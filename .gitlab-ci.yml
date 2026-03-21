@@ -24,7 +24,7 @@ default:
 
 # ── Variables ──
 variables:
-  BUN_VERSION: "1.1"
+  BUN_VERSION: "1.3.10"
   NODE_VERSION: "20"
 
 # ============================================================
