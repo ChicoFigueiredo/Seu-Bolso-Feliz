@@ -76,6 +76,7 @@ lint:
   image: oven/bun:${BUN_VERSION}
   needs: [install-deps]
   script:
+    - bun install --frozen-lockfile
     - bun run lint
 
 typecheck:
@@ -83,6 +84,7 @@ typecheck:
   image: oven/bun:${BUN_VERSION}
   needs: [install-deps]
   script:
+    - bun install --frozen-lockfile
     - bun run typecheck
 
 format-check:
@@ -90,6 +92,7 @@ format-check:
   image: oven/bun:${BUN_VERSION}
   needs: [install-deps]
   script:
+    - bun install --frozen-lockfile
     - bun run format:check
 
 # ============================================================
@@ -101,6 +104,7 @@ test-unit:
   image: oven/bun:${BUN_VERSION}
   needs: [install-deps]
   script:
+    - bun install --frozen-lockfile
     - bun run test:unit
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
 
@@ -109,6 +113,7 @@ test-integration:
   image: oven/bun:${BUN_VERSION}
   needs: [install-deps]
   script:
+    - bun install --frozen-lockfile
     - bun run test:integration
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -126,6 +131,7 @@ build-web:
   image: oven/bun:${BUN_VERSION}
   needs: [lint, typecheck, test-unit]
   script:
+    - bun install --frozen-lockfile
     - cd apps/web && bun run build
   artifacts:
     paths:

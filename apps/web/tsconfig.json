@@ -18,7 +18,10 @@
     ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@sbf/shared-types": ["../../packages/shared-types/src/index.ts"],
+      "@sbf/domain": ["../../packages/domain/src/index.ts"],
+      "@sbf/domain/*": ["../../packages/domain/src/*"]
     }
   },
   "include": [
