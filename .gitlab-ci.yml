@@ -1,0 +1,230 @@
+# ============================================================
+# Seu Bolso Feliz — GitLab CI/CD Pipeline
+# ============================================================
+
+stages:
+  - validate
+  - install
+  - check
+  - test
+  - build
+  - deploy
+
+# ── Cache global ──
+default:
+  cache:
+    key:
+      files:
+        - bun.lock
+    paths:
+      - node_modules/
+      - apps/web/node_modules/
+      - apps/mobile/node_modules/
+      - packages/*/node_modules/
+
+# ── Variables ──
+variables:
+  BUN_VERSION: "1.1"
+  NODE_VERSION: "20"
+
+# ============================================================
+# STAGE: validate (somente em MRs)
+# ============================================================
+
+validate-commits:
+  stage: validate
+  image: node:${NODE_VERSION}-alpine
+  script:
+    - npx commitlint --from $CI_MERGE_REQUEST_DIFF_BASE_SHA --to HEAD
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+validate-types:
+  stage: validate
+  image: node:${NODE_VERSION}-alpine
+  script:
+    - npx supabase gen types typescript --project-id $STAGING_SUPABASE_PROJECT_ID > /tmp/generated.ts
+    - diff packages/shared-types/src/database.types.ts /tmp/generated.ts
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - supabase/migrations/**
+        - packages/shared-types/**
+
+# ============================================================
+# STAGE: install
+# ============================================================
+
+install-deps:
+  stage: install
+  image: oven/bun:${BUN_VERSION}
+  script:
+    - bun install --frozen-lockfile
+  artifacts:
+    paths:
+      - node_modules/
+      - apps/*/node_modules/
+      - packages/*/node_modules/
+    expire_in: 1 hour
+
+# ============================================================
+# STAGE: check (lint + typecheck + format)
+# ============================================================
+
+lint:
+  stage: check
+  image: oven/bun:${BUN_VERSION}
+  needs: [install-deps]
+  script:
+    - bun run lint
+
+typecheck:
+  stage: check
+  image: oven/bun:${BUN_VERSION}
+  needs: [install-deps]
+  script:
+    - bun run typecheck
+
+format-check:
+  stage: check
+  image: oven/bun:${BUN_VERSION}
+  needs: [install-deps]
+  script:
+    - bun run format:check
+
+# ============================================================
+# STAGE: test
+# ============================================================
+
+test-unit:
+  stage: test
+  image: oven/bun:${BUN_VERSION}
+  needs: [install-deps]
+  script:
+    - bun run test:unit
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+
+test-integration:
+  stage: test
+  image: oven/bun:${BUN_VERSION}
+  needs: [install-deps]
+  script:
+    - bun run test:integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - supabase/**
+        - packages/domain/**
+        - packages/validation/**
+
+# ============================================================
+# STAGE: build
+# ============================================================
+
+build-web:
+  stage: build
+  image: oven/bun:${BUN_VERSION}
+  needs: [lint, typecheck, test-unit]
+  script:
+    - cd apps/web && bun run build
+  artifacts:
+    paths:
+      - apps/web/.next/
+      - apps/web/out/
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - apps/web/**
+        - packages/**
+
+# ============================================================
+# STAGE: deploy
+# ============================================================
+
+# ── Staging (develop) ──
+
+deploy-migrations-staging:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  needs: [build-web]
+  script:
+    - npx supabase link --project-ref $STAGING_SUPABASE_PROJECT_ID
+    - npx supabase db push
+  environment:
+    name: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - supabase/migrations/**
+
+deploy-functions-staging:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  needs: [build-web]
+  script:
+    - npx supabase link --project-ref $STAGING_SUPABASE_PROJECT_ID
+    - npx supabase functions deploy
+  environment:
+    name: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - supabase/functions/**
+
+deploy-web-staging:
+  stage: deploy
+  image: oven/bun:${BUN_VERSION}
+  needs: [build-web]
+  script:
+    - echo "Deploy web staging — configurar provedor (Vercel/Cloudflare)"
+  environment:
+    name: staging
+    url: https://staging.seubolsofeliz.com.br
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+# ── Production (main) ──
+
+deploy-migrations-production:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  needs: [build-web]
+  script:
+    - npx supabase link --project-ref $PRODUCTION_SUPABASE_PROJECT_ID
+    - npx supabase db push
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - supabase/migrations/**
+  when: manual
+
+deploy-functions-production:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  needs: [deploy-migrations-production]
+  script:
+    - npx supabase link --project-ref $PRODUCTION_SUPABASE_PROJECT_ID
+    - npx supabase functions deploy
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - supabase/functions/**
+
+deploy-web-production:
+  stage: deploy
+  image: oven/bun:${BUN_VERSION}
+  needs: [build-web]
+  script:
+    - echo "Deploy web production — configurar provedor"
+  environment:
+    name: production
+    url: https://app.seubolsofeliz.com.br
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  when: manual

@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>001-implementacao-geral</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 001-implementacao-geral</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        
+        <h1 id="checklist-geral-de-implementa%C3%A7%C3%A3o-%E2%80%94-seu-bolso-feliz" tabindex="-1"><a class="header-anchor" href="#checklist-geral-de-implementa%C3%A7%C3%A3o-%E2%80%94-seu-bolso-feliz">#</a> Checklist Geral de Implementação — Seu Bolso Feliz</h1>
+<blockquote>
+<p>Documento de acompanhamento de todas as etapas de implementação do projeto.
+Atualizado conforme o progresso real da equipe.</p>
+</blockquote>
+<hr>
+<h2 id="etapa-0-%E2%80%94-sprint-0%3A-monorepo%2C-tooling-e-ci%2Fcd" tabindex="-1"><a class="header-anchor" href="#etapa-0-%E2%80%94-sprint-0%3A-monorepo%2C-tooling-e-ci%2Fcd">#</a> Etapa 0 — Sprint 0: Monorepo, Tooling e CI/CD</h2>
+<h3 id="0.1-estrutura-de-pastas" tabindex="-1"><a class="header-anchor" href="#0.1-estrutura-de-pastas">#</a> 0.1 Estrutura de Pastas</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-837696"> <label class="task-list-item-label" for="task-item-837696"> `apps/web/src/{app,components/ui,hooks,lib,styles}`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7786963"> <label class="task-list-item-label" for="task-item-7786963"> `apps/web/public`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4104904"> <label class="task-list-item-label" for="task-item-4104904"> `apps/mobile/src/{screens,components,hooks,navigation,lib}`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6183114"> <label class="task-list-item-label" for="task-item-6183114"> `apps/mobile/assets`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2185690"> <label class="task-list-item-label" for="task-item-2185690"> `packages/shared-types/src/domain`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6628051"> <label class="task-list-item-label" for="task-item-6628051"> `packages/validation/src`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1409082"> <label class="task-list-item-label" for="task-item-1409082"> `packages/domain/src/{financial-cycle,amortization,deduplication,priority}`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9169422"> <label class="task-list-item-label" for="task-item-9169422"> `packages/ui-tokens/src`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1310995"> <label class="task-list-item-label" for="task-item-1310995"> `packages/config/{eslint,tsconfig,vitest}`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4614098"> <label class="task-list-item-label" for="task-item-4614098"> `scripts/`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5534977"> <label class="task-list-item-label" for="task-item-5534977"> `__tests__/{domain,integration,e2e}`</label></li>
+</ul>
+<h3 id="0.2-bun-workspaces" tabindex="-1"><a class="header-anchor" href="#0.2-bun-workspaces">#</a> 0.2 Bun Workspaces</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7290631"> Root <code>package.json</code> com <label class="task-list-item-label" for="task-item-7290631"> Root `package.json` com `"workspaces": ["apps/*", "packages/*"]`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-991660"><label class="task-list-item-label" for="task-item-991660"> Scripts padronizados: dev, build, lint, typecheck, test, format, generate-types, db:migrate, prepare</label></li>
+</ul>
+<h3 id="0.3-migrar-c%C3%B3digo-web-existente" tabindex="-1"><a class="header-anchor" href="#0.3-migrar-c%C3%B3digo-web-existente">#</a> 0.3 Migrar Código Web Existente</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2529629"> Mover <code>src/components/ui/</code> → <label class="task-list-item-label" for="task-item-2529629"> Mover `src/components/ui/` → `apps/web/src/components/ui/`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2075766"> Mover <code>src/lib/</code> → <label class="task-list-item-label" for="task-item-2075766"> Mover `src/lib/` → `apps/web/src/lib/`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9456532"> Mover <code>styles/globals.css</code> → <label class="task-list-item-label" for="task-item-9456532"> Mover `styles/globals.css` → `apps/web/src/styles/globals.css`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4754556"> Criar <code>apps/web/package.json</code><label class="task-list-item-label" for="task-item-4754556"> Criar `apps/web/package.json` (Next.js)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-347804"> Criar <label class="task-list-item-label" for="task-item-347804"> Criar `apps/web/next.config.ts`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4729967"> Criar <code>apps/web/src/app/layout.tsx</code><label class="task-list-item-label" for="task-item-4729967"> Criar `apps/web/src/app/layout.tsx` (App Router)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4270188"> Criar <code>apps/web/src/app/page.tsx</code><label class="task-list-item-label" for="task-item-4270188"> Criar `apps/web/src/app/page.tsx` (página inicial)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9992005"> Criar <label class="task-list-item-label" for="task-item-9992005"> Criar `apps/web/src/app/globals.css`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8105438"> Criar <code>apps/web/postcss.config.mjs</code><label class="task-list-item-label" for="task-item-8105438"> Criar `apps/web/postcss.config.mjs` (TailwindCSS v4 via @tailwindcss/postcss)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4130121"> Criar <code>apps/web/tsconfig.json</code><label class="task-list-item-label" for="task-item-4130121"> Criar `apps/web/tsconfig.json` (extends base)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6958348"><label class="task-list-item-label" for="task-item-6958348"> Preservar componentes shadcn/ui</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9122039"> Atualizar <code>components.json</code><label class="task-list-item-label" for="task-item-9122039"> Atualizar `components.json` para paths do monorepo</label></li>
+</ul>
+<h3 id="0.4-pacotes-internos" tabindex="-1"><a class="header-anchor" href="#0.4-pacotes-internos">#</a> 0.4 Pacotes Internos</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9808035"> <code>packages/shared-types/package.json</code><label class="task-list-item-label" for="task-item-9808035"> `packages/shared-types/package.json` (@sbf/shared-types)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4262322"> <label class="task-list-item-label" for="task-item-4262322"> `packages/shared-types/src/index.ts`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4104068"> <label class="task-list-item-label" for="task-item-4104068"> `packages/shared-types/tsconfig.json`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3110074"> <code>packages/validation/package.json</code><label class="task-list-item-label" for="task-item-3110074"> `packages/validation/package.json` (@sbf/validation)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5073396"> <label class="task-list-item-label" for="task-item-5073396"> `packages/validation/src/index.ts`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1265147"> <label class="task-list-item-label" for="task-item-1265147"> `packages/validation/tsconfig.json`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1025985"> <code>packages/domain/package.json</code><label class="task-list-item-label" for="task-item-1025985"> `packages/domain/package.json` (@sbf/domain)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4610874"> <label class="task-list-item-label" for="task-item-4610874"> `packages/domain/src/index.ts`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3835822"> <label class="task-list-item-label" for="task-item-3835822"> `packages/domain/tsconfig.json`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8074589"> <code>packages/ui-tokens/package.json</code><label class="task-list-item-label" for="task-item-8074589"> `packages/ui-tokens/package.json` (@sbf/ui-tokens)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8926512"> <label class="task-list-item-label" for="task-item-8926512"> `packages/ui-tokens/src/index.ts`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5553152"> <label class="task-list-item-label" for="task-item-5553152"> `packages/ui-tokens/tsconfig.json`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9430649"> <code>packages/config/package.json</code><label class="task-list-item-label" for="task-item-9430649"> `packages/config/package.json` (@sbf/config)</label></li>
+</ul>
+<h3 id="0.5-typescript-base" tabindex="-1"><a class="header-anchor" href="#0.5-typescript-base">#</a> 0.5 TypeScript Base</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2786408"> <code>tsconfig.base.json</code><label class="task-list-item-label" for="task-item-2786408"> `tsconfig.base.json` na raiz (composite, declaration, strict, noEmit)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2127663"> <code>tsconfig.json</code><label class="task-list-item-label" for="task-item-2127663"> `tsconfig.json` raiz (references para workspaces)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3899382"> <code>apps/web/tsconfig.json</code><label class="task-list-item-label" for="task-item-3899382"> `apps/web/tsconfig.json` (extends base, Next.js compat — composite:false, verbatimModuleSyntax:false)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5491958"> <code>apps/mobile/tsconfig.json</code><label class="task-list-item-label" for="task-item-5491958"> `apps/mobile/tsconfig.json` (extends base)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5812895"> Cada pacote com <code>tsconfig.json</code><label class="task-list-item-label" for="task-item-5812895"> Cada pacote com `tsconfig.json` extends base (emitDeclarationOnly:true)</label></li>
+</ul>
+<h3 id="0.6-eslint-9-%2B-prettier" tabindex="-1"><a class="header-anchor" href="#0.6-eslint-9-%2B-prettier">#</a> 0.6 ESLint 9 + Prettier</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4967212"><label class="task-list-item-label" for="task-item-4967212"> Instalar: eslint@10.1.0, @eslint/js@10.0.1, typescript-eslint@8.57.1, prettier@3.8.1, eslint-config-prettier@10.1.8</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6477969"> <code>eslint.config.ts</code><label class="task-list-item-label" for="task-item-6477969"> `eslint.config.ts` (flat config ESLint 9)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7779390"> <code>.prettierrc</code><label class="task-list-item-label" for="task-item-7779390"> `.prettierrc` (semi, doubleQuote, trailingComma:all, tabWidth:2, printWidth:100)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5488932"> <label class="task-list-item-label" for="task-item-5488932"> `.prettierignore`</label></li>
+</ul>
+<h3 id="0.7-vitest" tabindex="-1"><a class="header-anchor" href="#0.7-vitest">#</a> 0.7 Vitest</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2160732"><label class="task-list-item-label" for="task-item-2160732"> Instalar: vitest@4.1.0, @vitest/coverage-v8@4.1.0</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5525202"> <code>vitest.config.ts</code><label class="task-list-item-label" for="task-item-5525202"> `vitest.config.ts` (projetos unit + integration, coverage v8)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-493397"><label class="task-list-item-label" for="task-item-493397"> Teste placeholder para validar setup</label></li>
+</ul>
+<h3 id="0.8-husky-%2B-lint-staged-%2B-commitlint" tabindex="-1"><a class="header-anchor" href="#0.8-husky-%2B-lint-staged-%2B-commitlint">#</a> 0.8 Husky + lint-staged + commitlint</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-667976"><label class="task-list-item-label" for="task-item-667976"> Instalar: husky@9.1.7, lint-staged@16.4.0, @commitlint/cli@20.5.0, @commitlint/config-conventional@20.5.0</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9846029"> <code>commitlint.config.ts</code><label class="task-list-item-label" for="task-item-9846029"> `commitlint.config.ts` (Conventional Commits, scopes: web/mobile/domain/types/validation/supabase/ci/docs/config/tokens)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3444274"> <label class="task-list-item-label" for="task-item-3444274"> `.husky/commit-msg`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3092982"> <label class="task-list-item-label" for="task-item-3092982"> `.husky/pre-commit`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3105223"> <label class="task-list-item-label" for="task-item-3105223"> `.lintstagedrc.json`</label></li>
+</ul>
+<h3 id="0.9-supabase-init" tabindex="-1"><a class="header-anchor" href="#0.9-supabase-init">#</a> 0.9 Supabase Init</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4468453"> <code>supabase/config.toml</code> (via <code>npx supabase init</code><label class="task-list-item-label" for="task-item-4468453"> `supabase/config.toml` (via `npx supabase init` v2.83.0)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7415818"> <label class="task-list-item-label" for="task-item-7415818"> `supabase/seed.sql`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2628939"> Pasta <code>supabase/migrations/</code><label class="task-list-item-label" for="task-item-2628939"> Pasta `supabase/migrations/` criada</label></li>
+</ul>
+<h3 id="0.10-vari%C3%A1veis-de-ambiente" tabindex="-1"><a class="header-anchor" href="#0.10-vari%C3%A1veis-de-ambiente">#</a> 0.10 Variáveis de Ambiente</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9370498"> <code>.env.example</code><label class="task-list-item-label" for="task-item-9370498"> `.env.example` com variáveis documentadas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2555101"> <code>.gitignore</code> atualizado (supabase/.temp/, .env*<label class="task-list-item-label" for="task-item-2555101"> `.gitignore` atualizado (supabase/.temp/, .env\*, .next/)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8575960"> <code>scripts/generate-types.sh</code><label class="task-list-item-label" for="task-item-8575960"> `scripts/generate-types.sh` criado</label></li>
+</ul>
+<h3 id="0.11-gitlab-ci%2Fcd" tabindex="-1"><a class="header-anchor" href="#0.11-gitlab-ci%2Fcd">#</a> 0.11 GitLab CI/CD</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6501393"> <code>.gitlab-ci.yml</code><label class="task-list-item-label" for="task-item-6501393"> `.gitlab-ci.yml` com 6 stages: validate → install → check → test → build → deploy</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-933953"><label class="task-list-item-label" for="task-item-933953"> Jobs condicionais por pasta alterada</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6856666"><label class="task-list-item-label" for="task-item-6856666"> Deploy staging automático (develop)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6730865"><label class="task-list-item-label" for="task-item-6730865"> Deploy produção manual (main)</label></li>
+</ul>
+<h3 id="0.12-valida%C3%A7%C3%A3o-final" tabindex="-1"><a class="header-anchor" href="#0.12-valida%C3%A7%C3%A3o-final">#</a> 0.12 Validação Final</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8542433"> <code>bun install</code><label class="task-list-item-label" for="task-item-8542433"> `bun install` sem erros (1083 installs, 1153 packages)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1334017"> <code>bun run lint</code><label class="task-list-item-label" for="task-item-1334017"> `bun run lint` passa (ESLint 10.1.0, 0 errors)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2191717"> <code>bun run typecheck</code><label class="task-list-item-label" for="task-item-2191717"> `bun run typecheck` passa (tsc -b, 0 errors)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5444156"> <code>bun run test</code><label class="task-list-item-label" for="task-item-5444156"> `bun run test` passa (Vitest 4.1.0, 7 test files, 142 tests passed)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3875549"> <code>bun run build</code><label class="task-list-item-label" for="task-item-3875549"> `bun run build` passa (Next.js 15.5.14, 5 routes, 102kB first load)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1996121"> <code>bun run format:check</code><label class="task-list-item-label" for="task-item-1996121"> `bun run format:check` passa (Prettier 3.8.1, 0 issues)</label></li>
+</ul>
+<hr>
+<h2 id="etapa-1-%E2%80%94-funda%C3%A7%C3%A3o%3A-modelo-de-dados-%2B-auth-%2B-crud-inicial" tabindex="-1"><a class="header-anchor" href="#etapa-1-%E2%80%94-funda%C3%A7%C3%A3o%3A-modelo-de-dados-%2B-auth-%2B-crud-inicial">#</a> Etapa 1 — Fundação: Modelo de Dados + Auth + CRUD Inicial</h2>
+<h3 id="1.1-supabase-auth" tabindex="-1"><a class="header-anchor" href="#1.1-supabase-auth">#</a> 1.1 Supabase Auth</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1716528"><label class="task-list-item-label" for="task-item-1716528"> Configurar Auth no Supabase (email + magic link)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7158908"><label class="task-list-item-label" for="task-item-7158908"> Middleware de autenticação no Next.js</label></li>
+</ul>
+<h3 id="1.2-migrations-fundacionais" tabindex="-1"><a class="header-anchor" href="#1.2-migrations-fundacionais">#</a> 1.2 Migrations Fundacionais</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8943605"><label class="task-list-item-label" for="task-item-8943605"> Tabelas core: institutions, financial_products, cards, categories, tags, financial_periods, transactions, transfers, statement_cycles, statement_items, recurring_templates, recurring_instances, liabilities, liability_installments, documents, user_secrets, import_jobs, audit_logs, transaction_tags, recurring_template_tags, liability_tags, user_financial_preferences</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7709063"><label class="task-list-item-label" for="task-item-7709063"> RLS habilitado em todas as tabelas (27 tabelas + 3 junção)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-908049"><label class="task-list-item-label" for="task-item-908049"> Triggers de updated_at (18 tabelas)</label></li>
+</ul>
+<h3 id="1.3-tabelas-de-fornecedor-(adr-001%2C-adr-002%2C-adr-003)" tabindex="-1"><a class="header-anchor" href="#1.3-tabelas-de-fornecedor-(adr-001%2C-adr-002%2C-adr-003)">#</a> 1.3 Tabelas de Fornecedor (ADR-001, ADR-002, ADR-003)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6477647"><label class="task-list-item-label" for="task-item-6477647"> Migration 001: suppliers, supplier_aliases, supplier_contracts, consumption_metrics, supplier_tags</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4090417"><label class="task-list-item-label" for="task-item-4090417"> Migration 002: ALTER TABLE com supplier_id + origin_type</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-643955"><label class="task-list-item-label" for="task-item-643955"> Migration 003: Índices (trigram, FK, busca fuzzy)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6536375"><label class="task-list-item-label" for="task-item-6536375"> Migration 004: Triggers (unicidade temporal, auto-alias)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9831141"><label class="task-list-item-label" for="task-item-9831141"> Migration 005: RLS policies</label></li>
+</ul>
+<h3 id="1.4-crud-b%C3%A1sico-(server-actions)" tabindex="-1"><a class="header-anchor" href="#1.4-crud-b%C3%A1sico-(server-actions)">#</a> 1.4 CRUD Básico (Server Actions)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6763639"> <code>apps/web/src/app/actions/institutions.ts</code><label class="task-list-item-label" for="task-item-6763639"> `apps/web/src/app/actions/institutions.ts` — CRUD instituições</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9759572"> <code>apps/web/src/app/actions/financial-products.ts</code><label class="task-list-item-label" for="task-item-9759572"> `apps/web/src/app/actions/financial-products.ts` — CRUD produtos financeiros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5765661"> <code>apps/web/src/app/actions/suppliers.ts</code><label class="task-list-item-label" for="task-item-5765661"> `apps/web/src/app/actions/suppliers.ts` — CRUD fornecedores + aliases + contratos + busca RPC</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8716004"> <code>apps/web/src/app/actions/transactions.ts</code><label class="task-list-item-label" for="task-item-8716004"> `apps/web/src/app/actions/transactions.ts` — CRUD transações + tags + view deduplicada</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9820662"> <code>apps/web/src/app/actions/recurring.ts</code><label class="task-list-item-label" for="task-item-9820662"> `apps/web/src/app/actions/recurring.ts` — CRUD templates/instâncias recorrentes + geração automática</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6709893"> <code>apps/web/src/app/actions/financial-periods.ts</code><label class="task-list-item-label" for="task-item-6709893"> `apps/web/src/app/actions/financial-periods.ts` — CRUD períodos financeiros + RPCs + preferências</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2780916"> <code>apps/web/src/app/actions/statement-cycles.ts</code><label class="task-list-item-label" for="task-item-2780916"> `apps/web/src/app/actions/statement-cycles.ts` — CRUD ciclos de fatura + itens</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3512590"> <code>apps/web/src/app/actions/liabilities.ts</code><label class="task-list-item-label" for="task-item-3512590"> `apps/web/src/app/actions/liabilities.ts` — CRUD passivos + parcelas + tags</label></li>
+</ul>
+<h3 id="1.5-types-generation" tabindex="-1"><a class="header-anchor" href="#1.5-types-generation">#</a> 1.5 Types Generation</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6338745"> <label class="task-list-item-label" for="task-item-6338745"> `scripts/generate-types.sh`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4855464"> <code>packages/shared-types/src/database.types.ts</code><label class="task-list-item-label" for="task-item-4855464"> `packages/shared-types/src/database.types.ts` gerado (1678 linhas)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3991479"> <code>packages/shared-types/src/domain/index.ts</code><label class="task-list-item-label" for="task-item-3991479"> `packages/shared-types/src/domain/index.ts` — 20+ type aliases + enums + helpers</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8645976"> <code>packages/validation/src/enums.ts</code><label class="task-list-item-label" for="task-item-8645976"> `packages/validation/src/enums.ts` — Zod enums (20+)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7979426"> <code>packages/validation/src/schemas.ts</code><label class="task-list-item-label" for="task-item-7979426"> `packages/validation/src/schemas.ts` — Schemas CRUD completos</label></li>
+</ul>
+<h3 id="1.6-testes-da-etapa-1" tabindex="-1"><a class="header-anchor" href="#1.6-testes-da-etapa-1">#</a> 1.6 Testes da Etapa 1</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4627448"> T18-T24: Supplier CRUD (24 testes em <code>supplier-validation.test.ts</code><label class="task-list-item-label" for="task-item-4627448"> T18-T24: Supplier CRUD (24 testes em `supplier-validation.test.ts`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1434205"><label class="task-list-item-label" for="task-item-1434205"> T25-T26 + T-METRIC: Consumption metrics (5 testes T-METRIC-01 a T-METRIC-05)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7737465"><label class="task-list-item-label" for="task-item-7737465"> T27 + T-DEDUP: Deduplication (14 testes T-DEDUP-01 a T-DEDUP-04 + T27)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5470614"><label class="task-list-item-label" for="task-item-5470614"> T-ALIAS: Alias governance (8 testes T-ALIAS-01 a T-ALIAS-08)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1089872"> Schemas de validação Zod (34 testes em <code>validation-schemas.test.ts</code><label class="task-list-item-label" for="task-item-1089872"> Schemas de validação Zod (34 testes em `validation-schemas.test.ts`)</label></li>
+</ul>
+<h3 id="1.7-domain-logic" tabindex="-1"><a class="header-anchor" href="#1.7-domain-logic">#</a> 1.7 Domain Logic</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3842441"> <code>packages/domain/src/financial-cycle/</code><label class="task-list-item-label" for="task-item-3842441"> `packages/domain/src/financial-cycle/` — getCurrentPeriod, generatePeriods, findPeriodForDate, daysRemainingInPeriod (17 testes)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8573688"> <code>packages/domain/src/deduplication/</code><label class="task-list-item-label" for="task-item-8573688"> `packages/domain/src/deduplication/` — deduplicateExpenses, sumDeduplicatedExpenses, isExpenseType, isStatementPayment, getStatementComposition (14 testes)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6864278"> <code>packages/domain/src/priority/</code><label class="task-list-item-label" for="task-item-6864278"> `packages/domain/src/priority/` — deriveEffectivePriority, calculateSortScore, prioritizeItems, filterByPriority, groupByPriority (19 testes)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3112858"> <code>packages/domain/src/amortization/</code><label class="task-list-item-label" for="task-item-3112858"> `packages/domain/src/amortization/` — SAC, Price, Misto, simulateEarlyPayoff, getOutstandingBalanceAfter, totalInterestPaid (33 testes)</label></li>
+</ul>
+<h3 id="1.8-auth-pages" tabindex="-1"><a class="header-anchor" href="#1.8-auth-pages">#</a> 1.8 Auth Pages</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6962885"> <code>apps/web/src/app/login/page.tsx</code><label class="task-list-item-label" for="task-item-6962885"> `apps/web/src/app/login/page.tsx` — Login com magic link</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8368759"> <code>apps/web/src/app/auth/callback/route.ts</code><label class="task-list-item-label" for="task-item-8368759"> `apps/web/src/app/auth/callback/route.ts` — OAuth callback</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4762951"> <code>apps/web/src/app/auth/signout/route.ts</code><label class="task-list-item-label" for="task-item-4762951"> `apps/web/src/app/auth/signout/route.ts` — Sign out</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-217454"> <code>apps/web/src/app/dashboard/page.tsx</code><label class="task-list-item-label" for="task-item-217454"> `apps/web/src/app/dashboard/page.tsx` — Dashboard autenticado</label></li>
+</ul>
+<hr>
+<h2 id="etapa-2-%E2%80%94-transa%C3%A7%C3%B5es%2C-recorr%C3%AAncias-e-ciclos-financeiros" tabindex="-1"><a class="header-anchor" href="#etapa-2-%E2%80%94-transa%C3%A7%C3%B5es%2C-recorr%C3%AAncias-e-ciclos-financeiros">#</a> Etapa 2 — Transações, Recorrências e Ciclos Financeiros</h2>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4614291"><label class="task-list-item-label" for="task-item-4614291"> Tabelas: transactions, recurring_templates, recurring_instances (migration 001)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2394321"><label class="task-list-item-label" for="task-item-2394321"> Ciclos financeiros personalizados (financial_periods, user_financial_preferences) — domain logic + Server Actions + RPCs</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-152956"><label class="task-list-item-label" for="task-item-152956"> Statement cycles (faturas) — Server Actions CRUD</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3585904"><label class="task-list-item-label" for="task-item-3585904"> View v_expenses_deduplicated (ADR-001) — migration 006 + domain logic + testes</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1089442"><label class="task-list-item-label" for="task-item-1089442"> Testes de regras de negócio (142 testes cobrindo 17 regras críticas do copilot-instructions)</label></li>
+</ul>
+<hr>
+<h2 id="etapa-3-%E2%80%94-d%C3%ADvidas%2C-amortiza%C3%A7%C3%A3o-e-empr%C3%A9stimos" tabindex="-1"><a class="header-anchor" href="#etapa-3-%E2%80%94-d%C3%ADvidas%2C-amortiza%C3%A7%C3%A3o-e-empr%C3%A9stimos">#</a> Etapa 3 — Dívidas, Amortização e Empréstimos</h2>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-670400"><label class="task-list-item-label" for="task-item-670400"> Tabelas: liabilities, liability_installments (migration 001)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4217941"><label class="task-list-item-label" for="task-item-4217941"> Lógica de amortização (SAC, Price, Misto) em @sbf/domain (33 testes)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8436951"><label class="task-list-item-label" for="task-item-8436951"> Simulação de quitação antecipada (simulateEarlyPayoff)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2827902"><label class="task-list-item-label" for="task-item-2827902"> Testes de cálculos financeiros (amortization.test.ts)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4821351"><label class="task-list-item-label" for="task-item-4821351"> Server Actions: CRUD passivos + parcelas + tags (liabilities.ts)</label></li>
+</ul>
+<hr>
+<h2 id="etapa-4-%E2%80%94-interface-web-(mvp)" tabindex="-1"><a class="header-anchor" href="#etapa-4-%E2%80%94-interface-web-(mvp)">#</a> Etapa 4 — Interface Web (MVP)</h2>
+<h3 id="4.1-infraestrutura-frontend" tabindex="-1"><a class="header-anchor" href="#4.1-infraestrutura-frontend">#</a> 4.1 Infraestrutura Frontend</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9702465"><label class="task-list-item-label" for="task-item-9702465"> Instalar 31 componentes shadcn/ui (button, card, dialog, input, select, table, tabs, badge, skeleton, toast, sidebar, etc.)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3733330"> <code>apps/web/src/lib/supabase/client.ts</code><label class="task-list-item-label" for="task-item-3733330"> `apps/web/src/lib/supabase/client.ts` — createBrowserClient</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7036955"> <code>apps/web/src/lib/supabase/server.ts</code><label class="task-list-item-label" for="task-item-7036955"> `apps/web/src/lib/supabase/server.ts` — createServerClient (cookies)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3199503"> <code>apps/web/src/lib/supabase/middleware.ts</code><label class="task-list-item-label" for="task-item-3199503"> `apps/web/src/lib/supabase/middleware.ts` — updateSession</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-267486"> <code>apps/web/src/middleware.ts</code><label class="task-list-item-label" for="task-item-267486"> `apps/web/src/middleware.ts` — Middleware de autenticação</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6948934"> <code>apps/web/src/lib/format.ts</code><label class="task-list-item-label" for="task-item-6948934"> `apps/web/src/lib/format.ts` — formatCurrency, formatDate, formatRelativeDate, isOverdue, isDueToday</label></li>
+</ul>
+<h3 id="4.2-app-shell" tabindex="-1"><a class="header-anchor" href="#4.2-app-shell">#</a> 4.2 App Shell</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7689729"> <code>apps/web/src/app/dashboard/layout.tsx</code><label class="task-list-item-label" for="task-item-7689729"> `apps/web/src/app/dashboard/layout.tsx` — Layout com SidebarProvider</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8874166"> <code>apps/web/src/components/app-sidebar.tsx</code><label class="task-list-item-label" for="task-item-8874166"> `apps/web/src/components/app-sidebar.tsx` — Navegação: Dashboard, Instituições, Produtos, Transações, Recorrências, Faturas, Dívidas, Relatórios, Documentos, Importação, Configurações</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4544481"> <code>apps/web/src/components/dashboard-header.tsx</code><label class="task-list-item-label" for="task-item-4544481"> `apps/web/src/components/dashboard-header.tsx` — Header com breadcrumbs, user menu, signout</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9431277"> <code>apps/web/src/components/providers.tsx</code><label class="task-list-item-label" for="task-item-9431277"> `apps/web/src/components/providers.tsx` — ThemeProvider + Toaster</label></li>
+</ul>
+<h3 id="4.3-dashboard-(primeira-tela-%E2%80%94-a%C3%A7%C3%A3o-e-decis%C3%A3o)" tabindex="-1"><a class="header-anchor" href="#4.3-dashboard-(primeira-tela-%E2%80%94-a%C3%A7%C3%A3o-e-decis%C3%A3o)">#</a> 4.3 Dashboard (Primeira Tela — Ação e Decisão)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4186313"> <code>apps/web/src/app/dashboard/page.tsx</code><label class="task-list-item-label" for="task-item-4186313"> `apps/web/src/app/dashboard/page.tsx` — Tela orientada a ação: Receita/Despesas/Saldo/Dívida do mês, Fila de Prioridade (próximos 30 dias), Recorrências Próximas, Faturas em Aberto, Últimas Transações</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2409913"> Integração com <code>@sbf/domain/priority</code><label class="task-list-item-label" for="task-item-2409913"> Integração com `@sbf/domain/priority` (prioritizeItems)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9742178"><label class="task-list-item-label" for="task-item-9742178"> Indicadores visuais: ATRASADO, HOJE, badges de prioridade (essencial/alta/média/baixa/opcional)</label></li>
+</ul>
+<h3 id="4.4-crud-institui%C3%A7%C3%B5es-%2B-produtos" tabindex="-1"><a class="header-anchor" href="#4.4-crud-institui%C3%A7%C3%B5es-%2B-produtos">#</a> 4.4 CRUD Instituições + Produtos</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6412527"> <code>apps/web/src/app/dashboard/institutions/page.tsx</code><label class="task-list-item-label" for="task-item-6412527"> `apps/web/src/app/dashboard/institutions/page.tsx` — Listagem com tipo (banco/fintech/corretora/cooperativa/outro)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-393669"> <code>apps/web/src/app/dashboard/institutions/new/page.tsx</code><label class="task-list-item-label" for="task-item-393669"> `apps/web/src/app/dashboard/institutions/new/page.tsx` — Formulário de criação</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4355386"> <code>apps/web/src/app/dashboard/institutions/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-4355386"> `apps/web/src/app/dashboard/institutions/[id]/page.tsx` — Edição + exclusão com confirmação</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1645018"> <code>apps/web/src/app/dashboard/products/page.tsx</code><label class="task-list-item-label" for="task-item-1645018"> `apps/web/src/app/dashboard/products/page.tsx` — Listagem com badge de tipo</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5102063"> <code>apps/web/src/app/dashboard/products/new/page.tsx</code><label class="task-list-item-label" for="task-item-5102063"> `apps/web/src/app/dashboard/products/new/page.tsx` — Formulário com seletor de instituição + 10 tipos de produto</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3890471"> <code>apps/web/src/app/dashboard/products/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-3890471"> `apps/web/src/app/dashboard/products/[id]/page.tsx` — Edição + exclusão</label></li>
+</ul>
+<h3 id="4.5-crud-transa%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#4.5-crud-transa%C3%A7%C3%B5es">#</a> 4.5 CRUD Transações</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-956896"> <code>apps/web/src/app/dashboard/transactions/page.tsx</code><label class="task-list-item-label" for="task-item-956896"> `apps/web/src/app/dashboard/transactions/page.tsx` — Listagem paginada com filtros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-659231"> <code>apps/web/src/app/dashboard/transactions/filters.tsx</code><label class="task-list-item-label" for="task-item-659231"> `apps/web/src/app/dashboard/transactions/filters.tsx` — Filtros: tipo, confirmado, data de/até</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6448560"> <code>apps/web/src/app/dashboard/transactions/new/page.tsx</code><label class="task-list-item-label" for="task-item-6448560"> `apps/web/src/app/dashboard/transactions/new/page.tsx` — Formulário: tipo (8 opções), valor, datas, produto, prioridade, notas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6679269"> <code>apps/web/src/app/dashboard/transactions/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-6679269"> `apps/web/src/app/dashboard/transactions/[id]/page.tsx` — Edição + exclusão</label></li>
+</ul>
+<h3 id="4.6-crud-recorr%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#4.6-crud-recorr%C3%AAncias">#</a> 4.6 CRUD Recorrências</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3866577"> <code>apps/web/src/app/dashboard/recurring/page.tsx</code><label class="task-list-item-label" for="task-item-3866577"> `apps/web/src/app/dashboard/recurring/page.tsx` — Listagem com frequência e próximo vencimento</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4662313"> <code>apps/web/src/app/dashboard/recurring/new/page.tsx</code><label class="task-list-item-label" for="task-item-4662313"> `apps/web/src/app/dashboard/recurring/new/page.tsx` — Formulário de template recorrente</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9405776"> <code>apps/web/src/app/dashboard/recurring/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-9405776"> `apps/web/src/app/dashboard/recurring/[id]/page.tsx` — Edição + exclusão</label></li>
+</ul>
+<h3 id="4.7-faturas-(statement-cycles)" tabindex="-1"><a class="header-anchor" href="#4.7-faturas-(statement-cycles)">#</a> 4.7 Faturas (Statement Cycles)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4409980"> <code>apps/web/src/app/dashboard/statements/page.tsx</code><label class="task-list-item-label" for="task-item-4409980"> `apps/web/src/app/dashboard/statements/page.tsx` — Listagem de faturas com card e status</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5848424"> <code>apps/web/src/app/dashboard/statements/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-5848424"> `apps/web/src/app/dashboard/statements/[id]/page.tsx` — Detalhe da fatura com itens</label></li>
+</ul>
+<h3 id="4.8-d%C3%ADvidas-(liabilities)" tabindex="-1"><a class="header-anchor" href="#4.8-d%C3%ADvidas-(liabilities)">#</a> 4.8 Dívidas (Liabilities)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8419646"> <code>apps/web/src/app/dashboard/liabilities/page.tsx</code><label class="task-list-item-label" for="task-item-8419646"> `apps/web/src/app/dashboard/liabilities/page.tsx` — Listagem de passivos ativos</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3501663"> <code>apps/web/src/app/dashboard/liabilities/new/page.tsx</code><label class="task-list-item-label" for="task-item-3501663"> `apps/web/src/app/dashboard/liabilities/new/page.tsx` — Formulário de criação</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9177602"> <code>apps/web/src/app/dashboard/liabilities/[id]/page.tsx</code><label class="task-list-item-label" for="task-item-9177602"> `apps/web/src/app/dashboard/liabilities/[id]/page.tsx` — Detalhe com parcelas</label></li>
+</ul>
+<h3 id="4.9-configura%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#4.9-configura%C3%A7%C3%B5es">#</a> 4.9 Configurações</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9450483"> <code>apps/web/src/app/dashboard/settings/page.tsx</code><label class="task-list-item-label" for="task-item-9450483"> `apps/web/src/app/dashboard/settings/page.tsx` — Ciclo financeiro, categorias (CRUD inline), tags (CRUD inline)</label></li>
+</ul>
+<h3 id="4.10-valida%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#4.10-valida%C3%A7%C3%A3o">#</a> 4.10 Validação</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8734181"> <code>bun run typecheck</code><label class="task-list-item-label" for="task-item-8734181"> `bun run typecheck` — 0 erros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2151584"> <code>bun run build</code><label class="task-list-item-label" for="task-item-2151584"> `bun run build` — 26 rotas compiladas (23 estáticas + 3 dinâmicas)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4200616"> <code>bun run test</code><label class="task-list-item-label" for="task-item-4200616"> `bun run test` — 142 testes passando (0 regressões)</label></li>
+</ul>
+<hr>
+<h2 id="etapa-5-%E2%80%94-documentos%2C-importa%C3%A7%C3%A3o-e-polimento" tabindex="-1"><a class="header-anchor" href="#etapa-5-%E2%80%94-documentos%2C-importa%C3%A7%C3%A3o-e-polimento">#</a> Etapa 5 — Documentos, Importação e Polimento</h2>
+<h3 id="5.1-documentos" tabindex="-1"><a class="header-anchor" href="#5.1-documentos">#</a> 5.1 Documentos</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3134177"> <code>apps/web/src/app/dashboard/documents/page.tsx</code><label class="task-list-item-label" for="task-item-3134177"> `apps/web/src/app/dashboard/documents/page.tsx` — Upload de documentos (Supabase Storage), listagem, download, exclusão</label></li>
+</ul>
+<h3 id="5.2-importa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#5.2-importa%C3%A7%C3%A3o">#</a> 5.2 Importação</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-620376"> <code>apps/web/src/app/dashboard/import/page.tsx</code><label class="task-list-item-label" for="task-item-620376"> `apps/web/src/app/dashboard/import/page.tsx` — Importação de CSV com parsing, preview, detecção automática de colunas, normalização de datas, import_jobs tracking</label></li>
+</ul>
+<h3 id="5.3-relat%C3%B3rios" tabindex="-1"><a class="header-anchor" href="#5.3-relat%C3%B3rios">#</a> 5.3 Relatórios</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4978885"> <code>apps/web/src/app/dashboard/reports/page.tsx</code><label class="task-list-item-label" for="task-item-4978885"> `apps/web/src/app/dashboard/reports/page.tsx` — Relatórios por mês civil, período financeiro personalizado ou intervalo livre: receitas/despesas, por categoria, por tipo, maiores despesas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7458047"> <code>apps/web/src/app/dashboard/reports/filters.tsx</code><label class="task-list-item-label" for="task-item-7458047"> `apps/web/src/app/dashboard/reports/filters.tsx` — Componente de filtros com tabs de modo e date range</label></li>
+</ul>
+<h3 id="5.4-valida%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#5.4-valida%C3%A7%C3%A3o">#</a> 5.4 Validação</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2790877"> <code>bun run typecheck</code><label class="task-list-item-label" for="task-item-2790877"> `bun run typecheck` — 0 erros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9181784"> <code>bun run build</code><label class="task-list-item-label" for="task-item-9181784"> `bun run build` — 26 rotas compiladas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2432006"> <code>bun run test</code><label class="task-list-item-label" for="task-item-2432006"> `bun run test` — 142 testes passando (0 regressões)</label></li>
+</ul>
+<hr>
+<blockquote>
+<p><strong>Legenda:</strong> <code>- [ ]</code> = pendente | <code>- [x]</code> = concluído</p>
+</blockquote>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>

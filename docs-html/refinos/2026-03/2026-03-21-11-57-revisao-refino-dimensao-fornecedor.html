@@ -1,0 +1,3483 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2026-03-21-11-57-revisao-refino-dimensao-fornecedor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 2026-03-21-11-57-revisao-refino-dimensao-fornecedor</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        <p>Título da Reunião: Revisão do Refino — Incorporação da Dimensão Fornecedor, Unidades de Consumo e Auditoria Histórica</p>
+<p>Data e Hora: 2026-03-21 11:57</p>
+<p>Referência: Revisão do documento “2026-03-21-10-40-refino-tecnico-funcional-kickoff-seu-bolso-feliz.md”</p>
+<p>Prompt de origem: docs/Veronica/002-fornecedor.md</p>
+<p>Participantes:</p>
+<ul>
+<li>Chico (CEO) — facilitador, decisão final</li>
+<li>Verônica (Consultora Externa) — orientação funcional e visão de produto</li>
+<li>Ana Silva (Arquiteta de Software) — arquitetura e design de sistemas</li>
+<li>Carlos Mendes (Designer de Software) — UX/UI e prototipagem</li>
+<li>João Pereira (Backend Sênior — Node/Bun) — backend e APIs</li>
+<li>Maria Oliveira (Backend Sênior — Node/Bun) — backend, segurança e testes</li>
+<li>Pedro Santos (Backend Sênior — Python/Django) — modelagem e integração</li>
+<li>Laura Costa (Backend Sênior — Python/Django) — backend e DevOps básico</li>
+<li>Roberto Lima (Frontend Sênior — React/Next.js) — frontend web</li>
+<li>Sofia Almeida (Frontend Sênior — React/Next.js) — frontend web e responsividade</li>
+<li>Lucas Ferreira (Mobile Sênior — React Native/Expo) — mobile</li>
+<li>Beatriz Rocha (Mobile Sênior — React Native/Expo) — mobile e publicação</li>
+<li>Fernando Gomes (DevOps Sênior) — infraestrutura e CI/CD</li>
+<li>Ricardo Monteiro (Economista / Consultor Financeiro) — modelagem financeira e regras de negócio</li>
+<li>Camila Duarte (Consultora de Finanças Pessoais) — experiência do usuário financeiro</li>
+<li>Gabriela Nunes (Marketing Digital) — SEO e estratégia de lançamento</li>
+<li>Helena Vargas (UX/UI Especialista) — pesquisa de usuários e prototipagem</li>
+<li>Isabella Torres (UI Designer) — hierarquia visual e micro-interações</li>
+<li>Thiago Martins (Front Engineer) — componentização e performance</li>
+<li>Renata Silva (QA Visual/A11y) — acessibilidade e testes visuais</li>
+<li>André Santos (DBA Sênior PostgreSQL) — modelagem de dados e otimização</li>
+</ul>
+<p>Pauta: 1. Resumo do impacto da nova dimensão fornecedor
+2. Alterações no mapa de domínio
+3. Decisão sobre fornecedor vs instituição financeira
+4. Alterações no modelo de dados (novas tabelas e campos)
+5. Modelagem de aliases, nomes antigos e consolidação histórica
+6. Modelagem de métricas de consumo / unidades
+7. Impacto em recorrências
+8. Impacto em documentos e conciliação
+9. Revisão de categorias, tags e prioridade com fornecedor
+10. Impacto em relatórios, filtros e auditoria
+11. Impacto na primeira tela (dashboard de ação)
+12. Impacto na estratégia de testes (novos cenários obrigatórios)
+13. Impacto na futura camada de IA/MCP
+14. Regras de negócio novas e revisadas
+15. Revisão do escopo do MVP
+16. Revisão do roadmap
+17. Decisões finais e próximos passos</p>
+
+        <h1 id="reuni%C3%A3o-de-revis%C3%A3o-do-refino-%E2%80%94-dimens%C3%A3o-fornecedor" tabindex="-1"><a class="header-anchor" href="#reuni%C3%A3o-de-revis%C3%A3o-do-refino-%E2%80%94-dimens%C3%A3o-fornecedor">#</a> Reunião de Revisão do Refino — Dimensão Fornecedor</h1>
+<h2 id="1.-abertura-e-contexto" tabindex="-1"><a class="header-anchor" href="#1.-abertura-e-contexto">#</a> 1. Abertura e Contexto</h2>
+<p><strong>Chico (CEO):</strong>
+Time, a Verônica nos mandou uma nova exigência que considero essencial: precisamos tratar <strong>fornecedor</strong> como entidade própria e central do domínio. Hoje, quando eu olho minha planilha, sei que pago a Vivo, a Neoenergia, o GitHub — mas no modelo atual do sistema, essa informação se perde nas descrições de texto. Preciso saber: para quem vai meu dinheiro, quanto estou gastando com cada fornecedor, se o valor mudou, se posso substituir. Isso não é cosmético — é estrutural.</p>
+<p><strong>Verônica (Consultora Externa):</strong>
+Exatamente. O prompt que enviei pede uma revisão profunda, não uma nota de rodapé. Fornecedor é uma dimensão paralela e complementar a categoria e tag. Categoria responde “que tipo de gasto é?”. Tag responde “como classifico?”. Fornecedor responde “para QUEM vai o dinheiro?”. São perguntas diferentes e todas precisam de resposta.</p>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Li o prompt inteiro. A exigência é clara e legítima. Impacta o modelo de dados, recorrências, documentos, relatórios, testes, e até a futura IA. Vamos tratar com a profundidade que merece.</p>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Do ponto de vista financeiro, fornecedor é fundamental para auditoria. “Quanto gastei com a Neoenergia nos últimos 12 meses?” — essa é uma pergunta que qualquer consultor financeiro faz. Se o sistema não responde, está incompleto.</p>
+<p><strong>Camila Duarte (Consultora de Finanças Pessoais):</strong>
+E para o usuário operacional, fornecedor responde: “estou pagando caro demais nessa internet?” ou “o GitHub aumentou o preço?”. São perguntas de decisão, não de curiosidade.</p>
+<hr>
+<h2 id="2.-resumo-do-impacto-da-nova-dimens%C3%A3o-fornecedor" tabindex="-1"><a class="header-anchor" href="#2.-resumo-do-impacto-da-nova-dimens%C3%A3o-fornecedor">#</a> 2. Resumo do Impacto da Nova Dimensão Fornecedor</h2>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Vou consolidar o impacto em cada camada do sistema:</p>
+<table>
+<thead>
+<tr>
+<th>Camada</th>
+<th>Impacto</th>
+<th>Severidade</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Modelo de dados</strong></td>
+<td>Novas tabelas: suppliers, supplier_aliases, supplier_contracts, consumption_metrics. Novos FKs em transactions, recurring_templates, statement_items, documents</td>
+<td>🔴 Alto</td>
+</tr>
+<tr>
+<td><strong>Mapa do domínio</strong></td>
+<td>Fornecedor como entidade de primeira classe, paralela a categoria/tag</td>
+<td>🔴 Alto</td>
+</tr>
+<tr>
+<td><strong>Regras de negócio</strong></td>
+<td>Novas regras R18-R24 sobre integridade de fornecedor</td>
+<td>🟠 Médio</td>
+</tr>
+<tr>
+<td><strong>Recorrências</strong></td>
+<td>FK supplier_id em recurring_templates, herança para instâncias</td>
+<td>🟠 Médio</td>
+</tr>
+<tr>
+<td><strong>Documentos</strong></td>
+<td>FK supplier_id em documents, associação IA futura</td>
+<td>🟠 Médio</td>
+</tr>
+<tr>
+<td><strong>Categorias/Tags</strong></td>
+<td>Sem mudança estrutural — coexistem com fornecedor</td>
+<td>🟢 Baixo</td>
+</tr>
+<tr>
+<td><strong>Relatórios</strong></td>
+<td>Novas dimensões de agrupamento e filtro</td>
+<td>🟠 Médio</td>
+</tr>
+<tr>
+<td><strong>Primeira tela</strong></td>
+<td>Nova seção opcional de fornecedores no dashboard</td>
+<td>🟡 Baixo-Médio</td>
+</tr>
+<tr>
+<td><strong>Testes</strong></td>
+<td>10 novos cenários obrigatórios (T18-T27)</td>
+<td>🟠 Médio</td>
+</tr>
+<tr>
+<td><strong>IA/MCP futura</strong></td>
+<td>Fornecedor como dimensão de classificação, conciliação e detecção de anomalias</td>
+<td>🟡 Baixo (futuro)</td>
+</tr>
+<tr>
+<td><strong>Escopo MVP</strong></td>
+<td>5-6 novas funcionalidades adicionadas ao MVP</td>
+<td>🟠 Médio</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pedro Santos (Backend):</strong>
+Quantificando: estamos adicionando ~5 tabelas novas e ~4 FKs em tabelas existentes. É um incremento significativo mas gerenciável — não altera a arquitetura, estende o modelo. Não quebramos nada que já foi decidido.</p>
+<p><strong>Maria Oliveira (Backend):</strong>
+Concordo. O impacto é <strong>aditivo</strong>, não <strong>destrutivo</strong>. As tabelas existentes recebem novos campos nullable (supplier_id), e as novas tabelas seguem o mesmo padrão de RLS e auditoria que já definimos.</p>
+<p><strong>Decisão da equipe:</strong> O impacto é alto no modelo de dados, médio na maioria das camadas, e não invalida nenhuma decisão anterior. Prosseguimos com a incorporação.</p>
+<hr>
+<h2 id="3.-altera%C3%A7%C3%B5es-no-mapa-do-dom%C3%ADnio" tabindex="-1"><a class="header-anchor" href="#3.-altera%C3%A7%C3%B5es-no-mapa-do-dom%C3%ADnio">#</a> 3. Alterações no Mapa do Domínio</h2>
+<h3 id="3.1.-mapa-do-dom%C3%ADnio-revisado" tabindex="-1"><a class="header-anchor" href="#3.1.-mapa-do-dom%C3%ADnio-revisado">#</a> 3.1. Mapa do Domínio Revisado</h3>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Atualizando a hierarquia do domínio aprovada no refino anterior para incluir fornecedor:</p>
+<pre class="hljs"><code>Usuário (User)
+├── Preferências Financeiras (UserFinancialPreferences)
+│   └── Ciclo financeiro personalizado
+│
+├── Instituições Financeiras (Institution)
+│   ├── Produtos Financeiros (FinancialProduct)
+│   │   ├── Contas (Account)
+│   │   ├── Cartões (Card)
+│   │   │   ├── Titulares/Adicionais (CardHolder)
+│   │   │   └── Ciclos de Fatura (StatementCycle)
+│   │   │       └── Itens da Fatura (StatementItem) ←── supplier_id (FK)
+│   │   └── Passivos/Dívidas (Liability)
+│   │       └── Parcelas (LiabilityInstallment)
+│   └── ...múltiplos produtos
+│
+├── ★ Fornecedores (Supplier) ← NOVA ENTIDADE CENTRAL
+│   ├── Aliases (SupplierAlias)
+│   │   └── nomes antigos, nomes alternativos, variações
+│   ├── Contratos/Identificadores (SupplierContract)
+│   │   └── conta contrato, unidade consumidora, cliente, instalação
+│   ├── Tags de Fornecedor (SupplierTag) ← N:N
+│   └── Métricas de Consumo (ConsumptionMetric)
+│       └── kWh, velocidade, licenças, horas, etc.
+│
+├── Transações (Transaction) ←── supplier_id (FK, nullable)
+│   ├── Receita, Despesa, Estorno, Ajuste...
+│   └── (mantém todos os tipos já definidos)
+│
+├── Transferências Internas (Transfer)
+│   └── (sem fornecedor — é movimento interno)
+│
+├── Templates Recorrentes (RecurringTemplate) ←── supplier_id (FK, nullable)
+│   └── Instâncias Recorrentes (RecurringInstance)
+│       └── (herda supplier do template)
+│
+├── Categorias (Category) — INALTERADA
+├── Tags (Tag) — INALTERADA
+├── Prioridade de Pagamento — INALTERADA
+├── Períodos Financeiros (FinancialPeriod) — INALTERADO
+│
+├── Documentos (Document) ←── supplier_id (FK, nullable)
+│   └── Vinculado a transação, dívida, fatura, fornecedor
+│
+└── Importações (ImportJob) — INALTERADA
+</code></pre>
+<h3 id="3.2.-posi%C3%A7%C3%A3o-do-fornecedor-no-dom%C3%ADnio" tabindex="-1"><a class="header-anchor" href="#3.2.-posi%C3%A7%C3%A3o-do-fornecedor-no-dom%C3%ADnio">#</a> 3.2. Posição do Fornecedor no Domínio</h3>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Para ficar absolutamente claro — fornecedor é uma dimensão <strong>ortogonal</strong> às demais:</p>
+<table>
+<thead>
+<tr>
+<th>Dimensão</th>
+<th>Pergunta que responde</th>
+<th>Exemplo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Categoria</strong></td>
+<td>Que tipo de gasto é?</td>
+<td>Moradia, Alimentação, Software</td>
+</tr>
+<tr>
+<td><strong>Tag</strong></td>
+<td>Como classifico transversalmente?</td>
+<td>essencial, trabalho, casa</td>
+</tr>
+<tr>
+<td><strong>Fornecedor</strong></td>
+<td>Para QUEM vai o dinheiro?</td>
+<td>Vivo, Neoenergia, GitHub</td>
+</tr>
+<tr>
+<td><strong>Prioridade</strong></td>
+<td>Quão urgente/importante é?</td>
+<td>essencial, alta, média</td>
+</tr>
+<tr>
+<td><strong>Instituição</strong></td>
+<td>Onde está meu dinheiro / de qual banco é?</td>
+<td>Caixa, Nubank, C6</td>
+</tr>
+<tr>
+<td><strong>Período</strong></td>
+<td>Quando aconteceu / a qual ciclo pertence?</td>
+<td>20/Mar-19/Abr</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Camila Duarte:</strong>
+Perfeito. Um lançamento pode ter TODAS essas dimensões simultaneamente:</p>
+<pre class="hljs"><code>Exemplo completo de um lançamento:
+- Transação: &quot;Conta de Internet — Março/2026&quot;
+- Valor: R$ 149,90
+- Fornecedor: Vivo
+- Categoria: Internet/Telefonia
+- Tags: [internet, casa, essencial]
+- Prioridade: alta
+- Instituição: Caixa (débito automático)
+- Período: 20/Mar - 19/Abr
+- Documento: PDF da conta vinculado
+- Métrica de consumo: Plano 300Mbps, velocidade contratada
+</code></pre>
+<p><strong>André Santos (DBA):</strong>
+E do ponto de vista de banco de dados, cada dimensão é um FK ou tabela N:N — nenhuma substitui a outra, todas coexistem.</p>
+<h3 id="3.3.-o-que-fornecedor-n%C3%A3o-%C3%A9" tabindex="-1"><a class="header-anchor" href="#3.3.-o-que-fornecedor-n%C3%A3o-%C3%A9">#</a> 3.3. O que Fornecedor NÃO é</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Para evitar confusão futura, vou documentar o que fornecedor NÃO é:</p>
+<ol>
+<li>Fornecedor <strong>NÃO substitui</strong> categoria — “Vivo” não é categoria, “Internet/Telefonia” é</li>
+<li>Fornecedor <strong>NÃO substitui</strong> tag — “Vivo” não é tag, “internet” é tag que pode agrupar Vivo + Canaã</li>
+<li>Fornecedor <strong>NÃO é</strong> instituição financeira — Caixa é onde está o dinheiro, Vivo é para quem vai o dinheiro</li>
+<li>Fornecedor <strong>NÃO tem saldo</strong> — não é conta, não é produto financeiro</li>
+<li>Fornecedor <strong>NÃO é obrigatório</strong> em toda transação — transferências internas, ajustes e estornos podem não ter fornecedor</li>
+</ol>
+<p><strong>Chico (CEO):</strong>
+Essa clareza é fundamental. Aprovado.</p>
+<hr>
+<h2 id="4.-decis%C3%A3o%3A-fornecedor-vs-institui%C3%A7%C3%A3o-financeira" tabindex="-1"><a class="header-anchor" href="#4.-decis%C3%A3o%3A-fornecedor-vs-institui%C3%A7%C3%A3o-financeira">#</a> 4. Decisão: Fornecedor vs Instituição Financeira</h2>
+<h3 id="4.1.-contexto-do-problema" tabindex="-1"><a class="header-anchor" href="#4.1.-contexto-do-problema">#</a> 4.1. Contexto do Problema</h3>
+<p><strong>Verônica (Consultora):</strong>
+A Caixa Econômica é uma instituição financeira onde o CEO tem conta corrente e financiamento. Mas quando a Caixa cobra tarifa de manutenção, ela é também um “fornecedor” de serviço bancário. Quando o Nubank cobra anuidade do cartão, é um fornecedor. Precisamos decidir: unificamos ou separamos?</p>
+<h3 id="4.2.-an%C3%A1lise-das-op%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#4.2.-an%C3%A1lise-das-op%C3%A7%C3%B5es">#</a> 4.2. Análise das Opções</h3>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Analisei as três opções do prompt da Verônica:</p>
+<h4 id="op%C3%A7%C3%A3o-a%3A-entidades-separadas%2C-relacion%C3%A1veis-quando-necess%C3%A1rio" tabindex="-1"><a class="header-anchor" href="#op%C3%A7%C3%A3o-a%3A-entidades-separadas%2C-relacion%C3%A1veis-quando-necess%C3%A1rio">#</a> Opção A: Entidades separadas, relacionáveis quando necessário</h4>
+<ul>
+<li><code>institutions</code> = onde está o dinheiro (bancos, fintechs)</li>
+<li><code>suppliers</code> = para quem vai o dinheiro (Vivo, GitHub, Neoenergia)</li>
+<li>Quando necessário, campo <code>institution_id</code> nullable em <code>suppliers</code> para ligar os dois</li>
+</ul>
+<h4 id="op%C3%A7%C3%A3o-b%3A-fornecedor-como-superentidade" tabindex="-1"><a class="header-anchor" href="#op%C3%A7%C3%A3o-b%3A-fornecedor-como-superentidade">#</a> Opção B: Fornecedor como superentidade</h4>
+<ul>
+<li><code>suppliers</code> é a tabela central, <code>institutions</code> é um tipo de fornecedor</li>
+<li>Toda instituição é também um supplier</li>
+</ul>
+<h4 id="op%C3%A7%C3%A3o-c%3A-separa%C3%A7%C3%A3o-com-link-bidirecional" tabindex="-1"><a class="header-anchor" href="#op%C3%A7%C3%A3o-c%3A-separa%C3%A7%C3%A3o-com-link-bidirecional">#</a> Opção C: Separação com link bidirecional</h4>
+<ul>
+<li>Entidades separadas com tabela de link <code>supplier_institution_links</code></li>
+<li>Apenas quando a instituição atua como fornecedor (tarifa, anuidade)</li>
+</ul>
+<h3 id="4.3.-debate-da-equipe" tabindex="-1"><a class="header-anchor" href="#4.3.-debate-da-equipe">#</a> 4.3. Debate da Equipe</h3>
+<p><strong>André Santos (DBA):</strong>
+Sou fortemente a favor da <strong>Opção A</strong> com um campo de link opcional. Razões técnicas:</p>
+<ol>
+<li><code>institutions</code> já tem semântica própria: é o container de produtos financeiros, contas, cartões, saldos. Misturar com “fornecedores genéricos” poluiria o modelo.</li>
+<li>Um JOIN <code>suppliers JOIN institutions</code> quando a Caixa cobra tarifa é trivial e raro.</li>
+<li>A maioria dos fornecedores (Vivo, GitHub, Neoenergia) NÃO é instituição financeira. Forçar todos por uma entidade única seria artificially.</li>
+<li>RLS e queries ficam mais simples com entidades distintas.</li>
+</ol>
+<p><strong>João Pereira (Backend):</strong>
+Concordo com André. Na Opção B, teríamos que colocar campos como <code>current_balance</code>, <code>credit_limit</code> em suppliers — que só fazem sentido para instituições. Ficaria sujo.</p>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Do ponto de vista financeiro, a separação é natural. Instituição financeira é onde guardo e administro dinheiro. Fornecedor é para quem pago. São papéis diferentes. A Caixa pode ser ambos, mas o papel primário é “instituição”. O papel secundário de “fornecedor” (quando cobra tarifa) é ocasional e pode ser resolvido com um link simples.</p>
+<p><strong>Pedro Santos (Backend):</strong>
+Na Opção B, os relatórios de fornecedor misturariam “gastos com a Caixa” (tarifas) com “movimentações na Caixa” (saldos de conta). Confuso para o usuário.</p>
+<p><strong>Sofia Almeida (Frontend):</strong>
+No frontend, faz mais sentido: na tela de “Minhas Instituições” eu vejo bancos e contas. Na tela de “Meus Fornecedores” eu vejo para quem pago. São espaços mentais diferentes do usuário.</p>
+<p><strong>Laura Costa (Backend):</strong>
+E para IA futura, ter entidades distintas facilita: o modelo pode aprender que “Caixa” aparece em contextos de transferência/saldo (instituição) vs “Caixa — tarifa mensal” é fornecedor. Sem ambiguidade.</p>
+<h3 id="4.4.-an%C3%A1lise-de-pr%C3%B3s-e-contras" tabindex="-1"><a class="header-anchor" href="#4.4.-an%C3%A1lise-de-pr%C3%B3s-e-contras">#</a> 4.4. Análise de Prós e Contras</h3>
+<table>
+<thead>
+<tr>
+<th>Critério</th>
+<th>Opção A (Separadas + link)</th>
+<th>Opção B (Superentidade)</th>
+<th>Opção C (Link bidirecional)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Simplicidade de modelo</strong></td>
+<td>✅ Cada entidade com seus campos próprios</td>
+<td>❌ Muitos campos nullable</td>
+<td>⚠️ Tabela extra de link</td>
+</tr>
+<tr>
+<td><strong>Clareza semântica</strong></td>
+<td>✅ Instituição = dinheiro, Fornecedor = pagamento</td>
+<td>❌ Mistura papéis</td>
+<td>✅ Clara mas complexa</td>
+</tr>
+<tr>
+<td><strong>Impacto em queries</strong></td>
+<td>✅ Queries diretas, JOIN simples quando necessário</td>
+<td>⚠️ WHERE type = para filtrar</td>
+<td>⚠️ JOIN extra pela tabela de link</td>
+</tr>
+<tr>
+<td><strong>Impacto em relatórios</strong></td>
+<td>✅ “Gastos por fornecedor” não mistura saldos</td>
+<td>❌ Confusão entre saldo e gasto</td>
+<td>✅ OK com cuidado</td>
+</tr>
+<tr>
+<td><strong>Impacto em manutenção</strong></td>
+<td>✅ Evolução independente de cada entidade</td>
+<td>⚠️ Mudança em uma afeta outra</td>
+<td>⚠️ Mais uma tabela para manter</td>
+</tr>
+<tr>
+<td><strong>Impacto em conciliação</strong></td>
+<td>✅ Fornecedor para lançamentos, Instituição para contas</td>
+<td>⚠️ Ambíguo</td>
+<td>✅ OK</td>
+</tr>
+<tr>
+<td><strong>Impacto em IA futura</strong></td>
+<td>✅ Classificação sem ambiguidade</td>
+<td>⚠️ IA precisa distinguir papéis</td>
+<td>✅ OK</td>
+</tr>
+<tr>
+<td><strong>Caso “Caixa cobra tarifa”</strong></td>
+<td>⚠️ Precisa criar um Supplier “Caixa” + link</td>
+<td>✅ Já é supplier</td>
+<td>✅ Link resolve</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4.5.-decis%C3%A3o-final" tabindex="-1"><a class="header-anchor" href="#4.5.-decis%C3%A3o-final">#</a> 4.5. Decisão Final</h3>
+<p><strong>Chico (CEO):</strong>
+Vou com a recomendação da equipe: <strong>Opção A — Entidades separadas com link opcional</strong>.</p>
+<p><strong>Decisão:</strong></p>
+<ul>
+<li><code>institutions</code> permanece como está — container de produtos financeiros</li>
+<li><code>suppliers</code> é entidade nova e independente</li>
+<li>Campo <code>institution_id</code> (FK, nullable) em <code>suppliers</code> para os raros casos em que a instituição também atua como fornecedor (tarifa, anuidade, juros cobrados)</li>
+<li>Quando a Caixa cobra tarifa de manutenção, o lançamento tem: <code>institution_id</code> = Caixa (onde sai o dinheiro), <code>supplier_id</code> = Caixa-Fornecedor (para quem vai o dinheiro). São FKs para tabelas diferentes.</li>
+<li>A equipe cria um Supplier “Caixa Econômica Federal” linkado à Institution “Caixa” apenas quando necessário — não é automático.</li>
+</ul>
+<p><strong>Ricardo Monteiro:</strong>
+Isso é correto. Na prática, poucos lançamentos terão a instituição como fornecedor. A maioria dos fornecedores (Vivo, Neoenergia, GitHub) jamais é instituição financeira.</p>
+<hr>
+<h2 id="5.-altera%C3%A7%C3%B5es-no-modelo-de-dados" tabindex="-1"><a class="header-anchor" href="#5.-altera%C3%A7%C3%B5es-no-modelo-de-dados">#</a> 5. Alterações no Modelo de Dados</h2>
+<h3 id="5.1.-novas-tabelas" tabindex="-1"><a class="header-anchor" href="#5.1.-novas-tabelas">#</a> 5.1. Novas Tabelas</h3>
+<p><strong>André Santos (DBA):</strong>
+Proponho as seguintes novas tabelas, seguindo o padrão já definido (UUID v7, user_id para RLS, timestamps UTC):</p>
+<h4 id="5.1.1.-suppliers-(fornecedores)" tabindex="-1"><a class="header-anchor" href="#5.1.1.-suppliers-(fornecedores)">#</a> 5.1.1. suppliers (Fornecedores)</h4>
+<pre class="hljs"><code>suppliers
+├── id: uuid (PK)
+├── user_id: uuid (FK → auth.users)
+├── name: text — nome principal de exibição (ex: &quot;Vivo&quot;, &quot;Neoenergia&quot;)
+├── trade_name: text (nullable) — nome fantasia, se diferente
+├── legal_name: text (nullable) — razão social, se útil
+├── document_number: text (nullable) — CNPJ ou CPF, se conhecido
+├── type: enum (company, individual, utility, telecom, saas, financial_institution,
+│         autonomous, platform, government, other)
+├── website: text (nullable)
+├── contact_info: text (nullable) — telefone, email, SAC
+├── notes: text (nullable) — observações livres
+├── institution_id: uuid (FK → institutions, nullable) — link quando a IF é também fornecedor
+├── is_active: boolean (default true)
+├── display_order: int (nullable)
+├── created_at: timestamptz
+└── updated_at: timestamptz
+</code></pre>
+<p><strong>Maria Oliveira (Backend):</strong>
+O campo <code>type</code> como enum cobre a diversidade exigida pela Verônica: empresa, pessoa física, concessionária, SaaS, etc. É extensível sem ser genérico demais.</p>
+<p><strong>Camila Duarte:</strong>
+O campo <code>notes</code> é importante. Muitas vezes o usuário quer anotar algo como “plano antigo, migrar em setembro” ou “contrato termina em dezembro”. Informação operacional que não cabe em campo estruturado.</p>
+<h4 id="5.1.2.-supplier_aliases-(aliases-e-nomes-antigos)" tabindex="-1"><a class="header-anchor" href="#5.1.2.-supplier_aliases-(aliases-e-nomes-antigos)">#</a> 5.1.2. supplier_aliases (Aliases e Nomes Antigos)</h4>
+<pre class="hljs"><code>supplier_aliases
+├── id: uuid (PK)
+├── user_id: uuid (FK → auth.users)
+├── supplier_id: uuid (FK → suppliers)
+├── alias_name: text — nome alternativo (ex: &quot;CELPE&quot; para &quot;Neoenergia Pernambuco&quot;)
+├── alias_type: enum (former_name, abbreviation, trade_name, billing_name, other)
+├── valid_from: date (nullable) — desde quando esse nome era usado
+├── valid_until: date (nullable) — até quando esse nome era usado (null = ainda válido)
+├── notes: text (nullable)
+├── created_at: timestamptz
+└── updated_at: timestamptz
+</code></pre>
+<p><strong>Pedro Santos (Backend):</strong>
+O <code>alias_type</code> é estratégico para IA futura. Quando um lançamento importado tem “CELPE” na descrição, o sistema (ou IA) pode buscar em <code>supplier_aliases</code> e resolver que é Neoenergia. O <code>valid_from</code>/<code>valid_until</code> ajuda a desambiguar: se o nome mudou em 2020, lançamentos anteriores a 2020 com “CELPE” apontam para Neoenergia mas com contexto temporal.</p>
+<p><strong>Ricardo Monteiro:</strong>
+Exemplos reais que isso resolve:</p>
+<ul>
+<li>CELPE → Neoenergia Pernambuco (mudança societária)</li>
+<li>GVT → Vivo (aquisição)</li>
+<li>Oi → Oi/V.tal (reorganização)</li>
+<li>“<a href="http://GITHUB.COM">GITHUB.COM</a>” → GitHub (nome como aparece na fatura do cartão)</li>
+<li>“OPENAI *CHATGPT” → ChatGPT/OpenAI (descrição no extrato bancário)</li>
+</ul>
+<h4 id="5.1.3.-supplier_contracts-(contratos-e-identificadores-externos)" tabindex="-1"><a class="header-anchor" href="#5.1.3.-supplier_contracts-(contratos-e-identificadores-externos)">#</a> 5.1.3. supplier_contracts (Contratos e Identificadores Externos)</h4>
+<pre class="hljs"><code>supplier_contracts
+├── id: uuid (PK)
+├── user_id: uuid (FK → auth.users)
+├── supplier_id: uuid (FK → suppliers)
+├── contract_type: enum (utility_account, phone_line, subscription, service_contract,
+│                        customer_id, installation, other)
+├── identifier: text — número do contrato, conta, instalação, linha, cliente
+├── label: text (nullable) — descrição amigável (ex: &quot;Linha principal&quot;, &quot;Casa&quot;, &quot;Escritório&quot;)
+├── is_active: boolean (default true)
+├── start_date: date (nullable)
+├── end_date: date (nullable)
+├── metadata: jsonb (nullable) — dados extras (ex: plano contratado, velocidade, endereço)
+├── notes: text (nullable)
+├── created_at: timestamptz
+└── updated_at: timestamptz
+</code></pre>
+<p><strong>João Pereira (Backend):</strong>
+Essa tabela resolve todos os cenários de identificadores que a Verônica menciona: unidade consumidora, conta contrato, número da instalação, linha telefônica, número do cliente. Em vez de criar uma coluna para cada tipo, temos <code>contract_type</code> + <code>identifier</code> + <code>label</code> — flexível e claro.</p>
+<p><strong>Camila Duarte:</strong>
+Exemplo real: Neoenergia pode ter duas instalações — casa e escritório. Cada uma com sua unidade consumidora, sua conta contrato. O mesmo fornecedor, contratos diferentes, faturas diferentes. Essa tabela captura isso perfeitamente.</p>
+<p><strong>André Santos (DBA):</strong>
+E o <code>metadata</code> em jsonb permite armazenar dados específicos sem poluir o schema:</p>
+<pre class="hljs"><code><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;plan&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Residencial B1&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;voltage&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;220V&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;address&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Rua X, 123&quot;</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+<h4 id="5.1.4.-supplier_tags-(tags-n%3An-para-fornecedores)" tabindex="-1"><a class="header-anchor" href="#5.1.4.-supplier_tags-(tags-n%3An-para-fornecedores)">#</a> 5.1.4. supplier_tags (Tags N:N para Fornecedores)</h4>
+<pre class="hljs"><code>supplier_tags
+├── supplier_id: uuid (FK → suppliers)
+├── tag_id: uuid (FK → tags)
+└── PK: (supplier_id, tag_id)
+</code></pre>
+<p><strong>Maria Oliveira:</strong>
+Reutilizamos a tabela <code>tags</code> existente. Assim como transações e recorrências podem ter tags, fornecedores também. Exemplo: Vivo poderia ter tags <code>internet</code>, <code>telefonia</code>, <code>essencial</code>. Isso permite filtrar fornecedores por tag — “mostre todos os fornecedores essenciais”.</p>
+<h4 id="5.1.5.-consumption_metrics-(m%C3%A9tricas-de-consumo)" tabindex="-1"><a class="header-anchor" href="#5.1.5.-consumption_metrics-(m%C3%A9tricas-de-consumo)">#</a> 5.1.5. consumption_metrics (Métricas de Consumo)</h4>
+<pre class="hljs"><code>consumption_metrics
+├── id: uuid (PK)
+├── user_id: uuid (FK → auth.users)
+├── supplier_id: uuid (FK → suppliers)
+├── supplier_contract_id: uuid (FK → supplier_contracts, nullable) — vínculo opcional com contrato específico
+├── transaction_id: uuid (FK → transactions, nullable) — vínculo com lançamento, se aplicável
+├── document_id: uuid (FK → documents, nullable) — vínculo com documento, se extraído de fatura
+├── reference_period_start: date — início do período de medição
+├── reference_period_end: date — fim do período de medição
+├── metric_name: text — nome da métrica (ex: &quot;Consumo kWh&quot;, &quot;Velocidade contratada&quot;, &quot;Licenças&quot;)
+├── metric_unit: text — unidade (ex: &quot;kWh&quot;, &quot;Mbps&quot;, &quot;unidades&quot;, &quot;horas&quot;, &quot;GB&quot;)
+├── quantity: numeric(15,4) — quantidade medida
+├── unit_price: numeric(15,6) (nullable) — preço unitário (ex: R$/kWh)
+├── subtotal: numeric(15,2) (nullable) — valor parcial desta métrica
+├── metadata: jsonb (nullable) — dados extras (ex: bandeira tarifária, faixa de consumo)
+├── notes: text (nullable)
+├── created_at: timestamptz
+└── updated_at: timestamptz
+</code></pre>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Essa tabela é excelente para auditoria histórica. Imagine poder ver: “meu consumo de kWh foi de 280 em janeiro, 320 em fevereiro, 450 em março — o que aconteceu?” Ou: “a tarifa da Neoenergia subiu de R$ 0,72 para R$ 0,85 — impacto de R$ 40/mês no custo”.</p>
+<p><strong>Pedro Santos:</strong>
+Os campos <code>metric_name</code> e <code>metric_unit</code> como texto livre (não enum) são intencionais — cada fornecedor pode ter métricas diferentes. Energia tem kWh, telecom tem Mbps, SaaS tem licenças. Não faz sentido engessar em enum.</p>
+<p><strong>Camila Duarte:</strong>
+Para o CEO, isso resolve perguntas como:</p>
+<ul>
+<li>“Quanto aumentou meu consumo de energia desde que comprei o ar-condicionado?”</li>
+<li>“Compensa trocar de plano de internet de 300Mbps para 500Mbps?”</li>
+<li>“O GitHub está mais caro que o ano passado?”</li>
+</ul>
+<p><strong>João Pereira:</strong>
+O <code>metadata</code> em jsonb permite capturar informações específicas do tipo de fornecedor:</p>
+<pre class="hljs"><code><span class="hljs-comment">// Energia</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;tariff_flag&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;yellow&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;consumption_tier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;B1&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;icms_rate&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;25%&quot;</span><span class="hljs-punctuation">}</span>
+
+<span class="hljs-comment">// Telecom</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;download_speed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;300Mbps&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;upload_speed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;150Mbps&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;franchise&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;unlimited&quot;</span><span class="hljs-punctuation">}</span>
+
+<span class="hljs-comment">// SaaS</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;plan&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Team&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;seats_used&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">3</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;seats_total&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">5</span><span class="hljs-punctuation">}</span>
+</code></pre>
+<h3 id="5.2.-altera%C3%A7%C3%B5es-em-tabelas-existentes" tabindex="-1"><a class="header-anchor" href="#5.2.-altera%C3%A7%C3%B5es-em-tabelas-existentes">#</a> 5.2. Alterações em Tabelas Existentes</h3>
+<p><strong>André Santos (DBA):</strong>
+As seguintes tabelas existentes recebem novos campos:</p>
+<h4 id="transactions-%E2%80%94-adicionar-supplier_id" tabindex="-1"><a class="header-anchor" href="#transactions-%E2%80%94-adicionar-supplier_id">#</a> transactions — adicionar supplier_id</h4>
+<pre class="hljs"><code>transactions
+├── ... (campos existentes mantidos)
+├── supplier_id: uuid (FK → suppliers, nullable) ← NOVO
+└── ...
+</code></pre>
+<h4 id="recurring_templates-%E2%80%94-adicionar-supplier_id" tabindex="-1"><a class="header-anchor" href="#recurring_templates-%E2%80%94-adicionar-supplier_id">#</a> recurring_templates — adicionar supplier_id</h4>
+<pre class="hljs"><code>recurring_templates
+├── ... (campos existentes mantidos)
+├── supplier_id: uuid (FK → suppliers, nullable) ← NOVO
+└── ...
+</code></pre>
+<h4 id="statement_items-%E2%80%94-adicionar-supplier_id" tabindex="-1"><a class="header-anchor" href="#statement_items-%E2%80%94-adicionar-supplier_id">#</a> statement_items — adicionar supplier_id</h4>
+<pre class="hljs"><code>statement_items
+├── ... (campos existentes mantidos)
+├── supplier_id: uuid (FK → suppliers, nullable) ← NOVO
+└── ...
+</code></pre>
+<h4 id="documents-%E2%80%94-adicionar-supplier_id" tabindex="-1"><a class="header-anchor" href="#documents-%E2%80%94-adicionar-supplier_id">#</a> documents — adicionar supplier_id</h4>
+<pre class="hljs"><code>documents
+├── ... (campos existentes mantidos)
+├── supplier_id: uuid (FK → suppliers, nullable) ← NOVO
+└── ...
+</code></pre>
+<h4 id="liabilities-%E2%80%94-adicionar-supplier_id-(para-financiamentos%2Fempr%C3%A9stimos-com-fornecedor-identific%C3%A1vel)" tabindex="-1"><a class="header-anchor" href="#liabilities-%E2%80%94-adicionar-supplier_id-(para-financiamentos%2Fempr%C3%A9stimos-com-fornecedor-identific%C3%A1vel)">#</a> liabilities — adicionar supplier_id (para financiamentos/empréstimos com fornecedor identificável)</h4>
+<pre class="hljs"><code>liabilities
+├── ... (campos existentes mantidos)
+├── supplier_id: uuid (FK → suppliers, nullable) ← NOVO
+└── ...
+</code></pre>
+<p><strong>Maria Oliveira (Backend):</strong>
+Todos os novos campos são <strong>nullable</strong> propositalmente. Fornecedor é desejável mas não obrigatório. Um ajuste manual ou estorno pode não ter fornecedor. Uma transferência interna nunca tem fornecedor. Forçar preenchimento seria aumentar atrito operacional — exatamente o que queremos evitar.</p>
+<p><strong>Thiago Martins (Front Engineer):</strong>
+No frontend, o campo de fornecedor no formulário de transação será um autocomplete/combobox com busca — o usuário digite “Vi…” e aparece “Vivo”. Baixo atrito. Opcional. Sugestão automática baseada na recorrência quando aplicável.</p>
+<h3 id="5.3.-justificativa-de-simplifica%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#5.3.-justificativa-de-simplifica%C3%A7%C3%B5es">#</a> 5.3. Justificativa de Simplificações</h3>
+<p><strong>André Santos (DBA):</strong>
+Comparando com as sugestões do prompt da Verônica:</p>
+<table>
+<thead>
+<tr>
+<th>Sugestão da Verônica</th>
+<th>Nossa implementação</th>
+<th>Justificativa</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>suppliers</code></td>
+<td>✅ <code>suppliers</code></td>
+<td>Direto</td>
+</tr>
+<tr>
+<td><code>supplier_aliases</code></td>
+<td>✅ <code>supplier_aliases</code></td>
+<td>Direto</td>
+</tr>
+<tr>
+<td><code>supplier_categories / supplier_types</code></td>
+<td>✅ Campo <code>type</code> enum em <code>suppliers</code> + <code>supplier_tags</code> N:N</td>
+<td>Enum para tipo primário, tags para classificação flexível. Evita tabela extra só para tipos</td>
+</tr>
+<tr>
+<td><code>supplier_accounts_or_contracts</code></td>
+<td>✅ <code>supplier_contracts</code></td>
+<td>Renomeado para clareza</td>
+</tr>
+<tr>
+<td><code>transaction_suppliers</code></td>
+<td>❌ → FK <code>supplier_id</code> direto em <code>transactions</code></td>
+<td>Um lançamento tem no máximo 1 fornecedor. N:N seria over-engineering</td>
+</tr>
+<tr>
+<td><code>recurring_template_suppliers</code></td>
+<td>❌ → FK <code>supplier_id</code> direto em <code>recurring_templates</code></td>
+<td>Mesma razão</td>
+</tr>
+<tr>
+<td><code>document_suppliers</code></td>
+<td>❌ → FK <code>supplier_id</code> direto em <code>documents</code></td>
+<td>Mesma razão</td>
+</tr>
+<tr>
+<td><code>supplier_metrics</code></td>
+<td>✅ <code>consumption_metrics</code></td>
+<td>Renomeado para clareza do propósito</td>
+</tr>
+<tr>
+<td><code>supplier_units</code></td>
+<td>❌ → Absorvido em <code>consumption_metrics.metric_unit</code></td>
+<td>Não justifica tabela separada</td>
+</tr>
+<tr>
+<td><code>supplier_audit_links</code></td>
+<td>❌ → Coberto por <code>audit_logs</code> existente</td>
+<td>A tabela de auditoria já é genérica (entity_type + entity_id)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Maria Oliveira:</strong>
+A decisão de usar FK direto (1:1) em vez de tabela N:N para <code>transaction_suppliers</code> merece justificativa detalhada:</p>
+<ul>
+<li>Na realidade financeira pessoal, uma despesa tem UM fornecedor: “paguei a conta de energia da Neoenergia”</li>
+<li>Não existe cenário prático onde uma única transação tem múltiplos fornecedores</li>
+<li>Se o usuário paga uma fatura que tem itens de fornecedores diferentes, cada item já é um <code>statement_item</code> com seu próprio <code>supplier_id</code></li>
+<li>FK direto é mais simples, mais rápido em queries, e mais claro semanticamente</li>
+</ul>
+<p><strong>João Pereira:</strong>
+Concordo. Se no futuro precisarmos de N:N, a migração é simples (criar tabela pivot, migrar FKs). Mas não vamos pagar essa complexidade agora.</p>
+<h3 id="5.4.-resumo-das-novas-tabelas-e-campos" tabindex="-1"><a class="header-anchor" href="#5.4.-resumo-das-novas-tabelas-e-campos">#</a> 5.4. Resumo das Novas Tabelas e Campos</h3>
+<p><strong>André Santos:</strong>
+Consolidando:</p>
+<table>
+<thead>
+<tr>
+<th>Nova Tabela / Campo</th>
+<th>Tipo</th>
+<th>RLS</th>
+<th>Índices recomendados</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>suppliers</code></td>
+<td>Tabela nova</td>
+<td>✅ user_id</td>
+<td>name, type, institution_id, is_active</td>
+</tr>
+<tr>
+<td><code>supplier_aliases</code></td>
+<td>Tabela nova</td>
+<td>✅ user_id</td>
+<td>supplier_id, alias_name (trigram para busca fuzzy)</td>
+</tr>
+<tr>
+<td><code>supplier_contracts</code></td>
+<td>Tabela nova</td>
+<td>✅ user_id</td>
+<td>supplier_id, contract_type, identifier</td>
+</tr>
+<tr>
+<td><code>supplier_tags</code></td>
+<td>Tabela N:N nova</td>
+<td>✅ via suppliers.user_id</td>
+<td>(supplier_id, tag_id) PK</td>
+</tr>
+<tr>
+<td><code>consumption_metrics</code></td>
+<td>Tabela nova</td>
+<td>✅ user_id</td>
+<td>supplier_id, reference_period_start, metric_name</td>
+</tr>
+<tr>
+<td><code>transactions.supplier_id</code></td>
+<td>FK novo (nullable)</td>
+<td>✅ já tem RLS</td>
+<td>supplier_id</td>
+</tr>
+<tr>
+<td><code>recurring_templates.supplier_id</code></td>
+<td>FK novo (nullable)</td>
+<td>✅ já tem RLS</td>
+<td>supplier_id</td>
+</tr>
+<tr>
+<td><code>statement_items.supplier_id</code></td>
+<td>FK novo (nullable)</td>
+<td>✅ já tem RLS</td>
+<td>supplier_id</td>
+</tr>
+<tr>
+<td><code>documents.supplier_id</code></td>
+<td>FK novo (nullable)</td>
+<td>✅ já tem RLS</td>
+<td>supplier_id</td>
+</tr>
+<tr>
+<td><code>liabilities.supplier_id</code></td>
+<td>FK novo (nullable)</td>
+<td>✅ já tem RLS</td>
+<td>supplier_id</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fernando Gomes (DevOps):</strong>
+São 5 tabelas novas e 5 novos FKs. A migração será uma única migration file no Supabase. RLS precisa ser configurado para todas as novas tabelas com o padrão:</p>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> POLICY &quot;Users can only access their own suppliers&quot;
+  <span class="hljs-keyword">ON</span> suppliers <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span>
+  <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id)
+  <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+</code></pre>
+<h3 id="5.5.-decis%C3%A3o-final-sobre-modelo-de-dados" tabindex="-1"><a class="header-anchor" href="#5.5.-decis%C3%A3o-final-sobre-modelo-de-dados">#</a> 5.5. Decisão Final sobre Modelo de Dados</h3>
+<p>A equipe aprova unanimemente:</p>
+<ul>
+<li>5 novas tabelas: <code>suppliers</code>, <code>supplier_aliases</code>, <code>supplier_contracts</code>, <code>supplier_tags</code>, <code>consumption_metrics</code></li>
+<li>5 novos FKs nullable em tabelas existentes</li>
+<li>FK direto (1:1) ao invés de N:N para fornecedor em transações/recorrências/documentos</li>
+<li>Tipo de fornecedor como enum + tags para classificação flexível</li>
+<li>Métricas de consumo como tabela dedicada com campos texto para nome/unidade (não enum)</li>
+<li>RLS mandatório em todas as novas tabelas</li>
+</ul>
+<hr>
+<h2 id="6.-modelagem-de-aliases%2C-nomes-antigos-e-consolida%C3%A7%C3%A3o-hist%C3%B3rica" tabindex="-1"><a class="header-anchor" href="#6.-modelagem-de-aliases%2C-nomes-antigos-e-consolida%C3%A7%C3%A3o-hist%C3%B3rica">#</a> 6. Modelagem de Aliases, Nomes Antigos e Consolidação Histórica</h2>
+<h3 id="6.1.-estrat%C3%A9gia-de-aliases" tabindex="-1"><a class="header-anchor" href="#6.1.-estrat%C3%A9gia-de-aliases">#</a> 6.1. Estratégia de Aliases</h3>
+<p><strong>Pedro Santos (Backend):</strong>
+A tabela <code>supplier_aliases</code> resolve três cenários distintos:</p>
+<h4 id="cen%C3%A1rio-1%3A-mudan%C3%A7a-de-nome-societ%C3%A1rio" tabindex="-1"><a class="header-anchor" href="#cen%C3%A1rio-1%3A-mudan%C3%A7a-de-nome-societ%C3%A1rio">#</a> Cenário 1: Mudança de nome societário</h4>
+<pre class="hljs"><code>Fornecedor: &quot;Neoenergia Pernambuco&quot;
+Alias: &quot;CELPE&quot; (type: former_name, valid_until: 2020-12-31)
+</code></pre>
+<ul>
+<li>Lançamentos antigos com “CELPE” podem ser retroativamente vinculados ao fornecedor Neoenergia</li>
+<li>O histórico permanece íntegro: o alias registra o nome da época</li>
+</ul>
+<h4 id="cen%C3%A1rio-2%3A-nome-como-aparece-na-fatura-do-cart%C3%A3o" tabindex="-1"><a class="header-anchor" href="#cen%C3%A1rio-2%3A-nome-como-aparece-na-fatura-do-cart%C3%A3o">#</a> Cenário 2: Nome como aparece na fatura do cartão</h4>
+<pre class="hljs"><code>Fornecedor: &quot;GitHub&quot;
+Alias: &quot;GITHUB.COM&quot; (type: billing_name)
+Alias: &quot;GITHUB INC&quot; (type: legal_name)
+</code></pre>
+<ul>
+<li>Importações de extrato de cartão podem usar aliases para matching automático</li>
+</ul>
+<h4 id="cen%C3%A1rio-3%3A-abrevia%C3%A7%C3%B5es-e-varia%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#cen%C3%A1rio-3%3A-abrevia%C3%A7%C3%B5es-e-varia%C3%A7%C3%B5es">#</a> Cenário 3: Abreviações e variações</h4>
+<pre class="hljs"><code>Fornecedor: &quot;OpenAI&quot;
+Alias: &quot;OPENAI *CHATGPT&quot; (type: billing_name)
+Alias: &quot;ChatGPT&quot; (type: trade_name)
+Alias: &quot;ChatGPT Plus&quot; (type: trade_name)
+</code></pre>
+<h3 id="6.2.-consolida%C3%A7%C3%A3o-hist%C3%B3rica" tabindex="-1"><a class="header-anchor" href="#6.2.-consolida%C3%A7%C3%A3o-hist%C3%B3rica">#</a> 6.2. Consolidação Histórica</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Quando um fornecedor muda de nome, o processo é:</p>
+<ol>
+<li>O fornecedor permanece como entidade única — <code>suppliers.id</code> não muda</li>
+<li>O nome principal (<code>suppliers.name</code>) é atualizado para o novo nome</li>
+<li>O nome antigo é registrado como alias com <code>alias_type = 'former_name'</code> e <code>valid_until</code> preenchido</li>
+<li><strong>Nenhum lançamento precisa ser alterado</strong> — todos já apontam para o mesmo <code>supplier_id</code></li>
+<li>O histórico é automaticamente consolidado porque o FK é estável</li>
+</ol>
+<p><strong>André Santos (DBA):</strong>
+Isso é crucial do ponto de vista de banco de dados. Se mudássemos o ID ou criássemos novo fornecedor a cada mudança de nome, perderíamos o vínculo histórico. Com aliases, o ID é imutável e o nome é metadado — exatamente como deveria ser.</p>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Na prática, isso significa que a pergunta “quanto gastei com a Neoenergia nos últimos 5 anos?” retorna resultados corretos mesmo que nos primeiros 2 anos a empresa se chamasse CELPE. Nenhum esforço manual para o usuário.</p>
+<h3 id="6.3.-busca-e-matching-por-alias" tabindex="-1"><a class="header-anchor" href="#6.3.-busca-e-matching-por-alias">#</a> 6.3. Busca e Matching por Alias</h3>
+<p><strong>Pedro Santos:</strong>
+Para busca, proponho um índice trigram no campo <code>alias_name</code>:</p>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> EXTENSION IF <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> pg_trgm;
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_name_trgm
+  <span class="hljs-keyword">ON</span> supplier_aliases <span class="hljs-keyword">USING</span> gin (alias_name gin_trgm_ops);
+</code></pre>
+<p>Isso permite:</p>
+<ul>
+<li>Busca parcial: “NEOENER” encontra “Neoenergia Pernambuco”</li>
+<li>Busca fuzzy: “CELP” encontra “CELPE”</li>
+<li>Útil para importação e futura IA</li>
+</ul>
+<p><strong>Laura Costa (Backend):</strong>
+Na importação de planilha (já prevista no MVP), antes de criar um lançamento, podemos buscar em <code>supplier_aliases</code> para sugerir o fornecedor provável. Se o extrato do cartão diz “<a href="http://GITHUB.COM">GITHUB.COM</a> R$ 21,00”, o sistema sugere: “Fornecedor: GitHub?” — com um clique o usuário confirma.</p>
+<h3 id="6.4.-fluxo-de-merge-de-fornecedores" tabindex="-1"><a class="header-anchor" href="#6.4.-fluxo-de-merge-de-fornecedores">#</a> 6.4. Fluxo de Merge de Fornecedores</h3>
+<p><strong>Maria Oliveira:</strong>
+Cenário: o usuário criou dois fornecedores (“Vivo” e “Vivo Telefônica”) que são o mesmo. Precisamos de um fluxo de merge:</p>
+<ol>
+<li>Usuário seleciona fornecedor A (ex: “Vivo Telefônica”) como duplicata</li>
+<li>Seleciona fornecedor B (ex: “Vivo”) como principal</li>
+<li>Sistema:
+<ul>
+<li>Move todos os lançamentos de A para B (<code>UPDATE transactions SET supplier_id = B WHERE supplier_id = A</code>)</li>
+<li>Move todos os contratos de A para B</li>
+<li>Move todas as métricas de A para B</li>
+<li>Cria alias em B com o nome de A (<code>alias_type = 'former_name'</code>)</li>
+<li>Desativa A (<code>is_active = false</code>) ou deleta, conforme preferência</li>
+</ul>
+</li>
+<li>Histórico totalmente preservado sob o fornecedor B</li>
+</ol>
+<p><strong>André Santos:</strong>
+Esse merge deve ser uma Edge Function server-side com transação atômica. Não pode falhar no meio — ou move tudo ou nada.</p>
+<h3 id="6.5.-decis%C3%A3o-final-sobre-aliases" tabindex="-1"><a class="header-anchor" href="#6.5.-decis%C3%A3o-final-sobre-aliases">#</a> 6.5. Decisão Final sobre Aliases</h3>
+<p>Aprovado:</p>
+<ul>
+<li><code>supplier_aliases</code> com tipos: former_name, abbreviation, trade_name, billing_name, other</li>
+<li>Datas opcionais de validade (valid_from, valid_until)</li>
+<li>Índice trigram para busca fuzzy</li>
+<li>Matching de alias na importação (sugestão automática)</li>
+<li>Fluxo de merge de fornecedores duplicados (Edge Function transacional)</li>
+<li>ID do fornecedor é imutável — nome e aliases são metadados</li>
+</ul>
+<hr>
+<h2 id="7.-impacto-em-recorr%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#7.-impacto-em-recorr%C3%AAncias">#</a> 7. Impacto em Recorrências</h2>
+<h3 id="7.1.-revis%C3%A3o-do-template-recorrente" tabindex="-1"><a class="header-anchor" href="#7.1.-revis%C3%A3o-do-template-recorrente">#</a> 7.1. Revisão do Template Recorrente</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Com a adição de <code>supplier_id</code> em <code>recurring_templates</code>, cada recorrência pode (e deve) informar seu fornecedor. Revisando o fluxo:</p>
+<ul>
+<li>O template recorrente agora tem: nome, tipo, valor, frequência, conta, <strong>fornecedor</strong>, categoria, tags, prioridade</li>
+<li>Exemplo: “Internet Vivo — R$ 149,90 — mensal — dia 15 — Débito automático na Caixa — <strong>Fornecedor: Vivo</strong> — Categoria: Internet/Telefonia — Tags: internet, casa, essencial — Prioridade: alta”</li>
+</ul>
+<p><strong>Regras de herança revisadas:</strong></p>
+<ol>
+<li>Quando uma instância recorrente é gerada, herda: categoria, tags, prioridade E <strong>fornecedor</strong> do template</li>
+<li>Quando a instância é confirmada (paga) e gera uma <code>transaction</code>, o <code>supplier_id</code> é passado para a transação</li>
+<li>O usuário pode sobrescrever o fornecedor na instância ou na transação (ex.: trocou de operadora)</li>
+</ol>
+<h3 id="7.2.-cen%C3%A1rios-pr%C3%A1ticos" tabindex="-1"><a class="header-anchor" href="#7.2.-cen%C3%A1rios-pr%C3%A1ticos">#</a> 7.2. Cenários Práticos</h3>
+<p><strong>Camila Duarte (Consultora):</strong>
+Vou dar exemplos reais para validar a modelagem:</p>
+<table>
+<thead>
+<tr>
+<th>Template recorrente</th>
+<th>Fornecedor</th>
+<th>Categoria</th>
+<th>Tags</th>
+<th>Contrato associado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Internet Vivo (casa)</td>
+<td>Vivo</td>
+<td>Internet/Telefonia</td>
+<td>internet, casa, essencial</td>
+<td>Linha 81999XX, Plano 300Mbps</td>
+</tr>
+<tr>
+<td>Internet Canaã (backup)</td>
+<td>Canaã Telecom</td>
+<td>Internet/Telefonia</td>
+<td>internet, casa, contingencia</td>
+<td>Contrato #4521</td>
+</tr>
+<tr>
+<td>Energia (casa)</td>
+<td>Neoenergia</td>
+<td>Utilidades</td>
+<td>energia, casa, essencial</td>
+<td>UC 0123456, Instalação #789</td>
+</tr>
+<tr>
+<td>GitHub Pro</td>
+<td>GitHub</td>
+<td>Software/Serviços</td>
+<td>trabalho, desenvolvimento</td>
+<td>Account: chicofigueiredo</td>
+</tr>
+<tr>
+<td>ChatGPT Plus</td>
+<td>OpenAI</td>
+<td>Software/Serviços</td>
+<td>trabalho, pesquisa, ensino</td>
+<td>Subscription ID</td>
+</tr>
+<tr>
+<td>Diarista</td>
+<td>Maria da Silva</td>
+<td>Serviços Pessoais</td>
+<td>casa, pessoa_fisica, essencial</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Condomínio</td>
+<td>Adm. Cond. Edifício X</td>
+<td>Moradia</td>
+<td>moradia, essencial</td>
+<td>Apt 302, Bloco B</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ricardo Monteiro:</strong>
+Note que “Internet Vivo” e “Internet Canaã” têm a MESMA categoria (“Internet/Telefonia”) e a MESMA tag (“internet”) — mas fornecedores DIFERENTES. Isso demonstra que fornecedor é dimensão ortogonal. Sem ele, o relatório diria “gastei R$ 270/mês em internet” mas não diria “R$ 150 com Vivo e R$ 120 com Canaã”.</p>
+<h3 id="7.3.-concilia%C3%A7%C3%A3o-de-recorr%C3%AAncia-com-documento" tabindex="-1"><a class="header-anchor" href="#7.3.-concilia%C3%A7%C3%A3o-de-recorr%C3%AAncia-com-documento">#</a> 7.3. Conciliação de Recorrência com Documento</h3>
+<p><strong>Pedro Santos (Backend):</strong>
+Quando um documento (fatura, conta) chega, a conciliação pode usar o fornecedor como critério de matching:</p>
+<ol>
+<li>Documento chega com <code>supplier_id = Neoenergia</code></li>
+<li>Sistema busca recorrências pendentes com <code>supplier_id = Neoenergia</code> e data próxima</li>
+<li>Sugere: “Este documento parece ser a conta de energia de Março/2026 (recorrência: Energia Casa)”</li>
+<li>Usuário confirma → instância marcada como paga, documento vinculado</li>
+</ol>
+<p><strong>Laura Costa:</strong>
+No MVP isso pode ser matching manual (o usuário liga o documento à instância). Na Fase 4 (IA), o matching pode ser automático usando fornecedor + nome + valor + período.</p>
+<h3 id="7.4.-decis%C3%A3o-final-sobre-recorr%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#7.4.-decis%C3%A3o-final-sobre-recorr%C3%AAncias">#</a> 7.4. Decisão Final sobre Recorrências</h3>
+<p>Aprovado:</p>
+<ul>
+<li><code>supplier_id</code> FK nullable em <code>recurring_templates</code></li>
+<li>Herança de fornecedor para instâncias e transações derivadas</li>
+<li>Fornecedor como critério de matching na conciliação com documentos</li>
+<li>Override de fornecedor permitido em instância/transação individual</li>
+</ul>
+<hr>
+<h2 id="8.-impacto-em-documentos-e-concilia%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#8.-impacto-em-documentos-e-concilia%C3%A7%C3%A3o">#</a> 8. Impacto em Documentos e Conciliação</h2>
+<h3 id="8.1.-documento-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#8.1.-documento-com-fornecedor">#</a> 8.1. Documento com Fornecedor</h3>
+<p><strong>Pedro Santos (Backend):</strong>
+Com o novo FK <code>supplier_id</code> em <code>documents</code>, o fluxo de upload revisado é:</p>
+<ol>
+<li>Usuário faz upload de documento (PDF, imagem)</li>
+<li>Define: tipo de documento, entidade vinculada (transação, dívida, fatura)</li>
+<li><strong>Novo:</strong> Opcionalmente associa a um fornecedor</li>
+<li>Exemplo: PDF da conta de energia → <code>document_type: invoice</code>, <code>entity_type: transaction</code>, <code>supplier_id: Neoenergia</code></li>
+</ol>
+<h3 id="8.2.-cen%C3%A1rios-de-vincula%C3%A7%C3%A3o-documento-fornecedor" tabindex="-1"><a class="header-anchor" href="#8.2.-cen%C3%A1rios-de-vincula%C3%A7%C3%A3o-documento-fornecedor">#</a> 8.2. Cenários de Vinculação Documento-Fornecedor</h3>
+<p><strong>João Pereira (Backend):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tipo de documento</th>
+<th>Fornecedor associado</th>
+<th>Benefício</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Conta de energia (PDF)</td>
+<td>Neoenergia</td>
+<td>Agrupa todas as contas desse fornecedor</td>
+</tr>
+<tr>
+<td>Fatura do cartão (PDF)</td>
+<td>Instituição do cartão (Nubank)</td>
+<td>Vincula à fatura</td>
+</tr>
+<tr>
+<td>Nota fiscal de compra</td>
+<td>Loja X</td>
+<td>Comprova gasto</td>
+</tr>
+<tr>
+<td>Comprovante de pagamento</td>
+<td>Fornecedor do serviço pago</td>
+<td>Evidência de quitação</td>
+</tr>
+<tr>
+<td>Contrato de internet</td>
+<td>Vivo</td>
+<td>Referência do plano contratado</td>
+</tr>
+<tr>
+<td>Boleto pago</td>
+<td>Fornecedor do boleto</td>
+<td>Histórico de pagamentos</td>
+</tr>
+</tbody>
+</table>
+<h3 id="8.3.-prepara%C3%A7%C3%A3o-para-leitura-por-ia-futura" tabindex="-1"><a class="header-anchor" href="#8.3.-prepara%C3%A7%C3%A3o-para-leitura-por-ia-futura">#</a> 8.3. Preparação para Leitura por IA Futura</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+O prompt da Verônica pede que preparemos a modelagem para que a IA futura possa usar dados do fornecedor na leitura de documentos. Com a modelagem proposta, a IA terá acesso a:</p>
+<table>
+<thead>
+<tr>
+<th>Dado disponível</th>
+<th>Fonte</th>
+<th>Uso pela IA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nome do fornecedor</td>
+<td><code>suppliers.name</code></td>
+<td>Matching com texto do documento</td>
+</tr>
+<tr>
+<td>Aliases</td>
+<td><code>supplier_aliases.alias_name</code></td>
+<td>Resolução de nomes variantes no PDF</td>
+</tr>
+<tr>
+<td>CNPJ</td>
+<td><code>suppliers.document_number</code></td>
+<td>Validação de emissor</td>
+</tr>
+<tr>
+<td>Conta contrato</td>
+<td><code>supplier_contracts.identifier</code></td>
+<td>Matching de unidade consumidora</td>
+</tr>
+<tr>
+<td>Unidade consumidora</td>
+<td><code>supplier_contracts.identifier</code> (type: utility_account)</td>
+<td>Identificação automática</td>
+</tr>
+<tr>
+<td>Número do cliente</td>
+<td><code>supplier_contracts.identifier</code> (type: customer_id)</td>
+<td>Cross-reference</td>
+</tr>
+<tr>
+<td>Instalação</td>
+<td><code>supplier_contracts.identifier</code> (type: installation)</td>
+<td>Validação de endereço</td>
+</tr>
+<tr>
+<td>Plano/Linha</td>
+<td><code>supplier_contracts.metadata</code></td>
+<td>Contexto do serviço</td>
+</tr>
+<tr>
+<td>Histórico de métricas</td>
+<td><code>consumption_metrics</code></td>
+<td>Detecção de anomalias</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pedro Santos:</strong>
+Na prática, a IA futura fará:</p>
+<ol>
+<li>Receber PDF → extrair texto</li>
+<li>Buscar CNPJ/nome no texto → matching com <code>suppliers</code> + <code>supplier_aliases</code></li>
+<li>Buscar identificadores (UC, instalação) → matching com <code>supplier_contracts</code></li>
+<li>Extrair valores, datas, métricas → criar/atualizar <code>consumption_metrics</code></li>
+<li>Vincular documento à transação/recorrência correta</li>
+</ol>
+<p>Tudo isso depende de a modelagem dos dados do fornecedor estar correta AGORA — é por isso que fazemos na Fase 1, mesmo que a IA só venha na Fase 4.</p>
+<h3 id="8.4.-impacto-na-concilia%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#8.4.-impacto-na-concilia%C3%A7%C3%A3o">#</a> 8.4. Impacto na Conciliação</h3>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Conciliação é o processo de verificar se os lançamentos do sistema batem com os extratos reais. Fornecedor melhora a conciliação em vários aspectos:</p>
+<ol>
+<li><strong>Import matching</strong>: Ao importar extrato, a descrição “CELPE” pode ser automaticamente resolvida para “Neoenergia” via alias</li>
+<li><strong>Deduplicação</strong>: Lançamento manual “Conta de energia R$ 250 — Neoenergia” + importação do extrato “NEOENERGIA PE R$ 250” → sistema sugere que são o mesmo lançamento</li>
+<li><strong>Consistência temporal</strong>: Recorrência “Energia Neoenergia R$ ~250/mês” + documento PDF mostrando R$ 280 → sistema alerta “valor acima do padrão”</li>
+<li><strong>Verificação cruzada</strong>: Fatura do cartão com item “<a href="http://GITHUB.COM">GITHUB.COM</a> R$ 21” → alias resolve para GitHub → vincula ao template recorrente “GitHub Pro”</li>
+</ol>
+<p><strong>Laura Costa:</strong>
+No MVP, a conciliação manual já se beneficia do fornecedor: o usuário pode filtrar “mostre todos os lançamentos da Neoenergia” e cruzar com os PDFs de conta de energia. Mais tarde, a conciliação automática usa as mesmas entidades.</p>
+<h3 id="8.5.-decis%C3%A3o-final-sobre-documentos-e-concilia%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#8.5.-decis%C3%A3o-final-sobre-documentos-e-concilia%C3%A7%C3%A3o">#</a> 8.5. Decisão Final sobre Documentos e Conciliação</h3>
+<p>Aprovado:</p>
+<ul>
+<li><code>supplier_id</code> FK nullable em <code>documents</code></li>
+<li>Documentos podem ser vinculados simultaneamente a entidade (transação, dívida) E fornecedor</li>
+<li>Modelagem prepara todos os dados necessários para leitura por IA futura</li>
+<li>Conciliação manual beneficiada imediatamente; automática na Fase 4</li>
+<li>Aliases como base para matching de importação</li>
+</ul>
+<hr>
+<h2 id="9.-revis%C3%A3o-de-categorias%2C-tags-e-prioridade-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#9.-revis%C3%A3o-de-categorias%2C-tags-e-prioridade-com-fornecedor">#</a> 9. Revisão de Categorias, Tags e Prioridade com Fornecedor</h2>
+<h3 id="9.1.-coexist%C3%AAncia-de-dimens%C3%B5es" tabindex="-1"><a class="header-anchor" href="#9.1.-coexist%C3%AAncia-de-dimens%C3%B5es">#</a> 9.1. Coexistência de Dimensões</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Vou tornar explícita a coexistência de TODAS as dimensões em um lançamento. Revisando a anatomia completa de uma transação no modelo atualizado:</p>
+<pre class="hljs"><code>Transação: &quot;Conta de Energia — Março/2026&quot;
+├── Valor: R$ 280,00
+├── Tipo: expense
+├── Fornecedor: Neoenergia (FK → suppliers)
+├── Categoria: Utilidades / Energia (FK → categories)
+├── Tags: [energia, casa, essencial] (N:N → transaction_tags)
+├── Prioridade: essential (enum, derivado ou manual)
+├── Conta: Caixa - Conta Corrente (FK → financial_products)
+├── Período: 20/Mar - 19/Abr (FK → financial_periods)
+├── Contrato: UC 0123456 (via supplier_contracts)
+├── Métricas: 320 kWh, R$0.87/kWh, Bandeira Amarela (via consumption_metrics)
+├── Documento: conta_energia_mar2026.pdf (FK → documents)
+└── Recorrência: Energia Neoenergia (FK → recurring_instances → recurring_templates)
+</code></pre>
+<p><strong>Camila Duarte:</strong>
+Isso é poderoso. Com uma única transação, o usuário pode responder:</p>
+<ul>
+<li>“Que tipo de gasto?” → Categoria: Utilidades</li>
+<li>“É essencial?” → Prioridade: essential</li>
+<li>“Para quem?” → Fornecedor: Neoenergia</li>
+<li>“De qual conta saiu?” → Conta: Caixa CC</li>
+<li>“Em qual ciclo?” → Período: 20/Mar - 19/Abr</li>
+<li>“Quanto consumiu?” → Métrica: 320 kWh</li>
+<li>“Tem comprovante?” → Documento: PDF vinculado</li>
+</ul>
+<h3 id="9.2.-hierarquia-%E2%80%94-o-que-n%C3%A3o-sobreescreve-o-qu%C3%AA" tabindex="-1"><a class="header-anchor" href="#9.2.-hierarquia-%E2%80%94-o-que-n%C3%A3o-sobreescreve-o-qu%C3%AA">#</a> 9.2. Hierarquia — O que NÃO sobreescreve o quê</h3>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Regra fundamental: nenhuma dimensão invalida ou substitui outra.</p>
+<table>
+<thead>
+<tr>
+<th>Regra</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fornecedor NÃO define categoria</td>
+<td>Vivo pode ser “Internet/Telefonia” ou “Comunicação” — depende da categoria, não do fornecedor</td>
+</tr>
+<tr>
+<td>Fornecedor NÃO define prioridade</td>
+<td>Vivo pode ser essencial (internet principal) ou baixa (linha de backup) — depende do lançamento</td>
+</tr>
+<tr>
+<td>Categoria NÃO define fornecedor</td>
+<td>“Internet/Telefonia” pode ser Vivo, Canaã, Claro — depende do fornecedor associado</td>
+</tr>
+<tr>
+<td>Tag NÃO é alias de fornecedor</td>
+<td>Tag “internet” agrupa transações de qualquer fornecedor de internet</td>
+</tr>
+<tr>
+<td>Fornecedor pode ter tags próprias</td>
+<td>Vivo pode ter tag “essencial” — mas é a tag DO FORNECEDOR, não da transação</td>
+</tr>
+</tbody>
+</table>
+<h3 id="9.3.-tags-de-fornecedor-vs-tags-de-transa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#9.3.-tags-de-fornecedor-vs-tags-de-transa%C3%A7%C3%A3o">#</a> 9.3. Tags de Fornecedor vs Tags de Transação</h3>
+<p><strong>João Pereira (Backend):</strong>
+Temos agora dois níveis de tag:</p>
+<ol>
+<li><strong>Tags da transação</strong> (<code>transaction_tags</code>): Classificam o lançamento individual</li>
+<li><strong>Tags do fornecedor</strong> (<code>supplier_tags</code>): Classificam o fornecedor como entidade</li>
+</ol>
+<p><strong>Exemplo:</strong></p>
+<pre class="hljs"><code>Fornecedor: Vivo
+  Tags do fornecedor: [telecom, essencial, conta_mensal]
+
+Transação: Vivo — Fatura Março
+  Tags da transação: [internet, casa, essencial]
+</code></pre>
+<p><strong>Maria Oliveira:</strong>
+A distinção é clara:</p>
+<ul>
+<li>Tag do fornecedor = “que tipo de fornecedor é?” → usado para filtrar/agrupar fornecedores</li>
+<li>Tag da transação = “que tipo de gasto é?” → usado para relatórios e priorização</li>
+</ul>
+<p>No MVP, deixamos a tag da transação como principal (já existe). Tags de fornecedor ficam como funcionalidade complementar, preenchida sob demanda.</p>
+<h3 id="9.4.-revis%C3%A3o-dos-filtros" tabindex="-1"><a class="header-anchor" href="#9.4.-revis%C3%A3o-dos-filtros">#</a> 9.4. Revisão dos Filtros</h3>
+<p><strong>Roberto Lima (Frontend):</strong>
+Com a adição de fornecedor, os filtros na interface precisam ser atualizados:</p>
+<table>
+<thead>
+<tr>
+<th>Filtro</th>
+<th>Antes</th>
+<th>Agora</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Por categoria</td>
+<td>✅ Existia</td>
+<td>✅ Mantido</td>
+</tr>
+<tr>
+<td>Por tag</td>
+<td>✅ Existia</td>
+<td>✅ Mantido</td>
+</tr>
+<tr>
+<td>Por prioridade</td>
+<td>✅ Existia</td>
+<td>✅ Mantido</td>
+</tr>
+<tr>
+<td>Por período</td>
+<td>✅ Existia</td>
+<td>✅ Mantido</td>
+</tr>
+<tr>
+<td>Por conta/produto</td>
+<td>✅ Existia</td>
+<td>✅ Mantido</td>
+</tr>
+<tr>
+<td><strong>Por fornecedor</strong></td>
+<td>❌ Não existia</td>
+<td>✅ <strong>NOVO</strong></td>
+</tr>
+<tr>
+<td><strong>Cruzamento categoria × fornecedor</strong></td>
+<td>❌ Não existia</td>
+<td>✅ <strong>NOVO</strong></td>
+</tr>
+<tr>
+<td><strong>Cruzamento tag × fornecedor</strong></td>
+<td>❌ Não existia</td>
+<td>✅ <strong>NOVO</strong></td>
+</tr>
+<tr>
+<td><strong>Cruzamento fornecedor × período</strong></td>
+<td>❌ Não existia</td>
+<td>✅ <strong>NOVO</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sofia Almeida (Frontend):</strong>
+No componente de filtros, proponho um chip/badge para cada dimensão ativa. Exemplo: <code>[Fornecedor: Vivo] [Categoria: Internet] [Tag: essencial] [Período: Mar/2026]</code>. O usuário pode combinar livremente.</p>
+<p><strong>Helena Vargas (UX):</strong>
+Concordo com chips. E no mobile futuro, filtros aparecem como bottom sheet com seções expansíveis. A combinação livre é essencial — “me mostre tudo que paguei para a Vivo nos últimos 6 meses com tag essencial”.</p>
+<h3 id="9.5.-decis%C3%A3o-final-sobre-categorias%2C-tags-e-prioridade" tabindex="-1"><a class="header-anchor" href="#9.5.-decis%C3%A3o-final-sobre-categorias%2C-tags-e-prioridade">#</a> 9.5. Decisão Final sobre Categorias, Tags e Prioridade</h3>
+<p>Aprovado:</p>
+<ul>
+<li>Fornecedor coexiste com categoria, tags e prioridade sem sobreposição</li>
+<li>Tags de fornecedor (<code>supplier_tags</code>) como funcionalidade complementar</li>
+<li>Novos filtros por fornecedor e cruzamentos no frontend</li>
+<li>Interface com chips/badges para filtros combinados</li>
+<li>Nenhuma dimensão invalida ou substitui outra</li>
+</ul>
+<hr>
+<h2 id="10.-impacto-em-relat%C3%B3rios%2C-filtros-e-auditoria" tabindex="-1"><a class="header-anchor" href="#10.-impacto-em-relat%C3%B3rios%2C-filtros-e-auditoria">#</a> 10. Impacto em Relatórios, Filtros e Auditoria</h2>
+<h3 id="10.1.-novos-relat%C3%B3rios" tabindex="-1"><a class="header-anchor" href="#10.1.-novos-relat%C3%B3rios">#</a> 10.1. Novos Relatórios</h3>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Fornecedor habilita relatórios que antes eram impossíveis:</p>
+<h4 id="relat%C3%B3rio%3A-gastos-por-fornecedor" tabindex="-1"><a class="header-anchor" href="#relat%C3%B3rio%3A-gastos-por-fornecedor">#</a> Relatório: Gastos por Fornecedor</h4>
+<pre class="hljs"><code>Período: 20/Mar - 19/Abr/2026
+
+| Fornecedor       | Total      | % do Total | Variação vs período anterior |
+|-------------------|-----------|------------|------------------------------|
+| Neoenergia        | R$ 280,00 | 9,8%       | ▲ +R$ 30 (+12%)             |
+| Vivo              | R$ 149,90 | 5,3%       | → igual                     |
+| Canaã Telecom     | R$ 119,90 | 4,2%       | → igual                     |
+| GitHub            | R$ 21,00  | 0,7%       | → igual                     |
+| Supermercado X    | R$ 850,00 | 29,8%      | ▼ -R$ 100 (-10,5%)          |
+| ...               | ...       | ...        | ...                         |
+| TOTAL             | R$2.850,00| 100%       |                              |
+</code></pre>
+<h4 id="relat%C3%B3rio%3A-evolu%C3%A7%C3%A3o-por-fornecedor-(s%C3%A9rie-temporal)" tabindex="-1"><a class="header-anchor" href="#relat%C3%B3rio%3A-evolu%C3%A7%C3%A3o-por-fornecedor-(s%C3%A9rie-temporal)">#</a> Relatório: Evolução por Fornecedor (série temporal)</h4>
+<pre class="hljs"><code>Fornecedor: Neoenergia — últimos 6 meses
+
+| Período  | Valor    | kWh  | R$/kWh | Bandeira |
+|----------|---------|------|--------|----------|
+| Out/2025 | R$210   | 240  | 0.87   | Verde    |
+| Nov/2025 | R$230   | 265  | 0.87   | Verde    |
+| Dez/2025 | R$290   | 310  | 0.93   | Amarela  |
+| Jan/2026 | R$340   | 380  | 0.89   | Amarela  |
+| Fev/2026 | R$250   | 280  | 0.89   | Verde    |
+| Mar/2026 | R$280   | 320  | 0.87   | Amarela  |
+</code></pre>
+<p><strong>Camila Duarte:</strong>
+Esse segundo relatório é ouro puro. O usuário olha e pensa: “em janeiro meu consumo foi 380kWh — provavelmente o ar-condicionado ligado todo dia”. Decisão informada em vez de achismo.</p>
+<h4 id="relat%C3%B3rio%3A-fornecedores-com-varia%C3%A7%C3%A3o-suspeita" tabindex="-1"><a class="header-anchor" href="#relat%C3%B3rio%3A-fornecedores-com-varia%C3%A7%C3%A3o-suspeita">#</a> Relatório: Fornecedores com variação suspeita</h4>
+<pre class="hljs"><code>⚠️ Alertas de variação:
+- Neoenergia: R$ 280 este mês vs média R$ 250 (6 meses) → +12%
+- Supermercado X: R$ 850 este mês vs média R$ 720 → +18%
+- ChatGPT: R$ 120 este mês vs R$ 21 mês passado → +471% (mudou de plano?)
+</code></pre>
+<p><strong>Ricardo Monteiro:</strong>
+Esse tipo de alerta é extremamente valioso para consultoria financeira. No MVP, pode ser calculado server-side (Edge Function) ou com query SQL e exibido como seção do dashboard.</p>
+<h3 id="10.2.-perguntas-de-auditoria-agora-respond%C3%ADveis" tabindex="-1"><a class="header-anchor" href="#10.2.-perguntas-de-auditoria-agora-respond%C3%ADveis">#</a> 10.2. Perguntas de Auditoria Agora Respondíveis</h3>
+<p><strong>André Santos (DBA):</strong>
+Com a modelagem de fornecedor, aliases e métricas, o sistema agora responde:</p>
+<p>| Pergunta                                                                    | Como responde                                                                                          | Tabelas envolvidas                                  |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------- | — | ----------------------------------------------------- | ------------------------------ |
+| Quanto gastei com a Neoenergia nos últimos 12 meses?                        | <code>SUM(amount) WHERE supplier_id = X AND event_date &gt; now()-12 months</code>                                   | transactions, suppliers                             |
+| Qual foi o consumo de kWh mês a mês?                                        | <code>SELECT metric_name, quantity, reference_period_start WHERE supplier_id = X AND metric_name = 'kWh'</code>   | consumption_metrics                                 |
+| Quanto paguei de internet somando Vivo e Canaã?                             | <code>SUM(amount) WHERE supplier_id IN (vivo_id, canaa_id)</code>                                                 | transactions, suppliers                             |
+| Quais cobranças do GitHub foram pagas no cartão?                            | <code>SELECT * FROM transactions t JOIN statement_items si ON ... WHERE t.supplier_id = github_id</code>          | transactions, statement_items, suppliers            |
+| Quais cobranças recorrentes do mesmo fornecedor mudaram de valor?           | <code>SELECT * FROM recurring_instances WHERE supplier_id = X AND actual_amount != expected_amount</code>         | recurring_instances, recurring_templates, suppliers |
+| Quais despesas de um fornecedor ficaram sem documento?                      | <code>SELECT t.* FROM transactions t LEFT JOIN documents d ON ... WHERE t.supplier_id = X AND d.id IS NULL</code> | transactions, documents, suppliers                  |
+| Quais lançamentos antigos parecem do mesmo fornecedor com nomes diferentes? | <code>SELECT \* FROM transactions t WHERE t.description ILIKE ANY(SELECT '%'                                |                                                     | alias_name |     | '%' FROM supplier_aliases) AND t.supplier_id IS NULL</code> | transactions, supplier_aliases |</p>
+<p><strong>Maria Oliveira:</strong>
+A última query é particularmente interessante — pode ser executada como rotina periódica para sugerir associações: “Encontramos 15 lançamentos com ‘CELPE’ na descrição que parecem ser da Neoenergia. Deseja associar?”</p>
+<h3 id="10.3.-impacto-em-views-e-agrega%C3%A7%C3%B5es-sql" tabindex="-1"><a class="header-anchor" href="#10.3.-impacto-em-views-e-agrega%C3%A7%C3%B5es-sql">#</a> 10.3. Impacto em Views e Agregações SQL</h3>
+<p><strong>André Santos:</strong>
+Proponho adicionar views materializadas para os relatórios mais comuns:</p>
+<pre class="hljs"><code><span class="hljs-comment">-- View: Gastos por fornecedor por período</span>
+<span class="hljs-keyword">CREATE</span> MATERIALIZED <span class="hljs-keyword">VIEW</span> mv_supplier_spending <span class="hljs-keyword">AS</span>
+<span class="hljs-keyword">SELECT</span>
+  t.user_id,
+  t.supplier_id,
+  s.name <span class="hljs-keyword">AS</span> supplier_name,
+  s.type <span class="hljs-keyword">AS</span> supplier_type,
+  fp.id <span class="hljs-keyword">AS</span> financial_period_id,
+  fp.label <span class="hljs-keyword">AS</span> period_label,
+  fp.start_date,
+  fp.end_date,
+  <span class="hljs-built_in">SUM</span>(t.amount) <span class="hljs-keyword">AS</span> total_amount,
+  <span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">AS</span> transaction_count,
+  <span class="hljs-built_in">AVG</span>(t.amount) <span class="hljs-keyword">AS</span> avg_amount
+<span class="hljs-keyword">FROM</span> transactions t
+<span class="hljs-keyword">JOIN</span> suppliers s <span class="hljs-keyword">ON</span> t.supplier_id <span class="hljs-operator">=</span> s.id
+<span class="hljs-keyword">LEFT</span> <span class="hljs-keyword">JOIN</span> financial_periods fp <span class="hljs-keyword">ON</span> t.financial_period_id <span class="hljs-operator">=</span> fp.id
+<span class="hljs-keyword">WHERE</span> t.type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;expense&#x27;</span>, <span class="hljs-string">&#x27;fee&#x27;</span>, <span class="hljs-string">&#x27;interest_charge&#x27;</span>)
+  <span class="hljs-keyword">AND</span> t.supplier_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>
+<span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> t.user_id, t.supplier_id, s.name, s.type,
+         fp.id, fp.label, fp.start_date, fp.end_date;
+
+<span class="hljs-comment">-- Refresh periódico via cron do Supabase</span>
+</code></pre>
+<p><strong>Fernando Gomes (DevOps):</strong>
+O refresh da view materializada pode rodar via cron job do Supabase — uma vez por hora ou sob demanda quando o usuário acessa relatórios.</p>
+<h3 id="10.4.-decis%C3%A3o-final-sobre-relat%C3%B3rios-e-auditoria" tabindex="-1"><a class="header-anchor" href="#10.4.-decis%C3%A3o-final-sobre-relat%C3%B3rios-e-auditoria">#</a> 10.4. Decisão Final sobre Relatórios e Auditoria</h3>
+<p>Aprovado:</p>
+<ul>
+<li>3 novos tipos de relatório: gastos por fornecedor, evolução temporal, variação suspeita</li>
+<li>Todas as 7 perguntas de auditoria da Verônica são respondíveis com o modelo proposto</li>
+<li>View materializada <code>mv_supplier_spending</code> para performance</li>
+<li>Sugestão de associação retroativa de lançamentos sem fornecedor via alias matching</li>
+<li>Alerta de variação de valor como funcionalidade do dashboard</li>
+</ul>
+<hr>
+<h2 id="11.-revis%C3%A3o-da-primeira-tela-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#11.-revis%C3%A3o-da-primeira-tela-com-fornecedor">#</a> 11. Revisão da Primeira Tela com Fornecedor</h2>
+<h3 id="11.1.-impacto-na-tela-de-a%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#11.1.-impacto-na-tela-de-a%C3%A7%C3%A3o">#</a> 11.1. Impacto na Tela de Ação</h3>
+<p><strong>Helena Vargas (UX):</strong>
+No refino anterior, definimos que a primeira tela é uma <strong>tela de comando operacional</strong>, não um dashboard passivo. Fornecedor agora é uma dimensão que entra nessa visão — mas sem sobrecarregar.</p>
+<p><strong>Isabella Torres (UI Designer):</strong>
+Proponho adicionar o fornecedor de forma contextual, não como seção nova. O fornecedor aparece DENTRO dos itens que já existem:</p>
+<pre class="hljs"><code>┌─────────────────────────────────────────────────────────────┐
+│ 🏠 Seu Bolso Feliz          Ciclo: 20/Mar - 19/Abr   ⚙️    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Saldo Total  │  │ A Pagar      │  │ Dias Restam  │      │
+│  │ R$ 4.230,00  │  │ R$ 2.850,00  │  │     18       │      │
+│  │  ▲ +R$ 200   │  │ 7 itens      │  │ até 19/Abr   │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                              │
+│  ⚠️ ATENÇÃO ───────────────────────────────────────────      │
+│  │ 🔴 Condomínio (Adm. Cond. Ed. X) — ATRASADO — R$ 850   │
+│  │ 🟡 Fatura Nubank — vence em 3 dias — R$ 1.200           │
+│  └──────────────────────────────────────────────────────     │
+│                                                              │
+│  📋 PRÓXIMOS PAGAMENTOS (por prioridade) ──────────────     │
+│  │ 🔴 [essencial] Internet — Vivo — 28/Mar — R$120 [Pagar] │
+│  │ 🔴 [essencial] Energia — Neoenergia — 25/Mar — R$280    │
+│  │ 🟠 [alta]      Diarista — Maria S. — 30/Mar — R$200     │
+│  │ 🟡 [média]     Academia — SmartFit — 01/Abr — R$90      │
+│  │ 🔵 [baixa]     Spotify — Spotify — 05/Abr — R$34        │
+│  │ ⚪ [opcional]   Curso XY — Udemy — 10/Abr — R$200 [Adiar]│
+│  └──────────────────────────────────────────────────────     │
+│                                                              │
+│  📊 TOP FORNECEDORES DO PERÍODO ────────────────────────  🔽│
+│  │ Neoenergia     R$ 280  ████████████░░░ 9,8%  ▲+12%      │
+│  │ Vivo           R$ 270  ██████████░░░░░ 9,5%  →           │
+│  │ SmartFit       R$  90  ███░░░░░░░░░░░░ 3,2%  →           │
+│  └──────────────────────────────────────────────────────     │
+│                                                              │
+│  💳 FATURAS ─────────────────────────────────────────────    │
+│  │ Nubank (****1234) — Fatura Mar — R$ 1.200 — vence 23/Mar│
+│  │   Top: Supermercado X (R$450), iFood (R$180), Amazon...  │
+│  │ C6 (****5678)     — Fatura Mar — R$ 450   — vence 28/Mar│
+│  └──────────────────────────────────────────────────────     │
+│                                                              │
+│  📊 DÍVIDAS ──────────────────────────────────────────────   │
+│  │ Financiamento Apt (Caixa) — Parcela 24/120 — R$1.800    │
+│  │ Empréstimo Pessoal (Nubank) — Parcela 8/24 — R$ 650     │
+│  └──────────────────────────────────────────────────────     │
+│                                                              │
+│  🧮 SOBREVIVÊNCIA ─────────────────────────────────────      │
+│  │ Saldo disponível: R$ 4.230                               │
+│  │ Obrigações restantes no período: R$ 2.850                │
+│  │ Margem livre: R$ 1.380                                   │
+│  │ ✅ Você cobre todas as obrigações essenciais deste ciclo │
+│  └──────────────────────────────────────────────────────     │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="11.2.-onde-entra-o-fornecedor-na-home" tabindex="-1"><a class="header-anchor" href="#11.2.-onde-entra-o-fornecedor-na-home">#</a> 11.2. Onde Entra o Fornecedor na Home</h3>
+<p><strong>Camila Duarte (Consultora):</strong>
+O fornecedor aparecer de 3 formas na home:</p>
+<table>
+<thead>
+<tr>
+<th>Local</th>
+<th>Como aparece</th>
+<th>Exemplo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Próximos pagamentos</strong></td>
+<td>Nome do fornecedor ao lado do item</td>
+<td>“Internet — <strong>Vivo</strong> — 28/Mar — R$ 120”</td>
+</tr>
+<tr>
+<td><strong>TOP fornecedores</strong></td>
+<td>Mini-ranking com valor, % e variação</td>
+<td>“Neoenergia R$ 280 (9,8%) ▲+12%”</td>
+</tr>
+<tr>
+<td><strong>Faturas expandidas</strong></td>
+<td>Fornecedores dentro da fatura</td>
+<td>“Top: Supermercado X (R$450), iFood (R$180)…”</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Roberto Lima (Frontend):</strong>
+A seção “TOP Fornecedores” é colapsável (começa fechada em mobile). Não sobrecarrega, mas está disponível para quem quer análise rápida.</p>
+<h3 id="11.3.-alertas-relacionados-a-fornecedor" tabindex="-1"><a class="header-anchor" href="#11.3.-alertas-relacionados-a-fornecedor">#</a> 11.3. Alertas Relacionados a Fornecedor</h3>
+<p><strong>Ricardo Monteiro (Economista):</strong>
+Proponho 3 tipos de alerta de fornecedor na home:</p>
+<ol>
+<li><strong>Variação de valor</strong>: “Neoenergia subiu 12% este mês (R$ 280 vs média R$ 250)”</li>
+<li><strong>Cobrança inesperada</strong>: “Nova cobrança de ChatGPT: R$ 120 (era R$ 21). Mudou de plano?”</li>
+<li><strong>Fornecedor pendente</strong>: “3 cobranças da Vivo sem fornecedor associado — associar?”</li>
+</ol>
+<p><strong>Helena Vargas:</strong>
+Esses alertas aparecem na seção “Atenção” junto com vencimentos atrasados. É a mesma lógica: “precisa da sua ação agora”. O sistema ordena por criticidade.</p>
+<h3 id="11.4.-decis%C3%A3o-final-sobre-primeira-tela" tabindex="-1"><a class="header-anchor" href="#11.4.-decis%C3%A3o-final-sobre-primeira-tela">#</a> 11.4. Decisão Final sobre Primeira Tela</h3>
+<p>Aprovado:</p>
+<ul>
+<li>Fornecedor aparece no nome dos itens de pagamento (contextual)</li>
+<li>Nova seção “TOP Fornecedores do Período” colapsável</li>
+<li>Fornecedores dentro das faturas expandidas</li>
+<li>3 tipos de alerta relacionado a fornecedor na seção “Atenção”</li>
+<li>A tela continua orientada à ação, não vira dashboard analítico</li>
+</ul>
+<hr>
+<h2 id="12.-revis%C3%A3o-da-estrat%C3%A9gia-de-testes-%E2%80%94-cen%C3%A1rios-de-fornecedor" tabindex="-1"><a class="header-anchor" href="#12.-revis%C3%A3o-da-estrat%C3%A9gia-de-testes-%E2%80%94-cen%C3%A1rios-de-fornecedor">#</a> 12. Revisão da Estratégia de Testes — Cenários de Fornecedor</h2>
+<h3 id="12.1.-novos-testes-mandat%C3%B3rios" tabindex="-1"><a class="header-anchor" href="#12.1.-novos-testes-mandat%C3%B3rios">#</a> 12.1. Novos Testes Mandatórios</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Seguindo o padrão do refino anterior (T1-T17), acrescentamos 10 novos cenários mandatórios (T18-T27) que cobrem toda a dimensão fornecedor. Cada teste é um contrato. Mesma regra: não podem ser alterados por conveniência.</p>
+<hr>
+<h4 id="t18.-lan%C3%A7amento-pode-ser-corretamente-associado-a-fornecedor" tabindex="-1"><a class="header-anchor" href="#t18.-lan%C3%A7amento-pode-ser-corretamente-associado-a-fornecedor">#</a> T18. Lançamento pode ser corretamente associado a fornecedor</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que existe o fornecedor &quot;Neoenergia&quot; (type: utility, document_number: 10.338.320/0001-00)
+E existe uma transação &quot;Conta de Energia — Mar/2026&quot; com valor R$ 280
+QUANDO o usuário associa a transação ao fornecedor &quot;Neoenergia&quot;
+ENTÃO a transação tem supplier_id = id da Neoenergia
+E o relatório &quot;Gastos por Fornecedor&quot; inclui R$ 280 para Neoenergia
+E a transação aparece ao filtrar por fornecedor &quot;Neoenergia&quot;
+</code></pre>
+<p><strong>Caso-limite:</strong></p>
+<ul>
+<li>Transação sem fornecedor (supplier_id = NULL) → aceita, não obrigatório</li>
+<li>Transação com fornecedor + categoria + tags + prioridade → todos coexistem</li>
+</ul>
+<hr>
+<h4 id="t19.-aliases-do-mesmo-fornecedor-consolidam-hist%C3%B3rico" tabindex="-1"><a class="header-anchor" href="#t19.-aliases-do-mesmo-fornecedor-consolidam-hist%C3%B3rico">#</a> T19. Aliases do mesmo fornecedor consolidam histórico</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que existe o fornecedor &quot;Neoenergia&quot; com alias &quot;CELPE&quot; (type: legacy_name, valid_until: 2023-12-31)
+E existem 5 transações antigas com supplier_id = NULL e description contendo &quot;CELPE&quot;
+E existem 3 transações novas com supplier_id = Neoenergia
+QUANDO o sistema executa sugestão de associação retroativa via alias
+ENTÃO as 5 transações antigas são sugeridas para associação com Neoenergia
+E se o usuário confirma, as 5 transações passam a ter supplier_id = Neoenergia
+E o relatório de Neoenergia mostra 8 transações totais
+E a busca por &quot;CELPE&quot; continua encontrando as transações via alias
+</code></pre>
+<p><strong>Caso-limite:</strong></p>
+<ul>
+<li>Alias com período de validade → transações fora do período não são sugeridas</li>
+<li>Dois fornecedores com aliases semelhantes → sistema exibe ambas as opções</li>
+</ul>
+<hr>
+<h4 id="t20.-mudan%C3%A7a-de-nome-do-fornecedor-n%C3%A3o-quebra-hist%C3%B3rico" tabindex="-1"><a class="header-anchor" href="#t20.-mudan%C3%A7a-de-nome-do-fornecedor-n%C3%A3o-quebra-hist%C3%B3rico">#</a> T20. Mudança de nome do fornecedor NÃO quebra histórico</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que o fornecedor &quot;CELPE&quot; foi renomeado para &quot;Neoenergia&quot; (alias criado)
+E existem transações vinculadas a este fornecedor de 2020 a 2026
+QUANDO o nome do fornecedor muda de &quot;CELPE&quot; para &quot;Neoenergia&quot;
+ENTÃO todas as transações históricas continuam vinculadas ao MESMO supplier_id
+E o relatório mostra &quot;Neoenergia&quot; como nome atual em todas as transações
+E a busca por &quot;CELPE&quot; encontra o fornecedor via alias
+E nenhuma transação perde o vínculo
+</code></pre>
+<hr>
+<h4 id="t21.-recorr%C3%AAncia-com-fornecedor-gera-inst%C3%A2ncias-com-v%C3%ADnculo-coerente" tabindex="-1"><a class="header-anchor" href="#t21.-recorr%C3%AAncia-com-fornecedor-gera-inst%C3%A2ncias-com-v%C3%ADnculo-coerente">#</a> T21. Recorrência com fornecedor gera instâncias com vínculo coerente</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que existe um template recorrente &quot;Internet Vivo&quot; com supplier_id = Vivo
+E frequência = mensal, dia = 15, valor = R$ 149,90
+QUANDO o sistema gera a instância de Abril/2026
+ENTÃO a instância herda supplier_id = Vivo
+E quando confirmada (paga), a transação gerada tem supplier_id = Vivo
+E o relatório por fornecedor inclui R$ 149,90 para Vivo no período de Abril
+</code></pre>
+<p><strong>Caso-limite:</strong></p>
+<ul>
+<li>Usuário troca de fornecedor no meio (Vivo → Claro) → atualiza template, instâncias futuras mudam, históricas permanecem</li>
+<li>Instância gerada mas não paga → não aparece em relatório de fornecedor (é previsão, não gasto)</li>
+</ul>
+<hr>
+<h4 id="t22.-relat%C3%B3rios-por-fornecedor-somam-corretamente-despesas-de-diferentes-meios" tabindex="-1"><a class="header-anchor" href="#t22.-relat%C3%B3rios-por-fornecedor-somam-corretamente-despesas-de-diferentes-meios">#</a> T22. Relatórios por fornecedor somam corretamente despesas de diferentes meios</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que o fornecedor &quot;Vivo&quot; está associado a:
+  - R$ 149,90 débito automático na Caixa (transação direta)
+  - R$ 89,90 compra no cartão Nubank (item de fatura)
+  - R$ 50,00 boleto avulso (transação manual)
+QUANDO o relatório &quot;Gastos com Vivo&quot; é gerado
+ENTÃO o total exibido é R$ 289,80
+E a quebra por meio de pagamento mostra: Caixa (R$149,90), Nubank (R$89,90), Boleto (R$50,00)
+E nenhuma duplicação ocorre (mesmo que a transação do cartão apareça na fatura E como transação)
+</code></pre>
+<hr>
+<h4 id="t23.-lan%C3%A7amentos-em-cart%C3%A3o-atribu%C3%ADdos-ao-fornecedor-correto" tabindex="-1"><a class="header-anchor" href="#t23.-lan%C3%A7amentos-em-cart%C3%A3o-atribu%C3%ADdos-ao-fornecedor-correto">#</a> T23. Lançamentos em cartão atribuídos ao fornecedor correto</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que na fatura do Nubank de Março existem os itens:
+  - &quot;GITHUB.COM&quot; — R$ 21,00
+  - &quot;OPENAI *CHATGPT&quot; — R$ 120,00
+  - &quot;SUPERM BOM PRECO&quot; — R$ 350,00
+E existem aliases: &quot;GITHUB.COM&quot; → GitHub, &quot;OPENAI *CHATGPT&quot; → OpenAI
+QUANDO os itens de fatura são processados
+ENTÃO &quot;GITHUB.COM&quot; é sugerido como fornecedor GitHub
+E &quot;OPENAI *CHATGPT&quot; é sugerido como fornecedor OpenAI
+E &quot;SUPERM BOM PRECO&quot; fica sem fornecedor (pode ser associado manualmente)
+E cada item mantém a descrição original da fatura + supplier_id resolvido
+</code></pre>
+<hr>
+<h4 id="t24.-categoria%2C-tags%2C-fornecedor-e-prioridade-coexistem-sem-conflito" tabindex="-1"><a class="header-anchor" href="#t24.-categoria%2C-tags%2C-fornecedor-e-prioridade-coexistem-sem-conflito">#</a> T24. Categoria, tags, fornecedor e prioridade coexistem sem conflito</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO uma transação com:
+  - supplier_id = Vivo
+  - category_id = Internet/Telefonia
+  - tags = [internet, casa, essencial]
+  - priority = essential
+QUANDO a transação é salva e consultada
+ENTÃO todos os 4 campos estão presentes e corretos
+E filtrar por fornecedor &quot;Vivo&quot; inclui esta transação
+E filtrar por categoria &quot;Internet/Telefonia&quot; inclui esta transação
+E filtrar por tag &quot;internet&quot; inclui esta transação
+E filtrar por prioridade &quot;essential&quot; inclui esta transação
+E filtrar por fornecedor &quot;Vivo&quot; + tag &quot;essencial&quot; inclui esta transação
+E nenhum campo sobrescreve ou invalida outro
+</code></pre>
+<hr>
+<h4 id="t25.-m%C3%A9tricas-de-consumo-armazenadas-e-consultadas-corretamente" tabindex="-1"><a class="header-anchor" href="#t25.-m%C3%A9tricas-de-consumo-armazenadas-e-consultadas-corretamente">#</a> T25. Métricas de consumo armazenadas e consultadas corretamente</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que existe o fornecedor &quot;Neoenergia&quot; e uma transação &quot;Energia Mar/2026&quot;
+E o usuário registra métricas: kWh = 320, R$/kWh = 0.87, bandeira = &quot;Amarela&quot;
+QUANDO as métricas são salvas em consumption_metrics
+ENTÃO a consulta de métricas por fornecedor retorna:
+  - metric_name: &quot;kWh&quot;, quantity: 320, unit_price: 0.87
+  - metric_name: &quot;bandeira&quot;, metadata: {&quot;valor&quot;: &quot;Amarela&quot;}
+E o relatório de evolução mostra a série temporal de kWh mês a mês
+E o subtotal calculado (320 × 0.87 = 278,40) é consistente com o valor da transação
+</code></pre>
+<p><strong>Caso-limite:</strong></p>
+<ul>
+<li>Transação sem métricas → aceita normalmente, métricas são opcionais</li>
+<li>Métricas com unidades diferentes no mesmo fornecedor → aceitas (ex: kWh para energia, m³ para água em fornecedores de utilidade)</li>
+</ul>
+<hr>
+<h4 id="t26.-concilia%C3%A7%C3%A3o-hist%C3%B3rica-suporta-nomes-alternativos-do-mesmo-fornecedor" tabindex="-1"><a class="header-anchor" href="#t26.-concilia%C3%A7%C3%A3o-hist%C3%B3rica-suporta-nomes-alternativos-do-mesmo-fornecedor">#</a> T26. Conciliação histórica suporta nomes alternativos do mesmo fornecedor</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que:
+  - O fornecedor &quot;Neoenergia&quot; tem alias &quot;CELPE&quot; e &quot;CELPE DISTRIBUIÇÃO&quot;
+  - Há 10 transações importadas com descriptions: &quot;CELPE&quot;, &quot;Celpe Distrib&quot;, &quot;CELPE DISTRIBUIÇÃO&quot;, &quot;Neoenergia&quot;
+  - Nenhuma dessas transações tem supplier_id definido
+QUANDO o sistema executa a rotina de sugestão de associação
+ENTÃO sugere associar todas as 10 transações ao fornecedor &quot;Neoenergia&quot;
+E apresenta o grau de confiança do matching (exato vs fuzzy)
+E o usuário pode confirmar em lote (batch) ou individualmente
+E transações confirmadas passam a ter supplier_id = Neoenergia
+E o audit_log registra a ação de associação retroativa
+</code></pre>
+<hr>
+<h4 id="t27.-filtros-por-fornecedor-funcionam-com-per%C3%ADodo%2C-categoria%2C-tags-e-prioridade" tabindex="-1"><a class="header-anchor" href="#t27.-filtros-por-fornecedor-funcionam-com-per%C3%ADodo%2C-categoria%2C-tags-e-prioridade">#</a> T27. Filtros por fornecedor funcionam com período, categoria, tags e prioridade</h4>
+<p><strong>Cenário de aceitação:</strong></p>
+<pre class="hljs"><code>DADO que existem transações de 3 fornecedores (Vivo, Neoenergia, GitHub)
+  em 2 períodos financeiros (Feb/Mar e Mar/Abr)
+  com categorias e tags variadas
+  com prioridades diferentes
+QUANDO o usuário aplica filtro: fornecedor = Vivo, período = Mar/Abr, tag = essencial
+ENTÃO apenas transações que satisfazem TODOS os critérios são retornadas
+E a contagem e soma refletem apenas o subset filtrado
+E a remoção de um filtro expande o resultado corretamente
+E a combinação de TODOS os filtros simultâneos funciona sem erro de integridade
+</code></pre>
+<hr>
+<h3 id="12.2.-resumo-dos-testes-mandat%C3%B3rios-atualizados" tabindex="-1"><a class="header-anchor" href="#12.2.-resumo-dos-testes-mandat%C3%B3rios-atualizados">#</a> 12.2. Resumo dos Testes Mandatórios Atualizados</h3>
+<p><strong>Maria Oliveira:</strong>
+O sistema agora tem <strong>27 testes mandatórios</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Faixa</th>
+<th>Área</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1-T2</td>
+<td>Transferências</td>
+<td>Fatura e transferência interna não geram despesa</td>
+</tr>
+<tr>
+<td>T3-T4</td>
+<td>Período financeiro</td>
+<td>Atribuição e geração de ciclos</td>
+</tr>
+<tr>
+<td>T5-T6</td>
+<td>Cartões e faturas</td>
+<td>Ciclo de fechamento/vencimento, decomposição</td>
+</tr>
+<tr>
+<td>T7-T8</td>
+<td>Dívidas</td>
+<td>Amortização, juros, quitação antecipada</td>
+</tr>
+<tr>
+<td>T9-T10</td>
+<td>Recorrências e importação</td>
+<td>Geração de instâncias, deduplicação</td>
+</tr>
+<tr>
+<td>T11-T12</td>
+<td>Classificação</td>
+<td>Estornos, documentos vs saldo</td>
+</tr>
+<tr>
+<td>T13-T14</td>
+<td>Categorias e tags</td>
+<td>Multi-tag sem perda de integridade, filtro correto</td>
+</tr>
+<tr>
+<td>T15-T16</td>
+<td>Prioridade</td>
+<td>Ordenação e alertas, essenciais ≠ postergáveis</td>
+</tr>
+<tr>
+<td>T17</td>
+<td>Primeira tela</td>
+<td>Período, prioridade, sobrevivência correta</td>
+</tr>
+<tr>
+<td><strong>T18-T19</strong></td>
+<td><strong>Fornecedor — Associação</strong></td>
+<td><strong>Vínculo a transação, consolidação por alias</strong></td>
+</tr>
+<tr>
+<td><strong>T20</strong></td>
+<td><strong>Fornecedor — Histórico</strong></td>
+<td><strong>Renomeação sem perda de vínculo</strong></td>
+</tr>
+<tr>
+<td><strong>T21</strong></td>
+<td><strong>Fornecedor — Recorrência</strong></td>
+<td><strong>Herança em instância e transação</strong></td>
+</tr>
+<tr>
+<td><strong>T22-T23</strong></td>
+<td><strong>Fornecedor — Relatórios</strong></td>
+<td><strong>Soma multi-meio, resolução em fatura</strong></td>
+</tr>
+<tr>
+<td><strong>T24</strong></td>
+<td><strong>Fornecedor — Coexistência</strong></td>
+<td><strong>Sem conflito com categoria/tag/prioridade</strong></td>
+</tr>
+<tr>
+<td><strong>T25</strong></td>
+<td><strong>Fornecedor — Métricas</strong></td>
+<td><strong>Armazenamento e consulta de consumo</strong></td>
+</tr>
+<tr>
+<td><strong>T26</strong></td>
+<td><strong>Fornecedor — Conciliação</strong></td>
+<td><strong>Associação retroativa com aliases</strong></td>
+</tr>
+<tr>
+<td><strong>T27</strong></td>
+<td><strong>Fornecedor — Filtros</strong></td>
+<td><strong>Combinação com todas as dimensões</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="12.3.-decis%C3%A3o-final-sobre-testes" tabindex="-1"><a class="header-anchor" href="#12.3.-decis%C3%A3o-final-sobre-testes">#</a> 12.3. Decisão Final sobre Testes</h3>
+<p>Aprovado:</p>
+<ul>
+<li>10 novos cenários mandatórios (T18-T27) com padrão DADO/QUANDO/ENTÃO</li>
+<li>Total de 27 testes obrigatórios antes de deploy</li>
+<li>Mesma regra do refino anterior: testes são contrato, não alteráveis por conveniência</li>
+<li>Cobertura mínima: 100% dos 27 cenários antes de cualquer deploy</li>
+</ul>
+<hr>
+<h2 id="13.-revis%C3%A3o-da-ia-futura-%2F-mcp-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#13.-revis%C3%A3o-da-ia-futura-%2F-mcp-com-fornecedor">#</a> 13. Revisão da IA Futura / MCP com Fornecedor</h2>
+<h3 id="13.1.-fornecedor-como-dimens%C3%A3o-de-intelig%C3%AAncia" tabindex="-1"><a class="header-anchor" href="#13.1.-fornecedor-como-dimens%C3%A3o-de-intelig%C3%AAncia">#</a> 13.1. Fornecedor como Dimensão de Inteligência</h3>
+<p><strong>Pedro Santos (Backend):</strong>
+A camada de IA/MCP planejada para as Fases 4 e 5 ganha significativamente com fornecedor. Vou mapear exatamente como:</p>
+<h3 id="13.2.-classifica%C3%A7%C3%A3o-autom%C3%A1tica" tabindex="-1"><a class="header-anchor" href="#13.2.-classifica%C3%A7%C3%A3o-autom%C3%A1tica">#</a> 13.2. Classificação Automática</h3>
+<p><strong>Maria Oliveira (Backend):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Cenário</th>
+<th>Sem fornecedor</th>
+<th>Com fornecedor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Importação de extrato com “PIX NEOENERGIA”</td>
+<td>IA tenta adivinhar categoria</td>
+<td>IA resolve: alias “NEOENERGIA” → fornecedor → tipo utility → sugestão: categoria “Utilidades/Energia”, prioridade “essencial”</td>
+</tr>
+<tr>
+<td>Fatura do cartão com “<a href="http://GITHUB.COM">GITHUB.COM</a>”</td>
+<td>IA tenta adivinhar</td>
+<td>IA resolve: alias “<a href="http://GITHUB.COM">GITHUB.COM</a>” → fornecedor → tipo saas → sugestão: categoria “Software/Serviços”, tags [trabalho, dev]</td>
+</tr>
+<tr>
+<td>Novo lançamento manual “Internet”</td>
+<td>Ambíguo — Vivo? Canaã? Claro?</td>
+<td>Se houver recorrência com fornecedor → sugere automaticamente</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ricardo Monteiro:</strong>
+A taxonomia de fornecedor (tipo + tags + aliases) funciona como um <strong>vocabulário de domínio</strong> para a IA. Quanto mais classificado o fornecedor, mais precisa a IA.</p>
+<h3 id="13.3.-concilia%C3%A7%C3%A3o-de-documentos" tabindex="-1"><a class="header-anchor" href="#13.3.-concilia%C3%A7%C3%A3o-de-documentos">#</a> 13.3. Conciliação de Documentos</h3>
+<p><strong>Laura Costa (Backend):</strong>
+No fluxo de leitura de PDF:</p>
+<ol>
+<li>IA extrai texto do PDF (OCR se necessário)</li>
+<li>Busca CNPJ no texto → match com <code>suppliers.document_number</code></li>
+<li>Busca identificadores → match com <code>supplier_contracts.identifier</code></li>
+<li>Busca nome/alias → match com <code>suppliers.name</code> + <code>supplier_aliases.alias_name</code></li>
+<li>Se match encontrado: sugere fornecedor, recorrência e período</li>
+<li>Se não encontrado: sugere criar novo fornecedor com dados extraídos</li>
+</ol>
+<h3 id="13.4.-tool-calls-mcp-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#13.4.-tool-calls-mcp-com-fornecedor">#</a> 13.4. Tool Calls MCP com Fornecedor</h3>
+<p><strong>João Pereira (Backend):</strong>
+Na Fase 5 (MCP/Agentes), fornecedor expande significativamente o vocabulário de ferramentas:</p>
+<pre class="hljs"><code><span class="hljs-comment">// Novas tool calls habilitadas pelo domínio de fornecedor</span>
+
+<span class="hljs-comment">// Consulta por fornecedor</span>
+<span class="hljs-title function_">get_supplier_spending</span>({ <span class="hljs-attr">supplier_name</span>: <span class="hljs-string">&quot;Neoenergia&quot;</span>, <span class="hljs-attr">period</span>: <span class="hljs-string">&quot;last_6_months&quot;</span> });
+<span class="hljs-comment">// → { total: 1580, avg_monthly: 263.33, trend: &quot;up_5%&quot;, transactions: [...] }</span>
+
+<span class="hljs-comment">// Comparação entre fornecedores</span>
+<span class="hljs-title function_">compare_suppliers</span>({ <span class="hljs-attr">category</span>: <span class="hljs-string">&quot;internet&quot;</span>, <span class="hljs-attr">period</span>: <span class="hljs-string">&quot;last_12_months&quot;</span> });
+<span class="hljs-comment">// → { Vivo: { total: 1798.80, avg: 149.90 }, Canaã: { total: 1438.80, avg: 119.90 } }</span>
+
+<span class="hljs-comment">// Evolução de métricas</span>
+<span class="hljs-title function_">get_consumption_metrics</span>({ <span class="hljs-attr">supplier_name</span>: <span class="hljs-string">&quot;Neoenergia&quot;</span>, <span class="hljs-attr">metric</span>: <span class="hljs-string">&quot;kWh&quot;</span>, <span class="hljs-attr">period</span>: <span class="hljs-string">&quot;last_12_months&quot;</span> });
+<span class="hljs-comment">// → [{ month: &quot;Out/2025&quot;, quantity: 240 }, { month: &quot;Nov/2025&quot;, quantity: 265 }, ...]</span>
+
+<span class="hljs-comment">// Detecção de anomalias</span>
+<span class="hljs-title function_">detect_supplier_anomalies</span>({ <span class="hljs-attr">period</span>: <span class="hljs-string">&quot;current&quot;</span> });
+<span class="hljs-comment">// → [{ supplier: &quot;ChatGPT&quot;, expected: 21, actual: 120, change: &quot;+471%&quot; }]</span>
+
+<span class="hljs-comment">// Sugestão de associação</span>
+<span class="hljs-title function_">suggest_supplier_associations</span>({ <span class="hljs-attr">unlinked_transactions</span>: <span class="hljs-literal">true</span> });
+<span class="hljs-comment">// → [{ transaction_id: &quot;xxx&quot;, suggested_supplier: &quot;Neoenergia&quot;, confidence: 0.95, via: &quot;alias:CELPE&quot; }]</span>
+
+<span class="hljs-comment">// Resolução de alias</span>
+<span class="hljs-title function_">resolve_supplier_alias</span>({ <span class="hljs-attr">text</span>: <span class="hljs-string">&quot;CELPE DISTRIBUIÇÃO S/A&quot;</span> });
+<span class="hljs-comment">// → { supplier_id: &quot;xxx&quot;, name: &quot;Neoenergia&quot;, match_type: &quot;alias&quot;, confidence: 0.92 }</span>
+</code></pre>
+<p><strong>Pedro Santos:</strong>
+Cada uma dessas chamadas é possível porque o domínio de fornecedor está modelado agora. Sem as tabelas <code>suppliers</code>, <code>supplier_aliases</code>, <code>supplier_contracts</code> e <code>consumption_metrics</code>, essas tool calls não teriam de onde buscar dados.</p>
+<h3 id="13.5.-rotinas-de-classifica%C3%A7%C3%A3o-e-enriquecimento" tabindex="-1"><a class="header-anchor" href="#13.5.-rotinas-de-classifica%C3%A7%C3%A3o-e-enriquecimento">#</a> 13.5. Rotinas de Classificação e Enriquecimento</h3>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Proponho um pipeline de enriquecimento automático para a Fase 4:</p>
+<pre class="hljs"><code>Transação nova → Pipeline de enriquecimento:
+1. Resolução de fornecedor (alias matching)
+2. Sugestão de categoria (baseado em fornecedor.type + histórico)
+3. Sugestão de tags (baseado em fornecedor.tags + padrão do usuário)
+4. Sugestão de prioridade (baseado em fornecedor.tags + regras)
+5. Extração de métricas (se documento anexado)
+6. Vinculação com recorrência (se fornecedor + período match)
+</code></pre>
+<p>Cada etapa é independente e auditável. O usuário pode aceitar/rejeitar cada sugestão.</p>
+<h3 id="13.6.-reconcilia%C3%A7%C3%A3o-de-dados-importados" tabindex="-1"><a class="header-anchor" href="#13.6.-reconcilia%C3%A7%C3%A3o-de-dados-importados">#</a> 13.6. Reconciliação de Dados Importados</h3>
+<p><strong>Laura Costa:</strong>
+Na importação de dados (CSV/XLSX), fornecedor melhora significativamente a qualidade:</p>
+<table>
+<thead>
+<tr>
+<th>Etapa</th>
+<th>Sem fornecedor</th>
+<th>Com fornecedor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parse da descrição</td>
+<td>Texto bruto</td>
+<td>Resolução via aliases → fornecedor conhecido</td>
+</tr>
+<tr>
+<td>Deduplicação</td>
+<td>Data + valor + descrição</td>
+<td>Data + valor + <strong>supplier_id</strong> (mais preciso)</td>
+</tr>
+<tr>
+<td>Categorização</td>
+<td>Manual por linha</td>
+<td>Automática via supplier.type + histórico</td>
+</tr>
+<tr>
+<td>Conciliação</td>
+<td>Comparação de texto</td>
+<td>Matching por supplier_id + período</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13.7.-decis%C3%A3o-final-sobre-ia%2Fmcp" tabindex="-1"><a class="header-anchor" href="#13.7.-decis%C3%A3o-final-sobre-ia%2Fmcp">#</a> 13.7. Decisão Final sobre IA/MCP</h3>
+<p>Aprovado:</p>
+<ul>
+<li>Fornecedor como dimensão central da taxonomia de IA</li>
+<li>6 novas tool calls MCP habilitadas pela modelagem de fornecedor</li>
+<li>Pipeline de enriquecimento automático em 6 etapas para Fase 4</li>
+<li>Aliases e contratos como vocabulário de resolução para OCR/NLP</li>
+<li>Métricas de consumo como base para detecção de anomalias</li>
+</ul>
+<hr>
+<h2 id="14.-regras-de-neg%C3%B3cio-revisadas-e-novas-regras" tabindex="-1"><a class="header-anchor" href="#14.-regras-de-neg%C3%B3cio-revisadas-e-novas-regras">#</a> 14. Regras de Negócio Revisadas e Novas Regras</h2>
+<h3 id="14.1.-regras-existentes-impactadas" tabindex="-1"><a class="header-anchor" href="#14.1.-regras-existentes-impactadas">#</a> 14.1. Regras Existentes Impactadas</h3>
+<p><strong>Maria Oliveira (Backend):</strong>
+Revisando as 17 regras originais, as seguintes são impactadas pela adição de fornecedor:</p>
+<table>
+<thead>
+<tr>
+<th>Regra</th>
+<th>Descrição original</th>
+<th>Impacto do fornecedor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>Pagamento de fatura não gera despesa</td>
+<td><strong>Sem impacto</strong> — fornecedor não altera esta regra</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>Transferência não é gasto</td>
+<td><strong>Sem impacto</strong> — transferência interna não tem fornecedor</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>Lançamento atribuído ao período</td>
+<td><strong>Sem impacto</strong> — fornecedor não altera atribuição temporal</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>Compras respeitam fechamento</td>
+<td>Impactado: item de fatura pode ter <code>supplier_id</code> → matching por alias</td>
+</tr>
+<tr>
+<td>R7</td>
+<td>Recorrência gera expectativa</td>
+<td>Impactado: instância herda <code>supplier_id</code> do template</td>
+</tr>
+<tr>
+<td>R9</td>
+<td>Importação sem duplicação</td>
+<td>Impactado: <code>supplier_id</code> melhora deduplicação</td>
+</tr>
+<tr>
+<td>R13</td>
+<td>Múltiplas tags por despesa</td>
+<td><strong>Sem impacto</strong> — tags de transação coexistem com fornecedor</td>
+</tr>
+<tr>
+<td>R14</td>
+<td>Filtros por tag</td>
+<td>Impactado: filtro por tag deve funcionar combinado com filtro por fornecedor</td>
+</tr>
+<tr>
+<td>R17</td>
+<td>Primeira tela reflete prioridade e período</td>
+<td>Impactado: primeira tela agora mostra fornecedor</td>
+</tr>
+</tbody>
+</table>
+<h3 id="14.2.-novas-regras-de-neg%C3%B3cio-(r18-r27)" tabindex="-1"><a class="header-anchor" href="#14.2.-novas-regras-de-neg%C3%B3cio-(r18-r27)">#</a> 14.2. Novas Regras de Negócio (R18-R27)</h3>
+<p><strong>Ricardo Monteiro (Economista) e equipe:</strong></p>
+<h4 id="r18.-fornecedor-%C3%A9-opcional-em-transa%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#r18.-fornecedor-%C3%A9-opcional-em-transa%C3%A7%C3%B5es">#</a> R18. Fornecedor é opcional em transações</h4>
+<ul>
+<li>Todo lançamento PODE ter um fornecedor, mas não é obrigatório</li>
+<li>Transferências internas NÃO têm fornecedor (são movimentações entre contas próprias)</li>
+<li>Pagamento de fatura NÃO é transação com fornecedor (é quitação de obrigação)</li>
+</ul>
+<h4 id="r19.-fornecedor-n%C3%A3o-substitui-categoria-nem-tag" tabindex="-1"><a class="header-anchor" href="#r19.-fornecedor-n%C3%A3o-substitui-categoria-nem-tag">#</a> R19. Fornecedor não substitui categoria nem tag</h4>
+<ul>
+<li>Fornecedor, categoria, tags e prioridade são dimensões ortogonais</li>
+<li>Uma transação pode ter fornecedor + categoria + N tags + prioridade simultaneamente</li>
+<li>Nenhuma dimensão invalida outra</li>
+</ul>
+<h4 id="r20.-alias-de-fornecedor-deve-resolver-para-id-%C3%BAnico" tabindex="-1"><a class="header-anchor" href="#r20.-alias-de-fornecedor-deve-resolver-para-id-%C3%BAnico">#</a> R20. Alias de fornecedor deve resolver para ID único</h4>
+<ul>
+<li>Cada alias resolve para exatamente UM fornecedor</li>
+<li>Dois fornecedores NÃO podem compartilhar o mesmo alias ativo no mesmo período</li>
+<li>Alias expirado (valid_until &lt; now) não é usado em resolução ativa</li>
+</ul>
+<h4 id="r21.-hist%C3%B3rico-%C3%A9-vinculado-ao-id%2C-n%C3%A3o-ao-nome" tabindex="-1"><a class="header-anchor" href="#r21.-hist%C3%B3rico-%C3%A9-vinculado-ao-id%2C-n%C3%A3o-ao-nome">#</a> R21. Histórico é vinculado ao ID, não ao nome</h4>
+<ul>
+<li>Renomear um fornecedor NÃO altera o supplier_id</li>
+<li>Transações históricas vinculadas pelo ID permanecem vinculadas</li>
+<li>O nome antigo é preservado como alias com tipo “legacy_name”</li>
+</ul>
+<h4 id="r22.-m%C3%A9tricas-de-consumo-s%C3%A3o-opcionais-e-livres" tabindex="-1"><a class="header-anchor" href="#r22.-m%C3%A9tricas-de-consumo-s%C3%A3o-opcionais-e-livres">#</a> R22. Métricas de consumo são opcionais e livres</h4>
+<ul>
+<li>Fornecedor pode ter zero ou muitas métricas por transação</li>
+<li>Tipo de métrica é texto livre (kWh, m³, minutos, GB, unidades)</li>
+<li>Métricas são informativas — não alteram valor da transação</li>
+</ul>
+<h4 id="r23.-merge-de-fornecedores-%C3%A9-opera%C3%A7%C3%A3o-at%C3%B4mica" tabindex="-1"><a class="header-anchor" href="#r23.-merge-de-fornecedores-%C3%A9-opera%C3%A7%C3%A3o-at%C3%B4mica">#</a> R23. Merge de fornecedores é operação atômica</h4>
+<ul>
+<li>Ao mesclar dois fornecedores, TODAS as referências são migradas em transação</li>
+<li>O fornecedor absorvido tem seu nome convertido em alias do sobrevivente</li>
+<li>Histórico de métricas e contratos são migrados</li>
+<li>Audit log registra a operação de merge completa</li>
+</ul>
+<h4 id="r24.-contratos-de-fornecedor-s%C3%A3o-informativos" tabindex="-1"><a class="header-anchor" href="#r24.-contratos-de-fornecedor-s%C3%A3o-informativos">#</a> R24. Contratos de fornecedor são informativos</h4>
+<ul>
+<li>Contratos (UC, instalação, conta cliente) são metadados de referência</li>
+<li>Não alteram contabilização, saldo ou classificação</li>
+<li>Servem para: conciliação, auditoria, leitura por IA, organização pessoal</li>
+</ul>
+<h4 id="r25.-fornecedor-de-tipo-financial_institution-pode-ter-link-com-institutions" tabindex="-1"><a class="header-anchor" href="#r25.-fornecedor-de-tipo-financial_institution-pode-ter-link-com-institutions">#</a> R25. Fornecedor de tipo financial_institution pode ter link com institutions</h4>
+<ul>
+<li>Se supplier.type = ‘financial_institution’, o campo institution_id pode ser preenchido</li>
+<li>O link é opcional — um fornecedor financeiro pode existir sem instituição cadastrada</li>
+<li>A instituição financeira continua sendo a entidade de agrupamento patrimonial (contas, cartões, produtos)</li>
+<li>O fornecedor financeiro é a entidade de classificação de gastos</li>
+</ul>
+<h4 id="r26.-sugest%C3%B5es-de-associa%C3%A7%C3%A3o-n%C3%A3o-s%C3%A3o-aplicadas-automaticamente" tabindex="-1"><a class="header-anchor" href="#r26.-sugest%C3%B5es-de-associa%C3%A7%C3%A3o-n%C3%A3o-s%C3%A3o-aplicadas-automaticamente">#</a> R26. Sugestões de associação não são aplicadas automaticamente</h4>
+<ul>
+<li>Rotinas de matching por alias geram SUGESTÕES, não associações automáticas</li>
+<li>O usuário deve confirmar cada associação (individual ou em lote)</li>
+<li>Exceção futura: na Fase 4 (IA), associações com confiança &gt; 95% podem ser auto-aplicadas com opt-in do usuário</li>
+</ul>
+<h4 id="r27.-relat%C3%B3rios-por-fornecedor-n%C3%A3o-duplicam-entre-meios-de-pagamento" tabindex="-1"><a class="header-anchor" href="#r27.-relat%C3%B3rios-por-fornecedor-n%C3%A3o-duplicam-entre-meios-de-pagamento">#</a> R27. Relatórios por fornecedor não duplicam entre meios de pagamento</h4>
+<ul>
+<li>Se a mesma despesa aparece como item de fatura E como transação direta, o relatório por fornecedor conta apenas UMA vez</li>
+<li>A regra de deduplicação é: mesmo supplier_id + mesmo valor + mesma data ± 3 dias + mesma competência = potencial duplicata → exibir apenas uma vez</li>
+</ul>
+<h3 id="14.3.-decis%C3%A3o-final-sobre-regras-de-neg%C3%B3cio" tabindex="-1"><a class="header-anchor" href="#14.3.-decis%C3%A3o-final-sobre-regras-de-neg%C3%B3cio">#</a> 14.3. Decisão Final sobre Regras de Negócio</h3>
+<p><strong>Chico (CEO):</strong>
+Aceito todas as 10 novas regras (R18-R27). São consistentes com o domínio e não conflitam com as 17 regras anteriores. O conjunto completo agora é de 27 regras de negócio mandatórias.</p>
+<p>Aprovado:</p>
+<ul>
+<li>17 regras originais (R1-R17) mantidas, 5 com impacto documentado</li>
+<li>10 novas regras (R18-R27) incorporadas</li>
+<li>Total: 27 regras de negócio mandatórias</li>
+</ul>
+<hr>
+<h2 id="15.-escopo-do-mvp-revisado-com-fornecedor" tabindex="-1"><a class="header-anchor" href="#15.-escopo-do-mvp-revisado-com-fornecedor">#</a> 15. Escopo do MVP Revisado com Fornecedor</h2>
+<h3 id="15.1.-novas-funcionalidades-do-mvp" tabindex="-1"><a class="header-anchor" href="#15.1.-novas-funcionalidades-do-mvp">#</a> 15.1. Novas Funcionalidades do MVP</h3>
+<p><strong>Ana Silva (Arquiteta):</strong>
+Revisando o escopo do MVP incorporando fornecedor com impacto mínimo no cronograma:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Funcionalidade</th>
+<th>Prioridade</th>
+<th>Sprint estimada</th>
+<th>Dependência</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F-NEW-1</td>
+<td>CRUD de fornecedores (nome, tipo, documento, tags)</td>
+<td>🔴 P0</td>
+<td>Sprint 1</td>
+<td>Schema de banco</td>
+</tr>
+<tr>
+<td>F-NEW-2</td>
+<td>Aliases de fornecedor (cadastro e busca)</td>
+<td>🟠 P1</td>
+<td>Sprint 2</td>
+<td>F-NEW-1</td>
+</tr>
+<tr>
+<td>F-NEW-3</td>
+<td>Contratos de fornecedor (cadastro informativo)</td>
+<td>🟡 P2</td>
+<td>Sprint 3</td>
+<td>F-NEW-1</td>
+</tr>
+<tr>
+<td>F-NEW-4</td>
+<td>Associação de fornecedor a transações</td>
+<td>🔴 P0</td>
+<td>Sprint 1-2</td>
+<td>F-NEW-1, CRUD transações</td>
+</tr>
+<tr>
+<td>F-NEW-5</td>
+<td>Associação de fornecedor a recorrências</td>
+<td>🔴 P0</td>
+<td>Sprint 2</td>
+<td>F-NEW-1, recorrências</td>
+</tr>
+<tr>
+<td>F-NEW-6</td>
+<td>Fornecedor na primeira tela (nome, top, alertas)</td>
+<td>🟠 P1</td>
+<td>Sprint 2-3</td>
+<td>F-NEW-1, dashboard</td>
+</tr>
+<tr>
+<td>F-NEW-7</td>
+<td>Filtro por fornecedor (individual e combinado)</td>
+<td>🟠 P1</td>
+<td>Sprint 2-3</td>
+<td>F-NEW-4</td>
+</tr>
+<tr>
+<td>F-NEW-8</td>
+<td>Relatório de gastos por fornecedor</td>
+<td>🟠 P1</td>
+<td>Sprint 3</td>
+<td>F-NEW-4</td>
+</tr>
+<tr>
+<td>F-NEW-9</td>
+<td>Métricas de consumo (registro manual)</td>
+<td>🟡 P2</td>
+<td>Sprint 3-4</td>
+<td>F-NEW-1</td>
+</tr>
+<tr>
+<td>F-NEW-10</td>
+<td>Sugestão de associação retroativa por alias</td>
+<td>🟡 P2</td>
+<td>Sprint 4</td>
+<td>F-NEW-2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="15.2.-tabela-completa-do-mvp-revisado" tabindex="-1"><a class="header-anchor" href="#15.2.-tabela-completa-do-mvp-revisado">#</a> 15.2. Tabela Completa do MVP Revisado</h3>
+<p><strong>João Pereira (Backend):</strong>
+Integrando com o escopo anterior:</p>
+<table>
+<thead>
+<tr>
+<th>Módulo</th>
+<th>Entregáveis</th>
+<th>P</th>
+<th>Sprint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core</td>
+<td>Auth, setup de ciclo financeiro, instituições, produtos</td>
+<td>P0</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>Fornecedores</strong></td>
+<td><strong>CRUD de fornecedores, aliases, tipos</strong></td>
+<td><strong>P0</strong></td>
+<td><strong>1</strong></td>
+</tr>
+<tr>
+<td>Transações</td>
+<td>Lançamento manual, categorias, tags, prioridade, <strong>fornecedor</strong></td>
+<td>P0</td>
+<td>1-2</td>
+</tr>
+<tr>
+<td>Transferências</td>
+<td>Registro de transferências internas (sem despesa, <strong>sem fornecedor</strong>)</td>
+<td>P0</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Cartões</td>
+<td>Cadastro de cartões, ciclos de fatura, itens de fatura</td>
+<td>P0</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Faturas</td>
+<td>Pagamento de fatura (sem gerar despesa)</td>
+<td>P0</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Recorrências</td>
+<td>Templates + instâncias + geração automática + <strong>fornecedor herdado</strong></td>
+<td>P1</td>
+<td>2-3</td>
+</tr>
+<tr>
+<td>Dívidas</td>
+<td>Cadastro de passivos, parcelas, decomposição</td>
+<td>P1</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Dashboard</td>
+<td>Primeira tela de ação + <strong>top fornecedores + alertas</strong></td>
+<td>P0</td>
+<td>2-3</td>
+</tr>
+<tr>
+<td>Relatórios</td>
+<td>Por mês/período/categoria/tag + <strong>por fornecedor</strong></td>
+<td>P1</td>
+<td>3</td>
+</tr>
+<tr>
+<td><strong>Filtros</strong></td>
+<td><strong>Combinação fornecedor × categoria × tag × prioridade × período</strong></td>
+<td><strong>P1</strong></td>
+<td><strong>2-3</strong></td>
+</tr>
+<tr>
+<td><strong>Contratos</strong></td>
+<td><strong>Cadastro informativo de contratos por fornecedor</strong></td>
+<td><strong>P2</strong></td>
+<td><strong>3</strong></td>
+</tr>
+<tr>
+<td><strong>Métricas</strong></td>
+<td><strong>Registro manual de consumo (kWh, m³, etc.)</strong></td>
+<td><strong>P2</strong></td>
+<td><strong>3-4</strong></td>
+</tr>
+<tr>
+<td>Importação</td>
+<td>Upload de CSV/XLSX com preview + controle de duplicação</td>
+<td>P2</td>
+<td>4</td>
+</tr>
+<tr>
+<td>Documentos</td>
+<td>Upload e vinculação de anexos + <strong>fornecedor</strong></td>
+<td>P2</td>
+<td>4</td>
+</tr>
+<tr>
+<td><strong>Associação retroativa</strong></td>
+<td><strong>Sugestão de vínculo antigo por alias</strong></td>
+<td><strong>P2</strong></td>
+<td><strong>4</strong></td>
+</tr>
+<tr>
+<td>Testes</td>
+<td><strong>27 cenários mandatórios</strong> + domínio + integração</td>
+<td>P0</td>
+<td>1 (e contínuo)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="15.3.-impacto-no-cronograma" tabindex="-1"><a class="header-anchor" href="#15.3.-impacto-no-cronograma">#</a> 15.3. Impacto no Cronograma</h3>
+<p><strong>Fernando Gomes (DevOps):</strong>
+O CRUD de fornecedor é relativamente simples — uma tabela com form. Aliases e contratos também. O impacto real é que TODA transação/recorrência/documento agora tem um campo a mais. A boa notícia: é um FK nullable, então não bloqueia nada.</p>
+<p><strong>Ana Silva:</strong>
+Estimo impacto de +15-20% no esforço total do MVP (não no prazo). A maioria das features de fornecedor se encaixa dentro das sprints já planejadas. As adições puras (métricas, associação retroativa) ficam em P2 e não bloqueiam o lançamento.</p>
+<h3 id="15.4.-fluxos-do-mvp-revisados" tabindex="-1"><a class="header-anchor" href="#15.4.-fluxos-do-mvp-revisados">#</a> 15.4. Fluxos do MVP Revisados</h3>
+<p><strong>Camila Duarte (Consultora):</strong>
+Revisando os fluxos principais com fornecedor integrado:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Fluxo</th>
+<th>Atualização</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F1</td>
+<td>Cadastrar banco/produtos</td>
+<td>Sem mudança</td>
+</tr>
+<tr>
+<td>F2</td>
+<td>Configurar ciclo financeiro</td>
+<td>Sem mudança</td>
+</tr>
+<tr>
+<td>F3</td>
+<td>Lançar transação</td>
+<td><strong>+ campo fornecedor (select/autocomplete)</strong></td>
+</tr>
+<tr>
+<td>F4</td>
+<td>Registrar transferência interna</td>
+<td>Sem mudança (sem fornecedor)</td>
+</tr>
+<tr>
+<td>F5</td>
+<td>Registrar pagamento de fatura</td>
+<td>Sem mudança (sem fornecedor)</td>
+</tr>
+<tr>
+<td>F6</td>
+<td>Cadastrar dívida</td>
+<td><strong>+ campo fornecedor (para quem é a dívida)</strong></td>
+</tr>
+<tr>
+<td>F7</td>
+<td>Importar planilha</td>
+<td><strong>+ sugestão de fornecedor por alias</strong></td>
+</tr>
+<tr>
+<td>F8</td>
+<td>Anexar documento</td>
+<td><strong>+ campo fornecedor</strong></td>
+</tr>
+<tr>
+<td>F9</td>
+<td>Aplicar categoria/tags</td>
+<td>Sem mudança (fornecedor é campo separado)</td>
+</tr>
+<tr>
+<td>F10</td>
+<td>Visualizar vencimentos</td>
+<td><strong>+ nome do fornecedor nos itens</strong></td>
+</tr>
+<tr>
+<td><strong>F11</strong></td>
+<td><strong>Cadastrar fornecedor</strong></td>
+<td><strong>NOVO: nome, tipo, documento, tags</strong></td>
+</tr>
+<tr>
+<td><strong>F12</strong></td>
+<td><strong>Cadastrar alias de fornecedor</strong></td>
+<td><strong>NOVO: alias, tipo, período</strong></td>
+</tr>
+<tr>
+<td><strong>F13</strong></td>
+<td><strong>Cadastrar contrato de fornecedor</strong></td>
+<td><strong>NOVO: tipo, identificador, metadados</strong></td>
+</tr>
+<tr>
+<td><strong>F14</strong></td>
+<td><strong>Registrar métrica de consumo</strong></td>
+<td><strong>NOVO: tipo, quantidade, preço, subtotal</strong></td>
+</tr>
+<tr>
+<td><strong>F15</strong></td>
+<td><strong>Filtrar por fornecedor</strong></td>
+<td><strong>NOVO: select + combinação com outros filtros</strong></td>
+</tr>
+<tr>
+<td><strong>F16</strong></td>
+<td><strong>Ver relatório por fornecedor</strong></td>
+<td><strong>NOVO: totais, evolução, comparação</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="15.5.-decis%C3%A3o-final-sobre-escopo-mvp" tabindex="-1"><a class="header-anchor" href="#15.5.-decis%C3%A3o-final-sobre-escopo-mvp">#</a> 15.5. Decisão Final sobre Escopo MVP</h3>
+<p><strong>Chico (CEO):</strong>
+Aceito o escopo ampliado. Fornecedor é aderente ao MVP porque resolve um problema real do dia-a-dia (“para QUEM eu pago?”). Prioridade P0 para CRUD, P1 para filtros e relatórios, P2 para métricas e retroatividade.</p>
+<p>Aprovado:</p>
+<ul>
+<li>10 novas funcionalidades (F-NEW-1 a F-NEW-10)</li>
+<li>6 novos fluxos (F11-F16)</li>
+<li>Impacto de ~15-20% no esforço, sem aumento significativo de prazo</li>
+<li>Fornecedor CRUD entra na Sprint 1 junto com instituições</li>
+</ul>
+<hr>
+<h2 id="16.-roadmap-revisado" tabindex="-1"><a class="header-anchor" href="#16.-roadmap-revisado">#</a> 16. Roadmap Revisado</h2>
+<h3 id="16.1.-fases-atualizadas" tabindex="-1"><a class="header-anchor" href="#16.1.-fases-atualizadas">#</a> 16.1. Fases Atualizadas</h3>
+<p><strong>Ana Silva (Arquiteta):</strong></p>
+<h4 id="fase-1%3A-mvp-sem-ia-(revisada)" tabindex="-1"><a class="header-anchor" href="#fase-1%3A-mvp-sem-ia-(revisada)">#</a> Fase 1: MVP sem IA (revisada)</h4>
+<ul>
+<li>Tudo do roadmap original MAIS:</li>
+<li>CRUD de fornecedores + aliases + tipos</li>
+<li>Associação de fornecedor a transações, recorrências, documentos</li>
+<li>Filtro por fornecedor na interface</li>
+<li>Fornecedor na primeira tela (nome nos itens + top fornecedores)</li>
+<li>Relatório de gastos por fornecedor</li>
+<li>Contratos de fornecedor (cadastro informativo)</li>
+<li>27 testes mandatórios (17 originais + 10 de fornecedor)</li>
+</ul>
+<h4 id="fase-2%3A-importa%C3%A7%C3%A3o-e-automa%C3%A7%C3%A3o-b%C3%A1sica-(revisada)" tabindex="-1"><a class="header-anchor" href="#fase-2%3A-importa%C3%A7%C3%A3o-e-automa%C3%A7%C3%A3o-b%C3%A1sica-(revisada)">#</a> Fase 2: Importação e Automação Básica (revisada)</h4>
+<ul>
+<li>Tudo do roadmap original MAIS:</li>
+<li>Sugestão de associação retroativa por alias</li>
+<li>Matching de fornecedor em importação de extrato (via alias)</li>
+<li>Regras automáticas de categorização baseadas em fornecedor.type</li>
+<li>Registro manual de métricas de consumo</li>
+<li>Relatório de evolução temporal por fornecedor</li>
+<li>Merge de fornecedores duplicados</li>
+</ul>
+<h4 id="fase-3%3A-documentos-e-leitura-assistida-(revisada)" tabindex="-1"><a class="header-anchor" href="#fase-3%3A-documentos-e-leitura-assistida-(revisada)">#</a> Fase 3: Documentos e Leitura Assistida (revisada)</h4>
+<ul>
+<li>Tudo do roadmap original MAIS:</li>
+<li>Vinculação de documento com fornecedor</li>
+<li>Preparação de dados para OCR (CNPJ, UC, instalação em supplier_contracts)</li>
+<li>Extração básica de dados vinculados ao fornecedor (regex patterns)</li>
+</ul>
+<h4 id="fase-4%3A-ia-(revisada)" tabindex="-1"><a class="header-anchor" href="#fase-4%3A-ia-(revisada)">#</a> Fase 4: IA (revisada)</h4>
+<ul>
+<li>Tudo do roadmap original MAIS:</li>
+<li>Classificação automática de fornecedor por alias/CNPJ</li>
+<li>Extração de métricas de consumo de PDFs</li>
+<li>Detecção de anomalias por fornecedor</li>
+<li>Sugestão automática de fornecedor + categoria + tags</li>
+<li>Pipeline de enriquecimento em 6 etapas</li>
+<li>Auto-associação com confiança &gt; 95% (opt-in)</li>
+</ul>
+<h4 id="fase-5%3A-mcp%2Fagentes-(revisada)" tabindex="-1"><a class="header-anchor" href="#fase-5%3A-mcp%2Fagentes-(revisada)">#</a> Fase 5: MCP/Agentes (revisada)</h4>
+<ul>
+<li>Tudo do roadmap original MAIS:</li>
+<li>Tool calls de fornecedor: get_supplier_spending, compare_suppliers, get_consumption_metrics, detect_supplier_anomalies, suggest_supplier_associations, resolve_supplier_alias</li>
+<li>Consultas em linguagem natural com dimensão fornecedor</li>
+<li>Enriquecimento de relatórios via agente</li>
+</ul>
+<h3 id="16.2.-decis%C3%A3o-final-sobre-roadmap" tabindex="-1"><a class="header-anchor" href="#16.2.-decis%C3%A3o-final-sobre-roadmap">#</a> 16.2. Decisão Final sobre Roadmap</h3>
+<p>Aprovado:</p>
+<ul>
+<li>Todas as 5 fases revisadas incorporam fornecedor gradualmente</li>
+<li>Fase 1 absorve CRUD, associação, filtro e relatório básico</li>
+<li>Fases 2-5 evoluem progressivamente a inteligência sobre fornecedor</li>
+<li>Nenhuma fase é bloqueada pela ausência de fornecedor nas fases posteriores</li>
+</ul>
+<hr>
+<h2 id="17.-decis%C3%B5es-finais-e-checklist-de-entreg%C3%A1veis" tabindex="-1"><a class="header-anchor" href="#17.-decis%C3%B5es-finais-e-checklist-de-entreg%C3%A1veis">#</a> 17. Decisões Finais e Checklist de Entregáveis</h2>
+<h3 id="17.1.-checklist-dos-12-entreg%C3%A1veis-obrigat%C3%B3rios" tabindex="-1"><a class="header-anchor" href="#17.1.-checklist-dos-12-entreg%C3%A1veis-obrigat%C3%B3rios">#</a> 17.1. Checklist dos 12 Entregáveis Obrigatórios</h3>
+<p><strong>Verônica (Consultora):</strong>
+Conferindo cada entregável pedido no prompt #002:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Entregável</th>
+<th>Seção</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Resumo do impacto da nova dimensão fornecedor</td>
+<td>Seção 2</td>
+<td>✅ Completo</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Alterações necessárias no mapa de domínio</td>
+<td>Seção 3</td>
+<td>✅ Completo</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Alterações necessárias no modelo de dados</td>
+<td>Seção 5</td>
+<td>✅ Completo (5 tabelas novas, 5 FKs)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Decisão sobre relação fornecedor vs IF</td>
+<td>Seção 4</td>
+<td>✅ Opção A aprovada</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Modelagem de aliases e consolidação histórica</td>
+<td>Seção 6</td>
+<td>✅ Completo com 4 cenários</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Modelagem de métricas de consumo/unidades</td>
+<td>Seção 5.4</td>
+<td>✅ Tabela consumption_metrics</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Impacto em recorrências, documentos e conciliação</td>
+<td>Seções 7 e 8</td>
+<td>✅ Completo</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Impacto em relatórios, filtros e auditoria</td>
+<td>Seção 10</td>
+<td>✅ 3 relatórios + 7 queries de auditoria</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Impacto na home/tela inicial</td>
+<td>Seção 11</td>
+<td>✅ Wireframe revisado + 3 alertas</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Impacto na estratégia de testes</td>
+<td>Seção 12</td>
+<td>✅ 10 novos testes (T18-T27)</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Impacto na futura camada de IA/MCP</td>
+<td>Seção 13</td>
+<td>✅ 6 tool calls + pipeline</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Versão revisada das entidades e regras afetadas</td>
+<td>Seção 14</td>
+<td>✅ 10 novas regras (R18-R27)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="17.2.-resumo-das-decis%C3%B5es-chave-desta-revis%C3%A3o" tabindex="-1"><a class="header-anchor" href="#17.2.-resumo-das-decis%C3%B5es-chave-desta-revis%C3%A3o">#</a> 17.2. Resumo das Decisões Chave desta Revisão</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decisão</th>
+<th>Justificativa</th>
+<th>Aprovado por</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>Fornecedor e Instituição como entidades separadas (Opção A)</td>
+<td>Clareza semântica, simplicidade de queries</td>
+<td>Todos</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>FK direto (1:1) em vez de tabela N:N para supplier_id</td>
+<td>Realidade de finanças pessoais (1 txn = 1 fornecedor)</td>
+<td>Ana, André, Maria</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>Enum de tipo de fornecedor + tags livres</td>
+<td>Flexibilidade com estrutura base</td>
+<td>Maria, João, Camila</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>Métricas de consumo como tabela dedicada</td>
+<td>Isolamento, auditoria, queries específicas</td>
+<td>Ricardo, André</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>Aliases com tipo e período de validade</td>
+<td>Suporte a renomeação, nomes de fatura, abreviações</td>
+<td>Pedro, Ana</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>Merge atômico de fornecedores via Edge Function</td>
+<td>Garantia de integridade referencial</td>
+<td>André, Fernando</td>
+</tr>
+<tr>
+<td>D7</td>
+<td>Fornecedor contextual na home (não seção dedicada)</td>
+<td>Não sobrecarregar tela de ação</td>
+<td>Helena, Isabella, Camila</td>
+</tr>
+<tr>
+<td>D8</td>
+<td>10 novos testes mandatórios (T18-T27)</td>
+<td>Cobertura do domínio de fornecedor</td>
+<td>Maria, equipe</td>
+</tr>
+<tr>
+<td>D9</td>
+<td>10 novas regras de negócio (R18-R27)</td>
+<td>Formalização das regras do novo domínio</td>
+<td>Ricardo, equipe</td>
+</tr>
+<tr>
+<td>D10</td>
+<td>Escopo MVP expandido com impacto +15-20%</td>
+<td>Fornecedor resolve problema real, vale o custo</td>
+<td>Chico (CEO)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="18.-encerramento" tabindex="-1"><a class="header-anchor" href="#18.-encerramento">#</a> 18. Encerramento</h2>
+<h3 id="18.1.-recomenda%C3%A7%C3%B5es-finais-da-equipe" tabindex="-1"><a class="header-anchor" href="#18.1.-recomenda%C3%A7%C3%B5es-finais-da-equipe">#</a> 18.1. Recomendações Finais da Equipe</h3>
+<p><strong>Ana Silva (Arquiteta):</strong></p>
+<blockquote>
+<p>A inclusão de fornecedor no domínio é uma das decisões mais acertadas deste projeto. Fornecedor transforma o sistema de “registro de gastos” para “gestão de relacionamentos financeiros”. A modelagem está sólida — implementem com confiança.</p>
+</blockquote>
+<p><strong>Ricardo Monteiro (Economista):</strong></p>
+<blockquote>
+<p>Métricas de consumo vão transformar a análise financeira do CEO. “Gastei R$ 280 de energia” é informação. “Gastei R$ 280 por 320 kWh com bandeira amarela, 12% acima da média semestral” é inteligência. Essa é a diferença.</p>
+</blockquote>
+<p><strong>Camila Duarte (Consultora):</strong></p>
+<blockquote>
+<p>Na minha experiência com clientes, a pergunta “para quem eu pago?” vem logo depois de “quanto eu gasto?”. Fornecedor responde a primeira. E combinado com métricas, responde “estou pagando caro?”. Essas respostas mudam comportamento.</p>
+</blockquote>
+<p><strong>André Santos (DBA):</strong></p>
+<blockquote>
+<p>As 5 novas tabelas são leves e bem indexadas. O maior cuidado é com os aliases — o índice trigram em <code>alias_name</code> é essencial para performance de busca fuzzy. Não pulem esse índice.</p>
+</blockquote>
+<p><strong>Maria Oliveira (Backend):</strong></p>
+<blockquote>
+<p>Os 27 testes mandatórios agora cobrem o domínio completo. São contrato. Implementação que não passa nos testes está errada. Escrevam T18-T27 ANTES de implementar o CRUD de fornecedor.</p>
+</blockquote>
+<p><strong>Roberto Lima (Frontend):</strong></p>
+<blockquote>
+<p>O componente de select/autocomplete de fornecedor será usado em muitos forms (transação, recorrência, documento, dívida). Componentize bem desde o início — SupplierSelect com busca, criação inline e display de tipo/tags.</p>
+</blockquote>
+<p><strong>Pedro Santos (Backend):</strong></p>
+<blockquote>
+<p>A preparação para IA é o aspecto mais estratégico. CNPJ, aliases, contratos — tudo que modelamos agora será vocabulário para a IA na Fase 4. Quanto mais rico o dado do fornecedor, mais inteligente a classificação automática.</p>
+</blockquote>
+<p><strong>Fernando Gomes (DevOps):</strong></p>
+<blockquote>
+<p>As migrações das 5 novas tabelas são independentes — podem ser aplicadas em paralelo. Separar por arquivo: <code>001_suppliers.sql</code>, <code>002_supplier_aliases.sql</code>, etc. Isso facilita rollback se necessário.</p>
+</blockquote>
+<p><strong>Helena Vargas (UX):</strong></p>
+<blockquote>
+<p>O fornecedor na home deve ser sutil mas acessível. Chip no nome do pagamento, seção colapsável de top fornecedores. Se sobrecarregar, perdemos a clareza de “o que pagar agora?”. Façam teste de usabilidade com dados reais.</p>
+</blockquote>
+<p><strong>Thiago Martins (Front Engineer):</strong></p>
+<blockquote>
+<p>O SupplierBadge será tão frequente quanto o PriorityBadge. Pensem como componente de design system: variantes por tipo (utility=azul, saas=roxo, individual=verde), tamanho small/medium, com e sem ícone.</p>
+</blockquote>
+<h3 id="18.2.-fechamento" tabindex="-1"><a class="header-anchor" href="#18.2.-fechamento">#</a> 18.2. Fechamento</h3>
+<p><strong>Chico (CEO):</strong>
+Excelente trabalho, equipe. A Verônica tinha razão — fornecedor não é um detalhe, é uma dimensão central do domínio financeiro pessoal. Este documento incorpora fornecedor de forma profunda e estruturada em TODAS as camadas do sistema: modelo, regras, testes, telas, relatórios, IA e MCP.</p>
+<p>Resumo do que muda:</p>
+<ol>
+<li><strong>+5 tabelas</strong> no modelo de dados (suppliers, aliases, contracts, supplier_tags, consumption_metrics)</li>
+<li><strong>+5 FKs</strong> em tabelas existentes (transactions, recurring_templates, statement_items, documents, liabilities)</li>
+<li><strong>+10 regras de negócio</strong> (R18-R27)</li>
+<li><strong>+10 testes obrigatórios</strong> (T18-T27)</li>
+<li><strong>+6 novos fluxos</strong> de usuário (F11-F16)</li>
+<li><strong>+6 tool calls MCP</strong> planejadas</li>
+<li><strong>+3 relatórios</strong> novos</li>
+<li><strong>+3 alertas</strong> de fornecedor na home</li>
+<li><strong>Roadmap revisado</strong> nas 5 fases</li>
+<li><strong>Decisão arquitetural</strong>: Opção A — fornecedor e instituição como entidades separadas</li>
+</ol>
+<p>Este documento é a <strong>referência oficial atualizada</strong> para implementação. O refino anterior (#2026-03-21-10-40) continua válido para tudo que não foi revisado aqui.</p>
+<p><strong>Verônica (Consultora):</strong>
+A equipe entregou exatamente o que foi pedido, com profundidade. Todos os 12 entregáveis estão presentes e documentados. Recomendo que este refino seja revisitado a cada sprint, assim como o anterior. Bom trabalho.</p>
+<hr>
+<p><strong>Ações / Responsáveis / Prazo:</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Ação</th>
+<th>Responsável</th>
+<th>Sprint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Criar migrações das 5 novas tabelas (suppliers, aliases, contracts, supplier_tags, consumption_metrics)</td>
+<td>André Santos / João Pereira</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Adicionar FK supplier_id em transactions, recurring_templates, statement_items, documents, liabilities</td>
+<td>André Santos</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Implementar CRUD de fornecedores + aliases + tipos</td>
+<td>Maria Oliveira / João Pereira</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Criar componente SupplierSelect (autocomplete, busca, criação inline)</td>
+<td>Roberto Lima / Thiago Martins</td>
+<td>Sprint 1-2</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Criar componente SupplierBadge (variantes por tipo)</td>
+<td>Isabella Torres / Thiago Martins</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Integrar fornecedor no formulário de transação e recorrência</td>
+<td>Roberto Lima / Sofia Almeida</td>
+<td>Sprint 2</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Implementar filtro por fornecedor (individual + combinado)</td>
+<td>Roberto Lima / Sofia Almeida</td>
+<td>Sprint 2-3</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Adicionar fornecedor na primeira tela (nome nos itens + seção top + alertas)</td>
+<td>Roberto Lima / Helena Vargas</td>
+<td>Sprint 2-3</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Implementar relatório de gastos por fornecedor</td>
+<td>João Pereira / Ricardo Monteiro</td>
+<td>Sprint 3</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Implementar CRUD de contratos de fornecedor</td>
+<td>Maria Oliveira</td>
+<td>Sprint 3</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Implementar registro de métricas de consumo</td>
+<td>Maria Oliveira / Pedro Santos</td>
+<td>Sprint 3-4</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Implementar sugestão de associação retroativa por alias</td>
+<td>Pedro Santos / Laura Costa</td>
+<td>Sprint 4</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Escrever testes T18-T27 como suíte de regressão</td>
+<td>Maria Oliveira / Pedro Santos</td>
+<td>Sprint 1 (antes da implementação)</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Prototipar wireframes com fornecedor (forms, filtros, home)</td>
+<td>Helena Vargas / Isabella Torres</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Configurar índice trigram para busca fuzzy de aliases</td>
+<td>André Santos</td>
+<td>Sprint 1</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Criar view materializada mv_supplier_spending</td>
+<td>André Santos</td>
+<td>Sprint 3</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Documentar regras R18-R27 em ADR (Architecture Decision Record)</td>
+<td>Ana Silva</td>
+<td>Sprint 1</td>
+</tr>
+</tbody>
+</table>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>

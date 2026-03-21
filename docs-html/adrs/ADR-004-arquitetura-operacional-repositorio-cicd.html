@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADR-004-arquitetura-operacional-repositorio-cicd</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 ADR-004-arquitetura-operacional-repositorio-cicd</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        
+        <h1 id="adr-004-%E2%80%94-arquitetura-operacional%3A-reposit%C3%B3rio%2C-ci%2Fcd-e-padr%C3%A3o-de-engenharia" tabindex="-1"><a class="header-anchor" href="#adr-004-%E2%80%94-arquitetura-operacional%3A-reposit%C3%B3rio%2C-ci%2Fcd-e-padr%C3%A3o-de-engenharia">#</a> ADR-004 — Arquitetura Operacional: Repositório, CI/CD e Padrão de Engenharia</h1>
+<h2 id="status" tabindex="-1"><a class="header-anchor" href="#status">#</a> Status</h2>
+<p><strong>Aprovada</strong> — 2026-03-21</p>
+<h2 id="contexto" tabindex="-1"><a class="header-anchor" href="#contexto">#</a> Contexto</h2>
+<p>O projeto Seu Bolso Feliz possui arquitetura funcional e de domínio aprovadas (ADRs 001–003, guia de implementação em 5 etapas, refinos de kickoff, fornecedor e checkpoint). Porém, antes de iniciar a implementação, é necessário definir formalmente como o código será organizado, versionado, testado, integrado e implantado.</p>
+<p><strong>Restrições relevantes:</strong></p>
+<ul>
+<li>O repositório será hospedado no <strong>GitLab</strong> (não GitHub)</li>
+<li>A integração nativa Supabase↔GitHub <strong>não está disponível</strong> — toda automação com Supabase será feita via <strong>Supabase CLI</strong></li>
+<li>O projeto possui múltiplas bases de código: web (Next.js), mobile (React Native/Expo), backend (Supabase), pacotes compartilhados</li>
+<li>Bun é o runtime e gerenciador de pacotes do projeto</li>
+<li>serverless-first — sem VPS no MVP</li>
+</ul>
+<p><strong>Referências:</strong></p>
+<ul>
+<li>Ata de refino: <code>docs/refinos/2026-03/2026-03-21-14-19-refino-arquitetura-engenharia-cicd.md</code></li>
+<li>ADR-001: Deduplicação transação↔item de fatura</li>
+<li>ADR-002: Norma consumption_metrics</li>
+<li>ADR-003: Governança de aliases de fornecedor</li>
+<li>Guia de implementação: <code>docs/planejamento/001-guia-implementacao-passo-a-passo.md</code></li>
+</ul>
+<h2 id="decis%C3%A3o" tabindex="-1"><a class="header-anchor" href="#decis%C3%A3o">#</a> Decisão</h2>
+<h3 id="1.-estrat%C3%A9gia-de-reposit%C3%B3rio%3A-monorepo-com-bun-workspaces" tabindex="-1"><a class="header-anchor" href="#1.-estrat%C3%A9gia-de-reposit%C3%B3rio%3A-monorepo-com-bun-workspaces">#</a> 1. Estratégia de Repositório: Monorepo com Bun Workspaces</h3>
+<p><strong>Monorepo</strong> com <strong>Bun workspaces</strong> nativos. Justificativa: tipos compartilhados entre web/mobile/backend, pipeline único, refactors atômicos, time único.</p>
+<p>Turborepo será avaliado quando/se performance do pipeline degradar. Por ora, Bun workspaces + jobs GitLab condicionais são suficientes.</p>
+<h3 id="2.-estrutura-de-pastas" tabindex="-1"><a class="header-anchor" href="#2.-estrutura-de-pastas">#</a> 2. Estrutura de Pastas</h3>
+<pre class="hljs"><code>seu.bolso.feliz/
+├── .gitlab-ci.yml
+├── .env.example
+├── package.json              # workspaces: [&quot;apps/*&quot;, &quot;packages/*&quot;]
+├── bun.lock
+├── bunfig.toml
+├── tsconfig.base.json
+├── commitlint.config.ts
+├── .lintstagedrc.json
+│
+├── apps/
+│   ├── web/                  # Next.js + Tailwind + shadcn/ui
+│   │   ├── package.json
+│   │   ├── tsconfig.json     # extends ../../tsconfig.base.json
+│   │   ├── next.config.ts
+│   │   └── src/
+│   │       ├── app/          # App Router
+│   │       ├── components/
+│   │       ├── hooks/
+│   │       ├── lib/
+│   │       └── styles/
+│   │
+│   └── mobile/               # React Native + Expo
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── app.json
+│       └── src/
+│
+├── packages/
+│   ├── shared-types/         # @sbf/shared-types — tipos TS gerados + domínio
+│   ├── validation/           # @sbf/validation — Zod schemas
+│   ├── domain/               # @sbf/domain — lógica financeira pura
+│   ├── ui-tokens/            # @sbf/ui-tokens — tokens de design
+│   └── config/               # @sbf/config — eslint, tsconfig, vitest configs
+│
+├── supabase/                 # Supabase CLI (posição fixa)
+│   ├── config.toml
+│   ├── seed.sql
+│   ├── migrations/
+│   └── functions/
+│
+├── docs/                     # Documentação (inalterada)
+├── scripts/                  # Automações (generate-types, seed, etc.)
+└── __tests__/                # Testes globais (domain, integration, e2e)
+</code></pre>
+<h3 id="3.-compartilhamento-de-c%C3%B3digo" tabindex="-1"><a class="header-anchor" href="#3.-compartilhamento-de-c%C3%B3digo">#</a> 3. Compartilhamento de Código</h3>
+<p>Quatro pacotes internos via Bun workspaces:</p>
+<table>
+<thead>
+<tr>
+<th>Pacote</th>
+<th>Escopo</th>
+<th>Consumers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@sbf/shared-types</code></td>
+<td>Tipos TS gerados do Supabase + tipos de domínio</td>
+<td>web, mobile, testes, Edge Functions</td>
+</tr>
+<tr>
+<td><code>@sbf/validation</code></td>
+<td>Zod schemas</td>
+<td>web, mobile, Edge Functions</td>
+</tr>
+<tr>
+<td><code>@sbf/domain</code></td>
+<td>Lógica financeira pura (cálculos, regras)</td>
+<td>web, mobile, testes</td>
+</tr>
+<tr>
+<td><code>@sbf/ui-tokens</code></td>
+<td>Tokens de design (cores, espaçamento, tipografia)</td>
+<td>web, mobile</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Regra:</strong> componentes visuais NÃO são compartilhados entre web e mobile — apenas lógica, tipos, validação e tokens.</p>
+<h3 id="4.-conven%C3%A7%C3%A3o-de-branches" tabindex="-1"><a class="header-anchor" href="#4.-conven%C3%A7%C3%A3o-de-branches">#</a> 4. Convenção de Branches</h3>
+<p><strong>Trunk-based simplificado:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Branch</th>
+<th>Propósito</th>
+<th>Proteção</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>main</code></td>
+<td>Produção</td>
+<td>Push proibido, force push proibido, merge somente via MR</td>
+</tr>
+<tr>
+<td><code>develop</code></td>
+<td>Staging</td>
+<td>Push proibido, force push proibido, merge somente via MR</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Branches efêmeras (de trabalho):</strong>
+<code>feature/</code>, <code>fix/</code>, <code>chore/</code>, <code>refactor/</code>, <code>docs/</code>, <code>test/</code>, <code>migration/</code></p>
+<ul>
+<li>Saem sempre de <code>develop</code></li>
+<li>Nomes em kebab-case, em inglês</li>
+<li>Deletadas após merge</li>
+</ul>
+<h3 id="5.-conven%C3%A7%C3%A3o-de-commits" tabindex="-1"><a class="header-anchor" href="#5.-conven%C3%A7%C3%A3o-de-commits">#</a> 5. Convenção de Commits</h3>
+<p><strong>Conventional Commits</strong> com enforcement via <code>commitlint</code>:</p>
+<pre class="hljs"><code>&lt;tipo&gt;(&lt;escopo&gt;): &lt;descrição&gt;
+</code></pre>
+<p>Tipos: <code>feat</code>, <code>fix</code>, <code>docs</code>, <code>style</code>, <code>refactor</code>, <code>test</code>, <code>chore</code>, <code>ci</code>, <code>perf</code>, <code>migration</code></p>
+<p>Escopos: <code>web</code>, <code>mobile</code>, <code>domain</code>, <code>types</code>, <code>validation</code>, <code>supabase</code>, <code>ci</code>, <code>docs</code>, <code>config</code>, <code>tokens</code></p>
+<p>Enforcement: husky pre-commit hook (local) + job CI (safety net).</p>
+<h3 id="6.-pol%C3%ADtica-de-merge-requests" tabindex="-1"><a class="header-anchor" href="#6.-pol%C3%ADtica-de-merge-requests">#</a> 6. Política de Merge Requests</h3>
+<p><strong>Para <code>develop</code>:</strong></p>
+<ul>
+<li>Pipeline verde obrigatório</li>
+<li>1 aprovação (qualquer sênior)</li>
+<li>Squash merge</li>
+<li>Branch deletada após merge</li>
+</ul>
+<p><strong>Para <code>main</code>:</strong></p>
+<ul>
+<li>Pipeline verde obrigatório</li>
+<li>1 aprovação do CEO ou Arquiteta</li>
+<li>Merge commit (preserva contexto de release)</li>
+<li>Tag de versão automática</li>
+</ul>
+<h3 id="7.-estrat%C3%A9gia-de-ambientes" tabindex="-1"><a class="header-anchor" href="#7.-estrat%C3%A9gia-de-ambientes">#</a> 7. Estratégia de Ambientes</h3>
+<table>
+<thead>
+<tr>
+<th>Ambiente</th>
+<th>Supabase</th>
+<th>Web</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>local</td>
+<td><code>supabase start</code> (Docker)</td>
+<td><code>bun dev</code></td>
+<td>Manual</td>
+</tr>
+<tr>
+<td>staging</td>
+<td>Projeto dedicado (free)</td>
+<td>Deploy automático</td>
+<td>Merge para <code>develop</code></td>
+</tr>
+<tr>
+<td>production</td>
+<td>Projeto dedicado (pago)</td>
+<td>Deploy com gate manual</td>
+<td>Merge para <code>main</code></td>
+</tr>
+</tbody>
+</table>
+<p>Segredos gerenciados via <strong>GitLab CI/CD Variables</strong> (masked, protected). Nunca no repositório.</p>
+<h3 id="8.-supabase-no-ci%2Fcd" tabindex="-1"><a class="header-anchor" href="#8.-supabase-no-ci%2Fcd">#</a> 8. Supabase no CI/CD</h3>
+<p>Toda interação com Supabase no CI via <strong>Supabase CLI</strong> (<code>npx supabase</code>):</p>
+<ul>
+<li><code>supabase link --project-ref $PROJECT_ID</code> — linkar projeto</li>
+<li><code>supabase db push</code> — aplicar migrações</li>
+<li><code>supabase functions deploy</code> — deploy de Edge Functions</li>
+<li><code>supabase gen types typescript</code> — gerar tipos</li>
+</ul>
+<p>Variáveis GitLab necessárias:</p>
+<ul>
+<li><code>SUPABASE_ACCESS_TOKEN</code> (masked, protected)</li>
+<li><code>SUPABASE_DB_PASSWORD</code> (masked, protected)</li>
+<li><code>STAGING_SUPABASE_PROJECT_ID</code> (protected para develop)</li>
+<li><code>PRODUCTION_SUPABASE_PROJECT_ID</code> (protected para main)</li>
+</ul>
+<h3 id="9.-estrat%C3%A9gia-de-migra%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#9.-estrat%C3%A9gia-de-migra%C3%A7%C3%B5es">#</a> 9. Estratégia de Migrações</h3>
+<pre class="hljs"><code>Local → PR (review) → CI Staging (auto) → CI Production (manual gate)
+</code></pre>
+<ul>
+<li>Migrações criadas via <code>supabase migration new &lt;nome&gt;</code> (timestamp automático)</li>
+<li>Migrações são <strong>imutáveis</strong> após merge — correções geram nova migração</li>
+<li>Migrações destrutivas requerem <code>BREAKING CHANGE:</code> no commit</li>
+<li>Seed data aplicada apenas em local e staging</li>
+<li>Job <code>validate-types</code> detecta drift schema vs tipos commitados</li>
+</ul>
+<h3 id="10.-deploy-de-edge-functions" tabindex="-1"><a class="header-anchor" href="#10.-deploy-de-edge-functions">#</a> 10. Deploy de Edge Functions</h3>
+<p>Deploy completo por ambiente no merge:</p>
+<ul>
+<li><code>supabase functions deploy --project-ref $STAGING_PROJECT_ID</code> (staging, automático)</li>
+<li><code>supabase functions deploy --project-ref $PRODUCTION_PROJECT_ID</code> (produção, manual gate)</li>
+</ul>
+<p>Secrets configurados via dashboard/CLI por ambiente, nunca no repo.</p>
+<h3 id="11.-gera%C3%A7%C3%A3o-de-tipos-typescript" tabindex="-1"><a class="header-anchor" href="#11.-gera%C3%A7%C3%A3o-de-tipos-typescript">#</a> 11. Geração de Tipos TypeScript</h3>
+<p>Fluxo: <strong>geração local + validação no CI</strong></p>
+<ol>
+<li>Dev cria migração → aplica localmente</li>
+<li>Dev roda <code>bun run generate-types</code></li>
+<li>Dev commita <code>database.types.ts</code> junto com a migração</li>
+<li>CI regenera e compara via <code>diff</code> — divergência = falha</li>
+</ol>
+<h3 id="12.-pipeline-gitlab-ci%2Fcd-(6-stages)" tabindex="-1"><a class="header-anchor" href="#12.-pipeline-gitlab-ci%2Fcd-(6-stages)">#</a> 12. Pipeline GitLab CI/CD (6 Stages)</h3>
+<pre class="hljs"><code>validate → install → check → test → build → deploy
+</code></pre>
+<ul>
+<li><strong>validate:</strong> commits (commitlint), tipos (diff)</li>
+<li><strong>install:</strong> <code>bun install --frozen-lockfile</code></li>
+<li><strong>check:</strong> lint, typecheck, format</li>
+<li><strong>test:</strong> unitários, integração (condicional)</li>
+<li><strong>build:</strong> web (Next.js), futuro: mobile</li>
+<li><strong>deploy:</strong> migrações + functions + web, por ambiente</li>
+</ul>
+<p>Jobs condicionais por pasta alterada (<code>changes:</code>). Deploy produção com <code>when: manual</code>.</p>
+<h3 id="13.-crit%C3%A9rios-de-qualidade-(quality-gates)" tabindex="-1"><a class="header-anchor" href="#13.-crit%C3%A9rios-de-qualidade-(quality-gates)">#</a> 13. Critérios de Qualidade (Quality Gates)</h3>
+<p><strong>Bloqueantes (pipeline deve passar):</strong></p>
+<ol>
+<li>Commits seguem Conventional Commits</li>
+<li>ESLint sem erros (<code>--max-warnings 0</code>)</li>
+<li>TypeScript sem erros (<code>tsc --noEmit</code>)</li>
+<li>Prettier formatação correta</li>
+<li>Testes unitários 100% green</li>
+<li>Build sem erros</li>
+<li>Tipos Supabase atualizados (quando migração presente)</li>
+<li>Cobertura <code>packages/domain/</code> ≥ 90%</li>
+<li>Cobertura <code>packages/validation/</code> ≥ 90%</li>
+</ol>
+<p><strong>Metas (não bloqueantes no MVP):</strong></p>
+<ul>
+<li>Cobertura global ≥ 70%</li>
+<li>Zero <code>any</code> explícito em código novo</li>
+<li>Bundle &lt; 300kB gzip</li>
+</ul>
+<h3 id="14.-etapa-0-%E2%80%94-setup-do-monorepo-(sprint-0)" tabindex="-1"><a class="header-anchor" href="#14.-etapa-0-%E2%80%94-setup-do-monorepo-(sprint-0)">#</a> 14. Etapa 0 — Setup do Monorepo (Sprint 0)</h3>
+<p>Nova etapa que <strong>precede</strong> todas as etapas do guia de implementação:</p>
+<pre class="hljs"><code>0.1  Criar estrutura de pastas
+0.2  Configurar Bun workspaces
+0.3  Migrar código web existente para apps/web/
+0.4  Criar pacotes internos (@sbf/*)
+0.5  tsconfig.base.json + extends
+0.6  ESLint 9 + Prettier
+0.7  Vitest
+0.8  Husky + lint-staged + commitlint
+0.9  supabase init
+0.10 .env.example + .gitignore
+0.11 .gitlab-ci.yml inicial
+0.12 Commit: chore: setup monorepo with Bun workspaces and CI/CD
+</code></pre>
+<h2 id="consequ%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#consequ%C3%AAncias">#</a> Consequências</h2>
+<h3 id="positivas" tabindex="-1"><a class="header-anchor" href="#positivas">#</a> Positivas</h3>
+<ul>
+<li>Projeto nasce com disciplina de engenharia e entrega contínua</li>
+<li>Migrações controladas — sem drift entre ambientes</li>
+<li>Tipos TypeScript sempre sincronizados com schema real</li>
+<li>Quality gates previnem regressões antes de merge</li>
+<li>Compartilhamento de código entre web e mobile sem publicação npm</li>
+<li>Auditabilidade total via histórico Git + pipeline</li>
+</ul>
+<h3 id="negativas-%2F-trade-offs" tabindex="-1"><a class="header-anchor" href="#negativas-%2F-trade-offs">#</a> Negativas / Trade-offs</h3>
+<ul>
+<li>Sprint 0 antes de qualquer feature — investimento inicial em infraestrutura</li>
+<li>Pipeline pode ficar lento conforme projeto cresce — mitigável com Turborepo e cache</li>
+<li>Supabase CLI sem integração nativa GitLab — requer manutenção manual dos scripts de CI</li>
+<li>Monorepo exige disciplina no gerenciamento de dependências</li>
+</ul>
+<h3 id="riscos-mitigados" tabindex="-1"><a class="header-anchor" href="#riscos-mitigados">#</a> Riscos Mitigados</h3>
+<ul>
+<li>Drift de schema entre ambientes → validação de tipos no CI</li>
+<li>Deploy acidental em produção → gate manual no pipeline</li>
+<li>Secrets vazados → variáveis masked/protected no GitLab</li>
+<li>Migração destrutiva sem controle → imutabilidade de migrações + flag BREAKING CHANGE</li>
+<li>Processo pesado matando velocidade → revisão trimestral do processo</li>
+</ul>
+<h2 id="rastreabilidade" tabindex="-1"><a class="header-anchor" href="#rastreabilidade">#</a> Rastreabilidade</h2>
+<table>
+<thead>
+<tr>
+<th>Decisão</th>
+<th>Referência</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deduplicação transação↔fatura</td>
+<td>ADR-001</td>
+</tr>
+<tr>
+<td>Norma consumption_metrics</td>
+<td>ADR-002</td>
+</tr>
+<tr>
+<td>Governança aliases</td>
+<td>ADR-003</td>
+</tr>
+<tr>
+<td>Edge Functions deploy</td>
+<td>ADR-003 (merge-suppliers, retroactive-supplier-association)</td>
+</tr>
+<tr>
+<td>Testes mandatórios</td>
+<td>Guia de implementação, Etapa 2</td>
+</tr>
+<tr>
+<td>Migrações SQL</td>
+<td>Guia de implementação, Etapa 1</td>
+</tr>
+</tbody>
+</table>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>

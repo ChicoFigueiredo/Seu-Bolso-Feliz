@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>001-guia-implementacao-passo-a-passo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 001-guia-implementacao-passo-a-passo</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        
+        <h1 id="guia-de-implementa%C3%A7%C3%A3o-passo-a-passo-%E2%80%94-dimens%C3%A3o-fornecedor" tabindex="-1"><a class="header-anchor" href="#guia-de-implementa%C3%A7%C3%A3o-passo-a-passo-%E2%80%94-dimens%C3%A3o-fornecedor">#</a> Guia de Implementação Passo a Passo — Dimensão Fornecedor</h1>
+<p><strong>Data:</strong> 2026-03-21
+<strong>Origem:</strong> Parecer Verônica (Seção 6 — Sequenciamento Recomendado)
+<strong>ADRs de referência:</strong></p>
+<ul>
+<li><code>ADR-001-deduplicacao-transacao-item-fatura.md</code></li>
+<li><code>ADR-002-norma-consumption-metrics.md</code></li>
+<li><code>ADR-003-governanca-aliases-fornecedor.md</code></li>
+<li><code>ADR-004-arquitetura-operacional-repositorio-cicd.md</code></li>
+</ul>
+<hr>
+<h2 id="pr%C3%A9-requisito%3A-etapa-0-%E2%80%94-setup-do-monorepo-(sprint-0)" tabindex="-1"><a class="header-anchor" href="#pr%C3%A9-requisito%3A-etapa-0-%E2%80%94-setup-do-monorepo-(sprint-0)">#</a> Pré-requisito: Etapa 0 — Setup do Monorepo (Sprint 0)</h2>
+<blockquote>
+<p><strong>⚠️ OBRIGATÓRIO:</strong> Antes de iniciar qualquer etapa abaixo, o monorepo deve estar configurado conforme a ADR-004 e o guia <code>002-guia-cicd-engenharia-operacional.md</code>. Isso inclui: Bun workspaces, estrutura <code>apps/</code> + <code>packages/</code>, ESLint, Vitest, Husky, Supabase init e <code>.gitlab-ci.yml</code>.</p>
+</blockquote>
+<hr>
+<h2 id="vis%C3%A3o-geral" tabindex="-1"><a class="header-anchor" href="#vis%C3%A3o-geral">#</a> Visão Geral</h2>
+<p>Este guia detalha as <strong>5 etapas de implementação</strong> da dimensão fornecedor, seguindo o sequenciamento recomendado pela Verônica. Cada etapa é sequencial e depende da anterior.</p>
+<pre class="hljs"><code>Etapa 0: Setup Monorepo + CI/CD  → Pré-requisito (ver 002-guia-cicd-engenharia-operacional.md)
+Etapa 1: Base Estrutural         → Banco pronto, vazio, com constraints
+Etapa 2: Contrato Comportamental → Testes escritos e falhando (red)
+Etapa 3: Núcleo Funcional        → CRUD, aliases, autocomplete, associações
+Etapa 4: Relatórios e Filtros    → Views, filtros compostos, home operacional
+Etapa 5: Recursos Avançados      → Métricas, merge, retroatividade, IA
+</code></pre>
+<h3 id="caminhos-no-monorepo" tabindex="-1"><a class="header-anchor" href="#caminhos-no-monorepo">#</a> Caminhos no Monorepo</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Caminho</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Migrações SQL</td>
+<td><code>supabase/migrations/</code></td>
+</tr>
+<tr>
+<td>Edge Functions</td>
+<td><code>supabase/functions/</code></td>
+</tr>
+<tr>
+<td>Testes de domínio</td>
+<td><code>__tests__/domain/</code> ou <code>packages/domain/src/__tests__/</code></td>
+</tr>
+<tr>
+<td>Testes de integração</td>
+<td><code>__tests__/integration/</code></td>
+</tr>
+<tr>
+<td>Componentes web (CRUD)</td>
+<td><code>apps/web/src/components/</code></td>
+</tr>
+<tr>
+<td>Páginas web</td>
+<td><code>apps/web/src/app/</code></td>
+</tr>
+<tr>
+<td>Tipos compartilhados</td>
+<td><code>packages/shared-types/src/</code></td>
+</tr>
+<tr>
+<td>Lógica de domínio</td>
+<td><code>packages/domain/src/</code></td>
+</tr>
+<tr>
+<td>Validação (Zod)</td>
+<td><code>packages/validation/src/</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="etapa-1-%E2%80%94-base-estrutural" tabindex="-1"><a class="header-anchor" href="#etapa-1-%E2%80%94-base-estrutural">#</a> Etapa 1 — Base Estrutural</h2>
+<p><strong>Objetivo:</strong> Criar toda a infraestrutura de banco de dados com migrations, RLS, índices e constraints.</p>
+<h3 id="1.1.-migrations-a-criar" tabindex="-1"><a class="header-anchor" href="#1.1.-migrations-a-criar">#</a> 1.1. Migrations a Criar</h3>
+<h4 id="migration-001%3A-tabelas-de-fornecedor" tabindex="-1"><a class="header-anchor" href="#migration-001%3A-tabelas-de-fornecedor">#</a> Migration 001: Tabelas de fornecedor</h4>
+<pre class="hljs"><code><span class="hljs-comment">-- suppliers</span>
+<span class="hljs-keyword">CREATE TABLE</span> suppliers (
+  id uuid <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id),
+  name text <span class="hljs-keyword">NOT NULL</span>,
+  trade_name text,
+  legal_name text,
+  document_number text,
+  type text <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">&#x27;company&#x27;</span>
+    <span class="hljs-keyword">CHECK</span> (type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;company&#x27;</span>, <span class="hljs-string">&#x27;individual&#x27;</span>, <span class="hljs-string">&#x27;government&#x27;</span>, <span class="hljs-string">&#x27;utility&#x27;</span>, <span class="hljs-string">&#x27;telecom&#x27;</span>, <span class="hljs-string">&#x27;saas&#x27;</span>, <span class="hljs-string">&#x27;platform&#x27;</span>, <span class="hljs-string">&#x27;other&#x27;</span>)),
+  website text,
+  contact_info jsonb,
+  notes text,
+  institution_id uuid <span class="hljs-keyword">REFERENCES</span> institutions(id),
+  is_active <span class="hljs-type">boolean</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-literal">true</span>,
+  display_order <span class="hljs-type">integer</span>,
+  created_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  updated_at timestamptz <span class="hljs-keyword">DEFAULT</span> now()
+);
+
+<span class="hljs-comment">-- supplier_aliases</span>
+<span class="hljs-keyword">CREATE TABLE</span> supplier_aliases (
+  id uuid <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id),
+  supplier_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> suppliers(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  alias_name text <span class="hljs-keyword">NOT NULL</span>,
+  alias_type text <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">&#x27;other&#x27;</span>
+    <span class="hljs-keyword">CHECK</span> (alias_type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;former_name&#x27;</span>, <span class="hljs-string">&#x27;abbreviation&#x27;</span>, <span class="hljs-string">&#x27;trade_name&#x27;</span>, <span class="hljs-string">&#x27;billing_name&#x27;</span>, <span class="hljs-string">&#x27;other&#x27;</span>)),
+  is_active <span class="hljs-type">boolean</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-literal">true</span>,
+  valid_from <span class="hljs-type">date</span>,
+  valid_until <span class="hljs-type">date</span>,
+  notes text,
+  created_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  updated_at timestamptz <span class="hljs-keyword">DEFAULT</span> now()
+);
+
+<span class="hljs-comment">-- supplier_contracts</span>
+<span class="hljs-keyword">CREATE TABLE</span> supplier_contracts (
+  id uuid <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id),
+  supplier_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> suppliers(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  contract_type text <span class="hljs-keyword">NOT NULL</span>
+    <span class="hljs-keyword">CHECK</span> (contract_type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;service&#x27;</span>, <span class="hljs-string">&#x27;subscription&#x27;</span>, <span class="hljs-string">&#x27;utility&#x27;</span>, <span class="hljs-string">&#x27;loan&#x27;</span>, <span class="hljs-string">&#x27;insurance&#x27;</span>, <span class="hljs-string">&#x27;maintenance&#x27;</span>, <span class="hljs-string">&#x27;other&#x27;</span>)),
+  identifier text,
+  label text,
+  is_active <span class="hljs-type">boolean</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-literal">true</span>,
+  start_date <span class="hljs-type">date</span>,
+  end_date <span class="hljs-type">date</span>,
+  metadata jsonb,
+  notes text,
+  created_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  updated_at timestamptz <span class="hljs-keyword">DEFAULT</span> now()
+);
+
+<span class="hljs-comment">-- consumption_metrics</span>
+<span class="hljs-keyword">CREATE TABLE</span> consumption_metrics (
+  id uuid <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id),
+  supplier_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> suppliers(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  supplier_contract_id uuid <span class="hljs-keyword">REFERENCES</span> supplier_contracts(id),
+  transaction_id uuid <span class="hljs-keyword">REFERENCES</span> transactions(id),
+  document_id uuid <span class="hljs-keyword">REFERENCES</span> documents(id),
+  reference_period_start <span class="hljs-type">date</span> <span class="hljs-keyword">NOT NULL</span>,
+  reference_period_end <span class="hljs-type">date</span> <span class="hljs-keyword">NOT NULL</span>,
+  metric_name text,
+  metric_unit text,
+  quantity <span class="hljs-type">numeric</span>(<span class="hljs-number">15</span>,<span class="hljs-number">4</span>),
+  unit_price <span class="hljs-type">numeric</span>(<span class="hljs-number">15</span>,<span class="hljs-number">6</span>),
+  subtotal <span class="hljs-type">numeric</span>(<span class="hljs-number">15</span>,<span class="hljs-number">2</span>),
+  metadata jsonb,
+  created_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  updated_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  <span class="hljs-comment">-- ADR-002: Constraint métrica vs atributo</span>
+  <span class="hljs-keyword">CONSTRAINT</span> chk_metric_or_attribute <span class="hljs-keyword">CHECK</span> (
+    (quantity <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metric_name <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metric_unit <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>)
+    <span class="hljs-keyword">OR</span>
+    (quantity <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">AND</span> metadata <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metadata<span class="hljs-operator">-</span><span class="hljs-operator">&gt;&gt;</span><span class="hljs-string">&#x27;type&#x27;</span> <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;attribute&#x27;</span>)
+  )
+);
+
+<span class="hljs-comment">-- supplier_tags (schema-only no MVP, sem UI)</span>
+<span class="hljs-keyword">CREATE TABLE</span> supplier_tags (
+  id uuid <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id),
+  supplier_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> suppliers(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  tag_id uuid <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> tags(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  created_at timestamptz <span class="hljs-keyword">DEFAULT</span> now(),
+  <span class="hljs-keyword">UNIQUE</span>(supplier_id, tag_id)
+);
+</code></pre>
+<h4 id="migration-002%3A-alterar-tabelas-existentes" tabindex="-1"><a class="header-anchor" href="#migration-002%3A-alterar-tabelas-existentes">#</a> Migration 002: Alterar tabelas existentes</h4>
+<pre class="hljs"><code><span class="hljs-comment">-- Adicionar supplier_id nas tabelas existentes</span>
+<span class="hljs-keyword">ALTER TABLE</span> transactions <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> supplier_id uuid <span class="hljs-keyword">REFERENCES</span> suppliers(id);
+<span class="hljs-keyword">ALTER TABLE</span> statement_items <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> supplier_id uuid <span class="hljs-keyword">REFERENCES</span> suppliers(id);
+<span class="hljs-keyword">ALTER TABLE</span> recurring_templates <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> supplier_id uuid <span class="hljs-keyword">REFERENCES</span> suppliers(id);
+<span class="hljs-keyword">ALTER TABLE</span> documents <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> supplier_id uuid <span class="hljs-keyword">REFERENCES</span> suppliers(id);
+<span class="hljs-keyword">ALTER TABLE</span> liabilities <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> supplier_id uuid <span class="hljs-keyword">REFERENCES</span> suppliers(id);
+
+<span class="hljs-comment">-- ADR-001: Campo origin_type em transactions</span>
+<span class="hljs-keyword">ALTER TABLE</span> transactions <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> origin_type text <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">&#x27;manual&#x27;</span>
+  <span class="hljs-keyword">CHECK</span> (origin_type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;manual&#x27;</span>, <span class="hljs-string">&#x27;import&#x27;</span>, <span class="hljs-string">&#x27;recurring&#x27;</span>, <span class="hljs-string">&#x27;statement_link&#x27;</span>));
+
+<span class="hljs-comment">-- ADR-001: UNIQUE index para vínculo 1:1 statement_item ↔ transaction</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">UNIQUE</span> INDEX idx_statement_items_transaction_id
+  <span class="hljs-keyword">ON</span> statement_items(transaction_id) <span class="hljs-keyword">WHERE</span> transaction_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>;
+</code></pre>
+<h4 id="migration-003%3A-%C3%ADndices" tabindex="-1"><a class="header-anchor" href="#migration-003%3A-%C3%ADndices">#</a> Migration 003: Índices</h4>
+<pre class="hljs"><code><span class="hljs-comment">-- Extensão trigram para busca fuzzy</span>
+<span class="hljs-keyword">CREATE</span> EXTENSION IF <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> pg_trgm;
+
+<span class="hljs-comment">-- Índices de FK</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_suppliers_user_id <span class="hljs-keyword">ON</span> suppliers(user_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_supplier_id <span class="hljs-keyword">ON</span> supplier_aliases(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_user_id <span class="hljs-keyword">ON</span> supplier_aliases(user_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_contracts_supplier_id <span class="hljs-keyword">ON</span> supplier_contracts(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_consumption_metrics_supplier_id <span class="hljs-keyword">ON</span> consumption_metrics(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_tags_supplier_id <span class="hljs-keyword">ON</span> supplier_tags(supplier_id);
+
+<span class="hljs-comment">-- ADR-003: Índices trigram para busca fuzzy</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_suppliers_name_trgm <span class="hljs-keyword">ON</span> suppliers <span class="hljs-keyword">USING</span> gin (name gin_trgm_ops);
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_trgm <span class="hljs-keyword">ON</span> supplier_aliases <span class="hljs-keyword">USING</span> gin (alias_name gin_trgm_ops);
+
+<span class="hljs-comment">-- Índice para resolução temporal de alias</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_resolve
+  <span class="hljs-keyword">ON</span> supplier_aliases(user_id, alias_name, valid_from, valid_until)
+  <span class="hljs-keyword">WHERE</span> is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>;
+
+<span class="hljs-comment">-- Índice supplier_id nas tabelas existentes</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_transactions_supplier_id <span class="hljs-keyword">ON</span> transactions(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_statement_items_supplier_id <span class="hljs-keyword">ON</span> statement_items(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_recurring_templates_supplier_id <span class="hljs-keyword">ON</span> recurring_templates(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_documents_supplier_id <span class="hljs-keyword">ON</span> documents(supplier_id);
+<span class="hljs-keyword">CREATE</span> INDEX idx_liabilities_supplier_id <span class="hljs-keyword">ON</span> liabilities(supplier_id);
+</code></pre>
+<h4 id="migration-004%3A-triggers-(adr-003)" tabindex="-1"><a class="header-anchor" href="#migration-004%3A-triggers-(adr-003)">#</a> Migration 004: Triggers (ADR-003)</h4>
+<pre class="hljs"><code><span class="hljs-comment">-- ADR-003: Trigger de unicidade temporal de alias</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> check_alias_uniqueness()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  IF <span class="hljs-keyword">EXISTS</span> (
+    <span class="hljs-keyword">SELECT</span> <span class="hljs-number">1</span> <span class="hljs-keyword">FROM</span> supplier_aliases sa
+    <span class="hljs-keyword">WHERE</span> sa.user_id <span class="hljs-operator">=</span> NEW.user_id
+      <span class="hljs-keyword">AND</span> sa.id <span class="hljs-operator">!=</span> <span class="hljs-built_in">COALESCE</span>(NEW.id, <span class="hljs-string">&#x27;00000000-0000-0000-0000-000000000000&#x27;</span>::uuid)
+      <span class="hljs-keyword">AND</span> <span class="hljs-built_in">LOWER</span>(sa.alias_name) <span class="hljs-operator">=</span> <span class="hljs-built_in">LOWER</span>(NEW.alias_name)
+      <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+      <span class="hljs-keyword">AND</span> (
+        (sa.valid_from <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> NEW.valid_until <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> sa.valid_from <span class="hljs-operator">&lt;=</span> NEW.valid_until)
+        <span class="hljs-keyword">AND</span>
+        (sa.valid_until <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> NEW.valid_from <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> sa.valid_until <span class="hljs-operator">&gt;=</span> NEW.valid_from)
+      )
+  ) <span class="hljs-keyword">THEN</span>
+    RAISE EXCEPTION <span class="hljs-string">&#x27;Alias &quot;%&quot; já existe para outro fornecedor no período informado&#x27;</span>, NEW.alias_name;
+  <span class="hljs-keyword">END</span> IF;
+  <span class="hljs-keyword">RETURN</span> <span class="hljs-keyword">NEW</span>;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_check_alias_uniqueness
+  BEFORE <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">OR</span> <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> supplier_aliases
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> check_alias_uniqueness();
+
+<span class="hljs-comment">-- ADR-003: Trigger de auto-alias em renomeação</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> auto_alias_on_rename()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  IF OLD.name <span class="hljs-keyword">IS</span> <span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">FROM</span> NEW.name <span class="hljs-keyword">THEN</span>
+    <span class="hljs-keyword">INSERT INTO</span> supplier_aliases (user_id, supplier_id, alias_name, alias_type, valid_until)
+    <span class="hljs-keyword">VALUES</span> (NEW.user_id, NEW.id, OLD.name, <span class="hljs-string">&#x27;former_name&#x27;</span>, NOW());
+  <span class="hljs-keyword">END</span> IF;
+  <span class="hljs-keyword">RETURN</span> <span class="hljs-keyword">NEW</span>;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_auto_alias_on_rename
+  BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> suppliers
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> auto_alias_on_rename();
+
+<span class="hljs-comment">-- Trigger updated_at para todas as tabelas novas</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> update_updated_at()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  NEW.updated_at <span class="hljs-operator">=</span> NOW();
+  <span class="hljs-keyword">RETURN</span> <span class="hljs-keyword">NEW</span>;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_suppliers_updated_at BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> suppliers
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> update_updated_at();
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_supplier_aliases_updated_at BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> supplier_aliases
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> update_updated_at();
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_supplier_contracts_updated_at BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> supplier_contracts
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> update_updated_at();
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_consumption_metrics_updated_at BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> consumption_metrics
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> update_updated_at();
+</code></pre>
+<h4 id="migration-005%3A-rls-policies" tabindex="-1"><a class="header-anchor" href="#migration-005%3A-rls-policies">#</a> Migration 005: RLS Policies</h4>
+<pre class="hljs"><code><span class="hljs-comment">-- Habilitar RLS</span>
+<span class="hljs-keyword">ALTER TABLE</span> suppliers ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+<span class="hljs-keyword">ALTER TABLE</span> supplier_aliases ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+<span class="hljs-keyword">ALTER TABLE</span> supplier_contracts ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+<span class="hljs-keyword">ALTER TABLE</span> consumption_metrics ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+<span class="hljs-keyword">ALTER TABLE</span> supplier_tags ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+
+<span class="hljs-comment">-- Policies: cada usuário vê apenas seus dados</span>
+<span class="hljs-keyword">CREATE</span> POLICY suppliers_user_policy <span class="hljs-keyword">ON</span> suppliers
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id) <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+
+<span class="hljs-keyword">CREATE</span> POLICY supplier_aliases_user_policy <span class="hljs-keyword">ON</span> supplier_aliases
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id) <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+
+<span class="hljs-keyword">CREATE</span> POLICY supplier_contracts_user_policy <span class="hljs-keyword">ON</span> supplier_contracts
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id) <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+
+<span class="hljs-keyword">CREATE</span> POLICY consumption_metrics_user_policy <span class="hljs-keyword">ON</span> consumption_metrics
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id) <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+
+<span class="hljs-keyword">CREATE</span> POLICY supplier_tags_user_policy <span class="hljs-keyword">ON</span> supplier_tags
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id) <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+</code></pre>
+<h3 id="1.2.-entreg%C3%A1vel" tabindex="-1"><a class="header-anchor" href="#1.2.-entreg%C3%A1vel">#</a> 1.2. Entregável</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-681958"><label class="task-list-item-label" for="task-item-681958"> Todas as 5 migrations aplicadas com sucesso no Supabase local</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-684685"><label class="task-list-item-label" for="task-item-684685"> RLS testado: usuário A não vê dados do usuário B</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7325851"><label class="task-list-item-label" for="task-item-7325851"> Triggers testados: unicidade temporal de alias, auto-alias em renomeação</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5956305"> Constraint <code>chk_metric_or_attribute</code><label class="task-list-item-label" for="task-item-5956305"> Constraint `chk_metric_or_attribute` testado com INSERT válido e inválido</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1748305"> UNIQUE INDEX <code>idx_statement_items_transaction_id</code><label class="task-list-item-label" for="task-item-1748305"> UNIQUE INDEX `idx_statement_items_transaction_id` testado</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1207338"> Extensão <code>pg_trgm</code><label class="task-list-item-label" for="task-item-1207338"> Extensão `pg_trgm` habilitada e índices trigram criados</label></li>
+</ul>
+<h3 id="1.3.-o-que-fazer-manualmente" tabindex="-1"><a class="header-anchor" href="#1.3.-o-que-fazer-manualmente">#</a> 1.3. O que Fazer Manualmente</h3>
+<ol>
+<li>
+<p><strong>Criar projeto Supabase local</strong> (se ainda não existe):</p>
+<pre class="hljs"><code>npx supabase init
+npx supabase start
+</code></pre>
+</li>
+<li>
+<p><strong>Criar os arquivos de migration</strong> no diretório <code>supabase/migrations/</code>:</p>
+<pre class="hljs"><code>npx supabase migration new create_supplier_tables
+npx supabase migration new alter_existing_tables_supplier
+npx supabase migration new create_supplier_indexes
+npx supabase migration new create_supplier_triggers
+npx supabase migration new create_supplier_rls
+</code></pre>
+</li>
+<li>
+<p><strong>Aplicar migrations:</strong></p>
+<pre class="hljs"><code>npx supabase db reset  <span class="hljs-comment"># aplica todas as migrations do zero</span>
+</code></pre>
+</li>
+<li>
+<p><strong>Verificar no Supabase Studio</strong> (localhost:54323):</p>
+<ul>
+<li>Tabelas criadas com colunas e tipos corretos</li>
+<li>RLS habilitado em todas as tabelas</li>
+<li>Triggers listados em cada tabela</li>
+</ul>
+</li>
+</ol>
+<h3 id="1.4.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#1.4.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o">#</a> 1.4. Critérios de Aceitação</h3>
+<ul>
+<li>Migration aplica sem erros</li>
+<li><code>INSERT</code> em <code>consumption_metrics</code> sem <code>quantity</code> nem <code>metadata.type='attribute'</code> → falha</li>
+<li><code>INSERT</code> de alias duplicado no mesmo período → falha (trigger)</li>
+<li><code>UPDATE</code> de <code>suppliers.name</code> → cria alias automático (trigger)</li>
+<li><code>SELECT</code> com <code>auth.uid()</code> diferente → retorna vazio (RLS)</li>
+</ul>
+<hr>
+<h2 id="etapa-2-%E2%80%94-contrato-comportamental" tabindex="-1"><a class="header-anchor" href="#etapa-2-%E2%80%94-contrato-comportamental">#</a> Etapa 2 — Contrato Comportamental</h2>
+<p><strong>Objetivo:</strong> Escrever TODOS os testes mandatórios como suíte de regressão. Os testes devem FALHAR (red) porque a implementação ainda não existe.</p>
+<h3 id="2.1.-testes-a-escrever" tabindex="-1"><a class="header-anchor" href="#2.1.-testes-a-escrever">#</a> 2.1. Testes a Escrever</h3>
+<h4 id="testes-de-dom%C3%ADnio%2Ffornecedor-(t18-t27-do-refino)" tabindex="-1"><a class="header-anchor" href="#testes-de-dom%C3%ADnio%2Ffornecedor-(t18-t27-do-refino)">#</a> Testes de Domínio/Fornecedor (T18-T27 do refino)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Teste</th>
+<th>Cenário</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T18</td>
+<td>CRUD fornecedor</td>
+<td>DADO novo fornecedor → QUANDO criar → ENTÃO persiste com name, type, document_number</td>
+</tr>
+<tr>
+<td>T19</td>
+<td>Alias com autocomplete</td>
+<td>DADO fornecedor “Neoenergia” com alias “CELPE” → QUANDO buscar “CEL” → ENTÃO retorna “Neoenergia”</td>
+</tr>
+<tr>
+<td>T20</td>
+<td>Merge de fornecedores</td>
+<td>DADO dois fornecedores A e B → QUANDO merge A→B → ENTÃO transações migram, A.is_active=false</td>
+</tr>
+<tr>
+<td>T21</td>
+<td>Fornecedor em recorrência</td>
+<td>DADO template com supplier_id → QUANDO gerar instâncias → ENTÃO instâncias herdam fornecedor</td>
+</tr>
+<tr>
+<td>T22</td>
+<td>Relatório por fornecedor</td>
+<td>DADO 3 transações para “Neoenergia” → QUANDO relatório → ENTÃO total correto, deduplicado</td>
+</tr>
+<tr>
+<td>T23</td>
+<td>Fornecedor na home</td>
+<td>DADO fornecedor com vencimentos próximos → QUANDO home → ENTÃO aparece com nome e valor</td>
+</tr>
+<tr>
+<td>T24</td>
+<td>Associação a documentos</td>
+<td>DADO documento (PDF conta de luz) → QUANDO associar a fornecedor → ENTÃO vínculo persiste</td>
+</tr>
+<tr>
+<td>T25</td>
+<td>Métricas de consumo</td>
+<td>DADO fornecedor energia → QUANDO registrar 320 kWh → ENTÃO métrica persiste com quantity/unit</td>
+</tr>
+<tr>
+<td>T26</td>
+<td>Histórico de métricas</td>
+<td>DADO métricas em 3 meses → QUANDO consultar período → ENTÃO retorna série temporal</td>
+</tr>
+<tr>
+<td>T27</td>
+<td>Deduplicação (revisada)</td>
+<td>DADO statement_item com transaction_id → QUANDO relatório → ENTÃO conta apenas UMA vez</td>
+</tr>
+</tbody>
+</table>
+<h4 id="testes-de-adr-001-(deduplica%C3%A7%C3%A3o)" tabindex="-1"><a class="header-anchor" href="#testes-de-adr-001-(deduplica%C3%A7%C3%A3o)">#</a> Testes de ADR-001 (Deduplicação)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Teste</th>
+<th>Cenário</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-DEDUP-01</td>
+<td>statement_item com txn vinculada</td>
+<td>Relatório conta APENAS a transaction</td>
+</tr>
+<tr>
+<td>T-DEDUP-02</td>
+<td>statement_item sem txn vinculada</td>
+<td>Relatório conta o statement_item</td>
+</tr>
+<tr>
+<td>T-DEDUP-03</td>
+<td>statement_payment excluído</td>
+<td>NUNCA aparece em soma de despesas</td>
+</tr>
+<tr>
+<td>T-DEDUP-04</td>
+<td>Mix vinculados + não vinculados</td>
+<td>Soma da view == soma esperada</td>
+</tr>
+</tbody>
+</table>
+<h4 id="testes-de-adr-002-(norma-de-m%C3%A9tricas)" tabindex="-1"><a class="header-anchor" href="#testes-de-adr-002-(norma-de-m%C3%A9tricas)">#</a> Testes de ADR-002 (Norma de Métricas)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Teste</th>
+<th>Cenário</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-METRIC-01</td>
+<td>Métrica válida</td>
+<td>quantity + unit → aceito</td>
+</tr>
+<tr>
+<td>T-METRIC-02</td>
+<td>Atributo válido</td>
+<td>NULL quantity + metadata type=attribute → aceito</td>
+</tr>
+<tr>
+<td>T-METRIC-03</td>
+<td>Sem quantity nem metadata</td>
+<td>→ rejeitado pelo constraint</td>
+</tr>
+<tr>
+<td>T-METRIC-04</td>
+<td>quantity sem unit</td>
+<td>→ rejeitado pelo constraint</td>
+</tr>
+<tr>
+<td>T-METRIC-05</td>
+<td>Série temporal de atributos</td>
+<td>Bandeira por mês retorna corretamente</td>
+</tr>
+</tbody>
+</table>
+<h4 id="testes-de-adr-003-(governan%C3%A7a-de-aliases)" tabindex="-1"><a class="header-anchor" href="#testes-de-adr-003-(governan%C3%A7a-de-aliases)">#</a> Testes de ADR-003 (Governança de Aliases)</h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Teste</th>
+<th>Cenário</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-ALIAS-01</td>
+<td>Alias duplicado mesmo período</td>
+<td>→ rejeitado</td>
+</tr>
+<tr>
+<td>T-ALIAS-02</td>
+<td>Alias duplicado períodos diferentes</td>
+<td>→ aceito</td>
+</tr>
+<tr>
+<td>T-ALIAS-03</td>
+<td>Alias inativo em resolução</td>
+<td>→ não encontra</td>
+</tr>
+<tr>
+<td>T-ALIAS-04</td>
+<td>Auto-alias em renomeação</td>
+<td>→ cria former_name</td>
+</tr>
+<tr>
+<td>T-ALIAS-05</td>
+<td>Merge migra referências</td>
+<td>→ todas as tabelas migradas</td>
+</tr>
+<tr>
+<td>T-ALIAS-06</td>
+<td>Merge não deleta absorvido</td>
+<td>→ is_active = false</td>
+</tr>
+<tr>
+<td>T-ALIAS-07</td>
+<td>Merge registra audit_log</td>
+<td>→ log completo</td>
+</tr>
+<tr>
+<td>T-ALIAS-08</td>
+<td>Busca fuzzy trigram</td>
+<td>→ encontra por alias ou nome</td>
+</tr>
+<tr>
+<td>T-ALIAS-09</td>
+<td>Resolução temporal</td>
+<td>Alias expirado não resolve</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2.2.-estrutura-de-arquivos-de-teste" tabindex="-1"><a class="header-anchor" href="#2.2.-estrutura-de-arquivos-de-teste">#</a> 2.2. Estrutura de Arquivos de Teste</h3>
+<pre class="hljs"><code>src/
+  __tests__/
+    domain/
+      supplier.test.ts       # T18-T24
+      supplier-metrics.test.ts # T25-T26, T-METRIC-01 a 05
+      deduplication.test.ts    # T27, T-DEDUP-01 a 04
+      alias-governance.test.ts # T-ALIAS-01 a 09
+</code></pre>
+<h3 id="2.3.-entreg%C3%A1vel" tabindex="-1"><a class="header-anchor" href="#2.3.-entreg%C3%A1vel">#</a> 2.3. Entregável</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3624085"><label class="task-list-item-label" for="task-item-3624085"> 27+ testes escritos e rodando (todos FALHANDO — red)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6427770"><label class="task-list-item-label" for="task-item-6427770"> Suíte organizada por domínio (supplier, metrics, dedup, alias)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-892417"> Cada teste tem DADO/QUANDO/ENTÃO documentado no <code>describe</code>/<label class="task-list-item-label" for="task-item-892417"> Cada teste tem DADO/QUANDO/ENTÃO documentado no `describe`/`it`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8945273"><label class="task-list-item-label" for="task-item-8945273"> Nenhum teste depende de outro (isolamento)</label></li>
+</ul>
+<h3 id="2.4.-o-que-fazer-manualmente" tabindex="-1"><a class="header-anchor" href="#2.4.-o-que-fazer-manualmente">#</a> 2.4. O que Fazer Manualmente</h3>
+<ol>
+<li>
+<p><strong>Criar estrutura de diretórios de teste:</strong></p>
+<pre class="hljs"><code><span class="hljs-built_in">mkdir</span> -p __tests__/domain
+<span class="hljs-built_in">mkdir</span> -p __tests__/integration
+</code></pre>
+<blockquote>
+<p><strong>Nota:</strong> No monorepo, os testes de domínio ficam em <code>__tests__/domain/</code> (root) ou <code>packages/domain/src/__tests__/</code>. Os testes de integração (Supabase) ficam em <code>__tests__/integration/</code>.</p>
+</blockquote>
+</li>
+<li>
+<p><strong>Configurar Vitest</strong> (se não configurado):</p>
+<pre class="hljs"><code>bun add -d vitest @vitest/coverage-v8
+</code></pre>
+<p>Adicionar em <code>package.json</code>:</p>
+<pre class="hljs"><code><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;scripts&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;test&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;vitest run&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;test:watch&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;vitest&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+</li>
+<li>
+<p><strong>Escrever os testes</strong> seguindo a tabela acima. Cada arquivo de teste importa do módulo que será criado na Etapa 3.</p>
+</li>
+<li>
+<p><strong>Rodar e confirmar que TODOS falham:</strong></p>
+<pre class="hljs"><code>bun run <span class="hljs-built_in">test</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="2.5.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.5.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o">#</a> 2.5. Critérios de Aceitação</h3>
+<ul>
+<li>Todos os testes compilam sem erro de sintaxe</li>
+<li>Todos os testes FALHAM (red) — nenhum passa</li>
+<li>A suíte cobre todos os cenários listados nas tabelas acima</li>
+<li>Os testes são reproduzíveis e isolados</li>
+</ul>
+<hr>
+<h2 id="etapa-3-%E2%80%94-n%C3%BAcleo-funcional-de-fornecedor" tabindex="-1"><a class="header-anchor" href="#etapa-3-%E2%80%94-n%C3%BAcleo-funcional-de-fornecedor">#</a> Etapa 3 — Núcleo Funcional de Fornecedor</h2>
+<p><strong>Objetivo:</strong> Implementar CRUD, aliases, autocomplete e associações até que os testes T18-T24 passem.</p>
+<h3 id="3.1.-funcionalidades-a-implementar" tabindex="-1"><a class="header-anchor" href="#3.1.-funcionalidades-a-implementar">#</a> 3.1. Funcionalidades a Implementar</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Feature</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.1.1</td>
+<td>CRUD Supplier</td>
+<td>Criar, ler, atualizar, desativar fornecedor</td>
+</tr>
+<tr>
+<td>3.1.2</td>
+<td>CRUD Alias</td>
+<td>Criar, ler, atualizar, desativar alias (com validação temporal)</td>
+</tr>
+<tr>
+<td>3.1.3</td>
+<td>Autocomplete</td>
+<td>Busca por nome + alias com trigram</td>
+</tr>
+<tr>
+<td>3.1.4</td>
+<td>Associar a transação</td>
+<td>Campo supplier_id em form de transação</td>
+</tr>
+<tr>
+<td>3.1.5</td>
+<td>Associar a recorrência</td>
+<td>Campo supplier_id em template recorrente</td>
+</tr>
+<tr>
+<td>3.1.6</td>
+<td>Associar a documento</td>
+<td>Campo supplier_id em upload de documento</td>
+</tr>
+<tr>
+<td>3.1.7</td>
+<td>CRUD Contrato</td>
+<td>Criar, ler, atualizar contratos de fornecedor</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3.2.-api-endpoints-(supabase-client)" tabindex="-1"><a class="header-anchor" href="#3.2.-api-endpoints-(supabase-client)">#</a> 3.2. API Endpoints (Supabase Client)</h3>
+<pre class="hljs"><code><span class="hljs-comment">// Exemplos de chamadas via supabase-js</span>
+
+<span class="hljs-comment">// 3.1.1 CRUD Supplier</span>
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&#x27;suppliers&#x27;</span>).<span class="hljs-title function_">insert</span>({ name, <span class="hljs-keyword">type</span>, ... })
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&#x27;suppliers&#x27;</span>).<span class="hljs-title function_">select</span>(<span class="hljs-string">&#x27;*&#x27;</span>).<span class="hljs-title function_">eq</span>(<span class="hljs-string">&#x27;is_active&#x27;</span>, <span class="hljs-literal">true</span>)
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&#x27;suppliers&#x27;</span>).<span class="hljs-title function_">update</span>({ name }).<span class="hljs-title function_">eq</span>(<span class="hljs-string">&#x27;id&#x27;</span>, id)
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&#x27;suppliers&#x27;</span>).<span class="hljs-title function_">update</span>({ <span class="hljs-attr">is_active</span>: <span class="hljs-literal">false</span> }).<span class="hljs-title function_">eq</span>(<span class="hljs-string">&#x27;id&#x27;</span>, id)
+
+<span class="hljs-comment">// 3.1.2 CRUD Alias</span>
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&#x27;supplier_aliases&#x27;</span>).<span class="hljs-title function_">insert</span>({ supplier_id, alias_name, ... })
+
+<span class="hljs-comment">// 3.1.3 Autocomplete (via RPC ou query combinada)</span>
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">rpc</span>(<span class="hljs-string">&#x27;search_suppliers&#x27;</span>, { <span class="hljs-attr">query</span>: <span class="hljs-string">&#x27;CEL&#x27;</span>, <span class="hljs-attr">limit</span>: <span class="hljs-number">10</span> })
+</code></pre>
+<h3 id="3.3.-componentes-de-ui" tabindex="-1"><a class="header-anchor" href="#3.3.-componentes-de-ui">#</a> 3.3. Componentes de UI</h3>
+<table>
+<thead>
+<tr>
+<th>Componente</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SupplierForm</code></td>
+<td>Form de criação/edição de fornecedor</td>
+</tr>
+<tr>
+<td><code>SupplierList</code></td>
+<td>Lista de fornecedores com filtros</td>
+</tr>
+<tr>
+<td><code>SupplierAutocomplete</code></td>
+<td>Input com autocomplete por nome/alias</td>
+</tr>
+<tr>
+<td><code>AliasList</code></td>
+<td>Lista de aliases de um fornecedor</td>
+</tr>
+<tr>
+<td><code>AliasForm</code></td>
+<td>Form de criação de alias</td>
+</tr>
+<tr>
+<td><code>ContractList</code></td>
+<td>Lista de contratos de um fornecedor</td>
+</tr>
+<tr>
+<td><code>ContractForm</code></td>
+<td>Form de criação/edição de contrato</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3.4.-entreg%C3%A1vel" tabindex="-1"><a class="header-anchor" href="#3.4.-entreg%C3%A1vel">#</a> 3.4. Entregável</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4133132"><label class="task-list-item-label" for="task-item-4133132"> CRUD de fornecedor funcional (api + UI)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2667065"><label class="task-list-item-label" for="task-item-2667065"> CRUD de alias funcional (api + UI)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2337369"><label class="task-list-item-label" for="task-item-2337369"> Autocomplete de fornecedor por nome + alias (trigram)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8760102"><label class="task-list-item-label" for="task-item-8760102"> Associação de supplier_id em transações (form atualizado)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-802172"><label class="task-list-item-label" for="task-item-802172"> Associação de supplier_id em templates recorrentes (form atualizado)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9640037"><label class="task-list-item-label" for="task-item-9640037"> Associação de supplier_id em documentos (form atualizado)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5349249"><label class="task-list-item-label" for="task-item-5349249"> Testes T18, T19, T21, T23, T24 passando (green)</label></li>
+</ul>
+<h3 id="3.5.-o-que-fazer-manualmente" tabindex="-1"><a class="header-anchor" href="#3.5.-o-que-fazer-manualmente">#</a> 3.5. O que Fazer Manualmente</h3>
+<ol>
+<li>
+<p><strong>Criar RPC para autocomplete</strong> no Supabase:</p>
+<pre class="hljs"><code><span class="hljs-comment">-- Em supabase/migrations/</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> search_suppliers(search_query text, result_limit <span class="hljs-type">int</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-number">10</span>)
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TABLE</span>(id uuid, name text, match_type text, match_score <span class="hljs-type">real</span>) <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  <span class="hljs-keyword">RETURN</span> QUERY
+  <span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">DISTINCT</span> s.id, s.name,
+    <span class="hljs-keyword">CASE</span>
+      <span class="hljs-keyword">WHEN</span> <span class="hljs-built_in">LOWER</span>(s.name) <span class="hljs-operator">=</span> <span class="hljs-built_in">LOWER</span>(search_query) <span class="hljs-keyword">THEN</span> <span class="hljs-string">&#x27;exact_name&#x27;</span>
+      <span class="hljs-keyword">WHEN</span> s.name ILIKE search_query <span class="hljs-operator">||</span> <span class="hljs-string">&#x27;%&#x27;</span> <span class="hljs-keyword">THEN</span> <span class="hljs-string">&#x27;prefix_name&#x27;</span>
+      <span class="hljs-keyword">WHEN</span> s.name <span class="hljs-operator">%</span> search_query <span class="hljs-keyword">THEN</span> <span class="hljs-string">&#x27;fuzzy_name&#x27;</span>
+      <span class="hljs-keyword">ELSE</span> <span class="hljs-string">&#x27;fuzzy_alias&#x27;</span>
+    <span class="hljs-keyword">END</span> <span class="hljs-keyword">AS</span> match_type,
+    GREATEST(
+      similarity(s.name, search_query),
+      <span class="hljs-built_in">COALESCE</span>((<span class="hljs-keyword">SELECT</span> <span class="hljs-built_in">MAX</span>(similarity(sa.alias_name, search_query))
+        <span class="hljs-keyword">FROM</span> supplier_aliases sa
+        <span class="hljs-keyword">WHERE</span> sa.supplier_id <span class="hljs-operator">=</span> s.id <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>), <span class="hljs-number">0</span>)
+    ) <span class="hljs-keyword">AS</span> match_score
+  <span class="hljs-keyword">FROM</span> suppliers s
+  <span class="hljs-keyword">WHERE</span> s.user_id <span class="hljs-operator">=</span> auth.uid() <span class="hljs-keyword">AND</span> s.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+    <span class="hljs-keyword">AND</span> (
+      s.name <span class="hljs-operator">%</span> search_query
+      <span class="hljs-keyword">OR</span> s.name ILIKE search_query <span class="hljs-operator">||</span> <span class="hljs-string">&#x27;%&#x27;</span>
+      <span class="hljs-keyword">OR</span> <span class="hljs-keyword">EXISTS</span> (
+        <span class="hljs-keyword">SELECT</span> <span class="hljs-number">1</span> <span class="hljs-keyword">FROM</span> supplier_aliases sa
+        <span class="hljs-keyword">WHERE</span> sa.supplier_id <span class="hljs-operator">=</span> s.id <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+          <span class="hljs-keyword">AND</span> (sa.alias_name <span class="hljs-operator">%</span> search_query <span class="hljs-keyword">OR</span> sa.alias_name ILIKE search_query <span class="hljs-operator">||</span> <span class="hljs-string">&#x27;%&#x27;</span>)
+      )
+    )
+  <span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> match_score <span class="hljs-keyword">DESC</span>
+  LIMIT result_limit;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql SECURITY DEFINER;
+</code></pre>
+</li>
+<li>
+<p><strong>Criar componentes de UI</strong> na pasta <code>apps/web/src/components/supplier/</code></p>
+</li>
+<li>
+<p><strong>Atualizar forms existentes</strong> (transaction, recurring_template, document) para incluir <code>SupplierAutocomplete</code></p>
+</li>
+<li>
+<p><strong>Rodar testes:</strong></p>
+<pre class="hljs"><code>bun run <span class="hljs-built_in">test</span> -- --grep <span class="hljs-string">&quot;T18|T19|T21|T23|T24&quot;</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="3.6.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#3.6.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o">#</a> 3.6. Critérios de Aceitação</h3>
+<ul>
+<li>Testes T18, T19, T21, T23, T24 passando</li>
+<li>Testes T-ALIAS-01 a T-ALIAS-04, T-ALIAS-08, T-ALIAS-09 passando</li>
+<li>Form de transação tem campo de fornecedor com autocomplete</li>
+<li>Form de template recorrente tem campo de fornecedor</li>
+<li>Upload de documento permite associar fornecedor</li>
+</ul>
+<hr>
+<h2 id="etapa-4-%E2%80%94-relat%C3%B3rios-e-filtros" tabindex="-1"><a class="header-anchor" href="#etapa-4-%E2%80%94-relat%C3%B3rios-e-filtros">#</a> Etapa 4 — Relatórios e Filtros</h2>
+<p><strong>Objetivo:</strong> Implementar view de deduplicação, relatório por fornecedor, filtros compostos e presença do fornecedor na home.</p>
+<h3 id="4.1.-funcionalidades-a-implementar" tabindex="-1"><a class="header-anchor" href="#4.1.-funcionalidades-a-implementar">#</a> 4.1. Funcionalidades a Implementar</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Feature</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.1.1</td>
+<td>View deduplicação</td>
+<td><code>v_expenses_deduplicated</code> no banco</td>
+</tr>
+<tr>
+<td>4.1.2</td>
+<td>Relatório por fornecedor</td>
+<td>Gastos agrupados por supplier_id</td>
+</tr>
+<tr>
+<td>4.1.3</td>
+<td>Filtros compostos</td>
+<td>Fornecedor × categoria × tag × período × prioridade</td>
+</tr>
+<tr>
+<td>4.1.4</td>
+<td>Fornecedor na home</td>
+<td>Nome nos itens da fila, top fornecedores</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4.2.-view-sql" tabindex="-1"><a class="header-anchor" href="#4.2.-view-sql">#</a> 4.2. View SQL</h3>
+<pre class="hljs"><code><span class="hljs-comment">-- Migration: create_dedup_view</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> v_expenses_deduplicated <span class="hljs-keyword">AS</span>
+<span class="hljs-comment">-- statement_items SEM transação vinculada</span>
+<span class="hljs-keyword">SELECT</span>
+  si.id <span class="hljs-keyword">AS</span> canonical_id,
+  <span class="hljs-string">&#x27;statement_item&#x27;</span> <span class="hljs-keyword">AS</span> source_type,
+  si.user_id,
+  si.amount,
+  si.description,
+  si.supplier_id,
+  <span class="hljs-keyword">NULL</span>::uuid <span class="hljs-keyword">AS</span> category_id,
+  <span class="hljs-keyword">NULL</span>::text <span class="hljs-keyword">AS</span> priority,
+  si.transaction_date <span class="hljs-keyword">AS</span> event_date,
+  <span class="hljs-keyword">NULL</span>::<span class="hljs-type">date</span> <span class="hljs-keyword">AS</span> competence_date,
+  <span class="hljs-keyword">NULL</span>::uuid <span class="hljs-keyword">AS</span> financial_period_id,
+  si.statement_cycle_id
+<span class="hljs-keyword">FROM</span> statement_items si
+<span class="hljs-keyword">WHERE</span> si.transaction_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span>
+
+<span class="hljs-keyword">UNION</span> <span class="hljs-keyword">ALL</span>
+
+<span class="hljs-comment">-- transactions de despesa (incluindo vinculadas a statement_items)</span>
+<span class="hljs-keyword">SELECT</span>
+  t.id <span class="hljs-keyword">AS</span> canonical_id,
+  <span class="hljs-string">&#x27;transaction&#x27;</span> <span class="hljs-keyword">AS</span> source_type,
+  t.user_id,
+  t.amount,
+  t.description,
+  t.supplier_id,
+  t.category_id,
+  t.priority,
+  t.event_date,
+  t.competence_date,
+  t.financial_period_id,
+  t.statement_cycle_id
+<span class="hljs-keyword">FROM</span> transactions t
+<span class="hljs-keyword">WHERE</span> t.type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;expense&#x27;</span>, <span class="hljs-string">&#x27;fee&#x27;</span>, <span class="hljs-string">&#x27;interest_charge&#x27;</span>);
+</code></pre>
+<h3 id="4.3.-componentes-de-ui" tabindex="-1"><a class="header-anchor" href="#4.3.-componentes-de-ui">#</a> 4.3. Componentes de UI</h3>
+<table>
+<thead>
+<tr>
+<th>Componente</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SupplierReport</code></td>
+<td>Tabela/gráfico de gastos por fornecedor</td>
+</tr>
+<tr>
+<td><code>SupplierFilter</code></td>
+<td>Dropdown de filtro por fornecedor</td>
+</tr>
+<tr>
+<td><code>CompositeFilter</code></td>
+<td>Barra de filtros: fornecedor + categoria + tag + período</td>
+</tr>
+<tr>
+<td><code>HomeSupplierBadge</code></td>
+<td>Badge com nome do fornecedor em cada item da fila da home</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4.4.-entreg%C3%A1vel" tabindex="-1"><a class="header-anchor" href="#4.4.-entreg%C3%A1vel">#</a> 4.4. Entregável</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-370611"> View <code>v_expenses_deduplicated</code><label class="task-list-item-label" for="task-item-370611"> View `v_expenses_deduplicated` criada no banco</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-501287"><label class="task-list-item-label" for="task-item-501287"> Relatório de gastos por fornecedor funcional</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1117308"><label class="task-list-item-label" for="task-item-1117308"> Filtro por fornecedor nos relatórios existentes</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6306256"><label class="task-list-item-label" for="task-item-6306256"> Filtros compostos (fornecedor × categoria × tag × período)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-53172"><label class="task-list-item-label" for="task-item-53172"> Nome do fornecedor visível nos itens da home operacional</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5676920"><label class="task-list-item-label" for="task-item-5676920"> Testes T22, T27 passando (green)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1498616"><label class="task-list-item-label" for="task-item-1498616"> Testes T-DEDUP-01 a T-DEDUP-04 passando (green)</label></li>
+</ul>
+<h3 id="4.5.-o-que-fazer-manualmente" tabindex="-1"><a class="header-anchor" href="#4.5.-o-que-fazer-manualmente">#</a> 4.5. O que Fazer Manualmente</h3>
+<ol>
+<li>
+<p><strong>Criar migration</strong> para a view:</p>
+<pre class="hljs"><code>npx supabase migration new create_expenses_dedup_view
+</code></pre>
+</li>
+<li>
+<p><strong>Criar componentes</strong> em <code>src/components/reports/</code></p>
+</li>
+<li>
+<p><strong>Atualizar home operacional</strong> para exibir <code>supplier.name</code> em cada item</p>
+</li>
+<li>
+<p><strong>Testar manualmente:</strong> Criar cenário com:</p>
+<ul>
+<li>2 statement_items sem transaction_id</li>
+<li>1 statement_item COM transaction_id (vinculado)</li>
+<li>1 transaction manual (sem statement_item)</li>
+<li>Verificar: relatório mostra 4 itens, não 5</li>
+</ul>
+</li>
+<li>
+<p><strong>Rodar testes:</strong></p>
+<pre class="hljs"><code>bun run <span class="hljs-built_in">test</span> -- --grep <span class="hljs-string">&quot;T22|T27|DEDUP&quot;</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="4.6.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#4.6.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o">#</a> 4.6. Critérios de Aceitação</h3>
+<ul>
+<li>View retorna resultados corretos (sem duplicação)</li>
+<li>Relatório por fornecedor agrupa e totaliza corretamente</li>
+<li>Filtro por fornecedor funciona sozinho e combinado com outros filtros</li>
+<li>Home mostra nome do fornecedor em itens relevantes</li>
+<li>Todos os testes de deduplicação passando</li>
+</ul>
+<hr>
+<h2 id="etapa-5-%E2%80%94-recursos-avan%C3%A7ados" tabindex="-1"><a class="header-anchor" href="#etapa-5-%E2%80%94-recursos-avan%C3%A7ados">#</a> Etapa 5 — Recursos Avançados</h2>
+<p><strong>Objetivo:</strong> Implementar métricas de consumo, associação retroativa, merge de fornecedores, e view materializada.</p>
+<h3 id="5.1.-funcionalidades-a-implementar" tabindex="-1"><a class="header-anchor" href="#5.1.-funcionalidades-a-implementar">#</a> 5.1. Funcionalidades a Implementar</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Feature</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5.1.1</td>
+<td>CRUD métricas</td>
+<td>Registrar, listar, editar métricas de consumo</td>
+</tr>
+<tr>
+<td>5.1.2</td>
+<td>Associação retroativa</td>
+<td>Sugerir fornecedor para transações antigas por alias</td>
+</tr>
+<tr>
+<td>5.1.3</td>
+<td>Merge atômico</td>
+<td>Edge Function para merge de fornecedores</td>
+</tr>
+<tr>
+<td>5.1.4</td>
+<td>View materializada</td>
+<td><code>mv_supplier_spending</code> para performance</td>
+</tr>
+<tr>
+<td>5.1.5</td>
+<td>Enriquecer audit</td>
+<td>Logs detalhados de todas operações de fornecedor</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5.2.-edge-function%3A-merge-de-fornecedores" tabindex="-1"><a class="header-anchor" href="#5.2.-edge-function%3A-merge-de-fornecedores">#</a> 5.2. Edge Function: Merge de Fornecedores</h3>
+<p>Criar em <code>supabase/functions/merge-suppliers/index.ts</code>:</p>
+<pre class="hljs"><code><span class="hljs-keyword">import</span> { createClient } <span class="hljs-keyword">from</span> <span class="hljs-string">&quot;@supabase/supabase-js&quot;</span>;
+
+<span class="hljs-title class_">Deno</span>.<span class="hljs-title function_">serve</span>(<span class="hljs-title function_">async</span> (req) =&gt; {
+  <span class="hljs-keyword">const</span> { source_supplier_id, target_supplier_id } = <span class="hljs-keyword">await</span> req.<span class="hljs-title function_">json</span>();
+
+  <span class="hljs-comment">// Usar service_role_key para bypass de RLS</span>
+  <span class="hljs-keyword">const</span> supabase = <span class="hljs-title function_">createClient</span>(
+    <span class="hljs-title class_">Deno</span>.<span class="hljs-property">env</span>.<span class="hljs-title function_">get</span>(<span class="hljs-string">&quot;SUPABASE_URL&quot;</span>)!,
+    <span class="hljs-title class_">Deno</span>.<span class="hljs-property">env</span>.<span class="hljs-title function_">get</span>(<span class="hljs-string">&quot;SUPABASE_SERVICE_ROLE_KEY&quot;</span>)!,
+  );
+
+  <span class="hljs-comment">// Validar que ambos pertencem ao mesmo user_id</span>
+  <span class="hljs-comment">// Executar as 8 etapas em transação (via SQL raw)</span>
+  <span class="hljs-comment">// Registrar no audit_log</span>
+  <span class="hljs-comment">// Retornar resultado com contagem de migrações</span>
+});
+</code></pre>
+<h3 id="5.3.-edge-function%3A-associa%C3%A7%C3%A3o-retroativa" tabindex="-1"><a class="header-anchor" href="#5.3.-edge-function%3A-associa%C3%A7%C3%A3o-retroativa">#</a> 5.3. Edge Function: Associação Retroativa</h3>
+<p>Criar em <code>supabase/functions/retroactive-supplier-association/index.ts</code>:</p>
+<pre class="hljs"><code><span class="hljs-comment">// Buscar transações sem supplier_id</span>
+<span class="hljs-comment">// Para cada, verificar se description tem match com aliases existentes</span>
+<span class="hljs-comment">// Retornar lista de candidatos para confirmação humana</span>
+<span class="hljs-comment">// Usuário confirma em lote ou individualmente</span>
+<span class="hljs-comment">// Aplicar atualizações</span>
+</code></pre>
+<h3 id="5.4.-view-materializada" tabindex="-1"><a class="header-anchor" href="#5.4.-view-materializada">#</a> 5.4. View Materializada</h3>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> MATERIALIZED <span class="hljs-keyword">VIEW</span> mv_supplier_spending <span class="hljs-keyword">AS</span>
+<span class="hljs-keyword">SELECT</span>
+  v.user_id,
+  v.supplier_id,
+  s.name <span class="hljs-keyword">AS</span> supplier_name,
+  s.type <span class="hljs-keyword">AS</span> supplier_type,
+  date_trunc(<span class="hljs-string">&#x27;month&#x27;</span>, v.event_date) <span class="hljs-keyword">AS</span> <span class="hljs-keyword">month</span>,
+  <span class="hljs-built_in">COUNT</span>(<span class="hljs-operator">*</span>) <span class="hljs-keyword">AS</span> transaction_count,
+  <span class="hljs-built_in">SUM</span>(v.amount) <span class="hljs-keyword">AS</span> total_amount,
+  <span class="hljs-built_in">AVG</span>(v.amount) <span class="hljs-keyword">AS</span> avg_amount
+<span class="hljs-keyword">FROM</span> v_expenses_deduplicated v
+<span class="hljs-keyword">JOIN</span> suppliers s <span class="hljs-keyword">ON</span> s.id <span class="hljs-operator">=</span> v.supplier_id
+<span class="hljs-keyword">WHERE</span> v.supplier_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>
+<span class="hljs-keyword">GROUP</span> <span class="hljs-keyword">BY</span> v.user_id, v.supplier_id, s.name, s.type, date_trunc(<span class="hljs-string">&#x27;month&#x27;</span>, v.event_date);
+
+<span class="hljs-comment">-- Refresh policy (via cron ou Edge Function)</span>
+<span class="hljs-comment">-- REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supplier_spending;</span>
+</code></pre>
+<h3 id="5.5.-componentes-de-ui" tabindex="-1"><a class="header-anchor" href="#5.5.-componentes-de-ui">#</a> 5.5. Componentes de UI</h3>
+<table>
+<thead>
+<tr>
+<th>Componente</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MetricsForm</code></td>
+<td>Form para registrar métrica/atributo de consumo</td>
+</tr>
+<tr>
+<td><code>MetricsTimeline</code></td>
+<td>Série temporal de métricas por fornecedor</td>
+</tr>
+<tr>
+<td><code>MergeSupplierDialog</code></td>
+<td>Diálogo de merge com preview de impacto</td>
+</tr>
+<tr>
+<td><code>RetroactiveAssociationList</code></td>
+<td>Lista de sugestões para associação retroativa</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5.6.-entreg%C3%A1vel" tabindex="-1"><a class="header-anchor" href="#5.6.-entreg%C3%A1vel">#</a> 5.6. Entregável</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5735649"><label class="task-list-item-label" for="task-item-5735649"> CRUD de métricas funcional com constraint validada</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5312729"><label class="task-list-item-label" for="task-item-5312729"> Edge Function de merge implantada e testada</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7071059"><label class="task-list-item-label" for="task-item-7071059"> Edge Function de associação retroativa implantada</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1622178"><label class="task-list-item-label" for="task-item-1622178"> View materializada criada com refresh configurado</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7018294"><label class="task-list-item-label" for="task-item-7018294"> Testes T25, T26 passando (green)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6699533"><label class="task-list-item-label" for="task-item-6699533"> Testes T-METRIC-01 a T-METRIC-05 passando (green)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5929412"><label class="task-list-item-label" for="task-item-5929412"> Testes T20, T-ALIAS-05, T-ALIAS-06, T-ALIAS-07 passando (green)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5916897"><label class="task-list-item-label" for="task-item-5916897"> TODOS os testes passando (green) — suíte completa</label></li>
+</ul>
+<h3 id="5.7.-o-que-fazer-manualmente" tabindex="-1"><a class="header-anchor" href="#5.7.-o-que-fazer-manualmente">#</a> 5.7. O que Fazer Manualmente</h3>
+<ol>
+<li>
+<p><strong>Criar Edge Functions:</strong></p>
+<pre class="hljs"><code>npx supabase <span class="hljs-built_in">functions</span> new merge-suppliers
+npx supabase <span class="hljs-built_in">functions</span> new retroactive-supplier-association
+</code></pre>
+</li>
+<li>
+<p><strong>Deploy Edge Functions:</strong></p>
+<pre class="hljs"><code>npx supabase <span class="hljs-built_in">functions</span> deploy merge-suppliers
+npx supabase <span class="hljs-built_in">functions</span> deploy retroactive-supplier-association
+</code></pre>
+</li>
+<li>
+<p><strong>Criar migration para view materializada:</strong></p>
+<pre class="hljs"><code>npx supabase migration new create_supplier_spending_mv
+</code></pre>
+</li>
+<li>
+<p><strong>Configurar refresh da view materializada</strong> (cron job no Supabase ou Edge Function scheduled)</p>
+</li>
+<li>
+<p><strong>Rodar suíte completa:</strong></p>
+<pre class="hljs"><code>bun run <span class="hljs-built_in">test</span>
+</code></pre>
+</li>
+</ol>
+<h3 id="5.8.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#5.8.-crit%C3%A9rios-de-aceita%C3%A7%C3%A3o">#</a> 5.8. Critérios de Aceitação</h3>
+<ul>
+<li>TODOS os 27+ testes passando (green)</li>
+<li>Edge Function de merge executa em transação atômica</li>
+<li>Métricas respeitam constraint (métrica vs atributo)</li>
+<li>View materializada atualiza corretamente</li>
+<li>Associação retroativa exige confirmação humana</li>
+</ul>
+<hr>
+<h2 id="checklist-geral" tabindex="-1"><a class="header-anchor" href="#checklist-geral">#</a> Checklist Geral</h2>
+<table>
+<thead>
+<tr>
+<th>Etapa</th>
+<th>Entregável Principal</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Banco 100% estruturado, vazio, com RLS e constraints</td>
+<td>⬜</td>
+</tr>
+<tr>
+<td>2</td>
+<td>27+ testes escritos e falhando (red)</td>
+<td>⬜</td>
+</tr>
+<tr>
+<td>3</td>
+<td>CRUD fornecedor + aliases + associações (T18-T24 green)</td>
+<td>⬜</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Relatórios + filtros + home (T22, T27, DEDUP green)</td>
+<td>⬜</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Métricas + merge + retroativo (TODOS green)</td>
+<td>⬜</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="refer%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#refer%C3%AAncias">#</a> Referências</h2>
+<table>
+<thead>
+<tr>
+<th>Documento</th>
+<th>Caminho</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ata do checkpoint</td>
+<td><code>docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md</code></td>
+</tr>
+<tr>
+<td>ADR-001 Deduplicação</td>
+<td><code>docs/planejamento/ADR-001-deduplicacao-transacao-item-fatura.md</code></td>
+</tr>
+<tr>
+<td>ADR-002 Métricas</td>
+<td><code>docs/planejamento/ADR-002-norma-consumption-metrics.md</code></td>
+</tr>
+<tr>
+<td>ADR-003 Aliases</td>
+<td><code>docs/planejamento/ADR-003-governanca-aliases-fornecedor.md</code></td>
+</tr>
+<tr>
+<td>Refino kickoff</td>
+<td><code>docs/refinos/2026-03/2026-03-21-10-40-refino-tecnico-funcional-kickoff-seu-bolso-feliz.md</code></td>
+</tr>
+<tr>
+<td>Refino fornecedor</td>
+<td><code>docs/refinos/2026-03/2026-03-21-11-57-revisao-refino-dimensao-fornecedor.md</code></td>
+</tr>
+<tr>
+<td>Prompt inicial Verônica</td>
+<td><code>docs/Veronica/001-prompt.inicial.md</code></td>
+</tr>
+<tr>
+<td>Especificação fornecedor</td>
+<td><code>docs/Veronica/002-fornecedor.md</code></td>
+</tr>
+</tbody>
+</table>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>

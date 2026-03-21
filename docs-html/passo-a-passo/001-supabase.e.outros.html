@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>001-supabase.e.outros</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 001-supabase.e.outros</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        
+        <h1 id="passo-a-passo-%E2%80%94-supabase%2C-gitlab-e-ambiente-local" tabindex="-1"><a class="header-anchor" href="#passo-a-passo-%E2%80%94-supabase%2C-gitlab-e-ambiente-local">#</a> Passo a Passo — Supabase, GitLab e Ambiente Local</h1>
+<blockquote>
+<p>Guia operacional completo para configurar Supabase (local e remoto), GitLab (repositório e CI/CD) e o ambiente de desenvolvimento local do projeto <strong>Seu Bolso Feliz</strong>.</p>
+<p><strong>Pré-requisito:</strong> Etapa 0 (Sprint 0: Monorepo, Tooling e CI/CD) concluída — veja <code>docs/checklists/001-implementacao-geral.md</code>.</p>
+</blockquote>
+<hr>
+<h2 id="%C3%ADndice" tabindex="-1"><a class="header-anchor" href="#%C3%ADndice">#</a> Índice</h2>
+<ol>
+<li><a href="#1-supabase--configura%C3%A7%C3%A3o-local">Supabase — Configuração Local</a></li>
+<li><a href="#2-supabase--projeto-remoto-staging--production">Supabase — Projeto Remoto (Staging + Production)</a></li>
+<li><a href="#3-supabase--autentica%C3%A7%C3%A3o">Supabase — Autenticação</a></li>
+<li><a href="#4-supabase--storage">Supabase — Storage</a></li>
+<li><a href="#5-supabase--rls-row-level-security">Supabase — RLS (Row Level Security)</a></li>
+<li><a href="#6-supabase--edge-functions">Supabase — Edge Functions</a></li>
+<li><a href="#7-supabase--migrations">Supabase — Migrations</a></li>
+<li><a href="#8-supabase--gera%C3%A7%C3%A3o-de-tipos-typescript">Supabase — Geração de Tipos TypeScript</a></li>
+<li><a href="#9-gitlab--cria%C3%A7%C3%A3o-e-configura%C3%A7%C3%A3o-do-reposit%C3%B3rio">GitLab — Criação e Configuração do Repositório</a></li>
+<li><a href="#10-gitlab--branches-e-prote%C3%A7%C3%A3o">GitLab — Branches e Proteção</a></li>
+<li><a href="#11-gitlab--merge-requests">GitLab — Merge Requests</a></li>
+<li><a href="#12-gitlab--pipelines-cicd">GitLab — Pipelines (CI/CD)</a></li>
+<li><a href="#13-gitlab--ambientes-e-vari%C3%A1veis">GitLab — Ambientes e Variáveis</a></li>
+<li><a href="#14-teste-local--p%C3%A1gina-web-nextjs">Teste Local — Página Web (Next.js)</a></li>
+<li><a href="#15-teste-local--banco-de-dados-e-supabase">Teste Local — Banco de Dados e Supabase</a></li>
+<li><a href="#16-teste-local--testes-automatizados">Teste Local — Testes Automatizados</a></li>
+<li><a href="#17-fluxo-completo-de-desenvolvimento">Fluxo Completo de Desenvolvimento</a></li>
+<li><a href="#18-quando-terei-algo-para-ver-e-testar">Quando terei algo para ver e testar?</a></li>
+</ol>
+<hr>
+<h2 id="1.-supabase-%E2%80%94-configura%C3%A7%C3%A3o-local" tabindex="-1"><a class="header-anchor" href="#1.-supabase-%E2%80%94-configura%C3%A7%C3%A3o-local">#</a> 1. Supabase — Configuração Local</h2>
+<p>O Supabase local roda via Docker e é a base do desenvolvimento. Nenhuma conexão remota é necessária para desenvolver.</p>
+<h3 id="1.1.-pr%C3%A9-requisitos" tabindex="-1"><a class="header-anchor" href="#1.1.-pr%C3%A9-requisitos">#</a> 1.1. Pré-requisitos</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Docker precisa estar instalado e rodando</span>
+docker --version   <span class="hljs-comment"># Esperado: Docker 24+</span>
+
+<span class="hljs-comment"># Supabase CLI (já disponível via npx, ou instale globalmente)</span>
+npx supabase --version   <span class="hljs-comment"># Esperado: 2.x</span>
+</code></pre>
+<h3 id="1.2.-iniciar-o-supabase-local" tabindex="-1"><a class="header-anchor" href="#1.2.-iniciar-o-supabase-local">#</a> 1.2. Iniciar o Supabase local</h3>
+<pre class="hljs"><code><span class="hljs-built_in">cd</span> /home/chico/dev/Chico/seu.bolso.feliz
+
+<span class="hljs-comment"># Inicia todos os serviços: PostgreSQL, Auth, Storage, Studio, Edge Runtime</span>
+npx supabase start
+</code></pre>
+<p><strong>Primeira execução:</strong> vai baixar as imagens Docker (~2-5 min). Nas seguintes, inicia em segundos.</p>
+<p><strong>Saída esperada (anotar estas URLs e chaves):</strong></p>
+<pre class="hljs"><code>         API URL: http://127.0.0.1:54321
+     GraphQL URL: http://127.0.0.1:54321/graphql/v1
+  S3 Storage URL: http://127.0.0.1:54321/storage/v1/s3
+          DB URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+      Studio URL: http://127.0.0.1:54323
+    Inbucket URL: http://127.0.0.1:54324
+      JWT secret: super-secret-jwt-token-with-at-least-32-characters-long
+        anon key: eyJhbGci...   ← copiar
+service_role key: eyJhbGci...   ← copiar (NUNCA expor no frontend)
+   S3 Access Key: ...
+   S3 Secret Key: ...
+</code></pre>
+<h3 id="1.3.-configurar-vari%C3%A1veis-locais" tabindex="-1"><a class="header-anchor" href="#1.3.-configurar-vari%C3%A1veis-locais">#</a> 1.3. Configurar variáveis locais</h3>
+<p>Copie o <code>.env.example</code> para <code>.env.local</code> e preencha com as chaves do passo anterior:</p>
+<pre class="hljs"><code><span class="hljs-built_in">cp</span> .env.example .env.local
+</code></pre>
+<p>Edite <code>.env.local</code>:</p>
+<pre class="hljs"><code><span class="hljs-comment"># ── Supabase Local ──</span>
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=&lt;anon key <span class="hljs-keyword">do</span> supabase start&gt;
+SUPABASE_SERVICE_ROLE_KEY=&lt;service_role key <span class="hljs-keyword">do</span> supabase start&gt;
+SUPABASE_DB_PASSWORD=postgres
+
+<span class="hljs-comment"># ── App ──</span>
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NODE_ENV=development
+</code></pre>
+<blockquote>
+<p><strong>Segurança:</strong> <code>.env.local</code> está no <code>.gitignore</code> — nunca será commitado.</p>
+</blockquote>
+<h3 id="1.4.-acessar-o-supabase-studio-(interface-visual)" tabindex="-1"><a class="header-anchor" href="#1.4.-acessar-o-supabase-studio-(interface-visual)">#</a> 1.4. Acessar o Supabase Studio (interface visual)</h3>
+<p>Abra no navegador: <strong><a href="http://127.0.0.1:54323">http://127.0.0.1:54323</a></strong></p>
+<p>Lá você pode:</p>
+<ul>
+<li>Ver/editar tabelas (Table Editor)</li>
+<li>Rodar SQL direto (SQL Editor)</li>
+<li>Ver logs de autenticação</li>
+<li>Gerenciar Storage buckets</li>
+<li>Testar Edge Functions</li>
+<li>Ver configurações de Auth</li>
+</ul>
+<h3 id="1.5.-parar-e-reiniciar" tabindex="-1"><a class="header-anchor" href="#1.5.-parar-e-reiniciar">#</a> 1.5. Parar e reiniciar</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Parar tudo (preserva dados)</span>
+npx supabase stop
+
+<span class="hljs-comment"># Parar E destruir dados (reset completo)</span>
+npx supabase stop --no-backup
+
+<span class="hljs-comment"># Status dos serviços</span>
+npx supabase status
+</code></pre>
+<h3 id="1.6.-problemas-comuns" tabindex="-1"><a class="header-anchor" href="#1.6.-problemas-comuns">#</a> 1.6. Problemas comuns</h3>
+<table>
+<thead>
+<tr>
+<th>Problema</th>
+<th>Solução</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Cannot connect to the Docker daemon</code></td>
+<td>Inicie o Docker Desktop / <code>sudo systemctl start docker</code></td>
+</tr>
+<tr>
+<td><code>Port 54321 already in use</code></td>
+<td><code>npx supabase stop</code> e tente novamente</td>
+</tr>
+<tr>
+<td><code>Timed out waiting for container</code></td>
+<td><code>docker system prune</code> e reinicie Docker</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="2.-supabase-%E2%80%94-projeto-remoto-(staging-%2B-production)" tabindex="-1"><a class="header-anchor" href="#2.-supabase-%E2%80%94-projeto-remoto-(staging-%2B-production)">#</a> 2. Supabase — Projeto Remoto (Staging + Production)</h2>
+<h3 id="2.1.-criar-conta-e-projetos" tabindex="-1"><a class="header-anchor" href="#2.1.-criar-conta-e-projetos">#</a> 2.1. Criar conta e projetos</h3>
+<ol>
+<li>Vá para <strong><a href="https://supabase.com">https://supabase.com</a></strong> e crie uma conta (se não tiver)</li>
+<li>Crie <strong>2 projetos</strong> (ou 1 para staging free e 1 para production depois):</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Projeto</th>
+<th>Nome sugerido</th>
+<th>Região</th>
+<th>Plano</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Staging</td>
+<td><code>sbf-staging</code></td>
+<td>South America (São Paulo)</td>
+<td>Free</td>
+</tr>
+<tr>
+<td>Production</td>
+<td><code>sbf-production</code></td>
+<td>South America (São Paulo)</td>
+<td>Pro (quando lançar)</td>
+</tr>
+</tbody>
+</table>
+<ol start="3">
+<li>Anote de cada projeto:
+<ul>
+<li><strong>Project Reference ID</strong> (Settings → General → Reference ID)</li>
+<li><strong>API URL</strong> (<code>https://&lt;ref&gt;.supabase.co</code>)</li>
+<li><strong>anon key</strong> (Settings → API → <code>anon</code> key)</li>
+<li><strong>service_role key</strong> (Settings → API → <code>service_role</code> key)</li>
+<li><strong>DB password</strong> (o que você definiu na criação)</li>
+</ul>
+</li>
+</ol>
+<h3 id="2.2.-gerar-access-token-(para-cli-e-ci%2Fcd)" tabindex="-1"><a class="header-anchor" href="#2.2.-gerar-access-token-(para-cli-e-ci%2Fcd)">#</a> 2.2. Gerar Access Token (para CLI e CI/CD)</h3>
+<ol>
+<li>Vá para <strong><a href="https://supabase.com/dashboard/account/tokens">https://supabase.com/dashboard/account/tokens</a></strong></li>
+<li>Clique em <strong>Generate New Token</strong></li>
+<li>Nome: <code>sbf-ci-cd</code></li>
+<li>Copie o token — ele só aparece uma vez</li>
+</ol>
+<p>Este token será usado:</p>
+<ul>
+<li>No GitLab CI/CD (variável <code>SUPABASE_ACCESS_TOKEN</code>)</li>
+<li>Localmente para comandos <code>supabase link</code></li>
+</ul>
+<h3 id="2.3.-vincular-projeto-local-ao-remoto" tabindex="-1"><a class="header-anchor" href="#2.3.-vincular-projeto-local-ao-remoto">#</a> 2.3. Vincular projeto local ao remoto</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Para staging</span>
+npx supabase <span class="hljs-built_in">link</span> --project-ref &lt;STAGING_REF_ID&gt;
+<span class="hljs-comment"># Vai pedir a senha do banco (DB password do projeto staging)</span>
+</code></pre>
+<blockquote>
+<p><strong>Nota:</strong> <code>supabase link</code> configura o contexto local para apontar para o projeto remoto. Necessário para <code>db push</code> e <code>functions deploy</code> remotos.</p>
+</blockquote>
+<hr>
+<h2 id="3.-supabase-%E2%80%94-autentica%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#3.-supabase-%E2%80%94-autentica%C3%A7%C3%A3o">#</a> 3. Supabase — Autenticação</h2>
+<h3 id="3.1.-configura%C3%A7%C3%A3o-local-(j%C3%A1-pronta)" tabindex="-1"><a class="header-anchor" href="#3.1.-configura%C3%A7%C3%A3o-local-(j%C3%A1-pronta)">#</a> 3.1. Configuração local (já pronta)</h3>
+<p>O <code>supabase/config.toml</code> já configura Auth local:</p>
+<pre class="hljs"><code><span class="hljs-section">[auth]</span>
+<span class="hljs-attr">site_url</span> = <span class="hljs-string">&quot;http://127.0.0.1:3105&quot;</span>
+<span class="hljs-attr">additional_redirect_urls</span> = [
+  <span class="hljs-string">&quot;http://127.0.0.1:3105&quot;</span>,
+  <span class="hljs-string">&quot;http://localhost:3105&quot;</span>,
+  <span class="hljs-string">&quot;http://127.0.0.1:3105/auth/callback&quot;</span>,
+  <span class="hljs-string">&quot;http://localhost:3105/auth/callback&quot;</span>
+]
+<span class="hljs-attr">jwt_expiry</span> = <span class="hljs-number">3600</span>
+
+<span class="hljs-section">[auth.email]</span>
+<span class="hljs-attr">enable_signup</span> = <span class="hljs-literal">true</span>
+<span class="hljs-attr">enable_confirmations</span> = <span class="hljs-literal">false</span>   <span class="hljs-comment"># Desabilitado localmente para conveniência</span>
+</code></pre>
+<p>Emails locais vão para o <strong>Inbucket</strong> (<a href="http://127.0.0.1:54324">http://127.0.0.1:54324</a>) — sem envio real.</p>
+<p>Importante: sempre que alterar <code>site_url</code> ou <code>additional_redirect_urls</code>, reinicie o Supabase local:</p>
+<pre class="hljs"><code>npx supabase stop
+npx supabase start
+</code></pre>
+<h3 id="3.2.-como-testar-login-local-sem-smtp-externo" tabindex="-1"><a class="header-anchor" href="#3.2.-como-testar-login-local-sem-smtp-externo">#</a> 3.2. Como testar login local sem SMTP externo</h3>
+<p>Opcao A: Magic link com Inbucket</p>
+<ol>
+<li>Rode o frontend em <code>http://127.0.0.1:3105</code></li>
+<li>Abra o Inbucket em <code>http://127.0.0.1:54324</code></li>
+<li>Na tela de login, informe seu e-mail e clique em “Entrar com Magic Link”</li>
+<li>No Inbucket, abra o e-mail recebido e clique no link</li>
+<li>O fluxo deve retornar para <code>/auth/callback</code> e depois redirecionar para <code>/dashboard</code></li>
+</ol>
+<p>Opcao B: Conta de teste local com e-mail e senha</p>
+<ol>
+<li>Acesse a tela de login</li>
+<li>Informe e-mail e uma senha com no minimo 6 caracteres</li>
+<li>Clique em “Criar Conta de Teste Local”</li>
+<li>A aplicacao cria o usuario no Supabase local e faz login automaticamente</li>
+<li>Nos proximos acessos, use “Entrar com E-mail e Senha”</li>
+</ol>
+<p>Opcao C: Criar usuario manualmente no Supabase Studio</p>
+<ol>
+<li>Abra <code>http://127.0.0.1:54323</code></li>
+<li>Va em Authentication -&gt; Users</li>
+<li>Crie um usuario manualmente com e-mail e senha</li>
+<li>Use a opcao “Entrar com E-mail e Senha” na aplicacao</li>
+</ol>
+<h3 id="3.3.-configura%C3%A7%C3%A3o-remota-(staging%2Fproduction)" tabindex="-1"><a class="header-anchor" href="#3.3.-configura%C3%A7%C3%A3o-remota-(staging%2Fproduction)">#</a> 3.3. Configuração remota (staging/production)</h3>
+<p>No dashboard do Supabase (para cada projeto):</p>
+<ol>
+<li><strong>Authentication → Providers → Email:</strong> Habilitado</li>
+<li><strong>Authentication → URL Configuration:</strong>
+<ul>
+<li>Site URL: URL do seu frontend (staging ou production)</li>
+</ul>
+</li>
+</ol>
+<ul>
+<li>Redirect URLs: adicione a URL do ambiente e o callback correspondente</li>
+</ul>
+<ol start="3">
+<li><strong>Authentication → Rate Limits:</strong> Mantenha os padrões (ou ajuste conforme necessidade)</li>
+<li><strong>Authentication → Email Templates:</strong> Personalize os emails (opcional no MVP)</li>
+</ol>
+<h3 id="3.4.-integra%C3%A7%C3%A3o-com-next.js-(ser%C3%A1-feita-na-etapa-1)" tabindex="-1"><a class="header-anchor" href="#3.4.-integra%C3%A7%C3%A3o-com-next.js-(ser%C3%A1-feita-na-etapa-1)">#</a> 3.4. Integração com Next.js (será feita na Etapa 1)</h3>
+<p>Pacotes necessários (serão instalados na Etapa 1):</p>
+<pre class="hljs"><code><span class="hljs-built_in">cd</span> apps/web
+bun add @supabase/supabase-js @supabase/ssr
+</code></pre>
+<p>Arquivos a criar:</p>
+<ul>
+<li><code>apps/web/src/lib/supabase/client.ts</code> — cliente browser</li>
+<li><code>apps/web/src/lib/supabase/server.ts</code> — cliente server (RSC/Route Handlers)</li>
+<li><code>apps/web/src/middleware.ts</code> — refresh de sessão automático</li>
+</ul>
+<hr>
+<h2 id="4.-supabase-%E2%80%94-storage" tabindex="-1"><a class="header-anchor" href="#4.-supabase-%E2%80%94-storage">#</a> 4. Supabase — Storage</h2>
+<h3 id="4.1.-para-que-serve-no-projeto" tabindex="-1"><a class="header-anchor" href="#4.1.-para-que-serve-no-projeto">#</a> 4.1. Para que serve no projeto</h3>
+<p>O Storage será usado para:</p>
+<ul>
+<li>Documentos financeiros (PDFs de faturas, comprovantes)</li>
+<li>Anexos de transações</li>
+<li>Contratos digitalizados</li>
+</ul>
+<h3 id="4.2.-configura%C3%A7%C3%A3o-local" tabindex="-1"><a class="header-anchor" href="#4.2.-configura%C3%A7%C3%A3o-local">#</a> 4.2. Configuração local</h3>
+<p>O Storage local já está configurado no <code>config.toml</code>:</p>
+<pre class="hljs"><code><span class="hljs-section">[storage]</span>
+<span class="hljs-attr">file_size_limit</span> = <span class="hljs-string">&quot;50MiB&quot;</span>
+</code></pre>
+<h3 id="4.3.-criar-bucket-(ser%C3%A1-feito-na-etapa-5)" tabindex="-1"><a class="header-anchor" href="#4.3.-criar-bucket-(ser%C3%A1-feito-na-etapa-5)">#</a> 4.3. Criar bucket (será feito na Etapa 5)</h3>
+<p>Via migration SQL:</p>
+<pre class="hljs"><code><span class="hljs-keyword">INSERT INTO</span> storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+<span class="hljs-keyword">VALUES</span> (
+  <span class="hljs-string">&#x27;documents&#x27;</span>,
+  <span class="hljs-string">&#x27;documents&#x27;</span>,
+  <span class="hljs-literal">false</span>,                              <span class="hljs-comment">-- privado</span>
+  <span class="hljs-number">52428800</span>,                           <span class="hljs-comment">-- 50MB</span>
+  <span class="hljs-keyword">ARRAY</span>[<span class="hljs-string">&#x27;application/pdf&#x27;</span>, <span class="hljs-string">&#x27;image/png&#x27;</span>, <span class="hljs-string">&#x27;image/jpeg&#x27;</span>]
+);
+</code></pre>
+<h3 id="4.4.-rls-no-storage" tabindex="-1"><a class="header-anchor" href="#4.4.-rls-no-storage">#</a> 4.4. RLS no Storage</h3>
+<p>Cada bucket terá policies para que usuários só vejam seus próprios arquivos:</p>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> POLICY &quot;Users can upload own documents&quot;
+<span class="hljs-keyword">ON</span> storage.objects <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (bucket_id <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;documents&#x27;</span> <span class="hljs-keyword">AND</span> auth.uid()::text <span class="hljs-operator">=</span> (storage.foldername(name))[<span class="hljs-number">1</span>]);
+
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can view own documents&quot;
+<span class="hljs-keyword">ON</span> storage.objects <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">USING</span> (bucket_id <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;documents&#x27;</span> <span class="hljs-keyword">AND</span> auth.uid()::text <span class="hljs-operator">=</span> (storage.foldername(name))[<span class="hljs-number">1</span>]);
+</code></pre>
+<blockquote>
+<p><strong>Nota:</strong> A implementação completa do Storage é da <strong>Etapa 5</strong>. No MVP, o foco é domínio financeiro.</p>
+</blockquote>
+<hr>
+<h2 id="5.-supabase-%E2%80%94-rls-(row-level-security)" tabindex="-1"><a class="header-anchor" href="#5.-supabase-%E2%80%94-rls-(row-level-security)">#</a> 5. Supabase — RLS (Row Level Security)</h2>
+<h3 id="5.1.-princ%C3%ADpio-fundamental" tabindex="-1"><a class="header-anchor" href="#5.1.-princ%C3%ADpio-fundamental">#</a> 5.1. Princípio fundamental</h3>
+<p><strong>Toda tabela com dados de usuário DEVE ter RLS habilitado.</strong> Sem exceção.</p>
+<h3 id="5.2.-padr%C3%A3o-de-rls-do-projeto" tabindex="-1"><a class="header-anchor" href="#5.2.-padr%C3%A3o-de-rls-do-projeto">#</a> 5.2. Padrão de RLS do projeto</h3>
+<p>Todas as tabelas do domínio seguem o mesmo padrão:</p>
+<pre class="hljs"><code><span class="hljs-comment">-- Habilitar RLS</span>
+<span class="hljs-keyword">ALTER TABLE</span> nome_tabela ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+
+<span class="hljs-comment">-- Política SELECT: usuário vê apenas seus dados</span>
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can view own data&quot;
+<span class="hljs-keyword">ON</span> nome_tabela <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">USING</span> (user_id <span class="hljs-operator">=</span> auth.uid());
+
+<span class="hljs-comment">-- Política INSERT: usuário cria apenas seus dados</span>
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can create own data&quot;
+<span class="hljs-keyword">ON</span> nome_tabela <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (user_id <span class="hljs-operator">=</span> auth.uid());
+
+<span class="hljs-comment">-- Política UPDATE: usuário edita apenas seus dados</span>
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can update own data&quot;
+<span class="hljs-keyword">ON</span> nome_tabela <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">USING</span> (user_id <span class="hljs-operator">=</span> auth.uid())
+<span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (user_id <span class="hljs-operator">=</span> auth.uid());
+
+<span class="hljs-comment">-- Política DELETE: usuário deleta apenas seus dados (soft delete preferido)</span>
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can delete own data&quot;
+<span class="hljs-keyword">ON</span> nome_tabela <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">DELETE</span> <span class="hljs-keyword">TO</span> authenticated
+<span class="hljs-keyword">USING</span> (user_id <span class="hljs-operator">=</span> auth.uid());
+</code></pre>
+<h3 id="5.3.-como-testar-rls-localmente" tabindex="-1"><a class="header-anchor" href="#5.3.-como-testar-rls-localmente">#</a> 5.3. Como testar RLS localmente</h3>
+<pre class="hljs"><code><span class="hljs-comment"># No Supabase Studio (http://127.0.0.1:54323)</span>
+<span class="hljs-comment"># Vá em SQL Editor e rode:</span>
+
+-- Simular como usuário específico
+SET request.jwt.claims = <span class="hljs-string">&#x27;{&quot;sub&quot;: &quot;user-uuid-aqui&quot;, &quot;role&quot;: &quot;authenticated&quot;}&#x27;</span>;
+SELECT * FROM suppliers;  -- Deve retornar apenas dados <span class="hljs-keyword">do</span> user-uuid
+</code></pre>
+<p>Ou nos testes de integração (Etapa 2):</p>
+<pre class="hljs"><code><span class="hljs-comment">// Cria cliente autenticado como user específico</span>
+<span class="hljs-keyword">const</span> supabase = <span class="hljs-title function_">createClient</span>(url, anonKey, {
+  <span class="hljs-attr">global</span>: { <span class="hljs-attr">headers</span>: { <span class="hljs-title class_">Authorization</span>: <span class="hljs-string">`Bearer <span class="hljs-subst">${userJWT}</span>`</span> } },
+});
+<span class="hljs-keyword">const</span> { data } = <span class="hljs-keyword">await</span> supabase.<span class="hljs-title function_">from</span>(<span class="hljs-string">&quot;suppliers&quot;</span>).<span class="hljs-title function_">select</span>(<span class="hljs-string">&quot;*&quot;</span>);
+<span class="hljs-comment">// Deve retornar apenas os dados do usuário</span>
+</code></pre>
+<hr>
+<h2 id="6.-supabase-%E2%80%94-edge-functions" tabindex="-1"><a class="header-anchor" href="#6.-supabase-%E2%80%94-edge-functions">#</a> 6. Supabase — Edge Functions</h2>
+<h3 id="6.1.-o-que-s%C3%A3o" tabindex="-1"><a class="header-anchor" href="#6.1.-o-que-s%C3%A3o">#</a> 6.1. O que são</h3>
+<p>Edge Functions são funções serverless (Deno) que rodam no Supabase. Serão usadas para:</p>
+<ul>
+<li>Merge atômico de fornecedores (Etapa 5)</li>
+<li>Retroatividade de associação de fornecedores (Etapa 5)</li>
+<li>Lógica server-side que precisa de <code>service_role</code> (acesso admin)</li>
+</ul>
+<h3 id="6.2.-criar-uma-edge-function" tabindex="-1"><a class="header-anchor" href="#6.2.-criar-uma-edge-function">#</a> 6.2. Criar uma Edge Function</h3>
+<pre class="hljs"><code>npx supabase <span class="hljs-built_in">functions</span> new nome-da-funcao
+</code></pre>
+<p>Isso cria <code>supabase/functions/nome-da-funcao/index.ts</code>:</p>
+<pre class="hljs"><code><span class="hljs-keyword">import</span> { createClient } <span class="hljs-keyword">from</span> <span class="hljs-string">&quot;https://esm.sh/@supabase/supabase-js@2&quot;</span>;
+
+<span class="hljs-title class_">Deno</span>.<span class="hljs-title function_">serve</span>(<span class="hljs-title function_">async</span> (req) =&gt; {
+  <span class="hljs-keyword">const</span> supabaseClient = <span class="hljs-title function_">createClient</span>(
+    <span class="hljs-title class_">Deno</span>.<span class="hljs-property">env</span>.<span class="hljs-title function_">get</span>(<span class="hljs-string">&quot;SUPABASE_URL&quot;</span>)!,
+    <span class="hljs-title class_">Deno</span>.<span class="hljs-property">env</span>.<span class="hljs-title function_">get</span>(<span class="hljs-string">&quot;SUPABASE_SERVICE_ROLE_KEY&quot;</span>)!,
+  );
+
+  <span class="hljs-comment">// Lógica aqui...</span>
+
+  <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Response</span>(<span class="hljs-title class_">JSON</span>.<span class="hljs-title function_">stringify</span>({ <span class="hljs-attr">ok</span>: <span class="hljs-literal">true</span> }), {
+    <span class="hljs-attr">headers</span>: { <span class="hljs-string">&quot;Content-Type&quot;</span>: <span class="hljs-string">&quot;application/json&quot;</span> },
+  });
+});
+</code></pre>
+<h3 id="6.3.-testar-localmente" tabindex="-1"><a class="header-anchor" href="#6.3.-testar-localmente">#</a> 6.3. Testar localmente</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Serve todas as funções (hot reload)</span>
+npx supabase <span class="hljs-built_in">functions</span> serve
+
+<span class="hljs-comment"># Chamar com curl</span>
+curl -i --location --request POST \
+  <span class="hljs-string">&#x27;http://127.0.0.1:54321/functions/v1/nome-da-funcao&#x27;</span> \
+  --header <span class="hljs-string">&#x27;Authorization: Bearer &lt;anon_key&gt;&#x27;</span> \
+  --header <span class="hljs-string">&#x27;Content-Type: application/json&#x27;</span> \
+  --data <span class="hljs-string">&#x27;{&quot;key&quot;: &quot;value&quot;}&#x27;</span>
+</code></pre>
+<h3 id="6.4.-deploy-remoto" tabindex="-1"><a class="header-anchor" href="#6.4.-deploy-remoto">#</a> 6.4. Deploy remoto</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Deploy de uma função específica</span>
+npx supabase <span class="hljs-built_in">functions</span> deploy nome-da-funcao --project-ref &lt;REF_ID&gt;
+
+<span class="hljs-comment"># Deploy de todas as funções</span>
+npx supabase <span class="hljs-built_in">functions</span> deploy --project-ref &lt;REF_ID&gt;
+</code></pre>
+<h3 id="6.5.-secrets-das-fun%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#6.5.-secrets-das-fun%C3%A7%C3%B5es">#</a> 6.5. Secrets das funções</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Definir secrets (remoto)</span>
+npx supabase secrets <span class="hljs-built_in">set</span> MY_SECRET=valor --project-ref &lt;REF_ID&gt;
+
+<span class="hljs-comment"># Listar secrets</span>
+npx supabase secrets list --project-ref &lt;REF_ID&gt;
+</code></pre>
+<blockquote>
+<p><strong>Nota:</strong> Edge Functions serão implementadas a partir da <strong>Etapa 5</strong>. No MVP, o foco é CRUD direto via client.</p>
+</blockquote>
+<hr>
+<h2 id="7.-supabase-%E2%80%94-migrations" tabindex="-1"><a class="header-anchor" href="#7.-supabase-%E2%80%94-migrations">#</a> 7. Supabase — Migrations</h2>
+<h3 id="7.1.-conceito" tabindex="-1"><a class="header-anchor" href="#7.1.-conceito">#</a> 7.1. Conceito</h3>
+<p>Migrations são arquivos SQL versionados que evoluem o schema do banco. São o <strong>mecanismo oficial</strong> de alteração de schema — nunca altere o banco manualmente em staging/production.</p>
+<h3 id="7.2.-criar-uma-nova-migration" tabindex="-1"><a class="header-anchor" href="#7.2.-criar-uma-nova-migration">#</a> 7.2. Criar uma nova migration</h3>
+<pre class="hljs"><code>npx supabase migration new nome_descritivo_da_migration
+</code></pre>
+<p>Cria: <code>supabase/migrations/&lt;timestamp&gt;_nome_descritivo_da_migration.sql</code></p>
+<h3 id="7.3.-escrever-o-sql" tabindex="-1"><a class="header-anchor" href="#7.3.-escrever-o-sql">#</a> 7.3. Escrever o SQL</h3>
+<p>Edite o arquivo criado com o SQL desejado:</p>
+<pre class="hljs"><code><span class="hljs-comment">-- supabase/migrations/20260321150000_create_suppliers.sql</span>
+
+<span class="hljs-keyword">CREATE TABLE</span> suppliers (
+  id UUID <span class="hljs-keyword">PRIMARY KEY</span> <span class="hljs-keyword">DEFAULT</span> gen_random_uuid(),
+  user_id UUID <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">REFERENCES</span> auth.users(id) <span class="hljs-keyword">ON</span> <span class="hljs-keyword">DELETE</span> CASCADE,
+  name TEXT <span class="hljs-keyword">NOT NULL</span>,
+  <span class="hljs-comment">-- ...</span>
+  created_at TIMESTAMPTZ <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">DEFAULT</span> now(),
+  updated_at TIMESTAMPTZ <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">DEFAULT</span> now()
+);
+
+<span class="hljs-keyword">ALTER TABLE</span> suppliers ENABLE <span class="hljs-type">ROW</span> LEVEL SECURITY;
+<span class="hljs-comment">-- ... policies ...</span>
+</code></pre>
+<h3 id="7.4.-aplicar-localmente" tabindex="-1"><a class="header-anchor" href="#7.4.-aplicar-localmente">#</a> 7.4. Aplicar localmente</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Aplica todas as migrations pendentes no banco local</span>
+npx supabase db reset
+</code></pre>
+<p><code>db reset</code> destrói e recria o banco local, aplicando todas as migrations + seed.sql na ordem.</p>
+<p>Para aplicar apenas a última:</p>
+<pre class="hljs"><code>npx supabase migration up
+</code></pre>
+<h3 id="7.5.-verificar-diferen%C3%A7as" tabindex="-1"><a class="header-anchor" href="#7.5.-verificar-diferen%C3%A7as">#</a> 7.5. Verificar diferenças</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Mostra diff entre banco local e migrations</span>
+npx supabase db diff
+</code></pre>
+<h3 id="7.6.-aplicar-no-remoto-(staging%2Fproduction)" tabindex="-1"><a class="header-anchor" href="#7.6.-aplicar-no-remoto-(staging%2Fproduction)">#</a> 7.6. Aplicar no remoto (staging/production)</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Vincular ao projeto (se ainda não fez)</span>
+npx supabase <span class="hljs-built_in">link</span> --project-ref &lt;REF_ID&gt;
+
+<span class="hljs-comment"># Push das migrations</span>
+npx supabase db push
+</code></pre>
+<h3 id="7.7.-regras-de-ouro" tabindex="-1"><a class="header-anchor" href="#7.7.-regras-de-ouro">#</a> 7.7. Regras de ouro</h3>
+<ol>
+<li><strong>Migrations são imutáveis</strong> — após merge em <code>develop</code>, nunca editar. Correções viram nova migration.</li>
+<li><strong>Nomear descritivamente</strong> — <code>create_suppliers</code>, <code>add_supplier_id_to_transactions</code>, <code>create_rls_policies_suppliers</code></li>
+<li><strong>Uma responsabilidade por migration</strong> — não misture criação de tabela com lógica de negócio</li>
+<li><strong>Testar localmente</strong> — <code>db reset</code> + validar no Studio antes de commitar</li>
+<li><strong>Revisar em MR</strong> — migrations devem ser revisadas como código</li>
+</ol>
+<hr>
+<h2 id="8.-supabase-%E2%80%94-gera%C3%A7%C3%A3o-de-tipos-typescript" tabindex="-1"><a class="header-anchor" href="#8.-supabase-%E2%80%94-gera%C3%A7%C3%A3o-de-tipos-typescript">#</a> 8. Supabase — Geração de Tipos TypeScript</h2>
+<h3 id="8.1.-gerar-tipos-do-banco-local" tabindex="-1"><a class="header-anchor" href="#8.1.-gerar-tipos-do-banco-local">#</a> 8.1. Gerar tipos do banco local</h3>
+<pre class="hljs"><code>bun run generate-types
+</code></pre>
+<p>Isso executa <code>scripts/generate-types.sh</code> que gera <code>packages/shared-types/src/database.types.ts</code>.</p>
+<h3 id="8.2.-quando-gerar" tabindex="-1"><a class="header-anchor" href="#8.2.-quando-gerar">#</a> 8.2. Quando gerar</h3>
+<ul>
+<li>Após criar/alterar migrations</li>
+<li>Após rodar <code>db reset</code></li>
+<li>Antes de commitar mudanças de schema</li>
+</ul>
+<h3 id="8.3.-valida%C3%A7%C3%A3o-no-ci" tabindex="-1"><a class="header-anchor" href="#8.3.-valida%C3%A7%C3%A3o-no-ci">#</a> 8.3. Validação no CI</h3>
+<p>O pipeline CI compara os tipos gerados com os commitados. Se divergirem, a pipeline falha (job <code>validate-types</code>).</p>
+<hr>
+<h2 id="9.-gitlab-%E2%80%94-cria%C3%A7%C3%A3o-e-configura%C3%A7%C3%A3o-do-reposit%C3%B3rio" tabindex="-1"><a class="header-anchor" href="#9.-gitlab-%E2%80%94-cria%C3%A7%C3%A3o-e-configura%C3%A7%C3%A3o-do-reposit%C3%B3rio">#</a> 9. GitLab — Criação e Configuração do Repositório</h2>
+<h3 id="9.1.-criar-o-reposit%C3%B3rio" tabindex="-1"><a class="header-anchor" href="#9.1.-criar-o-reposit%C3%B3rio">#</a> 9.1. Criar o repositório</h3>
+<ol>
+<li>Vá para <strong><a href="https://gitlab.com">https://gitlab.com</a></strong> (ou seu GitLab self-hosted)</li>
+<li><strong>New Project → Create blank project</strong>
+<ul>
+<li>Nome: <code>seu-bolso-feliz</code></li>
+<li>Visibility: Private</li>
+<li>Initialize with README: <strong>Não</strong> (já temos código)</li>
+</ul>
+</li>
+<li>Copie a URL SSH/HTTPS do repositório</li>
+</ol>
+<h3 id="9.2.-conectar-o-local-ao-remoto" tabindex="-1"><a class="header-anchor" href="#9.2.-conectar-o-local-ao-remoto">#</a> 9.2. Conectar o local ao remoto</h3>
+<pre class="hljs"><code><span class="hljs-built_in">cd</span> /home/chico/dev/Chico/seu.bolso.feliz
+
+<span class="hljs-comment"># Se já tem remote origin (ex: GitHub), remova ou renomeie</span>
+git remote rename origin github  <span class="hljs-comment"># opcional, se quiser manter GitHub</span>
+
+<span class="hljs-comment"># Adicionar GitLab como origin</span>
+git remote add origin git@gitlab.com:&lt;seu-usuario&gt;/seu-bolso-feliz.git
+
+<span class="hljs-comment"># Verificar</span>
+git remote -v
+</code></pre>
+<h3 id="9.3.-push-inicial" tabindex="-1"><a class="header-anchor" href="#9.3.-push-inicial">#</a> 9.3. Push inicial</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Criar branch develop se não existe</span>
+git checkout -b develop
+git push -u origin develop
+
+<span class="hljs-comment"># Push da main</span>
+git checkout main
+git push -u origin main
+</code></pre>
+<hr>
+<h2 id="10.-gitlab-%E2%80%94-branches-e-prote%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#10.-gitlab-%E2%80%94-branches-e-prote%C3%A7%C3%A3o">#</a> 10. GitLab — Branches e Proteção</h2>
+<h3 id="10.1.-prote%C3%A7%C3%A3o-de-branches" tabindex="-1"><a class="header-anchor" href="#10.1.-prote%C3%A7%C3%A3o-de-branches">#</a> 10.1. Proteção de branches</h3>
+<p>No GitLab, vá para <strong>Settings → Repository → Protected branches</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Branch</th>
+<th>Allowed to merge</th>
+<th>Allowed to push</th>
+<th>Allowed to force push</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>main</code></td>
+<td>Maintainers</td>
+<td>No one</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>develop</code></td>
+<td>Developers + Maintainers</td>
+<td>No one</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Resultado:</strong> Ninguém faz push direto para <code>main</code> ou <code>develop</code>. Tudo passa por Merge Request.</p>
+<h3 id="10.2.-push-rules-(opcional-mas-recomendado)" tabindex="-1"><a class="header-anchor" href="#10.2.-push-rules-(opcional-mas-recomendado)">#</a> 10.2. Push Rules (opcional mas recomendado)</h3>
+<p>Em <strong>Settings → Repository → Push Rules</strong>:</p>
+<ul>
+<li><strong>Branch name regex:</strong> <code>^(main|develop|feature\/[a-z0-9-]+|fix\/[a-z0-9-]+|chore\/[a-z0-9-]+|refactor\/[a-z0-9-]+|docs\/[a-z0-9-]+|test\/[a-z0-9-]+|migration\/[a-z0-9-]+)$</code></li>
+<li><strong>Commit message regex:</strong> <code>^(feat|fix|docs|style|refactor|test|chore|ci|perf|migration)(\(.+\))?!?:\s.+</code></li>
+</ul>
+<h3 id="10.3.-modelo-de-branches" tabindex="-1"><a class="header-anchor" href="#10.3.-modelo-de-branches">#</a> 10.3. Modelo de branches</h3>
+<pre class="hljs"><code>main ←────────────── produção (deploy manual)
+  ↑
+develop ←──────────── staging (deploy automático)
+  ↑
+feature/xxx ─────── desenvolvimento diário
+fix/xxx
+chore/xxx
+migration/xxx
+</code></pre>
+<p><strong>Regra:</strong> toda branch nasce de <code>develop</code> e volta para <code>develop</code> via MR.</p>
+<p>Promover <code>develop → main</code> = release (MR separado, approval do CEO).</p>
+<hr>
+<h2 id="11.-gitlab-%E2%80%94-merge-requests" tabindex="-1"><a class="header-anchor" href="#11.-gitlab-%E2%80%94-merge-requests">#</a> 11. GitLab — Merge Requests</h2>
+<h3 id="11.1.-configura%C3%A7%C3%B5es-de-mr" tabindex="-1"><a class="header-anchor" href="#11.1.-configura%C3%A7%C3%B5es-de-mr">#</a> 11.1. Configurações de MR</h3>
+<p>Em <strong>Settings → Merge Requests</strong>:</p>
+<ul>
+<li><strong>Merge method:</strong> Merge commit (para <code>main</code>), Squash merges (para <code>develop</code>)</li>
+<li><strong>Merge checks:</strong>
+<ul>
+<li>✅ Pipelines must succeed</li>
+<li>✅ All threads must be resolved</li>
+</ul>
+</li>
+<li><strong>Merge suggestions:</strong>
+<ul>
+<li>✅ Delete source branch when merge request is accepted</li>
+</ul>
+</li>
+<li><strong>Approvals:</strong> Settings → Merge Requests → Approvals
+<ul>
+<li>Para <code>develop</code>: 1 aprovação mínima</li>
+<li>Para <code>main</code>: 1 aprovação mínima (CEO ou Arquiteta)</li>
+</ul>
+</li>
+</ul>
+<h3 id="11.2.-template-de-mr-(opcional)" tabindex="-1"><a class="header-anchor" href="#11.2.-template-de-mr-(opcional)">#</a> 11.2. Template de MR (opcional)</h3>
+<p>Crie <code>.gitlab/merge_request_templates/Default.md</code>:</p>
+<pre class="hljs"><code><span class="hljs-section">## O que muda?</span>
+&lt;!-- Descreva as mudanças --&gt;
+
+<span class="hljs-section">## Tipo</span>
+<span class="hljs-bullet">-</span> [ ] feature
+<span class="hljs-bullet">-</span> [ ] fix
+<span class="hljs-bullet">-</span> [ ] chore/refactor
+<span class="hljs-bullet">-</span> [ ] migration
+
+<span class="hljs-section">## Checklist</span>
+<span class="hljs-bullet">-</span> [ ] Testes passando
+<span class="hljs-bullet">-</span> [ ] Lint limpo
+<span class="hljs-bullet">-</span> [ ] Tipos gerados/atualizados (se migration)
+<span class="hljs-bullet">-</span> [ ] Documentação atualizada (se necessário)
+</code></pre>
+<hr>
+<h2 id="12.-gitlab-%E2%80%94-pipelines-(ci%2Fcd)" tabindex="-1"><a class="header-anchor" href="#12.-gitlab-%E2%80%94-pipelines-(ci%2Fcd)">#</a> 12. GitLab — Pipelines (CI/CD)</h2>
+<h3 id="12.1.-o-que-j%C3%A1-temos" tabindex="-1"><a class="header-anchor" href="#12.1.-o-que-j%C3%A1-temos">#</a> 12.1. O que já temos</h3>
+<p>O <code>.gitlab-ci.yml</code> já está configurado com 6 stages. A pipeline roda automaticamente em:</p>
+<ul>
+<li><strong>Merge Requests:</strong> validate → install → check → test → build</li>
+<li><strong>Push em <code>develop</code>:</strong> install → check → test → build → deploy (staging)</li>
+<li><strong>Push em <code>main</code>:</strong> install → check → test → build → deploy (production, manual)</li>
+</ul>
+<h3 id="12.2.-verificar-que-a-pipeline-funciona" tabindex="-1"><a class="header-anchor" href="#12.2.-verificar-que-a-pipeline-funciona">#</a> 12.2. Verificar que a pipeline funciona</h3>
+<p>Após o push inicial para GitLab:</p>
+<ol>
+<li>Vá para <strong>CI/CD → Pipelines</strong></li>
+<li>Deve aparecer a pipeline rodando</li>
+<li>Se der erro, verifique:
+<ul>
+<li>Runner disponível (<a href="http://GitLab.com">GitLab.com</a> tem shared runners)</li>
+<li>Variáveis CI/CD configuradas (passo 13)</li>
+</ul>
+</li>
+</ol>
+<h3 id="12.3.-jobs-da-pipeline" tabindex="-1"><a class="header-anchor" href="#12.3.-jobs-da-pipeline">#</a> 12.3. Jobs da pipeline</h3>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Job</th>
+<th>O que faz</th>
+<th>Quando roda</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>validate</td>
+<td><code>validate-commits</code></td>
+<td>Verifica Conventional Commits</td>
+<td>Apenas em MR</td>
+</tr>
+<tr>
+<td>validate</td>
+<td><code>validate-types</code></td>
+<td>Compara tipos TS</td>
+<td>MR com mudanças em migrations/types</td>
+</tr>
+<tr>
+<td>install</td>
+<td><code>install-deps</code></td>
+<td><code>bun install --frozen-lockfile</code></td>
+<td>Sempre</td>
+</tr>
+<tr>
+<td>check</td>
+<td><code>lint</code></td>
+<td><code>bun run lint</code></td>
+<td>Sempre</td>
+</tr>
+<tr>
+<td>check</td>
+<td><code>typecheck</code></td>
+<td><code>bun run typecheck</code></td>
+<td>Sempre</td>
+</tr>
+<tr>
+<td>check</td>
+<td><code>format-check</code></td>
+<td><code>bun run format:check</code></td>
+<td>Sempre</td>
+</tr>
+<tr>
+<td>test</td>
+<td><code>test-unit</code></td>
+<td><code>bun run test:unit</code></td>
+<td>Sempre</td>
+</tr>
+<tr>
+<td>test</td>
+<td><code>test-integration</code></td>
+<td><code>bun run test:integration</code></td>
+<td>Mudanças em supabase/domain/validation</td>
+</tr>
+<tr>
+<td>build</td>
+<td><code>build-web</code></td>
+<td><code>bun run build</code> (Next.js)</td>
+<td>develop/main ou mudanças em apps/web</td>
+</tr>
+<tr>
+<td>deploy</td>
+<td><code>deploy-*-staging</code></td>
+<td>Deploy Supabase + Web</td>
+<td>Automático em <code>develop</code></td>
+</tr>
+<tr>
+<td>deploy</td>
+<td><code>deploy-*-production</code></td>
+<td>Deploy Supabase + Web</td>
+<td>Manual em <code>main</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="13.-gitlab-%E2%80%94-ambientes-e-vari%C3%A1veis" tabindex="-1"><a class="header-anchor" href="#13.-gitlab-%E2%80%94-ambientes-e-vari%C3%A1veis">#</a> 13. GitLab — Ambientes e Variáveis</h2>
+<h3 id="13.1.-configurar-vari%C3%A1veis-ci%2Fcd" tabindex="-1"><a class="header-anchor" href="#13.1.-configurar-vari%C3%A1veis-ci%2Fcd">#</a> 13.1. Configurar variáveis CI/CD</h3>
+<p>Vá para <strong>Settings → CI/CD → Variables</strong> e adicione:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Value</th>
+<th>Protected</th>
+<th>Masked</th>
+<th>Environment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SUPABASE_ACCESS_TOKEN</code></td>
+<td>Token gerado no passo 2.2</td>
+<td>✅</td>
+<td>✅</td>
+<td>All</td>
+</tr>
+<tr>
+<td><code>STAGING_SUPABASE_PROJECT_ID</code></td>
+<td>Ref ID do projeto staging</td>
+<td>✅</td>
+<td>❌</td>
+<td>staging</td>
+</tr>
+<tr>
+<td><code>STAGING_SUPABASE_DB_PASSWORD</code></td>
+<td>Senha do banco staging</td>
+<td>✅</td>
+<td>✅</td>
+<td>staging</td>
+</tr>
+<tr>
+<td><code>PRODUCTION_SUPABASE_PROJECT_ID</code></td>
+<td>Ref ID do projeto production</td>
+<td>✅</td>
+<td>❌</td>
+<td>production</td>
+</tr>
+<tr>
+<td><code>PRODUCTION_SUPABASE_DB_PASSWORD</code></td>
+<td>Senha do banco production</td>
+<td>✅</td>
+<td>✅</td>
+<td>production</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13.2.-configurar-ambientes" tabindex="-1"><a class="header-anchor" href="#13.2.-configurar-ambientes">#</a> 13.2. Configurar ambientes</h3>
+<p>Vá para <strong>Operate → Environments</strong>:</p>
+<ol>
+<li>Crie <code>staging</code>:
+<ul>
+<li>External URL: URL do frontend staging (quando houver)</li>
+<li>Auto-stop: opcional</li>
+</ul>
+</li>
+<li>Crie <code>production</code>:
+<ul>
+<li>External URL: URL do frontend production (quando houver)</li>
+<li>Protected: ✅ (apenas branches protegidas podem deployar)</li>
+</ul>
+</li>
+</ol>
+<h3 id="13.3.-regra-de-segredos" tabindex="-1"><a class="header-anchor" href="#13.3.-regra-de-segredos">#</a> 13.3. Regra de segredos</h3>
+<ul>
+<li><strong>NUNCA</strong> commitar chaves reais no repositório</li>
+<li><strong>Protected variables</strong> só são acessíveis em branches protegidas (<code>main</code>, <code>develop</code>)</li>
+<li><strong>Masked variables</strong> não aparecem nos logs da pipeline</li>
+<li><code>service_role_key</code> <strong>NUNCA</strong> vai para o frontend — apenas em Edge Functions ou server-side</li>
+</ul>
+<hr>
+<h2 id="14.-teste-local-%E2%80%94-p%C3%A1gina-web-(next.js)" tabindex="-1"><a class="header-anchor" href="#14.-teste-local-%E2%80%94-p%C3%A1gina-web-(next.js)">#</a> 14. Teste Local — Página Web (Next.js)</h2>
+<h3 id="14.1.-iniciar-o-servidor-de-desenvolvimento" tabindex="-1"><a class="header-anchor" href="#14.1.-iniciar-o-servidor-de-desenvolvimento">#</a> 14.1. Iniciar o servidor de desenvolvimento</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Na raiz do monorepo</span>
+bun run dev
+</code></pre>
+<p>Isso executa <code>cd apps/web &amp;&amp; bun run dev</code> (Next.js com Turbopack).</p>
+<p>Acesse: <strong><a href="http://localhost:3100">http://localhost:3100</a></strong></p>
+<h3 id="14.2.-o-que-voc%C3%AA-ver%C3%A1-agora" tabindex="-1"><a class="header-anchor" href="#14.2.-o-que-voc%C3%AA-ver%C3%A1-agora">#</a> 14.2. O que você verá agora</h3>
+<p>Neste momento (pós-Etapa 0), verá a página de placeholder:</p>
+<ul>
+<li>Card centralizado com “Seu Bolso Feliz”</li>
+<li>Texto “MVP em construção. Etapa 0 concluída — monorepo configurado.”</li>
+</ul>
+<h3 id="14.3.-hot-reload" tabindex="-1"><a class="header-anchor" href="#14.3.-hot-reload">#</a> 14.3. Hot reload</h3>
+<p>Qualquer alteração em <code>apps/web/src/</code> reflete automaticamente no navegador (Turbopack HMR).</p>
+<h3 id="14.4.-build-de-produ%C3%A7%C3%A3o-local" tabindex="-1"><a class="header-anchor" href="#14.4.-build-de-produ%C3%A7%C3%A3o-local">#</a> 14.4. Build de produção local</h3>
+<pre class="hljs"><code>bun run build
+<span class="hljs-comment"># Se quiser servir o build localmente:</span>
+<span class="hljs-built_in">cd</span> apps/web &amp;&amp; bun run start
+</code></pre>
+<hr>
+<h2 id="15.-teste-local-%E2%80%94-banco-de-dados-e-supabase" tabindex="-1"><a class="header-anchor" href="#15.-teste-local-%E2%80%94-banco-de-dados-e-supabase">#</a> 15. Teste Local — Banco de Dados e Supabase</h2>
+<h3 id="15.1.-iniciar-supabase-local-%2B-web" tabindex="-1"><a class="header-anchor" href="#15.1.-iniciar-supabase-local-%2B-web">#</a> 15.1. Iniciar Supabase local + Web</h3>
+<p>Terminal 1:</p>
+<pre class="hljs"><code>npx supabase start
+</code></pre>
+<p>Terminal 2:</p>
+<pre class="hljs"><code>bun run dev
+</code></pre>
+<p>Agora o frontend em <a href="http://localhost:3000">http://localhost:3000</a> pode se conectar ao Supabase em <a href="http://127.0.0.1:54321">http://127.0.0.1:54321</a>.</p>
+<h3 id="15.2.-testando-o-banco-direto" tabindex="-1"><a class="header-anchor" href="#15.2.-testando-o-banco-direto">#</a> 15.2. Testando o banco direto</h3>
+<h4 id="via-supabase-studio" tabindex="-1"><a class="header-anchor" href="#via-supabase-studio">#</a> Via Supabase Studio</h4>
+<ul>
+<li>Abra <a href="http://127.0.0.1:54323">http://127.0.0.1:54323</a></li>
+<li>Table Editor: visualize, crie e edite dados</li>
+<li>SQL Editor: rode queries manuais</li>
+</ul>
+<h4 id="via-psql-(linha-de-comando)" tabindex="-1"><a class="header-anchor" href="#via-psql-(linha-de-comando)">#</a> Via psql (linha de comando)</h4>
+<pre class="hljs"><code><span class="hljs-comment"># Conectar direto ao PostgreSQL local do Supabase</span>
+psql postgresql://postgres:postgres@127.0.0.1:54322/postgres
+</code></pre>
+<h4 id="via-script-sql" tabindex="-1"><a class="header-anchor" href="#via-script-sql">#</a> Via script SQL</h4>
+<pre class="hljs"><code><span class="hljs-comment"># Rodar um arquivo SQL</span>
+psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -f meu_script.sql
+</code></pre>
+<h3 id="15.3.-reset-do-banco-(reaplica-todas-as-migrations-%2B-seed)" tabindex="-1"><a class="header-anchor" href="#15.3.-reset-do-banco-(reaplica-todas-as-migrations-%2B-seed)">#</a> 15.3. Reset do banco (reaplica todas as migrations + seed)</h3>
+<pre class="hljs"><code>npx supabase db reset
+</code></pre>
+<p>Útil quando:</p>
+<ul>
+<li>Você alterou uma migration existente (só localmente!)</li>
+<li>Quer limpar todos os dados</li>
+<li>Quer testar o seed.sql</li>
+</ul>
+<h3 id="15.4.-verificar-que-migrations-funcionam" tabindex="-1"><a class="header-anchor" href="#15.4.-verificar-que-migrations-funcionam">#</a> 15.4. Verificar que migrations funcionam</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Aplicar migrations pendentes</span>
+npx supabase migration up
+
+<span class="hljs-comment"># Ver status das migrations</span>
+npx supabase migration list
+</code></pre>
+<hr>
+<h2 id="16.-teste-local-%E2%80%94-testes-automatizados" tabindex="-1"><a class="header-anchor" href="#16.-teste-local-%E2%80%94-testes-automatizados">#</a> 16. Teste Local — Testes Automatizados</h2>
+<h3 id="16.1.-testes-unit%C3%A1rios-(r%C3%A1pidos%2C-sem-banco)" tabindex="-1"><a class="header-anchor" href="#16.1.-testes-unit%C3%A1rios-(r%C3%A1pidos%2C-sem-banco)">#</a> 16.1. Testes unitários (rápidos, sem banco)</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Todos os testes unitários</span>
+bun run <span class="hljs-built_in">test</span>:unit
+
+<span class="hljs-comment"># Um arquivo específico</span>
+bunx vitest run __tests__/domain/setup.test.ts
+
+<span class="hljs-comment"># Com coverage</span>
+bun run <span class="hljs-built_in">test</span>:coverage
+</code></pre>
+<p>Testes unitários testam lógica pura de domínio (cálculos financeiros, validações, regras de negócio) sem depender de banco ou rede.</p>
+<h3 id="16.2.-testes-de-integra%C3%A7%C3%A3o-(com-banco)" tabindex="-1"><a class="header-anchor" href="#16.2.-testes-de-integra%C3%A7%C3%A3o-(com-banco)">#</a> 16.2. Testes de integração (com banco)</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Requer supabase start ativo!</span>
+npx supabase start
+
+<span class="hljs-comment"># Rodar testes de integração</span>
+bun run <span class="hljs-built_in">test</span>:integration
+</code></pre>
+<p>Testes de integração se conectam ao Supabase local para validar:</p>
+<ul>
+<li>RLS policies</li>
+<li>Triggers</li>
+<li>Constraints</li>
+<li>Edge Functions</li>
+</ul>
+<h3 id="16.3.-estrutura-de-testes" tabindex="-1"><a class="header-anchor" href="#16.3.-estrutura-de-testes">#</a> 16.3. Estrutura de testes</h3>
+<pre class="hljs"><code>__tests__/
+├── domain/          ← Testes unitários (sem banco)
+│   ├── setup.test.ts
+│   ├── supplier.test.ts         (Etapa 2)
+│   ├── supplier-metrics.test.ts (Etapa 2)
+│   ├── deduplication.test.ts    (Etapa 2)
+│   └── alias-governance.test.ts (Etapa 2)
+├── integration/     ← Testes de integração (com banco)
+│   ├── supplier-crud.test.ts    (Etapa 2)
+│   └── rls-policies.test.ts     (Etapa 2)
+└── e2e/             ← Testes end-to-end (futuros)
+</code></pre>
+<h3 id="16.4.-mocks-e-stubs-para-testes-sem-banco" tabindex="-1"><a class="header-anchor" href="#16.4.-mocks-e-stubs-para-testes-sem-banco">#</a> 16.4. Mocks e stubs para testes sem banco</h3>
+<p>Para testes unitários que não precisam de banco real, use:</p>
+<pre class="hljs"><code><span class="hljs-comment">// __tests__/helpers/mock-supabase.ts</span>
+<span class="hljs-keyword">export</span> <span class="hljs-keyword">function</span> <span class="hljs-title function_">createMockSupabaseClient</span>(<span class="hljs-params"></span>) {
+  <span class="hljs-keyword">return</span> {
+    <span class="hljs-attr">from</span>: <span class="hljs-function">(<span class="hljs-params"><span class="hljs-attr">table</span>: <span class="hljs-built_in">string</span></span>) =&gt;</span> ({
+      <span class="hljs-attr">select</span>: <span class="hljs-function">() =&gt;</span> <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">resolve</span>({ <span class="hljs-attr">data</span>: [], <span class="hljs-attr">error</span>: <span class="hljs-literal">null</span> }),
+      <span class="hljs-attr">insert</span>: <span class="hljs-function">(<span class="hljs-params"><span class="hljs-attr">data</span>: <span class="hljs-built_in">unknown</span></span>) =&gt;</span> <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">resolve</span>({ data, <span class="hljs-attr">error</span>: <span class="hljs-literal">null</span> }),
+      <span class="hljs-attr">update</span>: <span class="hljs-function">(<span class="hljs-params"><span class="hljs-attr">data</span>: <span class="hljs-built_in">unknown</span></span>) =&gt;</span> <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">resolve</span>({ data, <span class="hljs-attr">error</span>: <span class="hljs-literal">null</span> }),
+      <span class="hljs-attr">delete</span>: <span class="hljs-function">() =&gt;</span> <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">resolve</span>({ <span class="hljs-attr">data</span>: <span class="hljs-literal">null</span>, <span class="hljs-attr">error</span>: <span class="hljs-literal">null</span> }),
+    }),
+    <span class="hljs-attr">auth</span>: {
+      <span class="hljs-attr">getUser</span>: <span class="hljs-function">() =&gt;</span> <span class="hljs-title class_">Promise</span>.<span class="hljs-title function_">resolve</span>({ <span class="hljs-attr">data</span>: { <span class="hljs-attr">user</span>: { <span class="hljs-attr">id</span>: <span class="hljs-string">&quot;mock-user-id&quot;</span> } }, <span class="hljs-attr">error</span>: <span class="hljs-literal">null</span> }),
+    },
+  };
+}
+</code></pre>
+<p>Para testes de integração, use o Supabase local real (não mocks).</p>
+<hr>
+<h2 id="17.-fluxo-completo-de-desenvolvimento" tabindex="-1"><a class="header-anchor" href="#17.-fluxo-completo-de-desenvolvimento">#</a> 17. Fluxo Completo de Desenvolvimento</h2>
+<p>Aqui está o fluxo que você seguirá diariamente:</p>
+<h3 id="passo-1%3A-atualizar-develop" tabindex="-1"><a class="header-anchor" href="#passo-1%3A-atualizar-develop">#</a> Passo 1: Atualizar develop</h3>
+<pre class="hljs"><code>git checkout develop
+git pull origin develop
+</code></pre>
+<h3 id="passo-2%3A-criar-branch-de-feature" tabindex="-1"><a class="header-anchor" href="#passo-2%3A-criar-branch-de-feature">#</a> Passo 2: Criar branch de feature</h3>
+<pre class="hljs"><code>git checkout -b feature/suppliers-crud
+</code></pre>
+<h3 id="passo-3%3A-desenvolver-com-banco-local" tabindex="-1"><a class="header-anchor" href="#passo-3%3A-desenvolver-com-banco-local">#</a> Passo 3: Desenvolver com banco local</h3>
+<pre class="hljs"><code><span class="hljs-comment"># Terminal 1: Supabase</span>
+npx supabase start
+
+<span class="hljs-comment"># Terminal 2: Web dev server</span>
+bun run dev
+
+<span class="hljs-comment"># Terminal 3: Desenvolvimento...</span>
+</code></pre>
+<h3 id="passo-4%3A-se-precisar-de-migration" tabindex="-1"><a class="header-anchor" href="#passo-4%3A-se-precisar-de-migration">#</a> Passo 4: Se precisar de migration</h3>
+<pre class="hljs"><code>npx supabase migration new create_suppliers
+<span class="hljs-comment"># Editar o arquivo SQL gerado</span>
+npx supabase db reset   <span class="hljs-comment"># Aplicar localmente</span>
+bun run generate-types  <span class="hljs-comment"># Atualizar tipos</span>
+</code></pre>
+<h3 id="passo-5%3A-testar" tabindex="-1"><a class="header-anchor" href="#passo-5%3A-testar">#</a> Passo 5: Testar</h3>
+<pre class="hljs"><code>bun run <span class="hljs-built_in">test</span>          <span class="hljs-comment"># Testes unitários + integração</span>
+bun run lint          <span class="hljs-comment"># Lint</span>
+bun run typecheck     <span class="hljs-comment"># Tipos</span>
+bun run format:check  <span class="hljs-comment"># Formatação</span>
+</code></pre>
+<h3 id="passo-6%3A-commitar-(conventional-commits)" tabindex="-1"><a class="header-anchor" href="#passo-6%3A-commitar-(conventional-commits)">#</a> Passo 6: Commitar (Conventional Commits)</h3>
+<pre class="hljs"><code>git add .
+git commit -m <span class="hljs-string">&quot;feat(supabase): create suppliers table with RLS&quot;</span>
+</code></pre>
+<p>O Husky vai rodar lint-staged e commitlint automaticamente.</p>
+<h3 id="passo-7%3A-push-e-mr" tabindex="-1"><a class="header-anchor" href="#passo-7%3A-push-e-mr">#</a> Passo 7: Push e MR</h3>
+<pre class="hljs"><code>git push -u origin feature/suppliers-crud
+</code></pre>
+<p>No GitLab: crie um Merge Request de <code>feature/suppliers-crud</code> → <code>develop</code>.</p>
+<p>A pipeline roda automaticamente. Se verde + aprovado → merge.</p>
+<h3 id="passo-8%3A-deploy-staging-(autom%C3%A1tico)" tabindex="-1"><a class="header-anchor" href="#passo-8%3A-deploy-staging-(autom%C3%A1tico)">#</a> Passo 8: Deploy staging (automático)</h3>
+<p>Ao fazer merge em <code>develop</code>, o pipeline deploya automaticamente para staging.</p>
+<h3 id="passo-9%3A-release-para-produ%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#passo-9%3A-release-para-produ%C3%A7%C3%A3o">#</a> Passo 9: Release para produção</h3>
+<p>Quando staging estiver estável, crie MR <code>develop → main</code>. Após merge, faça deploy manual no pipeline.</p>
+<hr>
+<h2 id="18.-quando-terei-algo-para-ver-e-testar%3F" tabindex="-1"><a class="header-anchor" href="#18.-quando-terei-algo-para-ver-e-testar%3F">#</a> 18. Quando terei algo para ver e testar?</h2>
+<h3 id="marcos-de-visibilidade" tabindex="-1"><a class="header-anchor" href="#marcos-de-visibilidade">#</a> Marcos de visibilidade</h3>
+<table>
+<thead>
+<tr>
+<th>Marco</th>
+<th>O que você verá</th>
+<th>Quando</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Agora (Etapa 0)</strong></td>
+<td>Página placeholder em <a href="http://localhost:3000">http://localhost:3000</a></td>
+<td>✅ Já disponível</td>
+</tr>
+<tr>
+<td><strong>Etapa 1.1</strong></td>
+<td>Login/cadastro funcionando com email</td>
+<td>Após configurar Auth</td>
+</tr>
+<tr>
+<td><strong>Etapa 1.2</strong></td>
+<td>Tabelas criadas visíveis no Supabase Studio</td>
+<td>Após migrations</td>
+</tr>
+<tr>
+<td><strong>Etapa 1.4</strong></td>
+<td>CRUD de fornecedores testável via API/Studio</td>
+<td>Após Edge Functions/CRUD</td>
+</tr>
+<tr>
+<td><strong>Etapa 3</strong></td>
+<td>Formulários web para cadastrar fornecedores</td>
+<td>Após UI do CRUD</td>
+</tr>
+<tr>
+<td><strong>Etapa 4</strong></td>
+<td>Dashboard com relatórios e filtros</td>
+<td>Após Etapa 4</td>
+</tr>
+</tbody>
+</table>
+<h3 id="o-que-testar-primeiro-(hands-on)" tabindex="-1"><a class="header-anchor" href="#o-que-testar-primeiro-(hands-on)">#</a> O que testar primeiro (hands-on)</h3>
+<ol>
+<li><strong>Agora:</strong> <code>bun run dev</code> → ver a página no browser</li>
+<li><strong>Após Etapa 1:</strong> <code>npx supabase start</code> → ver tabelas no Studio (<a href="http://127.0.0.1:54323">http://127.0.0.1:54323</a>)</li>
+<li><strong>Após Etapa 1 completa:</strong> testar CRUD de fornecedores via Studio ou curl</li>
+<li><strong>Após Etapa 3:</strong> navegar pela interface web com formulários reais</li>
+</ol>
+<h3 id="resumo-de-expectativa" tabindex="-1"><a class="header-anchor" href="#resumo-de-expectativa">#</a> Resumo de expectativa</h3>
+<blockquote>
+<p>O primeiro momento “tangível e interativo” será após a <strong>Etapa 1 completa</strong> — quando você poderá:</p>
+<ul>
+<li>Fazer login no sistema</li>
+<li>Criar fornecedores, aliases e contratos</li>
+<li>Ver dados no Supabase Studio</li>
+<li>Rodar testes e ver cobertura</li>
+</ul>
+<p>A interface web com formulários e dashboard virá nas <strong>Etapas 3 e 4</strong>.</p>
+</blockquote>
+<hr>
+<h2 id="refer%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#refer%C3%AAncias">#</a> Referências</h2>
+<table>
+<thead>
+<tr>
+<th>Documento</th>
+<th>Caminho</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Guia de Implementação</td>
+<td><code>docs/planejamento/001-guia-implementacao-passo-a-passo.md</code></td>
+</tr>
+<tr>
+<td>Guia CI/CD Operacional</td>
+<td><code>docs/planejamento/002-guia-cicd-engenharia-operacional.md</code></td>
+</tr>
+<tr>
+<td>ADR-004 Arquitetura Operacional</td>
+<td><code>docs/adrs/ADR-004-arquitetura-operacional-repositorio-cicd.md</code></td>
+</tr>
+<tr>
+<td>Ata do Refino CI/CD</td>
+<td><code>docs/refinos/2026-03/2026-03-21-14-19-refino-arquitetura-engenharia-cicd.md</code></td>
+</tr>
+<tr>
+<td>Checklist de Implementação</td>
+<td><code>docs/checklists/001-implementacao-geral.md</code></td>
+</tr>
+<tr>
+<td>Configuração Supabase</td>
+<td><code>supabase/config.toml</code></td>
+</tr>
+<tr>
+<td>Pipeline CI/CD</td>
+<td><code>.gitlab-ci.yml</code></td>
+</tr>
+<tr>
+<td>Variáveis de Ambiente</td>
+<td><code>.env.example</code></td>
+</tr>
+</tbody>
+</table>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>
