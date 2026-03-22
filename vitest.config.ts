@@ -7,7 +7,6 @@ export default defineConfig({
       "@sbf/domain": resolve(__dirname, "packages/domain/src/index.ts"),
       "@sbf/validation": resolve(__dirname, "packages/validation/src/index.ts"),
       "@sbf/shared-types": resolve(__dirname, "packages/shared-types/src/index.ts"),
-      zod: resolve(__dirname, "node_modules/zod/index.js"),
     },
   },
   test: {
