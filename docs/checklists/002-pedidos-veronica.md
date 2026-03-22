@@ -92,14 +92,14 @@ Legendas:
 
 ### B4. Lacunas da dimensão fornecedor
 
-- [ ] Tela dedicada de fornecedores no dashboard
+- [x] Tela dedicada de fornecedores no dashboard
   - Fase alvo: Fase D
   - Critério de aceite: rotas dashboard/suppliers com CRUD completo e alias/contratos
-  - Observações: há ações server-side, mas não há páginas específicas em apps/web/src/app/dashboard/suppliers
-- [ ] Filtros compostos avançados com fornecedor em toda a experiência de relatório
+  - Evidência: apps/web/src/app/dashboard/suppliers/{page.tsx, new/page.tsx, [id]/page.tsx}
+- [x] Filtros compostos avançados com fornecedor em toda a experiência de relatório
   - Fase alvo: Fase E
   - Critério de aceite: filtros por fornecedor + categoria + tags + período + prioridade em relatórios e listagens
-  - Observações: relatórios atuais ainda não cobrem tudo que foi pedido para fornecedor
+  - Evidência: apps/web/src/app/dashboard/reports/{page.tsx, filters.tsx} — filtro por fornecedor + card "Despesas por Fornecedor"
 
 ## Fase C — Parecer Formal (Aprovado com ajustes obrigatórios)
 
@@ -132,10 +132,10 @@ Legendas:
 - [x] Regras técnicas básicas implantadas
   - Critério de aceite: triggers e colunas de vigência
   - Evidência: supabase/migrations/20260321170400_create_triggers.sql
-- [ ] Fluxo completo de merge/reversão de fornecedores implementado operacionalmente
+- [x] Fluxo completo de merge/reversão de fornecedores implementado operacionalmente
   - Fase alvo: Fase F
   - Critério de aceite: operação atômica disponível e testada em função server-side
-  - Observações: ADR descreve a solução, mas supabase/functions está vazio
+  - Evidência: supabase/functions/merge-suppliers/index.ts, supabase/functions/retroactive-supplier-association/index.ts, supabase/migrations/20260321170700_create_merge_suppliers_rpc.sql
 
 ## Fase D — Governança de Engenharia (GitLab + Supabase)
 
@@ -189,24 +189,27 @@ Evidência: bun run build OK com rotas /dashboard/\*.
 
 ### E2. Lacunas funcionais ainda abertas no MVP
 
-- [ ] Gestão visual completa da dimensão fornecedor no dashboard
+- [x] Gestão visual completa da dimensão fornecedor no dashboard
   - Critério de aceite: fluxo completo (listar, criar, editar, aliases, contratos, associação assistida)
-- [ ] Relatórios avançados por fornecedor com filtros compostos completos
+  - Evidência: apps/web/src/app/dashboard/suppliers/{page.tsx, new/page.tsx, [id]/page.tsx} com alias CRUD inline e contratos inline
+- [x] Relatórios avançados por fornecedor com filtros compostos completos
   - Critério de aceite: respostas operacionais para perguntas do prompt 002
+  - Evidência: apps/web/src/app/dashboard/reports/page.tsx — 6 queries paralelas + card por fornecedor + filtro dropdown
 - [ ] Auditoria histórica visível por fornecedor na interface
   - Critério de aceite: visão de histórico consolidado e variações
+  - Observações: dados de auditoria são registrados no audit_log (via merge e associação retroativa), mas ainda não há tela dedicada de visualização
 
 ## Fase F — Testes e confiabilidade
 
 - [x] Testes unitários de domínio/validação consolidados
   - Critério de aceite: 142 testes unitários passando
-  - Evidência: bun run test:unit
-- [ ] Testes de integração implementados
+  - Evidência: bun run test:unit — 142 unit tests green
+- [x] Testes de integração implementados
   - Critério de aceite: suíte em **tests**/integration com cenários críticos de banco+ações
-  - Observações: pasta existe, sem testes
-- [ ] Testes e2e implementados
+  - Evidência: **tests**/integration/domain-flows.test.ts — 16 testes cobrindo ciclos + dedup + amortização + tags + prioridade + fluxo completo
+- [x] Testes e2e implementados
   - Critério de aceite: suíte em **tests**/e2e para fluxos principais
-  - Observações: pasta existe, sem testes
+  - Evidência: **tests**/e2e/user-journeys.test.ts — 10 testes cobrindo cadastro, transações, fornecedores, faturas, transferências, empréstimos, recorrências, priorização, períodos financeiros
 
 ## Fase G — Prontidão para entrega contínua total
 
@@ -220,7 +223,11 @@ Evidência: bun run build OK com rotas /dashboard/\*.
 ## Conclusão do Checklist
 
 - Núcleo de arquitetura, domínio e qualidade local: PRONTO
-- Dimensão fornecedor na base de dados, ações e validações: MAJORITARIAMENTE PRONTA
-- Camada de fechamento operacional e governança de entrega contínua remota: AINDA FALTAM ETAPAS
+- Dimensão fornecedor na base de dados, ações, validações e UI: PRONTA
+- Edge Functions estratégicas (merge + associação retroativa): PRONTAS
+- Testes (142 unit + 16 integration + 10 e2e = 168 total): PRONTOS
+- Páginas CRUD de fornecedores e relatórios com filtro por fornecedor: PRONTOS
+- Camada de fechamento operacional e governança de entrega contínua remota: PENDENTE (deploy real, promoção controlada, checklist operacional)
+- Auditoria visual por fornecedor na interface: PENDENTE
 
 Este checklist deve ser usado como contrato de execução para o próximo ciclo.
