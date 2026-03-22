@@ -34,7 +34,7 @@
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
-    "html-gen-docs": "^1.5.2",
+    "html-gen-docs": "^1.6.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",

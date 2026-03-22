@@ -1684,27 +1684,50 @@ NÃO CODEM, só refinem, planejem, organizem, e deixem tudo pronto para a implem
 
 ---
 
+Time,
+
+Vamos terminar os gaps que faltam para fechar a implementação geral, seguindo o planejamento e o checklist que vocês criaram, e garantindo que cada etapa seja concluída com os entregáveis definidos.
+
+- Baseado no checklist que vocês criaram, vamos fechar cada item, garantindo que tudo que a Verônica pediu esteja implementado, e que o projeto esteja alinhado com as decisões tomadas e os padrões definidos.
+- Baseado nos refino e planejamento que vocês criaram, vamos organizar o trabalho restante, definindo claramente o que falta, quem é responsável por cada item, e quais são os critérios de aceite para cada etapa.
+- Faça commits pequenos e frequentes, seguindo o padrão de commits definido, para garantir que o histórico do projeto seja claro e fácil de entender, e para facilitar a revisão de código e a colaboração entre os membros da equipe.
+- Mantenha a comunicação constante, compartilhando o progresso, os bloqueios, e os aprendizados com o time, para garantir que todos estejam alinhados e possam ajudar a resolver qualquer problema que possa surgir durante a implementação.
+- No final, me mostre o que foi feito, o que falta, e qual é o plano para finalizar a implementação, para que eu possa acompanhar o progresso e dar feedbacks mais práticos.
+- Atualize a documentação de checklists, em `docs/checklists/`, atualizando/adicionando os checklists necessários para refletir o que foi feito e o que falta, garantindo que a documentação esteja sempre atualizada e alinhada com o estado atual do projeto.
+
+Foco total agora, time, para terminar essa implementação geral, garantindo que o projeto já nasça com disciplina de engenharia e entrega contínua, e que esteja pronto para crescer de forma sustentável e escalável.
+
+Nas próximas inteirações, vamos focar em fechar os gaps que faltam, seguindo o planejamento e o checklist que vocês criaram, e garantindo que cada etapa seja concluída com os entregáveis definidos.
+
+---
+
+Façam novamente auditoria e respondam algumas perguntas:
+
+- Tinha edge functions no planejamento inicial? Se sim, qual é o status delas? Se não, tem alguma função que deveria ser implementada como edge function, e que não está sendo implementada como tal?
+- Tinha alguma configuração específica do Supabase que deveria ser feita, e que não foi feita, como configuração de RLS, configuração de storage, configuração de autenticação, ou qualquer outra configuração relevante para garantir a segurança, a governança, e a escalabilidade do projeto?
+
+---
+
+Feito essa auditoria:
+
+- Time, de posse da auditoria, cria:
+  - documento de refino detalhado
+  - atualização do checklist completo de tudo que a verônica pediu, na pasta `docs/checklist/001-pedidos-veronica.md`, com check no que tá pronto, fases, criterios de aceite
+  - planejamento do que falta, com responsáveis, prazos, e critérios de aceite claros para
+- Integragir com supabase localmente, para testar as funcionalidades implementadas
+  - Por que não aparece as edge functions no dashboard do supabase? Tem que aparecer? Tem alguma configuração específica para isso?
+  - Tem como testar as edge functions localmente? Se sim, como fazer isso? Se não, tem alguma alternativa para testar as edge functions localmente, garantindo que elas estejam funcionando corretamente antes
+  - Checa tudo que tinha que estar aparecendo no supabase
+    - configura o mcp do supabase local no arquivo mcp.json para expor as funcionalidade do supabase local, para que o VSCode possa se conectar e mostrar as tabelas, as edge functions, e qualquer outra funcionalidade relevante do supabase local, para facilitar o desenvolvimento e a depuração localmente.
+
+Chama o time para planejar, criar o refino, atualizar o checklist e implementar o que precisar implementar
+
+Conto com vocês para isso, time!
+
+---
+
+=======================================================
 TODO:
-Fechar validação local completa antes de subir branch:
-bun run lint, bun run typecheck, bun run test, bun run build.
-Referência: 001-implementacao-geral.md
 
-Normalizar autenticação local com porta customizada (se usar 3105, 3101 etc):
-Garantir consistência entre NEXT_PUBLIC_APP_URL, site_url e redirect URLs do Supabase.
-Referências: 001-supabase.e.outros.md, config.toml, middleware.ts
-
-Executar fluxo diário oficial de desenvolvimento:
-develop atualizado, branch de feature, desenvolvimento, testes, commit convencional, MR.
-Referência: 001-supabase.e.outros.md:868
-
-Configurar e validar CI/CD de verdade no GitLab:
-Variáveis de ambiente, proteção de branches, regras de MR, pipeline verde obrigatória.
-Referências: 001-supabase.e.outros.md, .gitlab-ci.yml, 002-guia-cicd-engenharia-operacional.md, ADR-004-arquitetura-operacional-repositorio-cicd.md
-
-Rodar checkpoint funcional do produto (MVP navegável):
-Login, dashboard, instituições, produtos, transações, recorrências, faturas, dívidas, documentos, importação e relatórios.
-Referência: 001-implementacao-geral.md
-
-Publicar para staging e validar com dados reais de teste:
-Deploy automático de develop, smoke test funcional e só depois promover para main.
-Referências: 001-supabase.e.outros.md, .gitlab-ci.yml
+- Tem como criar uma authenticação via gmail? se sim, estabeleça o planejamento para isso, e implemente, garantindo que a autenticação esteja funcionando corretamente, e que seja possível testar localmente e em staging antes de promover para produção.
+  - Criei um gmail próprio para isso, para acomodar tudo que precisa na google cloud, e para garantir que a autenticação via gmail esteja funcionando corretamente, e que seja possível testar localmente e em staging antes de promover para produção.

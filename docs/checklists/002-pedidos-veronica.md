@@ -220,14 +220,89 @@ Evidência: bun run build OK com rotas /dashboard/\*.
 - [ ] Checklist de operação contínua assinado pelo time
   - Critério de aceite: todos os itens críticos de segurança/qualidade/deploy fechados
 
+## Fase H — Segurança e Hardening Supabase (pós-auditoria 2026-03-22)
+
+> Gaps críticos e importantes identificados na auditoria pós-implementação das Edge Functions e configurações do Supabase.
+
+### H1. Gaps Críticos (bloqueiam segurança real)
+
+- [ ] RLS de audit_logs: substituir FOR ALL por FOR SELECT + FOR INSERT + trigger de imutabilidade
+  - Fase alvo: Fase H (urgente)
+  - Critério de aceite: migration criada; `DELETE` em audit_logs levanta exception; testes cobrindo o trigger
+  - Observações: policy atual FOR ALL permite usuário deletar seus próprios audit logs — destrói imutabilidade
+- [ ] Storage: criar bucket `documents` e `imports` com policies de acesso por usuário
+  - Fase alvo: Fase H (urgente)
+  - Critério de aceite: migration com `INSERT INTO storage.buckets` + policies de Storage RLS; bucket aparece no Studio
+  - Observações: tabela `documents` tem `file_path` mas nenhum bucket existe — qualquer upload falharia hoje
+- [ ] user_secrets.encrypted_value: encriptar com pgcrypto em repouso
+  - Fase alvo: Fase H (urgente)
+  - Critério de aceite: migration altera coluna para uso de `pgp_sym_encrypt`; segredos não são texto puro no banco
+  - Observações: pg_vault está comentado no config.toml; usar pgcrypto (já instalado) como alternativa pragmática
+
+### H2. Gaps Importantes (antes de produção)
+
+- [ ] config.toml: `minimum_password_length` de 6 para 8 (dev) / 12 (prod)
+  - Critério de aceite: valor alterado e documentado
+- [ ] config.toml: `password_requirements = "lower_upper_letters_digits"`
+  - Critério de aceite: valor configurado
+- [ ] config.toml: `enable_confirmations = true`
+  - Critério de aceite: confirmação de e-mail ativa em dev/prod
+- [ ] config.toml: `secure_password_change = true`
+  - Critério de aceite: reautenticação exigida para troca de senha
+- [ ] config.toml: Google OAuth configurado (`[auth.external.google]`)
+  - Critério de aceite: bloco provider Google presente; vars GOOGLE_CLIENT_ID/GOOGLE_SECRET no .env.example
+  - Observações: CEO criou Gmail para este fim (ver TODO em prompts.md)
+- [ ] config.toml: SMTP configurado (Mailpit local + SendGrid/SES prod)
+  - Critério de aceite: emails de auth funcionam localmente via Mailpit (http://127.0.0.1:54324)
+- [ ] View materializada `mv_supplier_spending` criada
+  - Critério de aceite: migration 20260323\* com a view + mecanismo de refresh
+  - Observações: planejada na Etapa 5.4 mas não implementada; necessária para performance de relatórios
+- [ ] Edge Function `retroactive-supplier-association`: confirm com transação atômica
+  - Critério de aceite: `handleConfirm` usa RPC PL/pgSQL atômica; sem risco de estado inconsistente no meio do lote
+- [ ] Edge Functions: adicionar CORS headers em merge-suppliers e retroactive-supplier-association
+  - Critério de aceite: headers `Access-Control-Allow-Origin` presentes; preflight OPTIONS respondido
+- [ ] Edge Function `refresh-mv-supplier-spending` criada (scheduled/cron)
+  - Critério de aceite: função que executa `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supplier_spending`
+  - Observações: terceira Edge Function planejada na Etapa 5.4, ainda não criada
+- [ ] seed.sql populado com dados base de desenvolvimento
+  - Critério de aceite: categorias base, tags comuns, usuário de teste no seed.sql
+
+### H3. Gaps Opcionais (melhorias de qualidade)
+
+- [ ] MFA TOTP habilitado (`[auth.mfa.totp] enroll_enabled = true`)
+- [ ] Session timebox configurado (`timebox = "24h"`, `inactivity_timeout = "8h"`)
+- [ ] `[db.vault]` habilitado para melhor governança de segredos
+- [ ] `[db.ssl_enforcement]` habilitado em produção
+- [ ] PgBouncer habilitado em produção (`[db.pooler] enabled = true`)
+- [ ] Email templates customizados (confirmação, reset, convite)
+- [ ] hCaptcha/Turnstile para signup (`[auth.captcha]`)
+- [ ] `OPENAI_API_KEY` documentado no `.env.example`
+
+### H4. Supabase Local — Ambiente de Desenvolvimento
+
+- [ ] Edge Runtime iniciado e Edge Functions aparecendo no Studio
+  - Critério de aceite: `npx supabase functions serve` documentado; Studio mostra as funções
+  - Observações: `supabase_edge_runtime_seu.bolso.feliz` está stopped — funções não aparecem no Studio
+- [x] MCP do Supabase local configurado no VS Code
+  - Critério de aceite: `.vscode/mcp.json` com endpoint `http://127.0.0.1:54321/mcp`
+  - Evidência: .vscode/mcp.json criado em 2026-03-22
+- [ ] Storage buckets aparecendo no Studio após migration H1
+  - Critério de aceite: aba Storage do Studio mostra buckets `documents` e `imports`
+- [ ] Tabelas verificadas no Studio (todas 27 com RLS ativo)
+  - Critério de aceite: Table Editor mostra todas as tabelas; RLS tab mostra policies ativas
+
+---
+
 ## Conclusão do Checklist
 
 - Núcleo de arquitetura, domínio e qualidade local: PRONTO
 - Dimensão fornecedor na base de dados, ações, validações e UI: PRONTA
-- Edge Functions estratégicas (merge + associação retroativa): PRONTAS
+- Edge Functions estratégicas (merge + associação retroativa): PRONTAS (com gaps I8/I9)
 - Testes (142 unit + 16 integration + 10 e2e = 168 total): PRONTOS
 - Páginas CRUD de fornecedores e relatórios com filtro por fornecedor: PRONTOS
+- Segurança e hardening Supabase (Fase H): PENDENTE — 3 gaps críticos, 11 importantes
 - Camada de fechamento operacional e governança de entrega contínua remota: PENDENTE (deploy real, promoção controlada, checklist operacional)
 - Auditoria visual por fornecedor na interface: PENDENTE
 
 Este checklist deve ser usado como contrato de execução para o próximo ciclo.
+Próxima prioridade: Corrigir gaps H1 (críticos) antes de qualquer promoção para produção.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADR-002-norma-consumption-metrics</title>
+  <title>2026-03-22-18-00-pos-auditoria-supabase-edge-functions-e-seguranca</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hack-font/3.3.0/web/hack.min.css">
@@ -844,7 +844,7 @@
     <main class="main">
       <header class="hero">
         <div class="hero-top">
-          <h1>📝 ADR-002-norma-consumption-metrics</h1>
+          <h1>📝 2026-03-22-18-00-pos-auditoria-supabase-edge-functions-e-seguranca</h1>
           <div class="hero-actions">
             <a href="/">🏠 Index</a>
             <button id="go-top" type="button">⬆️ Topo</button>
@@ -854,365 +854,376 @@
       </header>
 
       <article class="doc-card" id="documento">
-        
-        <h1 id="adr-002%3A-norma-de-uso-de-consumption_metrics" tabindex="-1"><a class="header-anchor" href="#adr-002%3A-norma-de-uso-de-consumption_metrics">#</a> ADR-002: Norma de Uso de <code>consumption_metrics</code></h1>
-<p><strong>Status:</strong> Aprovado
-<strong>Data:</strong> 2026-03-21
-<strong>Origem:</strong> Parecer Verônica — Ajuste Obrigatório 4.2
-<strong>Ata de referência:</strong> <code>docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md</code> (Seção 3)</p>
+        <p>Título da Reunião: Pós-Auditoria — Edge Functions, Supabase Local e Segurança</p>
+<p>Data e Hora: 2026-03-22 18:00</p>
+<p>Participantes:</p>
+<ul>
+<li>Francisco “Chico” Figueiredo (CEO) — facilitador</li>
+<li>Ana Silva (Arquiteta de Software) — anotadora</li>
+<li>João Pereira (Backend Sênior NodeJS/Bun) — relator de Edge Functions</li>
+<li>Maria Oliveira (Backend Sênior NodeJS/Bun) — relator de Edge Functions</li>
+<li>Fernando Gomes (DevOps Sênior) — relator de config.toml e MCP</li>
+<li>André Santos (DBA Sênior PostgreSQL) — relator de RLS e Storage</li>
+<li>Pedro Santos (Backend Sênior Python/Django) — relator de Auth</li>
+<li>Carlos Mendes (Designer de Software) — observador</li>
+</ul>
+<p>Pauta:</p>
+<ul>
+<li>Análise dos resultados da auditoria de Edge Functions e Configurações do Supabase</li>
+<li>Definir criticalidade e prioridade de cada gap encontrado</li>
+<li>Responder perguntas do CEO sobre Edge Functions no dashboard e testes locais</li>
+<li>Planejar correção dos gaps críticos (C1, C2, C3)</li>
+<li>Configurar MCP do Supabase local no VS Code</li>
+<li>Atualizar checklist e criar planejamento de continuidade</li>
+</ul>
+
+        <h2 id="contexto" tabindex="-1"><a class="header-anchor" href="#contexto">#</a> Contexto</h2>
+<p>Esta reunião é convocada pelo CEO imediatamente após a auditoria técnica completa do projeto, que revelou o status das Edge Functions e das configurações do Supabase local. A auditoria cruzou o codebase com os documentos de planejamento (<code>docs/planejamento/001-guia-implementacao-passo-a-passo.md</code>) e os ADRs publicados.</p>
 <hr>
-<h2 id="1.-contexto" tabindex="-1"><a class="header-anchor" href="#1.-contexto">#</a> 1. Contexto</h2>
-<p>A tabela <code>consumption_metrics</code> armazena dados de consumo associados a fornecedores (ex: kWh de energia, GB de internet, litros de água). Porém, sem norma formal, ela corre risco de virar “tabela-lixeira” misturando:</p>
-<ul>
-<li>Métricas quantitativas (consumo de energia em kWh)</li>
-<li>Atributos qualitativos (bandeira tarifária verde/amarela)</li>
-<li>Metadados de referência (número do medidor)</li>
-</ul>
-<p>A Verônica identificou que essa ambiguidade precisa ser resolvida antes da implementação.</p>
-<h2 id="2.-decis%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.-decis%C3%A3o">#</a> 2. Decisão</h2>
-<h3 id="2.1.-tr%C3%AAs-categorias-de-dados" tabindex="-1"><a class="header-anchor" href="#2.1.-tr%C3%AAs-categorias-de-dados">#</a> 2.1. Três Categorias de Dados</h3>
+<h2 id="discuss%C3%A3o" tabindex="-1"><a class="header-anchor" href="#discuss%C3%A3o">#</a> Discussão</h2>
+<h3 id="1.-edge-functions-%E2%80%94-status-e-testes-locais" tabindex="-1"><a class="header-anchor" href="#1.-edge-functions-%E2%80%94-status-e-testes-locais">#</a> 1. Edge Functions — Status e Testes Locais</h3>
+<p><strong>João Pereira (Backend Sênior):</strong> A auditoria confirmou que das 3 Edge Functions planejadas, 2 estão implementadas e 1 ausente:</p>
 <table>
 <thead>
 <tr>
-<th>Categoria</th>
-<th>Definição</th>
-<th>Onde registrar</th>
+<th>#</th>
+<th>Função</th>
+<th>Status</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Métrica</strong></td>
-<td>Valor quantitativo mensurável com unidade de medida</td>
-<td><code>consumption_metrics</code> — campos estruturados</td>
+<td>1</td>
+<td><code>merge-suppliers</code></td>
+<td>✅ Implementada (~90% completa)</td>
 </tr>
 <tr>
-<td><strong>Atributo</strong></td>
-<td>Qualificador categórico ou classificatório, sem quantidade</td>
-<td><code>consumption_metrics.metadata</code> com <code>type: &quot;attribute&quot;</code></td>
+<td>2</td>
+<td><code>retroactive-supplier-association</code></td>
+<td>✅ Implementada (~75% completa)</td>
 </tr>
 <tr>
-<td><strong>Metadado</strong></td>
-<td>Informação de referência estática sobre equipamento/contrato</td>
-<td><code>supplier_contracts.metadata</code> ou <code>supplier_contracts.notes</code></td>
+<td>3</td>
+<td><code>refresh-mv-supplier-spending</code></td>
+<td>❌ Não criada (planejada na Etapa 5.4)</td>
 </tr>
 </tbody>
 </table>
-<h3 id="2.2.-defini%C3%A7%C3%A3o-formal%3A-m%C3%A9trica" tabindex="-1"><a class="header-anchor" href="#2.2.-defini%C3%A7%C3%A3o-formal%3A-m%C3%A9trica">#</a> 2.2. Definição Formal: Métrica</h3>
-<blockquote>
-<p><strong>Métrica</strong> é um registro quantitativo mensurável associado a um fornecedor em um período de referência, que possui unidade de medida e pode ou não ter valor monetário associado.</p>
-</blockquote>
-<p><strong>Critérios obrigatórios:</strong></p>
-<ul>
-<li><code>quantity</code> IS NOT NULL (valor numérico, pode ser 0)</li>
-<li><code>metric_name</code> IS NOT NULL (nome da métrica: “Consumo”, “Dados utilizados”, etc.)</li>
-<li><code>metric_unit</code> IS NOT NULL (unidade: kWh, GB, m³, minutos, unidades, etc.)</li>
-</ul>
-<p><strong>Campos opcionais:</strong></p>
-<ul>
-<li><code>unit_price</code> — preço unitário (quando monetizável)</li>
-<li><code>subtotal</code> — valor total da métrica (quantity × unit_price ou valor fixo)</li>
-</ul>
-<h3 id="2.3.-defini%C3%A7%C3%A3o-formal%3A-atributo-qualitativo" tabindex="-1"><a class="header-anchor" href="#2.3.-defini%C3%A7%C3%A3o-formal%3A-atributo-qualitativo">#</a> 2.3. Definição Formal: Atributo Qualitativo</h3>
-<blockquote>
-<p><strong>Atributo</strong> é uma característica qualitativa associada a um período de referência, que não possui quantidade numérica mensurável.</p>
-</blockquote>
-<p><strong>Critérios:</strong></p>
-<ul>
-<li><code>quantity</code> IS NULL</li>
-<li><code>metric_name</code> IS NULL ou descritivo</li>
-<li><code>metadata</code> contém <code>{&quot;type&quot;: &quot;attribute&quot;, &quot;attribute_name&quot;: &quot;...&quot;, &quot;attribute_value&quot;: &quot;...&quot;}</code></li>
-<li>Preserva série temporal (ex: “março foi bandeira amarela, abril foi verde”)</li>
-</ul>
-<h3 id="2.4.-defini%C3%A7%C3%A3o-formal%3A-metadado" tabindex="-1"><a class="header-anchor" href="#2.4.-defini%C3%A7%C3%A3o-formal%3A-metadado">#</a> 2.4. Definição Formal: Metadado</h3>
-<blockquote>
-<p><strong>Metadado</strong> é uma informação de referência estática sobre o equipamento, instalação ou contrato, que NÃO varia por período.</p>
-</blockquote>
-<p><strong>Critérios:</strong></p>
-<ul>
-<li>NÃO vai em <code>consumption_metrics</code> (não é periódico)</li>
-<li>Registrar em <code>supplier_contracts.metadata</code> ou <code>supplier_contracts.notes</code></li>
-<li>Exemplos: número do medidor, ID de instalação, código do cliente</li>
-</ul>
-<h3 id="2.5.-regra%3A-coer%C3%AAncia-com-valor-da-transa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.5.-regra%3A-coer%C3%AAncia-com-valor-da-transa%C3%A7%C3%A3o">#</a> 2.5. Regra: Coerência com Valor da Transação</h3>
-<blockquote>
-<p>O somatório dos subtotais das métricas NÃO precisa bater com o valor da transação vinculada.</p>
-</blockquote>
-<p>Motivo: a transação pode incluir impostos, taxas, descontos e arredondamentos que não são decompostos em métricas. As métricas são decomposição PARCIAL e informativa, não contábil.</p>
-<h3 id="2.6.-constraint-no-banco" tabindex="-1"><a class="header-anchor" href="#2.6.-constraint-no-banco">#</a> 2.6. Constraint no Banco</h3>
-<pre class="hljs"><code><span class="hljs-keyword">ALTER TABLE</span> consumption_metrics <span class="hljs-keyword">ADD CONSTRAINT</span> chk_metric_or_attribute
-  <span class="hljs-keyword">CHECK</span> (
-    <span class="hljs-comment">-- Caso 1: métrica quantitativa — precisa de name, unit e quantity</span>
-    (quantity <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metric_name <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metric_unit <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>)
-    <span class="hljs-keyword">OR</span>
-    <span class="hljs-comment">-- Caso 2: atributo qualitativo — sem quantity, com metadata tipada</span>
-    (quantity <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">AND</span> metadata <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span> <span class="hljs-keyword">AND</span> metadata<span class="hljs-operator">-</span><span class="hljs-operator">&gt;&gt;</span><span class="hljs-string">&#x27;type&#x27;</span> <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;attribute&#x27;</span>)
-  );
+<p><strong>Por que não aparecem no Studio (<code>http://127.0.0.1:54323</code>)?</strong></p>
+<p><strong>Fernando Gomes (DevOps):</strong> A resposta é direta: o serviço <code>supabase_edge_runtime_seu.bolso.feliz</code> está <strong>parado</strong>. O output do <code>supabase status</code> mostra:</p>
+<pre class="hljs"><code>Stopped services: [supabase_imgproxy_seu.bolso.feliz supabase_edge_runtime_seu.bolso.feliz supabase_pooler_seu.bolso.feliz]
 </code></pre>
-<h3 id="2.7.-conven%C3%A7%C3%A3o-para-o-campo-metadata" tabindex="-1"><a class="header-anchor" href="#2.7.-conven%C3%A7%C3%A3o-para-o-campo-metadata">#</a> 2.7. Convenção para o campo <code>metadata</code></h3>
-<h4 id="atributo-qualitativo-peri%C3%B3dico%3A" tabindex="-1"><a class="header-anchor" href="#atributo-qualitativo-peri%C3%B3dico%3A">#</a> Atributo qualitativo periódico:</h4>
+<p>O Studio lista Edge Functions apenas quando o Edge Runtime está ativo. <strong>As funções existem como código</strong> em <code>supabase/functions/</code>, mas para aparecerem no Studio e serem testadas localmente, o runtime precisa estar rodando.</p>
+<p><strong>Como testar Edge Functions localmente:</strong></p>
+<p>Opção A — runtime completo (estável, igual à produção):</p>
+<pre class="hljs"><code>npx supabase <span class="hljs-built_in">functions</span> serve
+</code></pre>
+<p>Isso inicia o Deno Edge Runtime e todas as funções ficam acessíveis em <code>http://127.0.0.1:54321/functions/v1/&lt;nome-da-funcao&gt;</code>.</p>
+<p>Opção B — função específica:</p>
+<pre class="hljs"><code>npx supabase <span class="hljs-built_in">functions</span> serve merge-suppliers
+npx supabase <span class="hljs-built_in">functions</span> serve retroactive-supplier-association
+</code></pre>
+<p><strong>Após iniciar</strong>, para testar com cURL:</p>
+<pre class="hljs"><code><span class="hljs-comment"># Teste merge-suppliers (requer JWT de usuário autenticado)</span>
+curl -X POST http://127.0.0.1:54321/functions/v1/merge-suppliers \
+  -H <span class="hljs-string">&quot;Authorization: Bearer &lt;JWT_TOKEN&gt;&quot;</span> \
+  -H <span class="hljs-string">&quot;Content-Type: application/json&quot;</span> \
+  -d <span class="hljs-string">&#x27;{&quot;source_supplier_id&quot;: &quot;&lt;uuid&gt;&quot;, &quot;target_supplier_id&quot;: &quot;&lt;uuid&gt;&quot;}&#x27;</span>
+
+<span class="hljs-comment"># Teste retroactive-supplier-association (GET — busca candidatos)</span>
+curl http://127.0.0.1:54321/functions/v1/retroactive-supplier-association \
+  -H <span class="hljs-string">&quot;Authorization: Bearer &lt;JWT_TOKEN&gt;&quot;</span>
+</code></pre>
+<p>Para obter um JWT de teste, autentique via Supabase Auth local e capture o <code>access_token</code>.</p>
+<p><strong>Maria Oliveira (Backend Sênior):</strong> Vale reforçar que as funções usam <code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code> e <code>SUPABASE_ANON_KEY</code> do ambiente — todos são auto-injetados pelo runtime local sem configuração adicional.</p>
+<hr>
+<h3 id="2.-checklist-de-tudo-que-deveria-aparecer-no-supabase-studio" tabindex="-1"><a class="header-anchor" href="#2.-checklist-de-tudo-que-deveria-aparecer-no-supabase-studio">#</a> 2. Checklist de Tudo que Deveria Aparecer no Supabase Studio</h3>
+<p><strong>André Santos (DBA):</strong> Ao abrir o Studio (<code>http://127.0.0.1:54323</code>), o time deve verificar:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Como verificar no Studio</th>
+<th>Status esperado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabelas (27)</td>
+<td>Table Editor → todas as tabelas listadas</td>
+<td>✅ Deve aparecer após migrations</td>
+</tr>
+<tr>
+<td>RLS ativo nas tabelas</td>
+<td>Table Editor → cada tabela → RLS tab</td>
+<td>✅ Configurado na migration 170500</td>
+</tr>
+<tr>
+<td>Edge Functions</td>
+<td>Edge Functions tab</td>
+<td>⚠️ Só aparece com Edge Runtime rodando</td>
+</tr>
+<tr>
+<td>Storage buckets</td>
+<td>Storage tab</td>
+<td>❌ VAZIO — nenhum bucket foi criado</td>
+</tr>
+<tr>
+<td>Auth providers</td>
+<td>Auth → Providers</td>
+<td>⚠️ Apenas email (sem Google OAuth)</td>
+</tr>
+<tr>
+<td>Auth users</td>
+<td>Auth → Users</td>
+<td>Deve mostrar usuários de teste</td>
+</tr>
+<tr>
+<td>API docs</td>
+<td>API tab → schema auto-gerado</td>
+<td>Deve aparecer para todas as tabelas</td>
+</tr>
+<tr>
+<td>Logs</td>
+<td>Logs tab</td>
+<td>Disponível quando serviços ativos</td>
+</tr>
+<tr>
+<td>pg_net / extensões</td>
+<td>Database → Extensions</td>
+<td>Deve mostrar extensões ativas (pg_trgm, pgcrypto, etc.)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="3.-gaps-cr%C3%ADticos-de-seguran%C3%A7a" tabindex="-1"><a class="header-anchor" href="#3.-gaps-cr%C3%ADticos-de-seguran%C3%A7a">#</a> 3. Gaps Críticos de Segurança</h3>
+<p><strong>Ana Silva (Arquiteta):</strong> A auditoria identificou 3 gaps críticos que precisam de correção imediata antes de qualquer promoção para produção:</p>
+<h4 id="c1-%E2%80%94-audit_logs-delet%C3%A1veis-pelo-usu%C3%A1rio-(rls-for-all)" tabindex="-1"><a class="header-anchor" href="#c1-%E2%80%94-audit_logs-delet%C3%A1veis-pelo-usu%C3%A1rio-(rls-for-all)">#</a> C1 — audit_logs deletáveis pelo usuário (RLS FOR ALL)</h4>
+<p><strong>Problema:</strong> A policy atual em <code>audit_logs</code> usa <code>FOR ALL USING (auth.uid() = user_id)</code>, o que permite ao usuário executar <code>DELETE</code> nos próprios logs de auditoria. Isso destrói a imutabilidade, que é o propósito central da tabela.</p>
+<p><strong>Solução:</strong> Substituir <code>FOR ALL</code> por <code>FOR SELECT</code> + <code>FOR INSERT</code> na policy, e adicionar um trigger <code>BEFORE DELETE OR UPDATE</code> que levanta exception.</p>
+<p><strong>André Santos (DBA):</strong> Concordo. O trigger é a camada mais robusta porque garante imutabilidade mesmo se alguém usar <code>service_role</code> por engano em código futuro. Proposta:</p>
+<pre class="hljs"><code><span class="hljs-comment">-- Substituir policy atual</span>
+<span class="hljs-keyword">DROP</span> POLICY IF <span class="hljs-keyword">EXISTS</span> &quot;Users can manage their own audit_logs&quot; <span class="hljs-keyword">ON</span> audit_logs;
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can read own audit_logs&quot; <span class="hljs-keyword">ON</span> audit_logs
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">USING</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+<span class="hljs-keyword">CREATE</span> POLICY &quot;System can insert audit_logs&quot; <span class="hljs-keyword">ON</span> audit_logs
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (auth.uid() <span class="hljs-operator">=</span> user_id);
+
+<span class="hljs-comment">-- Trigger de imutabilidade</span>
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> prevent_audit_log_mutation()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  RAISE EXCEPTION <span class="hljs-string">&#x27;audit_logs are immutable -- % not allowed&#x27;</span>, TG_OP;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_audit_logs_immutable
+  BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">OR</span> <span class="hljs-keyword">DELETE</span> <span class="hljs-keyword">ON</span> audit_logs
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> prevent_audit_log_mutation();
+</code></pre>
+<h4 id="c2-%E2%80%94-nenhum-bucket-de-storage-criado" tabindex="-1"><a class="header-anchor" href="#c2-%E2%80%94-nenhum-bucket-de-storage-criado">#</a> C2 — Nenhum bucket de Storage criado</h4>
+<p><strong>Problema:</strong> <code>config.toml</code> tem Storage habilitado (50MiB, S3 protocol), mas nenhum bucket foi criado. A tabela <code>documents</code> referencia <code>file_path text NOT NULL</code> que pressupõe bucket existente. Qualquer tentativa de upload vai falhar.</p>
+<p><strong>Fernando Gomes:</strong> Precisamos criar migration para o bucket <code>documents</code> (privado) e possivelmente <code>imports</code> para arquivos CSV/XLSX. A policy de Storage segue o padrão: usuário acessa apenas seus próprios arquivos via <code>auth.uid()</code> no path do objeto.</p>
+<p><strong>Proposta de migration:</strong></p>
+<pre class="hljs"><code><span class="hljs-comment">-- Criar buckets</span>
+<span class="hljs-keyword">INSERT INTO</span> storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+<span class="hljs-keyword">VALUES</span>
+  (<span class="hljs-string">&#x27;documents&#x27;</span>, <span class="hljs-string">&#x27;documents&#x27;</span>, <span class="hljs-literal">false</span>, <span class="hljs-number">52428800</span>,
+   <span class="hljs-keyword">ARRAY</span>[<span class="hljs-string">&#x27;application/pdf&#x27;</span>,<span class="hljs-string">&#x27;image/jpeg&#x27;</span>,<span class="hljs-string">&#x27;image/png&#x27;</span>,<span class="hljs-string">&#x27;image/webp&#x27;</span>,<span class="hljs-string">&#x27;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&#x27;</span>,<span class="hljs-string">&#x27;text/csv&#x27;</span>]),
+  (<span class="hljs-string">&#x27;imports&#x27;</span>, <span class="hljs-string">&#x27;imports&#x27;</span>, <span class="hljs-literal">false</span>, <span class="hljs-number">52428800</span>,
+   <span class="hljs-keyword">ARRAY</span>[<span class="hljs-string">&#x27;text/csv&#x27;</span>,<span class="hljs-string">&#x27;application/vnd.ms-excel&#x27;</span>,<span class="hljs-string">&#x27;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&#x27;</span>]);
+
+<span class="hljs-comment">-- Policies de acesso (Storage RLS)</span>
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can upload own documents&quot;
+  <span class="hljs-keyword">ON</span> storage.objects <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">INSERT</span>
+  <span class="hljs-keyword">WITH</span> <span class="hljs-keyword">CHECK</span> (bucket_id <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;documents&#x27;</span> <span class="hljs-keyword">AND</span> (storage.foldername(name))[<span class="hljs-number">1</span>] <span class="hljs-operator">=</span> auth.uid()::text);
+
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can read own documents&quot;
+  <span class="hljs-keyword">ON</span> storage.objects <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">SELECT</span>
+  <span class="hljs-keyword">USING</span> (bucket_id <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;documents&#x27;</span> <span class="hljs-keyword">AND</span> (storage.foldername(name))[<span class="hljs-number">1</span>] <span class="hljs-operator">=</span> auth.uid()::text);
+
+<span class="hljs-keyword">CREATE</span> POLICY &quot;Users can delete own documents&quot;
+  <span class="hljs-keyword">ON</span> storage.objects <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">DELETE</span>
+  <span class="hljs-keyword">USING</span> (bucket_id <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;documents&#x27;</span> <span class="hljs-keyword">AND</span> (storage.foldername(name))[<span class="hljs-number">1</span>] <span class="hljs-operator">=</span> auth.uid()::text);
+
+<span class="hljs-comment">-- Mesmas policies para &#x27;imports&#x27;</span>
+...
+</code></pre>
+<h4 id="c3-%E2%80%94-user_secrets.encrypted_value-em-texto-puro" tabindex="-1"><a class="header-anchor" href="#c3-%E2%80%94-user_secrets.encrypted_value-em-texto-puro">#</a> C3 — user_secrets.encrypted_value em texto puro</h4>
+<p><strong>Problema:</strong> A coluna <code>encrypted_value text NOT NULL</code> armazena segredos (ex: senhas de PDF) em texto puro. O nome da coluna sugere encriptação mas ela não existe. <code>pg_vault</code> está comentado no <code>config.toml</code>.</p>
+<p><strong>André Santos:</strong> Como solução pragmática para o MVP, podemos usar <code>pgp_sym_encrypt</code> do pgcrypto (já instalado como extensão). A chave de encriptação pode vir de uma env var segura. Isso não é ideal (vault seria melhor), mas é incomparavelmente melhor que texto puro.</p>
+<pre class="hljs"><code><span class="hljs-comment">-- Alternativa simples com pgcrypto já instalado:</span>
+<span class="hljs-comment">-- CREATE EXTENSION IF NOT EXISTS pgcrypto; -- já existe</span>
+
+<span class="hljs-comment">-- Na aplicação, ao salvar:</span>
+<span class="hljs-comment">-- encrypted_value = pgp_sym_encrypt(valor_real, current_setting(&#x27;app.encryption_key&#x27;))</span>
+
+<span class="hljs-comment">-- Ao ler:</span>
+<span class="hljs-comment">-- pgp_sym_decrypt(encrypted_value::bytea, current_setting(&#x27;app.encryption_key&#x27;))</span>
+</code></pre>
+<p><strong>Pedro Santos:</strong> Vale notar que a <code>app.encryption_key</code> deve vir de variável de ambiente e ser configurada via <code>supabase secrets set</code> para as Edge Functions, e via <code>ALTER DATABASE SET</code> para uso no banco.</p>
+<hr>
+<h3 id="4.-gaps-importantes-(auth-%2B-views-%2B-edge-functions)" tabindex="-1"><a class="header-anchor" href="#4.-gaps-importantes-(auth-%2B-views-%2B-edge-functions)">#</a> 4. Gaps Importantes (Auth + Views + Edge Functions)</h3>
+<p><strong>Pedro Santos (Backend Python/Django):</strong> Os gaps de autenticação são todos de configuração no <code>config.toml</code> e/ou Edge Functions secrets. Resumindo os mais urgentes:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Impacto</th>
+<th>Solução</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>minimum_password_length = 6</code></td>
+<td>Baixo para produto financeiro</td>
+<td>Alterar para <code>8</code> em dev</td>
+</tr>
+<tr>
+<td><code>enable_confirmations = false</code></td>
+<td>Usuários sem e-mail confirmado</td>
+<td>Ativar <code>true</code></td>
+</tr>
+<tr>
+<td>Sem Google OAuth</td>
+<td>Feature planejada bloqueada</td>
+<td>Adicionar bloco <code>[auth.external.google]</code></td>
+</tr>
+<tr>
+<td>SMTP não configurado</td>
+<td>Emails de auth não funcionam</td>
+<td>Mailpit já disponível localmente</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Maria Oliveira:</strong> Sobre SMTP localmente — o Mailpit já roda em <code>http://127.0.0.1:54324</code>. Basta descomentar a seção de SMTP no config.toml apontando para <code>localhost:54325</code> (inbound_port).</p>
+<p><strong>João Pereira:</strong> Sobre a Edge Function <code>retroactive-supplier-association</code> — o <code>handleConfirm</code> atual executa updates em loop sequencial sem transação atômica. Se falhar no meio, o estado fica inconsistente. A correção ideal é extrair o batch update para uma RPC PL/pgSQL (como fizemos para o merge).</p>
+<hr>
+<h3 id="5.-mcp-do-supabase-local-no-vs-code" tabindex="-1"><a class="header-anchor" href="#5.-mcp-do-supabase-local-no-vs-code">#</a> 5. MCP do Supabase Local no VS Code</h3>
+<p><strong>Fernando Gomes:</strong> O Supabase CLI v2.83.0 já expõe um servidor MCP nativo em <code>http://127.0.0.1:54321/mcp</code>. Isso aparece no <code>supabase status</code>:</p>
+<pre class="hljs"><code>│ MCP     │ http://127.0.0.1:54321/mcp │
+</code></pre>
+<p>Para conectar o VS Code, criar <code>.vscode/mcp.json</code> com:</p>
 <pre class="hljs"><code><span class="hljs-punctuation">{</span>
-  <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;attribute&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;attribute_name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;bandeira&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;attribute_value&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;amarela&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;servers&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;supabase-local&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;http&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;url&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;http://127.0.0.1:54321/mcp&quot;</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span>
 </code></pre>
-<h4 id="contexto-adicional-de-m%C3%A9trica%3A" tabindex="-1"><a class="header-anchor" href="#contexto-adicional-de-m%C3%A9trica%3A">#</a> Contexto adicional de métrica:</h4>
-<pre class="hljs"><code><span class="hljs-punctuation">{</span>
-  <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;metric&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;tariff&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;convencional&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;reading_date&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2026-03-15&quot;</span><span class="hljs-punctuation">,</span>
-<span class="hljs-punctuation">}</span>
-</code></pre>
-<h2 id="3.-exemplos-v%C3%A1lidos" tabindex="-1"><a class="header-anchor" href="#3.-exemplos-v%C3%A1lidos">#</a> 3. Exemplos Válidos</h2>
-<h3 id="3.1.-conta-de-energia-(neoenergia)-%E2%80%94-3-registros" tabindex="-1"><a class="header-anchor" href="#3.1.-conta-de-energia-(neoenergia)-%E2%80%94-3-registros">#</a> 3.1. Conta de Energia (Neoenergia) — 3 registros</h3>
-<table>
-<thead>
-<tr>
-<th>metric_name</th>
-<th>metric_unit</th>
-<th>quantity</th>
-<th>unit_price</th>
-<th>subtotal</th>
-<th>metadata</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Consumo</td>
-<td>kWh</td>
-<td>320.0000</td>
-<td>0.875000</td>
-<td>278.40</td>
-<td><code>{&quot;tariff&quot;: &quot;convencional&quot;}</code></td>
-</tr>
-<tr>
-<td>COSIP</td>
-<td>taxa</td>
-<td>1.0000</td>
-<td>42.500000</td>
-<td>42.50</td>
-<td><code>{&quot;description&quot;: &quot;Contribuição iluminação pública&quot;}</code></td>
-</tr>
-<tr>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td><code>{&quot;type&quot;: &quot;attribute&quot;, &quot;attribute_name&quot;: &quot;bandeira&quot;, &quot;attribute_value&quot;: &quot;amarela&quot;}</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="3.2.-conta-de-internet-(vivo)-%E2%80%94-2-registros" tabindex="-1"><a class="header-anchor" href="#3.2.-conta-de-internet-(vivo)-%E2%80%94-2-registros">#</a> 3.2. Conta de Internet (Vivo) — 2 registros</h3>
-<table>
-<thead>
-<tr>
-<th>metric_name</th>
-<th>metric_unit</th>
-<th>quantity</th>
-<th>unit_price</th>
-<th>subtotal</th>
-<th>metadata</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Dados utilizados</td>
-<td>GB</td>
-<td>45.0000</td>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-</tr>
-<tr>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td>NULL</td>
-<td><code>{&quot;type&quot;: &quot;attribute&quot;, &quot;attribute_name&quot;: &quot;plano&quot;, &quot;attribute_value&quot;: &quot;Fibra 300Mbps&quot;}</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="3.3.-assinatura-saas-%E2%80%94-github-(1-registro)" tabindex="-1"><a class="header-anchor" href="#3.3.-assinatura-saas-%E2%80%94-github-(1-registro)">#</a> 3.3. Assinatura SaaS — GitHub (1 registro)</h3>
-<table>
-<thead>
-<tr>
-<th>metric_name</th>
-<th>metric_unit</th>
-<th>quantity</th>
-<th>unit_price</th>
-<th>subtotal</th>
-<th>metadata</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Licenças</td>
-<td>unidades</td>
-<td>1.0000</td>
-<td>4.000000</td>
-<td>4.00</td>
-<td><code>{&quot;plan&quot;: &quot;Pro&quot;}</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="3.4.-conta-de-%C3%A1gua-(2-registros)" tabindex="-1"><a class="header-anchor" href="#3.4.-conta-de-%C3%A1gua-(2-registros)">#</a> 3.4. Conta de Água (2 registros)</h3>
-<table>
-<thead>
-<tr>
-<th>metric_name</th>
-<th>metric_unit</th>
-<th>quantity</th>
-<th>unit_price</th>
-<th>subtotal</th>
-<th>metadata</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Consumo</td>
-<td>m³</td>
-<td>12.0000</td>
-<td>8.500000</td>
-<td>102.00</td>
-<td>NULL</td>
-</tr>
-<tr>
-<td>Taxa esgoto</td>
-<td>taxa</td>
-<td>1.0000</td>
-<td>81.600000</td>
-<td>81.60</td>
-<td><code>{&quot;percent_of_water&quot;: 80}</code></td>
-</tr>
-</tbody>
-</table>
-<h2 id="4.-exemplos-inv%C3%A1lidos" tabindex="-1"><a class="header-anchor" href="#4.-exemplos-inv%C3%A1lidos">#</a> 4. Exemplos Inválidos</h2>
-<table>
-<thead>
-<tr>
-<th>Tentativa</th>
-<th>Por que é inválido</th>
-<th>Correção</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>metric_name: &quot;Bandeira&quot;</code>, <code>quantity: 1</code>, <code>metric_unit: &quot;flag&quot;</code></td>
-<td>Bandeira não é quantidade mensurável — forçar quantity=1 é semântica errada</td>
-<td>Usar metadata: <code>{&quot;type&quot;: &quot;attribute&quot;, &quot;attribute_name&quot;: &quot;bandeira&quot;, &quot;attribute_value&quot;: &quot;amarela&quot;}</code></td>
-</tr>
-<tr>
-<td><code>metric_name: &quot;Plano&quot;</code>, <code>quantity: 300</code>, <code>metric_unit: &quot;Mbps&quot;</code></td>
-<td>300Mbps é velocidade contratada, não consumo medido</td>
-<td>Usar metadata: <code>{&quot;type&quot;: &quot;attribute&quot;, &quot;attribute_name&quot;: &quot;plano&quot;, &quot;attribute_value&quot;: &quot;Fibra 300Mbps&quot;}</code></td>
-</tr>
-<tr>
-<td><code>metric_name: &quot;Observação&quot;</code>, <code>quantity: NULL</code>, <code>metadata: {&quot;text&quot;: &quot;Medidor trocado em março&quot;}</code></td>
-<td>Não é métrica nem atributo periódico — é metadado de contrato</td>
-<td>Registrar em <code>supplier_contracts.notes</code></td>
-</tr>
-<tr>
-<td><code>subtotal: 280.00</code> sem <code>quantity</code> nem <code>unit_price</code></td>
-<td>Subtotal sem quantity/unit_price perde rastreabilidade</td>
-<td>Usar <code>quantity: 1</code>, <code>unit_price: 280.00</code> se é taxa fixa</td>
-</tr>
-<tr>
-<td><code>metric_name: &quot;Nº Medidor&quot;</code>, <code>quantity: 12345</code>, <code>metric_unit: &quot;id&quot;</code></td>
-<td>Número do medidor é referência estática, não consumo</td>
-<td>Registrar em <code>supplier_contracts.metadata</code></td>
-</tr>
-</tbody>
-</table>
-<h2 id="5.-conven%C3%A7%C3%B5es-por-tipo-de-fornecedor" tabindex="-1"><a class="header-anchor" href="#5.-conven%C3%A7%C3%B5es-por-tipo-de-fornecedor">#</a> 5. Convenções por Tipo de Fornecedor</h2>
-<table>
-<thead>
-<tr>
-<th>Tipo</th>
-<th>Métricas típicas</th>
-<th>Atributos típicos</th>
-<th>Referências → supplier_contracts</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>utility</strong> (energia)</td>
-<td>kWh consumo, taxa COSIP</td>
-<td>bandeira, faixa, grupo tarifário</td>
-<td>Nº medidor, UC, classe</td>
-</tr>
-<tr>
-<td><strong>utility</strong> (água)</td>
-<td>m³ consumo, taxa esgoto</td>
-<td>faixa de consumo</td>
-<td>Nº hidrômetro, matrícula</td>
-</tr>
-<tr>
-<td><strong>utility</strong> (gás)</td>
-<td>m³ consumo</td>
-<td>tarifa residencial/comercial</td>
-<td>Nº medidor</td>
-</tr>
-<tr>
-<td><strong>telecom</strong></td>
-<td>GB dados, minutos chamadas</td>
-<td>plano, velocidade contratada</td>
-<td>Nº linha, contrato</td>
-</tr>
-<tr>
-<td><strong>saas</strong></td>
-<td>licenças, GB storage, API calls</td>
-<td>plano (free/pro/team)</td>
-<td>Subscription ID</td>
-</tr>
-<tr>
-<td><strong>company</strong> (supermercado)</td>
-<td><em>geralmente sem métricas</em></td>
-<td><em>nenhum</em></td>
-<td><em>sem contrato</em></td>
-</tr>
-<tr>
-<td><strong>individual</strong> (diarista)</td>
-<td>horas trabalhadas</td>
-<td><em>nenhum</em></td>
-<td><em>sem contrato formal</em></td>
-</tr>
-<tr>
-<td><strong>platform</strong> (iFood)</td>
-<td>pedidos realizados</td>
-<td><em>nenhum</em></td>
-<td><em>sem contrato</em></td>
-</tr>
-</tbody>
-</table>
-<h2 id="6.-consequ%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#6.-consequ%C3%AAncias">#</a> 6. Consequências</h2>
-<h3 id="positivas" tabindex="-1"><a class="header-anchor" href="#positivas">#</a> Positivas</h3>
+<p>Isso expõe no Copilot Chat acesso às tabelas, dados, edge functions, storage e auth do Supabase local — facilitando desenvolvimento e depuração diretamente no editor.</p>
+<p><strong>Ana Silva:</strong> Importante documentar que o MCP local só funciona quando o Supabase está rodando (<code>npx supabase start</code>). Para projeto que vai para produção, futuramente será criado um MCP apontando para o projeto Supabase em nuvem usando o <code>SUPABASE_ACCESS_TOKEN</code>.</p>
+<hr>
+<h2 id="pr%C3%B3s-e-contras" tabindex="-1"><a class="header-anchor" href="#pr%C3%B3s-e-contras">#</a> Prós e Contras</h2>
+<h3 id="op%C3%A7%C3%A3o-a-%E2%80%94-corrigir-gaps-cr%C3%ADticos-via-novas-migrations" tabindex="-1"><a class="header-anchor" href="#op%C3%A7%C3%A3o-a-%E2%80%94-corrigir-gaps-cr%C3%ADticos-via-novas-migrations">#</a> Opção A — Corrigir gaps críticos via novas migrations</h3>
 <ul>
-<li>Tabela <code>consumption_metrics</code> tem semântica clara e auditável</li>
-<li>Constraint no banco impede dados malformados</li>
-<li>Atributos qualitativos preservam série temporal via metadata tipada</li>
-<li>Convenções por tipo de fornecedor guiam implementação</li>
-</ul>
-<h3 id="negativas" tabindex="-1"><a class="header-anchor" href="#negativas">#</a> Negativas</h3>
+<li><strong>Prós:</strong>
 <ul>
-<li>Requer disciplina do desenvolvedor para classificar corretamente métrica vs atributo</li>
-<li>Atributos qualitativos em JSONB são menos tipados que campos fixos (trade-off aceitável pela flexibilidade)</li>
-<li>Convenção de metadata precisa ser documentada e validada no backend</li>
+<li>Histórico de banco versionado e reproduzível</li>
+<li>CI/CD já aplica migrations automaticamente</li>
+<li>Reversível via down migration</li>
 </ul>
-<h2 id="7.-testes-associados" tabindex="-1"><a class="header-anchor" href="#7.-testes-associados">#</a> 7. Testes Associados</h2>
+</li>
+<li><strong>Contras:</strong>
 <ul>
-<li><strong>T25 (existente):</strong> Registro de métrica de consumo associada a fornecedor</li>
-<li><strong>T26 (existente):</strong> Consulta de histórico de métricas por fornecedor + período</li>
-<li><strong>Novo: T-METRIC-01:</strong> Registro de métrica válida (com quantity + unit) → aceito</li>
-<li><strong>Novo: T-METRIC-02:</strong> Registro de atributo válido (sem quantity, com metadata tipada) → aceito</li>
-<li><strong>Novo: T-METRIC-03:</strong> Registro sem quantity E sem metadata tipada → rejeitado pelo constraint</li>
-<li><strong>Novo: T-METRIC-04:</strong> Registro com quantity mas sem metric_unit → rejeitado pelo constraint</li>
-<li><strong>Novo: T-METRIC-05:</strong> Consulta de série temporal de atributos (bandeira por mês)</li>
+<li>Número de migrations crescendo (já são 8)</li>
+<li>Precisa de reset local para testar (ou <code>supabase db reset</code>)</li>
 </ul>
-<h2 id="8.-etapa-de-implementa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#8.-etapa-de-implementa%C3%A7%C3%A3o">#</a> 8. Etapa de Implementação</h2>
-<p><strong>Etapa 1</strong> (Base Estrutural): Tabela <code>consumption_metrics</code> com constraint <code>chk_metric_or_attribute</code>
-<strong>Etapa 5</strong> (Recursos Avançados): CRUD de métricas, UI de registro, consultas temporais</p>
+</li>
+</ul>
+<h3 id="op%C3%A7%C3%A3o-b-%E2%80%94-corrigir-c2-(storage)-via-config.toml-%5Bstorage.buckets%5D" tabindex="-1"><a class="header-anchor" href="#op%C3%A7%C3%A3o-b-%E2%80%94-corrigir-c2-(storage)-via-config.toml-%5Bstorage.buckets%5D">#</a> Opção B — Corrigir C2 (Storage) via config.toml <code>[storage.buckets]</code></h3>
+<ul>
+<li><strong>Prós:</strong>
+<ul>
+<li>Mais simples para desenvolvimento local</li>
+<li>Não precisa de migration</li>
+</ul>
+</li>
+<li><strong>Contras:</strong>
+<ul>
+<li>Não funciona para produção (buckets em cloud precisam de migration ou API de management)</li>
+<li>Inconsistência entre ambientes</li>
+</ul>
+</li>
+</ul>
+<p><strong>Decisão para C1 e C2 e C3:</strong> Opção A (nova migration <code>20260322*</code>) — garante consistência entre dev, staging e produção.</p>
+<hr>
+<h2 id="decis%C3%A3o-final" tabindex="-1"><a class="header-anchor" href="#decis%C3%A3o-final">#</a> Decisão Final</h2>
+<p>O time decidiu por unanimidade:</p>
+<ol>
+<li><strong>C1, C2, C3 (gaps críticos):</strong> Corrigir via nova migration antes do próximo push.</li>
+<li><strong>I1–I6 (Auth):</strong> Corrigir <code>config.toml</code> localmente + documentar o que vai para produção.</li>
+<li><strong>I7 (mv_supplier_spending):</strong> Criar na próxima sprint como migration <code>20260323*</code>.</li>
+<li><strong>I8 (retroactive sem transação):</strong> Refatorar para usar RPC atômica — próxima sprint.</li>
+<li><strong>I9 (CORS nas Edge Functions):</strong> Adicionar headers de CORS em ambas as funções agora.</li>
+<li><strong>MCP local:</strong> Criar <code>.vscode/mcp.json</code> apontando para <code>http://127.0.0.1:54321/mcp</code>.</li>
+<li><strong>Edge Runtime:</strong> Documentar no README como inicializar (<code>npx supabase functions serve</code>).</li>
+</ol>
+<hr>
+<h2 id="a%C3%A7%C3%B5es-%2F-respons%C3%A1veis-%2F-prazo" tabindex="-1"><a class="header-anchor" href="#a%C3%A7%C3%B5es-%2F-respons%C3%A1veis-%2F-prazo">#</a> Ações / Responsáveis / Prazo</h2>
+<table>
+<thead>
+<tr>
+<th>Ação</th>
+<th>Responsável</th>
+<th>Prazo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Migration: RLS imutabilidade audit_logs + trigger</td>
+<td>André Santos</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Migration: Storage buckets + policies</td>
+<td>Fernando Gomes</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Migration: pgcrypto encrypt para user_secrets</td>
+<td>André Santos</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Corrigir config.toml: senha mínima + confirmations + mailpit</td>
+<td>Pedro Santos</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Adicionar CORS headers em merge-suppliers e retroactive</td>
+<td>João Pereira</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Criar <code>.vscode/mcp.json</code> com Supabase MCP local</td>
+<td>Fernando Gomes</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Atualizar checklist <a href="http://002-pedidos-veronica.md">002-pedidos-veronica.md</a></td>
+<td>Ana Silva</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Criar planejamento <a href="http://004-pos-auditoria-supabase.md">004-pos-auditoria-supabase.md</a></td>
+<td>Ana Silva</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Documentar Edge Functions serve no README/passo-a-passo</td>
+<td>Maria Oliveira</td>
+<td>2026-03-22</td>
+</tr>
+<tr>
+<td>Sprint planejada: mv_supplier_spending + retroactive RPC</td>
+<td>João + André</td>
+<td>2026-03-25</td>
+</tr>
+</tbody>
+</table>
 
       </article>
 

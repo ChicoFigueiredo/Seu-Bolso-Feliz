@@ -6,7 +6,8 @@
   <title>2026-03-22-15-17-auditoria-completa-implantacao-veronica</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hack-font/3.3.0/web/hack.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 
   <script>
@@ -306,8 +307,11 @@
     }
 
     .doc-card pre,
-    .doc-card code {
-      font-family: "JetBrains Mono", "Consolas", monospace;
+    .doc-card code,
+    .doc-card .hljs {
+      font-family: "Hack", "JetBrains Mono", "Consolas", monospace !important;
+      white-space: pre !important; /* Garante que os espaços múltiplos sejam renderizados */
+      line-height: 1.18em !important;
     }
 
     .doc-card pre {

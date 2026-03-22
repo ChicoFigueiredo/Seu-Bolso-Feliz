@@ -6,7 +6,8 @@
   <title>002-pedidos-veronica</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hack-font/3.3.0/web/hack.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 
   <script>
@@ -306,8 +307,11 @@
     }
 
     .doc-card pre,
-    .doc-card code {
-      font-family: "JetBrains Mono", "Consolas", monospace;
+    .doc-card code,
+    .doc-card .hljs {
+      font-family: "Hack", "JetBrains Mono", "Consolas", monospace !important;
+      white-space: pre !important; /* Garante que os espaços múltiplos sejam renderizados */
+      line-height: 1.18em !important;
     }
 
     .doc-card pre {
@@ -855,32 +859,32 @@
 <p>Objetivo: consolidar, em formato auditável, tudo o que foi pedido pela Verônica e o status real de implantação no codebase.</p>
 <p>Legendas:</p>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6350151"><label class="task-list-item-label" for="task-item-6350151"> Concluído</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4902539"><label class="task-list-item-label" for="task-item-4902539"> Pendente</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8329877"><label class="task-list-item-label" for="task-item-8329877"> Parcial (descrito no campo Observações)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2994575"><label class="task-list-item-label" for="task-item-2994575"> Concluído</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-597772"><label class="task-list-item-label" for="task-item-597772"> Pendente</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1119525"><label class="task-list-item-label" for="task-item-1119525"> Parcial (descrito no campo Observações)</label></li>
 </ul>
 <h2 id="fase-a-%E2%80%94-funda%C3%A7%C3%A3o-de-arquitetura-e-dom%C3%ADnio-(001-prompt.inicial)" tabindex="-1"><a class="header-anchor" href="#fase-a-%E2%80%94-funda%C3%A7%C3%A3o-de-arquitetura-e-dom%C3%ADnio-(001-prompt.inicial)">#</a> Fase A — Fundação de Arquitetura e Domínio (001-prompt.inicial)</h2>
 <h3 id="a1.-stack-e-arquitetura-base" tabindex="-1"><a class="header-anchor" href="#a1.-stack-e-arquitetura-base">#</a> A1. Stack e arquitetura-base</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5970717"><label class="task-list-item-label" for="task-item-5970717"> Web com React + Next.js + Tailwind</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9476562"><label class="task-list-item-label" for="task-item-9476562"> Web com React + Next.js + Tailwind</label>
 <ul>
 <li>Critério de aceite: apps/web com build funcional e rotas do App Router</li>
 <li>Evidência: apps/web/package.json, apps/web/src/app/*, bun run build OK</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6290906"><label class="task-list-item-label" for="task-item-6290906"> Mobile em estrutura React Native/Expo preparada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1733768"><label class="task-list-item-label" for="task-item-1733768"> Mobile em estrutura React Native/Expo preparada</label>
 <ul>
 <li>Critério de aceite: apps/mobile estruturado no monorepo</li>
 <li>Evidência: apps/mobile/package.json, apps/mobile/src</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3460921"><label class="task-list-item-label" for="task-item-3460921"> Backend central em Supabase (Postgres/Auth/RLS/Storage/Functions)</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4591780"><label class="task-list-item-label" for="task-item-4591780"> Backend central em Supabase (Postgres/Auth/RLS/Storage/Functions)</label>
 <ul>
 <li>Critério de aceite: supabase/config.toml + migrations + uso de client no web</li>
 <li>Evidência: supabase/config.toml, supabase/migrations/<em>, apps/web/src/lib/supabase/</em></li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3405248"><label class="task-list-item-label" for="task-item-3405248"> Estratégia serverless-first com baixo acoplamento operacional</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-891543"><label class="task-list-item-label" for="task-item-891543"> Estratégia serverless-first com baixo acoplamento operacional</label>
 <ul>
 <li>Critério de aceite: operações centrais no Supabase e pipeline CI/CD com CLI</li>
 <li>Evidência: .gitlab-ci.yml, docs/adrs/ADR-004-arquitetura-operacional-repositorio-cicd.md</li>
@@ -889,31 +893,31 @@
 </ul>
 <h3 id="a2.-princ%C3%ADpios-de-modelagem-financeira" tabindex="-1"><a class="header-anchor" href="#a2.-princ%C3%ADpios-de-modelagem-financeira">#</a> A2. Princípios de modelagem financeira</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2083908"><label class="task-list-item-label" for="task-item-2083908"> Separação despesa vs transferência interna</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8540658"><label class="task-list-item-label" for="task-item-8540658"> Separação despesa vs transferência interna</label>
 <ul>
 <li>Critério de aceite: regra explícita de deduplicação e tipos de evento</li>
 <li>Evidência: packages/domain/src/deduplication/index.ts, docs/adrs/ADR-001-deduplicacao-transacao-item-fatura.md</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1294579"><label class="task-list-item-label" for="task-item-1294579"> Separação de composição da dívida (amortização/juros/encargos)</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-556513"><label class="task-list-item-label" for="task-item-556513"> Separação de composição da dívida (amortização/juros/encargos)</label>
 <ul>
 <li>Critério de aceite: modelagem + cálculos e testes</li>
 <li>Evidência: supabase/migrations/20260321170000_create_core_foundation_tables.sql, packages/domain/src/amortization/index.ts, <strong>tests</strong>/domain/amortization.test.ts</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3404795"><label class="task-list-item-label" for="task-item-3404795"> Ciclos financeiros personalizados</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1250687"><label class="task-list-item-label" for="task-item-1250687"> Ciclos financeiros personalizados</label>
 <ul>
 <li>Critério de aceite: funções de domínio e tabela de períodos</li>
 <li>Evidência: packages/domain/src/financial-cycle/index.ts, <strong>tests</strong>/domain/financial-cycle.test.ts</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9130410"><label class="task-list-item-label" for="task-item-9130410"> Categoria principal + múltiplas tags</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5382837"><label class="task-list-item-label" for="task-item-5382837"> Categoria principal + múltiplas tags</label>
 <ul>
 <li>Critério de aceite: tabelas categories/tags/junções e uso em transações</li>
 <li>Evidência: supabase/migrations/20260321170000_create_core_foundation_tables.sql, apps/web/src/app/actions/transactions.ts</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-872864"><label class="task-list-item-label" for="task-item-872864"> Priorização de pagamento</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-309644"><label class="task-list-item-label" for="task-item-309644"> Priorização de pagamento</label>
 <ul>
 <li>Critério de aceite: enum/campo + motor de priorização</li>
 <li>Evidência: packages/domain/src/priority/index.ts, <strong>tests</strong>/domain/priority.test.ts</li>
@@ -923,31 +927,31 @@
 <h2 id="fase-b-%E2%80%94-dimens%C3%A3o-fornecedor-(002-fornecedor)" tabindex="-1"><a class="header-anchor" href="#fase-b-%E2%80%94-dimens%C3%A3o-fornecedor-(002-fornecedor)">#</a> Fase B — Dimensão Fornecedor (002-fornecedor)</h2>
 <h3 id="b1.-entidade-e-rela%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#b1.-entidade-e-rela%C3%A7%C3%B5es">#</a> B1. Entidade e relações</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3770975"><label class="task-list-item-label" for="task-item-3770975"> Cadastro de fornecedores como entidade própria</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5822409"><label class="task-list-item-label" for="task-item-5822409"> Cadastro de fornecedores como entidade própria</label>
 <ul>
 <li>Critério de aceite: tabela suppliers + ações CRUD</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql, apps/web/src/app/actions/suppliers.ts</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3323143"><label class="task-list-item-label" for="task-item-3323143"> Associação de fornecedor com lançamentos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7420153"><label class="task-list-item-label" for="task-item-7420153"> Associação de fornecedor com lançamentos</label>
 <ul>
 <li>Critério de aceite: supplier_id em transactions</li>
 <li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6782724"><label class="task-list-item-label" for="task-item-6782724"> Associação de fornecedor com recorrências</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7898547"><label class="task-list-item-label" for="task-item-7898547"> Associação de fornecedor com recorrências</label>
 <ul>
 <li>Critério de aceite: supplier_id em recurring_templates</li>
 <li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9531974"><label class="task-list-item-label" for="task-item-9531974"> Associação de fornecedor com documentos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8424205"><label class="task-list-item-label" for="task-item-8424205"> Associação de fornecedor com documentos</label>
 <ul>
 <li>Critério de aceite: supplier_id em documents</li>
 <li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-785495"><label class="task-list-item-label" for="task-item-785495"> Associação de fornecedor com itens de fatura</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6568128"><label class="task-list-item-label" for="task-item-6568128"> Associação de fornecedor com itens de fatura</label>
 <ul>
 <li>Critério de aceite: supplier_id em statement_items</li>
 <li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
@@ -956,25 +960,25 @@
 </ul>
 <h3 id="b2.-aliases%2C-hist%C3%B3rico-e-contratos" tabindex="-1"><a class="header-anchor" href="#b2.-aliases%2C-hist%C3%B3rico-e-contratos">#</a> B2. Aliases, histórico e contratos</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-951546"><label class="task-list-item-label" for="task-item-951546"> Registro de aliases e nomes antigos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-706775"><label class="task-list-item-label" for="task-item-706775"> Registro de aliases e nomes antigos</label>
 <ul>
 <li>Critério de aceite: tabela supplier_aliases com vigência</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5892753"><label class="task-list-item-label" for="task-item-5892753"> Governança de unicidade temporal de alias</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6603014"><label class="task-list-item-label" for="task-item-6603014"> Governança de unicidade temporal de alias</label>
 <ul>
 <li>Critério de aceite: trigger de validação</li>
 <li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3287902"><label class="task-list-item-label" for="task-item-3287902"> Auto-alias em renomeação</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8640507"><label class="task-list-item-label" for="task-item-8640507"> Auto-alias em renomeação</label>
 <ul>
 <li>Critério de aceite: trigger de renomeação</li>
 <li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7675515"><label class="task-list-item-label" for="task-item-7675515"> Contratos e identificadores externos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-876405"><label class="task-list-item-label" for="task-item-876405"> Contratos e identificadores externos</label>
 <ul>
 <li>Critério de aceite: tabela supplier_contracts</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
@@ -983,19 +987,19 @@
 </ul>
 <h3 id="b3.-m%C3%A9tricas-de-consumo-(consumption_metrics)" tabindex="-1"><a class="header-anchor" href="#b3.-m%C3%A9tricas-de-consumo-(consumption_metrics)">#</a> B3. Métricas de consumo (consumption_metrics)</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1103393"><label class="task-list-item-label" for="task-item-1103393"> Estrutura de métricas de consumo criada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-943929"><label class="task-list-item-label" for="task-item-943929"> Estrutura de métricas de consumo criada</label>
 <ul>
 <li>Critério de aceite: tabela consumption_metrics com campos quantitativos</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3430194"><label class="task-list-item-label" for="task-item-3430194"> Norma de uso formalizada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2137351"><label class="task-list-item-label" for="task-item-2137351"> Norma de uso formalizada</label>
 <ul>
 <li>Critério de aceite: ADR publicada</li>
 <li>Evidência: docs/adrs/ADR-002-norma-consumption-metrics.md</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1891124"><label class="task-list-item-label" for="task-item-1891124"> Constraint técnica de consistência implantada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7338895"><label class="task-list-item-label" for="task-item-7338895"> Constraint técnica de consistência implantada</label>
 <ul>
 <li>Critério de aceite: validação em banco para métrica vs atributo</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
@@ -1004,37 +1008,37 @@
 </ul>
 <h3 id="b4.-lacunas-da-dimens%C3%A3o-fornecedor" tabindex="-1"><a class="header-anchor" href="#b4.-lacunas-da-dimens%C3%A3o-fornecedor">#</a> B4. Lacunas da dimensão fornecedor</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5288396"><label class="task-list-item-label" for="task-item-5288396"> Tela dedicada de fornecedores no dashboard</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-986470"><label class="task-list-item-label" for="task-item-986470"> Tela dedicada de fornecedores no dashboard</label>
 <ul>
 <li>Fase alvo: Fase D</li>
 <li>Critério de aceite: rotas dashboard/suppliers com CRUD completo e alias/contratos</li>
-<li>Observações: há ações server-side, mas não há páginas específicas em apps/web/src/app/dashboard/suppliers</li>
+<li page.tsx,="" newpage.tsx,="" [id]page.tsx="">Evidência: apps/web/src/app/dashboard/suppliers/</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7038069"><label class="task-list-item-label" for="task-item-7038069"> Filtros compostos avançados com fornecedor em toda a experiência de relatório</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5919209"><label class="task-list-item-label" for="task-item-5919209"> Filtros compostos avançados com fornecedor em toda a experiência de relatório</label>
 <ul>
 <li>Fase alvo: Fase E</li>
 <li>Critério de aceite: filtros por fornecedor + categoria + tags + período + prioridade em relatórios e listagens</li>
-<li>Observações: relatórios atuais ainda não cobrem tudo que foi pedido para fornecedor</li>
+<li>Evidência: apps/web/src/app/dashboard/reports/{page.tsx, filters.tsx} — filtro por fornecedor + card “Despesas por Fornecedor”</li>
 </ul>
 </li>
 </ul>
 <h2 id="fase-c-%E2%80%94-parecer-formal-(aprovado-com-ajustes-obrigat%C3%B3rios)" tabindex="-1"><a class="header-anchor" href="#fase-c-%E2%80%94-parecer-formal-(aprovado-com-ajustes-obrigat%C3%B3rios)">#</a> Fase C — Parecer Formal (Aprovado com ajustes obrigatórios)</h2>
 <h3 id="c1.-ajuste-obrigat%C3%B3rio-1-%E2%80%94-deduplica%C3%A7%C3%A3o-transa%C3%A7%C3%A3o-x-item-de-fatura" tabindex="-1"><a class="header-anchor" href="#c1.-ajuste-obrigat%C3%B3rio-1-%E2%80%94-deduplica%C3%A7%C3%A3o-transa%C3%A7%C3%A3o-x-item-de-fatura">#</a> C1. Ajuste obrigatório 1 — Deduplicação transação x item de fatura</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6492222"><label class="task-list-item-label" for="task-item-6492222"> Estratégia formalizada em ADR</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9038628"><label class="task-list-item-label" for="task-item-9038628"> Estratégia formalizada em ADR</label>
 <ul>
 <li>Critério de aceite: ADR-001 publicada com regras de precedência/soma/exibição</li>
 <li>Evidência: docs/adrs/ADR-001-deduplicacao-transacao-item-fatura.md</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4684013"><label class="task-list-item-label" for="task-item-4684013"> Estruturas de suporte implantadas</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-123744"><label class="task-list-item-label" for="task-item-123744"> Estruturas de suporte implantadas</label>
 <ul>
 <li>Critério de aceite: FK e view de deduplicação</li>
 <li>Evidência: migrations 20260321170200 e 20260321170600</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3482376"><label class="task-list-item-label" for="task-item-3482376"> Regras cobertas por testes unitários</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9948510"><label class="task-list-item-label" for="task-item-9948510"> Regras cobertas por testes unitários</label>
 <ul>
 <li>Critério de aceite: suíte dedup passando</li>
 <li>Evidência: <strong>tests</strong>/domain/deduplication.test.ts</li>
@@ -1043,13 +1047,13 @@
 </ul>
 <h3 id="c2.-ajuste-obrigat%C3%B3rio-2-%E2%80%94-norma-de-consumption_metrics" tabindex="-1"><a class="header-anchor" href="#c2.-ajuste-obrigat%C3%B3rio-2-%E2%80%94-norma-de-consumption_metrics">#</a> C2. Ajuste obrigatório 2 — Norma de consumption_metrics</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8173977"><label class="task-list-item-label" for="task-item-8173977"> Norma formalizada e versionada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6280047"><label class="task-list-item-label" for="task-item-6280047"> Norma formalizada e versionada</label>
 <ul>
 <li>Critério de aceite: ADR-002 publicada</li>
 <li>Evidência: docs/adrs/ADR-002-norma-consumption-metrics.md</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9127484"><label class="task-list-item-label" for="task-item-9127484"> Regras de dados implantadas no schema</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6848812"><label class="task-list-item-label" for="task-item-6848812"> Regras de dados implantadas no schema</label>
 <ul>
 <li>Critério de aceite: campos + constraint coerentes</li>
 <li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
@@ -1058,42 +1062,42 @@
 </ul>
 <h3 id="c3.-ajuste-obrigat%C3%B3rio-3-%E2%80%94-governan%C3%A7a-t%C3%A9cnica-de-aliases" tabindex="-1"><a class="header-anchor" href="#c3.-ajuste-obrigat%C3%B3rio-3-%E2%80%94-governan%C3%A7a-t%C3%A9cnica-de-aliases">#</a> C3. Ajuste obrigatório 3 — Governança técnica de aliases</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4389514"><label class="task-list-item-label" for="task-item-4389514"> Governança formalizada e versionada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8845145"><label class="task-list-item-label" for="task-item-8845145"> Governança formalizada e versionada</label>
 <ul>
 <li>Critério de aceite: ADR-003 publicada</li>
 <li>Evidência: docs/adrs/ADR-003-governanca-aliases-fornecedor.md</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-438454"><label class="task-list-item-label" for="task-item-438454"> Regras técnicas básicas implantadas</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-974166"><label class="task-list-item-label" for="task-item-974166"> Regras técnicas básicas implantadas</label>
 <ul>
 <li>Critério de aceite: triggers e colunas de vigência</li>
 <li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8099326"><label class="task-list-item-label" for="task-item-8099326"> Fluxo completo de merge/reversão de fornecedores implementado operacionalmente</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-258159"><label class="task-list-item-label" for="task-item-258159"> Fluxo completo de merge/reversão de fornecedores implementado operacionalmente</label>
 <ul>
 <li>Fase alvo: Fase F</li>
 <li>Critério de aceite: operação atômica disponível e testada em função server-side</li>
-<li>Observações: ADR descreve a solução, mas supabase/functions está vazio</li>
+<li>Evidência: supabase/functions/merge-suppliers/index.ts, supabase/functions/retroactive-supplier-association/index.ts, supabase/migrations/20260321170700_create_merge_suppliers_rpc.sql</li>
 </ul>
 </li>
 </ul>
 <h2 id="fase-d-%E2%80%94-governan%C3%A7a-de-engenharia-(gitlab-%2B-supabase)" tabindex="-1"><a class="header-anchor" href="#fase-d-%E2%80%94-governan%C3%A7a-de-engenharia-(gitlab-%2B-supabase)">#</a> Fase D — Governança de Engenharia (GitLab + Supabase)</h2>
 <h3 id="d1.-padr%C3%A3o-de-reposit%C3%B3rio-e-branches" tabindex="-1"><a class="header-anchor" href="#d1.-padr%C3%A3o-de-reposit%C3%B3rio-e-branches">#</a> D1. Padrão de repositório e branches</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-594309"><label class="task-list-item-label" for="task-item-594309"> Monorepo com workspaces e estrutura modular</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3924356"><label class="task-list-item-label" for="task-item-3924356"> Monorepo com workspaces e estrutura modular</label>
 <ul>
 <li>Critério de aceite: apps/_ + packages/_ + supabase/_ + docs/_</li>
 <li>Evidência: package.json, árvore do repositório</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9426071"><label class="task-list-item-label" for="task-item-9426071"> Convenção de commit convencional aplicada</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8987080"><label class="task-list-item-label" for="task-item-8987080"> Convenção de commit convencional aplicada</label>
 <ul>
 <li>Critério de aceite: commitlint configurado</li>
 <li>Evidência: commitlint.config.ts</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6562189"><label class="task-list-item-label" for="task-item-6562189"> Hook de bloqueio de push com qualidade mínima</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6812302"><label class="task-list-item-label" for="task-item-6812302"> Hook de bloqueio de push com qualidade mínima</label>
 <ul>
 <li>Critério de aceite: pre-push roda lint/typecheck/test:unit</li>
 <li>Evidência: .husky/pre-push</li>
@@ -1102,26 +1106,26 @@
 </ul>
 <h3 id="d2.-ci%2Fcd-e-ambientes" tabindex="-1"><a class="header-anchor" href="#d2.-ci%2Fcd-e-ambientes">#</a> D2. CI/CD e ambientes</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6360082"><label class="task-list-item-label" for="task-item-6360082"> Pipeline GitLab com estágios principais</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1232843"><label class="task-list-item-label" for="task-item-1232843"> Pipeline GitLab com estágios principais</label>
 <ul>
 <li>Critério de aceite: validate/install/check/test/build/deploy</li>
 <li>Evidência: .gitlab-ci.yml</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-893130"><label class="task-list-item-label" for="task-item-893130"> Deploy de migrations/functions previsto por ambiente</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-208494"><label class="task-list-item-label" for="task-item-208494"> Deploy de migrations/functions previsto por ambiente</label>
 <ul>
 <li>Critério de aceite: jobs staging e production existentes</li>
 <li>Evidência: .gitlab-ci.yml</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8116946"><label class="task-list-item-label" for="task-item-8116946"> Deploy web real automatizado (sem placeholder)</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6752864"><label class="task-list-item-label" for="task-item-6752864"> Deploy web real automatizado (sem placeholder)</label>
 <ul>
 <li>Fase alvo: Fase G</li>
 <li>Critério de aceite: job deploy-web-* executa integração real com provedor</li>
 <li>Observações: hoje usa echo de placeholder</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5438046"><label class="task-list-item-label" for="task-item-5438046"> Comprovação em ambiente remoto da política completa (proteções, approvals, variáveis)</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1112277"><label class="task-list-item-label" for="task-item-1112277"> Comprovação em ambiente remoto da política completa (proteções, approvals, variáveis)</label>
 <ul>
 <li>Fase alvo: Fase G</li>
 <li>Critério de aceite: checklist operacional validado no GitLab do projeto</li>
@@ -1132,84 +1136,219 @@
 <h2 id="fase-e-%E2%80%94-produto-web-mvp-(fluxo-operacional)" tabindex="-1"><a class="header-anchor" href="#fase-e-%E2%80%94-produto-web-mvp-(fluxo-operacional)">#</a> Fase E — Produto Web MVP (fluxo operacional)</h2>
 <h3 id="e1.-funcionalidades-principais-j%C3%A1-dispon%C3%ADveis" tabindex="-1"><a class="header-anchor" href="#e1.-funcionalidades-principais-j%C3%A1-dispon%C3%ADveis">#</a> E1. Funcionalidades principais já disponíveis</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-870163"><label class="task-list-item-label" for="task-item-870163"> Login/autenticação com Supabase</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3929297"><label class="task-list-item-label" for="task-item-3929297"> Dashboard operacional</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-685672"><label class="task-list-item-label" for="task-item-685672"> CRUD de instituições</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4149376"><label class="task-list-item-label" for="task-item-4149376"> CRUD de produtos financeiros</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7681785"><label class="task-list-item-label" for="task-item-7681785"> CRUD de transações</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-328678"><label class="task-list-item-label" for="task-item-328678"> CRUD de recorrências</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6328198"><label class="task-list-item-label" for="task-item-6328198"> CRUD de faturas</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1230395"><label class="task-list-item-label" for="task-item-1230395"> CRUD de dívidas</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5191462"><label class="task-list-item-label" for="task-item-5191462"> Upload/listagem de documentos</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1240616"><label class="task-list-item-label" for="task-item-1240616"> Importação CSV</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7021678"><label class="task-list-item-label" for="task-item-7021678"> Relatórios por período</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2879545"><label class="task-list-item-label" for="task-item-2879545"> Login/autenticação com Supabase</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8530052"><label class="task-list-item-label" for="task-item-8530052"> Dashboard operacional</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-159202"><label class="task-list-item-label" for="task-item-159202"> CRUD de instituições</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3045092"><label class="task-list-item-label" for="task-item-3045092"> CRUD de produtos financeiros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7229136"><label class="task-list-item-label" for="task-item-7229136"> CRUD de transações</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4862396"><label class="task-list-item-label" for="task-item-4862396"> CRUD de recorrências</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8670522"><label class="task-list-item-label" for="task-item-8670522"> CRUD de faturas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3806024"><label class="task-list-item-label" for="task-item-3806024"> CRUD de dívidas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6090752"><label class="task-list-item-label" for="task-item-6090752"> Upload/listagem de documentos</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4979516"><label class="task-list-item-label" for="task-item-4979516"> Importação CSV</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9170529"><label class="task-list-item-label" for="task-item-9170529"> Relatórios por período</label></li>
 </ul>
 <p>Critério de aceite E1: rotas compilam no build e páginas acessíveis no app web.
 Evidência: bun run build OK com rotas /dashboard/*.</p>
 <h3 id="e2.-lacunas-funcionais-ainda-abertas-no-mvp" tabindex="-1"><a class="header-anchor" href="#e2.-lacunas-funcionais-ainda-abertas-no-mvp">#</a> E2. Lacunas funcionais ainda abertas no MVP</h3>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7963085"><label class="task-list-item-label" for="task-item-7963085"> Gestão visual completa da dimensão fornecedor no dashboard</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6829338"><label class="task-list-item-label" for="task-item-6829338"> Gestão visual completa da dimensão fornecedor no dashboard</label>
 <ul>
 <li>Critério de aceite: fluxo completo (listar, criar, editar, aliases, contratos, associação assistida)</li>
+<li>Evidência: apps/web/src/app/dashboard/suppliers/{page.tsx, new/page.tsx, [id]/page.tsx} com alias CRUD inline e contratos inline</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6191460"><label class="task-list-item-label" for="task-item-6191460"> Relatórios avançados por fornecedor com filtros compostos completos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7709771"><label class="task-list-item-label" for="task-item-7709771"> Relatórios avançados por fornecedor com filtros compostos completos</label>
 <ul>
 <li>Critério de aceite: respostas operacionais para perguntas do prompt 002</li>
+<li>Evidência: apps/web/src/app/dashboard/reports/page.tsx — 6 queries paralelas + card por fornecedor + filtro dropdown</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3438727"><label class="task-list-item-label" for="task-item-3438727"> Auditoria histórica visível por fornecedor na interface</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9897387"><label class="task-list-item-label" for="task-item-9897387"> Auditoria histórica visível por fornecedor na interface</label>
 <ul>
 <li>Critério de aceite: visão de histórico consolidado e variações</li>
+<li>Observações: dados de auditoria são registrados no audit_log (via merge e associação retroativa), mas ainda não há tela dedicada de visualização</li>
 </ul>
 </li>
 </ul>
 <h2 id="fase-f-%E2%80%94-testes-e-confiabilidade" tabindex="-1"><a class="header-anchor" href="#fase-f-%E2%80%94-testes-e-confiabilidade">#</a> Fase F — Testes e confiabilidade</h2>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7867645"><label class="task-list-item-label" for="task-item-7867645"> Testes unitários de domínio/validação consolidados</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4094618"><label class="task-list-item-label" for="task-item-4094618"> Testes unitários de domínio/validação consolidados</label>
 <ul>
 <li>Critério de aceite: 142 testes unitários passando</li>
-<li>Evidência: bun run test:unit</li>
+<li>Evidência: bun run test:unit — 142 unit tests green</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5101870"><label class="task-list-item-label" for="task-item-5101870"> Testes de integração implementados</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1687355"><label class="task-list-item-label" for="task-item-1687355"> Testes de integração implementados</label>
 <ul>
 <li>Critério de aceite: suíte em <strong>tests</strong>/integration com cenários críticos de banco+ações</li>
-<li>Observações: pasta existe, sem testes</li>
+<li>Evidência: <strong>tests</strong>/integration/domain-flows.test.ts — 16 testes cobrindo ciclos + dedup + amortização + tags + prioridade + fluxo completo</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7823346"><label class="task-list-item-label" for="task-item-7823346"> Testes e2e implementados</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-854009"><label class="task-list-item-label" for="task-item-854009"> Testes e2e implementados</label>
 <ul>
 <li>Critério de aceite: suíte em <strong>tests</strong>/e2e para fluxos principais</li>
-<li>Observações: pasta existe, sem testes</li>
+<li>Evidência: <strong>tests</strong>/e2e/user-journeys.test.ts — 10 testes cobrindo cadastro, transações, fornecedores, faturas, transferências, empréstimos, recorrências, priorização, períodos financeiros</li>
 </ul>
 </li>
 </ul>
 <h2 id="fase-g-%E2%80%94-prontid%C3%A3o-para-entrega-cont%C3%ADnua-total" tabindex="-1"><a class="header-anchor" href="#fase-g-%E2%80%94-prontid%C3%A3o-para-entrega-cont%C3%ADnua-total">#</a> Fase G — Prontidão para entrega contínua total</h2>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9248206"><label class="task-list-item-label" for="task-item-9248206"> Fluxo develop -> feature -> MR -> pipeline -> staging validado ponta a ponta</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1349619"><label class="task-list-item-label" for="task-item-1349619"> Fluxo develop -> feature -> MR -> pipeline -> staging validado ponta a ponta</label>
 <ul>
 <li>Critério de aceite: evidência em execução real do GitLab</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-490790"><label class="task-list-item-label" for="task-item-490790"> Promotion controlada para main/produção com gates ativos</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5156343"><label class="task-list-item-label" for="task-item-5156343"> Promotion controlada para main/produção com gates ativos</label>
 <ul>
 <li>Critério de aceite: deploy de produção manual controlado e comprovado</li>
 </ul>
 </li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7518937"><label class="task-list-item-label" for="task-item-7518937"> Checklist de operação contínua assinado pelo time</label>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8962257"><label class="task-list-item-label" for="task-item-8962257"> Checklist de operação contínua assinado pelo time</label>
 <ul>
 <li>Critério de aceite: todos os itens críticos de segurança/qualidade/deploy fechados</li>
 </ul>
 </li>
 </ul>
+<h2 id="fase-h-%E2%80%94-seguran%C3%A7a-e-hardening-supabase-(p%C3%B3s-auditoria-2026-03-22)" tabindex="-1"><a class="header-anchor" href="#fase-h-%E2%80%94-seguran%C3%A7a-e-hardening-supabase-(p%C3%B3s-auditoria-2026-03-22)">#</a> Fase H — Segurança e Hardening Supabase (pós-auditoria 2026-03-22)</h2>
+<blockquote>
+<p>Gaps críticos e importantes identificados na auditoria pós-implementação das Edge Functions e configurações do Supabase.</p>
+</blockquote>
+<h3 id="h1.-gaps-cr%C3%ADticos-(bloqueiam-seguran%C3%A7a-real)" tabindex="-1"><a class="header-anchor" href="#h1.-gaps-cr%C3%ADticos-(bloqueiam-seguran%C3%A7a-real)">#</a> H1. Gaps Críticos (bloqueiam segurança real)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-299575"><label class="task-list-item-label" for="task-item-299575"> RLS de audit_logs: substituir FOR ALL por FOR SELECT + FOR INSERT + trigger de imutabilidade</label>
+<ul>
+<li>Fase alvo: Fase H (urgente)</li>
+<li>Critério de aceite: migration criada; <code>DELETE</code> em audit_logs levanta exception; testes cobrindo o trigger</li>
+<li>Observações: policy atual FOR ALL permite usuário deletar seus próprios audit logs — destrói imutabilidade</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2652400"> Storage: criar bucket <code>documents</code> e <code>imports</code><label class="task-list-item-label" for="task-item-2652400"> Storage: criar bucket `documents` e `imports` com policies de acesso por usuário</label>
+<ul>
+<li>Fase alvo: Fase H (urgente)</li>
+<li>Critério de aceite: migration com <code>INSERT INTO storage.buckets</code> + policies de Storage RLS; bucket aparece no Studio</li>
+<li>Observações: tabela <code>documents</code> tem <code>file_path</code> mas nenhum bucket existe — qualquer upload falharia hoje</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2662854"><label class="task-list-item-label" for="task-item-2662854"> user_secrets.encrypted_value: encriptar com pgcrypto em repouso</label>
+<ul>
+<li>Fase alvo: Fase H (urgente)</li>
+<li>Critério de aceite: migration altera coluna para uso de <code>pgp_sym_encrypt</code>; segredos não são texto puro no banco</li>
+<li>Observações: pg_vault está comentado no config.toml; usar pgcrypto (já instalado) como alternativa pragmática</li>
+</ul>
+</li>
+</ul>
+<h3 id="h2.-gaps-importantes-(antes-de-produ%C3%A7%C3%A3o)" tabindex="-1"><a class="header-anchor" href="#h2.-gaps-importantes-(antes-de-produ%C3%A7%C3%A3o)">#</a> H2. Gaps Importantes (antes de produção)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7244568"> config.toml: <code>minimum_password_length</code><label class="task-list-item-label" for="task-item-7244568"> config.toml: `minimum_password_length` de 6 para 8 (dev) / 12 (prod)</label>
+<ul>
+<li>Critério de aceite: valor alterado e documentado</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-939228"> config.toml: <label class="task-list-item-label" for="task-item-939228"> config.toml: `password_requirements = "lower_upper_letters_digits"`</label>
+<ul>
+<li>Critério de aceite: valor configurado</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4531065"> config.toml: <label class="task-list-item-label" for="task-item-4531065"> config.toml: `enable_confirmations = true`</label>
+<ul>
+<li>Critério de aceite: confirmação de e-mail ativa em dev/prod</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7124893"> config.toml: <label class="task-list-item-label" for="task-item-7124893"> config.toml: `secure_password_change = true`</label>
+<ul>
+<li>Critério de aceite: reautenticação exigida para troca de senha</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2768447"> config.toml: Google OAuth configurado (<code>[auth.external.google]</code><label class="task-list-item-label" for="task-item-2768447"> config.toml: Google OAuth configurado (`[auth.external.google]`)</label>
+<ul>
+<li>Critério de aceite: bloco provider Google presente; vars GOOGLE_CLIENT_ID/GOOGLE_SECRET no .env.example</li>
+<li>Observações: CEO criou Gmail para este fim (ver TODO em <a href="http://prompts.md">prompts.md</a>)</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7691041"><label class="task-list-item-label" for="task-item-7691041"> config.toml: SMTP configurado (Mailpit local + SendGrid/SES prod)</label>
+<ul>
+<li>Critério de aceite: emails de auth funcionam localmente via Mailpit (<a href="http://127.0.0.1:54324">http://127.0.0.1:54324</a>)</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8975260"> View materializada <code>mv_supplier_spending</code><label class="task-list-item-label" for="task-item-8975260"> View materializada `mv_supplier_spending` criada</label>
+<ul>
+<li>Critério de aceite: migration 20260323* com a view + mecanismo de refresh</li>
+<li>Observações: planejada na Etapa 5.4 mas não implementada; necessária para performance de relatórios</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8965295"> Edge Function <code>retroactive-supplier-association</code><label class="task-list-item-label" for="task-item-8965295"> Edge Function `retroactive-supplier-association`: confirm com transação atômica</label>
+<ul>
+<li>Critério de aceite: <code>handleConfirm</code> usa RPC PL/pgSQL atômica; sem risco de estado inconsistente no meio do lote</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9777405"><label class="task-list-item-label" for="task-item-9777405"> Edge Functions: adicionar CORS headers em merge-suppliers e retroactive-supplier-association</label>
+<ul>
+<li>Critério de aceite: headers <code>Access-Control-Allow-Origin</code> presentes; preflight OPTIONS respondido</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4943466"> Edge Function <code>refresh-mv-supplier-spending</code><label class="task-list-item-label" for="task-item-4943466"> Edge Function `refresh-mv-supplier-spending` criada (scheduled/cron)</label>
+<ul>
+<li>Critério de aceite: função que executa <code>REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supplier_spending</code></li>
+<li>Observações: terceira Edge Function planejada na Etapa 5.4, ainda não criada</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3230002"><label class="task-list-item-label" for="task-item-3230002"> seed.sql populado com dados base de desenvolvimento</label>
+<ul>
+<li>Critério de aceite: categorias base, tags comuns, usuário de teste no seed.sql</li>
+</ul>
+</li>
+</ul>
+<h3 id="h3.-gaps-opcionais-(melhorias-de-qualidade)" tabindex="-1"><a class="header-anchor" href="#h3.-gaps-opcionais-(melhorias-de-qualidade)">#</a> H3. Gaps Opcionais (melhorias de qualidade)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2138260"> MFA TOTP habilitado (<code>[auth.mfa.totp] enroll_enabled = true</code><label class="task-list-item-label" for="task-item-2138260"> MFA TOTP habilitado (`[auth.mfa.totp] enroll_enabled = true`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-452564"> Session timebox configurado (<code>timebox = &quot;24h&quot;</code>, <code>inactivity_timeout = &quot;8h&quot;</code><label class="task-list-item-label" for="task-item-452564"> Session timebox configurado (`timebox = "24h"`, `inactivity_timeout = "8h"`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3819946"> <code>[db.vault]</code><label class="task-list-item-label" for="task-item-3819946"> `[db.vault]` habilitado para melhor governança de segredos</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2134559"> <code>[db.ssl_enforcement]</code><label class="task-list-item-label" for="task-item-2134559"> `[db.ssl_enforcement]` habilitado em produção</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5637499"> PgBouncer habilitado em produção (<code>[db.pooler] enabled = true</code><label class="task-list-item-label" for="task-item-5637499"> PgBouncer habilitado em produção (`[db.pooler] enabled = true`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3003834"><label class="task-list-item-label" for="task-item-3003834"> Email templates customizados (confirmação, reset, convite)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8998229"> hCaptcha/Turnstile para signup (<code>[auth.captcha]</code><label class="task-list-item-label" for="task-item-8998229"> hCaptcha/Turnstile para signup (`[auth.captcha]`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4692579"> <code>OPENAI_API_KEY</code> documentado no <label class="task-list-item-label" for="task-item-4692579"> `OPENAI_API_KEY` documentado no `.env.example`</label></li>
+</ul>
+<h3 id="h4.-supabase-local-%E2%80%94-ambiente-de-desenvolvimento" tabindex="-1"><a class="header-anchor" href="#h4.-supabase-local-%E2%80%94-ambiente-de-desenvolvimento">#</a> H4. Supabase Local — Ambiente de Desenvolvimento</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5573242"><label class="task-list-item-label" for="task-item-5573242"> Edge Runtime iniciado e Edge Functions aparecendo no Studio</label>
+<ul>
+<li>Critério de aceite: <code>npx supabase functions serve</code> documentado; Studio mostra as funções</li>
+<li>Observações: <code>supabase_edge_runtime_seu.bolso.feliz</code> está stopped — funções não aparecem no Studio</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3316164"><label class="task-list-item-label" for="task-item-3316164"> MCP do Supabase local configurado no VS Code</label>
+<ul>
+<li>Critério de aceite: <code>.vscode/mcp.json</code> com endpoint <code>http://127.0.0.1:54321/mcp</code></li>
+<li>Evidência: .vscode/mcp.json criado em 2026-03-22</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-686967"><label class="task-list-item-label" for="task-item-686967"> Storage buckets aparecendo no Studio após migration H1</label>
+<ul>
+<li>Critério de aceite: aba Storage do Studio mostra buckets <code>documents</code> e <code>imports</code></li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6436028"><label class="task-list-item-label" for="task-item-6436028"> Tabelas verificadas no Studio (todas 27 com RLS ativo)</label>
+<ul>
+<li>Critério de aceite: Table Editor mostra todas as tabelas; RLS tab mostra policies ativas</li>
+</ul>
+</li>
+</ul>
+<hr>
 <h2 id="conclus%C3%A3o-do-checklist" tabindex="-1"><a class="header-anchor" href="#conclus%C3%A3o-do-checklist">#</a> Conclusão do Checklist</h2>
 <ul>
 <li>Núcleo de arquitetura, domínio e qualidade local: PRONTO</li>
-<li>Dimensão fornecedor na base de dados, ações e validações: MAJORITARIAMENTE PRONTA</li>
-<li>Camada de fechamento operacional e governança de entrega contínua remota: AINDA FALTAM ETAPAS</li>
+<li>Dimensão fornecedor na base de dados, ações, validações e UI: PRONTA</li>
+<li>Edge Functions estratégicas (merge + associação retroativa): PRONTAS (com gaps I8/I9)</li>
+<li>Testes (142 unit + 16 integration + 10 e2e = 168 total): PRONTOS</li>
+<li>Páginas CRUD de fornecedores e relatórios com filtro por fornecedor: PRONTOS</li>
+<li>Segurança e hardening Supabase (Fase H): PENDENTE — 3 gaps críticos, 11 importantes</li>
+<li>Camada de fechamento operacional e governança de entrega contínua remota: PENDENTE (deploy real, promoção controlada, checklist operacional)</li>
+<li>Auditoria visual por fornecedor na interface: PENDENTE</li>
 </ul>
-<p>Este checklist deve ser usado como contrato de execução para o próximo ciclo.</p>
+<p>Este checklist deve ser usado como contrato de execução para o próximo ciclo.
+Próxima prioridade: Corrigir gaps H1 (críticos) antes de qualquer promoção para produção.</p>
 
       </article>
 

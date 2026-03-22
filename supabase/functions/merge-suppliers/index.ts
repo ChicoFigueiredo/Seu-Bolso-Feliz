@@ -1,5 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 interface MergeRequest {
   source_supplier_id: string;
   target_supplier_id: string;
@@ -12,10 +18,15 @@ interface MergeResult {
 }
 
 Deno.serve(async (req) => {
+  // Responder preflight CORS
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -24,7 +35,7 @@ Deno.serve(async (req) => {
   if (!authHeader) {
     return new Response(JSON.stringify({ error: "Missing authorization" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -44,7 +55,7 @@ Deno.serve(async (req) => {
   if (authError || !user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -57,7 +68,7 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -66,14 +77,14 @@ Deno.serve(async (req) => {
   if (!source_supplier_id || !target_supplier_id) {
     return new Response(
       JSON.stringify({ error: "source_supplier_id and target_supplier_id are required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
   if (source_supplier_id === target_supplier_id) {
     return new Response(JSON.stringify({ error: "Cannot merge a supplier with itself" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -86,7 +97,7 @@ Deno.serve(async (req) => {
   if (fetchError || !suppliers || suppliers.length !== 2) {
     return new Response(JSON.stringify({ error: "One or both suppliers not found" }), {
       status: 404,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -96,7 +107,7 @@ Deno.serve(async (req) => {
   if (!source || !target) {
     return new Response(JSON.stringify({ error: "Supplier mismatch" }), {
       status: 404,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -105,7 +116,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: "Suppliers do not belong to authenticated user" }),
       {
         status: 403,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
     );
   }
@@ -113,7 +124,7 @@ Deno.serve(async (req) => {
   if (!source.is_active) {
     return new Response(JSON.stringify({ error: "Source supplier is already inactive" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -130,7 +141,7 @@ Deno.serve(async (req) => {
   if (mergeError) {
     return new Response(JSON.stringify({ error: "Merge failed", details: mergeError.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -142,6 +153,6 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({ success: true, result: mergeResult }), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });

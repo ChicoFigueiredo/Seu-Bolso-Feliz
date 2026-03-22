@@ -6,7 +6,8 @@
   <title>002-guia-cicd-engenharia-operacional</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hack-font/3.3.0/web/hack.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 
   <script>
@@ -306,8 +307,11 @@
     }
 
     .doc-card pre,
-    .doc-card code {
-      font-family: "JetBrains Mono", "Consolas", monospace;
+    .doc-card code,
+    .doc-card .hljs {
+      font-family: "Hack", "JetBrains Mono", "Consolas", monospace !important;
+      white-space: pre !important; /* Garante que os espaços múltiplos sejam renderizados */
+      line-height: 1.18em !important;
     }
 
     .doc-card pre {
@@ -1525,19 +1529,19 @@ git push
 <h2 id="11.-checklist-de-novo-membro" tabindex="-1"><a class="header-anchor" href="#11.-checklist-de-novo-membro">#</a> 11. Checklist de Novo Membro</h2>
 <p>Para um novo desenvolvedor que entra no projeto:</p>
 <ul class="contains-task-list">
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3702245"> Instalar Bun (<code>curl -fsSL https://bun.sh/install | bash</code><label class="task-list-item-label" for="task-item-3702245"> Instalar Bun (`curl -fsSL https://bun.sh/install | bash`)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-1824964"><label class="task-list-item-label" for="task-item-1824964"> Instalar Docker</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2074395"> Clonar repositório (<code>git clone ...</code><label class="task-list-item-label" for="task-item-2074395"> Clonar repositório (`git clone ...`)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3970308"> <code>bun install</code><label class="task-list-item-label" for="task-item-3970308"> `bun install` na raiz</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7464875"> Copiar <code>.env.example</code> para <code>.env.local</code><label class="task-list-item-label" for="task-item-7464875"> Copiar `.env.example` para `.env.local` e preencher</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9333848"> <code>npx supabase start</code><label class="task-list-item-label" for="task-item-9333848"> `npx supabase start` (iniciar banco local)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7621087"> <code>npx supabase db reset</code><label class="task-list-item-label" for="task-item-7621087"> `npx supabase db reset` (aplicar migrações + seed)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5376579"> <code>bun run generate-types</code><label class="task-list-item-label" for="task-item-5376579"> `bun run generate-types` (gerar tipos TS)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9719626"> <code>bun run dev</code><label class="task-list-item-label" for="task-item-9719626"> `bun run dev` (iniciar dev server)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9363038"> <code>bun run test</code><label class="task-list-item-label" for="task-item-9363038"> `bun run test` (rodar testes)</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2253054"> Ler ADRs em <label class="task-list-item-label" for="task-item-2253054"> Ler ADRs em `docs/adrs/`</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2788402"> Ler guia de implementação em <label class="task-list-item-label" for="task-item-2788402"> Ler guia de implementação em `docs/planejamento/001-guia-implementacao-passo-a-passo.md`</label></li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9440215"><label class="task-list-item-label" for="task-item-9440215"> Ler esta documentação de CI/CD</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9346290"> Instalar Bun (<code>curl -fsSL https://bun.sh/install | bash</code><label class="task-list-item-label" for="task-item-9346290"> Instalar Bun (`curl -fsSL https://bun.sh/install | bash`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9184036"><label class="task-list-item-label" for="task-item-9184036"> Instalar Docker</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4662369"> Clonar repositório (<code>git clone ...</code><label class="task-list-item-label" for="task-item-4662369"> Clonar repositório (`git clone ...`)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8517642"> <code>bun install</code><label class="task-list-item-label" for="task-item-8517642"> `bun install` na raiz</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2553592"> Copiar <code>.env.example</code> para <code>.env.local</code><label class="task-list-item-label" for="task-item-2553592"> Copiar `.env.example` para `.env.local` e preencher</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9473193"> <code>npx supabase start</code><label class="task-list-item-label" for="task-item-9473193"> `npx supabase start` (iniciar banco local)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5662602"> <code>npx supabase db reset</code><label class="task-list-item-label" for="task-item-5662602"> `npx supabase db reset` (aplicar migrações + seed)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7588891"> <code>bun run generate-types</code><label class="task-list-item-label" for="task-item-7588891"> `bun run generate-types` (gerar tipos TS)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5986439"> <code>bun run dev</code><label class="task-list-item-label" for="task-item-5986439"> `bun run dev` (iniciar dev server)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6637267"> <code>bun run test</code><label class="task-list-item-label" for="task-item-6637267"> `bun run test` (rodar testes)</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-2911665"> Ler ADRs em <label class="task-list-item-label" for="task-item-2911665"> Ler ADRs em `docs/adrs/`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9279619"> Ler guia de implementação em <label class="task-list-item-label" for="task-item-9279619"> Ler guia de implementação em `docs/planejamento/001-guia-implementacao-passo-a-passo.md`</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3094432"><label class="task-list-item-label" for="task-item-3094432"> Ler esta documentação de CI/CD</label></li>
 </ul>
 
       </article>
