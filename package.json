@@ -25,6 +25,8 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@sbf/domain": "workspace:*",
+    "@sbf/validation": "workspace:*",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",

@@ -18,6 +18,8 @@
         "@commitlint/cli": "^20.5.0",
         "@commitlint/config-conventional": "^20.5.0",
         "@eslint/js": "^10.0.1",
+        "@sbf/domain": "workspace:*",
+        "@sbf/validation": "workspace:*",
         "@types/bun": "latest",
         "@vitest/coverage-v8": "^4.1.0",
         "eslint": "^10.1.0",
