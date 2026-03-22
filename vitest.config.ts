@@ -11,6 +11,11 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    server: {
+      deps: {
+        inline: ["zod"],
+      },
+    },
     projects: [
       {
         test: {
