@@ -30,6 +30,13 @@ export default defineConfig({
           testTimeout: 30_000,
         },
       },
+      {
+        test: {
+          name: "e2e",
+          include: ["__tests__/e2e/**/*.test.ts"],
+          testTimeout: 60_000,
+        },
+      },
     ],
     coverage: {
       provider: "v8",
