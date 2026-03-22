@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADR-001-deduplicacao-transacao-item-fatura</title>
+  <title>2026-03-22-15-17-auditoria-completa-implantacao-veronica</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -840,7 +840,7 @@
     <main class="main">
       <header class="hero">
         <div class="hero-top">
-          <h1>📝 ADR-001-deduplicacao-transacao-item-fatura</h1>
+          <h1>📝 2026-03-22-15-17-auditoria-completa-implantacao-veronica</h1>
           <div class="hero-actions">
             <a href="/">🏠 Index</a>
             <button id="go-top" type="button">⬆️ Topo</button>
@@ -850,244 +850,191 @@
       </header>
 
       <article class="doc-card" id="documento">
-        
-        <h1 id="adr-001%3A-estrat%C3%A9gia-de-deduplica%C3%A7%C3%A3o-%E2%80%94-transa%C3%A7%C3%A3o-vs-item-de-fatura" tabindex="-1"><a class="header-anchor" href="#adr-001%3A-estrat%C3%A9gia-de-deduplica%C3%A7%C3%A3o-%E2%80%94-transa%C3%A7%C3%A3o-vs-item-de-fatura">#</a> ADR-001: Estratégia de Deduplicação — Transação vs Item de Fatura</h1>
-<p><strong>Status:</strong> Aprovado
-<strong>Data:</strong> 2026-03-21
-<strong>Origem:</strong> Parecer Verônica — Ajuste Obrigatório 4.1
-<strong>Ata de referência:</strong> <code>docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md</code> (Seção 2)</p>
-<hr>
-<h2 id="1.-contexto" tabindex="-1"><a class="header-anchor" href="#1.-contexto">#</a> 1. Contexto</h2>
-<p>Uma compra no cartão de crédito pode existir em múltiplas formas no sistema:</p>
+        <p>Título da Reunião: Auditoria Completa de Implantação dos Pedidos da Verônica</p>
+<p>Data e Hora: 2026-03-22 15:17</p>
+<p>Participantes:</p>
 <ul>
-<li>Como <code>statement_item</code> na fatura do cartão</li>
-<li>Como <code>transaction</code> manual registrada pelo usuário</li>
-<li>Como registro importado de extrato CSV</li>
+<li>Chico (CEO) — facilitador, decisão final</li>
+<li>Ana Silva (Arquiteta de Software) — coordenação técnica da auditoria</li>
+<li>Carlos Mendes (Designer de Software) — avaliação de consistência UX/UI</li>
+<li>João Pereira (Backend Sênior — Node/Bun) — revisão backend e ações server-side</li>
+<li>Maria Oliveira (Backend Sênior — Node/Bun) — revisão de segurança, qualidade e testes</li>
+<li>Pedro Santos (Backend Sênior — Python/Django) — revisão de modelagem e integração</li>
+<li>Laura Costa (Backend Sênior — Python/Django) — revisão de APIs e rastreabilidade</li>
+<li>Roberto Lima (Frontend Sênior — React/Next.js) — revisão de telas e fluxos web</li>
+<li>Sofia Almeida (Frontend Sênior — React/Next.js) — revisão de formulários e filtros</li>
+<li>Lucas Ferreira (Mobile Sênior — React Native/Expo) — revisão de aderência cross-platform</li>
+<li>Beatriz Rocha (Mobile Sênior — React Native/Expo) — revisão de readiness mobile</li>
+<li>Fernando Gomes (DevOps Sênior) — revisão CI/CD, ambientes e deploy</li>
+<li>Ricardo Monteiro (Economista) — validação de regras financeiras e cálculos</li>
+<li>Camila Duarte (Consultora Finanças Pessoais) — validação da utilidade operacional do MVP</li>
+<li>Gabriela Nunes (Marketing Digital) — revisão de readiness para staging e demonstração</li>
+<li>Helena Vargas (UX/UI) — revisão de clareza e fluxo orientado a decisão</li>
+<li>Isabella Torres (UI Designer) — revisão de consistência visual da interface</li>
+<li>Thiago Martins (Front Engineer) — revisão de padrões e qualidade de implementação</li>
+<li>Renata Silva (QA Visual/A11y) — revisão de cobertura de testes e riscos de regressão</li>
+<li>André Santos (DBA Sênior — PostgreSQL) — revisão de migrations, constraints e RLS</li>
 </ul>
-<p>Sem regras claras, relatórios podem contar a mesma despesa 2-3 vezes, destruindo a confiabilidade do sistema.</p>
-<p>A regra anterior (R27) usava heurística: <code>mesmo supplier_id + valor + data ± 3 dias + competência = duplicata</code>. Isso é frágil, sujeito a falsos positivos/negativos, e inadequado para o núcleo determinístico.</p>
-<h2 id="2.-decis%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.-decis%C3%A3o">#</a> 2. Decisão</h2>
-<h3 id="2.1.-v%C3%ADnculo-expl%C3%ADcito-via-fk" tabindex="-1"><a class="header-anchor" href="#2.1.-v%C3%ADnculo-expl%C3%ADcito-via-fk">#</a> 2.1. Vínculo Explícito via FK</h3>
-<p>O campo <code>statement_items.transaction_id</code> é o <strong>único mecanismo de conciliação</strong> entre item de fatura e transação. É um vínculo 1:1 (cada item pode ter no máximo uma transação, e cada transação estar vinculada a no máximo um item).</p>
-<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">UNIQUE</span> INDEX idx_statement_items_transaction_id
-  <span class="hljs-keyword">ON</span> statement_items(transaction_id) <span class="hljs-keyword">WHERE</span> transaction_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NOT NULL</span>;
-</code></pre>
-<h3 id="2.2.-campo-origin_type-em-transactions" tabindex="-1"><a class="header-anchor" href="#2.2.-campo-origin_type-em-transactions">#</a> 2.2. Campo origin_type em transactions</h3>
-<pre class="hljs"><code><span class="hljs-keyword">ALTER TABLE</span> transactions <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> origin_type text <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">&#x27;manual&#x27;</span>
-  <span class="hljs-keyword">CHECK</span> (origin_type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;manual&#x27;</span>, <span class="hljs-string">&#x27;import&#x27;</span>, <span class="hljs-string">&#x27;recurring&#x27;</span>, <span class="hljs-string">&#x27;statement_link&#x27;</span>));
-</code></pre>
-<table>
-<thead>
-<tr>
-<th>Valor</th>
-<th>Significado</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>manual</code></td>
-<td>Usuário digitou manualmente</td>
-</tr>
-<tr>
-<td><code>import</code></td>
-<td>Importação de CSV/XLSX</td>
-</tr>
-<tr>
-<td><code>recurring</code></td>
-<td>Gerado por recorrência (recurring_instances)</td>
-</tr>
-<tr>
-<td><code>statement_link</code></td>
-<td>Gerado a partir de statement_item</td>
-</tr>
-</tbody>
-</table>
-<h3 id="2.3.-regra-de-preced%C3%AAncia-(fonte-prim%C3%A1ria)" tabindex="-1"><a class="header-anchor" href="#2.3.-regra-de-preced%C3%AAncia-(fonte-prim%C3%A1ria)">#</a> 2.3. Regra de Precedência (Fonte Primária)</h3>
-<table>
-<thead>
-<tr>
-<th>Cenário</th>
-<th>Fonte primária para relatórios</th>
-<th>Motivo</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Só statement_item (sem transação vinculada)</td>
-<td>statement_item</td>
-<td>Única observação</td>
-</tr>
-<tr>
-<td>statement_item + transação vinculada</td>
-<td>transação</td>
-<td>Mais metadados (categoria, tags, fornecedor, notas)</td>
-</tr>
-<tr>
-<td>Só transação manual (sem item de fatura)</td>
-<td>transação</td>
-<td>Única observação</td>
-</tr>
-<tr>
-<td>Importação detecta match com statement_item</td>
-<td>statement_item existente</td>
-<td>Evita duplicação</td>
-</tr>
-<tr>
-<td>recurring_instance confirmada → transação</td>
-<td>transação gerada</td>
-<td>Instância é expectativa, transação é fato</td>
-</tr>
-</tbody>
-</table>
-<h3 id="2.4.-regra-de-soma-em-relat%C3%B3rios" tabindex="-1"><a class="header-anchor" href="#2.4.-regra-de-soma-em-relat%C3%B3rios">#</a> 2.4. Regra de Soma em Relatórios</h3>
-<pre class="hljs"><code>1. Para cada evento real, soma-se APENAS a fonte primária
-2. statement_payment NUNCA entra na soma de despesas (é quitação)
-3. transfers NUNCA entram na soma de despesas (são movimentações internas)
-4. recurring_instances com status ≠ 'paid' NÃO entram na soma de gastos realizados
-5. Se statement_item tem transaction_id preenchido → conta APENAS a transaction
-6. Se statement_item NÃO tem transaction_id → conta o statement_item
-7. Exceção: relatório &quot;Composição da Fatura&quot; — conta todos os statement_items (é visão da fatura)
-</code></pre>
-<h3 id="2.5.-regra-de-exibi%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.5.-regra-de-exibi%C3%A7%C3%A3o">#</a> 2.5. Regra de Exibição</h3>
-<table>
-<thead>
-<tr>
-<th>Tela</th>
-<th>O que mostrar</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Relatório de despesas</td>
-<td>Fonte primária de cada evento (sem duplicatas)</td>
-</tr>
-<tr>
-<td>Fatura do cartão</td>
-<td>Todos os statement_items (é a visão da fatura)</td>
-</tr>
-<tr>
-<td>Extrato da conta</td>
-<td>Todas as transactions da conta (incluindo statement_payment)</td>
-</tr>
-<tr>
-<td>Relatório por fornecedor</td>
-<td>Fonte primária de cada evento, agrupada por supplier_id</td>
-</tr>
-<tr>
-<td>Detalhes do lançamento</td>
-<td>Fonte primária + indicador visual se tem observações vinculadas</td>
-</tr>
-</tbody>
-</table>
-<h3 id="2.6.-view-de-deduplica%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.6.-view-de-deduplica%C3%A7%C3%A3o">#</a> 2.6. View de Deduplicação</h3>
-<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> v_expenses_deduplicated <span class="hljs-keyword">AS</span>
-<span class="hljs-comment">-- Caso 1: statement_items SEM transação vinculada (a despesa é o item)</span>
-<span class="hljs-keyword">SELECT</span>
-  si.id <span class="hljs-keyword">AS</span> canonical_id,
-  <span class="hljs-string">&#x27;statement_item&#x27;</span> <span class="hljs-keyword">AS</span> source_type,
-  si.user_id,
-  si.amount,
-  si.description,
-  si.supplier_id,
-  <span class="hljs-keyword">NULL</span>::uuid <span class="hljs-keyword">AS</span> category_id,
-  <span class="hljs-keyword">NULL</span>::text <span class="hljs-keyword">AS</span> priority,
-  si.transaction_date <span class="hljs-keyword">AS</span> event_date,
-  <span class="hljs-keyword">NULL</span>::<span class="hljs-type">date</span> <span class="hljs-keyword">AS</span> competence_date,
-  <span class="hljs-keyword">NULL</span>::uuid <span class="hljs-keyword">AS</span> financial_period_id,
-  si.statement_cycle_id
-<span class="hljs-keyword">FROM</span> statement_items si
-<span class="hljs-keyword">WHERE</span> si.transaction_id <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span>
+<p>Pauta:</p>
+<ul>
+<li>
+<ol>
+<li>Auditar cobertura real dos pedidos da Verônica (001 + 002)</li>
+</ol>
+</li>
+<li>
+<ol start="2">
+<li>Auditar cobertura dos ajustes obrigatórios do parecer formal</li>
+</ol>
+</li>
+<li>
+<ol start="3">
+<li>Auditar aderência a ADR-001, ADR-002, ADR-003 e ADR-004</li>
+</ol>
+</li>
+<li>
+<ol start="4">
+<li>Auditar aderência ao planejamento e checklist existentes</li>
+</ol>
+</li>
+<li>
+<ol start="5">
+<li>Identificar lacunas críticas para início seguro da implementação contínua</li>
+</ol>
+</li>
+<li>
+<ol start="6">
+<li>Fechar plano objetivo do que falta</li>
+</ol>
+</li>
+</ul>
 
-<span class="hljs-keyword">UNION</span> <span class="hljs-keyword">ALL</span>
-
-<span class="hljs-comment">-- Caso 2: transactions que são despesas (inclui as vinculadas a statement_items)</span>
-<span class="hljs-keyword">SELECT</span>
-  t.id <span class="hljs-keyword">AS</span> canonical_id,
-  <span class="hljs-string">&#x27;transaction&#x27;</span> <span class="hljs-keyword">AS</span> source_type,
-  t.user_id,
-  t.amount,
-  t.description,
-  t.supplier_id,
-  t.category_id,
-  t.priority,
-  t.event_date,
-  t.competence_date,
-  t.financial_period_id,
-  t.statement_cycle_id
-<span class="hljs-keyword">FROM</span> transactions t
-<span class="hljs-keyword">WHERE</span> t.type <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;expense&#x27;</span>, <span class="hljs-string">&#x27;fee&#x27;</span>, <span class="hljs-string">&#x27;interest_charge&#x27;</span>)
-  <span class="hljs-comment">-- Excluir transações que NÃO são despesas reais</span>
-  <span class="hljs-keyword">AND</span> t.type <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">IN</span> (<span class="hljs-string">&#x27;statement_payment&#x27;</span>, <span class="hljs-string">&#x27;refund&#x27;</span>);
-</code></pre>
-<p><strong>Nota:</strong> A view usa UNION ALL de dois conjuntos mutuamente exclusivos:</p>
+        <h1 id="1.-escopo-da-auditoria" tabindex="-1"><a class="header-anchor" href="#1.-escopo-da-auditoria">#</a> 1. Escopo da Auditoria</h1>
+<p>A equipe realizou cruzamento entre:</p>
 <ul>
-<li>statement_items sem transação (onde <code>transaction_id IS NULL</code>)</li>
-<li>transactions de despesa (que inclui as vinculadas via <code>statement_items.transaction_id</code>)</li>
+<li>Código-fonte do monorepo (web, packages, migrations, CI/CD, hooks)</li>
+<li>Documentos de referência funcional da Verônica</li>
+<li>Refinos de 2026-03</li>
+<li>ADRs obrigatórias</li>
+<li>Guias de planejamento e passo a passo</li>
 </ul>
-<p>Não há duplicação porque quando um statement_item tem transaction vinculada, só a segunda parte do UNION emite o registro.</p>
-<h2 id="3.-exemplos" tabindex="-1"><a class="header-anchor" href="#3.-exemplos">#</a> 3. Exemplos</h2>
-<h3 id="3.1.-compra-no-cart%C3%A3o-sem-lan%C3%A7amento-manual" tabindex="-1"><a class="header-anchor" href="#3.1.-compra-no-cart%C3%A3o-sem-lan%C3%A7amento-manual">#</a> 3.1. Compra no cartão sem lançamento manual</h3>
-<pre class="hljs"><code>Ação: Usuário compra no Supermercado X com Nubank
-Resultado: statement_item criado → transaction_id = NULL
-Relatório: conta R$ 350 via statement_item
-Pagamento fatura: transaction type=statement_payment → NÃO soma como despesa
-</code></pre>
-<h3 id="3.2.-lan%C3%A7amento-manual-vinculado-%C3%A0-fatura" tabindex="-1"><a class="header-anchor" href="#3.2.-lan%C3%A7amento-manual-vinculado-%C3%A0-fatura">#</a> 3.2. Lançamento manual vinculado à fatura</h3>
-<pre class="hljs"><code>Ação: Usuário lança &quot;Supermercado X — R$ 350&quot; antes da fatura fechar
-Resultado: transaction criada → transaction_id preenchido
-Fatura chega: statement_item.transaction_id = id da transação
-Relatório: conta R$ 350 via transaction (tem categoria, tags, notas)
-Fatura: mostra statement_item (é visão da fatura)
-</code></pre>
-<h3 id="3.3.-parcelas%3A-vis%C3%A3o-do-total-vs-item-mensal" tabindex="-1"><a class="header-anchor" href="#3.3.-parcelas%3A-vis%C3%A3o-do-total-vs-item-mensal">#</a> 3.3. Parcelas: visão do total vs item mensal</h3>
-<pre class="hljs"><code>Ação: TV R$ 3.000 em 10x no Nubank
-Cada fatura: statement_item &quot;LOJA TV R$ 300 (3/10)&quot;
-Transação: PODE existir transação-mãe de R$ 3.000 com parcelas filhas
-Vínculo: statement_item de cada parcela vincula à instância da parcela
-Relatório mensal: R$ 300 (parcela do mês)
-Relatório total da dívida: R$ 3.000 (transação-mãe)
-</code></pre>
-<h3 id="3.4.-estorno" tabindex="-1"><a class="header-anchor" href="#3.4.-estorno">#</a> 3.4. Estorno</h3>
-<pre class="hljs"><code>statement_item: &quot;LOJA X R$ 200&quot;
-statement_item: &quot;ESTORNO LOJA X -R$ 200&quot;
-Ambos na fatura, sem vínculo entre si (são itens distintos)
-Relatório: soma líquida R$ 0
-</code></pre>
-<h3 id="3.5.-d%C3%A9bito-autom%C3%A1tico-(conta-de-luz)" tabindex="-1"><a class="header-anchor" href="#3.5.-d%C3%A9bito-autom%C3%A1tico-(conta-de-luz)">#</a> 3.5. Débito automático (conta de luz)</h3>
-<pre class="hljs"><code>Ação: Conta de energia debitada automaticamente
-Resultado: transaction type=expense R$ 280 (sem statement_item)
-Relatório: conta R$ 280 via transaction
-</code></pre>
-<h2 id="4.-consequ%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#4.-consequ%C3%AAncias">#</a> 4. Consequências</h2>
-<h3 id="positivas" tabindex="-1"><a class="header-anchor" href="#positivas">#</a> Positivas</h3>
+<p>Fontes principais auditadas:</p>
 <ul>
-<li>Zero duplicação por design (vínculo explícito, não heurística)</li>
-<li>Regra determinística e auditável</li>
-<li>View SQL materializa a regra — qualquer relatório pode reusar</li>
-<li>Payment de fatura claramente separado de despesa</li>
+<li>docs/Veronica/001-prompt.inicial.md</li>
+<li>docs/Veronica/002-fornecedor.md</li>
+<li>docs/refinos/2026-03/2026-03-21-10-40-refino-tecnico-funcional-kickoff-seu-bolso-feliz.md</li>
+<li>docs/refinos/2026-03/2026-03-21-11-57-revisao-refino-dimensao-fornecedor.md</li>
+<li>docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md</li>
+<li>docs/refinos/2026-03/2026-03-21-14-19-refino-arquitetura-engenharia-cicd.md</li>
+<li>docs/adrs/ADR-001-deduplicacao-transacao-item-fatura.md</li>
+<li>docs/adrs/ADR-002-norma-consumption-metrics.md</li>
+<li>docs/adrs/ADR-003-governanca-aliases-fornecedor.md</li>
+<li>docs/adrs/ADR-004-arquitetura-operacional-repositorio-cicd.md</li>
+<li>docs/planejamento/001-guia-implementacao-passo-a-passo.md</li>
+<li>docs/planejamento/002-guia-cicd-engenharia-operacional.md</li>
+<li>docs/passo-a-passo/001-supabase.e.outros.md</li>
 </ul>
-<h3 id="negativas" tabindex="-1"><a class="header-anchor" href="#negativas">#</a> Negativas</h3>
+<p>Validação técnica do estado atual executada nesta auditoria:</p>
 <ul>
-<li>O vínculo <code>statement_item.transaction_id</code> depende de ação do usuário ou sugestão inteligente (futuro)</li>
-<li>Items de fatura sem transação vinculada terão menos metadados (sem categoria, sem tags)</li>
-<li>A view precisa ser mantida se o schema evoluir</li>
+<li>bun run lint: OK</li>
+<li>bun run typecheck: OK</li>
+<li>bun run test:unit: 142/142 OK</li>
+<li>bun run build: OK (apps/web)</li>
 </ul>
-<h2 id="5.-r27-revisada" tabindex="-1"><a class="header-anchor" href="#5.-r27-revisada">#</a> 5. R27 Revisada</h2>
-<blockquote>
-<p>Relatórios por fornecedor (e por qualquer dimensão) utilizam a fonte primária de cada evento financeiro. Quando um <code>statement_item</code> possui <code>transaction_id</code> vinculado, a <code>transaction</code> é a fonte primária. Quando não possui, o <code>statement_item</code> é a fonte primária. Pagamentos de fatura (<code>statement_payment</code>) NUNCA são contabilizados como despesa. A view <code>v_expenses_deduplicated</code> materializa essa regra.</p>
-</blockquote>
-<h2 id="6.-testes-associados" tabindex="-1"><a class="header-anchor" href="#6.-testes-associados">#</a> 6. Testes Associados</h2>
+<h1 id="2.-diagn%C3%B3stico-executivo" tabindex="-1"><a class="header-anchor" href="#2.-diagn%C3%B3stico-executivo">#</a> 2. Diagnóstico Executivo</h1>
+<h2 id="2.1.-conclus%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.1.-conclus%C3%A3o">#</a> 2.1. Conclusão</h2>
+<p>Status geral da implantação dos pedidos da Verônica: PARCIALMENTE IMPLANTADO, com base sólida e lacunas claras de execução final.</p>
+<p>Síntese:</p>
 <ul>
-<li><strong>T22 (revisado):</strong> report por fornecedor usa <code>v_expenses_deduplicated</code></li>
-<li><strong>T27 (revisado):</strong> deduplicação usa vínculo explícito, não heurística</li>
-<li><strong>Novo: T-DEDUP-01:</strong> statement_item com transaction_id → relatório conta APENAS transaction</li>
-<li><strong>Novo: T-DEDUP-02:</strong> statement_item sem transaction_id → relatório conta statement_item</li>
-<li><strong>Novo: T-DEDUP-03:</strong> statement_payment NUNCA aparece em soma de despesas</li>
-<li><strong>Novo: T-DEDUP-04:</strong> soma da view == soma esperada para cenário com mix de vinculados e não vinculados</li>
+<li>Fundação técnica e de domínio: forte e consistente</li>
+<li>Modelagem financeira e de fornecedor: amplamente implantada em schema, regras e testes unitários</li>
+<li>Interface web MVP: majoritariamente implantada, incluindo telas de dashboard, transações, recorrências, faturas, dívidas, relatórios, documentos e importação</li>
+<li>Governança de engenharia (CI/CD, commitlint, Husky, monorepo): implantada no repositório</li>
+<li>Lacunas principais: integração avançada de fornecedor nas telas, testes de integração/e2e, Edge Functions previstas em ADRs, validações operacionais em ambiente GitLab/Supabase remoto</li>
 </ul>
-<h2 id="7.-etapa-de-implementa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#7.-etapa-de-implementa%C3%A7%C3%A3o">#</a> 7. Etapa de Implementação</h2>
-<p><strong>Etapa 1</strong> (Base Estrutural): UNIQUE INDEX, campo origin_type
-<strong>Etapa 4</strong> (Relatórios e Filtros): View <code>v_expenses_deduplicated</code>, integração em relatórios</p>
+<h2 id="2.2.-percentual-de-cobertura-estimado" tabindex="-1"><a class="header-anchor" href="#2.2.-percentual-de-cobertura-estimado">#</a> 2.2. Percentual de Cobertura Estimado</h2>
+<ul>
+<li>Pedidos estruturais (arquitetura, stack, domínio): 90%</li>
+<li>Pedidos de fornecedor (002): 78%</li>
+<li>Pedidos de parecer formal (ajustes obrigatórios): 70%</li>
+<li>Pedidos de operação contínua (GitLab/Supabase em produção): 65%</li>
+<li>Cobertura consolidada para início disciplinado de implementação contínua: 76%</li>
+</ul>
+<h1 id="3.-discuss%C3%A3o-do-time-(resumo-por-especialidade)" tabindex="-1"><a class="header-anchor" href="#3.-discuss%C3%A3o-do-time-(resumo-por-especialidade)">#</a> 3. Discussão do Time (Resumo por Especialidade)</h1>
+<ul>
+<li>Ana Silva: confirmou aderência arquitetural ao modelo serverless-first e separação entre núcleo determinístico e evolução IA futura.</li>
+<li>Fernando Gomes: pipeline está funcional, porém validação de variáveis protegidas, ambientes e deploy real ainda depende de configuração final no GitLab.</li>
+<li>André Santos: migrations, índices, constraints e RLS estão robustos; ponto de atenção é validar fluxo completo de operação em staging/production.</li>
+<li>Maria Oliveira: quality gates locais estão corretos (lint/typecheck/test/build); recomenda elevar integração e e2e antes de abertura de ciclo intenso de feature.</li>
+<li>João Pereira: ações server-side já cobrem CRUD principal; faltam operações atômicas avançadas previstas para Edge Functions.</li>
+<li>Ricardo Monteiro: regras críticas de amortização, deduplicação e prioridade já estão representadas no domínio com boa cobertura.</li>
+<li>Camila Duarte: dashboard operacional melhorou, mas ainda precisa reforçar decisões práticas por fornecedor para reduzir atrito diário.</li>
+<li>Roberto Lima e Sofia Almeida: MVP web está funcional com diversas rotas, porém existe gap em telas dedicadas de fornecedor e filtros compostos avançados.</li>
+<li>Renata Silva: ausência de testes de integração/e2e é o maior risco residual para regressão funcional entre banco, ações e UI.</li>
+</ul>
+<h1 id="4.-pr%C3%B3s-e-contras-da-situa%C3%A7%C3%A3o-atual" tabindex="-1"><a class="header-anchor" href="#4.-pr%C3%B3s-e-contras-da-situa%C3%A7%C3%A3o-atual">#</a> 4. Prós e Contras da Situação Atual</h1>
+<h2 id="4.1.-pr%C3%B3s" tabindex="-1"><a class="header-anchor" href="#4.1.-pr%C3%B3s">#</a> 4.1. Prós</h2>
+<ul>
+<li>Base de dados extensa e alinhada ao domínio financeiro real</li>
+<li>Dimensão fornecedor já existe no banco, nas referências e em regras</li>
+<li>ADRs obrigatórias publicadas e refletidas no código de base</li>
+<li>Monorepo, CI/CD e convenções de engenharia implantados</li>
+<li>Suíte unitária com 142 testes passando</li>
+<li>Build web estável e amplo conjunto de páginas já disponível</li>
+</ul>
+<h2 id="4.2.-contras" tabindex="-1"><a class="header-anchor" href="#4.2.-contras">#</a> 4.2. Contras</h2>
+<ul>
+<li>Parte dos pedidos de fornecedor ainda não está plenamente visível na operação diária da UI</li>
+<li>Falta camada de testes de integração e e2e para validar fluxos ponta a ponta</li>
+<li>Edge Functions planejadas em ADR ainda não foram implementadas</li>
+<li>Operação de deploy web ainda está em placeholder no pipeline</li>
+<li>Dependências de configuração manual no GitLab/Supabase remoto podem gerar desvio entre documentação e execução real</li>
+</ul>
+<h1 id="5.-resultado-da-auditoria-por-bloco" tabindex="-1"><a class="header-anchor" href="#5.-resultado-da-auditoria-por-bloco">#</a> 5. Resultado da Auditoria por Bloco</h1>
+<h2 id="5.1.-implantado" tabindex="-1"><a class="header-anchor" href="#5.1.-implantado">#</a> 5.1. Implantado</h2>
+<ul>
+<li>Estrutura de monorepo e workspaces</li>
+<li>Pipeline GitLab com stages de validação, check, testes, build e deploy</li>
+<li>Husky com pre-commit, commit-msg e pre-push</li>
+<li>Migrations centrais do domínio financeiro</li>
+<li>Migrations de fornecedor, aliases, contratos e métricas</li>
+<li>RLS e políticas em tabelas principais</li>
+<li>Domínio de ciclo financeiro, deduplicação, prioridade e amortização</li>
+<li>Validação de schemas em package de validation</li>
+<li>Actions server-side para entidades principais</li>
+<li>Grande parte da interface web MVP</li>
+</ul>
+<h2 id="5.2.-parcial" tabindex="-1"><a class="header-anchor" href="#5.2.-parcial">#</a> 5.2. Parcial</h2>
+<ul>
+<li>Experiência completa de fornecedor na UI (faltam pontos de fechamento)</li>
+<li>Relatórios e filtros compostos de fornecedor em nível avançado</li>
+<li>Operacionalização total de CI/CD em ambientes remotos</li>
+<li>Cobertura de testes além da camada unitária</li>
+</ul>
+<h2 id="5.3.-n%C3%A3o-implantado" tabindex="-1"><a class="header-anchor" href="#5.3.-n%C3%A3o-implantado">#</a> 5.3. Não Implantado</h2>
+<ul>
+<li>Edge Functions previstas para fluxos atômicos avançados</li>
+<li>Testes de integração no diretório <strong>tests</strong>/integration</li>
+<li>Testes e2e no diretório <strong>tests</strong>/e2e</li>
+<li>Deploy web real automatizado (jobs atuais com placeholder)</li>
+</ul>
+<h1 id="6.-decis%C3%A3o-final-da-reuni%C3%A3o" tabindex="-1"><a class="header-anchor" href="#6.-decis%C3%A3o-final-da-reuni%C3%A3o">#</a> 6. Decisão Final da Reunião</h1>
+<p>A equipe aprova o diagnóstico e define que o projeto está apto para continuidade com disciplina de engenharia, desde que o próximo ciclo seja focado em fechamento das lacunas operacionais e de confiabilidade já mapeadas.</p>
+<p>Diretriz aprovada pelo CEO:</p>
+<ul>
+<li>Não reabrir refino estrutural do zero</li>
+<li>Executar plano de fechamento de gaps com prioridade</li>
+<li>Amarrar critérios de aceite por fase e evidências objetivas</li>
+</ul>
+<h1 id="7.-a%C3%A7%C3%B5es-%2F-respons%C3%A1veis-%2F-prazo" tabindex="-1"><a class="header-anchor" href="#7.-a%C3%A7%C3%B5es-%2F-respons%C3%A1veis-%2F-prazo">#</a> 7. Ações / Responsáveis / Prazo</h1>
+<ul>
+<li>Fechar checklist consolidado de pedidos da Verônica com status por item — Ana, Renata — 2026-03-22</li>
+<li>Publicar planejamento executável de fechamento dos gaps — Ana, Fernando, André — 2026-03-22</li>
+<li>Validar manualmente configurações de GitLab protegidas e variáveis — Fernando, Chico — 2026-03-23</li>
+<li>Executar ciclo de implementação de lacunas P0/P1 conforme planejamento — Time de Engenharia — início 2026-03-23</li>
+</ul>
+<h1 id="8.-encerramento" tabindex="-1"><a class="header-anchor" href="#8.-encerramento">#</a> 8. Encerramento</h1>
+<p>A auditoria confirma maturidade relevante do projeto e clareza de próximos passos. O foco agora é execução disciplinada dos gaps restantes para consolidar a entrega contínua com previsibilidade.</p>
 
       </article>
 

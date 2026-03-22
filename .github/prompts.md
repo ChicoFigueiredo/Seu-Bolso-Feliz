@@ -1379,3 +1379,332 @@ Provavelmente por que a porta não tá cadastrada como redirecionamento válido 
 ---
 
 Pelos documentos, quais são os próximos passos?
+
+---
+
+Pela ordem:
+
+1. Fui dar um push e o husky bloqueou:
+
+```bash
+❯ git init --initial-branch=main --object-format=sha1
+
+warning: re-init: ignored --initial-branch=main
+Reinitialized existing Git repository in /mnt/d/Chico/seu.bolso.feliz/.git/
+❯ git remote add origin git@gitlab.com:chico-figueiredo/pessoal/seu-bolso-feliz.git
+
+❯ git add .
+git commit -m "Initial commit"
+git push --set-upstream origin main
+⚠ Skipping backup because there’s no initial commit yet. This might result in data loss.
+
+✔ Preparing lint-staged...
+✔ Running tasks for staged files...
+✔ Applying modifications from tasks...
+⧗   input: Initial commit
+✖   subject may not be empty [subject-empty]
+✖   type may not be empty [type-empty]
+
+✖   found 2 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+
+husky - commit-msg script failed (code 1)
+error: src refspec main does not match any
+error: failed to push some refs to 'gitlab.com:chico-figueiredo/pessoal/seu-bolso-feliz.git'
+```
+
+Consegue verificar e corrigir?
+
+---
+
+Pipeline em andamento, olha o erro lá
+
+```bash
+
+00:01
+Checking cache for 0_bun-8a26bb1e7c48ba3d485e0998bbfc1607e3a799ab-protected...
+WARNING: file does not exist
+Failed to extract cache
+Executing "step_script" stage of the job script
+00:01
+Using effective pull policy of [always] for container oven/bun:1.1
+Using docker image sha256:56c2b30b4686e523f5b5a088cf0211774da038589613e101e969fd48de091c2d for oven/bun:1.1 with digest oven/bun@sha256:d6ad4d3280d3e7e92b793a924105d68766d60b1f36709f4cee11bc8737782621 ...
+$ bun install --frozen-lockfile
+bun install v1.1.45 (196621f2)
+2 |   "lockfileVersion": 1,
+                         ^
+error: Unknown lockfile version
+    at bun.lock:2:22
+InvalidLockfileVersion: failed to parse lockfile: 'bun.lock'
+warn: Ignoring lockfile
+error: lockfile had changes, but lockfile is frozen
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: exit code 1
+```
+
+Consegue verificar o que está acontecendo com o lockfile e corrigir?
+
+- fazer um commit e um push do lockfile atualizado, para que o pipeline possa usar a versão correta do lockfile e resolver as dependências corretamente.
+
+---
+
+Novo erro na pipeline de typecheck:
+
+```bash
+00:24
+Downloading artifacts for install-deps (13594786977)...
+Downloading artifacts from coordinator... ok        correlation_id=1317f38b9508418eae0701e710a374a6 host=storage.googleapis.com id=13594786977 responseStatus=200 OK token=6d_yZf6qo
+Executing "step_script" stage of the job script
+00:12
+Using effective pull policy of [always] for container oven/bun:1.3.10
+Using docker image sha256:8d514c44e18a2e1b25353c76df23e951283ef4dc78eebc2dbd27a0cf33b58ce5 for oven/bun:1.3.10 with digest oven/bun@sha256:b86c67b531d87b4db11470d9b2bd0c519b1976eee6fcd71634e73abfa6230d2e ...
+$ bun run typecheck
+$ tsc -b
+apps/web/src/app/actions/financial-periods.ts(4,54): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/financial-products.ts(4,55): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/institutions.ts(4,50): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/liabilities.ts(4,70): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/recurring.ts(4,75): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/statement-cycles.ts(4,68): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/suppliers.ts(4,80): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/actions/transactions.ts(4,50): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/app/dashboard/page.tsx(22,33): error TS2307: Cannot find module '@sbf/domain/priority' or its corresponding type declarations.
+apps/web/src/app/dashboard/page.tsx(205,49): error TS7006: Parameter 'item' implicitly has an 'any' type.
+apps/web/src/lib/supabase/client.ts(2,31): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+apps/web/src/lib/supabase/server.ts(3,31): error TS2307: Cannot find module '@sbf/shared-types' or its corresponding type declarations.
+Cleaning up project directory and file based variables
+00:01
+ERROR: Job failed: exit code 1
+```
+
+Corrige?
+
+---
+
+Próximos erros: test-unit:
+
+```bash
+
+Checked 1145 installs across 1213 packages (no changes) [171.00ms]
+$ bun run test:unit
+$ vitest run --project unit
+ RUN  v4.1.0 /builds/chico-figueiredo/pessoal/seu-bolso-feliz
+ ❯  unit  __tests__/domain/validation-schemas.test.ts (0 test)
+ ❯  unit  __tests__/domain/amortization.test.ts (0 test)
+ ❯  unit  __tests__/domain/priority.test.ts (0 test)
+ ❯  unit  __tests__/domain/deduplication.test.ts (0 test)
+ ❯  unit  __tests__/domain/supplier-validation.test.ts (0 test)
+ ❯  unit  __tests__/domain/financial-cycle.test.ts (0 test)
+ ✓  unit  __tests__/domain/setup.test.ts (1 test) 6ms
+⎯⎯⎯⎯⎯⎯ Failed Suites 6 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  __tests__/domain/financial-cycle.test.ts [ __tests__/domain/financial-cycle.test.ts ]
+Error: Cannot find package '@sbf/domain' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/financial-cycle.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+ FAIL   unit  __tests__/domain/priority.test.ts [ __tests__/domain/priority.test.ts ]
+Error: Cannot find package '@sbf/domain' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/priority.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+ FAIL   unit  __tests__/domain/validation-schemas.test.ts [ __tests__/domain/validation-schemas.test.ts ]
+Error: Cannot find package '@sbf/validation' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/validation-schemas.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+ FAIL   unit  __tests__/domain/deduplication.test.ts [ __tests__/domain/deduplication.test.ts ]
+Error: Cannot find package '@sbf/domain' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/deduplication.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+ FAIL   unit  __tests__/domain/supplier-validation.test.ts [ __tests__/domain/supplier-validation.test.ts ]
+Error: Cannot find package '@sbf/validation' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/supplier-validation.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+ FAIL   unit  __tests__/domain/amortization.test.ts [ __tests__/domain/amortization.test.ts ]
+Error: Cannot find package '@sbf/domain' imported from /builds/chico-figueiredo/pessoal/seu-bolso-feliz/__tests__/domain/amortization.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+ Test Files  6 failed | 1 passed (7)
+      Tests  1 passed (1)
+   Start at  23:51:52
+   Duration  1.20s (transform 123ms, setup 0ms, import 13ms, tests 6ms, environment 2ms)
+error: script "test:unit" exited with code 1
+Cleaning up project directory and file based variables
+00:01
+ERROR: Job failed: exit code 1
+```
+
+- Verifique e corrija
+  - Isso tem que ser reproduzido localmente, para garantir que os testes estejam passando antes de fazer push, e para evitar que o pipeline quebre por causa de erros de importação ou configuração.
+
+---
+
+Eu não falei que lint, typecheck e testes unitários deveriam ser reproduzidos aqui antes de subir o código?
+Olha o novo erro:
+
+```bash
+
+Checked 1146 installs across 1213 packages (no changes) [183.00ms]
+$ bun run test:unit
+$ vitest run --project unit
+ RUN  v4.1.0 /builds/chico-figueiredo/pessoal/seu-bolso-feliz
+ ❯  unit  __tests__/domain/validation-schemas.test.ts (0 test)
+ ✓  unit  __tests__/domain/amortization.test.ts (33 tests) 41ms
+ ✓  unit  __tests__/domain/priority.test.ts (19 tests) 16ms
+ ✓  unit  __tests__/domain/deduplication.test.ts (14 tests) 17ms
+ ❯  unit  __tests__/domain/supplier-validation.test.ts (0 test)
+ ✓  unit  __tests__/domain/financial-cycle.test.ts (17 tests) 20ms
+ ✓  unit  __tests__/domain/setup.test.ts (1 test) 6ms
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  __tests__/domain/validation-schemas.test.ts [ __tests__/domain/validation-schemas.test.ts ]
+ FAIL   unit  __tests__/domain/supplier-validation.test.ts [ __tests__/domain/supplier-validation.test.ts ]
+TypeError: undefined is not an object (evaluating 'z.enum')
+ ❯ packages/validation/src/enums.ts:4:38
+      2|
+      3| // ── Enums ──
+      4| export const institutionTypeSchema = z.enum(["bank", "fintech", "broke…
+       |                                      ^
+      5|
+      6| export const financialProductTypeSchema = z.enum([
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+ Test Files  2 failed | 5 passed (7)
+      Tests  84 passed (84)
+   Start at  00:03:50
+   Duration  1.51s (transform 175ms, setup 0ms, import 206ms, tests 101ms, environment 2ms)
+error: script "test:unit" exited with code 1
+Cleaning up project directory and file based variables
+00:01
+ERROR: Job failed: exit code 1
+```
+
+Garantam que o husky esteja bloqueando commits que não passam lint, typecheck ou testes unitários, para evitar que o pipeline quebre por causa de erros que poderiam ter sido detectados localmente antes de fazer push.
+
+- Tente reproduzir o mesmo ambiente que o ci-cd do gitlab tem na pipeline, para garantir que os testes estejam passando localmente antes de fazer push, e para evitar que o pipeline quebre por causa de erros de configuração ou dependências.
+
+---
+
+Novo erro em test-unit:
+
+```bash
+
+bun install v1.3.10 (30e609e0)
+$ husky
+git command not found
+Checked 1146 installs across 1213 packages (no changes) [168.00ms]
+$ bun run test:unit
+$ vitest run --project unit
+ RUN  v4.1.0 /builds/chico-figueiredo/pessoal/seu-bolso-feliz
+ ❯  unit  __tests__/domain/validation-schemas.test.ts (0 test)
+ ✓  unit  __tests__/domain/amortization.test.ts (33 tests) 42ms
+ ✓  unit  __tests__/domain/priority.test.ts (19 tests) 17ms
+ ✓  unit  __tests__/domain/deduplication.test.ts (14 tests) 18ms
+ ❯  unit  __tests__/domain/supplier-validation.test.ts (0 test)
+ ✓  unit  __tests__/domain/financial-cycle.test.ts (17 tests) 18ms
+ ✓  unit  __tests__/domain/setup.test.ts (1 test) 5ms
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  __tests__/domain/validation-schemas.test.ts [ __tests__/domain/validation-schemas.test.ts ]
+ FAIL   unit  __tests__/domain/supplier-validation.test.ts [ __tests__/domain/supplier-validation.test.ts ]
+TypeError: undefined is not an object (evaluating 'z.enum')
+ ❯ packages/validation/src/enums.ts:4:38
+      2|
+      3| // ── Enums ──
+      4| export const institutionTypeSchema = z.enum(["bank", "fintech", "broke…
+       |                                      ^
+      5|
+      6| export const financialProductTypeSchema = z.enum([
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+ Test Files  2 failed | 5 passed (7)
+      Tests  84 passed (84)
+   Start at  00:27:24
+   Duration  1.43s (transform 171ms, setup 0ms, import 181ms, tests 101ms, environment 2ms)
+error: script "test:unit" exited with code 1
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: exit code 1
+```
+
+Verifiquem e corrijam os erros, tentando reproduzir o ambiente do CI/CD localmente para garantir que os testes estejam passando antes de fazer push, e para evitar que o pipeline quebre por causa de erros de configuração ou dependências.
+
+---
+
+Ontem teve queda de energia e não foi possível concluir se corrigiu ou não, verifique?
+
+Erro em test-unit:
+
+```bash
+...
+Executing "step_script" stage of the job script
+00:02
+Using effective pull policy of [always] for container oven/bun:1.3.10
+Using docker image sha256:8d514c44e18a2e1b25353c76df23e951283ef4dc78eebc2dbd27a0cf33b58ce5 for oven/bun:1.3.10 with digest oven/bun@sha256:b86c67b531d87b4db11470d9b2bd0c519b1976eee6fcd71634e73abfa6230d2e ...
+$ bun install --frozen-lockfile
+bun install v1.3.10 (30e609e0)
+$ command -v git >/dev/null 2>&1 && husky || true
+Checked 1146 installs across 1213 packages (no changes) [140.00ms]
+$ bun run test:unit
+$ vitest run --project unit
+ RUN  v4.1.0 /builds/chico-figueiredo/pessoal/seu-bolso-feliz
+ ❯  unit  __tests__/domain/validation-schemas.test.ts (0 test)
+ ✓  unit  __tests__/domain/amortization.test.ts (33 tests) 35ms
+ ✓  unit  __tests__/domain/priority.test.ts (19 tests) 18ms
+ ✓  unit  __tests__/domain/deduplication.test.ts (14 tests) 14ms
+ ❯  unit  __tests__/domain/supplier-validation.test.ts (0 test)
+ ✓  unit  __tests__/domain/financial-cycle.test.ts (17 tests) 18ms
+ ✓  unit  __tests__/domain/setup.test.ts (1 test) 7ms
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  __tests__/domain/validation-schemas.test.ts [ __tests__/domain/validation-schemas.test.ts ]
+ FAIL   unit  __tests__/domain/supplier-validation.test.ts [ __tests__/domain/supplier-validation.test.ts ]
+TypeError: undefined is not an object (evaluating 'z.enum')
+ ❯ packages/validation/src/enums.ts:4:38
+      2|
+      3| // ── Enums ──
+      4| export const institutionTypeSchema = z.enum(["bank", "fintech", "broke…
+       |                                      ^
+      5|
+      6| export const financialProductTypeSchema = z.enum([
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+ Test Files  2 failed | 5 passed (7)
+      Tests  84 passed (84)
+   Start at  00:51:47
+   Duration  1.35s (transform 151ms, setup 0ms, import 172ms, tests 91ms, environment 2ms)
+error: script "test:unit" exited with code 1
+Cleaning up project directory and file based variables
+00:01
+ERROR: Job failed: exit code 1
+```
+
+Verifiquem e corrijam os erros, tentando reproduzir o ambiente do CI/CD localmente para garantir que os testes estejam passando antes de fazer push, e para evitar que o pipeline quebre por causa de erros de configuração ou dependências.
+
+---
+
+Faça uma auditoria completa no #codebase, crusando com todos os documentos de `docs/` para garantir que:
+
+- Tudo que a Verônica pediu foi implantado ?
+- o que falta
+
+Chama o time, faça um refino muito profundo e detalhado, e saia desse refino com
+
+- documento de refino
+- um checklist completo de tudo que a verônica pediu, na pasta `docs/checklist/001-pedidos-veronica.md`, com check no que tá pronto, fases, criterios de aceite
+- planejamento do que falta
+
+NÃO CODEM, só refinem, planejem, organizem, e deixem tudo pronto para a implementação começar com clareza total do que precisa ser feito, e como será feito, garantindo que o projeto já nasça com disciplina de engenharia e entrega contínua.
+
+---
+
+TODO:
+Fechar validação local completa antes de subir branch:
+bun run lint, bun run typecheck, bun run test, bun run build.
+Referência: 001-implementacao-geral.md
+
+Normalizar autenticação local com porta customizada (se usar 3105, 3101 etc):
+Garantir consistência entre NEXT_PUBLIC_APP_URL, site_url e redirect URLs do Supabase.
+Referências: 001-supabase.e.outros.md, config.toml, middleware.ts
+
+Executar fluxo diário oficial de desenvolvimento:
+develop atualizado, branch de feature, desenvolvimento, testes, commit convencional, MR.
+Referência: 001-supabase.e.outros.md:868
+
+Configurar e validar CI/CD de verdade no GitLab:
+Variáveis de ambiente, proteção de branches, regras de MR, pipeline verde obrigatória.
+Referências: 001-supabase.e.outros.md, .gitlab-ci.yml, 002-guia-cicd-engenharia-operacional.md, ADR-004-arquitetura-operacional-repositorio-cicd.md
+
+Rodar checkpoint funcional do produto (MVP navegável):
+Login, dashboard, instituições, produtos, transações, recorrências, faturas, dívidas, documentos, importação e relatórios.
+Referência: 001-implementacao-geral.md
+
+Publicar para staging e validar com dados reais de teste:
+Deploy automático de develop, smoke test funcional e só depois promover para main.
+Referências: 001-supabase.e.outros.md, .gitlab-ci.yml

@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>002-pedidos-veronica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+
+  <script>
+    window.MathJax = {
+      tex: {
+        // Os delimitadores são emitidos pelo markdown-it-texmath dentro de
+        // elementos <eq> e <eqn> — não precisamos que o MathJax varra texto livre.
+        inlineMath: [["\\(", "\\)"]],
+        displayMath: [["\\[", "\\]"]],
+        processEscapes: false,
+        processEnvironments: false,
+        processRefs: false
+      },
+      options: {
+        // Processar apenas os elementos emitidos pelo markdown-it-texmath.
+        // Isso evita que cifrões isolados (R$, $99, etc.) sejam interpretados.
+        processHtmlClass: "math-inline|math-block",
+        skipHtmlTags: [
+          "script", "noscript", "style", "textarea",
+          "pre", "code", "annotation", "annotation-xml"
+        ]
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-main: #f7f6f3;
+      --bg-accent: #ffe9d3;
+      --bg-card: #ffffff;
+      --ink-main: #1f2937;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-2: #d97706;
+      --toc-bg: #fff7ed;
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+      color: var(--ink-main);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(217, 119, 6, 0.12), transparent 40%),
+        radial-gradient(circle at 90% 20%, rgba(15, 118, 110, 0.13), transparent 30%),
+        linear-gradient(155deg, var(--bg-main) 0%, #eef2ff 60%, var(--bg-accent) 100%);
+      padding: 0;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      padding: 14px 16px 16px 0;
+    }
+
+    .rail {
+      position: sticky;
+      top: 18px;
+      background: var(--toc-bg);
+      border: 1px solid #fed7aa;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .brand {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #9a3412;
+    }
+
+    .quick-links {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .quick-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      color: #7c2d12;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #fed7aa;
+      font-size: 0.84rem;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .quick-links a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 14px rgba(154, 52, 18, 0.14);
+    }
+
+    .toc-box {
+      margin-top: 14px;
+      background: #fff;
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .toc-box h3 {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      color: #9a3412;
+    }
+
+    .toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .toc-list a {
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      display: block;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .toc-list a:hover,
+    .toc-list a.active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      color: #9a3412;
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+      padding-right: 8px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, var(--brand) 0%, #0891b2 48%, var(--brand-2) 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      font-size: 0.95rem;
+      opacity: 0.95;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hero-actions a,
+    .hero-actions button {
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      color: #fff;
+      background: rgba(15, 23, 42, 0.2);
+      border-radius: 999px;
+      padding: 7px 12px;
+      text-decoration: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color 140ms ease;
+    }
+
+    .hero-actions a:hover,
+    .hero-actions button:hover {
+      background: rgba(15, 23, 42, 0.34);
+    }
+
+    /* Elementos emitidos pelo markdown-it-texmath */
+    eq {
+      display: inline;
+    }
+
+    section:has(eqn) {
+      display: block;
+      margin: 1.2rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    eqn {
+      display: block;
+    }
+
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 26px;
+      box-shadow: var(--shadow-sm);
+      animation: appear 260ms ease-out;
+      overflow-wrap: anywhere;
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .doc-card a {
+      color: #1d4ed8;
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(29, 78, 216, 0.35);
+    }
+
+    .doc-card a:hover {
+      border-bottom-color: rgba(29, 78, 216, 0.8);
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .doc-card h1,
+    .doc-card h2,
+    .doc-card h3,
+    .doc-card h4 {
+      position: relative;
+      scroll-margin-top: 90px;
+    }
+
+    .doc-card h1 .anchor,
+    .doc-card h2 .anchor,
+    .doc-card h3 .anchor,
+    .doc-card h4 .anchor {
+      opacity: 0;
+      text-decoration: none;
+      margin-left: 8px;
+      font-size: 0.8em;
+      transition: opacity 130ms ease;
+    }
+
+    .doc-card h1:hover .anchor,
+    .doc-card h2:hover .anchor,
+    .doc-card h3:hover .anchor,
+    .doc-card h4:hover .anchor {
+      opacity: 1;
+    }
+
+    .doc-card pre,
+    .doc-card code {
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .doc-card pre {
+      border-radius: 12px;
+      padding: 12px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .doc-card table {
+      width: 100%;
+      border-collapse: collapse;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .doc-card th,
+    .doc-card td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    .doc-card th {
+      background: #ecfeff;
+      color: #0f766e;
+    }
+
+    .doc-card blockquote {
+      margin: 0;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .doc-card ul.contains-task-list {
+      list-style: none;
+      padding-left: 0;
+      margin-left: 0;
+    }
+
+    .doc-card li.task-list-item {
+      list-style: none;
+      margin: 0.45rem 0;
+    }
+
+    .doc-card li.task-list-item input.task-list-item-checkbox {
+      appearance: auto;
+      -webkit-appearance: checkbox;
+      inline-size: 1rem;
+      block-size: 1rem;
+      margin: 0 0.55rem 0 0;
+      vertical-align: text-top;
+      accent-color: #0f766e;
+    }
+
+    .mermaid-wrapper {
+      position: relative;
+      margin: 1.4rem 0;
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f0f9ff;
+      overflow: hidden;
+    }
+
+    .mermaid-controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid #cbd5e1;
+    }
+
+    .mermaid-btn {
+      border: 0;
+      border-radius: 8px;
+      background: linear-gradient(130deg, #0f766e, #0369a1);
+      color: #fff;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 8px 14px rgba(15, 118, 110, 0.25);
+    }
+
+    .mermaid-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 18px rgba(14, 116, 144, 0.28);
+    }
+
+    .mermaid-svg-container {
+      width: 100%;
+      min-height: 300px;
+      max-height: 780px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mermaid-svg-container svg {
+      max-width: none !important;
+      transition: transform 70ms ease-out;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mermaid-wrapper.fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      border-radius: 0;
+      margin: 0;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 0 0 100vmax rgba(2, 6, 23, 0.58);
+    }
+
+    .mermaid-wrapper.fullscreen .mermaid-svg-container {
+      height: calc(100vh - 90px);
+      max-height: calc(100vh - 90px);
+    }
+
+    .mermaid-diagram {
+      display: none;
+    }
+
+    .mermaid-error {
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .footnote {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      text-align: right;
+    }
+
+    .mobile-rail-toggle {
+      display: none;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 20;
+      border: 0;
+      border-radius: 999px;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 14px;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.3);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 10px;
+      }
+
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+
+      .rail {
+        position: fixed;
+        inset: auto 10px 70px 10px;
+        max-height: 58vh;
+        transform: translateY(130%);
+        transition: transform 200ms ease;
+        z-index: 30;
+      }
+
+      .rail.open {
+        transform: translateY(0%);
+      }
+
+      .mobile-rail-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .doc-card,
+      .hero {
+        border-radius: 12px;
+      }
+
+      .main {
+        padding-right: 0;
+      }
+    }
+  </style>
+
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+
+    function setupMermaidZoom(container) {
+      const svgContainer = container.querySelector(".mermaid-svg-container");
+      if (!svgContainer) {
+        return;
+      }
+
+      const svg = svgContainer.querySelector("svg");
+      if (!svg) {
+        return;
+      }
+
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const applyTransform = () => {
+        svg.style.transform = "translate(" + translateX + "px, " + translateY + "px) scale(" + scale + ")";
+        svg.style.transformOrigin = "0 0";
+      };
+
+      const getSvgSize = () => {
+        const viewBox = svg.viewBox && svg.viewBox.baseVal;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+          return { width: viewBox.width, height: viewBox.height };
+        }
+
+        const box = svg.getBBox();
+        return { width: box.width || 1, height: box.height || 1 };
+      };
+
+      const fitToContainer = () => {
+        const containerWidth = Math.max(svgContainer.clientWidth, 200);
+        const containerHeight = Math.max(svgContainer.clientHeight, 240);
+        const svgSize = getSvgSize();
+
+        const scaleX = containerWidth / svgSize.width;
+        const scaleY = containerHeight / svgSize.height;
+
+        scale = Math.min(scaleX, scaleY, 1) * 0.95;
+        translateX = (containerWidth - svgSize.width * scale) / 2;
+        translateY = 20;
+        applyTransform();
+      };
+
+      const zoomIn = container.querySelector(".zoom-in");
+      const zoomOut = container.querySelector(".zoom-out");
+      const zoomFit = container.querySelector(".zoom-fit");
+      const zoomReset = container.querySelector(".zoom-reset");
+      const zoomFullscreen = container.querySelector(".zoom-fullscreen");
+
+      if (zoomIn) {
+        zoomIn.addEventListener("click", () => {
+          scale *= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomOut) {
+        zoomOut.addEventListener("click", () => {
+          scale /= 1.18;
+          applyTransform();
+        });
+      }
+
+      if (zoomFit) {
+        zoomFit.addEventListener("click", fitToContainer);
+      }
+
+      if (zoomReset) {
+        zoomReset.addEventListener("click", () => {
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          applyTransform();
+        });
+      }
+
+      if (zoomFullscreen) {
+        zoomFullscreen.addEventListener("click", () => {
+          if (!container.classList.contains("fullscreen")) {
+            container.classList.add("fullscreen");
+            zoomFullscreen.textContent = "✖️ Sair Fullscreen";
+            zoomFullscreen.title = "Sair da tela cheia";
+            document.body.style.overflow = "hidden";
+            setTimeout(fitToContainer, 120);
+          } else {
+            container.classList.remove("fullscreen");
+            zoomFullscreen.textContent = "⛶ Fullscreen";
+            zoomFullscreen.title = "Tela cheia";
+            document.body.style.overflow = "";
+            setTimeout(fitToContainer, 80);
+          }
+        });
+      }
+
+      svgContainer.addEventListener("mousedown", (event) => {
+        if (event.target && event.target.closest("a")) {
+          return;
+        }
+        isDragging = true;
+        startX = event.clientX - translateX;
+        startY = event.clientY - translateY;
+        svg.style.cursor = "grabbing";
+      });
+
+      document.addEventListener("mousemove", (event) => {
+        if (!isDragging) {
+          return;
+        }
+        translateX = event.clientX - startX;
+        translateY = event.clientY - startY;
+        applyTransform();
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        svg.style.cursor = "grab";
+      });
+
+      svgContainer.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 0.92 : 1.08;
+        scale *= delta;
+        applyTransform();
+      });
+
+      setTimeout(fitToContainer, 60);
+    }
+
+    async function renderMermaidBlocks() {
+      const blocks = document.querySelectorAll(".mermaid-diagram");
+      for (let i = 0; i < blocks.length; i += 1) {
+        const block = blocks[i];
+        const code = block.textContent || "";
+
+        try {
+          const rendered = await mermaid.render("mermaid-" + i, code);
+          const wrapper = block.parentElement;
+          if (!wrapper) {
+            continue;
+          }
+
+          wrapper.innerHTML = ""
+            + '<div class="mermaid-controls">'
+            + '<button class="mermaid-btn zoom-in" title="Aumentar zoom">🔍+</button>'
+            + '<button class="mermaid-btn zoom-out" title="Diminuir zoom">🔍-</button>'
+            + '<button class="mermaid-btn zoom-fit" title="Ajustar a tela">⛶ Ajustar</button>'
+            + '<button class="mermaid-btn zoom-reset" title="Resetar zoom">↻ Resetar</button>'
+            + '<button class="mermaid-btn zoom-fullscreen" title="Tela cheia">⛶ Fullscreen</button>'
+            + '</div>'
+            + '<div class="mermaid-svg-container">' + rendered.svg + '</div>';
+
+          setupMermaidZoom(wrapper);
+        } catch (error) {
+          block.outerHTML = '<pre class="mermaid-error">❌ Erro ao renderizar Mermaid.</pre>';
+          console.error(error);
+        }
+      }
+    }
+
+    function ensureHeadingAnchors() {
+      const headings = document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3, .doc-card h4");
+      for (let i = 0; i < headings.length; i += 1) {
+        const heading = headings[i];
+        if (!heading.id) {
+          heading.id = "sec-" + (i + 1);
+        }
+
+        const anchor = document.createElement("a");
+        anchor.className = "anchor";
+        anchor.href = "#" + heading.id;
+        anchor.textContent = "🔗";
+        anchor.setAttribute("aria-label", "Copiar ancora");
+        heading.appendChild(anchor);
+      }
+    }
+
+    function buildNavigationToc() {
+      const container = document.getElementById("toc-list");
+      const headings = Array.from(document.querySelectorAll(".doc-card h1, .doc-card h2, .doc-card h3"));
+
+      if (!container) {
+        return;
+      }
+
+      if (headings.length === 0) {
+        container.innerHTML = "<li><span>Sem secoes detectadas.</span></li>";
+        return;
+      }
+
+      const html = headings
+        .map((heading) => {
+          const level = Number(heading.tagName.replace("H", ""));
+          const indent = String(Math.max(0, level - 1) * 12);
+          const text = heading.textContent ? heading.textContent.replace("🔗", "").trim() : "(sem titulo)";
+          return ""
+            + "<li>"
+            + '<a href="#' + heading.id + '" style="margin-left:' + indent + 'px">'
+            + "📍 " + text
+            + "</a>"
+            + "</li>";
+        })
+        .join("");
+
+      container.innerHTML = html;
+
+      const tocLinks = Array.from(container.querySelectorAll("a"));
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            const id = entry.target.getAttribute("id");
+            if (!id) {
+              return;
+            }
+
+            const link = tocLinks.find((item) => item.getAttribute("href") === "#" + id);
+            if (!link) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              tocLinks.forEach((item) => item.classList.remove("active"));
+              link.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 }
+      );
+
+      headings.forEach((heading) => observer.observe(heading));
+    }
+
+    function setupQuickActions() {
+      const topButton = document.getElementById("go-top");
+      if (topButton) {
+        topButton.addEventListener("click", () => {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+
+      const mobileToggle = document.getElementById("toggle-rail");
+      const rail = document.getElementById("rail");
+      if (mobileToggle && rail) {
+        mobileToggle.addEventListener("click", () => {
+          rail.classList.toggle("open");
+          mobileToggle.textContent = rail.classList.contains("open") ? "✖️ Fechar menu" : "🧭 Navegar";
+        });
+      }
+    }
+
+    function typesetMath() {
+      if (!window.MathJax) {
+        return;
+      }
+
+      // Seleciona apenas os elementos emitidos pelo markdown-it-texmath.
+      // <eq>  = math inline   ($...$)
+      // <eqn> = math em bloco ($$...$$  ou  egin{equation}...end{equation})
+      // Passando a lista de elementos, o MathJax nao varre texto livre do DOM,
+      // o que evita que R$, $15, etc. sejam interpretados como LaTeX.
+      const mathElements = Array.from(document.querySelectorAll("eq, eqn"));
+
+      if (mathElements.length === 0) {
+        return;
+      }
+
+      const run = () => {
+        if (window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise(mathElements).catch((error) => {
+            console.error("Erro no MathJax:", error);
+          });
+        }
+      };
+
+      if (window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(run).catch((error) => {
+          console.error("Erro no MathJax startup:", error);
+        });
+      } else {
+        run();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      ensureHeadingAnchors();
+      await renderMermaidBlocks();
+      buildNavigationToc();
+      setupQuickActions();
+      typesetMath();
+    });
+  </script>
+</head>
+<body>
+  <button id="toggle-rail" class="mobile-rail-toggle" type="button">🧭 Navegar</button>
+  <div class="shell" id="topo">
+    <aside class="rail" id="rail" aria-label="Menu lateral">
+      <div class="brand">📚 html-gen docs</div>
+      <div class="quick-links">
+        <a href="/">🏠 Ir para index</a>
+        <a href="#topo">⬆️ Voltar ao topo</a>
+        <a href="#documento">📄 Conteudo</a>
+      </div>
+      <div class="toc-box">
+        <h3>🗺️ Navegacao</h3>
+        <ul class="toc-list" id="toc-list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="hero-top">
+          <h1>📝 002-pedidos-veronica</h1>
+          <div class="hero-actions">
+            <a href="/">🏠 Index</a>
+            <button id="go-top" type="button">⬆️ Topo</button>
+          </div>
+        </div>
+        <p>✨ Documento renderizado com html-gen, Mermaid (com fullscreen) e MathJax 4.</p>
+      </header>
+
+      <article class="doc-card" id="documento">
+        
+        <h1 id="001-%E2%80%94-checklist-completo-dos-pedidos-da-ver%C3%B4nica" tabindex="-1"><a class="header-anchor" href="#001-%E2%80%94-checklist-completo-dos-pedidos-da-ver%C3%B4nica">#</a> 001 — Checklist Completo dos Pedidos da Verônica</h1>
+<p>Objetivo: consolidar, em formato auditável, tudo o que foi pedido pela Verônica e o status real de implantação no codebase.</p>
+<p>Legendas:</p>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6350151"><label class="task-list-item-label" for="task-item-6350151"> Concluído</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-4902539"><label class="task-list-item-label" for="task-item-4902539"> Pendente</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8329877"><label class="task-list-item-label" for="task-item-8329877"> Parcial (descrito no campo Observações)</label></li>
+</ul>
+<h2 id="fase-a-%E2%80%94-funda%C3%A7%C3%A3o-de-arquitetura-e-dom%C3%ADnio-(001-prompt.inicial)" tabindex="-1"><a class="header-anchor" href="#fase-a-%E2%80%94-funda%C3%A7%C3%A3o-de-arquitetura-e-dom%C3%ADnio-(001-prompt.inicial)">#</a> Fase A — Fundação de Arquitetura e Domínio (001-prompt.inicial)</h2>
+<h3 id="a1.-stack-e-arquitetura-base" tabindex="-1"><a class="header-anchor" href="#a1.-stack-e-arquitetura-base">#</a> A1. Stack e arquitetura-base</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5970717"><label class="task-list-item-label" for="task-item-5970717"> Web com React + Next.js + Tailwind</label>
+<ul>
+<li>Critério de aceite: apps/web com build funcional e rotas do App Router</li>
+<li>Evidência: apps/web/package.json, apps/web/src/app/*, bun run build OK</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6290906"><label class="task-list-item-label" for="task-item-6290906"> Mobile em estrutura React Native/Expo preparada</label>
+<ul>
+<li>Critério de aceite: apps/mobile estruturado no monorepo</li>
+<li>Evidência: apps/mobile/package.json, apps/mobile/src</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3460921"><label class="task-list-item-label" for="task-item-3460921"> Backend central em Supabase (Postgres/Auth/RLS/Storage/Functions)</label>
+<ul>
+<li>Critério de aceite: supabase/config.toml + migrations + uso de client no web</li>
+<li>Evidência: supabase/config.toml, supabase/migrations/<em>, apps/web/src/lib/supabase/</em></li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3405248"><label class="task-list-item-label" for="task-item-3405248"> Estratégia serverless-first com baixo acoplamento operacional</label>
+<ul>
+<li>Critério de aceite: operações centrais no Supabase e pipeline CI/CD com CLI</li>
+<li>Evidência: .gitlab-ci.yml, docs/adrs/ADR-004-arquitetura-operacional-repositorio-cicd.md</li>
+</ul>
+</li>
+</ul>
+<h3 id="a2.-princ%C3%ADpios-de-modelagem-financeira" tabindex="-1"><a class="header-anchor" href="#a2.-princ%C3%ADpios-de-modelagem-financeira">#</a> A2. Princípios de modelagem financeira</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-2083908"><label class="task-list-item-label" for="task-item-2083908"> Separação despesa vs transferência interna</label>
+<ul>
+<li>Critério de aceite: regra explícita de deduplicação e tipos de evento</li>
+<li>Evidência: packages/domain/src/deduplication/index.ts, docs/adrs/ADR-001-deduplicacao-transacao-item-fatura.md</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1294579"><label class="task-list-item-label" for="task-item-1294579"> Separação de composição da dívida (amortização/juros/encargos)</label>
+<ul>
+<li>Critério de aceite: modelagem + cálculos e testes</li>
+<li>Evidência: supabase/migrations/20260321170000_create_core_foundation_tables.sql, packages/domain/src/amortization/index.ts, <strong>tests</strong>/domain/amortization.test.ts</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3404795"><label class="task-list-item-label" for="task-item-3404795"> Ciclos financeiros personalizados</label>
+<ul>
+<li>Critério de aceite: funções de domínio e tabela de períodos</li>
+<li>Evidência: packages/domain/src/financial-cycle/index.ts, <strong>tests</strong>/domain/financial-cycle.test.ts</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9130410"><label class="task-list-item-label" for="task-item-9130410"> Categoria principal + múltiplas tags</label>
+<ul>
+<li>Critério de aceite: tabelas categories/tags/junções e uso em transações</li>
+<li>Evidência: supabase/migrations/20260321170000_create_core_foundation_tables.sql, apps/web/src/app/actions/transactions.ts</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-872864"><label class="task-list-item-label" for="task-item-872864"> Priorização de pagamento</label>
+<ul>
+<li>Critério de aceite: enum/campo + motor de priorização</li>
+<li>Evidência: packages/domain/src/priority/index.ts, <strong>tests</strong>/domain/priority.test.ts</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-b-%E2%80%94-dimens%C3%A3o-fornecedor-(002-fornecedor)" tabindex="-1"><a class="header-anchor" href="#fase-b-%E2%80%94-dimens%C3%A3o-fornecedor-(002-fornecedor)">#</a> Fase B — Dimensão Fornecedor (002-fornecedor)</h2>
+<h3 id="b1.-entidade-e-rela%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#b1.-entidade-e-rela%C3%A7%C3%B5es">#</a> B1. Entidade e relações</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3770975"><label class="task-list-item-label" for="task-item-3770975"> Cadastro de fornecedores como entidade própria</label>
+<ul>
+<li>Critério de aceite: tabela suppliers + ações CRUD</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql, apps/web/src/app/actions/suppliers.ts</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3323143"><label class="task-list-item-label" for="task-item-3323143"> Associação de fornecedor com lançamentos</label>
+<ul>
+<li>Critério de aceite: supplier_id em transactions</li>
+<li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6782724"><label class="task-list-item-label" for="task-item-6782724"> Associação de fornecedor com recorrências</label>
+<ul>
+<li>Critério de aceite: supplier_id em recurring_templates</li>
+<li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9531974"><label class="task-list-item-label" for="task-item-9531974"> Associação de fornecedor com documentos</label>
+<ul>
+<li>Critério de aceite: supplier_id em documents</li>
+<li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-785495"><label class="task-list-item-label" for="task-item-785495"> Associação de fornecedor com itens de fatura</label>
+<ul>
+<li>Critério de aceite: supplier_id em statement_items</li>
+<li>Evidência: supabase/migrations/20260321170200_alter_tables_add_supplier_refs.sql</li>
+</ul>
+</li>
+</ul>
+<h3 id="b2.-aliases%2C-hist%C3%B3rico-e-contratos" tabindex="-1"><a class="header-anchor" href="#b2.-aliases%2C-hist%C3%B3rico-e-contratos">#</a> B2. Aliases, histórico e contratos</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-951546"><label class="task-list-item-label" for="task-item-951546"> Registro de aliases e nomes antigos</label>
+<ul>
+<li>Critério de aceite: tabela supplier_aliases com vigência</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5892753"><label class="task-list-item-label" for="task-item-5892753"> Governança de unicidade temporal de alias</label>
+<ul>
+<li>Critério de aceite: trigger de validação</li>
+<li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3287902"><label class="task-list-item-label" for="task-item-3287902"> Auto-alias em renomeação</label>
+<ul>
+<li>Critério de aceite: trigger de renomeação</li>
+<li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7675515"><label class="task-list-item-label" for="task-item-7675515"> Contratos e identificadores externos</label>
+<ul>
+<li>Critério de aceite: tabela supplier_contracts</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
+</ul>
+</li>
+</ul>
+<h3 id="b3.-m%C3%A9tricas-de-consumo-(consumption_metrics)" tabindex="-1"><a class="header-anchor" href="#b3.-m%C3%A9tricas-de-consumo-(consumption_metrics)">#</a> B3. Métricas de consumo (consumption_metrics)</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1103393"><label class="task-list-item-label" for="task-item-1103393"> Estrutura de métricas de consumo criada</label>
+<ul>
+<li>Critério de aceite: tabela consumption_metrics com campos quantitativos</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3430194"><label class="task-list-item-label" for="task-item-3430194"> Norma de uso formalizada</label>
+<ul>
+<li>Critério de aceite: ADR publicada</li>
+<li>Evidência: docs/adrs/ADR-002-norma-consumption-metrics.md</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1891124"><label class="task-list-item-label" for="task-item-1891124"> Constraint técnica de consistência implantada</label>
+<ul>
+<li>Critério de aceite: validação em banco para métrica vs atributo</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
+</ul>
+</li>
+</ul>
+<h3 id="b4.-lacunas-da-dimens%C3%A3o-fornecedor" tabindex="-1"><a class="header-anchor" href="#b4.-lacunas-da-dimens%C3%A3o-fornecedor">#</a> B4. Lacunas da dimensão fornecedor</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5288396"><label class="task-list-item-label" for="task-item-5288396"> Tela dedicada de fornecedores no dashboard</label>
+<ul>
+<li>Fase alvo: Fase D</li>
+<li>Critério de aceite: rotas dashboard/suppliers com CRUD completo e alias/contratos</li>
+<li>Observações: há ações server-side, mas não há páginas específicas em apps/web/src/app/dashboard/suppliers</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7038069"><label class="task-list-item-label" for="task-item-7038069"> Filtros compostos avançados com fornecedor em toda a experiência de relatório</label>
+<ul>
+<li>Fase alvo: Fase E</li>
+<li>Critério de aceite: filtros por fornecedor + categoria + tags + período + prioridade em relatórios e listagens</li>
+<li>Observações: relatórios atuais ainda não cobrem tudo que foi pedido para fornecedor</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-c-%E2%80%94-parecer-formal-(aprovado-com-ajustes-obrigat%C3%B3rios)" tabindex="-1"><a class="header-anchor" href="#fase-c-%E2%80%94-parecer-formal-(aprovado-com-ajustes-obrigat%C3%B3rios)">#</a> Fase C — Parecer Formal (Aprovado com ajustes obrigatórios)</h2>
+<h3 id="c1.-ajuste-obrigat%C3%B3rio-1-%E2%80%94-deduplica%C3%A7%C3%A3o-transa%C3%A7%C3%A3o-x-item-de-fatura" tabindex="-1"><a class="header-anchor" href="#c1.-ajuste-obrigat%C3%B3rio-1-%E2%80%94-deduplica%C3%A7%C3%A3o-transa%C3%A7%C3%A3o-x-item-de-fatura">#</a> C1. Ajuste obrigatório 1 — Deduplicação transação x item de fatura</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6492222"><label class="task-list-item-label" for="task-item-6492222"> Estratégia formalizada em ADR</label>
+<ul>
+<li>Critério de aceite: ADR-001 publicada com regras de precedência/soma/exibição</li>
+<li>Evidência: docs/adrs/ADR-001-deduplicacao-transacao-item-fatura.md</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4684013"><label class="task-list-item-label" for="task-item-4684013"> Estruturas de suporte implantadas</label>
+<ul>
+<li>Critério de aceite: FK e view de deduplicação</li>
+<li>Evidência: migrations 20260321170200 e 20260321170600</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3482376"><label class="task-list-item-label" for="task-item-3482376"> Regras cobertas por testes unitários</label>
+<ul>
+<li>Critério de aceite: suíte dedup passando</li>
+<li>Evidência: <strong>tests</strong>/domain/deduplication.test.ts</li>
+</ul>
+</li>
+</ul>
+<h3 id="c2.-ajuste-obrigat%C3%B3rio-2-%E2%80%94-norma-de-consumption_metrics" tabindex="-1"><a class="header-anchor" href="#c2.-ajuste-obrigat%C3%B3rio-2-%E2%80%94-norma-de-consumption_metrics">#</a> C2. Ajuste obrigatório 2 — Norma de consumption_metrics</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-8173977"><label class="task-list-item-label" for="task-item-8173977"> Norma formalizada e versionada</label>
+<ul>
+<li>Critério de aceite: ADR-002 publicada</li>
+<li>Evidência: docs/adrs/ADR-002-norma-consumption-metrics.md</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9127484"><label class="task-list-item-label" for="task-item-9127484"> Regras de dados implantadas no schema</label>
+<ul>
+<li>Critério de aceite: campos + constraint coerentes</li>
+<li>Evidência: supabase/migrations/20260321170100_create_supplier_tables.sql</li>
+</ul>
+</li>
+</ul>
+<h3 id="c3.-ajuste-obrigat%C3%B3rio-3-%E2%80%94-governan%C3%A7a-t%C3%A9cnica-de-aliases" tabindex="-1"><a class="header-anchor" href="#c3.-ajuste-obrigat%C3%B3rio-3-%E2%80%94-governan%C3%A7a-t%C3%A9cnica-de-aliases">#</a> C3. Ajuste obrigatório 3 — Governança técnica de aliases</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4389514"><label class="task-list-item-label" for="task-item-4389514"> Governança formalizada e versionada</label>
+<ul>
+<li>Critério de aceite: ADR-003 publicada</li>
+<li>Evidência: docs/adrs/ADR-003-governanca-aliases-fornecedor.md</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-438454"><label class="task-list-item-label" for="task-item-438454"> Regras técnicas básicas implantadas</label>
+<ul>
+<li>Critério de aceite: triggers e colunas de vigência</li>
+<li>Evidência: supabase/migrations/20260321170400_create_triggers.sql</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8099326"><label class="task-list-item-label" for="task-item-8099326"> Fluxo completo de merge/reversão de fornecedores implementado operacionalmente</label>
+<ul>
+<li>Fase alvo: Fase F</li>
+<li>Critério de aceite: operação atômica disponível e testada em função server-side</li>
+<li>Observações: ADR descreve a solução, mas supabase/functions está vazio</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-d-%E2%80%94-governan%C3%A7a-de-engenharia-(gitlab-%2B-supabase)" tabindex="-1"><a class="header-anchor" href="#fase-d-%E2%80%94-governan%C3%A7a-de-engenharia-(gitlab-%2B-supabase)">#</a> Fase D — Governança de Engenharia (GitLab + Supabase)</h2>
+<h3 id="d1.-padr%C3%A3o-de-reposit%C3%B3rio-e-branches" tabindex="-1"><a class="header-anchor" href="#d1.-padr%C3%A3o-de-reposit%C3%B3rio-e-branches">#</a> D1. Padrão de repositório e branches</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-594309"><label class="task-list-item-label" for="task-item-594309"> Monorepo com workspaces e estrutura modular</label>
+<ul>
+<li>Critério de aceite: apps/_ + packages/_ + supabase/_ + docs/_</li>
+<li>Evidência: package.json, árvore do repositório</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-9426071"><label class="task-list-item-label" for="task-item-9426071"> Convenção de commit convencional aplicada</label>
+<ul>
+<li>Critério de aceite: commitlint configurado</li>
+<li>Evidência: commitlint.config.ts</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6562189"><label class="task-list-item-label" for="task-item-6562189"> Hook de bloqueio de push com qualidade mínima</label>
+<ul>
+<li>Critério de aceite: pre-push roda lint/typecheck/test:unit</li>
+<li>Evidência: .husky/pre-push</li>
+</ul>
+</li>
+</ul>
+<h3 id="d2.-ci%2Fcd-e-ambientes" tabindex="-1"><a class="header-anchor" href="#d2.-ci%2Fcd-e-ambientes">#</a> D2. CI/CD e ambientes</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6360082"><label class="task-list-item-label" for="task-item-6360082"> Pipeline GitLab com estágios principais</label>
+<ul>
+<li>Critério de aceite: validate/install/check/test/build/deploy</li>
+<li>Evidência: .gitlab-ci.yml</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-893130"><label class="task-list-item-label" for="task-item-893130"> Deploy de migrations/functions previsto por ambiente</label>
+<ul>
+<li>Critério de aceite: jobs staging e production existentes</li>
+<li>Evidência: .gitlab-ci.yml</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-8116946"><label class="task-list-item-label" for="task-item-8116946"> Deploy web real automatizado (sem placeholder)</label>
+<ul>
+<li>Fase alvo: Fase G</li>
+<li>Critério de aceite: job deploy-web-* executa integração real com provedor</li>
+<li>Observações: hoje usa echo de placeholder</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5438046"><label class="task-list-item-label" for="task-item-5438046"> Comprovação em ambiente remoto da política completa (proteções, approvals, variáveis)</label>
+<ul>
+<li>Fase alvo: Fase G</li>
+<li>Critério de aceite: checklist operacional validado no GitLab do projeto</li>
+<li>Observações: depende de configuração manual na plataforma</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-e-%E2%80%94-produto-web-mvp-(fluxo-operacional)" tabindex="-1"><a class="header-anchor" href="#fase-e-%E2%80%94-produto-web-mvp-(fluxo-operacional)">#</a> Fase E — Produto Web MVP (fluxo operacional)</h2>
+<h3 id="e1.-funcionalidades-principais-j%C3%A1-dispon%C3%ADveis" tabindex="-1"><a class="header-anchor" href="#e1.-funcionalidades-principais-j%C3%A1-dispon%C3%ADveis">#</a> E1. Funcionalidades principais já disponíveis</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-870163"><label class="task-list-item-label" for="task-item-870163"> Login/autenticação com Supabase</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-3929297"><label class="task-list-item-label" for="task-item-3929297"> Dashboard operacional</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-685672"><label class="task-list-item-label" for="task-item-685672"> CRUD de instituições</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-4149376"><label class="task-list-item-label" for="task-item-4149376"> CRUD de produtos financeiros</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7681785"><label class="task-list-item-label" for="task-item-7681785"> CRUD de transações</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-328678"><label class="task-list-item-label" for="task-item-328678"> CRUD de recorrências</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-6328198"><label class="task-list-item-label" for="task-item-6328198"> CRUD de faturas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1230395"><label class="task-list-item-label" for="task-item-1230395"> CRUD de dívidas</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-5191462"><label class="task-list-item-label" for="task-item-5191462"> Upload/listagem de documentos</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-1240616"><label class="task-list-item-label" for="task-item-1240616"> Importação CSV</label></li>
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7021678"><label class="task-list-item-label" for="task-item-7021678"> Relatórios por período</label></li>
+</ul>
+<p>Critério de aceite E1: rotas compilam no build e páginas acessíveis no app web.
+Evidência: bun run build OK com rotas /dashboard/*.</p>
+<h3 id="e2.-lacunas-funcionais-ainda-abertas-no-mvp" tabindex="-1"><a class="header-anchor" href="#e2.-lacunas-funcionais-ainda-abertas-no-mvp">#</a> E2. Lacunas funcionais ainda abertas no MVP</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7963085"><label class="task-list-item-label" for="task-item-7963085"> Gestão visual completa da dimensão fornecedor no dashboard</label>
+<ul>
+<li>Critério de aceite: fluxo completo (listar, criar, editar, aliases, contratos, associação assistida)</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-6191460"><label class="task-list-item-label" for="task-item-6191460"> Relatórios avançados por fornecedor com filtros compostos completos</label>
+<ul>
+<li>Critério de aceite: respostas operacionais para perguntas do prompt 002</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-3438727"><label class="task-list-item-label" for="task-item-3438727"> Auditoria histórica visível por fornecedor na interface</label>
+<ul>
+<li>Critério de aceite: visão de histórico consolidado e variações</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-f-%E2%80%94-testes-e-confiabilidade" tabindex="-1"><a class="header-anchor" href="#fase-f-%E2%80%94-testes-e-confiabilidade">#</a> Fase F — Testes e confiabilidade</h2>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" checked="" disabled="" type="checkbox" id="task-item-7867645"><label class="task-list-item-label" for="task-item-7867645"> Testes unitários de domínio/validação consolidados</label>
+<ul>
+<li>Critério de aceite: 142 testes unitários passando</li>
+<li>Evidência: bun run test:unit</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-5101870"><label class="task-list-item-label" for="task-item-5101870"> Testes de integração implementados</label>
+<ul>
+<li>Critério de aceite: suíte em <strong>tests</strong>/integration com cenários críticos de banco+ações</li>
+<li>Observações: pasta existe, sem testes</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7823346"><label class="task-list-item-label" for="task-item-7823346"> Testes e2e implementados</label>
+<ul>
+<li>Critério de aceite: suíte em <strong>tests</strong>/e2e para fluxos principais</li>
+<li>Observações: pasta existe, sem testes</li>
+</ul>
+</li>
+</ul>
+<h2 id="fase-g-%E2%80%94-prontid%C3%A3o-para-entrega-cont%C3%ADnua-total" tabindex="-1"><a class="header-anchor" href="#fase-g-%E2%80%94-prontid%C3%A3o-para-entrega-cont%C3%ADnua-total">#</a> Fase G — Prontidão para entrega contínua total</h2>
+<ul class="contains-task-list">
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-9248206"><label class="task-list-item-label" for="task-item-9248206"> Fluxo develop -> feature -> MR -> pipeline -> staging validado ponta a ponta</label>
+<ul>
+<li>Critério de aceite: evidência em execução real do GitLab</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-490790"><label class="task-list-item-label" for="task-item-490790"> Promotion controlada para main/produção com gates ativos</label>
+<ul>
+<li>Critério de aceite: deploy de produção manual controlado e comprovado</li>
+</ul>
+</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox" id="task-item-7518937"><label class="task-list-item-label" for="task-item-7518937"> Checklist de operação contínua assinado pelo time</label>
+<ul>
+<li>Critério de aceite: todos os itens críticos de segurança/qualidade/deploy fechados</li>
+</ul>
+</li>
+</ul>
+<h2 id="conclus%C3%A3o-do-checklist" tabindex="-1"><a class="header-anchor" href="#conclus%C3%A3o-do-checklist">#</a> Conclusão do Checklist</h2>
+<ul>
+<li>Núcleo de arquitetura, domínio e qualidade local: PRONTO</li>
+<li>Dimensão fornecedor na base de dados, ações e validações: MAJORITARIAMENTE PRONTA</li>
+<li>Camada de fechamento operacional e governança de entrega contínua remota: AINDA FALTAM ETAPAS</li>
+</ul>
+<p>Este checklist deve ser usado como contrato de execução para o próximo ciclo.</p>
+
+      </article>
+
+      <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
+    </main>
+  </div>
+</body>
+</html>

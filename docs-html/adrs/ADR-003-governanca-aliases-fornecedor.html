@@ -851,7 +851,369 @@
 
       <article class="doc-card" id="documento">
         
-        
+        <h1 id="adr-003%3A-governan%C3%A7a-t%C3%A9cnica-de-aliases-de-fornecedor" tabindex="-1"><a class="header-anchor" href="#adr-003%3A-governan%C3%A7a-t%C3%A9cnica-de-aliases-de-fornecedor">#</a> ADR-003: Governança Técnica de Aliases de Fornecedor</h1>
+<p><strong>Status:</strong> Aprovado
+<strong>Data:</strong> 2026-03-21
+<strong>Origem:</strong> Parecer Verônica — Ajuste Obrigatório 4.3
+<strong>Ata de referência:</strong> <code>docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md</code> (Seção 4)</p>
+<hr>
+<h2 id="1.-contexto" tabindex="-1"><a class="header-anchor" href="#1.-contexto">#</a> 1. Contexto</h2>
+<p>A tabela <code>supplier_aliases</code> permite que um fornecedor tenha múltiplos nomes (ex: “CELPE”, “Neoenergia”, “Companhia Energética de Pernambuco”). Porém, sem regras técnicas rígidas, o sistema corre risco de:</p>
+<ul>
+<li>Aliases conflitantes entre fornecedores (dois fornecedores com alias “CELPE”)</li>
+<li>Fornecedores duplicados crescendo sem controle</li>
+<li>Merges inseguros que quebram histórico</li>
+<li>Associações retroativas incorretas</li>
+</ul>
+<p>A Verônica exigiu que essas regras fossem formalizadas ANTES da implementação.</p>
+<h2 id="2.-decis%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.-decis%C3%A3o">#</a> 2. Decisão</h2>
+<h3 id="2.1.-regra-de-unicidade-temporal" tabindex="-1"><a class="header-anchor" href="#2.1.-regra-de-unicidade-temporal">#</a> 2.1. Regra de Unicidade Temporal</h3>
+<blockquote>
+<p>Para um dado <code>user_id</code>, NÃO podem existir dois aliases com o mesmo <code>alias_name</code> (case-insensitive) com períodos de vigência sobrepostos.</p>
+</blockquote>
+<p>Isso significa: “CELPE” só pode apontar para UM fornecedor de cada vez. Se houve mudança de empresa (fusão), o alias antigo expira e um novo pode ser criado.</p>
+<h4 id="trigger-de-valida%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#trigger-de-valida%C3%A7%C3%A3o">#</a> Trigger de Validação</h4>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> check_alias_uniqueness()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  IF <span class="hljs-keyword">EXISTS</span> (
+    <span class="hljs-keyword">SELECT</span> <span class="hljs-number">1</span> <span class="hljs-keyword">FROM</span> supplier_aliases sa
+    <span class="hljs-keyword">WHERE</span> sa.user_id <span class="hljs-operator">=</span> NEW.user_id
+      <span class="hljs-keyword">AND</span> sa.id <span class="hljs-operator">!=</span> <span class="hljs-built_in">COALESCE</span>(NEW.id, <span class="hljs-string">&#x27;00000000-0000-0000-0000-000000000000&#x27;</span>::uuid)
+      <span class="hljs-keyword">AND</span> <span class="hljs-built_in">LOWER</span>(sa.alias_name) <span class="hljs-operator">=</span> <span class="hljs-built_in">LOWER</span>(NEW.alias_name)
+      <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+      <span class="hljs-keyword">AND</span> (
+        <span class="hljs-comment">-- Períodos se sobrepõem</span>
+        (sa.valid_from <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> NEW.valid_until <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> sa.valid_from <span class="hljs-operator">&lt;=</span> NEW.valid_until)
+        <span class="hljs-keyword">AND</span>
+        (sa.valid_until <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> NEW.valid_from <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> sa.valid_until <span class="hljs-operator">&gt;=</span> NEW.valid_from)
+      )
+  ) <span class="hljs-keyword">THEN</span>
+    RAISE EXCEPTION <span class="hljs-string">&#x27;Alias &quot;%&quot; já existe para outro fornecedor no período informado&#x27;</span>, NEW.alias_name;
+  <span class="hljs-keyword">END</span> IF;
+  <span class="hljs-keyword">RETURN</span> <span class="hljs-keyword">NEW</span>;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_check_alias_uniqueness
+  BEFORE <span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">OR</span> <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> supplier_aliases
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> check_alias_uniqueness();
+</code></pre>
+<h3 id="2.2.-regra-de-vig%C3%AAncia" tabindex="-1"><a class="header-anchor" href="#2.2.-regra-de-vig%C3%AAncia">#</a> 2.2. Regra de Vigência</h3>
+<table>
+<thead>
+<tr>
+<th>Campo</th>
+<th>Significado</th>
+<th>Valor NULL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>valid_from</code></td>
+<td>Desde quando o alias é válido</td>
+<td>Sem data de início conhecida (“desde sempre”)</td>
+</tr>
+<tr>
+<td><code>valid_until</code></td>
+<td>Até quando o alias é válido</td>
+<td>Ainda ativo (sem data de expiração)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Combinações:</strong></p>
+<ul>
+<li><code>valid_from = NULL, valid_until = NULL</code> → alias ativo em qualquer data</li>
+<li><code>valid_from = 2020-01-01, valid_until = 2023-12-31</code> → alias válido de 2020 a 2023</li>
+<li><code>valid_from = 2024-01-01, valid_until = NULL</code> → alias ativo desde 2024, sem fim definido</li>
+</ul>
+<p><strong>Resolução temporal</strong> (para buscar fornecedor por alias em data específica):</p>
+<pre class="hljs"><code><span class="hljs-keyword">SELECT</span> supplier_id <span class="hljs-keyword">FROM</span> supplier_aliases
+<span class="hljs-keyword">WHERE</span> user_id <span class="hljs-operator">=</span> :user_id
+  <span class="hljs-keyword">AND</span> <span class="hljs-built_in">LOWER</span>(alias_name) <span class="hljs-operator">=</span> <span class="hljs-built_in">LOWER</span>(:alias)
+  <span class="hljs-keyword">AND</span> is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+  <span class="hljs-keyword">AND</span> (valid_from <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> valid_from <span class="hljs-operator">&lt;=</span> :target_date)
+  <span class="hljs-keyword">AND</span> (valid_until <span class="hljs-keyword">IS</span> <span class="hljs-keyword">NULL</span> <span class="hljs-keyword">OR</span> valid_until <span class="hljs-operator">&gt;=</span> :target_date)
+LIMIT <span class="hljs-number">1</span>;
+</code></pre>
+<h3 id="2.3.-campo-is_active" tabindex="-1"><a class="header-anchor" href="#2.3.-campo-is_active">#</a> 2.3. Campo is_active</h3>
+<pre class="hljs"><code><span class="hljs-keyword">ALTER TABLE</span> supplier_aliases <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">COLUMN</span> is_active <span class="hljs-type">boolean</span> <span class="hljs-keyword">DEFAULT</span> <span class="hljs-literal">true</span>;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Mecanismo</th>
+<th>Significado</th>
+<th>Quando usar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>valid_until</code> preenchido</td>
+<td>Expiração natural</td>
+<td>Empresa mudou de nome, fusão corporativa</td>
+</tr>
+<tr>
+<td><code>is_active = false</code></td>
+<td>Desativação manual</td>
+<td>Alias errado, conflito detectado, limpeza</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>REGRA:</strong> Um alias com <code>is_active = false</code> NUNCA é usado na resolução, mesmo que esteja no período de vigência.</p>
+</blockquote>
+<h3 id="2.4.-auto-alias-em-renomea%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#2.4.-auto-alias-em-renomea%C3%A7%C3%A3o">#</a> 2.4. Auto-Alias em Renomeação</h3>
+<p>Quando o usuário renomeia um fornecedor (ex: “CELPE” → “Neoenergia”), o nome antigo é automaticamente preservado como alias:</p>
+<pre class="hljs"><code><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">OR</span> REPLACE <span class="hljs-keyword">FUNCTION</span> auto_alias_on_rename()
+<span class="hljs-keyword">RETURNS</span> <span class="hljs-keyword">TRIGGER</span> <span class="hljs-keyword">AS</span> $$
+<span class="hljs-keyword">BEGIN</span>
+  IF OLD.name <span class="hljs-keyword">IS</span> <span class="hljs-keyword">DISTINCT</span> <span class="hljs-keyword">FROM</span> NEW.name <span class="hljs-keyword">THEN</span>
+    <span class="hljs-keyword">INSERT INTO</span> supplier_aliases (user_id, supplier_id, alias_name, alias_type, valid_until)
+    <span class="hljs-keyword">VALUES</span> (NEW.user_id, NEW.id, OLD.name, <span class="hljs-string">&#x27;former_name&#x27;</span>, NOW());
+  <span class="hljs-keyword">END</span> IF;
+  <span class="hljs-keyword">RETURN</span> <span class="hljs-keyword">NEW</span>;
+<span class="hljs-keyword">END</span>;
+$$ <span class="hljs-keyword">LANGUAGE</span> plpgsql;
+
+<span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TRIGGER</span> trg_auto_alias_on_rename
+  BEFORE <span class="hljs-keyword">UPDATE</span> <span class="hljs-keyword">ON</span> suppliers
+  <span class="hljs-keyword">FOR</span> <span class="hljs-keyword">EACH</span> <span class="hljs-type">ROW</span> <span class="hljs-keyword">EXECUTE</span> <span class="hljs-keyword">FUNCTION</span> auto_alias_on_rename();
+</code></pre>
+<p>Isso garante que buscas pelo nome antigo continuem encontrando o fornecedor.</p>
+<h3 id="2.5.-fluxo-de-merge-de-fornecedores" tabindex="-1"><a class="header-anchor" href="#2.5.-fluxo-de-merge-de-fornecedores">#</a> 2.5. Fluxo de Merge de Fornecedores</h3>
+<p>Merge: fornecedor A é absorvido pelo fornecedor B.</p>
+<h4 id="pr%C3%A9-condi%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#pr%C3%A9-condi%C3%A7%C3%B5es">#</a> Pré-condições</h4>
+<ul>
+<li>Ambos pertencem ao mesmo <code>user_id</code></li>
+<li>O usuário confirma explicitamente (confirmação humana obrigatória)</li>
+<li>O sistema exibe preview: “X transações, Y recorrências, Z documentos serão migrados”</li>
+</ul>
+<h4 id="etapas-(transa%C3%A7%C3%A3o-at%C3%B4mica-via-edge-function)" tabindex="-1"><a class="header-anchor" href="#etapas-(transa%C3%A7%C3%A3o-at%C3%B4mica-via-edge-function)">#</a> Etapas (transação atômica via Edge Function)</h4>
+<pre class="hljs"><code>Etapa 1 — Migrar referências de A → B:
+  UPDATE transactions SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+  UPDATE recurring_templates SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+  UPDATE recurring_instances SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+  UPDATE statement_items SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+  UPDATE documents SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+  UPDATE liabilities SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+
+Etapa 2 — Migrar aliases de A → B:
+  UPDATE supplier_aliases SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+
+Etapa 3 — Criar alias com nome do fornecedor absorvido:
+  INSERT INTO supplier_aliases (supplier_id, alias_name, alias_type, valid_until)
+  VALUES (B, A.name, 'former_name', NOW())
+
+Etapa 4 — Migrar contratos de A → B:
+  UPDATE supplier_contracts SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+
+Etapa 5 — Migrar métricas de A → B:
+  UPDATE consumption_metrics SET supplier_id = B WHERE supplier_id = A AND user_id = :uid
+
+Etapa 6 — Migrar tags de A → B (sem duplicatas):
+  INSERT INTO supplier_tags (supplier_id, tag_id)
+  SELECT B, tag_id FROM supplier_tags WHERE supplier_id = A AND user_id = :uid
+  ON CONFLICT DO NOTHING
+
+Etapa 7 — Desativar fornecedor absorvido:
+  UPDATE suppliers SET is_active = false,
+    notes = CONCAT(notes, ' [Merged into ', B.name, ' at ', NOW(), ']')
+  WHERE id = A
+
+Etapa 8 — Registrar no audit_log:
+  INSERT INTO audit_log (action, entity_type, entity_id, details)
+  VALUES ('supplier_merge', 'supplier', B,
+    '{&quot;absorbed_id&quot;: &quot;A.id&quot;, &quot;absorbed_name&quot;: &quot;A.name&quot;, &quot;migrated_counts&quot;: {...}}'
+  )
+</code></pre>
+<h4 id="p%C3%B3s-condi%C3%A7%C3%B5es" tabindex="-1"><a class="header-anchor" href="#p%C3%B3s-condi%C3%A7%C3%B5es">#</a> Pós-condições</h4>
+<ul>
+<li>Todas as referências apontam para B</li>
+<li>A está inativo mas NÃO deletado (preserva rastro)</li>
+<li>Nome de A é alias de B com <code>type = 'former_name'</code></li>
+<li>Audit log registra operação completa com contagem de migrações</li>
+</ul>
+<h4 id="implementa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#implementa%C3%A7%C3%A3o">#</a> Implementação</h4>
+<ul>
+<li><strong>Edge Function</strong> com <code>service_role_key</code> para atomicidade</li>
+<li>RLS é bypassado durante a operação (service role) e reativado após</li>
+<li>A Edge Function valida que ambos fornecedores pertencem ao mesmo user_id</li>
+</ul>
+<h3 id="2.6.-revers%C3%A3o-de-merge" tabindex="-1"><a class="header-anchor" href="#2.6.-revers%C3%A3o-de-merge">#</a> 2.6. Reversão de Merge</h3>
+<blockquote>
+<p><strong>REGRA MVP:</strong> Reversão automática de merge NÃO é implementada no MVP.</p>
+</blockquote>
+<p><strong>Motivo:</strong> Após o merge, o usuário pode ter editado transações, adicionado vinculações e alterado metadados. Reverter automaticamente é inseguro.</p>
+<p><strong>Alternativa no MVP:</strong></p>
+<ol>
+<li>Criar novo fornecedor com dados do antigo (manualmente)</li>
+<li>Reatribuir transações desejadas ao novo fornecedor (manualmente ou em lote)</li>
+<li>Consultar audit_log para recuperar dados do merge original</li>
+</ol>
+<p><strong>Fase 2+:</strong> Avaliar “undo merge” com janela de 24h, se nenhuma edição manual foi feita após o merge.</p>
+<h3 id="2.7.-revis%C3%A3o-humana-obrigat%C3%B3ria" tabindex="-1"><a class="header-anchor" href="#2.7.-revis%C3%A3o-humana-obrigat%C3%B3ria">#</a> 2.7. Revisão Humana Obrigatória</h3>
+<table>
+<thead>
+<tr>
+<th>Cenário</th>
+<th>Ação do sistema</th>
+<th>Requer confirmação humana?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resolução de alias com match exato (case-insensitive)</td>
+<td>Sugere fornecedor</td>
+<td><strong>Não</strong> no MVP — aceita automaticamente</td>
+</tr>
+<tr>
+<td>Resolução de alias com match fuzzy (trigram)</td>
+<td>Sugere com % de confiança</td>
+<td><strong>Sim</strong> — sempre</td>
+</tr>
+<tr>
+<td>Merge de fornecedores</td>
+<td>Exibe preview com contagem de impacto</td>
+<td><strong>Sim</strong> — sempre</td>
+</tr>
+<tr>
+<td>Associação retroativa em lote</td>
+<td>Exibe lista de candidatos</td>
+<td><strong>Sim</strong> — sempre (individual ou lote)</td>
+</tr>
+<tr>
+<td>Criação automática de alias (via renomeação)</td>
+<td>Auto-cria alias former_name</td>
+<td><strong>Não</strong> — automático e seguro</td>
+</tr>
+<tr>
+<td>Detecção de possível duplicata</td>
+<td>Sugere merge</td>
+<td><strong>Sim</strong> — sempre</td>
+</tr>
+<tr>
+<td>Importação com alias sem match</td>
+<td>Mostra “fornecedor desconhecido”</td>
+<td><strong>Sim</strong> — usuário decide</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2.8.-%C3%ADndice-para-busca-fuzzy" tabindex="-1"><a class="header-anchor" href="#2.8.-%C3%ADndice-para-busca-fuzzy">#</a> 2.8. Índice para Busca Fuzzy</h3>
+<pre class="hljs"><code><span class="hljs-comment">-- Habilitar extensão trigram</span>
+<span class="hljs-keyword">CREATE</span> EXTENSION IF <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> pg_trgm;
+
+<span class="hljs-comment">-- Índice para busca fuzzy em alias_name</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_supplier_aliases_trgm
+  <span class="hljs-keyword">ON</span> supplier_aliases <span class="hljs-keyword">USING</span> gin (alias_name gin_trgm_ops);
+
+<span class="hljs-comment">-- Índice para busca fuzzy em suppliers.name</span>
+<span class="hljs-keyword">CREATE</span> INDEX idx_suppliers_name_trgm
+  <span class="hljs-keyword">ON</span> suppliers <span class="hljs-keyword">USING</span> gin (name gin_trgm_ops);
+</code></pre>
+<p><strong>Busca combinada (nome + aliases):</strong></p>
+<pre class="hljs"><code><span class="hljs-comment">-- Autocomplete que busca em suppliers.name e supplier_aliases.alias_name</span>
+<span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">DISTINCT</span> s.id, s.name,
+  similarity(s.name, :query) <span class="hljs-keyword">AS</span> name_score,
+  (<span class="hljs-keyword">SELECT</span> <span class="hljs-built_in">MAX</span>(similarity(sa.alias_name, :query))
+   <span class="hljs-keyword">FROM</span> supplier_aliases sa
+   <span class="hljs-keyword">WHERE</span> sa.supplier_id <span class="hljs-operator">=</span> s.id <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+  ) <span class="hljs-keyword">AS</span> alias_score
+<span class="hljs-keyword">FROM</span> suppliers s
+<span class="hljs-keyword">WHERE</span> s.user_id <span class="hljs-operator">=</span> :user_id <span class="hljs-keyword">AND</span> s.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+  <span class="hljs-keyword">AND</span> (
+    s.name <span class="hljs-operator">%</span> :query
+    <span class="hljs-keyword">OR</span> <span class="hljs-keyword">EXISTS</span> (
+      <span class="hljs-keyword">SELECT</span> <span class="hljs-number">1</span> <span class="hljs-keyword">FROM</span> supplier_aliases sa
+      <span class="hljs-keyword">WHERE</span> sa.supplier_id <span class="hljs-operator">=</span> s.id
+        <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>
+        <span class="hljs-keyword">AND</span> sa.alias_name <span class="hljs-operator">%</span> :query
+    )
+  )
+<span class="hljs-keyword">ORDER</span> <span class="hljs-keyword">BY</span> GREATEST(
+  similarity(s.name, :query),
+  <span class="hljs-built_in">COALESCE</span>((<span class="hljs-keyword">SELECT</span> <span class="hljs-built_in">MAX</span>(similarity(sa.alias_name, :query))
+    <span class="hljs-keyword">FROM</span> supplier_aliases sa
+    <span class="hljs-keyword">WHERE</span> sa.supplier_id <span class="hljs-operator">=</span> s.id <span class="hljs-keyword">AND</span> sa.is_active <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>), <span class="hljs-number">0</span>)
+) <span class="hljs-keyword">DESC</span>
+LIMIT <span class="hljs-number">10</span>;
+</code></pre>
+<h2 id="3.-resumo-de-constraints-t%C3%A9cnicas" tabindex="-1"><a class="header-anchor" href="#3.-resumo-de-constraints-t%C3%A9cnicas">#</a> 3. Resumo de Constraints Técnicas</h2>
+<table>
+<thead>
+<tr>
+<th>Constraint</th>
+<th>Tipo</th>
+<th>Descrição</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unicidade temporal de alias</td>
+<td>Trigger</td>
+<td>Mesmo alias_name (case-insensitive) não pode existir para dois fornecedores com vigência sobreposta</td>
+</tr>
+<tr>
+<td>is_active exclui de resolução</td>
+<td>Lógica de aplicação + query</td>
+<td>Alias inativo ignorado em todas as queries de resolução</td>
+</tr>
+<tr>
+<td>Auto-alias em renomeação</td>
+<td>Trigger</td>
+<td>Nome antigo vira alias type=‘former_name’ automaticamente</td>
+</tr>
+<tr>
+<td>Merge é atômico</td>
+<td>Edge Function</td>
+<td>Todas as 8 etapas em transação única</td>
+</tr>
+<tr>
+<td>Fornecedor absorvido não é deletado</td>
+<td>Regra de negócio</td>
+<td>is_active = false, preserva rastro completo</td>
+</tr>
+<tr>
+<td>Index trigram para busca fuzzy</td>
+<td>Índice GIN</td>
+<td>pg_trgm em alias_name e <a href="http://suppliers.name">suppliers.name</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="4.-consequ%C3%AAncias" tabindex="-1"><a class="header-anchor" href="#4.-consequ%C3%AAncias">#</a> 4. Consequências</h2>
+<h3 id="positivas" tabindex="-1"><a class="header-anchor" href="#positivas">#</a> Positivas</h3>
+<ul>
+<li>Um alias resolve para EXATAMENTE um fornecedor em qualquer ponto no tempo</li>
+<li>Histórico preservado: renomeação e merges não perdem dados</li>
+<li>Merge atômico e auditado</li>
+<li>Busca fuzzy performática via trigram</li>
+</ul>
+<h3 id="negativas" tabindex="-1"><a class="header-anchor" href="#negativas">#</a> Negativas</h3>
+<ul>
+<li>Triggers adicionam overhead em operações de escrita (aceitável)</li>
+<li>Merge só via Edge Function (não pode ser chamado diretamente do frontend)</li>
+<li>Sem reversão automática de merge no MVP (trade-off por segurança)</li>
+</ul>
+<h2 id="5.-testes-associados" tabindex="-1"><a class="header-anchor" href="#5.-testes-associados">#</a> 5. Testes Associados</h2>
+<ul>
+<li><strong>T18 (existente):</strong> CRUD de fornecedor</li>
+<li><strong>T19 (existente):</strong> Aliases com autocomplete</li>
+<li><strong>T20 (existente):</strong> Merge de fornecedores</li>
+<li><strong>Novo: T-ALIAS-01:</strong> Criar dois aliases iguais para fornecedores diferentes no mesmo período → rejeitado</li>
+<li><strong>Novo: T-ALIAS-02:</strong> Criar dois aliases iguais com períodos NÃO sobrepostos → aceito</li>
+<li><strong>Novo: T-ALIAS-03:</strong> Alias inativo NÃO aparece em resolução</li>
+<li><strong>Novo: T-ALIAS-04:</strong> Renomear fornecedor cria alias former_name automaticamente</li>
+<li><strong>Novo: T-ALIAS-05:</strong> Merge migra todas as referências (transactions, templates, docs, etc.)</li>
+<li><strong>Novo: T-ALIAS-06:</strong> Merge não deleta fornecedor absorvido (is_active = false)</li>
+<li><strong>Novo: T-ALIAS-07:</strong> Merge registra audit_log completo</li>
+<li><strong>Novo: T-ALIAS-08:</strong> Busca fuzzy por trigram retorna fornecedores com nome ou alias similar</li>
+<li><strong>Novo: T-ALIAS-09:</strong> Resolução temporal: alias expirado NÃO resolve para data posterior</li>
+</ul>
+<h2 id="6.-etapa-de-implementa%C3%A7%C3%A3o" tabindex="-1"><a class="header-anchor" href="#6.-etapa-de-implementa%C3%A7%C3%A3o">#</a> 6. Etapa de Implementação</h2>
+<p><strong>Etapa 1</strong> (Base Estrutural): Tabela, triggers de unicidade e auto-alias, índices trigram
+<strong>Etapa 3</strong> (Núcleo Funcional): CRUD de aliases, autocomplete, resolução temporal
+<strong>Etapa 5</strong> (Recursos Avançados): Merge atômico via Edge Function, associação retroativa</p>
+
       </article>
 
       <p class="footnote">⚡ Gerado automaticamente por html-gen</p>
