@@ -26,6 +26,7 @@ default:
 variables:
   BUN_VERSION: "1.3.10"
   NODE_VERSION: "20"
+  HUSKY: "0"
 
 # ============================================================
 # STAGE: validate (somente em MRs)
