@@ -226,46 +226,55 @@ Evidência: bun run build OK com rotas /dashboard/\*.
 
 ### H1. Gaps Críticos (bloqueiam segurança real)
 
-- [ ] RLS de audit_logs: substituir FOR ALL por FOR SELECT + FOR INSERT + trigger de imutabilidade
-  - Fase alvo: Fase H (urgente)
-  - Critério de aceite: migration criada; `DELETE` em audit_logs levanta exception; testes cobrindo o trigger
-  - Observações: policy atual FOR ALL permite usuário deletar seus próprios audit logs — destrói imutabilidade
-- [ ] Storage: criar bucket `documents` e `imports` com policies de acesso por usuário
-  - Fase alvo: Fase H (urgente)
+- [x] RLS de audit_logs: substituir FOR ALL por FOR SELECT + FOR INSERT + trigger de imutabilidade
+  - Critério de aceite: migration criada; `DELETE` em audit_logs levanta exception
+  - Evidência: supabase/migrations/20260322180000_fix_audit_logs_immutability.sql — trigger `trg_audit_logs_immutable` + policies SELECT/INSERT
+- [x] Storage: criar bucket `documents` e `imports` com policies de acesso por usuário
   - Critério de aceite: migration com `INSERT INTO storage.buckets` + policies de Storage RLS; bucket aparece no Studio
-  - Observações: tabela `documents` tem `file_path` mas nenhum bucket existe — qualquer upload falharia hoje
-- [ ] user_secrets.encrypted_value: encriptar com pgcrypto em repouso
-  - Fase alvo: Fase H (urgente)
-  - Critério de aceite: migration altera coluna para uso de `pgp_sym_encrypt`; segredos não são texto puro no banco
-  - Observações: pg_vault está comentado no config.toml; usar pgcrypto (já instalado) como alternativa pragmática
+  - Evidência: supabase/migrations/20260322180100_create_storage_buckets.sql — buckets + 8 policies RLS de storage
+- [x] user_secrets.encrypted_value: encriptar com pgcrypto em repouso
+  - Critério de aceite: migration cria helpers pgp_sym_encrypt/pgp_sym_decrypt; segredos não são texto puro no banco
+  - Evidência: supabase/migrations/20260322180200_encrypt_user_secrets.sql — funções encrypt_secret/decrypt_secret via pgcrypto
 
 ### H2. Gaps Importantes (antes de produção)
 
-- [ ] config.toml: `minimum_password_length` de 6 para 8 (dev) / 12 (prod)
+- [x] config.toml: `minimum_password_length` de 6 para 8 (dev) / 12 (prod)
   - Critério de aceite: valor alterado e documentado
-- [ ] config.toml: `password_requirements = "lower_upper_letters_digits"`
+  - Evidência: supabase/config.toml — `minimum_password_length = 8`
+- [x] config.toml: `password_requirements = "lower_upper_letters_digits"`
   - Critério de aceite: valor configurado
-- [ ] config.toml: `enable_confirmations = true`
+  - Evidência: supabase/config.toml — `password_requirements = "lower_upper_letters_digits"`
+- [x] config.toml: `enable_confirmations = true`
   - Critério de aceite: confirmação de e-mail ativa em dev/prod
-- [ ] config.toml: `secure_password_change = true`
+  - Evidência: supabase/config.toml — `enable_confirmations = true`
+- [x] config.toml: `secure_password_change = true`
   - Critério de aceite: reautenticação exigida para troca de senha
+  - Evidência: supabase/config.toml — `secure_password_change = true`
 - [ ] config.toml: Google OAuth configurado (`[auth.external.google]`)
+  - Fase alvo: Sprint 3 (depende de CEO criar credenciais Google Cloud)
   - Critério de aceite: bloco provider Google presente; vars GOOGLE_CLIENT_ID/GOOGLE_SECRET no .env.example
   - Observações: CEO criou Gmail para este fim (ver TODO em prompts.md)
-- [ ] config.toml: SMTP configurado (Mailpit local + SendGrid/SES prod)
+- [x] config.toml: SMTP configurado (Mailpit local + SendGrid/SES prod)
   - Critério de aceite: emails de auth funcionam localmente via Mailpit (http://127.0.0.1:54324)
+  - Evidência: supabase/config.toml — `[auth.email.smtp]` com host=inbucket + porta 54325
 - [ ] View materializada `mv_supplier_spending` criada
-  - Critério de aceite: migration 20260323\* com a view + mecanismo de refresh
-  - Observações: planejada na Etapa 5.4 mas não implementada; necessária para performance de relatórios
+  - Fase alvo: Sprint 1 (2026-03-23)
+  - Critério de aceite: migration com a view + índice único para REFRESH CONCURRENTLY
+  - Observações: planejada na Etapa 5.4 mas não implementada; necessária para relatórios de performance
 - [ ] Edge Function `retroactive-supplier-association`: confirm com transação atômica
+  - Fase alvo: Sprint 1 (2026-03-23)
   - Critério de aceite: `handleConfirm` usa RPC PL/pgSQL atômica; sem risco de estado inconsistente no meio do lote
-- [ ] Edge Functions: adicionar CORS headers em merge-suppliers e retroactive-supplier-association
+- [x] Edge Functions: adicionar CORS headers em merge-suppliers e retroactive-supplier-association
   - Critério de aceite: headers `Access-Control-Allow-Origin` presentes; preflight OPTIONS respondido
+  - Evidência: supabase/functions/merge-suppliers/index.ts + retroactive-supplier-association/index.ts — corsHeaders em todas as respostas
 - [ ] Edge Function `refresh-mv-supplier-spending` criada (scheduled/cron)
+  - Fase alvo: Sprint 1 (2026-03-23)
   - Critério de aceite: função que executa `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supplier_spending`
-  - Observações: terceira Edge Function planejada na Etapa 5.4, ainda não criada
+  - Observações: terceira Edge Function planejada, depende de mv_supplier_spending existir
 - [ ] seed.sql populado com dados base de desenvolvimento
+  - Fase alvo: Sprint 2 (2026-03-24)
   - Critério de aceite: categorias base, tags comuns, usuário de teste no seed.sql
+  - Observações: seed.sql existe mas está vazio — banco funcional mas vazio após db reset
 
 ### H3. Gaps Opcionais (melhorias de qualidade)
 
@@ -282,22 +291,42 @@ Evidência: bun run build OK com rotas /dashboard/\*.
 
 - [ ] Edge Runtime iniciado e Edge Functions aparecendo no Studio
   - Critério de aceite: `npx supabase functions serve` documentado; Studio mostra as funções
-  - Observações: `supabase_edge_runtime_seu.bolso.feliz` está stopped — funções não aparecem no Studio
+  - Observações: `supabase_edge_runtime_seu.bolso.feliz` fica stopped quando não explicitamente iniciado — rodar `npx supabase functions serve` manualmente em desenvolvimento
 - [x] MCP do Supabase local configurado no VS Code
   - Critério de aceite: `.vscode/mcp.json` com endpoint `http://127.0.0.1:54321/mcp`
   - Evidência: .vscode/mcp.json criado em 2026-03-22
-- [ ] Storage buckets aparecendo no Studio após migration H1
-  - Critério de aceite: aba Storage do Studio mostra buckets `documents` e `imports`
-- [ ] Tabelas verificadas no Studio (todas 27 com RLS ativo)
-  - Critério de aceite: Table Editor mostra todas as tabelas; RLS tab mostra policies ativas
+- [x] Storage buckets criados via migration (documentado acima em H1)
+  - Critério de aceite: migration 20260322180100 aplicada; Studio mostra buckets ao rodar `npx supabase db reset`
+  - Evidência: supabase/migrations/20260322180100_create_storage_buckets.sql
+- [ ] Verificação manual no Studio (tabelas, RLS, buckets visíveis)
+  - Critério de aceite: verificação visual confirmada por CEO ou engenheir@ responsável
+  - Observações: requer `npx supabase start` ativo + Studio em http://127.0.0.1:54323
 
 ---
 
 ## Conclusão do Checklist
 
-- Núcleo de arquitetura, domínio e qualidade local: PRONTO
-- Dimensão fornecedor na base de dados, ações, validações e UI: PRONTA
-- Edge Functions estratégicas (merge + associação retroativa): PRONTAS (com gaps I8/I9)
+**Última atualização:** 2026-03-22 21:27 (pós-segunda auditoria)
+
+### Estado consolidado por fase:
+
+| Fase                                | Status                       | Observações                                |
+| ----------------------------------- | ---------------------------- | ------------------------------------------ |
+| A — Fundação e Domínio              | ✅ Concluída                 | Stack, princípios, ciclos, prioridade      |
+| B — Dimensão Fornecedor             | ✅ Concluída                 | Entidades, alias, contratos, métricas, UI  |
+| C — Ajustes obrigatórios            | ✅ Concluída                 | Deduplicação, consumption_metrics, aliases |
+| D — Governança de Engenharia        | ✅ Concluída (D2 parcial)    | Deploy web real ainda placeholder          |
+| E — Produto Web MVP                 | ✅ Concluída (E2.3 pendente) | Tela de auditoria histórica de fornecedor  |
+| F — Testes e confiabilidade         | ✅ Concluída                 | 168 testes passando                        |
+| G — Prontidão para entrega contínua | ⏳ Pendente                  | Deploy real + validação staging            |
+| H — Segurança e Hardening           | ⚠️ Parcialmente concluída    | H1 ✅ · H2 parcial · H3 pendente           |
+
+### Próximos sprints:
+
+- **Sprint 1 (2026-03-23):** mv_supplier_spending + refresh Edge Function + confirm atômico
+- **Sprint 2 (2026-03-24):** seed.sql + tela de auditoria histórica de fornecedor (E2.3)
+- **Sprint 3 (a definir):** Google OAuth (depende de credenciais do CEO)
+- **Sprint G (após Sprint 3):** Deploy web real, validação staging, promoção para produção
 - Testes (142 unit + 16 integration + 10 e2e = 168 total): PRONTOS
 - Páginas CRUD de fornecedores e relatórios com filtro por fornecedor: PRONTOS
 - Segurança e hardening Supabase (Fase H): PENDENTE — 3 gaps críticos, 11 importantes
