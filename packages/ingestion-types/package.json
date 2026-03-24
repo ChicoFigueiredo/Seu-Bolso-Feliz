@@ -1,0 +1,12 @@
+{
+  "name": "@sbf/ingestion-types",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Tipos e enums do ciclo de ingestão documental",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit"
+  }
+}

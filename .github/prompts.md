@@ -1705,6 +1705,23 @@ Façam novamente auditoria e respondam algumas perguntas:
 
 - Tinha edge functions no planejamento inicial? Se sim, qual é o status delas? Se não, tem alguma função que deveria ser implementada como edge function, e que não está sendo implementada como tal?
 - Tinha alguma configuração específica do Supabase que deveria ser feita, e que não foi feita, como configuração de RLS, configuração de storage, configuração de autenticação, ou qualquer outra configuração relevante para garantir a segurança, a governança, e a escalabilidade do projeto?
+- o que era esperado?
+
+---
+
+Estou aprendendo sobre agentes e o uso da pasta `.github/agents`
+- Eu tenho algum ganho quando tenho eles?
+- Você invoca conforme a necessidade?
+- Se eu pegar a equipe recrutada lá do #file:copilot-instructions.md e tornar cada um um agente independente tenho algum ganho? você tem ganhos?
+- me explica num arquivo `docs/aprenda/001-agentes.md1` tudo que preciso saber sobre eles, como configura, etc
+
+Me explica?
+
+---
+
+Com base no que foi escrito na sessão e no #file:001-agentes.md ajuste a pasta `.github/agents` e crie os 10 agentes, deixando a pasta limpa só com os 10 agentes, garantindo que eles sejam escritos com toda qualidade e os melhores padrões que o mercado mais exigente cobra
+
+
 
 ---
 
@@ -1725,6 +1742,721 @@ Chama o time para planejar, criar o refino, atualizar o checklist e implementar 
 Conto com vocês para isso, time!
 
 ---
+
+Time, vamos evoluir!
+Olha o que a Verônica arquitetou para a gente planejar:
+```markdown
+    # Prompt faseado — Arquitetura de ingestão, automação, MCP, agentes e povoamento de dados
+    ## Projeto: Seu Bolso Feliz
+
+    Vocês são a equipe técnica responsável por abrir o próximo ciclo do projeto **Seu Bolso Feliz**.
+
+    O núcleo financeiro e documental já está suficientemente amadurecido para avançar, mas o próximo ciclo **não deve reabrir o refino estrutural do zero**.
+
+    A missão agora é construir, de forma faseada e disciplinada, a camada de:
+
+    - ingestão de e-mails e anexos;
+    - leitura de documentos;
+    - classificação assistida por IA;
+    - geração de registros em modo draft/revisável;
+    - povoamento inicial com dados reais;
+    - MCP próprio para operação assistida;
+    - integração progressiva com OpenAI;
+    - e fechamento da arquitetura operacional com Vercel + Supabase + GitLab.
+
+    ---
+
+    ## 1. Decisões arquiteturais já assumidas
+
+    Assumam como decisões já tomadas:
+
+    ### Web
+    - Next.js + React + Tailwind
+    - hospedagem em **Vercel**
+
+    ### Backend / núcleo
+    - **Supabase** como núcleo financeiro e documental
+    - Postgres
+    - Auth
+    - RLS
+    - Storage
+    - Vault
+    - Queues
+    - Cron
+    - Edge Functions
+
+    ### Engenharia
+    - repositório principal em **GitLab**
+    - CI/CD em GitLab
+    - deploy web real em Vercel
+    - migrations e functions versionadas
+
+    ### Automação / IA
+    - uso de **OpenAI** como camada de orquestração e extração/classificação assistida
+    - criação de um **MCP próprio**
+    - uso inicial do MCP no **VS Code / GitHub Copilot**
+    - possível integração posterior com ChatGPT
+
+    ### Operação inicial
+    - o primeiro worker de ingestão deve poder rodar **localmente**
+    - o objetivo inicial é **povoar o banco com dados reais**, com revisão assistida, não automatismo cego
+
+    ---
+
+    ## 2. Objetivo macro do ciclo
+
+    O objetivo final deste ciclo é deixar o sistema apto a:
+
+    - ler e-mails e anexos do Gmail;
+    - ler documentos locais;
+    - detectar e evitar duplicidade por hash/fingerprint;
+    - extrair dados relevantes de comprovantes, faturas e PDFs;
+    - associar fornecedor, tags, categoria, prioridade e período financeiro;
+    - gerar registros em modo draft para revisão;
+    - consolidar histórico suficiente para orientar desenho de telas e fluxo operacional;
+    - permitir operação assistida via MCP e interface web.
+
+    O sistema deve priorizar:
+    - auditabilidade;
+    - idempotência;
+    - revisão humana;
+    - reaproveitamento de dados reais;
+    - e redução máxima de digitação manual.
+
+    ---
+
+    ## 3. Princípio operacional obrigatório
+
+    A equipe deve assumir como regra:
+
+    > **IA não grava diretamente no ledger principal por decisão livre.**
+
+    Toda ingestão automática deve passar por estados intermediários, como por exemplo:
+    - discovered
+    - downloaded
+    - hashed
+    - parsed
+    - classified
+    - reconciled
+    - drafted
+    - approved
+    - posted
+    - failed
+
+    A equipe pode ajustar os nomes, mas deve manter uma máquina de estados explícita.
+
+    ---
+
+    ## 4. Arquitetura operacional obrigatória
+
+    A equipe deve refinar e implementar o sistema com a seguinte separação de responsabilidades:
+
+    ### 4.1. Vercel
+    Responsável por:
+    - hospedar o app web Next.js;
+    - servir a interface de revisão;
+    - disponibilizar telas e comandos operacionais;
+    - expor rotas leves/API routes/server actions para disparar jobs;
+    - mostrar status de processamento;
+    - integrar domínio customizado `seubolsofeliz.com.br`.
+
+    ### 4.2. Supabase
+    Responsável por:
+    - banco de dados autoritativo;
+    - autenticação;
+    - RLS;
+    - armazenamento de arquivos;
+    - secrets/segredos;
+    - filas de jobs;
+    - agendamentos;
+    - funções atômicas server-side;
+    - persistência de drafts, logs, fingerprints e evidências.
+
+    ### 4.3. Worker de ingestão
+    Responsável por:
+    - consultar Gmail;
+    - baixar anexos;
+    - ler arquivos locais;
+    - calcular hash/fingerprint;
+    - abrir PDFs com senha;
+    - chamar pipeline de extração/classificação;
+    - gerar drafts e resultados estruturados;
+    - reconciliar com o que já existir.
+
+    ### 4.4. OpenAI
+    Responsável por:
+    - extração assistida;
+    - classificação de fornecedor/categoria/tags/prioridade;
+    - sugestão de reconciliação;
+    - apoio a parsing semântico;
+    - agentes especializados;
+    - orquestração progressiva via SDK e tools.
+
+    ### 4.5. MCP próprio
+    Responsável por:
+    - expor ferramentas operacionais do domínio;
+    - permitir operação assistida via VS Code / GitHub Copilot;
+    - futuramente permitir integração com ChatGPT;
+    - evitar duplicação de lógica entre web, CLI e agentes.
+
+    ---
+
+    ## 5. Fases obrigatórias
+
+    A equipe deve trabalhar nas fases abaixo, nesta ordem, salvo justificativa forte.
+
+    ---
+
+    ## Fase 1 — Fechamento operacional da base e prontidão de ambientes
+
+    ### Objetivo
+    Fechar a prontidão mínima do projeto para suportar o ciclo de ingestão e automação com segurança.
+
+    ### Entregas obrigatórias
+    1. validar o fluxo real de deploy web no Vercel;
+    2. ligar o repositório GitLab ao Vercel;
+    3. configurar preview deployments;
+    4. configurar domínio/caminho para futura publicação;
+    5. validar environments no GitLab, Vercel e Supabase;
+    6. fechar segredos por ambiente;
+    7. fechar Supabase staging e production;
+    8. confirmar migrations e functions com fluxo de promoção real;
+    9. fechar os gaps já mapeados de CI/CD remoto;
+    10. formalizar a estrutura definitiva do monorepo para:
+      - apps/web
+      - apps/mobile
+      - apps/mcp-server
+      - workers/*
+      - packages/*
+      - supabase/*
+
+    ### Liberações / configurações necessárias
+    - conta/projeto Vercel conectado ao GitLab;
+    - ambientes do Supabase definidos;
+    - variáveis protegidas no GitLab;
+    - variáveis de ambiente configuradas no Vercel;
+    - chave e configuração do Supabase por ambiente;
+    - política de deploy protegida.
+
+    ### Critérios de aceite
+    - deploy web real funcionando no Vercel;
+    - preview por branch/MR funcionando;
+    - pipeline GitLab apontando de verdade para os ambientes;
+    - checklist de variáveis e segredos concluído;
+    - nenhum deploy crítico dependente de passo manual obscuro;
+    - evidência de staging funcional.
+
+    ---
+
+    ## Fase 2 — Estrutura de ingestão e idempotência documental
+
+    ### Objetivo
+    Criar a base técnica para ingestão de e-mails, anexos e documentos locais, com deduplicação e reprocessamento seguro.
+
+    ### Entregas obrigatórias
+    1. criar tabelas/estruturas para:
+      - ingestion_runs
+      - ingestion_jobs
+      - source_documents
+      - document_blobs ou equivalente
+      - document_fingerprints
+      - parsed_document_versions
+      - extraction_results
+      - draft_records / draft_batches
+    2. definir máquina de estados da ingestão;
+    3. implementar estratégia de hash/fingerprint;
+    4. criar política de idempotência;
+    5. definir política de reprocessamento;
+    6. salvar anexos originais no Storage;
+    7. registrar proveniência:
+      - gmail_message_id
+      - gmail_thread_id
+      - attachment_id
+      - origem local
+      - filename
+      - mime type
+    8. criar fila(s) no Supabase para jobs de ingestão;
+    9. criar worker local inicial;
+    10. implementar logs e telemetria mínima do pipeline.
+
+    ### Regra obrigatória de hash/fingerprint
+    A equipe deve implementar pelo menos:
+    - hash bruto do arquivo (ex.: SHA-256 dos bytes);
+    - fingerprint canônico do conteúdo extraído;
+    - chave de origem/provedor;
+    - lógica que permita:
+      - detectar documento exatamente igual;
+      - detectar documento semanticamente equivalente;
+      - permitir reprocessamento forçado;
+      - impedir duplicação acidental.
+
+    ### Critérios de aceite
+    - um documento local pode ser ingerido;
+    - o mesmo documento pode ser detectado como duplicado;
+    - o mesmo documento pode ser reprocessado sob comando explícito;
+    - todos os documentos ingeridos ficam rastreáveis no banco;
+    - o sistema não perde a origem de cada anexo.
+
+    ---
+
+    ## Fase 3 — Integração inicial com Gmail (polling + varredura manual)
+
+    ### Objetivo
+    Permitir leitura real de e-mails e anexos do Gmail de forma controlada, começando por polling/manual scan, sem push complexo.
+
+    ### Decisão obrigatória
+    Nesta fase, **não implementar push notifications do Gmail** como caminho principal.
+
+    Começar com:
+    - scan manual por botão/comando;
+    - scan por label;
+    - scan por query/período;
+    - polling agendado opcional.
+
+    ### Entregas obrigatórias
+    1. configurar integração OAuth com Gmail;
+    2. documentar escopos mínimos necessários;
+    3. implementar leitura por:
+      - inbox
+      - label específica
+      - período
+      - query
+    4. baixar anexos;
+    5. suportar varredura de uma label específica, por exemplo `Comprovantes`;
+    6. suportar comando de backfill:
+      - “varrer de data X até data Y”
+    7. persistir tokens/credenciais de forma segura;
+    8. integrar com a fila de ingestão;
+    9. permitir execução local do worker Gmail;
+    10. registrar falhas por mensagem/anexo.
+
+    ### Liberações / configurações necessárias
+    A equipe deve documentar claramente o que o dono do projeto precisará liberar:
+    - criação/configuração de projeto no Google Cloud;
+    - habilitação da Gmail API;
+    - OAuth consent screen;
+    - criação de credenciais OAuth;
+    - redirect URIs;
+    - escopos;
+    - estratégia de armazenamento de tokens;
+    - possíveis limitações de conta/ambiente de teste.
+
+    ### Critérios de aceite
+    - varrer uma label do Gmail gera jobs;
+    - anexos reais são baixados e armazenados;
+    - o sistema consegue distinguir mensagens já processadas;
+    - o pipeline local consegue consumir essas mensagens;
+    - existe modo dry-run;
+    - existe modo execução real para criação de drafts.
+
+    ---
+
+    ## Fase 4 — Parsing documental, segredos e geração de drafts
+
+    ### Objetivo
+    Transformar anexos/documentos em drafts financeiros auditáveis.
+
+    ### Entregas obrigatórias
+    1. pipeline de leitura de documento;
+    2. suporte a PDF protegido por senha;
+    3. integração com segredos/senhas no Supabase;
+    4. busca de senha associada à origem/fornecedor/contrato;
+    5. extração de:
+      - fornecedor provável
+      - competência
+      - vencimento
+      - valores
+      - identificadores
+      - unidade consumidora/contrato quando existir
+      - itens úteis
+    6. atribuição de período financeiro;
+    7. sugestão de categoria/tags/prioridade;
+    8. geração de drafts de:
+      - documento
+      - transação
+      - item recorrente
+      - conta a pagar
+      - métrica de consumo, quando aplicável
+    9. registro de confiança/score por inferência;
+    10. fila de revisão.
+
+    ### Regra obrigatória
+    A equipe deve assumir que:
+    - parsing pode falhar parcialmente;
+    - o documento pode produzir múltiplas interpretações;
+    - o sistema precisa guardar a versão da extração;
+    - o usuário precisa poder rever e corrigir.
+
+    ### Critérios de aceite
+    - PDF com senha pode ser processado usando segredo seguro;
+    - fornecedor e período podem ser sugeridos;
+    - drafts são criados sem poluir diretamente o ledger principal;
+    - documentos com baixa confiança são enviados para revisão;
+    - consumo/métrica, quando existir, pode ser capturado.
+
+    ---
+
+    ## Fase 5 — MCP local + Copilot/VS Code + ferramentas de backfill
+
+    ### Objetivo
+    Criar o MCP próprio do Seu Bolso Feliz para operação assistida local e uso no VS Code/GitHub Copilot.
+
+    ### Entregas obrigatórias
+    1. criar `apps/mcp-server` ou equivalente;
+    2. definir autenticação local simples e segura;
+    3. expor tools operacionais do domínio;
+    4. conectar o MCP ao GitHub Copilot no VS Code;
+    5. permitir uso do MCP para:
+      - varrer label do Gmail
+      - ler pasta local de documentos
+      - listar drafts
+      - reprocessar documentos
+      - resolver fornecedor
+      - sugerir aliases
+      - recomputar períodos
+      - aprovar ou rejeitar lotes em dry-run
+    6. criar documentação de uso com comandos reais;
+    7. manter a mesma camada de tools reutilizável depois pela web e por futura integração com ChatGPT.
+
+    ### Ferramentas mínimas sugeridas
+    - `scan_gmail_label`
+    - `scan_gmail_period`
+    - `scan_local_folder`
+    - `list_unparsed_documents`
+    - `reprocess_document`
+    - `resolve_supplier_candidates`
+    - `list_draft_batches`
+    - `approve_draft_batch`
+    - `recompute_financial_periods`
+    - `find_documents_without_password_profile`
+
+    ### Critérios de aceite
+    - o MCP roda localmente;
+    - o Copilot consegue invocar tools reais;
+    - pelo menos um fluxo de backfill completo funciona via MCP;
+    - o pipeline consegue ler documentos locais e gerar drafts;
+    - a mesma tool não duplica registros ao ser executada duas vezes sem mudança.
+
+    ---
+
+    ## Fase 6 — Interface web de revisão e povoamento orientado a dados reais
+
+    ### Objetivo
+    Transformar a ingestão em fluxo operacional visível e utilizável.
+
+    ### Entregas obrigatórias
+    1. criar telas para:
+      - fila de ingestão
+      - documentos ingeridos
+      - drafts pendentes
+      - revisão de fornecedor
+      - revisão de tags/categoria/prioridade
+      - conflitos e duplicidades
+      - reprocessamento
+    2. mostrar:
+      - documento original
+      - status
+      - hash/fingerprint
+      - origem
+      - fornecedor sugerido
+      - período sugerido
+      - score de confiança
+      - ação recomendada
+    3. suportar aprovação em lote;
+    4. suportar rejeição/correção;
+    5. suportar vinculação manual quando a IA errar;
+    6. suportar backfill histórico por período;
+    7. permitir que os dados aprovados comecem a alimentar as telas financeiras.
+
+    ### Critérios de aceite
+    - existe fluxo visível de ingestão → draft → revisão → aprovação;
+    - o usuário consegue povoar o sistema sem cadastrar tudo manualmente;
+    - os dados aprovados já permitem avaliar necessidade de telas futuras;
+    - o sistema já responde:
+      - por ciclo financeiro;
+      - por fornecedor;
+      - por categoria/tag;
+      - por instituição/produto;
+      - por tipo de movimentação.
+
+    ---
+
+    ## Fase 7 — Agentes OpenAI e consolidação do assistente operacional
+
+    ### Objetivo
+    Introduzir IA de forma disciplinada, sobre o pipeline já controlado.
+
+    ### Entregas obrigatórias
+    1. criar camada de integração com OpenAI;
+    2. estruturar uso de Responses API / SDK de agentes;
+    3. separar agentes ou módulos por responsabilidade, por exemplo:
+      - agente de parsing documental
+      - agente de resolução de fornecedor
+      - agente de classificação financeira
+      - agente de reconciliação
+    4. integrar esses agentes às tools determinísticas;
+    5. registrar confiança, justificativa e rastreabilidade;
+    6. permitir operação por linguagem natural dentro do app web;
+    7. manter escrita no ledger apenas por fluxo autorizado.
+
+    ### Critérios de aceite
+    - o usuário consegue pedir em linguagem natural:
+      - varredura,
+      - reclassificação,
+      - sugestão,
+      - reconciliação;
+    - a IA usa ferramentas do domínio;
+    - nada crítico é persistido sem trilha e revisão apropriada;
+    - os dados gerados são auditáveis.
+
+    ---
+
+    ## Fase 8 — Integração futura com ChatGPT e expansão de automação
+
+    ### Objetivo
+    Preparar a camada para futura integração remota com ChatGPT, após o domínio de ingestão estar validado.
+
+    ### Entregas obrigatórias
+    1. avaliar exposição remota do MCP;
+    2. adaptar autenticação para ambiente remoto;
+    3. decidir quais tools podem ser expostas externamente;
+    4. manter distinção entre:
+      - tools read-only
+      - write-safe
+      - write-risky
+    5. avaliar eventual adoção futura de push do Gmail;
+    6. avaliar hospedagem futura do worker fora da máquina local.
+
+    ### Critérios de aceite
+    - o MCP está preparado para futura exposição remota;
+    - o domínio e as tools já são reutilizáveis;
+    - a evolução não exige reescrever a camada operacional.
+
+    ---
+
+    ## 6. Regras obrigatórias para a equipe
+
+    ### 6.1. Não transformar ingestão automática em escrita cega
+    Tudo deve passar por rastreabilidade, estado e revisão.
+
+    ### 6.2. Não depender de cadastro manual massivo
+    O foco é reduzir ao máximo a digitação humana.
+
+    ### 6.3. Não usar Edge Functions como parser principal pesado
+    Edge Functions devem servir para operações curtas e seguras.
+    O processamento pesado inicial deve ocorrer no worker local.
+
+    ### 6.4. Não misturar documento ingerido com lançamento já aprovado
+    Separar claramente:
+    - evidência documental,
+    - extração,
+    - draft,
+    - registro aprovado.
+
+    ### 6.5. Não ignorar idempotência
+    O sistema deve suportar releitura, reprocessamento e deduplicação com disciplina.
+
+    ---
+
+    ## 7. Resultado final esperado de todas as fases
+
+    Ao final das fases implementadas, o sistema deve estar apto a gerar uma base de dados confiável e suficientemente povoada para permitir:
+
+    - separação por mês civil e período financeiro personalizado;
+    - visão por instituição, produto, fornecedor e tipo de movimentação;
+    - reconstrução histórica assistida por documentos e e-mails;
+    - identificação de transferências, despesas, faturas e obrigações;
+    - visão clara de quem pagou quem;
+    - visão de fornecedores, tags, categorias e prioridades;
+    - base realista para desenhar e evoluir as telas finais do produto.
+
+    ---
+
+    ## 8. O que a equipe deve entregar agora
+
+    A equipe deve responder com:
+
+    1. **Plano faseado detalhado**
+    2. **Arquitetura final proposta por fase**
+    3. **Lista de módulos/pastas a criar ou ajustar**
+    4. **Lista de tabelas/filas/estruturas novas**
+    5. **Lista de integrações externas a habilitar**
+    6. **Lista de segredos e variáveis por ambiente**
+    7. **Fluxo completo do Gmail até draft**
+    8. **Estratégia de hash, fingerprint e idempotência**
+    9. **Estratégia do worker local**
+    10. **Estratégia do MCP local no VS Code/Copilot**
+    11. **Critérios de aceite por fase**
+    12. **Riscos e dependências**
+    13. **Sugestão de ordem real de implementação**
+    14. **Checklist do que o dono do projeto precisará liberar/configurar manualmente**
+
+    ---
+
+    ## 9. Orientação final
+
+    Não respondam genericamente.
+
+    Quero um plano:
+    - executável;
+    - modular;
+    - com fases claras;
+    - com critérios de aceite objetivos;
+    - coerente com Vercel + Supabase + GitLab;
+    - coerente com MCP local e uso de Copilot;
+    - e orientado a povoar o banco com dados reais antes de obsessão por telas finais.
+```
+Chamem o time e os agentes para:
+- Estudar e analisar todos os pedidos da Verônica, cruzando com a codebase e a documentação atual, para entender o que já foi feito, o que falta, e quais são os gaps.
+- Analisar, discutir, planejar cada fase como ela colocou no texto dela
+- Todos participam, critiquem, sugiram, contribuam para o planejamento
+- O time é soberano, mas devemos levar o que a Verônica pediu muito a sério, e tentar atender ao máximo, justificando qualquer decisão de não atender algum pedido específico, ou de ajustar o planejamento dela, com argumentos sólidos e bem fundamentados.
+- Esperado:
+  - Documento de refino em `docs/refinos` no padrão de refino que já temos. Se ficar grande, faça em etapas para não perdemos por timeout ou esgotamento de tokens
+  - Documento de planejamento em `docs/planejamento/` com arquivo iniciando numerado para melhor organização
+  - Documento de checklist em `docs/checklist/` com arquivo iniciando numerado para melhor organização
+  - Documento de passo a passo em `docs/passo-a-passo/` com arquivo iniciando numerado para melhor organização, detalhando o passo a passo do que eu preciso fazer manualmente, cadastros, tokens, credenciais, tudo que precisa para o que a gente precisa para implantar
+  - Documento de aprenda em `docs/aprenda/` com arquivo iniciando numerado para melhor organização, explicando tudo que a gente precisa saber de Vercel, supabase, MCP, OpenAI, etc, para implementar o que a Verônica pediu, e para operar o sistema depois de implementado
+
+NÃO CODAR, VAMOS PLANEJAR!
+
+---
+
+Fui realizar a sessão para 2.3 Aplicar Migrations (via CLI local) e me deparei com o seguinte erro:
+
+```bash
+supabase db push
+Connecting to remote database...
+failed to connect to postgres: failed to connect to `host=aws-1-sa-east-1.pooler.supabase.com user=postgres.opwelsgdhksuuewdbefk database=postgres`: failed SASL auth (FATAL: password authentication failed for user "postgres" (SQLSTATE 28P01))
+Try rerunning the command with --debug to troubleshoot the error.
+```
+
+Faltou configurar algo? Tem que configurar o acesso ao banco do supabase local? Tem que configurar o acesso ao banco do supabase remoto? Tem que configurar alguma variável de ambiente? Tem que criar algum segredo? Tem que criar algum usuário? Tem que fazer algum passo manual no supabase para liberar o acesso?
+usa arquivo .env ? .env.local? ou tem que configurar direto no supabase? Tem que configurar o acesso via CLI do supabase? Tem que configurar o acesso via Vercel? Tem que configurar o acesso via GitLab? Tem que configurar o acesso via MCP?
+
+---
+
+Não deu, o que faço?
+```bash
+❯ supabase link --project-ref dcljzgjgnkmxdvhybvpt --password 7zVeuK6aTzrkh71zhQs5cRFQLXdRZqCMsUvBehE7Q
+Finished supabase link.
+❯ supabase db push --debug
+open /home/chico/.supabase/profile: no such file or directory
+Loading project ref from file: supabase/.temp/project-ref
+Using connection pooler: postgresql://postgres.dcljzgjgnkmxdvhybvpt@aws-1-sa-east-1.pooler.supabase.com:5432/postgres
+Using database password from env var...
+Supabase CLI 2.83.0
+Using profile: supabase (supabase.co)
+Connecting to remote database...
+2026/03/23 10:48:20 PG Send: {"Type":"StartupMessage","ProtocolVersion":196608,"Parameters":{"database":"postgres","user":"postgres.dcljzgjgnkmxdvhybvpt"}}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASL","AuthMechanisms":["SCRAM-SHA-256"]}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLInitialResponse","AuthMechanism":"SCRAM-SHA-256","Data":"n,,n=,r=JgE3O/924uTgxI8qK72K+mzO"}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASLContinue","Data":"r=JgE3O/924uTgxI8qK72K+mzORUdGaCtyQitoTWgrTFVnelpWUmVMaUkrdkJkTQ==,s=QUlyfBs1yq/9FTaaX8qJJQ==,i=4096"}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLResponse","Data":"c=biws,r=JgE3O/924uTgxI8qK72K+mzORUdGaCtyQitoTWgrTFVnelpWUmVMaUkrdkJkTQ==,p=krDfHKxfE02ZmWxAf704Lf2Yc3FqiMuDQzM23JA8zeg="}
+2026/03/23 10:48:20 PG Recv: {"Type":"ErrorResponse","Severity":"FATAL","SeverityUnlocalized":"FATAL","Code":"28P01","Message":"password authentication failed for user \"postgres\"","Detail":"","Hint":"","Position":0,"InternalPosition":0,"InternalQuery":"","Where":"","SchemaName":"","TableName":"","ColumnName":"","DataTypeName":"","ConstraintName":"","File":"","Line":0,"Routine":"","UnknownFields":null}
+2026/03/23 10:48:20 PG Send: {"Type":"StartupMessage","ProtocolVersion":196608,"Parameters":{"database":"postgres","user":"postgres.dcljzgjgnkmxdvhybvpt"}}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASL","AuthMechanisms":["SCRAM-SHA-256"]}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLInitialResponse","AuthMechanism":"SCRAM-SHA-256","Data":"n,,n=,r=zAhNPIkGbmAb1DLUKEx1I9Qt"}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASLContinue","Data":"r=zAhNPIkGbmAb1DLUKEx1I9QtRUlTMVVKbWZkOXdWUVg3L0ZZWGNnSGFCL2RkTA==,s=QUlyfBs1yq/9FTaaX8qJJQ==,i=4096"}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLResponse","Data":"c=biws,r=zAhNPIkGbmAb1DLUKEx1I9QtRUlTMVVKbWZkOXdWUVg3L0ZZWGNnSGFCL2RkTA==,p=QU5SOBpHT8WE1QppLuied0mv/a5H5YohtOaLEtQgS38="}
+2026/03/23 10:48:20 PG Recv: {"Type":"ErrorResponse","Severity":"FATAL","SeverityUnlocalized":"FATAL","Code":"28P01","Message":"password authentication failed for user \"postgres\"","Detail":"","Hint":"","Position":0,"InternalPosition":0,"InternalQuery":"","Where":"","SchemaName":"","TableName":"","ColumnName":"","DataTypeName":"","ConstraintName":"","File":"","Line":0,"Routine":"","UnknownFields":null}
+2026/03/23 10:48:20 PG Send: {"Type":"StartupMessage","ProtocolVersion":196608,"Parameters":{"database":"postgres","user":"postgres.dcljzgjgnkmxdvhybvpt"}}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASL","AuthMechanisms":["SCRAM-SHA-256"]}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLInitialResponse","AuthMechanism":"SCRAM-SHA-256","Data":"n,,n=,r=xOE8xnvjt9gC2rUwsxne2Gg4"}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASLContinue","Data":"r=xOE8xnvjt9gC2rUwsxne2Gg4RUw0Rm1hclhvQ1dPSHVMZjBlRXJxRXdCRVF1MFNBPT0=,s=QUlyfBs1yq/9FTaaX8qJJQ==,i=4096"}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLResponse","Data":"c=biws,r=xOE8xnvjt9gC2rUwsxne2Gg4RUw0Rm1hclhvQ1dPSHVMZjBlRXJxRXdCRVF1MFNBPT0=,p=reWVOQ0cxburc2tGKIaei4gDws8dQrlPppPrpiiqRS4="}
+2026/03/23 10:48:20 PG Recv: {"Type":"ErrorResponse","Severity":"FATAL","SeverityUnlocalized":"FATAL","Code":"28P01","Message":"password authentication failed for user \"postgres\"","Detail":"","Hint":"","Position":0,"InternalPosition":0,"InternalQuery":"","Where":"","SchemaName":"","TableName":"","ColumnName":"","DataTypeName":"","ConstraintName":"","File":"","Line":0,"Routine":"","UnknownFields":null}
+2026/03/23 10:48:20 PG Send: {"Type":"StartupMessage","ProtocolVersion":196608,"Parameters":{"database":"postgres","user":"postgres.dcljzgjgnkmxdvhybvpt"}}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASL","AuthMechanisms":["SCRAM-SHA-256"]}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLInitialResponse","AuthMechanism":"SCRAM-SHA-256","Data":"n,,n=,r=XFmtjIDk0zWXFzNOfvUqiufp"}
+2026/03/23 10:48:20 PG Recv: {"Type":"AuthenticationSASLContinue","Data":"r=XFmtjIDk0zWXFzNOfvUqiufpRUxLcGtSM2NnOVpIa2JScWpheFRCdno5WXNkRw==,s=QUlyfBs1yq/9FTaaX8qJJQ==,i=4096"}
+2026/03/23 10:48:20 PG Send: {"Type":"SASLResponse","Data":"c=biws,r=XFmtjIDk0zWXFzNOfvUqiufpRUxLcGtSM2NnOVpIa2JScWpheFRCdno5WXNkRw==,p=s6AN1yHOVS5wVjXqMoOCg05wKFowfakAEDZPy+fEHKE="}
+2026/03/23 10:48:20 PG Recv: {"Type":"ErrorResponse","Severity":"FATAL","SeverityUnlocalized":"FATAL","Code":"28P01","Message":"password authentication failed for user \"postgres\"","Detail":"","Hint":"","Position":0,"InternalPosition":0,"InternalQuery":"","Where":"","SchemaName":"","TableName":"","ColumnName":"","DataTypeName":"","ConstraintName":"","File":"","Line":0,"Routine":"","UnknownFields":null}
+failed to connect to postgres: failed to connect to `host=aws-1-sa-east-1.pooler.supabase.com user=postgres.dcljzgjgnkmxdvhybvpt database=postgres`: failed SASL auth (FATAL: password authentication failed for user "postgres" (SQLSTATE 28P01))
+```
+
+O que faço
+
+---
+
+Não deu, o que faço?
+```bash
+❯ supabase db push --db-url "postgresql://postgres:7zVeuK6aTzrkh71zhQs5cRFQLXdRZqCMsUvBehE7Q@db.dcljzgjgnkmxdvhybvpt.supabase.co:5432/postgres" --debug
+open /home/chico/.supabase/profile: no such file or directory
+Supabase CLI 2.83.0
+Using profile: supabase (supabase.co)
+Connecting to remote database...
+failed to connect to postgres: failed to connect to `host=db.dcljzgjgnkmxdvhybvpt.supabase.co user=postgres database=postgres`: dial error (dial tcp [2600:1f1e:75b:4b0d:2bdc:f15a:74e1:e364]:5432: connect: network is unreachable)
+╭─ ~/dev/Chico/seu.bolso.feliz  on feat/001-criacao-geral !6 ?12 ▓▒░·····················································································································░▒▓ 1 х  base Py  at 10:56:06 ─╮
+╰─                       
+```
+
+---
+
+Vamos prosseguir com o desenvolvimento conforme:
+- Conforme o planejado em (Fonte da verdade):
+   - #2026-03-22-23-54-refino-ciclo-ingestao-automacao-mcp-agentes.md (REFINO)
+   - #005-plano-faseado-ingestao-automacao-mcp-agentes.md (PLANO)
+   - #003-ciclo-ingestao-automacao-mcp-agentes.md (CHECKLIST)
+   - #002-configuracoes-manuais-ingestao-automacao-mcp.md (PASSO A PASSO)
+- Manter o #003-ciclo-ingestao-automacao-mcp-agentes.md preenchido, marcando o que já foi feito, o que falta, e os próximos passos claros.
+- Vamos fazer tudo no supabase local, conforme .env.local, para garantir que a gente tem controle total do ambiente, e para evitar qualquer risco de mexer no ambiente remoto antes de estar tudo testado e funcionando localmente.
+- Sigam as fases, no final preciso de um resumo
+  - do que foi feito
+  - o que eu preciso fazer
+  - o que será feito em seguida
+
+MÃOS A OBRA!
+
+---
+
+Criar conta/org no Vercel	vercel.com	✅
+Registrar domínio seubolsofeliz.com.br	registro.br	✅
+Criar projeto Supabase STAGING	supabase.com	✅
+Criar projeto Supabase PRODUCTION	supabase.com	✅
+Criar projeto no Google Cloud Console	console.cloud.google.com	✅
+Habilitar Gmail API + OAuth	GCP	✅
+
+Todos os dados estão no `.env` localizado na raiz do projeto, e com .gitignore ativo.
+Prosiga!
+
+---
+
+Resetei a senha de production e consegui configurar o auth do google em staging.
+Tente acessar agora, acredito que consiga continuar
+- Me explique, a worker local vai se comunicar com a staging ou com a production? 
+- Os testes para valer, vão ser feitos no localhost, staging ou production?
+
+Continue o desenvolvimento mas adiciona isso na explicação final 
+
+---
+
+Olhando o checklist :
+- Fase 1 - Fechamento Operacional e Prontidão de Ambientes
+  - Já fiz configuração do Vercel e já deixei os dados no `.env` para a gente usar localmente e para configurar o site, tem como interagir? tem mcp? se sim já configura o mcp.json para poder interagir
+  - DNS parqueado na Vercel ✅
+  - 1.16	Aplicar migrations em production já troquei a senha de prd, veja o que falta
+  - 1.21	Configurar variáveis protegidas por ambiente no GitLab ✅
+- Avalia o que falta em cada fase e veja o que dá para continuar, testar o que falhou na etapa anterior e seguir em frente! :)
+
+Conto com vocês!
+
+---
+
+- Olhando o Checklist:
+  - 1.2	Conectar repositório GitLab ao Vercel ✅
+  - 1.5	Configurar preview deployments por branch ✅  (Preview do Vercel ligado a branch Deployment)
+  - 3.5	Definir redirect URIs no Google Cloud Console ✅ Vide `Pasted Image`, se faltar avise
+  - 3.AA.7	CEO: adicionar redirect URIs no Google Cloud Console ✅ Vide `Pasted Image`, se faltar avise
+- Vejam o que dá para continuar do #003-ciclo-ingestao-automacao-mcp-agentes.md, sem perder o que já foi documentado pelos demais refinos e outros documentos que estão em `docs/`
+- Vamos continuar, estou louco para:
+  - Entrar na ferramenta com meu GMail
+  - entrar na fase de integração de Worker Local para fazer scan com o Gmail, com OpenAI e começar a dar pitaco de como o Worker local vai processar tudo, tem muita coisa que 
+Chamem o time e alinhem antes de continuar a codar para nada ficar solto ou sem planejamento, e para garantir que a gente esteja seguindo o que a Verônica pediu, e para garantir que a gente esteja documentando tudo direitinho, e para garantir que a gente esteja testando tudo localmente antes de promover para staging ou produção, e para garantir que a gente esteja usando o MCP local para interagir com o sistema, e para garantir que a gente esteja usando o GitLab e o Vercel da forma correta, e para garantir que a gente esteja seguindo as fases do planejamento dela, e para garantir que a gente esteja entregando o que ela pediu em cada fase, e para garantir que a gente esteja documentando tudo direitinho, e para garantir que a gente esteja testando tudo localmente antes de promover para staging ou produção.
+
+
+
+
 
 =======================================================
 TODO:

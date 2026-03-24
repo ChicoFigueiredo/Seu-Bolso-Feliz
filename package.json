@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "workers/*"
   ],
   "scripts": {
     "dev": "cd apps/web && bun run dev",
@@ -25,12 +26,14 @@
     "prepare": "command -v git >/dev/null 2>&1 && husky || true"
   },
   "devDependencies": {
-    "@sbf/domain": "workspace:*",
-    "@sbf/validation": "workspace:*",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
+    "@sbf/domain": "workspace:*",
+    "@sbf/validation": "workspace:*",
+    "@supabase/supabase-js": "^2.100.0",
     "@types/bun": "latest",
+    "@types/pdf-parse": "^1.1.5",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",

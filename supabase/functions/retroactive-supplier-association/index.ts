@@ -179,37 +179,24 @@ async function handleConfirm(
     });
   }
 
-  let updated = 0;
-  const errors: string[] = [];
+  // Confirm atômico via RPC PL/pgSQL (transação única)
+  const { data: result, error: rpcError } = await supabase.rpc(
+    "confirm_supplier_associations",
+    {
+      p_user_id: userId,
+      p_confirmations: confirmations,
+    },
+  );
 
-  for (const conf of confirmations) {
-    const { error } = await supabase
-      .from("transactions")
-      .update({ supplier_id: conf.supplier_id })
-      .eq("id", conf.transaction_id)
-      .eq("user_id", userId);
-
-    if (error) {
-      errors.push(`${conf.transaction_id}: ${error.message}`);
-    } else {
-      updated++;
-    }
+  if (rpcError) {
+    return new Response(
+      JSON.stringify({ error: "Confirmation failed", details: rpcError.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
-  // Registrar no audit_log
-  await supabase.from("audit_logs").insert({
-    user_id: userId,
-    action: "retroactive_supplier_association",
-    entity_type: "transaction",
-    details: {
-      total_confirmed: confirmations.length,
-      total_updated: updated,
-      errors: errors.length > 0 ? errors : undefined,
-    },
-  });
-
   return new Response(
-    JSON.stringify({ success: true, updated, errors: errors.length > 0 ? errors : undefined }),
+    JSON.stringify({ success: true, ...result }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 }
