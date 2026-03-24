@@ -23,6 +23,7 @@
     "db:migrate": "npx supabase db push",
     "db:reset": "npx supabase db reset",
     "html:docs": "rm -Rf docs-html/ && html-gen-docs --input docs --output docs-html --port 12468",
+    "get:gmail-token": "bun run workers/gmail-scanner/get-token.ts",
     "prepare": "command -v git >/dev/null 2>&1 && husky || true"
   },
   "devDependencies": {
