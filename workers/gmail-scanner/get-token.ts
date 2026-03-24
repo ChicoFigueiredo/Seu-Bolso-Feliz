@@ -63,6 +63,7 @@ console.log(`   ${authUrl}\n`);
 
 // Servidor HTTP temporário para capturar o callback
 const server = Bun.serve({
+  hostname: "127.0.0.1",
   port: REDIRECT_PORT,
 
   async fetch(req) {
