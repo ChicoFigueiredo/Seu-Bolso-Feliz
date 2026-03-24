@@ -3,10 +3,6 @@
  * Escaneia diretório local por documentos financeiros (PDF, CSV, imagens),
  * faz upload para Supabase Storage e cria source_documents + ingestion_jobs.
  */
-import { readdir, stat } from "node:fs/promises";
-import { join, extname, relative } from "node:path";
-import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin, IngestionLogLevel } from "@sbf/ingestion-types";
-import { buildOriginKey } from "@sbf/operations";
 import { getSupabaseClient } from "./supabase";
 
 export { scanDirectory } from "./scanner";
@@ -22,8 +18,12 @@ async function main(): Promise<void> {
   console.log(`[SCANNER] Local scanner starting — watching: ${WATCH_DIR}`);
   console.log(`[SCANNER] Scan interval: ${SCAN_INTERVAL_MS}ms`);
 
-  process.on("SIGTERM", () => { running = false; });
-  process.on("SIGINT", () => { running = false; });
+  process.on("SIGTERM", () => {
+    running = false;
+  });
+  process.on("SIGINT", () => {
+    running = false;
+  });
 
   while (running) {
     try {

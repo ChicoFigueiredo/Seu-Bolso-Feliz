@@ -48,8 +48,8 @@ export function parseBoleto(text: string): BoletoExtractionResult {
 
   // ── Vencimento ──
   const vencMatch =
-    text.match(/VENCIMENTO[:\s]*(\d{2})[\/\-](\d{2})[\/\-](\d{4})/i) ??
-    text.match(/DATA\s+(?:DE\s+)?VENCIMENTO[:\s]*(\d{2})[\/\-](\d{2})[\/\-](\d{4})/i);
+    text.match(/VENCIMENTO[:\s]*(\d{2})[/-](\d{2})[/-](\d{4})/i) ??
+    text.match(/DATA\s+(?:DE\s+)?VENCIMENTO[:\s]*(\d{2})[/-](\d{2})[/-](\d{4})/i);
   if (vencMatch) {
     result.dueDate = `${vencMatch[3]}-${vencMatch[2]}-${vencMatch[1]}`;
     hits++;
@@ -57,8 +57,8 @@ export function parseBoleto(text: string): BoletoExtractionResult {
 
   // ── Competência ──
   const compMatch =
-    text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA|PER[IÍ]ODO)[:\s]*(\d{2})[\/\-](\d{4})/i) ??
-    text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA)[:\s]*(\d{2})[\/\-](\d{2})[\/\-](\d{4})/i);
+    text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA|PER[IÍ]ODO)[:\s]*(\d{2})[/-](\d{4})/i) ??
+    text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA)[:\s]*(\d{2})[/-](\d{2})[/-](\d{4})/i);
   if (compMatch) {
     if (compMatch[3]) {
       // DD/MM/YYYY
@@ -71,15 +71,16 @@ export function parseBoleto(text: string): BoletoExtractionResult {
   }
 
   // ── CNPJ ──
-  const cnpjMatch = text.match(/(?:CNPJ)[:\s]*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}\-?\d{2})/i);
+  const cnpjMatch = text.match(/(?:CNPJ)[:\s]*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
   if (cnpjMatch) {
-    result.supplierCnpj = cnpjMatch[1]!.replace(/[.\-\/]/g, "");
+    result.supplierCnpj = cnpjMatch[1]!.replace(/[.\-/]/g, "");
     hits++;
   }
 
   // ── Nome do cedente/beneficiário ──
-  const cedenteMatch =
-    text.match(/(?:CEDENTE|BENEFICI[AÁ]RIO)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i);
+  const cedenteMatch = text.match(
+    /(?:CEDENTE|BENEFICI[AÁ]RIO)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i,
+  );
   if (cedenteMatch) {
     result.supplierNameRaw = cedenteMatch[1]!.trim();
   }

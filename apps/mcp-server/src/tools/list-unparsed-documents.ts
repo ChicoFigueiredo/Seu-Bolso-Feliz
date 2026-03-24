@@ -33,14 +33,16 @@ export async function listUnparsedDocuments(
 
   const { data, error } = await supabase
     .from("ingestion_jobs")
-    .select(`
+    .select(
+      `
       id,
       source_document_id,
       status,
       error_message,
       created_at,
       source_documents!inner(filename)
-    `)
+    `,
+    )
     .eq("user_id", userId)
     .in("status", statuses)
     .order("created_at", { ascending: false })
@@ -48,6 +50,7 @@ export async function listUnparsedDocuments(
 
   if (error || !data) return [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return data.map((row: any) => ({
     job_id: row.id,
     document_id: row.source_document_id,

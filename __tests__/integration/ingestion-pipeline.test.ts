@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Testes de integração: Pipeline de Ingestão
  *
@@ -15,15 +16,15 @@ import { join } from "node:path";
 import { scanDirectory } from "../../workers/local-scanner/src/scanner";
 import { processJob } from "../../workers/ingestion/src/processor";
 import { IngestionJobStatus, IngestionRunStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
-import { computeContentHash, computeCanonicalFingerprint } from "@sbf/operations";
 
 // ══════════════════════════════════════════════════════════════
 // Setup: Supabase local (service_role) + diretório temp
 // ══════════════════════════════════════════════════════════════
 
 const SUPABASE_URL = "http://127.0.0.1:54321";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-  ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const SUPABASE_SERVICE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
 const TEST_USER_ID = "00000000-0000-0000-0000-000000000001";
 const INBOX_DIR = join(process.cwd(), "__tests__/integration/.test-inbox");
 
@@ -38,18 +39,20 @@ beforeAll(async () => {
   process.env.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_KEY;
 
   // Garantir que o user existe no auth (necessário para RLS/FK)
-  await supabase.auth.admin.createUser({
-    email: "test-ingestion@sbf.local",
-    password: "TestPass123!",
-    user_metadata: { name: "Test Ingestion" },
-    email_confirm: true,
-  }).catch(() => {
-    // Ignora se o user já existir
-  });
+  await supabase.auth.admin
+    .createUser({
+      email: "test-ingestion@sbf.local",
+      password: "TestPass123!",
+      user_metadata: { name: "Test Ingestion" },
+      email_confirm: true,
+    })
+    .catch(() => {
+      // Ignora se o user já existir
+    });
 
   // Buscar o user real criado (o ID pode não ser o nosso TEST_USER_ID)
   const { data: users } = await supabase.auth.admin.listUsers();
-  const testUser = users?.users?.find(u => u.email === "test-ingestion@sbf.local");
+  const testUser = users?.users?.find((u) => u.email === "test-ingestion@sbf.local");
   if (testUser) {
     process.env.LOCAL_USER_ID = testUser.id;
   }
@@ -79,7 +82,7 @@ afterAll(async () => {
         .from("ingestion-originals")
         .list(`${userId}/${folder.name}`);
       if (inner?.length) {
-        const paths = inner.map(f => `${userId}/${folder.name}/${f.name}`);
+        const paths = inner.map((f) => `${userId}/${folder.name}/${f.name}`);
         await supabase.storage.from("ingestion-originals").remove(paths);
       }
     }
@@ -220,13 +223,18 @@ describe("2.27: Scanner → Worker → Banco (fluxo integrado)", () => {
     expect(logs.length).toBeGreaterThanOrEqual(2);
     const messages = logs.map((l: any) => l.message);
     expect(messages.some((m: string) => m.includes("Downloaded"))).toBe(true);
-    expect(messages.some((m: string) => m.includes("queued") || m.includes("proceeding"))).toBe(true);
+    expect(messages.some((m: string) => m.includes("queued") || m.includes("proceeding"))).toBe(
+      true,
+    );
   });
 
   it("escaneia múltiplos arquivos e cria jobs independentes", async () => {
     const userId = process.env.LOCAL_USER_ID!;
     await createTestFile("fatura-nubank.csv", "Fatura Nubank Abril 2026 R$1.200,00");
-    await createTestFile("boleto-internet.csv", "Boleto Vivo Internet R$99,90 Vencimento 15/04/2026");
+    await createTestFile(
+      "boleto-internet.csv",
+      "Boleto Vivo Internet R$99,90 Vencimento 15/04/2026",
+    );
 
     const discovered = await scanDirectory(supabase, INBOX_DIR);
     expect(discovered).toBe(2);
@@ -253,7 +261,9 @@ describe("2.27: Scanner → Worker → Banco (fluxo integrado)", () => {
     }
 
     const updatedJobs = await getJobs(userId);
-    expect(updatedJobs.every((j: any) => j.status === IngestionJobStatus.PENDING_REVIEW)).toBe(true);
+    expect(updatedJobs.every((j: any) => j.status === IngestionJobStatus.PENDING_REVIEW)).toBe(
+      true,
+    );
 
     const fps = await getFingerprints(userId);
     expect(fps).toHaveLength(2);
@@ -442,7 +452,7 @@ describe("2.29: Reprocessamento forçado", () => {
     await createTestFile("retry-test.csv", "Documento de retry");
     await scanDirectory(supabase, INBOX_DIR);
 
-    let jobs = await getJobs(userId);
+    const jobs = await getJobs(userId);
     const jobId = jobs[0]!.id;
 
     // Simular falha manual
@@ -576,10 +586,7 @@ describe("4.17: Drafts não poluem ledger principal", () => {
     expect(updatedJobs[0]!.status).toBe(IngestionJobStatus.PENDING_REVIEW);
 
     // Draft_records devem existir
-    const { data: drafts } = await supabase
-      .from("draft_records")
-      .select("*")
-      .eq("user_id", userId);
+    const { data: drafts } = await supabase.from("draft_records").select("*").eq("user_id", userId);
     expect(drafts!.length).toBeGreaterThanOrEqual(1);
     expect(drafts![0]!.status).toBe("pending_review");
 
@@ -619,10 +626,7 @@ describe("4.18: Baixa confiança vai para revisão", () => {
     expect(updatedJobs[0]!.status).toBe(IngestionJobStatus.PENDING_REVIEW);
 
     // Verificar draft_records status e confiança
-    const { data: drafts } = await supabase
-      .from("draft_records")
-      .select("*")
-      .eq("user_id", userId);
+    const { data: drafts } = await supabase.from("draft_records").select("*").eq("user_id", userId);
 
     expect(drafts!.length).toBeGreaterThanOrEqual(1);
     expect(drafts![0]!.status).toBe("pending_review");

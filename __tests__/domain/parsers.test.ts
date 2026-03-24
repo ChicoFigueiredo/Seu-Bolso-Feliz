@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { isCemig, parseCemig } from "../../workers/ingestion/src/parsers/cemig-parser";
 import { parseBoleto } from "../../workers/ingestion/src/parsers/boleto-parser";
-import { extractText, PdfPasswordRequiredError } from "../../workers/ingestion/src/parsers/text-extractor";
+import { extractText } from "../../workers/ingestion/src/parsers/text-extractor";
 
 // ══════════════════════════════════════════════════════════════
 // 4.4 — Parser CEMIG

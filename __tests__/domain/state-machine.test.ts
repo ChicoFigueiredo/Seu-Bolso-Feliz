@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { isValidTransition, getValidNextStates } from "../../workers/ingestion/src/state-machine";
-import { IngestionJobStatus } from "@sbf/ingestion-types";
+import { IngestionJobStatus, type IngestionJobStatus as JobStatus } from "@sbf/ingestion-types";
 
 const S = IngestionJobStatus;
 
@@ -24,19 +24,27 @@ describe("isValidTransition", () => {
     ];
 
     it.each(happyPath)("%s → %s é válida", (from, to) => {
-      expect(isValidTransition(from as any, to as any)).toBe(true);
+      expect(isValidTransition(from as JobStatus, to as JobStatus)).toBe(true);
     });
   });
 
   describe("qualquer estado pode ir para FAILED", () => {
     const allButPosted = [
-      S.DISCOVERED, S.DOWNLOADED, S.HASHED, S.QUEUED,
-      S.PARSING, S.PARSED, S.CLASSIFIED, S.RECONCILED,
-      S.DRAFTED, S.PENDING_REVIEW, S.APPROVED,
+      S.DISCOVERED,
+      S.DOWNLOADED,
+      S.HASHED,
+      S.QUEUED,
+      S.PARSING,
+      S.PARSED,
+      S.CLASSIFIED,
+      S.RECONCILED,
+      S.DRAFTED,
+      S.PENDING_REVIEW,
+      S.APPROVED,
     ];
 
     it.each(allButPosted)("%s → FAILED é válida", (from) => {
-      expect(isValidTransition(from as any, S.FAILED)).toBe(true);
+      expect(isValidTransition(from as JobStatus, S.FAILED)).toBe(true);
     });
   });
 
@@ -44,7 +52,7 @@ describe("isValidTransition", () => {
     const allStates = Object.values(S);
 
     it.each(allStates)("POSTED → %s é inválida", (to) => {
-      expect(isValidTransition(S.POSTED, to as any)).toBe(false);
+      expect(isValidTransition(S.POSTED, to as JobStatus)).toBe(false);
     });
   });
 
@@ -59,7 +67,7 @@ describe("isValidTransition", () => {
     ];
 
     it.each(invalid)("%s → %s é inválida", (from, to) => {
-      expect(isValidTransition(from as any, to as any)).toBe(false);
+      expect(isValidTransition(from as JobStatus, to as JobStatus)).toBe(false);
     });
   });
 

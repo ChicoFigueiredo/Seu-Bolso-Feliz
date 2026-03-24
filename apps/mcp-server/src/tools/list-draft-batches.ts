@@ -30,14 +30,16 @@ export async function listDraftBatches(
 
   const { data: batches, error } = await supabase
     .from("draft_batches")
-    .select(`
+    .select(
+      `
       id,
       status,
       source_document_id,
       created_at,
       source_documents(filename),
       draft_records(id, record_type, status, confidence, payload)
-    `)
+    `,
+    )
     .eq("user_id", userId)
     .eq("status", status)
     .order("created_at", { ascending: false })
@@ -45,12 +47,14 @@ export async function listDraftBatches(
 
   if (error || !batches) return [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return batches.map((b: any) => ({
     id: b.id,
     status: b.status,
     draft_count: b.draft_records?.length ?? 0,
     source_document_filename: b.source_documents?.filename ?? null,
     created_at: b.created_at,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     drafts: (b.draft_records ?? []).map((d: any) => ({
       id: d.id,
       record_type: d.record_type,

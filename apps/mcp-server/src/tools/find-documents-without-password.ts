@@ -19,20 +19,25 @@ export async function findDocumentsWithoutPassword(
 ): Promise<PasswordlessDocument[]> {
   const { data, error } = await supabase
     .from("ingestion_jobs")
-    .select(`
+    .select(
+      `
       id,
       source_document_id,
       error_message,
       created_at,
       source_documents!inner(filename)
-    `)
+    `,
+    )
     .eq("user_id", userId)
     .eq("status", IngestionJobStatus.FAILED)
-    .or("error_message.ilike.%password%,error_message.ilike.%encrypted%,error_message.ilike.%protected%")
+    .or(
+      "error_message.ilike.%password%,error_message.ilike.%encrypted%,error_message.ilike.%protected%",
+    )
     .order("created_at", { ascending: false });
 
   if (error || !data) return [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return data.map((row: any) => ({
     job_id: row.id,
     document_id: row.source_document_id,

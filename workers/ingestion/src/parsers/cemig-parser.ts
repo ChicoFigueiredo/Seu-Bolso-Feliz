@@ -13,26 +13,44 @@
 
 export interface CemigExtractionResult {
   supplierNameRaw: string;
-  competenceDate: string | null;      // YYYY-MM-DD
-  dueDate: string | null;             // YYYY-MM-DD
+  competenceDate: string | null; // YYYY-MM-DD
+  dueDate: string | null; // YYYY-MM-DD
   totalAmount: number | null;
   documentNumber: string | null;
-  contractIdentifier: string | null;  // Unidade Consumidora (UC)
+  contractIdentifier: string | null; // Unidade Consumidora (UC)
   consumption: {
     kwh: number | null;
     days: number | null;
   };
   confidence: number;
-  breakdown: Record<string, number>;  // Itens da fatura
+  breakdown: Record<string, number>; // Itens da fatura
 }
 
 const MONTH_MAP: Record<string, string> = {
-  JAN: "01", FEV: "02", MAR: "03", ABR: "04",
-  MAI: "05", JUN: "06", JUL: "07", AGO: "08",
-  SET: "09", OUT: "10", NOV: "11", DEZ: "12",
-  JANEIRO: "01", FEVEREIRO: "02", MARÇO: "03", ABRIL: "04",
-  MAIO: "05", JUNHO: "06", JULHO: "07", AGOSTO: "08",
-  SETEMBRO: "09", OUTUBRO: "10", NOVEMBRO: "11", DEZEMBRO: "12",
+  JAN: "01",
+  FEV: "02",
+  MAR: "03",
+  ABR: "04",
+  MAI: "05",
+  JUN: "06",
+  JUL: "07",
+  AGO: "08",
+  SET: "09",
+  OUT: "10",
+  NOV: "11",
+  DEZ: "12",
+  JANEIRO: "01",
+  FEVEREIRO: "02",
+  MARÇO: "03",
+  ABRIL: "04",
+  MAIO: "05",
+  JUNHO: "06",
+  JULHO: "07",
+  AGOSTO: "08",
+  SETEMBRO: "09",
+  OUTUBRO: "10",
+  NOVEMBRO: "11",
+  DEZEMBRO: "12",
 };
 
 /** Verifica se o texto parece ser uma conta da CEMIG */
@@ -64,8 +82,9 @@ export function parseCemig(text: string): CemigExtractionResult {
 
   // ── Competência (mês de referência) ──
   const compMatch =
-    text.match(/(?:M[EÊ]S\s+(?:REF(?:ER[EÊ]NCIA)?|COMPETÊNCIA))[:\s]*([A-ZÀ-ÖØ-öø-ÿ]+)[\/\s]*(\d{4})/i) ??
-    text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA)[:\s]*([A-ZÀ-ÖØ-öø-ÿ]+)[\/\s]*(\d{4})/i);
+    text.match(
+      /(?:M[EÊ]S\s+(?:REF(?:ER[EÊ]NCIA)?|COMPETÊNCIA))[:\s]*([A-ZÀ-ÖØ-öø-ÿ]+)[/\s]*(\d{4})/i,
+    ) ?? text.match(/(?:REFER[EÊ]NCIA|COMPETÊNCIA)[:\s]*([A-ZÀ-ÖØ-öø-ÿ]+)[/\s]*(\d{4})/i);
   if (compMatch) {
     const month = MONTH_MAP[compMatch[1]!.toUpperCase()];
     if (month) {
@@ -76,8 +95,8 @@ export function parseCemig(text: string): CemigExtractionResult {
 
   // ── Vencimento ──
   const vencMatch =
-    text.match(/VENCIMENTO[:\s]*(\d{2})[\/\-](\d{2})[\/\-](\d{4})/i) ??
-    text.match(/DATA\s+(?:DE\s+)?VENCIMENTO[:\s]*(\d{2})[\/\-](\d{2})[\/\-](\d{4})/i);
+    text.match(/VENCIMENTO[:\s]*(\d{2})[/-](\d{2})[/-](\d{4})/i) ??
+    text.match(/DATA\s+(?:DE\s+)?VENCIMENTO[:\s]*(\d{2})[/-](\d{2})[/-](\d{4})/i);
   if (vencMatch) {
     result.dueDate = `${vencMatch[3]}-${vencMatch[2]}-${vencMatch[1]}`;
     hits++;
@@ -112,9 +131,7 @@ export function parseCemig(text: string): CemigExtractionResult {
   }
 
   // ── Consumo (kWh) ──
-  const kwhMatch =
-    text.match(/CONSUMO[:\s]*([\d.,]+)\s*kWh/i) ??
-    text.match(/([\d.,]+)\s*kWh/i);
+  const kwhMatch = text.match(/CONSUMO[:\s]*([\d.,]+)\s*kWh/i) ?? text.match(/([\d.,]+)\s*kWh/i);
   if (kwhMatch) {
     const kwh = parseFloat(kwhMatch[1]!.replace(",", "."));
     if (!isNaN(kwh)) {
@@ -130,7 +147,8 @@ export function parseCemig(text: string): CemigExtractionResult {
   }
 
   // ── Breakdown: itens da fatura ──
-  const itemPattern = /(?:ENERGIA|ILUMINAÇÃO|BANDEIRA|CIP|COSIP|ICMS|PIS|COFINS|CONTRIB)[^:]*[:\s]*R?\$?\s*([\d.,]+)/gi;
+  const itemPattern =
+    /(?:ENERGIA|ILUMINAÇÃO|BANDEIRA|CIP|COSIP|ICMS|PIS|COFINS|CONTRIB)[^:]*[:\s]*R?\$?\s*([\d.,]+)/gi;
   let itemMatch: RegExpExecArray | null;
   while ((itemMatch = itemPattern.exec(text)) !== null) {
     const label = itemMatch[0]!.split(/[:\s]*R?\$?/)[0]!.trim();

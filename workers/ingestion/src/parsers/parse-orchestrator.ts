@@ -4,11 +4,8 @@
  * Implementa os itens 4.1-4.7 do checklist.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { IngestionJobStatus, IngestionLogLevel, ParserType } from "@sbf/ingestion-types";
-import {
-  extractText,
-  PdfPasswordRequiredError,
-} from "./text-extractor";
+import { IngestionLogLevel, ParserType } from "@sbf/ingestion-types";
+import { extractText, PdfPasswordRequiredError } from "./text-extractor";
 import { findPdfPassword } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
@@ -38,13 +35,16 @@ export interface ParseResult {
  * 4. Parsing e extração estruturada
  * 5. Persistência em parsed_document_versions + extraction_results
  */
-export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): Promise<ParseResult> {
+export async function parseDocument(
+  pctx: ParseContext,
+  fileData: ArrayBuffer,
+): Promise<ParseResult> {
   const { supabase, ctx, userId, sourceDocumentId, mimeType } = pctx;
 
   // ── 1. Extração de texto ──
   let text: string;
   let pages: number;
-  let wasProtected = false;
+  let wasProtected: boolean;
 
   try {
     const result = await extractText(fileData, mimeType);
@@ -57,7 +57,12 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
 
       const secret = await findPdfPassword(supabase, userId);
       if (!secret) {
-        await writeLog(supabase, ctx, IngestionLogLevel.WARN, "Sem senha encontrada para PDF protegido");
+        await writeLog(
+          supabase,
+          ctx,
+          IngestionLogLevel.WARN,
+          "Sem senha encontrada para PDF protegido",
+        );
         return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
       }
 
@@ -75,8 +80,12 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
     return saveRawOnlyVersion(pctx, "", pages ?? 0, ParserType.LOCAL_TEXT, 0);
   }
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
-    `Texto extraído: ${text.length} chars, ${pages} páginas${wasProtected ? " (PDF protegido)" : ""}`);
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
+    `Texto extraído: ${text.length} chars, ${pages} páginas${wasProtected ? " (PDF protegido)" : ""}`,
+  );
 
   // ── 2. Detecção de parser e extração ──
   let parserType = ParserType.LOCAL_TEXT;
@@ -88,8 +97,12 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
     const cemigResult = parseCemig(text);
     extractionData = cemigResult as unknown as Record<string, unknown>;
     confidence = cemigResult.confidence;
-    await writeLog(supabase, ctx, IngestionLogLevel.INFO,
-      `Parser CEMIG detectado (confiança: ${(confidence * 100).toFixed(0)}%)`);
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      `Parser CEMIG detectado (confiança: ${(confidence * 100).toFixed(0)}%)`,
+    );
   } else {
     // Tentar parser genérico de boleto
     const boletoResult = parseBoleto(text);
@@ -97,8 +110,12 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
       parserType = ParserType.LOCAL_REGEX;
       extractionData = boletoResult as unknown as Record<string, unknown>;
       confidence = boletoResult.confidence;
-      await writeLog(supabase, ctx, IngestionLogLevel.INFO,
-        `Parser boleto genérico (confiança: ${(confidence * 100).toFixed(0)}%)`);
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.INFO,
+        `Parser boleto genérico (confiança: ${(confidence * 100).toFixed(0)}%)`,
+      );
     }
   }
 
@@ -134,8 +151,12 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
     .single();
 
   if (pvError || !parsedVersion) {
-    await writeLog(supabase, ctx, IngestionLogLevel.ERROR,
-      `Falha ao salvar parsed_version: ${pvError?.message}`);
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.ERROR,
+      `Falha ao salvar parsed_version: ${pvError?.message}`,
+    );
     throw new Error(`Falha ao salvar parsed_version: ${pvError?.message}`);
   }
 
@@ -170,15 +191,23 @@ export async function parseDocument(pctx: ParseContext, fileData: ArrayBuffer): 
       .single();
 
     if (exError) {
-      await writeLog(supabase, ctx, IngestionLogLevel.WARN,
-        `Falha ao salvar extraction_result: ${exError.message}`);
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.WARN,
+        `Falha ao salvar extraction_result: ${exError.message}`,
+      );
     } else {
       extractionResultId = exResult?.id ?? null;
     }
   }
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
-    `Parsing v${versionNumber} concluído: ${parserType}, confiança ${(confidence * 100).toFixed(0)}%`);
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
+    `Parsing v${versionNumber} concluído: ${parserType}, confiança ${(confidence * 100).toFixed(0)}%`,
+  );
 
   return {
     parsedVersionId,
@@ -237,13 +266,28 @@ async function saveRawOnlyVersion(
 
 function suggestCategory(data: Record<string, unknown>): string | null {
   const name = ((data.supplierNameRaw as string) ?? "").toUpperCase();
-  if (name.includes("CEMIG") || name.includes("CPFL") || name.includes("ENEL") || name.includes("ENERGI")) {
+  if (
+    name.includes("CEMIG") ||
+    name.includes("CPFL") ||
+    name.includes("ENEL") ||
+    name.includes("ENERGI")
+  ) {
     return "energia_eletrica";
   }
-  if (name.includes("COPASA") || name.includes("SABESP") || name.includes("SANEPAR") || name.includes("ÁGUA")) {
+  if (
+    name.includes("COPASA") ||
+    name.includes("SABESP") ||
+    name.includes("SANEPAR") ||
+    name.includes("ÁGUA")
+  ) {
     return "agua_saneamento";
   }
-  if (name.includes("VIVO") || name.includes("CLARO") || name.includes("TIM") || name.includes("OI ")) {
+  if (
+    name.includes("VIVO") ||
+    name.includes("CLARO") ||
+    name.includes("TIM") ||
+    name.includes("OI ")
+  ) {
     return "telecomunicacoes";
   }
   return null;

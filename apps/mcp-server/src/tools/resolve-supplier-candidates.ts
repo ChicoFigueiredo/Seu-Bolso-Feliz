@@ -31,6 +31,7 @@ export async function resolveSupplierCandidates(
 
     if (data) {
       results.push(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...data.map((s: any) => ({
           ...s,
           match_type: "exact_cnpj" as const,
@@ -53,7 +54,9 @@ export async function resolveSupplierCandidates(
       const existingIds = new Set(results.map((r) => r.id));
       results.push(
         ...data
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .filter((s: any) => !existingIds.has(s.id))
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((s: any) => ({
             ...s,
             match_type: "name_similarity" as const,

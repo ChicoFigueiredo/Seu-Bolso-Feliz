@@ -32,7 +32,7 @@ async function transitionJob(
   to: string,
   extra?: Record<string, unknown>,
 ): Promise<boolean> {
-  if (!isValidTransition(from as any, to as any)) {
+  if (!isValidTransition(from as IngestionJobStatus, to as IngestionJobStatus)) {
     console.error(`Invalid transition: ${from} → ${to}`);
     return false;
   }
@@ -105,7 +105,12 @@ async function stepDownload(
   }
 
   const arrayBuffer = await blob.arrayBuffer();
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO, `Downloaded ${doc.filename} (${arrayBuffer.byteLength} bytes)`);
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
+    `Downloaded ${doc.filename} (${arrayBuffer.byteLength} bytes)`,
+  );
   return { data: arrayBuffer, mimeType: doc.mime_type };
 }
 
@@ -170,7 +175,9 @@ async function stepHash(
     },
     {
       byContentHash: matchByHash ? { sourceDocumentId: matchByHash.source_document_id } : undefined,
-      byCanonicalFingerprint: matchByFP ? { sourceDocumentId: matchByFP.source_document_id } : undefined,
+      byCanonicalFingerprint: matchByFP
+        ? { sourceDocumentId: matchByFP.source_document_id }
+        : undefined,
       byOriginKey: undefined,
     },
   );
@@ -190,17 +197,18 @@ async function stepHash(
  * Step: parse — extrai texto e dados estruturados do documento.
  * Transição: queued → parsing → parsed.
  */
-async function stepParse(
-  supabase: SupabaseClient,
-  ctx: LogContext,
-  job: JobRow,
-): Promise<void> {
+async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow): Promise<void> {
   if (!job.source_document_id) {
     throw new Error("Job without source_document_id cannot parse");
   }
 
   // Transition queued → parsing
-  const ok = await transitionJob(supabase, job.id, IngestionJobStatus.QUEUED, IngestionJobStatus.PARSING);
+  const ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.QUEUED,
+    IngestionJobStatus.PARSING,
+  );
   if (!ok) return;
   job.status = IngestionJobStatus.PARSING;
 
@@ -225,19 +233,23 @@ async function stepParse(
   }
 
   const fileData = await blob.arrayBuffer();
-  const mimeType = (job.metadata as Record<string, unknown>)?.mime_type as string
-    ?? doc.mime_type
-    ?? "application/octet-stream";
+  const mimeType =
+    ((job.metadata as Record<string, unknown>)?.mime_type as string) ??
+    doc.mime_type ??
+    "application/octet-stream";
 
   await writeLog(supabase, ctx, IngestionLogLevel.INFO, `Parsing ${doc.filename} (${mimeType})`);
 
-  const result = await parseDocument({
-    supabase,
-    ctx,
-    userId: ctx.userId,
-    sourceDocumentId: job.source_document_id,
-    mimeType,
-  }, fileData);
+  const result = await parseDocument(
+    {
+      supabase,
+      ctx,
+      userId: ctx.userId,
+      sourceDocumentId: job.source_document_id,
+      mimeType,
+    },
+    fileData,
+  );
 
   // Transition parsing → parsed
   await transitionJob(supabase, job.id, IngestionJobStatus.PARSING, IngestionJobStatus.PARSED, {
@@ -250,7 +262,10 @@ async function stepParse(
     },
   });
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
     `Parsed with ${result.parserType} (confidence: ${result.confidence})`,
     { parsedVersionId: result.parsedVersionId, extractionResultId: result.extractionResultId },
   );
@@ -270,11 +285,7 @@ async function stepParse(
  * Transições: parsed → classified → reconciled → drafted → pending_review.
  * No MVP, classify e reconcile são passthrough automáticos.
  */
-async function stepDraft(
-  supabase: SupabaseClient,
-  ctx: LogContext,
-  job: JobRow,
-): Promise<void> {
+async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow): Promise<void> {
   if (!job.source_document_id) {
     throw new Error("Job without source_document_id cannot generate drafts");
   }
@@ -282,16 +293,28 @@ async function stepDraft(
   const meta = job.metadata as Record<string, unknown>;
 
   // parsed → classified (auto: determinado pelo tipo de extração)
-  let ok = await transitionJob(supabase, job.id, IngestionJobStatus.PARSED, IngestionJobStatus.CLASSIFIED, {
-    metadata: { ...meta, classified_at: new Date().toISOString() },
-  });
+  let ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.PARSED,
+    IngestionJobStatus.CLASSIFIED,
+    {
+      metadata: { ...meta, classified_at: new Date().toISOString() },
+    },
+  );
   if (!ok) return;
   job.status = IngestionJobStatus.CLASSIFIED;
 
   // classified → reconciled (MVP: passthrough, sem conflitos)
-  ok = await transitionJob(supabase, job.id, IngestionJobStatus.CLASSIFIED, IngestionJobStatus.RECONCILED, {
-    metadata: { ...meta, reconciled_at: new Date().toISOString(), reconcile_conflicts: 0 },
-  });
+  ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.CLASSIFIED,
+    IngestionJobStatus.RECONCILED,
+    {
+      metadata: { ...meta, reconciled_at: new Date().toISOString(), reconcile_conflicts: 0 },
+    },
+  );
   if (!ok) return;
   job.status = IngestionJobStatus.RECONCILED;
 
@@ -304,26 +327,40 @@ async function stepDraft(
     extractionResultId: meta.extraction_result_id as string | null,
     parsedVersionId: meta.parsed_version_id as string,
     parserType: meta.parser_type as string,
-    confidence: meta.confidence as number ?? 0.3,
+    confidence: (meta.confidence as number) ?? 0.3,
   });
 
-  ok = await transitionJob(supabase, job.id, IngestionJobStatus.RECONCILED, IngestionJobStatus.DRAFTED, {
-    metadata: {
-      ...meta,
-      batch_id: result.batchId,
-      draft_count: result.drafts.length,
-      draft_ids: result.drafts.map(d => d.id),
+  ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.RECONCILED,
+    IngestionJobStatus.DRAFTED,
+    {
+      metadata: {
+        ...meta,
+        batch_id: result.batchId,
+        draft_count: result.drafts.length,
+        draft_ids: result.drafts.map((d) => d.id),
+      },
     },
-  });
+  );
   if (!ok) return;
   job.status = IngestionJobStatus.DRAFTED;
 
   // drafted → pending_review
-  ok = await transitionJob(supabase, job.id, IngestionJobStatus.DRAFTED, IngestionJobStatus.PENDING_REVIEW);
+  ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.DRAFTED,
+    IngestionJobStatus.PENDING_REVIEW,
+  );
   if (!ok) return;
   job.status = IngestionJobStatus.PENDING_REVIEW;
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
     `Drafts gerados e aguardando revisão (batch: ${result.batchId}, ${result.drafts.length} drafts)`,
   );
 }
@@ -346,17 +383,33 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
       const file = await stepDownload(supabase, ctx, job);
       if (!file) return;
 
-      const ok = await transitionJob(supabase, job.id, IngestionJobStatus.DISCOVERED, IngestionJobStatus.DOWNLOADED, {
-        metadata: { ...(job.metadata ?? {}), file_size: file.data.byteLength, mime_type: file.mimeType },
-      });
+      const ok = await transitionJob(
+        supabase,
+        job.id,
+        IngestionJobStatus.DISCOVERED,
+        IngestionJobStatus.DOWNLOADED,
+        {
+          metadata: {
+            ...(job.metadata ?? {}),
+            file_size: file.data.byteLength,
+            mime_type: file.mimeType,
+          },
+        },
+      );
       if (!ok) return;
       job.status = IngestionJobStatus.DOWNLOADED;
-      job.metadata = { ...(job.metadata ?? {}), file_size: file.data.byteLength, mime_type: file.mimeType };
+      job.metadata = {
+        ...(job.metadata ?? {}),
+        file_size: file.data.byteLength,
+        mime_type: file.mimeType,
+      };
 
       // Step 2: downloaded → hashed
       const hashResult = await stepHash(supabase, ctx, job, file.data);
 
-      const nextStatus = hashResult.shouldProceed ? IngestionJobStatus.HASHED : IngestionJobStatus.FAILED;
+      const nextStatus = hashResult.shouldProceed
+        ? IngestionJobStatus.HASHED
+        : IngestionJobStatus.FAILED;
       const extraData = hashResult.shouldProceed
         ? { metadata: { ...(job.metadata ?? {}), content_hash: hashResult.contentHash } }
         : { error_message: "Duplicate document detected" };
