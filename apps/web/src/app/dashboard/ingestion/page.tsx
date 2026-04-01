@@ -116,9 +116,17 @@ export default async function IngestionPage() {
 
       {/* Recent Documents */}
       <Card>
-        <CardHeader>
-          <CardTitle>Documentos Recentes</CardTitle>
-          <CardDescription>{recentDocs.length} documento(s) mais recentes</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Documentos Recentes</CardTitle>
+            <CardDescription>{recentDocs.length} documento(s) mais recentes</CardDescription>
+          </div>
+          <Link
+            href="/dashboard/ingestion/documents"
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Ver todos →
+          </Link>
         </CardHeader>
         <CardContent className="p-0">
           {recentDocs.length === 0 ? (
@@ -138,12 +146,14 @@ export default async function IngestionPage() {
               </TableHeader>
               <TableBody>
                 {recentDocs.map((doc) => (
-                  <TableRow key={doc.id}>
+                  <TableRow key={doc.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell className="max-w-[200px] truncate font-medium">
-                      {doc.filename}
+                      <Link href={`/dashboard/ingestion/documents/${doc.id}`}>{doc.filename}</Link>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {doc.gmail_from ?? doc.storage_path ?? "—"}
+                      <span className="capitalize">
+                        {doc.origin_type?.replace("_", " ") ?? "—"}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={doc.status ?? ""} className="text-xs" />
