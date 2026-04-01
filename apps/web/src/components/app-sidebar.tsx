@@ -16,6 +16,8 @@ import {
   TrendingDown,
   Upload,
   Wallet,
+  Activity,
+  ScanLine,
 } from "lucide-react";
 import {
   Sidebar,
@@ -44,6 +46,8 @@ const navFinanceiro = [
 const navGestao = [
   { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },
   { title: "Documentos", href: "/dashboard/documents", icon: FileText },
+  { title: "Ingestão", href: "/dashboard/ingestion", icon: ScanLine },
+  { title: "Logs Ingestão", href: "/dashboard/ingestion/logs", icon: Activity },
   { title: "Importar", href: "/dashboard/import", icon: Upload },
   { title: "Relatórios", href: "/dashboard/reports", icon: LayoutDashboard },
 ];
