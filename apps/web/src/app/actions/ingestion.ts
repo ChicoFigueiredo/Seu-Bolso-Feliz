@@ -168,9 +168,13 @@ export async function getDraftRecords(filters?: {
 
 export async function approveDraftRecord(id: string): Promise<DraftRecord> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const { data, error } = await supabase
     .from("draft_records")
-    .update({ status: "approved", reviewed_at: new Date().toISOString() })
+    .update({ status: "approved", approved_at: new Date().toISOString(), approved_by: user?.id })
     .eq("id", id)
     .select()
     .single();
@@ -185,8 +189,7 @@ export async function rejectDraftRecord(id: string, reason?: string): Promise<Dr
     .from("draft_records")
     .update({
       status: "rejected",
-      reviewed_at: new Date().toISOString(),
-      review_notes: reason ?? null,
+      corrections: reason ? { rejection_reason: reason } : null,
     })
     .eq("id", id)
     .select()
@@ -201,7 +204,7 @@ export async function approveDraftBatch(batchId: string): Promise<void> {
 
   const { error: recordsError } = await supabase
     .from("draft_records")
-    .update({ status: "approved", reviewed_at: new Date().toISOString() })
+    .update({ status: "approved", approved_at: new Date().toISOString() })
     .eq("batch_id", batchId)
     .eq("status", "pending");
 
