@@ -22,6 +22,7 @@
 ## 1. Vercel — Criação de Conta e Configuração {#1-vercel}
 
 ### Pré-requisitos
+
 - E-mail válido
 - Acesso ao repositório GitLab do projeto
 - Instalar Vercel CLI (opcional, para deploy via CLI)
@@ -34,6 +35,7 @@ bun install -g supabase vercel
 ### Passos
 
 #### 1.1 Criar conta no Vercel
+
 1. Acesse https://vercel.com/signup
 2. Crie conta com e-mail (não vincular ao GitHub — usaremos GitLab)
 3. Escolha o plano **Hobby** (gratuito) ou **Pro** ($20/mês — recomendado para domínio custom e limites maiores)
@@ -41,6 +43,7 @@ bun install -g supabase vercel
    - **Vercel Account/Org ID** — visível em Settings → General → "Your ID"
 
 #### 1.2 Conectar ao GitLab
+
 1. No dashboard Vercel, clique **"Add New Project"**
 2. Em "Import Git Repository", selecione **"GitLab"**
 3. Autorize o Vercel a acessar seu GitLab
@@ -57,30 +60,35 @@ bun install -g supabase vercel
 
 > **Alternativa (se GitLab direto não funcionar):**  
 > Use o Vercel CLI no pipeline do GitLab:
+>
 > ```bash
 > npm i -g vercel
 > vercel --token=$VERCEL_TOKEN --prod
 > ```
+>
 > Nesse caso, o deploy é feito pelo pipeline, não pelo Vercel diretamente.
 
 #### 1.3 Configurar Environment Variables no Vercel
+
 1. Em Project Settings → Environment Variables
 2. Adicione para cada ambiente (**Preview**, **Production**):
 
-| Variável | Preview (staging) | Production |
-|----------|-------------------|------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | URL do projeto staging | URL do projeto production |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key staging | Anon key production |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role staging | Service role production |
+| Variável                        | Preview (staging)      | Production                |
+| ------------------------------- | ---------------------- | ------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | URL do projeto staging | URL do projeto production |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key staging       | Anon key production       |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Service role staging   | Service role production   |
 
 3. Marque service_role_key como **Sensitive** (não visível no log de build)
 
 #### 1.4 Configurar Preview Deployments
+
 1. Em Project Settings → Git
 2. Certifique-se de que **"Automatically deploy on push"** está ativado
 3. Confirme que branches de MR/PR geram preview deployments
 
 ### Verificação
+
 - [ ] Conta Vercel criada
 - [ ] Projeto criado e conectado ao GitLab
 - [ ] Root directory configurado como `apps/web`
@@ -92,11 +100,13 @@ bun install -g supabase vercel
 ## 2. Supabase — Projetos Staging e Production {#2-supabase-staging-e-production}
 
 ### Pré-requisitos
+
 - Conta Supabase (já existente para ambiente local)
 
 ### Passos
 
 #### 2.1 Criar Projeto STAGING
+
 1. Acesse https://supabase.com/dashboard
 2. Clique **"New Project"**
 3. Configure:
@@ -113,6 +123,7 @@ bun install -g supabase vercel
    - **Project ID** (visível na URL: `supabase.com/dashboard/project/XXXXX`)
 
 #### 2.2 Criar Projeto PRODUCTION
+
 1. Repita os mesmos passos com:
    - **Name:** `seu-bolso-feliz-production`
    - **Database Password:** Senha diferente da staging!
@@ -161,6 +172,7 @@ supabase functions deploy retroactive-supplier-association
 > **IMPORTANTE:** Ao trocar entre projetos com `supabase link`, o Supabase CLI atualiza o `.env` local. Cuidado para não misturar credenciais.
 
 #### 2.4 Habilitar Vault (para segredos)
+
 1. No Dashboard Supabase → Settings → Vault
 2. Verifique se o Vault está habilitado (em projetos novos geralmente já vem)
 3. Se não estiver disponível, a extensão `supabase_vault` precisa ser habilitada:
@@ -169,6 +181,7 @@ supabase functions deploy retroactive-supplier-association
    ```
 
 ### Verificação
+
 - [ ] Projeto staging criado e acessível
 - [ ] Projeto production criado e acessível
 - [ ] Senhas dos bancos anotadas em local seguro
@@ -182,45 +195,48 @@ supabase functions deploy retroactive-supplier-association
 ## 3. GitLab — Variáveis de Ambiente Protegidas {#3-gitlab-variaveis}
 
 ### Pré-requisitos
+
 - Projetos Supabase staging e production criados
 - Conta Vercel configurada
 
 ### Passos
 
 #### 3.1 Configurar Variáveis no GitLab
+
 1. Acesse o repositório no GitLab → Settings → CI/CD → Variables
 2. Adicione as seguintes variáveis:
 
 **Para ambiente STAGING (Environment scope: `staging`)**:
 
-| Variável | Valor | Protegida | Masked |
-|----------|-------|-----------|--------|
-| `SUPABASE_URL` | URL do projeto staging | ✅ | ❌ |
-| `SUPABASE_ANON_KEY` | Anon key staging | ✅ | ✅ |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role staging | ✅ | ✅ |
-| `SUPABASE_DB_PASSWORD` | Senha do banco staging | ✅ | ✅ |
-| `SUPABASE_PROJECT_ID` | Project ID staging | ✅ | ❌ |
-| `SUPABASE_ACCESS_TOKEN` | Token pessoal Supabase CLI | ✅ | ✅ |
+| Variável                    | Valor                      | Protegida | Masked |
+| --------------------------- | -------------------------- | --------- | ------ |
+| `SUPABASE_URL`              | URL do projeto staging     | ✅        | ❌     |
+| `SUPABASE_ANON_KEY`         | Anon key staging           | ✅        | ✅     |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role staging       | ✅        | ✅     |
+| `SUPABASE_DB_PASSWORD`      | Senha do banco staging     | ✅        | ✅     |
+| `SUPABASE_PROJECT_ID`       | Project ID staging         | ✅        | ❌     |
+| `SUPABASE_ACCESS_TOKEN`     | Token pessoal Supabase CLI | ✅        | ✅     |
 
 **Para ambiente PRODUCTION (Environment scope: `production`)**:
 
-| Variável | Valor | Protegida | Masked |
-|----------|-------|-----------|--------|
-| `SUPABASE_URL` | URL do projeto production | ✅ | ❌ |
-| `SUPABASE_ANON_KEY` | Anon key production | ✅ | ✅ |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role production | ✅ | ✅ |
-| `SUPABASE_DB_PASSWORD` | Senha do banco production | ✅ | ✅ |
-| `SUPABASE_PROJECT_ID` | Project ID production | ✅ | ❌ |
+| Variável                    | Valor                     | Protegida | Masked |
+| --------------------------- | ------------------------- | --------- | ------ |
+| `SUPABASE_URL`              | URL do projeto production | ✅        | ❌     |
+| `SUPABASE_ANON_KEY`         | Anon key production       | ✅        | ✅     |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role production   | ✅        | ✅     |
+| `SUPABASE_DB_PASSWORD`      | Senha do banco production | ✅        | ✅     |
+| `SUPABASE_PROJECT_ID`       | Project ID production     | ✅        | ❌     |
 
 **Para TODOS os ambientes (Environment scope: `*`)**:
 
-| Variável | Valor | Protegida | Masked |
-|----------|-------|-----------|--------|
-| `VERCEL_TOKEN` | Token da conta Vercel | ✅ | ✅ |
-| `VERCEL_ORG_ID` | Org/Account ID | ✅ | ❌ |
-| `VERCEL_PROJECT_ID` | Project ID | ✅ | ❌ |
+| Variável            | Valor                 | Protegida | Masked |
+| ------------------- | --------------------- | --------- | ------ |
+| `VERCEL_TOKEN`      | Token da conta Vercel | ✅        | ✅     |
+| `VERCEL_ORG_ID`     | Org/Account ID        | ✅        | ❌     |
+| `VERCEL_PROJECT_ID` | Project ID            | ✅        | ❌     |
 
 #### 3.2 Gerar Token de Acesso Supabase CLI
+
 1. Acesse https://supabase.com/dashboard/account/tokens
 2. Clique "Generate new token"
 3. Nome: `gitlab-ci`
@@ -228,6 +244,7 @@ supabase functions deploy retroactive-supplier-association
 5. Use como `SUPABASE_ACCESS_TOKEN` no GitLab
 
 #### 3.3 Gerar Token Vercel
+
 1. Acesse https://vercel.com/account/tokens
 2. Clique "Create Token"
 3. Nome: `gitlab-ci`
@@ -236,6 +253,7 @@ supabase functions deploy retroactive-supplier-association
 6. Use como `VERCEL_TOKEN` no GitLab
 
 ### Verificação
+
 - [ ] Todas as variáveis configuradas por ambiente
 - [ ] Variáveis sensíveis marcadas como Masked e Protected
 - [ ] Token Supabase CLI gerado e configurado
@@ -247,11 +265,13 @@ supabase functions deploy retroactive-supplier-association
 ## 4. Domínio — Registro e DNS {#4-dominio}
 
 ### Pré-requisitos
+
 - Conta Vercel com projeto configurado
 
 ### Passos
 
 #### 4.1 Registrar Domínio
+
 1. Acesse https://registro.br (para domínio `.com.br`)
 2. Busque `seubolsofeliz.com.br`
 3. Registre (custo: ~R$ 40/ano)
@@ -260,6 +280,7 @@ supabase functions deploy retroactive-supplier-association
 > **Alternativa:** Se preferir outro TLD, use qualquer registrador (Cloudflare, Namecheap, etc.) para `.com`, `.dev`, `.app`, etc.
 
 #### 4.2 Configurar DNS no Vercel
+
 1. No Vercel, vá em Project Settings → Domains
 2. Adicione `seubolsofeliz.com.br`
 3. O Vercel mostrará os registros DNS necessários (geralmente CNAME ou A record)
@@ -270,9 +291,11 @@ supabase functions deploy retroactive-supplier-association
 6. O Vercel gera certificado SSL automaticamente
 
 #### 4.3 (Opcional) Configurar subdomínio para staging
+
 - `staging.seubolsofeliz.com.br` apontando para o preview deployment do Vercel
 
 ### Verificação
+
 - [ ] Domínio registrado
 - [ ] DNS configurado e propagado
 - [ ] HTTPS funcionando
@@ -283,11 +306,13 @@ supabase functions deploy retroactive-supplier-association
 ## 5. Google Cloud — Projeto e Gmail API {#5-google-cloud}
 
 ### Pré-requisitos
+
 - Conta Google (a mesma do Gmail que será lido)
 
 ### Passos
 
 #### 5.1 Criar Projeto no Google Cloud
+
 1. Acesse https://console.cloud.google.com
 2. Clique no seletor de projetos (topo da página) → **"New Project"**
 3. Configure:
@@ -297,11 +322,13 @@ supabase functions deploy retroactive-supplier-association
 5. Selecione o projeto recém-criado
 
 #### 5.2 Habilitar Gmail API
+
 1. No menu lateral → **APIs & Services** → **Library**
 2. Busque **"Gmail API"**
 3. Clique na Gmail API → **"Enable"**
 
 #### 5.3 Configurar OAuth Consent Screen
+
 1. No menu lateral → **APIs & Services** → **OAuth consent screen**
 2. Selecione **"External"** (se for conta pessoal) ou **"Internal"** (se for Google Workspace)
 3. Preencha:
@@ -321,6 +348,7 @@ supabase functions deploy retroactive-supplier-association
 > **IMPORTANTE:** Em modo External/Testing, você terá limite de 100 test users. Para produção futura, seria necessário publicar o app e passar por verificação do Google. Para uso pessoal, o modo teste é suficiente.
 
 #### 5.4 Criar Credenciais OAuth
+
 1. No menu lateral → **APIs & Services** → **Credentials**
 2. Clique **"Create Credentials"** → **"OAuth client ID"**
 3. Configure:
@@ -359,6 +387,7 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 > **IMPORTANTE:** O refresh token é como uma "chave permanente" para o seu Gmail (somente leitura). Guarde com extremo cuidado.
 
 ### Verificação
+
 - [ ] Projeto Google Cloud criado
 - [ ] Gmail API habilitada
 - [ ] OAuth consent screen configurada
@@ -373,6 +402,7 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 ### Passos
 
 #### 6.1 Criar Labels para Organização
+
 1. No Gmail, crie as seguintes labels (ou ajuste conforme seu padrão):
    - `Comprovantes` — comprovantes de pagamento
    - `Faturas` — faturas de cartão, boletos
@@ -380,6 +410,7 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
    - `Financeiro` — label pai para organizar (opcional)
 
 #### 6.2 Preparar Dados de Teste
+
 1. Mova para as labels criadas pelo menos:
    - 3-5 comprovantes de pagamento (transferência, PIX)
    - 3-5 faturas de cartão de crédito
@@ -388,6 +419,7 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 2. Isso permitirá o primeiro teste real do pipeline
 
 ### Verificação
+
 - [ ] Labels criadas no Gmail
 - [ ] Pelo menos 10-15 e-mails com anexos nas labels de teste
 - [ ] Pelo menos 1 PDF protegido por senha identificado
@@ -397,11 +429,13 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 ## 7. OpenAI — API Key e Budget {#7-openai}
 
 ### Pré-requisitos
+
 - Necessário apenas na **Fase 7** — pode ser feito depois
 
 ### Passos
 
 #### 7.1 Criar Conta/API Key
+
 1. Acesse https://platform.openai.com
 2. Crie conta ou faça login
 3. Vá em **API Keys** → **"Create new secret key"**
@@ -409,17 +443,20 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 5. **ANOTE a key** (só aparece uma vez!)
 
 #### 7.2 Configurar Budget
+
 1. Vá em **Settings** → **Billing** → **Usage Limits**
 2. Configure um **hard limit** mensal (sugestão inicial: $20-50/mês)
 3. Configure **alertas** de uso (50%, 80%, 90%)
 4. Adicione um meio de pagamento
 
 #### 7.3 Escolher Modelo
+
 - **Para desenvolvimento/teste:** `gpt-4o-mini` (~$0.15/1M input tokens) — barato e rápido
 - **Para produção/parsing complexo:** `gpt-4o` (~$2.50/1M input tokens) — mais preciso
 - **Para visão/imagens:** `gpt-4o` com vision — para leitura de documentos escaneados
 
 ### Verificação
+
 - [ ] API key criada e anotada em local seguro
 - [ ] Budget configurado com limite
 - [ ] Alertas de uso configurados
@@ -430,33 +467,37 @@ O time vai disponibilizar um script de autenticação. O fluxo será:
 ## 8. Supabase Vault — Armazenamento de Segredos {#8-vault}
 
 ### Pré-requisitos
+
 - Projetos Supabase staging/production com Vault habilitado
 - Credenciais do Google Cloud e OpenAI em mãos
 
 ### Passos
 
 #### 8.1 Armazenar Segredos do Gmail
+
 Via SQL (no Supabase SQL Editor):
+
+⚠️ **Atenção:** A assinatura é `vault.create_secret(valor_secreto, nome_da_chave, descrição)` — o **valor vem primeiro**.
 
 ```sql
 -- Client ID do Google OAuth
 SELECT vault.create_secret(
-  'google_oauth_client_id',
-  '<SEU_CLIENT_ID>',
+  '<SEU_CLIENT_ID>',            -- valor secreto (1º arg)
+  'google_oauth_client_id',     -- nome da chave (2º arg)
   'Google OAuth Client ID para Gmail API'
 );
 
 -- Client Secret do Google OAuth
 SELECT vault.create_secret(
-  'google_oauth_client_secret',
   '<SEU_CLIENT_SECRET>',
+  'google_oauth_client_secret',
   'Google OAuth Client Secret para Gmail API'
 );
 
 -- Refresh Token do Gmail
 SELECT vault.create_secret(
-  'gmail_refresh_token',
   '<SEU_REFRESH_TOKEN>',
+  'gmail_refresh_token',
   'Gmail OAuth Refresh Token para leitura de e-mails'
 );
 ```
@@ -465,25 +506,27 @@ SELECT vault.create_secret(
 
 ```sql
 SELECT vault.create_secret(
-  'openai_api_key',
-  '<SUA_API_KEY>',
+  '<SUA_API_KEY>',      -- valor secreto (1º arg)
+  'openai_api_key',     -- nome da chave (2º arg)
   'OpenAI API Key para extração e classificação assistida'
 );
 ```
 
 #### 8.3 Armazenar Senhas de PDFs
+
 Para cada fornecedor/tipo de documento protegido por senha:
 
 ```sql
 -- Exemplo: Informe de rendimentos do banco
 SELECT vault.create_secret(
-  'pdf_password_banco_x_informe',
-  '<SENHA_DO_PDF>',
+  '<SENHA_DO_PDF>',                -- valor secreto (1º arg)
+  'pdf_password_banco_x_informe',  -- nome da chave (2º arg)
   'Senha do PDF de informe de rendimentos do Banco X'
 );
 ```
 
 Ou, via tabela `user_secrets` existente (que já tem criptografia pgcrypto):
+
 ```sql
 INSERT INTO user_secrets (user_id, name, type, encrypted_value, metadata)
 VALUES (
@@ -498,6 +541,7 @@ VALUES (
 > **NOTA:** O mecanismo exato (Vault vs. user_secrets) será definido na implementação. Ambos são seguros com criptografia.
 
 ### Verificação
+
 - [ ] Segredos do Gmail armazenados no Vault
 - [ ] Segredos do OpenAI armazenados (quando necessário)
 - [ ] Senhas de PDFs armazenadas
@@ -508,6 +552,7 @@ VALUES (
 ## 9. VS Code — Configuração do MCP Local {#9-vscode-mcp}
 
 ### Pré-requisitos
+
 - Necessário apenas na **Fase 5**
 - VS Code com extensão GitHub Copilot Chat instalada
 - MCP server implementado em `apps/mcp-server/`
@@ -515,6 +560,7 @@ VALUES (
 ### Passos
 
 #### 9.1 Configurar `.env` Local para MCP
+
 Crie ou atualize o `.env` na raiz do projeto:
 
 ```env
@@ -533,6 +579,7 @@ OPENAI_API_KEY=<api_key>
 ```
 
 #### 9.2 Configurar MCP no VS Code
+
 O time criará o arquivo `.vscode/mcp.json`:
 
 ```jsonc
@@ -544,14 +591,15 @@ O time criará o arquivo `.vscode/mcp.json`:
       "args": ["run", "apps/mcp-server/src/index.ts"],
       "env": {
         "SUPABASE_URL": "${env:SUPABASE_URL}",
-        "SUPABASE_SERVICE_ROLE_KEY": "${env:SUPABASE_SERVICE_ROLE_KEY}"
-      }
-    }
-  }
+        "SUPABASE_SERVICE_ROLE_KEY": "${env:SUPABASE_SERVICE_ROLE_KEY}",
+      },
+    },
+  },
 }
 ```
 
 #### 9.3 Testar o MCP
+
 1. Abra o VS Code no projeto
 2. Abra o Copilot Chat (Ctrl+Shift+I ou Cmd+Shift+I)
 3. Use o modo Agent (@workspace)
@@ -559,6 +607,7 @@ O time criará o arquivo `.vscode/mcp.json`:
 5. O Copilot deve invocar as tools do MCP automaticamente
 
 ### Verificação
+
 - [ ] `.env` configurado com credenciais locais
 - [ ] MCP server roda localmente sem erros
 - [ ] Copilot no VS Code lista as tools do MCP
@@ -568,25 +617,25 @@ O time criará o arquivo `.vscode/mcp.json`:
 
 ## Resumo: Ordem das Ações Manuais do CEO
 
-| Ordem | Ação | Fase | Urgência |
-|-------|------|------|----------|
-| 1 | Criar conta Vercel | F1 | ⚡ Bloqueante |
-| 2 | Criar projeto Supabase STAGING | F1 | ⚡ Bloqueante |
-| 3 | Criar projeto Supabase PRODUCTION | F1 | ⚡ Bloqueante |
-| 4 | Anotar URLs e chaves dos projetos Supabase | F1 | ⚡ Bloqueante |
-| 5 | Conectar GitLab ao Vercel | F1 | ⚡ Bloqueante |
-| 6 | Gerar token Supabase CLI | F1 | ⚡ Bloqueante |
-| 7 | Gerar token Vercel | F1 | ⚡ Bloqueante |
-| 8 | Configurar variáveis no GitLab CI/CD | F1 | ⚡ Bloqueante |
-| 9 | Registrar domínio seubolsofeliz.com.br | F1 | 🟡 Pode depois |
-| 10 | Configurar DNS | F1 | 🟡 Pode depois |
-| 11 | Criar projeto Google Cloud | F3 | 🟡 Quando chegar na F3 |
-| 12 | Habilitar Gmail API | F3 | 🟡 Quando chegar na F3 |
-| 13 | Configurar OAuth consent screen | F3 | 🟡 Quando chegar na F3 |
-| 14 | Criar credenciais OAuth | F3 | 🟡 Quando chegar na F3 |
-| 15 | Gerar refresh token do Gmail | F3 | 🟡 Quando chegar na F3 |
-| 16 | Criar labels no Gmail e mover e-mails de teste | F3 | 🟡 Quando chegar na F3 |
-| 17 | Armazenar segredos no Vault | F3 | 🟡 Quando chegar na F3 |
-| 18 | Criar conta/API key OpenAI | F7 | ⏳ Pode esperar |
-| 19 | Configurar budget OpenAI | F7 | ⏳ Pode esperar |
-| 20 | Armazenar senhas de PDFs no Vault | F4 | 🟡 Quando chegar na F4 |
+| Ordem | Ação                                           | Fase | Urgência               |
+| ----- | ---------------------------------------------- | ---- | ---------------------- |
+| 1     | Criar conta Vercel                             | F1   | ⚡ Bloqueante          |
+| 2     | Criar projeto Supabase STAGING                 | F1   | ⚡ Bloqueante          |
+| 3     | Criar projeto Supabase PRODUCTION              | F1   | ⚡ Bloqueante          |
+| 4     | Anotar URLs e chaves dos projetos Supabase     | F1   | ⚡ Bloqueante          |
+| 5     | Conectar GitLab ao Vercel                      | F1   | ⚡ Bloqueante          |
+| 6     | Gerar token Supabase CLI                       | F1   | ⚡ Bloqueante          |
+| 7     | Gerar token Vercel                             | F1   | ⚡ Bloqueante          |
+| 8     | Configurar variáveis no GitLab CI/CD           | F1   | ⚡ Bloqueante          |
+| 9     | Registrar domínio seubolsofeliz.com.br         | F1   | 🟡 Pode depois         |
+| 10    | Configurar DNS                                 | F1   | 🟡 Pode depois         |
+| 11    | Criar projeto Google Cloud                     | F3   | 🟡 Quando chegar na F3 |
+| 12    | Habilitar Gmail API                            | F3   | 🟡 Quando chegar na F3 |
+| 13    | Configurar OAuth consent screen                | F3   | 🟡 Quando chegar na F3 |
+| 14    | Criar credenciais OAuth                        | F3   | 🟡 Quando chegar na F3 |
+| 15    | Gerar refresh token do Gmail                   | F3   | 🟡 Quando chegar na F3 |
+| 16    | Criar labels no Gmail e mover e-mails de teste | F3   | 🟡 Quando chegar na F3 |
+| 17    | Armazenar segredos no Vault                    | F3   | 🟡 Quando chegar na F3 |
+| 18    | Criar conta/API key OpenAI                     | F7   | ⏳ Pode esperar        |
+| 19    | Configurar budget OpenAI                       | F7   | ⏳ Pode esperar        |
+| 20    | Armazenar senhas de PDFs no Vault              | F4   | 🟡 Quando chegar na F4 |

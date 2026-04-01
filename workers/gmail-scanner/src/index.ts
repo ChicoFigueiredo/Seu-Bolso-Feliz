@@ -12,7 +12,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
-import { buildOriginKey } from "@sbf/operations";
+import { buildOriginKey, computeContentHash } from "@sbf/operations";
 
 import { createGmailClient, type GmailClient } from "./gmail-client";
 import {
@@ -82,6 +82,8 @@ interface ScanStats {
   attachmentsUploaded: number;
   jobsCreated: number;
   skippedAlreadyProcessed: number;
+  skippedByMsgFilename: number;
+  skippedByContentHash: number;
   errors: number;
 }
 
@@ -93,8 +95,40 @@ function createStats(): ScanStats {
     attachmentsUploaded: 0,
     jobsCreated: 0,
     skippedAlreadyProcessed: 0,
+    skippedByMsgFilename: 0,
+    skippedByContentHash: 0,
     errors: 0,
   };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Sanitiza nome de arquivo para uso como key no Supabase Storage.
+ * Remove caracteres problemáticos, substitui espaços por underscores.
+ */
+function sanitizeFilename(filename: string): string {
+  return filename
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/[^a-zA-Z0-9._-]/g, "_") // substitui chars inválidos por _
+    .replace(/_+/g, "_") // colapsa underscores consecutivos
+    .replace(/^_|_$/g, ""); // remove _ nas pontas
+}
+
+/**
+ * Converte header Date RFC 2822 para ISO 8601 (compatível com TIMESTAMPTZ).
+ * Exemplos de entrada:
+ *   "Tue, 17 Mar 2026 17:06:02 +0000 (UTC)"
+ *   "Mon, 26 Jan 2026 04:53:01 -0800 (PST)"
+ * Remove o comentário entre parênteses que o PostgreSQL não aceita.
+ */
+function parseEmailDate(dateStr: string | undefined): string | null {
+  if (!dateStr) return null;
+  // Remove commentary like (UTC), (PST), (GMT+0) at end
+  const cleaned = dateStr.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const parsed = new Date(cleaned);
+  return isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 // ─── Core ─────────────────────────────────────────────────────
@@ -106,19 +140,41 @@ function getUserId(): string {
 }
 
 /**
- * Verifica se um attachment (by origin_key) já foi processado.
+ * Fase 1 (pré-download): verifica se já existe source_document com mesmo messageId + filename.
+ * Evita re-download desnecessário do anexo.
  */
-async function isAlreadyProcessed(
+async function isAlreadyProcessedByMsgFile(
   supabase: SupabaseClient,
   userId: string,
-  originKey: string,
+  gmailMessageId: string,
+  filename: string,
 ): Promise<boolean> {
   const { data } = await supabase
     .from("source_documents")
     .select("id")
     .eq("user_id", userId)
     .eq("origin_type", SourceDocumentOrigin.GMAIL)
-    .eq("origin_key", originKey)
+    .eq("gmail_message_id", gmailMessageId)
+    .eq("filename", filename)
+    .limit(1);
+
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * Fase 2 (pós-download): verifica se o hash SHA-256 do conteúdo já existe.
+ * Identifica arquivo idêntico mesmo vindo de e-mail ou nome diferente.
+ */
+async function isContentHashDuplicate(
+  supabase: SupabaseClient,
+  userId: string,
+  contentHash: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("document_fingerprints")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("content_hash", contentHash)
     .limit(1);
 
   return (data?.length ?? 0) > 0;
@@ -126,6 +182,9 @@ async function isAlreadyProcessed(
 
 /**
  * Faz download do attachment, upload para Storage, cria source_document e ingestion_job.
+ * Deduplicação em duas fases:
+ *   Fase 1 (pré-download): gmail_message_id + filename
+ *   Fase 2 (pós-download): SHA-256 content hash
  */
 async function processAttachment(
   gmail: GmailClient,
@@ -136,15 +195,12 @@ async function processAttachment(
   attachment: AttachmentInfo,
   stats: ScanStats,
 ): Promise<void> {
-  const originKey = buildOriginKey({
-    type: "gmail",
-    messageId: metadata.messageId,
-    attachmentId: attachment.attachmentId,
-  });
-
-  // Idempotência: pular se já processado
-  if (await isAlreadyProcessed(supabase, userId, originKey)) {
+  // Fase 1: Pré-download — evita baixar novamente o mesmo anexo
+  if (
+    await isAlreadyProcessedByMsgFile(supabase, userId, metadata.messageId, attachment.filename)
+  ) {
     stats.skippedAlreadyProcessed++;
+    stats.skippedByMsgFilename++;
     return;
   }
 
@@ -152,8 +208,29 @@ async function processAttachment(
   const attachmentData = await gmail.getAttachment(metadata.messageId, attachment.attachmentId);
   const fileBuffer = decodeBase64Url(attachmentData.data);
 
-  // 2. Upload para Supabase Storage
-  const storagePath = `${userId}/${crypto.randomUUID()}/${attachment.filename}`;
+  // 2. Compute SHA-256 content hash
+  const contentHash = await computeContentHash(fileBuffer);
+
+  // Fase 2: Pós-download — detecta conteúdo idêntico de qualquer origem
+  if (await isContentHashDuplicate(supabase, userId, contentHash)) {
+    stats.skippedAlreadyProcessed++;
+    stats.skippedByContentHash++;
+    console.log(
+      `  ⏭️  ${attachment.filename} — conteúdo duplicado (hash: ${contentHash.substring(0, 12)}…)`,
+    );
+    return;
+  }
+
+  // Build stable origin_key using content hash
+  const originKey = buildOriginKey({
+    type: "gmail",
+    messageId: metadata.messageId,
+    contentHash,
+  });
+
+  // 3. Upload para Supabase Storage (filename sanitizado para evitar chars inválidos)
+  const safeFilename = sanitizeFilename(attachment.filename);
+  const storagePath = `${userId}/${crypto.randomUUID()}/${safeFilename}`;
   const { error: uploadError } = await supabase.storage
     .from("ingestion-originals")
     .upload(storagePath, fileBuffer, { contentType: attachment.mimeType });
@@ -166,7 +243,7 @@ async function processAttachment(
 
   stats.attachmentsUploaded++;
 
-  // 3. Criar source_document
+  // 4. Criar source_document com content_hash
   const { data: doc, error: docError } = await supabase
     .from("source_documents")
     .insert({
@@ -177,13 +254,14 @@ async function processAttachment(
       gmail_thread_id: metadata.threadId,
       gmail_attachment_id: attachment.attachmentId,
       gmail_label: metadata.labelIds.join(","),
-      gmail_date: metadata.date,
+      gmail_date: parseEmailDate(metadata.date),
       gmail_from: metadata.from,
       gmail_subject: metadata.subject,
       filename: attachment.filename,
       mime_type: attachment.mimeType,
       file_size_bytes: fileBuffer.byteLength,
       storage_path: storagePath,
+      content_hash: contentHash,
       status: "active",
     })
     .select("id")
@@ -195,7 +273,19 @@ async function processAttachment(
     return;
   }
 
-  // 4. Criar ingestion_job
+  // 5. Criar fingerprint para deduplicação futura
+  const { error: fpError } = await supabase.from("document_fingerprints").insert({
+    source_document_id: doc.id,
+    user_id: userId,
+    content_hash: contentHash,
+    hash_algorithm: "sha256",
+  });
+
+  if (fpError) {
+    console.warn(`  ⚠️  fingerprint insert failed: ${attachment.filename} — ${fpError.message}`);
+  }
+
+  // 6. Criar ingestion_job
   const { error: jobError } = await supabase.from("ingestion_jobs").insert({
     run_id: runId,
     user_id: userId,
@@ -206,7 +296,7 @@ async function processAttachment(
       origin: "gmail_scanner",
       gmail_subject: metadata.subject,
       gmail_from: metadata.from,
-      gmail_date: metadata.date,
+      gmail_date: parseEmailDate(metadata.date),
     },
   });
 
@@ -217,7 +307,9 @@ async function processAttachment(
   }
 
   stats.jobsCreated++;
-  console.log(`  ✅ ${attachment.filename} (${formatBytes(fileBuffer.byteLength)})`);
+  console.log(
+    `  ✅ ${attachment.filename} (${formatBytes(fileBuffer.byteLength)}) [${contentHash.substring(0, 12)}…]`,
+  );
 }
 
 /**
@@ -388,6 +480,12 @@ async function main(): Promise<void> {
     console.log(`   Jobs de ingestão criados:   ${stats.jobsCreated}`);
   }
   console.log(`   Já processados (skip):      ${stats.skippedAlreadyProcessed}`);
+  if (stats.skippedByMsgFilename > 0) {
+    console.log(`     ↳ por msg+filename:       ${stats.skippedByMsgFilename}`);
+  }
+  if (stats.skippedByContentHash > 0) {
+    console.log(`     ↳ por content hash:       ${stats.skippedByContentHash}`);
+  }
   console.log(`   Erros:                      ${stats.errors}`);
   console.log("━".repeat(60) + "\n");
 

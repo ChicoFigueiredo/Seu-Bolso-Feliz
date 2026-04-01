@@ -1,0 +1,250 @@
+# Checklist de Implementação — Plano de Ação Completo
+
+> **Fonte de verdade:** Este checklist + refino principal + ADR-005 + ADR-006 (versões mais recentes).
+> **Versões antigas no histórico Git possuem modelagem divergente (supplier_match, content_match, document_id, job_id). Ignorar.**
+> **Referência:** [refino 2026-03-31](../refinos/2026-03/2026-03-31-19-40-refino-plano-acao-ingestao-ia-staging.md)
+
+---
+
+## Marco 1 — Staging Operacional + Observabilidade
+
+**Objetivo:** CEO faz login em staging, vê dashboard, e logs do sistema são visíveis.
+
+### Infra e Deploy
+
+- [ ] M1-001 — Verificar 19 migrations aplicadas em staging (supabase db push --linked)
+  - **Aceite:** `supabase db push` sem erros
+- [ ] M1-002 — Configurar env vars no Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  - **Aceite:** Variáveis visíveis no painel Vercel
+- [ ] M1-003 — Substituir placeholder de deploy no CI/CD por deploy Vercel real
+  - **Aceite:** Push na branch principal gera deploy em staging
+- [ ] M1-004 — **CEO:** Configurar Google OAuth no Supabase Staging (redirect URL do Vercel)
+  - **Aceite:** Login Google funciona em staging
+- [ ] M1-005 — Testar login Google em staging
+  - **Aceite:** CEO faz login e vê dashboard
+
+### Logging e Observabilidade
+
+- [ ] M1-006 — Criar migration: tabela `system_logs` (level, module, message, details, user_id, created_at)
+  - **Aceite:** Migration aplicada sem erros, RLS ativa
+- [ ] M1-007 — Criar server action `insertLog` e `getLogs` (com filtros por nível/módulo/data)
+  - **Aceite:** Logs podem ser inseridos e consultados
+- [ ] M1-008 — Criar rota `/dashboard/logs` com listagem, filtros por nível/módulo/período
+  - **Aceite:** Página funcional com logs visíveis
+- [ ] M1-009 — Adicionar link "Logs" no sidebar (seção Gestão)
+  - **Aceite:** Link visível e navegável
+
+### Edge Function — Staging Independence
+
+- [ ] M1-010 — Criar Edge Function `trigger-ingestion` para disparar reprocessamento remoto
+  - **Aceite:** Chamada HTTP dispara reprocessamento de jobs QUEUED em staging
+
+**Critério do Marco:** CEO faz login em staging, vê dashboard, navega para /dashboard/logs.
+
+---
+
+## Marco 2 — Ingestão Visível
+
+**Objetivo:** Documentos ingeridos aparecem listados com status e filtros.
+
+### Server Actions — Ingestão
+
+- [ ] M2-001 — Criar server action `listDocuments` (source_documents com joins em ingestion_jobs)
+  - **Aceite:** Retorna lista paginada com status, origem, fornecedor
+- [ ] M2-002 — Criar server action `getDocument` (detalhe completo do documento + jobs + drafts)
+  - **Aceite:** Retorna documento com todos os dados relacionados
+- [ ] M2-003 — Criar server action `listDrafts` (draft_records com filtros)
+  - **Aceite:** Retorna lista de drafts filtráveis por status
+- [ ] M2-004 — Criar server action `getDraft` (detalhe do draft + extraction_result)
+  - **Aceite:** Retorna draft com dados extraídos e correções
+
+### Páginas de Ingestão
+
+- [ ] M2-005 — Criar rota `/dashboard/ingestion` com contadores (total, pendentes, aprovados, erros)
+  - **Aceite:** Página com cards de contadores funcionais
+- [ ] M2-006 — Criar rota `/dashboard/ingestion/documents` com listagem + filtros (status, origem, tipo, período)
+  - **Aceite:** Listagem paginada com filtros funcionando
+- [ ] M2-007 — Componente `<StatusBadge />` para estados da máquina de estados do ingestion
+  - **Aceite:** Badge com cor e label por estado (discovered, downloaded, hashed, parsed, etc.)
+- [ ] M2-008 — Componente `<ConfidenceIndicator />` para confiança de extração
+  - **Aceite:** Indicador visual (barra ou %) com cores (verde >80%, amarelo >60%, vermelho <60%)
+- [ ] M2-009 — Empty states e loading states para páginas de ingestão
+  - **Aceite:** Skeleton loading + mensagem quando não há dados
+
+### Sidebar
+
+- [ ] M2-010 — Adicionar link "Ingestão" no sidebar (seção Gestão) com ícone
+  - **Aceite:** Link navega para /dashboard/ingestion
+
+**Critério do Marco:** Documentos ingeridos via worker CLI aparecem listados com status e filtros na UI.
+
+---
+
+## Marco 3 — Revisão Humana + Upload Manual
+
+**Objetivo:** CEO abre documento, vê PDF + dados, edita, aprova, e registro aparece em transactions. Upload manual funcional.
+
+### Upload Manual
+
+- [ ] M3-001 — Criar server action `uploadDocument` (recebe arquivo, salva no Storage, cria source_document + ingestion_job)
+  - **Aceite:** Arquivo enviado aparece em source_documents com status correto
+- [ ] M3-002 — Componente `<DocumentUpload />` com drag & drop + seleção de arquivo
+  - **Aceite:** Drag & drop funciona, progresso visível, aceita PDF/imagem/texto
+- [ ] M3-003 — Integrar upload no `/dashboard/ingestion` (botão "Enviar documento" + modal/área de upload)
+  - **Aceite:** CEO arrasta PDF na página e documento aparece na lista
+
+### Revisão — Split View
+
+- [ ] M3-004 — Criar rota `/dashboard/ingestion/documents/[id]` com layout split-view
+  - **Aceite:** Metade esquerda mostra PDF/arquivo, metade direita mostra dados extraídos
+- [ ] M3-005 — Componente `<PDFViewer />` inline (embed ou iframe para PDF do Supabase Storage)
+  - **Aceite:** PDF renderizado inline sem download obrigatório
+- [ ] M3-006 — Componente `<DraftReviewForm />` com campos editáveis (fornecedor, tipo, valor, data, categoria)
+  - **Aceite:** Campos preenchidos com dados da extração, editáveis antes de aprovar
+- [ ] M3-007 — Componente `<DraftApprovalActions />` com botões aprovar/rejeitar/reprocessar
+  - **Aceite:** Cada ação atualiza status do draft e mostra feedback via toast
+
+### Server Actions — Revisão
+
+- [ ] M3-008 — Criar server action `approveDraft` (valida draft, grava no ledger, atualiza status)
+  - **Aceite:** Draft aprovado cria transaction correspondente + draft_records.status = 'approved'
+- [ ] M3-009 — Criar server action `rejectDraft` (marca rejeitado + motivo obrigatório)
+  - **Aceite:** Draft rejeitado com motivo salvo em corrections.rejection_reason
+- [ ] M3-010 — Criar server action `reprocessDocument` (reseta job para QUEUED, limpa drafts anteriores)
+  - **Aceite:** Job volta para QUEUED, pronto para novo processamento
+- [ ] M3-011 — Batch approval: server action `approveBatch` (aprovar múltiplos drafts de uma vez)
+  - **Aceite:** Seleção de checkboxes + botão "Aprovar selecionados" funciona
+
+### Indicadores Visuais
+
+- [ ] M3-012 — Indicadores no detalhe: erro (vermelho), pendência (amarelo), falta de senha (ícone cadeado), baixa confiança (alerta)
+  - **Aceite:** Cada cenário exibe indicador correto no detalhe do documento
+
+**Critério do Marco:** CEO faz upload de PDF, vê no split-view, edita campos, aprova, e transação aparece no dashboard.
+
+---
+
+## Marco 4 — IA Acoplada (prep arquitetural + início)
+
+**Objetivo:** Chat funcional, upload pelo chat, sugestão de fornecedor/tipo/campos.
+
+### Infra IA
+
+- [ ] M4-001 — **CEO:** Obter API key OpenAI e configurar em `.env.local` e Vercel env vars
+  - **Aceite:** OPENAI_API_KEY acessível pelo backend
+- [ ] M4-002 — Instalar dependência `ai` (Vercel AI SDK) e `openai` no apps/web
+  - **Aceite:** Pacotes no package.json, import funciona
+- [ ] M4-003 — Criar migration: tabelas `ai_chat_sessions` e `ai_chat_messages` com RLS
+  - **Aceite:** Tabelas criadas, RLS impede acesso cross-user
+
+### API de Chat
+
+- [ ] M4-004 — Criar API Route `app/api/chat/route.ts` com auth, rate limiting, streaming
+  - **Aceite:** POST com mensagem retorna stream de resposta, 401 sem auth
+- [ ] M4-005 — System prompt do SBF (contexto financeiro, personalidade, instruções de tool use)
+  - **Aceite:** Prompt documentado e testável
+- [ ] M4-006 — Function calling: tools iniciais (list_documents, get_document, list_drafts, approve_draft, reject_draft)
+  - **Aceite:** IA consegue listar documentos e aprovar drafts via chat
+
+### UI de Chat
+
+- [ ] M4-007 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat hook
+  - **Aceite:** Drawer lateral abre/fecha, mensagens renderizam com streaming
+- [ ] M4-008 — Upload de arquivo no chat (drag & drop que chama uploadDocument + informa à IA)
+  - **Aceite:** CEO arrasta PDF no chat, documento é ingerido, IA comenta sobre ele
+- [ ] M4-009 — Renderização de mensagens: markdown, tabelas, badges de status
+  - **Aceite:** Mensagens da IA com formatação rica
+- [ ] M4-010 — Botão de chat no header/sidebar + toggle de drawer
+  - **Aceite:** Ícone acessível de qualquer página do dashboard
+
+### Function Calling Avançado
+
+- [ ] M4-011 — Tools: suggest_supplier, suggest_document_type, explain_classification
+  - **Aceite:** IA sugere fornecedor/tipo com explicação
+- [ ] M4-012 — Tools: list_pending_documents, list_error_documents, list_missing_password_documents
+  - **Aceite:** IA lista documentos por estado quando perguntada
+- [ ] M4-013 — Tools: batch_approve_drafts (com confirmação humana)
+  - **Aceite:** IA propõe batch, pede confirmação, executa após "sim"
+- [ ] M4-014 — Auditoria: registrar toda interação com IA em ai_chat_messages
+  - **Aceite:** Cada mensagem e tool call fica persistida
+
+**Critério do Marco:** CEO abre drawer de chat, arrasta PDF, recebe sugestão de fornecedor/tipo, aprova via chat.
+
+---
+
+## Marco 5 — Padrões Documentais + Reconciliação + Gmail
+
+### Padrões (Fase D)
+
+- [ ] M5-001 — Migration: tabelas `document_patterns` e `pattern_feedback` conforme ADR-006
+  - **Aceite:** Tabelas criadas com exata modelagem do ADR-006 (supplier_id FK, field_mappings, version, etc.)
+- [ ] M5-002 — Server actions: CRUD patterns (create, list, get, update, deactivate)
+  - **Aceite:** Padrões editáveis e listáveis
+- [ ] M5-003 — Rota `/dashboard/ingestion/patterns` com lista de padrões + detalhe + histórico
+  - **Aceite:** Página funcional com success_count, feedback_count, is_active
+- [ ] M5-004 — Integrar busca de padrões no ingestion worker (match por supplier_id + document_type)
+  - **Aceite:** Worker usa padrão quando encontra match
+- [ ] M5-005 — Auto-desativação: padrão com feedback_count > 3 e taxa < 50% → is_active = false
+  - **Aceite:** Teste automatizado valida regra
+- [ ] M5-006 — Tools de chat: list_document_patterns, register_document_pattern, update_pattern
+  - **Aceite:** IA gerencia padrões via chat
+- [ ] M5-007 — Seed: 3-5 padrões iniciais (CEMIG, boleto, fatura cartão)
+  - **Aceite:** Padrões pré-carregados no seed.sql
+
+### Reconciliação (Fase E)
+
+- [ ] M5-008 — Módulo reconciliation.ts no worker: heurísticas por valor+data+fornecedor
+  - **Aceite:** Match determinístico funcional com score de confiança
+- [ ] M5-009 — Migration: colunas reconciliation_status, reconciled_with em draft_records
+  - **Aceite:** Migration aplicada
+- [ ] M5-010 — Integrar reconciliação no ingestion worker (pós extração, pré review)
+  - **Aceite:** Drafts chegam com sugestão de reconciliação
+- [ ] M5-011 — Componente `<ReconciliationPanel />` no detalhe do documento
+  - **Aceite:** Mostra candidatos de match com botão "vincular"
+- [ ] M5-012 — Tool IA: suggest_reconciliation
+  - **Aceite:** IA sugere match quando perguntada
+
+### Gmail Avançado (Fase F)
+
+- [ ] M5-013 — Gmail scan por query livre (--query)
+  - **Aceite:** Worker aceita flag --query
+- [ ] M5-014 — Gmail scan por período (--after, --before)
+  - **Aceite:** Worker filtra por data
+- [ ] M5-015 — Rate limiting Gmail API (respeitar quotas)
+  - **Aceite:** Backoff exponencial implementado
+- [ ] M5-016 — Progresso do scan na UI (jobs em andamento, contagem)
+  - **Aceite:** Página de ingestão mostra scan em progress
+- [ ] M5-017 — MCP tools: scan_gmail_label, scan_gmail_query, scan_gmail_period
+  - **Aceite:** Tools funcionais no MCP server
+
+**Critério do Marco:** Padrões funcionam, reconciliação sugere matches, Gmail scan completo com progresso na UI.
+
+---
+
+## Marco 6 — Promoção entre Ambientes
+
+- [ ] M6-001 — Migration: tabela `promotion_logs` com RLS
+  - **Aceite:** Tabela criada
+- [ ] M6-002 — Script `promote.ts` com --from, --to, --scope, --dry-run
+  - **Aceite:** Dry-run mostra preview correto
+- [ ] M6-003 — Lógica de diff por hash entre ambientes
+  - **Aceite:** Detecta itens novos/alterados/iguais
+- [ ] M6-004 — Lógica de merge: insert/update/skip com idempotência
+  - **Aceite:** Re-execução não duplica dados
+- [ ] M6-005 — Auditoria em promotion_logs (quem, quando, o que, resultado)
+  - **Aceite:** Cada promoção fica registrada
+- [ ] M6-006 — MCP tools: promote_to_staging, promote_to_production
+  - **Aceite:** Tools funcionais no MCP server
+
+**Critério do Marco:** `promote.ts --dry-run` mostra preview, execução real funciona, auditável.
+
+---
+
+## Pós Marcos
+
+- [ ] POST-001 — Dashboard operacional "primeira tela" (priorização, vencimentos, essenciais)
+- [ ] POST-002 — A11y audit nas páginas de ingestão (contraste, foco, teclado)
+- [ ] POST-003 — Testes E2E com volume real (1000+ docs)
+- [ ] POST-004 — Gráficos e visualizações em relatórios
+- [ ] POST-005 — Merge visual de fornecedores
+- [ ] POST-006 — Cronograma visual de amortização

@@ -2,7 +2,8 @@
  * Extração de texto de documentos.
  * Suporta PDF (com e sem senha), CSV e texto plano.
  */
-import pdfParse from "pdf-parse";
+// Import from lib/ to avoid pdf-parse@1.x debug code that runs on top-level import
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 export interface TextExtractResult {
   text: string;
@@ -54,10 +55,7 @@ export async function extractText(
   };
 }
 
-async function extractPdfText(
-  buf: Buffer,
-  password?: string,
-): Promise<TextExtractResult> {
+async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtractResult> {
   const options: Record<string, unknown> = {};
   if (password) {
     options.password = password;

@@ -48,3 +48,6 @@ secrets/
 docs-html/
 .vercel
 .env*.local
+
+# Arquivos temporários de execução
+tmp/

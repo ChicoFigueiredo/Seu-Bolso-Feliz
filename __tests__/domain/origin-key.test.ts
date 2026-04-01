@@ -5,14 +5,14 @@ import { describe, it, expect } from "vitest";
 import { buildOriginKey } from "@sbf/operations";
 
 describe("buildOriginKey", () => {
-  it("gmail: gera chave com messageId e attachmentId", () => {
+  it("gmail: gera chave com messageId e contentHash", () => {
     const key = buildOriginKey({
       type: "gmail",
       messageId: "msg-abc123",
-      attachmentId: "att-456",
+      contentHash: "a1b2c3d4e5f6",
     });
 
-    expect(key).toBe("gmail:msg-abc123:att-456");
+    expect(key).toBe("gmail:msg-abc123:a1b2c3d4e5f6");
   });
 
   it("local_file: gera chave com filepath e mtimeMs", () => {
@@ -39,7 +39,7 @@ describe("buildOriginKey", () => {
     const gmailKey = buildOriginKey({
       type: "gmail",
       messageId: "msg-1",
-      attachmentId: "att-1",
+      contentHash: "hash-1",
     });
     const localKey = buildOriginKey({
       type: "local_file",

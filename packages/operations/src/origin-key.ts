@@ -8,7 +8,7 @@ export type OriginType = "gmail" | "local_file" | "manual_upload";
 interface GmailOrigin {
   type: "gmail";
   messageId: string;
-  attachmentId: string;
+  contentHash: string;
 }
 
 interface LocalFileOrigin {
@@ -31,7 +31,7 @@ export type OriginInput = GmailOrigin | LocalFileOrigin | ManualUploadOrigin;
 export function buildOriginKey(origin: OriginInput): string {
   switch (origin.type) {
     case "gmail":
-      return `gmail:${origin.messageId}:${origin.attachmentId}`;
+      return `gmail:${origin.messageId}:${origin.contentHash}`;
     case "local_file":
       return `local:${origin.filepath}:${origin.mtimeMs}`;
     case "manual_upload":
