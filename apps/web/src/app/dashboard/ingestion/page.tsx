@@ -5,7 +5,8 @@ import {
   getIngestionJobs,
 } from "@/app/actions/ingestion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
+import { UploadDocuments } from "@/components/upload-documents";
 import {
   Table,
   TableBody,
@@ -16,30 +17,6 @@ import {
 } from "@/components/ui/table";
 import { FileText, AlertTriangle, CheckCircle2, Clock, FileSearch, Activity } from "lucide-react";
 import Link from "next/link";
-
-const statusLabels: Record<string, string> = {
-  discovered: "Descoberto",
-  downloaded: "Baixado",
-  hashed: "Hash calculado",
-  queued: "Na fila",
-  parsed: "Parseado",
-  classified: "Classificado",
-  reconciled: "Conciliado",
-  drafted: "Rascunho criado",
-  pending_review: "Aguardando revisão",
-  approved: "Aprovado",
-  posted: "Lançado",
-  failed: "Falhou",
-  skipped: "Ignorado",
-};
-
-const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  pending_review: "default",
-  approved: "secondary",
-  posted: "secondary",
-  failed: "destructive",
-  skipped: "outline",
-};
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -134,6 +111,9 @@ export default async function IngestionPage() {
         </Card>
       </div>
 
+      {/* Upload Manual */}
+      <UploadDocuments />
+
       {/* Recent Documents */}
       <Card>
         <CardHeader>
@@ -166,12 +146,7 @@ export default async function IngestionPage() {
                       {doc.gmail_from ?? doc.storage_path ?? "—"}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={statusVariant[doc.status ?? ""] ?? "outline"}
-                        className="text-xs"
-                      >
-                        {statusLabels[doc.status ?? ""] ?? doc.status}
-                      </Badge>
+                      <StatusBadge status={doc.status ?? ""} className="text-xs" />
                     </TableCell>
                     <TableCell className="text-sm">{formatDate(doc.created_at)}</TableCell>
                   </TableRow>
@@ -210,12 +185,7 @@ export default async function IngestionPage() {
                   <TableRow key={job.id}>
                     <TableCell className="font-mono text-xs">{job.id.slice(0, 8)}…</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={statusVariant[job.status ?? ""] ?? "outline"}
-                        className="text-xs"
-                      >
-                        {statusLabels[job.status ?? ""] ?? job.status}
-                      </Badge>
+                      <StatusBadge status={job.status ?? ""} className="text-xs" />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {job.status ?? "—"}
@@ -252,12 +222,7 @@ export default async function IngestionPage() {
                   <TableRow key={run.id}>
                     <TableCell className="font-mono text-xs">{run.id.slice(0, 8)}…</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={run.status === "failed" ? "destructive" : "outline"}
-                        className="text-xs"
-                      >
-                        {run.status}
-                      </Badge>
+                      <StatusBadge status={run.status ?? ""} className="text-xs" />
                     </TableCell>
                     <TableCell className="text-sm">{formatDate(run.started_at)}</TableCell>
                     <TableCell className="text-sm">{formatDate(run.completed_at)}</TableCell>
