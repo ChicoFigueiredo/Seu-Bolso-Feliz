@@ -16,6 +16,11 @@ import type {
 
 export async function getSourceDocuments(filters?: {
   status?: string;
+  originType?: string;
+  mimeType?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ data: SourceDocument[]; count: number }> {
@@ -27,6 +32,21 @@ export async function getSourceDocuments(filters?: {
 
   if (filters?.status) {
     query = query.eq("status", filters.status);
+  }
+  if (filters?.originType) {
+    query = query.eq("origin_type", filters.originType);
+  }
+  if (filters?.mimeType) {
+    query = query.eq("mime_type", filters.mimeType);
+  }
+  if (filters?.dateFrom) {
+    query = query.gte("created_at", filters.dateFrom);
+  }
+  if (filters?.dateTo) {
+    query = query.lte("created_at", filters.dateTo);
+  }
+  if (filters?.search) {
+    query = query.ilike("filename", `%${filters.search}%`);
   }
   if (filters?.limit) {
     query = query.limit(filters.limit);
@@ -49,6 +69,76 @@ export async function getSourceDocument(id: string): Promise<SourceDocument | nu
     throw new Error(error.message);
   }
   return data;
+}
+
+export async function getDocumentWithRelations(id: string) {
+  const supabase = await createClient();
+
+  const [docResult, jobsResult, draftsResult] = await Promise.all([
+    supabase.from("source_documents").select("*").eq("id", id).single(),
+    supabase
+      .from("ingestion_jobs")
+      .select("*")
+      .eq("source_document_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("draft_records")
+      .select("*")
+      .eq("source_document_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (docResult.error) {
+    if (docResult.error.code === "PGRST116") return null;
+    throw new Error(docResult.error.message);
+  }
+
+  return {
+    document: docResult.data as SourceDocument,
+    jobs: (jobsResult.data ?? []) as IngestionJob[],
+    drafts: (draftsResult.data ?? []) as DraftRecord[],
+  };
+}
+
+export async function getDocumentStorageUrl(storagePath: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.storage
+    .from("ingestion-originals")
+    .createSignedUrl(storagePath, 3600);
+  return data?.signedUrl ?? null;
+}
+
+export async function reprocessDocument(documentId: string): Promise<void> {
+  const supabase = await createClient();
+
+  // Reset drafts linked to this document
+  await supabase
+    .from("draft_records")
+    .update({ status: "archived" })
+    .eq("source_document_id", documentId)
+    .in("status", ["pending_review", "rejected"]);
+
+  // Reset the latest job for this document to 'queued'
+  const { data: latestJob } = await supabase
+    .from("ingestion_jobs")
+    .select("id")
+    .eq("source_document_id", documentId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (latestJob) {
+    await supabase
+      .from("ingestion_jobs")
+      .update({
+        status: "queued",
+        error_message: null,
+        error_details: null,
+        retry_count: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", latestJob.id);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -175,6 +265,27 @@ export async function approveDraftRecord(id: string): Promise<DraftRecord> {
   const { data, error } = await supabase
     .from("draft_records")
     .update({ status: "approved", approved_at: new Date().toISOString(), approved_by: user?.id })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateDraftData(
+  id: string,
+  draftData: Record<string, unknown>,
+): Promise<DraftRecord> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("draft_records")
+    .update({
+      draft_data: draftData as unknown as Record<string, never>,
+      status: "corrected",
+      corrections: { manual_edit: true, edited_at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .select()
     .single();
