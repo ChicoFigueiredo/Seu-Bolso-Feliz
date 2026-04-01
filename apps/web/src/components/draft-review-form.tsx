@@ -22,7 +22,7 @@ export function DraftReviewForm({ batch, drafts: initialDrafts }: DraftReviewFor
   const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
   const [showRejectFor, setShowRejectFor] = useState<string | null>(null);
 
-  const pendingCount = drafts.filter((d) => d.status === "pending").length;
+  const pendingCount = drafts.filter((d) => d.status === "pending_review").length;
 
   async function handleApprove(id: string) {
     setLoading(id);
@@ -62,7 +62,7 @@ export function DraftReviewForm({ batch, drafts: initialDrafts }: DraftReviewFor
       await approveDraftBatch(batch.id);
       setDrafts((prev) =>
         prev.map((d) =>
-          d.status === "pending"
+          d.status === "pending_review"
             ? { ...d, status: "approved", approved_at: new Date().toISOString() }
             : d,
         ),
@@ -134,7 +134,7 @@ export function DraftReviewForm({ batch, drafts: initialDrafts }: DraftReviewFor
             {renderDraftData(draft.draft_data)}
 
             {/* Actions */}
-            {draft.status === "pending" && (
+            {draft.status === "pending_review" && (
               <div className="flex items-center gap-2 pt-2">
                 <Button
                   size="sm"

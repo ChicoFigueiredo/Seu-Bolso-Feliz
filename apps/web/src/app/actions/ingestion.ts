@@ -206,7 +206,7 @@ export async function approveDraftBatch(batchId: string): Promise<void> {
     .from("draft_records")
     .update({ status: "approved", approved_at: new Date().toISOString() })
     .eq("batch_id", batchId)
-    .eq("status", "pending");
+    .eq("status", "pending_review");
 
   if (recordsError) throw new Error(recordsError.message);
 
@@ -280,7 +280,7 @@ export async function getIngestionStats(): Promise<{
       supabase
         .from("draft_records")
         .select("*", { count: "exact", head: true })
-        .eq("status", "pending"),
+        .eq("status", "pending_review"),
       supabase
         .from("ingestion_logs")
         .select("*", { count: "exact", head: true })

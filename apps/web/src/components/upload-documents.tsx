@@ -35,11 +35,11 @@ export function UploadDocuments({ onUploadComplete }: { onUploadComplete?: () =>
     try {
       // Upload cada arquivo para o storage
       for (const file of fileArray) {
-        const ext = file.name.split(".").pop() ?? "";
-        const storagePath = `ingestion/${crypto.randomUUID()}.${ext}`;
+        const docId = crypto.randomUUID();
+        const storagePath = `uploads/${docId}/${file.name}`;
 
         const { error: uploadError } = await supabase.storage
-          .from("ingestion-files")
+          .from("ingestion-originals")
           .upload(storagePath, file, { contentType: file.type });
 
         if (uploadError) {
