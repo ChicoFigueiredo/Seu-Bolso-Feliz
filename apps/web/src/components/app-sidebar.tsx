@@ -19,6 +19,7 @@ import {
   Activity,
   ScanLine,
   ClipboardCheck,
+  Files,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,6 +49,7 @@ const navGestao = [
   { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },
   { title: "Documentos", href: "/dashboard/documents", icon: FileText },
   { title: "Ingestão", href: "/dashboard/ingestion", icon: ScanLine },
+  { title: "Documentos Ingeridos", href: "/dashboard/ingestion/documents", icon: Files },
   { title: "Revisão", href: "/dashboard/ingestion/review", icon: ClipboardCheck },
   { title: "Logs Ingestão", href: "/dashboard/ingestion/logs", icon: Activity },
   { title: "Importar", href: "/dashboard/import", icon: Upload },
