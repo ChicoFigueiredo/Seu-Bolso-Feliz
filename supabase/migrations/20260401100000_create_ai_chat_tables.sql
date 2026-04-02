@@ -62,3 +62,26 @@ CREATE INDEX idx_ai_chat_sessions_user ON ai_chat_sessions(user_id);
 CREATE INDEX idx_ai_chat_sessions_updated ON ai_chat_sessions(updated_at DESC);
 CREATE INDEX idx_ai_chat_messages_session ON ai_chat_messages(session_id, created_at);
 CREATE INDEX idx_ai_chat_messages_user ON ai_chat_messages(user_id);
+
+-- ══════════════════════════════════════════════════════════════
+-- Helper RPC: Increment session token/message counters
+-- ══════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION increment_session_tokens(
+    p_session_id UUID,
+    p_tokens INTEGER,
+    p_messages INTEGER DEFAULT 2
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE ai_chat_sessions
+    SET
+        total_tokens_used = total_tokens_used + p_tokens,
+        message_count = message_count + p_messages,
+        updated_at = now()
+    WHERE id = p_session_id AND user_id = auth.uid();
+END;
+$$;
