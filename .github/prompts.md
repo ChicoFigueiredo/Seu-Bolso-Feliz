@@ -615,3 +615,36 @@ TIME, liberado CODAR!!
 - faça commits pequenos, claros e frequentes, para que a gente possa acompanhar o progresso e ter rastreabilidade. PUSH por minha conta
 
 VAMOS CODAR!!! CONTO COM VOCÊS!!
+
+---
+
+Vamos continuar
+
+- Atualizar o #2026-04-01-implementacao-plano-acao com o que foi feito
+- faça commits pequenos, claros e frequentes, para que a gente possa acompanhar o progresso e ter rastreabilidade. PUSH por minha conta
+- Ao final de cada ciclo de prompt que eu fizer, quero:
+  - um resumo do que foi feito, do que falta, e do que é prioridade
+  - um link para o checklist atualizado
+  - um link para o passo-a-passo atualizado
+
+---
+
+Ao fazer os commits, levar em conta os erros dos hooks do husky:
+
+```bash
+❯ git save-n "Chico: Evoluções do marco 4"
+✔ Backed up original state in git stash (a346507)
+✔ Running tasks for staged files...
+✔ Applying modifications from tasks...
+✔ Cleaning up temporary files...
+⧗   input: Chico: Evoluções do marco 4
+✖   subject must not be sentence-case, start-case, pascal-case, upper-case [subject-case]
+✖   type must be lower-case [type-case]
+✖   type must be one of [feat, fix, docs, style, refactor, test, chore, ci, perf, migration] [type-enum]
+
+✖   found 3 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+
+husky - commit-msg script failed (code 1)
+fatal: invalid refspec ''
+```
