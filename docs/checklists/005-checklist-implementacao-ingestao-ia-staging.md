@@ -22,13 +22,13 @@
 
 ## Marco 2 — Ingestão Visível (Fase B — início)
 
-- [ ] 007 — Server actions ingestão: listDocuments, getDocument
-- [ ] 008 — Server actions ingestão: listDrafts, getDraft
-- [ ] 009 — Rota `/dashboard/ingestion` com contadores
-- [ ] 010 — Rota `/dashboard/ingestion/documents` com listagem + filtros
-- [ ] 011 — Componente `<StatusBadge />` para 24 estados
-- [ ] 012 — Componente `<ConfidenceIndicator />`
-- [ ] 013 — Empty/loading states para páginas de ingestão
+- [x] 007 — Server actions ingestão: listDocuments, getDocument
+- [x] 008 — Server actions ingestão: listDrafts, getDraft
+- [x] 009 — Rota `/dashboard/ingestion` com contadores
+- [x] 010 — Rota `/dashboard/ingestion/documents` com listagem + filtros
+- [x] 011 — Componente `<StatusBadge />` para 24 estados
+- [x] 012 — Componente `<ConfidenceIndicator />`
+- [x] 013 — Empty/loading states para páginas de ingestão
 
 **Critério Marco 2:** Documentos ingeridos aparecem listados com status e filtros.
 
@@ -36,16 +36,16 @@
 
 ## Marco 3 — Revisão Humana (Fase B — completa)
 
-- [ ] 014 — Rota `/dashboard/ingestion/documents/[id]` com split-view
-- [ ] 015 — Componente `<PDFViewer />` inline
-- [ ] 016 — Componente `<DraftReviewForm />` com edição de campos
-- [ ] 017 — Componente `<DraftApprovalActions />` com aprovar/rejeitar/reprocessar
-- [ ] 018 — Server action: approveDraft (gravar no ledger + update status)
-- [ ] 019 — Server action: rejectDraft (marcar rejeitado + motivo)
-- [ ] 020 — Server action: reprocessDocument (resetar para QUEUED)
+- [x] 014 — Rota `/dashboard/ingestion/documents/[id]` com split-view
+- [x] 015 — Componente `<PDFViewer />` inline
+- [x] 016 — Componente `<DraftReviewForm />` com edição de campos
+- [x] 017 — Componente `<DraftApprovalActions />` com aprovar/rejeitar/reprocessar
+- [x] 018 — Server action: approveDraft (gravar no ledger + update status)
+- [x] 019 — Server action: rejectDraft (marcar rejeitado + motivo)
+- [x] 020 — Server action: reprocessDocument (resetar para QUEUED)
 - [ ] 021 — Batch approval: selecionar + aprovar múltiplos drafts
-- [ ] 022 — Indicadores visuais: erro, pendência, falta de senha, baixa confiança
-- [ ] 023a — Upload manual via UI: drag & drop na página de ingestão
+- [x] 022 — Indicadores visuais: erro, pendência, falta de senha, baixa confiança
+- [x] 023a — Upload manual via UI: drag & drop na página de ingestão
 
 **Critério Marco 3:** CEO abre documento, vê PDF + dados, edita, aprova, e registro aparece em transactions. Upload manual funcional.
 
@@ -54,11 +54,11 @@
 ## Marco 4 — IA Acoplada (Fase C)
 
 - [ ] 023 — **CEO:** Obter API key OpenAI e colocar no `.env`
-- [ ] 024 — Migration: tabelas ai_chat_sessions e ai_chat_messages com RLS
-- [ ] 025 — API Route `/api/chat` com auth, rate limiting, streaming
-- [ ] 026 — System prompt do SBF (contexto financeiro, personalidade)
-- [ ] 027 — Function calling tools (15 tools)
-- [ ] 028 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat
+- [x] 024 — Migration: tabelas ai_chat_sessions e ai_chat_messages com RLS
+- [x] 025 — API Route `/api/chat` com auth, rate limiting, streaming
+- [x] 026 — System prompt do SBF (contexto financeiro, personalidade)
+- [x] 027 — Function calling tools (12 tools implementadas)
+- [x] 028 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat
 - [ ] 029 — Upload de arquivo no chat (drag & drop)
 - [ ] 030 — Renderização de mensagens: markdown, tabelas, badges
 - [ ] 031 — Parser OpenAI: fallback quando regex falha
