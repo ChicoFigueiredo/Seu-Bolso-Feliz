@@ -307,4 +307,49 @@ BEGIN
   -- ── 18. Materialized view refresh ──
   REFRESH MATERIALIZED VIEW mv_supplier_spending;
 
+  -- ── 19. Padrões documentais iniciais (ADR-006) ──
+  INSERT INTO document_patterns (
+    user_id, name, document_type, supplier_id, institution_id,
+    extraction_rules, field_mappings, confidence_threshold, version, is_active
+  ) VALUES
+  -- Conta de energia CEMIG
+  (
+    v_user_id,
+    'Conta CEMIG Energia',
+    'conta_energia',
+    v_sup_cemig,
+    NULL,
+    '{"keywords": ["CEMIG", "DISTRIBUIÇÃO", "CEMIG D"], "fields": {"totalAmount": "TOTAL A PAGAR|Valor Total", "dueDate": "VENCIMENTO|Venc\\.", "competenceDate": "REFERENTE A|Competência"}}'::jsonb,
+    '{"supplierNameRaw": "supplierName", "totalAmount": {"target": "amount", "transform": "parse_number"}, "dueDate": "due_date", "competenceDate": "competence_date"}'::jsonb,
+    0.80,
+    1,
+    true
+  ),
+  -- Boleto genérico
+  (
+    v_user_id,
+    'Boleto Genérico',
+    'boleto_generico',
+    NULL,
+    NULL,
+    '{"keywords": ["BOLETO", "BANCO", "CÓDIGO DE BARRAS", "LINHA DIGITÁVEL"], "fields": {"totalAmount": "Valor Documento|VALOR", "dueDate": "Data de Vencimento|VENCIMENTO"}}'::jsonb,
+    '{"totalAmount": {"target": "amount", "transform": "parse_number"}, "dueDate": "due_date", "barCode": "bar_code"}'::jsonb,
+    0.60,
+    1,
+    true
+  ),
+  -- Fatura de cartão Nubank
+  (
+    v_user_id,
+    'Fatura Cartão Nubank',
+    'fatura_cartao',
+    NULL,
+    v_nubank,
+    '{"keywords": ["Nubank", "FATURA", "TOTAL DA FATURA", "Nu Pagamentos"], "fields": {"totalAmount": "TOTAL DA FATURA|Total", "dueDate": "Vencimento|DATA DE VENCIMENTO"}}'::jsonb,
+    '{"totalAmount": {"target": "amount", "transform": "parse_number"}, "dueDate": "due_date", "supplierNameRaw": "supplierName"}'::jsonb,
+    0.75,
+    1,
+    true
+  );
+
 END $$;
