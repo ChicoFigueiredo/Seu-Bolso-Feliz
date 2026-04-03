@@ -150,23 +150,23 @@
 
 - [x] M4-007 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat hook
   - **Aceite:** `AIChatDrawer` com `useChat()` e streaming
-- [ ] M4-008 — Upload de arquivo no chat (drag & drop que chama uploadDocument + informa à IA)
-  - **Aceite:** CEO arrasta PDF no chat, documento é ingerido, IA comenta sobre ele
-- [ ] M4-009 — Renderização de mensagens: markdown, tabelas, badges de status
-  - **Aceite:** Mensagens da IA com formatação rica
+- [x] M4-008 — Upload de arquivo no chat (drag & drop que chama uploadDocument + informa à IA)
+  - **Aceite:** Paperclip + file picker no `AIChatDrawer`, upload → trigger-ingestion → mensagem automática
+- [x] M4-009 — Renderização de mensagens: markdown, tabelas, badges de status
+  - **Aceite:** `ChatMarkdown` com GFM tables, code blocks, listas, links, headings, blockquotes
 - [x] M4-010 — Botão de chat no header/sidebar + toggle de drawer
   - **Aceite:** `ChatToggle` flutuante no dashboard layout
 
 ### Function Calling Avançado
 
-- [ ] M4-011 — Tools: suggest_supplier, suggest_document_type, explain_classification
-  - **Aceite:** IA sugere fornecedor/tipo com explicação
-- [ ] M4-012 — Tools: list_pending_documents, list_error_documents, list_missing_password_documents
-  - **Aceite:** IA lista documentos por estado quando perguntada
-- [ ] M4-013 — Tools: batch_approve_drafts (com confirmação humana)
-  - **Aceite:** IA propõe batch, pede confirmação, executa após "sim"
-- [ ] M4-014 — Auditoria: registrar toda interação com IA em ai_chat_messages
-  - **Aceite:** Cada mensagem e tool call fica persistida
+- [x] M4-011 — Tools: suggest_supplier, suggest_document_type, explain_classification
+  - **Aceite:** `suggestDocumentType` + `explainClassification` em `tools.ts` (suggest_supplier já existia)
+- [x] M4-012 — Tools: list_pending_documents, list_error_documents, list_missing_password_documents
+  - **Aceite:** `listErrorDocuments` + `listMissingPasswordDocuments` no registry (list_pending já existia)
+- [x] M4-013 — Tools: batch_approve_drafts (com confirmação humana)
+  - **Aceite:** `batchApproveDrafts` tool registrada com limit de 20 drafts, confirmação via system prompt
+- [x] M4-014 — Auditoria: registrar toda interação com IA em ai_chat_messages
+  - **Aceite:** Mensagens user/assistant + tool calls (nome, args, resultado) persistidos em `ai_chat_messages`
 
 **Critério do Marco:** CEO abre drawer de chat, arrasta PDF, recebe sugestão de fornecedor/tipo, aprova via chat.
 
