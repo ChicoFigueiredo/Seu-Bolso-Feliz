@@ -9,6 +9,7 @@ import { extractText, PdfPasswordRequiredError } from "./text-extractor";
 import { findPdfPassword } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
+import { findMatchingPattern } from "./pattern-matcher";
 import { writeLog, type LogContext } from "../logger";
 
 interface ParseContext {
@@ -115,6 +116,36 @@ export async function parseDocument(
         ctx,
         IngestionLogLevel.INFO,
         `Parser boleto genérico (confiança: ${(confidence * 100).toFixed(0)}%)`,
+      );
+    }
+  }
+
+  // ── 2b. Busca de padrão do usuário (ADR-006) ──
+  // Tenta identificar document_type a partir da extração atual para buscar padrão
+  if (extractionData) {
+    const detectedType = detectDocumentType(extractionData);
+    const patternMatch = await findMatchingPattern(
+      supabase,
+      userId,
+      detectedType,
+      null, // supplier_id resolvido na fase de draft — ainda não disponível aqui
+      extractionData,
+      confidence,
+    );
+
+    if (patternMatch) {
+      // Enriquece os dados com os campos mapeados pelo padrão
+      extractionData = { ...extractionData, ...patternMatch.mappedFields };
+      // Se o padrão aumentou a confiança, aplica
+      if (patternMatch.confidence > confidence) {
+        confidence = patternMatch.confidence;
+      }
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.INFO,
+        `Padrão aplicado: "${patternMatch.patternName}" v${patternMatch.version} ` +
+          `(confiança: ${(patternMatch.confidence * 100).toFixed(0)}%, auto: ${patternMatch.autoApplied})`,
       );
     }
   }
@@ -300,4 +331,34 @@ function suggestTags(data: Record<string, unknown>): string[] {
     tags.push("energia");
   }
   return tags;
+}
+
+/**
+ * Detecta o tipo de documento a partir dos dados extraídos.
+ * Usado para buscar padrões cadastrados pelo usuário (ADR-006).
+ */
+function detectDocumentType(data: Record<string, unknown>): string {
+  // documento já pode indicar seu tipo explicitamente
+  if (typeof data.documentType === "string" && data.documentType) {
+    return data.documentType;
+  }
+
+  const name = ((data.supplierNameRaw as string) ?? "").toUpperCase();
+
+  if (name.includes("CEMIG") || name.includes("CPFL") || name.includes("ENEL")) {
+    return "conta_energia";
+  }
+  if (name.includes("COPASA") || name.includes("SABESP") || name.includes("SANEPAR")) {
+    return "conta_agua";
+  }
+  if (name.includes("VIVO") || name.includes("CLARO") || name.includes("TIM")) {
+    return "conta_telefone";
+  }
+
+  // Boleto genérico quando há código de barras / vencimento identificados
+  if (data.barCode || data.dueDate) {
+    return "boleto_generico";
+  }
+
+  return "outros";
 }
