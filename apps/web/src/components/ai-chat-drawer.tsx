@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Loader2, AlertCircle, User, Wrench, Plus } from "lucide-react";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { createClient } from "@/lib/supabase/client";
 
 interface AIChatDrawerProps {
@@ -153,7 +154,11 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
                     message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  {message.role === "user" ? (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  ) : (
+                    <ChatMarkdown content={message.content} />
+                  )}
 
                   {/* Show tool invocations */}
                   {message.toolInvocations && message.toolInvocations.length > 0 && (
