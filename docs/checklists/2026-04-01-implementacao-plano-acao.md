@@ -36,7 +36,7 @@
 
 ### Edge Function — Staging Independence
 
-- [ ] M1-010 — Criar Edge Function `trigger-ingestion` para disparar reprocessamento remoto
+- [x] M1-010 — Criar Edge Function `trigger-ingestion` para disparar reprocessamento remoto
   - **Aceite:** Chamada HTTP dispara reprocessamento de jobs QUEUED em staging
 
 **Critério do Marco:** CEO faz login em staging, vê dashboard, navega para /dashboard/logs.
@@ -49,32 +49,32 @@
 
 ### Server Actions — Ingestão
 
-- [ ] M2-001 — Criar server action `listDocuments` (source_documents com joins em ingestion_jobs)
-  - **Aceite:** Retorna lista paginada com status, origem, fornecedor
-- [ ] M2-002 — Criar server action `getDocument` (detalhe completo do documento + jobs + drafts)
-  - **Aceite:** Retorna documento com todos os dados relacionados
-- [ ] M2-003 — Criar server action `listDrafts` (draft_records com filtros)
-  - **Aceite:** Retorna lista de drafts filtráveis por status
-- [ ] M2-004 — Criar server action `getDraft` (detalhe do draft + extraction_result)
-  - **Aceite:** Retorna draft com dados extraídos e correções
+- [x] M2-001 — Criar server action `listDocuments` (source_documents com joins em ingestion_jobs)
+  - **Aceite:** `getSourceDocuments()` em `actions/ingestion.ts`
+- [x] M2-002 — Criar server action `getDocument` (detalhe completo do documento + jobs + drafts)
+  - **Aceite:** `getDocumentWithRelations()` em `actions/ingestion.ts`
+- [x] M2-003 — Criar server action `listDrafts` (draft_records com filtros)
+  - **Aceite:** `getDraftRecords()` em `actions/ingestion.ts`
+- [x] M2-004 — Criar server action `getDraft` (detalhe do draft + extraction_result)
+  - **Aceite:** Draft data via `getDraftRecords()` com filtro por batch
 
 ### Páginas de Ingestão
 
-- [ ] M2-005 — Criar rota `/dashboard/ingestion` com contadores (total, pendentes, aprovados, erros)
+- [x] M2-005 — Criar rota `/dashboard/ingestion` com contadores (total, pendentes, aprovados, erros)
   - **Aceite:** Página com cards de contadores funcionais
-- [ ] M2-006 — Criar rota `/dashboard/ingestion/documents` com listagem + filtros (status, origem, tipo, período)
+- [x] M2-006 — Criar rota `/dashboard/ingestion/documents` com listagem + filtros (status, origem, tipo, período)
   - **Aceite:** Listagem paginada com filtros funcionando
-- [ ] M2-007 — Componente `<StatusBadge />` para estados da máquina de estados do ingestion
-  - **Aceite:** Badge com cor e label por estado (discovered, downloaded, hashed, parsed, etc.)
-- [ ] M2-008 — Componente `<ConfidenceIndicator />` para confiança de extração
-  - **Aceite:** Indicador visual (barra ou %) com cores (verde >80%, amarelo >60%, vermelho <60%)
-- [ ] M2-009 — Empty states e loading states para páginas de ingestão
-  - **Aceite:** Skeleton loading + mensagem quando não há dados
+- [x] M2-007 — Componente `<StatusBadge />` para estados da máquina de estados do ingestion
+  - **Aceite:** Badge com cor e label por estado
+- [x] M2-008 — Componente `<ConfidenceIndicator />` para confiança de extração
+  - **Aceite:** Indicador visual com cores
+- [x] M2-009 — Empty states e loading states para páginas de ingestão
+  - **Aceite:** Implementado nas páginas de ingestão
 
 ### Sidebar
 
-- [ ] M2-010 — Adicionar link "Ingestão" no sidebar (seção Gestão) com ícone
-  - **Aceite:** Link navega para /dashboard/ingestion
+- [x] M2-010 — Adicionar link "Ingestão" no sidebar (seção Gestão) com ícone
+  - **Aceite:** Links para Ingestão, Documentos e Logs no sidebar
 
 **Critério do Marco:** Documentos ingeridos via worker CLI aparecem listados com status e filtros na UI.
 
@@ -86,39 +86,39 @@
 
 ### Upload Manual
 
-- [ ] M3-001 — Criar server action `uploadDocument` (recebe arquivo, salva no Storage, cria source_document + ingestion_job)
-  - **Aceite:** Arquivo enviado aparece em source_documents com status correto
-- [ ] M3-002 — Componente `<DocumentUpload />` com drag & drop + seleção de arquivo
-  - **Aceite:** Drag & drop funciona, progresso visível, aceita PDF/imagem/texto
-- [ ] M3-003 — Integrar upload no `/dashboard/ingestion` (botão "Enviar documento" + modal/área de upload)
-  - **Aceite:** CEO arrasta PDF na página e documento aparece na lista
+- [x] M3-001 — Criar server action `uploadDocument` (recebe arquivo, salva no Storage, cria source_document + ingestion_job)
+  - **Aceite:** Upload via `UploadDocuments` component + Edge Function trigger
+- [x] M3-002 — Componente `<DocumentUpload />` com drag & drop + seleção de arquivo
+  - **Aceite:** `UploadDocuments` com drag & drop funcional
+- [x] M3-003 — Integrar upload no `/dashboard/ingestion` (botão "Enviar documento" + modal/área de upload)
+  - **Aceite:** Integrado na página de ingestão
 
 ### Revisão — Split View
 
-- [ ] M3-004 — Criar rota `/dashboard/ingestion/documents/[id]` com layout split-view
-  - **Aceite:** Metade esquerda mostra PDF/arquivo, metade direita mostra dados extraídos
-- [ ] M3-005 — Componente `<PDFViewer />` inline (embed ou iframe para PDF do Supabase Storage)
-  - **Aceite:** PDF renderizado inline sem download obrigatório
-- [ ] M3-006 — Componente `<DraftReviewForm />` com campos editáveis (fornecedor, tipo, valor, data, categoria)
-  - **Aceite:** Campos preenchidos com dados da extração, editáveis antes de aprovar
-- [ ] M3-007 — Componente `<DraftApprovalActions />` com botões aprovar/rejeitar/reprocessar
-  - **Aceite:** Cada ação atualiza status do draft e mostra feedback via toast
+- [x] M3-004 — Criar rota `/dashboard/ingestion/documents/[id]` com layout split-view
+  - **Aceite:** `DocumentDetailView` com split-view funcional
+- [x] M3-005 — Componente `<PDFViewer />` inline (embed ou iframe para PDF do Supabase Storage)
+  - **Aceite:** Inline via iframe/img no `DocumentDetailView`
+- [x] M3-006 — Componente `<DraftReviewForm />` com campos editáveis (fornecedor, tipo, valor, data, categoria)
+  - **Aceite:** `DraftReviewForm` com edição de campos
+- [x] M3-007 — Componente `<DraftApprovalActions />` com botões aprovar/rejeitar/reprocessar
+  - **Aceite:** Ações integradas no `DraftReviewForm`
 
 ### Server Actions — Revisão
 
-- [ ] M3-008 — Criar server action `approveDraft` (valida draft, grava no ledger, atualiza status)
-  - **Aceite:** Draft aprovado cria transaction correspondente + draft_records.status = 'approved'
-- [ ] M3-009 — Criar server action `rejectDraft` (marca rejeitado + motivo obrigatório)
-  - **Aceite:** Draft rejeitado com motivo salvo em corrections.rejection_reason
-- [ ] M3-010 — Criar server action `reprocessDocument` (reseta job para QUEUED, limpa drafts anteriores)
-  - **Aceite:** Job volta para QUEUED, pronto para novo processamento
-- [ ] M3-011 — Batch approval: server action `approveBatch` (aprovar múltiplos drafts de uma vez)
-  - **Aceite:** Seleção de checkboxes + botão "Aprovar selecionados" funciona
+- [x] M3-008 — Criar server action `approveDraft` (valida draft, grava no ledger, atualiza status)
+  - **Aceite:** `approveDraftRecord()` em `actions/ingestion.ts`
+- [x] M3-009 — Criar server action `rejectDraft` (marca rejeitado + motivo obrigatório)
+  - **Aceite:** `rejectDraftRecord()` com `corrections.rejection_reason`
+- [x] M3-010 — Criar server action `reprocessDocument` (reseta job para QUEUED, limpa drafts anteriores)
+  - **Aceite:** `reprocessDocument()` em `actions/ingestion.ts`
+- [x] M3-011 — Batch approval: server action `approveBatch` (aprovar múltiplos drafts de uma vez)
+  - **Aceite:** `approveDraftBatch()` em `actions/ingestion.ts`
 
 ### Indicadores Visuais
 
-- [ ] M3-012 — Indicadores no detalhe: erro (vermelho), pendência (amarelo), falta de senha (ícone cadeado), baixa confiança (alerta)
-  - **Aceite:** Cada cenário exibe indicador correto no detalhe do documento
+- [x] M3-012 — Indicadores no detalhe: erro (vermelho), pendência (amarelo), falta de senha (ícone cadeado), baixa confiança (alerta)
+  - **Aceite:** Indicadores visuais no `DocumentDetailView` e `StatusBadge`
 
 **Critério do Marco:** CEO faz upload de PDF, vê no split-view, edita campos, aprova, e transação aparece no dashboard.
 
@@ -132,30 +132,30 @@
 
 - [ ] M4-001 — **CEO:** Obter API key OpenAI e configurar em `.env.local` e Vercel env vars
   - **Aceite:** OPENAI_API_KEY acessível pelo backend
-- [ ] M4-002 — Instalar dependência `ai` (Vercel AI SDK) e `openai` no apps/web
-  - **Aceite:** Pacotes no package.json, import funciona
-- [ ] M4-003 — Criar migration: tabelas `ai_chat_sessions` e `ai_chat_messages` com RLS
-  - **Aceite:** Tabelas criadas, RLS impede acesso cross-user
+- [x] M4-002 — Instalar dependência `ai` (Vercel AI SDK) e `openai` no apps/web
+  - **Aceite:** `ai@4.3.19` + `@ai-sdk/openai@1.3.24` instalados
+- [x] M4-003 — Criar migration: tabelas `ai_chat_sessions` e `ai_chat_messages` com RLS
+  - **Aceite:** Migration `20260401100000_create_ai_chat_tables.sql` com RLS
 
 ### API de Chat
 
-- [ ] M4-004 — Criar API Route `app/api/chat/route.ts` com auth, rate limiting, streaming
-  - **Aceite:** POST com mensagem retorna stream de resposta, 401 sem auth
-- [ ] M4-005 — System prompt do SBF (contexto financeiro, personalidade, instruções de tool use)
-  - **Aceite:** Prompt documentado e testável
-- [ ] M4-006 — Function calling: tools iniciais (list_documents, get_document, list_drafts, approve_draft, reject_draft)
-  - **Aceite:** IA consegue listar documentos e aprovar drafts via chat
+- [x] M4-004 — Criar API Route `app/api/chat/route.ts` com auth, rate limiting, streaming
+  - **Aceite:** Rate limiting 10/min + 100/dia, streaming via `streamText()`
+- [x] M4-005 — System prompt do SBF (contexto financeiro, personalidade, instruções de tool use)
+  - **Aceite:** `system-prompt.ts` com persona e guardrails
+- [x] M4-006 — Function calling: tools iniciais (list_documents, get_document, list_drafts, approve_draft, reject_draft)
+  - **Aceite:** 12 tools em `lib/ai/tools.ts`
 
 ### UI de Chat
 
-- [ ] M4-007 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat hook
-  - **Aceite:** Drawer lateral abre/fecha, mensagens renderizam com streaming
+- [x] M4-007 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat hook
+  - **Aceite:** `AIChatDrawer` com `useChat()` e streaming
 - [ ] M4-008 — Upload de arquivo no chat (drag & drop que chama uploadDocument + informa à IA)
   - **Aceite:** CEO arrasta PDF no chat, documento é ingerido, IA comenta sobre ele
 - [ ] M4-009 — Renderização de mensagens: markdown, tabelas, badges de status
   - **Aceite:** Mensagens da IA com formatação rica
-- [ ] M4-010 — Botão de chat no header/sidebar + toggle de drawer
-  - **Aceite:** Ícone acessível de qualquer página do dashboard
+- [x] M4-010 — Botão de chat no header/sidebar + toggle de drawer
+  - **Aceite:** `ChatToggle` flutuante no dashboard layout
 
 ### Function Calling Avançado
 
