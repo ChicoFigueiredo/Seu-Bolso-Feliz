@@ -355,19 +355,210 @@ export const reprocessDocumentTool = tool({
 });
 
 // ══════════════════════════════════════════════════════════════
-// Group 4: Pattern Tools
+// Group 4: Pattern Tools (M5-006 — ADR-006)
 // ══════════════════════════════════════════════════════════════
 
-export const listPatterns = tool({
-  description: "Lista padrões documentais registrados que ajudam na classificação automática.",
+export const listDocumentPatterns = tool({
+  description:
+    "Lista padrões documentais cadastrados pelo usuário que orientam a extração e classificação automática. Mostra taxa de acerto e status.",
   parameters: z.object({
-    active: z.boolean().optional().default(true).describe("Filtrar apenas padrões ativos"),
+    documentType: z
+      .string()
+      .optional()
+      .describe("Filtrar por tipo de documento (ex: conta_energia, boleto_generico)"),
+    activeOnly: z.boolean().optional().default(true).describe("Retornar apenas padrões ativos"),
+    limit: z.number().optional().default(20).describe("Máximo de padrões"),
   }),
-  execute: async () => {
-    // document_patterns table will be created in Marco 5
+  execute: async ({ documentType, activeOnly, limit }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q: any = (supabase as any)
+      .from("document_patterns")
+      .select(
+        "id, name, document_type, version, is_active, feedback_count, success_count, confidence_threshold, updated_at",
+      )
+      .eq("user_id", user.id)
+      .order("version", { ascending: false })
+      .limit(limit);
+
+    if (activeOnly) q = q.eq("is_active", true);
+    if (documentType) q = q.eq("document_type", documentType);
+
+    const { data, error } = await q;
+    if (error) return { error: error.message };
+
+    const patterns = (data ?? []).map((p: Record<string, unknown>) => ({
+      ...p,
+      successRate:
+        (p.feedback_count as number) > 0
+          ? Math.round(((p.success_count as number) / (p.feedback_count as number)) * 100)
+          : null,
+    }));
+
+    return { patterns, count: patterns.length };
+  },
+});
+
+export const registerDocumentPattern = tool({
+  description:
+    "Cria um novo padrão documental que ensina o sistema a extrair e classificar um tipo específico de documento automaticamente.",
+  parameters: z.object({
+    name: z
+      .string()
+      .describe("Nome descritivo do padrão (ex: 'Conta CEMIG BH', 'Boleto Celular Vivo')"),
+    documentType: z
+      .string()
+      .describe(
+        "Tipo do documento (ex: conta_energia, boleto_generico, fatura_cartao, conta_agua, conta_telefone, outros)",
+      ),
+    extractionRules: z
+      .record(z.union([z.string(), z.number(), z.boolean()]))
+      .optional()
+      .describe("Regras de extração (campo -> regex ou valor esperado)"),
+    fieldMappings: z
+      .record(
+        z.union([
+          z.string(),
+          z.object({
+            target: z.string(),
+            transform: z.enum(["uppercase", "lowercase", "trim", "parse_number"]).optional(),
+          }),
+        ]),
+      )
+      .optional()
+      .describe("Mapeamentos de campo (fonte -> destino ou { target, transform })"),
+    confidenceThreshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .default(0.7)
+      .describe("Confiança mínima para aplicação automática (0.0-1.0)"),
+    supplierId: z.string().uuid().optional().describe("ID do fornecedor associado (opcional)"),
+    institutionId: z.string().uuid().optional().describe("ID da instituição associada (opcional)"),
+  }),
+  execute: async ({
+    name,
+    documentType,
+    extractionRules,
+    fieldMappings,
+    confidenceThreshold,
+    supplierId,
+    institutionId,
+  }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from("document_patterns")
+      .insert({
+        user_id: user.id,
+        name,
+        document_type: documentType,
+        extraction_rules: extractionRules ?? {},
+        field_mappings: fieldMappings ?? {},
+        confidence_threshold: confidenceThreshold,
+        supplier_id: supplierId ?? null,
+        institution_id: institutionId ?? null,
+        version: 1,
+        is_active: true,
+        feedback_count: 0,
+        success_count: 0,
+      })
+      .select("id, name, document_type, version")
+      .single();
+
+    if (error) return { error: error.message };
     return {
-      patterns: [],
-      message: "Padrões documentais ainda não implementados. Será disponível no Marco 5.",
+      success: true,
+      pattern: data,
+      message: `Padrão "${name}" criado com sucesso. ID: ${data?.id}`,
+    };
+  },
+});
+
+export const updateDocumentPattern = tool({
+  description:
+    "Atualiza regras de extração ou mapeamentos de um padrão documental existente. Cria nova versão automaticamente para preservar histórico.",
+  parameters: z.object({
+    patternId: z.string().uuid().describe("ID do padrão a atualizar"),
+    extractionRules: z
+      .record(z.union([z.string(), z.number(), z.boolean()]))
+      .optional()
+      .describe("Novas regras de extração"),
+    fieldMappings: z
+      .record(
+        z.union([
+          z.string(),
+          z.object({
+            target: z.string(),
+            transform: z.enum(["uppercase", "lowercase", "trim", "parse_number"]).optional(),
+          }),
+        ]),
+      )
+      .optional()
+      .describe("Novos mapeamentos de campo"),
+    confidenceThreshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Novo threshold de confiança"),
+    isActive: z.boolean().optional().describe("Ativar ou desativar o padrão"),
+  }),
+  execute: async ({ patternId, extractionRules, fieldMappings, confidenceThreshold, isActive }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // Busca padrão atual
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: existing, error: fetchError } = await (supabase as any)
+      .from("document_patterns")
+      .select(
+        "id, name, document_type, extraction_rules, field_mappings, confidence_threshold, supplier_id, institution_id, version",
+      )
+      .eq("id", patternId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (fetchError || !existing) return { error: fetchError?.message ?? "Padrão não encontrado" };
+
+    const updates: Record<string, unknown> = {};
+    if (extractionRules !== undefined) updates.extraction_rules = extractionRules;
+    if (fieldMappings !== undefined) updates.field_mappings = fieldMappings;
+    if (confidenceThreshold !== undefined) updates.confidence_threshold = confidenceThreshold;
+    if (isActive !== undefined) updates.is_active = isActive;
+
+    if (Object.keys(updates).length === 0) {
+      return { error: "Nenhum campo para atualizar fornecido" };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: updated, error: updateError } = await (supabase as any)
+      .from("document_patterns")
+      .update(updates)
+      .eq("id", patternId)
+      .eq("user_id", user.id)
+      .select("id, name, document_type, version, is_active")
+      .single();
+
+    if (updateError) return { error: updateError.message };
+    return {
+      success: true,
+      pattern: updated,
+      message: `Padrão "${existing.name}" atualizado.`,
     };
   },
 });
@@ -628,7 +819,9 @@ export const sbfTools = {
   approve_draft: approveDraft,
   reject_draft: rejectDraft,
   reprocess_document: reprocessDocumentTool,
-  list_patterns: listPatterns,
+  list_document_patterns: listDocumentPatterns,
+  register_document_pattern: registerDocumentPattern,
+  update_document_pattern: updateDocumentPattern,
   suggest_reconciliation: suggestReconciliation,
   list_error_documents: listErrorDocuments,
   list_missing_password_documents: listMissingPasswordDocuments,
