@@ -435,6 +435,183 @@ export const suggestReconciliation = tool({
 });
 
 // ══════════════════════════════════════════════════════════════
+// Group 5: Classification & Analysis Tools
+// ══════════════════════════════════════════════════════════════
+
+export const suggestDocumentType = tool({
+  description:
+    "Sugere o tipo de documento (boleto, fatura, recibo, comprovante, extrato, contrato) baseado no texto extraído.",
+  parameters: z.object({
+    extractedText: z.string().describe("Texto extraído do documento"),
+    filename: z.string().optional().describe("Nome do arquivo original"),
+  }),
+  execute: async ({ extractedText, filename }) => {
+    return {
+      instruction:
+        "Analise o texto e o nome do arquivo para classificar o tipo de documento. Tipos possíveis: boleto, fatura_cartao, fatura_servico, recibo, comprovante_pagamento, extrato_bancario, contrato, nota_fiscal, outro. Explique sua classificação.",
+      extractedText: extractedText.slice(0, 2000),
+      filename,
+    };
+  },
+});
+
+export const explainClassification = tool({
+  description:
+    "Explica por que um documento ou transação foi classificado de determinada forma. Útil para transparência e aprendizado.",
+  parameters: z.object({
+    draftId: z.string().uuid().describe("ID do draft para explicar a classificação"),
+  }),
+  execute: async ({ draftId }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    const { data: draft, error } = await supabase
+      .from("draft_records")
+      .select("draft_type, draft_data, confidence_score, corrections, source_document_id")
+      .eq("id", draftId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (error || !draft) return { error: error?.message ?? "Draft não encontrado" };
+
+    // Get source document for context
+    let sourceInfo = null;
+    if (draft.source_document_id) {
+      const { data: doc } = await supabase
+        .from("source_documents")
+        .select("filename, mime_type, origin_type, metadata")
+        .eq("id", draft.source_document_id)
+        .single();
+      sourceInfo = doc;
+    }
+
+    return {
+      instruction:
+        "Explique em linguagem acessível como este draft foi classificado, quais dados foram extraídos e qual a confiança. Se houver correções, mencione o que foi ajustado.",
+      draft: {
+        type: draft.draft_type,
+        data: draft.draft_data,
+        confidence: draft.confidence_score,
+        corrections: draft.corrections,
+      },
+      source: sourceInfo,
+    };
+  },
+});
+
+// ══════════════════════════════════════════════════════════════
+// Group 6: Specialized Query Tools
+// ══════════════════════════════════════════════════════════════
+
+export const listErrorDocuments = tool({
+  description: "Lista documentos com erro de processamento, para diagnóstico e reprocessamento.",
+  parameters: z.object({
+    limit: z.number().optional().default(10).describe("Máximo de documentos"),
+  }),
+  execute: async ({ limit }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    const { data, error } = await supabase
+      .from("source_documents")
+      .select("id, filename, status, created_at")
+      .eq("user_id", user.id)
+      .eq("status", "error")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) return { error: error.message };
+    return { documents: data, count: data?.length ?? 0 };
+  },
+});
+
+export const listMissingPasswordDocuments = tool({
+  description:
+    "Lista documentos que falharam por falta de senha (PDF protegido), para que o usuário possa fornecer.",
+  parameters: z.object({
+    limit: z.number().optional().default(10).describe("Máximo de documentos"),
+  }),
+  execute: async ({ limit }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // Search for jobs that failed at parse step (typically password issues)
+    const { data, error } = await supabase
+      .from("ingestion_jobs")
+      .select(
+        "id, source_document_id, status, step, error_message, source_documents!inner(filename, user_id)",
+      )
+      .eq("source_documents.user_id", user.id)
+      .eq("status", "failed")
+      .eq("step", "parse")
+      .ilike("error_message", "%password%")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) return { error: error.message };
+    return { documents: data, count: data?.length ?? 0 };
+  },
+});
+
+// ══════════════════════════════════════════════════════════════
+// Group 7: Batch Action Tools
+// ══════════════════════════════════════════════════════════════
+
+export const batchApproveDrafts = tool({
+  description:
+    "Aprova múltiplos drafts de uma vez. IMPORTANTE: SEMPRE liste os drafts primeiro e peça confirmação explícita do usuário antes de executar.",
+  parameters: z.object({
+    draftIds: z.array(z.string().uuid()).describe("Lista de IDs dos drafts a aprovar"),
+  }),
+  execute: async ({ draftIds }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    if (draftIds.length > 50) {
+      return { error: "Máximo de 50 drafts por batch." };
+    }
+
+    const results: { id: string; success: boolean; error?: string }[] = [];
+
+    for (const draftId of draftIds) {
+      const { error } = await supabase
+        .from("draft_records")
+        .update({ status: "approved" as const })
+        .eq("id", draftId)
+        .eq("user_id", user.id)
+        .eq("status", "pending_review");
+
+      results.push({
+        id: draftId,
+        success: !error,
+        error: error?.message,
+      });
+    }
+
+    const approved = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+
+    return {
+      success: true,
+      message: `Batch concluído: ${approved} aprovados, ${failed} falharam.`,
+      details: results,
+    };
+  },
+});
+
+// ══════════════════════════════════════════════════════════════
 // Tool registry for the chat route
 // ══════════════════════════════════════════════════════════════
 
@@ -446,9 +623,14 @@ export const sbfTools = {
   list_recent_transactions: listRecentTransactions,
   suggest_supplier: suggestSupplier,
   suggest_category_tags: suggestCategoryTags,
+  suggest_document_type: suggestDocumentType,
+  explain_classification: explainClassification,
   approve_draft: approveDraft,
   reject_draft: rejectDraft,
   reprocess_document: reprocessDocumentTool,
   list_patterns: listPatterns,
   suggest_reconciliation: suggestReconciliation,
+  list_error_documents: listErrorDocuments,
+  list_missing_password_documents: listMissingPasswordDocuments,
+  batch_approve_drafts: batchApproveDrafts,
 };
