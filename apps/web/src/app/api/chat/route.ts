@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     tools: sbfTools,
     maxTokens: MAX_TOKENS_PER_REQUEST,
     maxSteps: 5,
-    onFinish: async ({ text, usage }) => {
+    onFinish: async ({ text, usage, toolCalls, toolResults }) => {
       // Log assistant response
       if (sessionId && text) {
         await untypedFrom(supabase, "ai_chat_messages").insert({
@@ -127,12 +127,32 @@ export async function POST(req: Request) {
           content: text,
           tokens_used: usage?.totalTokens,
         });
+      }
 
-        // Update session token counter
+      // Log tool calls for audit
+      if (sessionId && toolCalls && toolCalls.length > 0) {
+        const toolEntries = toolCalls.map((call, i) => ({
+          session_id: sessionId,
+          user_id: user.id,
+          role: "tool" as const,
+          content: JSON.stringify({
+            tool_name: call.toolName,
+            args: call.args,
+            result: toolResults?.[i]?.result ?? null,
+          }),
+          tokens_used: 0,
+        }));
+
+        await untypedFrom(supabase, "ai_chat_messages").insert(toolEntries);
+      }
+
+      // Update session token counter
+      if (sessionId) {
+        const msgCount = 2 + (toolCalls?.length ?? 0);
         await untypedRpc(supabase, "increment_session_tokens", {
           p_session_id: sessionId,
           p_tokens: usage?.totalTokens ?? 0,
-          p_messages: 2,
+          p_messages: msgCount,
         });
       }
     },
