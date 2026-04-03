@@ -7,9 +7,13 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Bot, Send, Loader2, AlertCircle, User, Wrench, Plus } from "lucide-react";
+import { Bot, Send, Loader2, AlertCircle, User, Wrench, Plus, Paperclip } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
+
+const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif";
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 interface AIChatDrawerProps {
   open: boolean;
@@ -18,10 +22,12 @@ interface AIChatDrawerProps {
 
 export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, append } = useChat({
     api: "/api/chat",
     body: { sessionId },
     onError: (err) => {
@@ -75,6 +81,71 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
     setSessionId(null);
     // useChat doesn't have a direct reset, so we create new session which resets via key
   }, []);
+
+  const handleFileUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      const fileArray = Array.from(files);
+      const oversized = fileArray.filter((f) => f.size > MAX_FILE_SIZE);
+      if (oversized.length > 0) {
+        toast.error("Arquivo(s) muito grande(s)", {
+          description: `Limite de 10MB. Rejeitados: ${oversized.map((f) => f.name).join(", ")}`,
+        });
+        return;
+      }
+
+      setUploading(true);
+      const supabase = createClient();
+      const uploadedPaths: string[] = [];
+      const uploadedNames: string[] = [];
+
+      try {
+        for (const file of fileArray) {
+          const docId = crypto.randomUUID();
+          const storagePath = `uploads/${docId}/${file.name}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("ingestion-originals")
+            .upload(storagePath, file, { contentType: file.type });
+
+          if (uploadError) {
+            toast.error(`Erro no upload de ${file.name}`, { description: uploadError.message });
+            continue;
+          }
+          uploadedPaths.push(storagePath);
+          uploadedNames.push(file.name);
+        }
+
+        if (uploadedPaths.length === 0) {
+          toast.error("Nenhum arquivo enviado com sucesso");
+          return;
+        }
+
+        // Trigger ingestion
+        await supabase.functions.invoke("trigger-ingestion", {
+          body: {
+            source_type: "manual",
+            file_paths: uploadedPaths,
+          },
+        });
+
+        // Send message to chat about uploaded files
+        const fileList = uploadedNames.join(", ");
+        append({
+          role: "user",
+          content: `Enviei ${uploadedNames.length} arquivo(s) para ingestão: ${fileList}. Por favor, acompanhe o processamento e me avise quando os documentos estiverem disponíveis para revisão.`,
+        });
+
+        toast.success(`${uploadedNames.length} arquivo(s) enviado(s) para ingestão`);
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [append],
+  );
 
   const onSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -208,6 +279,30 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
         {/* Input area */}
         <div className="border-t p-4">
           <form onSubmit={onSubmit} className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              disabled={uploading || isLoading}
+              onClick={() => fileInputRef.current?.click()}
+              title="Enviar arquivo para ingestão"
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Paperclip className="h-4 w-4" />
+              )}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept={ACCEPTED_TYPES}
+              multiple
+              onChange={handleFileUpload}
+              disabled={uploading}
+            />
             <Textarea
               ref={textareaRef}
               value={input}
