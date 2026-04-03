@@ -74,13 +74,13 @@
 
 ### Padrões Documentais (Fase D)
 
-- [ ] 035 — Migration: tabelas document_patterns e pattern_feedback com RLS
-- [ ] 036 — Server actions: CRUD patterns, listagem, feedback
-- [ ] 037 — Rota `/dashboard/ingestion/patterns` — lista + detalhe + edição
-- [ ] 038 — Integrar padrões no ingestion worker
-- [ ] 039 — Auto-desativação de padrões ruins (feedback_count > 3, success < 50%)
-- [ ] 040 — Tools de chat: list/register/update patterns
-- [ ] 041 — Seed: 3-5 padrões iniciais (CEMIG, boleto, fatura cartão)
+- [x] 035 — Migration: tabelas document_patterns e pattern_feedback com RLS
+- [x] 036 — Server actions: CRUD patterns, listagem, feedback
+- [x] 037 — Rota `/dashboard/ingestion/patterns` — lista + detalhe + edição
+- [x] 038 — Integrar padrões no ingestion worker
+- [x] 039 — Auto-desativação de padrões ruins (feedback_count > 3, success < 50%)
+- [x] 040 — Tools de chat: list/register/update patterns
+- [x] 041 — Seed: 3-5 padrões iniciais (CEMIG, boleto, fatura cartão)
 
 ### Reconciliação (Fase E)
 
