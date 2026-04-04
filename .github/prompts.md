@@ -674,3 +674,21 @@ Vamos continuar a execução do plano de ação #file:2026-04-01-implementacao-p
   - um link para o checklist atualizado
   - um link para o passo-a-passo atualizado
     Vamos evoluir!
+
+---
+
+Vamos começar o Marco 5. Primeiro item: migration de document_patterns
+
+---
+
+Próximos itens do Marco 5 (Fase E — Reconciliação):
+
+- 042: módulo reconciliation.ts
+- 043: migration de colunas em draft_records
+- 044-048: integração, UI e testes de reconciliação
+
+VAMOS LÁ!
+
+---
+
+

@@ -10,6 +10,7 @@ import { isValidTransition } from "./state-machine";
 import { writeLog, type LogContext } from "./logger";
 import { parseDocument } from "./parsers/parse-orchestrator";
 import { generateDrafts } from "./drafts/draft-generator";
+import { findReconciliationCandidates, isDuplicateRisk } from "./reconciliation/reconciliation";
 
 interface JobRow {
   id: string;
@@ -305,14 +306,70 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   if (!ok) return;
   job.status = IngestionJobStatus.CLASSIFIED;
 
-  // classified → reconciled (MVP: passthrough, sem conflitos)
+  // classified → reconciled (engine determinística de reconciliação)
+  await writeLog(supabase, ctx, IngestionLogLevel.INFO, "Executando reconciliação...");
+
+  // Buscar draft_data do primeiro draft gerado para rodar reconciliação
+  // (neste ponto os drafts ainda não existem — reconciliação ocorre antes de gerar)
+  // Carregamos extraction_result para obter os dados necessários
+  let reconciliationConflicts = 0;
+  if (meta.extraction_result_id) {
+    const { data: er } = await supabase
+      .from("extraction_results")
+      .select("*")
+      .eq("id", meta.extraction_result_id as string)
+      .single();
+
+    if (er) {
+      const draftDataForReconciliation: Record<string, unknown> = {
+        amount: er.total_amount,
+        due_date: er.due_date,
+        competence_date: er.competence_date,
+        supplier_id: er.supplier_id,
+        supplier_name: er.supplier_name_raw,
+      };
+
+      const reconcResult = await findReconciliationCandidates(
+        supabase,
+        ctx.userId,
+        draftDataForReconciliation,
+        job.source_document_id,
+      );
+
+      if (isDuplicateRisk(reconcResult)) {
+        reconciliationConflicts = 1;
+        await writeLog(
+          supabase,
+          ctx,
+          IngestionLogLevel.WARN,
+          `Risco de duplicata detectado: ${reconcResult.status} (${reconcResult.candidates.length} candidatos)`,
+        );
+      } else if (reconcResult.status !== "no_match") {
+        await writeLog(
+          supabase,
+          ctx,
+          IngestionLogLevel.INFO,
+          `Reconciliação: ${reconcResult.status} (${reconcResult.candidates.length} candidatos)`,
+        );
+      }
+
+      // Salvar resultado da reconciliação em metadados do job
+      meta.reconciliation_status = reconcResult.status;
+      meta.reconciliation_candidates = reconcResult.candidates;
+    }
+  }
+
   ok = await transitionJob(
     supabase,
     job.id,
     IngestionJobStatus.CLASSIFIED,
     IngestionJobStatus.RECONCILED,
     {
-      metadata: { ...meta, reconciled_at: new Date().toISOString(), reconcile_conflicts: 0 },
+      metadata: {
+        ...meta,
+        reconciled_at: new Date().toISOString(),
+        reconcile_conflicts: reconciliationConflicts,
+      },
     },
   );
   if (!ok) return;
@@ -346,6 +403,22 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   );
   if (!ok) return;
   job.status = IngestionJobStatus.DRAFTED;
+
+  // Persistir status de reconciliação nos draft_records gerados
+  if (meta.reconciliation_status && result.drafts.length > 0) {
+    const reconcStatus = meta.reconciliation_status as string;
+    const reconcCandidates = meta.reconciliation_candidates ?? [];
+    const draftIds = result.drafts.map((d) => d.id);
+
+    await supabase
+      .from("draft_records")
+      .update({
+        reconciliation_status: reconcStatus,
+        reconciliation_candidates: reconcCandidates,
+        reconciled_at: new Date().toISOString(),
+      })
+      .in("id", draftIds);
+  }
 
   // drafted → pending_review
   ok = await transitionJob(
