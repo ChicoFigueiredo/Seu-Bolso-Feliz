@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     const { toolResults } = await generateText({
       model: openai("gpt-4o-mini"),
       tools: { [toolName]: tool } as typeof sbfTools,
-      toolChoice: { type: "tool", toolName },
+      toolChoice: { type: "tool", toolName: toolName as keyof typeof sbfTools },
       maxSteps: 1,
       messages: [
         {

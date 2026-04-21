@@ -892,7 +892,7 @@ export const suggestSupplierName = tool({
       .limit(1);
 
     if (existing && existing.length > 0) {
-      const s = existing[0];
+      const s = existing[0]!;
       return {
         found: true,
         supplier_id: s.id,

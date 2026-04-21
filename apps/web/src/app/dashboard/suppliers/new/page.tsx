@@ -63,7 +63,7 @@ export default function NewSupplierPage() {
 
     if (data.found) {
       toast.info("Fornecedor já cadastrado", { description: data.message ?? "" });
-    } else if (data.suggested_names && data.suggested_names.length > 0) {
+    } else if (data.name) {
       toast.success("Nome sugerido pela IA", { description: data.message ?? "" });
     }
   }
