@@ -691,4 +691,22 @@ VAMOS LÁ!
 
 ---
 
+Time, a casa caiu
 
+- Leiam completamente o documento #file:003-alteracoes-novas-telas.md em que a Verônica tá DESCASCANDO nosso trabalho
+- Após ler, chamem o time, façam 3 rodadas de refino e feedback e entreguem um documento de refino atualizado, concordando ou discordando do que foi relatado e pedido, com plano de ação concreto, para que a gente possa começar a executar imediatamente
+- TODOS PARTICIPAM, pequisem no mercado as melhores práticas, e façam todas as proposições conscientes e embasadas
+- O documento tem que ser claro, objetivo, sem enrolação, e com plano de ação concreto, para que a gente possa começar a executar imediatamente
+- NÃO CODAR NADA ANTES DE ENTREGAR O DOCUMENTO DE REFINO ATUALIZADO, E ANTES DE ALINHAR COMIGO SOBRE O DOCUMENTO DE REFINO ATUALIZADO, PARA GARANTIR QUE A GENTE ESTEJA NA MESMA PÁGINA SOBRE O ESTADO DO PROJETO, SOBRE O QUE FOI FEITO, SOBRE O QUE FALTA, E SOBRE O QUE É PRIORIDADE.
+- Quero ver o time unido, maduro, objetivo e focado em entregar valor real, sem enrolação, sem desculpas, e sem criar documentos paralelos que não levam a lugar nenhum. Quero um plano de ação concreto para destravar a execução, e quero que a gente comece a executar imediatamente após alinhar o plano de ação.
+
+---
+
+Time, a Verônica respondeu:
+
+- Leiam completamente o documento #file:003-alteracoes-novas-telas.md atualizado
+- Façam uma reunião de refino com 4 rodadas de refino para garantir que tudo foi revisto (o que precisar acrescentar / alterar mudem no documento #file:2026-04-21-10-36-refino-alinhamento-design-telas-plano-acao.md )
+- Ajuste #file:2026-04-21-10-36-refino-alinhamento-design-telas-plano-acao.md com as observações da Verônica editados no documento #file:003-alteracoes-novas-telas.md
+- NÃO CODAR! apenas conferir e ajustar o documento #file:2026-04-21-10-36-refino-alinhamento-design-telas-plano-acao.md com o ajuste da equipe
+
+---
