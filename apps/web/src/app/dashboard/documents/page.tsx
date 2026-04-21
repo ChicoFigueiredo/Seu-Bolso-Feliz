@@ -22,10 +22,12 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { FileUp, FileText, Loader2, ChevronRight } from "lucide-react";
+import { FileUp, FileText, Loader2, ChevronRight, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { getSourceDocuments, uploadDocument } from "@/app/actions/ingestion";
 import type { SourceDocument } from "@sbf/shared-types";
+import { useChatContext } from "@/contexts/chat-context";
+import { CONFIDENCE_THRESHOLD } from "@/components/ai-field-badge";
 
 // ─── Helpers de exibição ────────────────────────────────────────────────────
 
@@ -69,6 +71,9 @@ export default function DocumentsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+
+  // S4-009
+  const { setDrawerOpen, setPendingMessage } = useChatContext();
 
   // Filtros
   const [filterStatus, setFilterStatus] = useState("all");
@@ -239,6 +244,7 @@ export default function DocumentsPage() {
                   <TableHead>Status pipeline</TableHead>
                   <TableHead>Tamanho</TableHead>
                   <TableHead>Data</TableHead>
+                  <TableHead className="w-8">IA</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
@@ -278,6 +284,33 @@ export default function DocumentsPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {doc.created_at ? new Date(doc.created_at).toLocaleDateString("pt-BR") : "—"}
+                    </TableCell>
+                    {/* S4-009: botão Explicar para docs com baixa confiança */}
+                    <TableCell>
+                      {(() => {
+                        const meta = (doc.metadata ?? {}) as Record<string, unknown>;
+                        const confidence = meta["confidence"] as number | undefined;
+                        if (confidence == null || confidence >= CONFIDENCE_THRESHOLD) return null;
+                        return (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-primary"
+                            title={`Confiança: ${Math.round(confidence * 100)}%`}
+                            onClick={() => {
+                              setPendingMessage(
+                                `Explique por que o documento "${doc.filename}" foi classificado com confiança baixa ` +
+                                  `(${Math.round(confidence * 100)}%). ID: ${doc.id}.`,
+                              );
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            <Sparkles className="mr-1 h-3 w-3" />
+                            Explicar
+                          </Button>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Link href={`/dashboard/documents/${doc.id}`}>
