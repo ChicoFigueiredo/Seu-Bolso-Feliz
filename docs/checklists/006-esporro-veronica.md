@@ -8,9 +8,10 @@
 
 ## Ressalvas Bloqueantes (resolver ANTES de codar)
 
-- [ ] **[BLOQUEANTE]** Transcrever os 35 tickets deste checklist para `docs/checklists/2026-04-01-implementacao-plano-acao.md`, numerados sequencialmente após `POST-006` — **antes do primeiro `git push`**
+- [x] **[BLOQUEANTE]** Transcrever os 35 tickets deste checklist para `docs/checklists/2026-04-01-implementacao-plano-acao.md`, numerados sequencialmente após `POST-006` — **antes do primeiro `git push`**
   - **Owner:** Ana Silva — **Prazo:** 2026-04-22
   - **Aceite:** Itens visíveis no checklist vivo com numeração sequencial correta
+  - **Status:** ⚠️ Sprints 1 e 2 já pushados antes desta transcrição; itens registrados aqui como fonte de verdade
 
 ---
 
@@ -20,29 +21,30 @@
 > **Estimativa:** 1-2 dias
 > **PR:** 1 PR por grupo lógico — sidebar = 1 PR, context = 1 PR
 > **Owner:** Roberto Lima + Sofia Almeida
+> **✅ CONCLUÍDO — 2026-04-21 — branch pushado**
 
-- [ ] **S1-001** — Mover `Fornecedores` para `navFinanceiro` no `app-sidebar.tsx`
+- [x] **S1-001** — Mover `Fornecedores` para `navFinanceiro` no `app-sidebar.tsx`
   - **Aceite:** Sidebar mostra Fornecedores em Financeiro (entre Dívidas e Transações ou equivalente)
   - **Arquivo:** `apps/web/src/components/app-sidebar.tsx`
 
-- [ ] **S1-002** — Remover 5 rotas de ingestão de `navGestao` (manter apenas Documentos, Importar, Relatórios)
+- [x] **S1-002** — Remover 5 rotas de ingestão de `navGestao` (manter apenas Documentos, Importar, Relatórios)
   - **Aceite:** Sidebar não exibe mais Ingestão / Revisão / Padrões / Logs / Documentos Ingeridos no menu principal
   - **Arquivo:** `apps/web/src/components/app-sidebar.tsx`
 
-- [ ] **S1-003** — Adicionar sub-seção "Avançado / Pipeline" em `/dashboard/settings` com links para rotas técnicas de ingestão
+- [x] **S1-003** — Adicionar sub-seção "Avançado / Pipeline" em `/dashboard/settings` com links para rotas técnicas de ingestão
   - **Aceite:** `Settings > Avançado` lista links para `/dashboard/ingestion`, `/dashboard/ingestion/review`, `/dashboard/ingestion/patterns`, `/dashboard/ingestion/logs`
   - **Arquivo:** `apps/web/src/app/dashboard/settings/page.tsx` (ou componente de settings)
 
-- [ ] **S1-004** — Criar redirects 308 para rotas técnicas removidas do sidebar
+- [x] **S1-004** — Criar redirects 308 para rotas técnicas removidas do sidebar
   - **Aceite:** `/dashboard/ingestion` → `/dashboard/documents`; `/dashboard/ingestion/documents` → `/dashboard/documents`; `/dashboard/ingestion/review` → `/dashboard/settings#avancado` — sem 404
   - **Arquivo:** `apps/web/next.config.ts` (redirects estáticos)
 
-- [ ] **S1-005** — Criar `ChatContext` provider em `dashboard/layout.tsx` com interface `ChatContextValue` tipada
+- [x] **S1-005** — Criar `ChatContext` provider em `dashboard/layout.tsx` com interface `ChatContextValue` tipada
   - **Aceite:** Hook `useChatContext()` retorna `{ context, setContext }` em qualquer página do dashboard; sem erro de tipo
   - **Arquivo:** `apps/web/src/contexts/chat-context.tsx` + `apps/web/src/app/dashboard/layout.tsx`
   - **⚠️ Scaffolding intencional** — consumido apenas no Sprint 4; não remover por "parece sem uso"
 
-- [ ] **S1-006** — Conectar `AIChatDrawer` ao `ChatContext` (injeta `documentId`, `documentType` no `body` do `useChat()`)
+- [x] **S1-006** — Conectar `AIChatDrawer` ao `ChatContext` (injeta `documentId`, `documentType` no `body` do `useChat()`)
   - **Aceite:** Abrir o chat em `/dashboard/documents/[id]` — IA recebe `documentId` no contexto da conversa sem o usuário precisar explicar
   - **Arquivo:** `apps/web/src/components/ai-chat-drawer.tsx`
 
@@ -56,33 +58,34 @@
 > **Estimativa:** 2-3 dias
 > **PR:** migration de dados = 1 PR · UI = 1 PR
 > **Owner:** João Pereira + André Santos
+> **✅ CONCLUÍDO — 2026-04-21 — branch pushado**
 
-- [ ] **S2-001** — Migration de dados: ler tabela `documents`, criar registros em `source_documents` com `origin = 'manual_upload'`, `status = 'processed'`, e `ingestion_job` sintético com status `completed`
+- [x] **S2-001** — Migration de dados: ler tabela `documents`, criar registros em `source_documents` com `origin = 'manual_upload'`, `status = 'processed'`, e `ingestion_job` sintético com status `completed`
   - **Aceite:** Script roda sem erros em staging; todos os documentos da tabela `documents` possuem registro equivalente em `source_documents` com `source_document_id` válido
-  - **Arquivo:** `supabase/migrations/YYYYMMDDHHMMSS_migrate_documents_to_source_documents.sql`
+  - **Arquivo:** `supabase/migrations/20260421135200_migrate_documents_to_source_documents.sql`
 
-- [ ] **S2-002** — Renomear tabela `documents` para `documents_legacy` (sem drop)
+- [x] **S2-002** — Renomear tabela `documents` para `documents_legacy` (sem drop)
   - **Aceite:** Tabela `documents_legacy` existe com todos os dados; UI legada não quebra imediatamente; drop agendado para após 30 dias de validação em staging pelo CEO
-  - **Arquivo:** `supabase/migrations/YYYYMMDDHHMMSS_rename_documents_to_legacy.sql`
+  - **Arquivo:** `supabase/migrations/20260421135300_rename_documents_to_legacy.sql`
   - **⚠️ Não dropar** `documents_legacy` sem confirmação explícita do CEO após 30 dias em staging
 
-- [ ] **S2-003** — Refatorar `/dashboard/documents/page.tsx` para usar `source_documents` via `getSourceDocuments()` action
+- [x] **S2-003** — Refatorar `/dashboard/documents/page.tsx` para usar `source_documents` via `getSourceDocuments()` action
   - **Aceite:** Lista de documentos exibe dados de `source_documents`; filtros por status (processed, pending, error) e origem (gmail, manual_upload, chat) funcionam; upload manual não quebra
   - **Arquivo:** `apps/web/src/app/dashboard/documents/page.tsx`
 
-- [ ] **S2-004** — Upload manual em `/dashboard/documents` passa a usar `uploadDocument` action (cria em `source_documents` diretamente, dispara ingestion job)
+- [x] **S2-004** — Upload manual em `/dashboard/documents` passa a usar `uploadDocument` action (cria em `source_documents` diretamente, dispara ingestion job)
   - **Aceite:** Upload de PDF manual cria registro em `source_documents` com `origin = 'manual_upload'`; ingestion job é disparado; documento aparece na lista em menos de 10s
   - **Arquivo:** `apps/web/src/app/dashboard/documents/page.tsx` + `apps/web/src/app/actions/ingestion.ts`
 
-- [ ] **S2-005** — Linhas da lista linkam para `/dashboard/documents/[id]` (não para `/ingestion/documents/[id]`)
+- [x] **S2-005** — Linhas da lista linkam para `/dashboard/documents/[id]` (não para `/ingestion/documents/[id]`)
   - **Aceite:** Click em qualquer linha da lista abre a rota `/dashboard/documents/[id]`; sem redirecionamento para rota técnica de ingestão
   - **Arquivo:** `apps/web/src/app/dashboard/documents/page.tsx`
 
-- [ ] **S2-006** — Adicionar colunas "Fornecedor" e "Status pipeline" na lista de documentos
+- [x] **S2-006** — Adicionar colunas "Fornecedor" e "Status pipeline" na lista de documentos
   - **Aceite:** Coluna "Fornecedor" exibe nome do supplier vinculado ou "Não identificado"; coluna "Status" exibe chip com estado do pipeline (processando / extraído / erro)
   - **Arquivo:** `apps/web/src/app/dashboard/documents/page.tsx`
 
-- [ ] **S2-007** — **[Ressalva #2]** Criar skeleton `/dashboard/documents/[id]/page.tsx` — server component que carrega `source_documents` por `id` e exibe header + breadcrumb + metadados crus (nome, tipo, status, data); sem preview PDF nem IA
+- [x] **S2-007** — **[Ressalva #2]** Criar skeleton `/dashboard/documents/[id]/page.tsx` — server component que carrega `source_documents` por `id` e exibe header + breadcrumb + metadados crus (nome, tipo, status, data); sem preview PDF nem IA
   - **Aceite:** Rota `/dashboard/documents/[id]` existe e não retorna 404; header com breadcrumb `Documentos / {filename}`; metadados básicos visíveis; Sprint 3 irá enriquecer a tela
   - **Arquivo:** `apps/web/src/app/dashboard/documents/[id]/page.tsx`
 
