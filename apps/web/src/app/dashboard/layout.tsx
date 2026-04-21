@@ -4,6 +4,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ChatToggle } from "@/components/chat-toggle";
+import { ChatContextProvider } from "@/contexts/chat-context";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -16,13 +17,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <DashboardHeader user={user} />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
-      </SidebarInset>
-      <ChatToggle />
-    </SidebarProvider>
+    <ChatContextProvider>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <DashboardHeader user={user} />
+          <main className="flex-1 p-4 md:p-6">{children}</main>
+        </SidebarInset>
+        <ChatToggle />
+      </SidebarProvider>
+    </ChatContextProvider>
   );
 }
