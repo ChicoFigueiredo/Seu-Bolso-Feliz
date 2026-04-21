@@ -35,8 +35,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2 } from "lucide-react";
-import { formatDate } from "@/lib/format";
+import { Plus, Trash2, FileText } from "lucide-react";
+import { formatDate, formatCurrency } from "@/lib/format";
 
 const typeOptions = [
   { value: "company", label: "Empresa" },
@@ -83,6 +83,15 @@ interface Contract {
   is_active: boolean;
 }
 
+interface SourceDocRef {
+  id: string;
+  filename: string;
+  origin_type: string;
+  status: string;
+  created_at: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
 export default function EditSupplierPage() {
   const router = useRouter();
   const params = useParams();
@@ -112,11 +121,14 @@ export default function EditSupplierPage() {
   const [newContractLabel, setNewContractLabel] = useState("");
   const [addingContract, setAddingContract] = useState(false);
 
+  // Documentos vinculados
+  const [documents, setDocuments] = useState<SourceDocRef[]>([]);
+
   useEffect(() => {
     async function load() {
       const supabase = createClient();
 
-      const [supplierRes, aliasesRes, contractsRes] = await Promise.all([
+      const [supplierRes, aliasesRes, contractsRes, docsRes] = await Promise.all([
         supabase.from("suppliers").select("*").eq("id", id).single(),
         supabase
           .from("supplier_aliases")
@@ -128,6 +140,12 @@ export default function EditSupplierPage() {
           .select("*")
           .eq("supplier_id", id)
           .order("start_date", { ascending: false }),
+        supabase
+          .from("source_documents")
+          .select("id, filename, origin_type, status, created_at, metadata")
+          .eq("supplier_id", id)
+          .order("created_at", { ascending: false })
+          .limit(50),
       ]);
 
       if (supplierRes.data) {
@@ -139,6 +157,7 @@ export default function EditSupplierPage() {
       }
       if (aliasesRes.data) setAliases(aliasesRes.data);
       if (contractsRes.data) setContracts(contractsRes.data);
+      if (docsRes.data) setDocuments(docsRes.data as SourceDocRef[]);
 
       setFetching(false);
     }
@@ -550,6 +569,83 @@ export default function EditSupplierPage() {
                     </TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Documentos vinculados — S3-012 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Documentos vinculados</CardTitle>
+          <CardDescription>
+            Notas fiscais, faturas e comprovantes associados a este fornecedor
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {documents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhum documento associado a este fornecedor.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Origem</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Valor</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead className="text-right">Ação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {documents.map((doc) => {
+                  const meta = (doc.metadata ?? {}) as Record<string, unknown>;
+                  return (
+                    <TableRow key={doc.id}>
+                      <TableCell className="max-w-[200px] truncate font-medium">
+                        <span className="flex items-center gap-1.5">
+                          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                          {doc.filename}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {doc.origin_type === "gmail"
+                          ? "Gmail"
+                          : doc.origin_type === "local_file"
+                            ? "Local"
+                            : "Upload"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            doc.status === "approved"
+                              ? "default"
+                              : doc.status === "failed"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                          className="text-xs"
+                        >
+                          {doc.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {meta["amount"] != null ? formatCurrency(Number(meta["amount"])) : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {doc.created_at ? formatDate(doc.created_at) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={`/dashboard/documents/${doc.id}`}>Ver</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
