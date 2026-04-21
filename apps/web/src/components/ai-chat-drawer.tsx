@@ -11,6 +11,7 @@ import { Bot, Send, Loader2, AlertCircle, User, Wrench, Plus, Paperclip } from "
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { useChatContext } from "@/contexts/chat-context";
 
 const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -27,9 +28,11 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const { context } = useChatContext();
+
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, append } = useChat({
     api: "/api/chat",
-    body: { sessionId },
+    body: { sessionId, ...context },
     onError: (err) => {
       console.error("Chat error:", err);
     },
