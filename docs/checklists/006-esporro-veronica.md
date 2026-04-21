@@ -100,59 +100,46 @@
 > **PR:** migrations = 1 PR · tela 13 = 1 PR · tela 14 = 1 PR · edição metadados = 1 PR
 > **Owner:** Roberto Lima + João Pereira + André Santos
 
-- [ ] **S3-001** — Migration: tabela `document_splits(id, source_document_id, category_id, tags UUID[], amount, description, created_at)` com RLS + `CHECK (amount > 0)` + trigger `trg_validate_splits_sum` (valida `SUM(splits) ≤ document.amount` server-side)
-  - **Aceite:** Migration aplicada sem erros; INSERT de split com soma > valor do documento retorna erro; RLS ativa (usuário vê apenas seus splits)
-  - **Arquivo:** `supabase/migrations/YYYYMMDDHHMMSS_create_document_splits.sql`
-  - **Domínio:** Conceito `DocumentSplit` vive em `packages/domain`, não em `apps/web`
+✅ CONCLUÍDO — 2026-04-21 — branch pushado
 
-- [ ] **S3-002** — Migration: tabela `document_transactions(id, source_document_id, transaction_id, link_type, confidence, created_by, created_at)` com RLS + indexes em `(source_document_id)` e `(transaction_id)`
-  - **Aceite:** Migration aplicada; `link_type ∈ {payment, refund, installment, support}`; `created_by ∈ {user, ai, pattern}`; RLS ativa; indexes criados
-  - **Arquivo:** `supabase/migrations/YYYYMMDDHHMMSS_create_document_transactions.sql`
-  - **Domínio:** Conceito `DocumentTransactionLink` vive em `packages/domain`, não em `apps/web`
+- [x] **S3-001** — Migration: tabela `document_splits` com RLS + trigger de validação de soma
+  - **Arquivo:** `supabase/migrations/20260421140500_create_document_splits.sql`
 
-- [ ] **S3-003** — Server actions: `createDocumentSplit`, `listDocumentSplits`, `deleteDocumentSplit`
-  - **Aceite:** Actions funcionais; `createDocumentSplit` chama validação de soma no servidor (não só na UI); retornam erro tipado em caso de falha
+- [x] **S3-002** — Migration: tabela `document_transactions` com RLS + indexes
+  - **Arquivo:** `supabase/migrations/20260421140600_create_document_transactions.sql`
+
+- [x] **S3-003** — Server actions: `createDocumentSplit`, `listDocumentSplits`, `deleteDocumentSplit`
   - **Arquivo:** `apps/web/src/app/actions/document-splits.ts`
 
-- [ ] **S3-004** — Server actions: `linkTransactionToDocument`, `unlinkTransactionFromDocument`, `listLinkedTransactions`
-  - **Aceite:** `linkTransactionToDocument` cria registro em `document_transactions`; `unlinkTransactionFromDocument` remove; `listLinkedTransactions` retorna lista com join em `transactions`
+- [x] **S3-004** — Server actions: `linkTransactionToDocument`, `unlinkTransactionFromDocument`, `listLinkedTransactions`
   - **Arquivo:** `apps/web/src/app/actions/document-transactions.ts`
 
-- [ ] **S3-005** — Instalar `react-pdf` via `next/dynamic` com lazy load (bundle de `/dashboard/documents/[id]` não inclui `react-pdf` no initial load)
-  - **Aceite:** Lighthouse mostra que `react-pdf` não está no bundle inicial; carrega apenas ao navegar para `/dashboard/documents/[id]`
-  - **Arquivo:** `apps/web/package.json` + componente `PDFPreview` com `next/dynamic`
+- [x] **S3-005** — Instalar `react-pdf` + componente `PDFPreview` com `next/dynamic` (sem SSR)
+  - **Arquivo:** `apps/web/src/components/pdf-preview.tsx` + `next.config.ts` (canvas: false)
 
-- [ ] **S3-006** — Rota `/dashboard/documents/[id]/page.tsx` (server component) resolve `document_type` de `source_documents` e decide `variant: "generic" | "statement"` para `DocumentPageShell`
-  - **Aceite:** Documento com `document_type = 'credit_card_statement'` ou `'bank_statement'` → abre `variant="statement"`; qualquer outro → `variant="generic"`; sem lógica de discriminação no cliente
-  - **Arquivo:** `apps/web/src/app/dashboard/documents/[id]/page.tsx` (enriquece S2-007)
+- [x] **S3-006** — Rota `/dashboard/documents/[id]/page.tsx` resolve `variant` via `document_type` e carrega `draftBatch` para statements
+  - **Arquivo:** `apps/web/src/app/dashboard/documents/[id]/page.tsx`
 
-- [ ] **S3-007** — Refatorar `DocumentDetailView` para aceitar `variant: "generic" | "statement"` e prop `gridCols` configurável (tela 13: `lg:grid-cols-[minmax(0,1fr)_340px]`; tela 14: `lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)]`)
-  - **Aceite:** Componente renderiza corretamente ambas as variantes sem duplicação de código; shell (header, breadcrumb, preview) compartilhado; coluna direita varia por `variant`
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
+- [x] **S3-007** — `DocumentDetailNew` com prop `variant: "generic" | "statement"` e grid configurável
+  - **Nota:** Criado como arquivo separado `document-detail-new.tsx` para não quebrar o componente legado
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S3-008** — Implementar `variant="generic"` (Tela 13): header consumer-friendly, preview PDF com `react-pdf` (paginação `Pág. X/Y`, zoom ±/reset, "Abrir em nova aba"), card Metadados, card Rateios (+ Adicionar rateio), card Transações Vinculadas (+ Vincular transação)
-  - **Aceite:** Preview navega páginas e faz zoom; card de metadados exibe Fornecedor+CNPJ, Data, Valor, Tipo, Categoria; "+ Adicionar rateio" abre form; "+ Vincular transação" abre seletor; progress strip de rateios mostra "Soma: R$ X / R$ Total"
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx` + sub-componentes
+- [x] **S3-008** — `variant="generic"` (Tela 13): preview PDF, card Metadados, card Rateios, card Transações Vinculadas
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S3-009a** — **[Ressalva #3]** Criar função Postgres `fn_reconciliation_progress(p_batch_id UUID)` retornando `{ total_count, reconciled_count, progress_pct }` — usada pela tela 14, server actions e MCP/tools via RPC
-  - **Aceite:** Função criada em migration; server action chama via `supabase.rpc('fn_reconciliation_progress', { p_batch_id })`; retorno consistente com contagem real de `draft_records`
-  - **Arquivo:** `supabase/migrations/YYYYMMDDHHMMSS_fn_reconciliation_progress.sql`
-  - **⚠️ Esta função deve ser criada ANTES de S3-009** (tela 14 depende dela para a progress bar)
+- [x] **S3-009a** — Função Postgres `fn_reconciliation_progress(p_batch_id UUID)`
+  - **Arquivo:** `supabase/migrations/20260421140700_fn_reconciliation_progress.sql`
 
-- [ ] **S3-009** — Implementar `variant="statement"` (Tela 14): preview PDF, card resumo fatura (total, vencimento, ciclo, progress bar usando `fn_reconciliation_progress`), tabela de lançamentos detectados com checkbox de aprovação em lote, filtros Todos/Pendentes/Conciliados, ordenação Data/Valor
-  - **Aceite:** Progress bar mostra "X de Y conciliados" calculado por `fn_reconciliation_progress`; checkbox de batch seleciona/deseleciona tudo; "Aprovar selecionados" funciona; filtros funcionam; chips de status (Conciliado · Recorrência · Novo) corretos
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx` + sub-componentes
+- [x] **S3-009** — `variant="statement"` (Tela 14): resumo fatura, progress bar, `DraftTable` com filtros + aprovação em lote
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S3-010** — Edição de metadados (fornecedor, data, valor, tipo) inline via form + server action `updateDocumentMetadata`
-  - **Aceite:** Usuário clica "Editar metadados" → form inline (não modal separada) → salva → dados atualizados sem reload de página; action valida e persiste em `source_documents`
-  - **Arquivo:** `apps/web/src/app/actions/ingestion.ts` + componente de edição
+- [x] **S3-010** — Edição de metadados inline + server action `updateDocumentMetadata`
+  - **Arquivo:** `apps/web/src/app/actions/document-metadata.ts` + `MetadataCard` in `document-detail-new.tsx`
 
-- [ ] **S3-011** — Linkar coluna "Documento" em `/dashboard/transactions` para `/dashboard/documents/[id]`
-  - **Aceite:** Click em nome de documento na tabela de transações abre `/dashboard/documents/[id]` correto (tela 13 ou 14 conforme tipo)
+- [x] **S3-011** — Coluna "Documento" em `/dashboard/transactions` com link para `/dashboard/documents/[id]`
   - **Arquivo:** `apps/web/src/app/dashboard/transactions/page.tsx`
 
-- [ ] **S3-012** — Detalhe do fornecedor (`/dashboard/suppliers/[id]`) lista documentos vinculados
-  - **Aceite:** Página do fornecedor exibe lista de `source_documents` onde `supplier_id` bate; cada item tem link para `/dashboard/documents/[id]`
+- [x] **S3-012** — Detalhe do fornecedor lista documentos vinculados via `supplier_id`
   - **Arquivo:** `apps/web/src/app/dashboard/suppliers/[id]/page.tsx`
 
 **Critério do Sprint 3:** CEO faz upload de nota fiscal → abre tela 13 → vê preview PDF navegável → edita metadados → adiciona rateio → vincula transação. Faz upload de fatura → abre tela 14 → vê progress bar → aprova lançamentos em lote → transações aparecem em `/dashboard/transactions`.
