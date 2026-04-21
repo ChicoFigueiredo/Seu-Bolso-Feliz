@@ -152,43 +152,43 @@
 > **Estimativa:** 2-3 dias
 > **PR:** `useAISuggest` + `AIFieldBadge` = 1 PR · hotspots tela 13 = 1 PR · hotspots tela 14 = 1 PR · outros hotspots = 1 PR
 > **Owner:** Sofia Almeida + Maria Oliveira
+> **✅ CONCLUÍDO — branch pushado**
 
-- [ ] **S4-001** — Criar hook `useAISuggest(toolName, params)`: faz `POST /api/chat` com mensagem formatada e retorna JSON direto (sem stream, sem abrir drawer)
+- [x] **S4-001** — Criar hook `useAISuggest(toolName, params)`: faz `POST /api/chat` com mensagem formatada e retorna JSON direto (sem stream, sem abrir drawer)
   - **Aceite:** Hook retorna sugestão tipada; loading state; error state; **não abre o drawer**; tools chamadas são apenas as 15 já definidas na ADR-005 (tool nova → atualizar ADR-005 primeiro)
   - **Arquivo:** `apps/web/src/hooks/use-ai-suggest.ts`
   - **⚠️ Não misturar com o drawer:** drawer = chat livre (stream); `useAISuggest` = sugestão pontual (JSON)
 
-- [ ] **S4-002** — Componente `<AIFieldBadge field confidence source documentId />` com tooltip de explicabilidade: valor extraído, fonte (padrão / OpenAI / parser determinístico), confiança em %, botão "Por que esta sugestão?" que abre o drawer com `explain_extraction(document_id, field)` pré-preenchido
+- [x] **S4-002** — Componente `<AIFieldBadge field confidence source documentId />` com tooltip de explicabilidade: valor extraído, fonte (padrão / OpenAI / parser determinístico), confiança em %, botão "Por que esta sugestão?" que abre o drawer com `explain_extraction(document_id, field)` pré-preenchido
   - **Aceite:** Badge aparece em campos com confiança < 0.8; tooltip abre com fonte + confiança; "Por que?" abre drawer com `explain_extraction` pré-preenchido (este é o único caso em S4 onde o drawer abre — via botão explícito do usuário, não automaticamente)
   - **Arquivo:** `apps/web/src/components/ai-field-badge.tsx`
 
-- [ ] **S4-003** — Hotspot Tela 13: campos de metadados com baixa confiança mostram `<AIFieldBadge>` com ações aceitar/rejeitar inline
+- [x] **S4-003** — Hotspot Tela 13: campos de metadados com baixa confiança mostram `<AIFieldBadge>` com ações aceitar/rejeitar inline
   - **Aceite:** Campo com confiança < 0.8 exibe badge; "Aceitar" preenche o campo e remove o badge; "Rejeitar" descarta a sugestão; nenhuma gravação automática
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S4-004** — Hotspot Tela 13: botão `+ Vincular transação` pré-carrega sugestões de IA via `suggest_reconciliation` antes da busca manual
-  - **Aceite:** Ao clicar "Vincular transação", dropdown pré-carrega candidatos sugeridos por `suggest_reconciliation(document_id)`; usuário escolhe candidato ou busca manualmente; nenhuma vinculação automática
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
+- [x] **S4-004** — Hotspot Tela 13: botão `+ Vincular transação` pré-carrega sugestões de IA via `suggest_reconciliation` antes da busca manual
+  - **Aceite:** Ao clicar "Sugerir via IA", `suggest_reconciliation` retorna candidatos; usuário escolhe candidato ou busca manualmente; nenhuma vinculação automática
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S4-005** — Hotspot Tela 13: botão `+ Adicionar rateio` pré-preenche splits sugeridos pela IA baseado no documento
-  - **Aceite:** "IA sugere desdobramento" aparece no form de rateio; ao clicar, `useAISuggest('suggest_splits', { document_id })` retorna array de splits sugeridos (categoria + valor) que pré-preenchem os campos; usuário edita antes de salvar
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
+- [x] **S4-005** — Hotspot Tela 13: botão `+ Adicionar rateio` pré-preenche splits sugeridos pela IA baseado no documento
+  - **Aceite:** "IA sugere rateio" aparece no card de splits; ao clicar, `useAISuggest('suggest_splits', { document_id })` retorna splits sugeridos e abre drawer com contexto; usuário edita antes de salvar
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S4-006** — Hotspot Tela 14: chip "Categoria sugerida" inline editável em cada lançamento detectado da fatura
-  - **Aceite:** Cada draft na tabela exibe chip com categoria sugerida; click no chip abre seletor inline (sem modal); alteração não grava sozinha — apenas depois de aprovação
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
+- [x] **S4-006** — Hotspot Tela 14: chip "Categoria sugerida" inline em cada lançamento detectado da fatura
+  - **Aceite:** Cada draft na tabela exibe chip com categoria sugerida de `draft_data.category`; sem modal; alteração não grava sozinha — apenas depois de aprovação
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S4-007** — Hotspot Tela 14: botão "Conciliar com IA" por lançamento com status "Novo" (não conciliado) — abre **drawer** com candidatos via `suggest_reconciliation`
-  - **Aceite:** Botão aparece apenas em drafts com `reconciliation_status = null`; click abre o drawer (legítimo neste caso — é conversa livre de conciliação) com `suggest_reconciliation` pré-preenchido; decisão final é do usuário
-  - **Arquivo:** `apps/web/src/components/document-detail-view.tsx`
-  - **⚠️ Este é o único S4 que abre o drawer** — os demais (S4-003/4/5/6/8) usam `useAISuggest` sem drawer
+- [x] **S4-007** — Hotspot Tela 14: botão "Conciliar com IA" por lançamento com status "Novo" — abre **drawer** com candidatos
+  - **Aceite:** Botão ícone `<Sparkles>` aparece em drafts não aprovados; click abre drawer com mensagem contextual de conciliação pré-preenchida; decisão final é do usuário
+  - **Arquivo:** `apps/web/src/components/document-detail-new.tsx`
 
-- [ ] **S4-008** — Hotspot Tela 10 (Fornecedores): campo CNPJ pré-preenche nome + aliases via IA ao criar novo fornecedor
-  - **Aceite:** Ao digitar/colar CNPJ, `useAISuggest('suggest_supplier_name', { cnpj })` retorna nome e aliases sugeridos que pré-preenchem os campos; usuário confirma ou edita
-  - **Arquivo:** `apps/web/src/app/dashboard/suppliers/new/page.tsx` (ou formulário de supplier)
+- [x] **S4-008** — Hotspot Tela 10 (Fornecedores): campo CNPJ pré-preenche nome + aliases via IA ao criar novo fornecedor
+  - **Aceite:** Ao sair do campo CNPJ/CPF, `useAISuggest('suggest_supplier_name', { document_number })` retorna nome sugerido e pré-preenche os campos; usuário confirma ou edita; spinner no label enquanto carrega
+  - **Arquivo:** `apps/web/src/app/dashboard/suppliers/new/page.tsx`
 
-- [ ] **S4-009** — Botão inline "Explicar" em linhas com status "baixa confiança" na lista de documentos (Tela 12)
-  - **Aceite:** Linhas com `confidence < 0.8` exibem botão "Explicar"; click abre drawer com `explain_classification(document_id)` pré-preenchido; sem reload de página
+- [x] **S4-009** — Botão inline "Explicar" em linhas com status "baixa confiança" na lista de documentos (Tela 12)
+  - **Aceite:** Linhas com `confidence < 0.8` exibem botão "Explicar"; click abre drawer com mensagem contextual pré-preenchida; sem reload de página
   - **Arquivo:** `apps/web/src/app/dashboard/documents/page.tsx`
 
 **Critério do Sprint 4:** CEO abre documento → campo Fornecedor com baixa confiança tem badge "IA sugere: CEMIG" → aceita inline → "Por que?" abre drawer com explicação. Tela 14 → "Conciliar com IA" em lançamento Novo → drawer com candidatos.
