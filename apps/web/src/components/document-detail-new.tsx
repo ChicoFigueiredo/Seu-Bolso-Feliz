@@ -671,6 +671,9 @@ function DraftTable({ batchId }: { batchId: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
 
+  // S4-006/007
+  const { setDrawerOpen, setPendingMessage } = useChatContext();
+
   const load = useCallback(() => {
     getDraftRecords({ batchId })
       .then(setRecords)
@@ -792,8 +795,10 @@ function DraftTable({ batchId }: { batchId: string }) {
                     <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
                   </th>
                   <th className="pb-2 text-left">Descrição</th>
+                  <th className="pb-2 text-left">Categoria</th>
                   <th className="pb-2 text-right">Valor</th>
                   <th className="pb-2 text-center">Status</th>
+                  <th className="pb-2 text-center">IA</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -804,6 +809,7 @@ function DraftTable({ batchId }: { batchId: string }) {
                     variant: "outline" as const,
                   };
                   const isApproved = r.status === "approved";
+                  const category = (rData?.["category"] as string) ?? null;
                   return (
                     <tr key={r.id} className="hover:bg-muted/30">
                       <td className="py-2">
@@ -818,6 +824,16 @@ function DraftTable({ batchId }: { batchId: string }) {
                           {(rData?.["description"] as string) ?? r.id}
                         </span>
                       </td>
+                      {/* S4-006: Chip de categoria inline */}
+                      <td className="py-2">
+                        {category ? (
+                          <Badge variant="secondary" className="text-xs font-normal">
+                            {category}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="py-2 text-right tabular-nums">
                         {formatCurrency((rData?.["amount"] as number) ?? null)}
                       </td>
@@ -825,6 +841,29 @@ function DraftTable({ batchId }: { batchId: string }) {
                         <Badge variant={chip.variant} className="text-xs">
                           {chip.label}
                         </Badge>
+                      </td>
+                      {/* S4-007: Botão Conciliar com IA */}
+                      <td className="py-2 text-center">
+                        {!isApproved && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            title="Conciliar com IA"
+                            onClick={() => {
+                              setPendingMessage(
+                                `Concilie o lançamento "${(rData?.["description"] as string) ?? r.id}" ` +
+                                  `(valor: ${formatCurrency((rData?.["amount"] as number) ?? null)}) ` +
+                                  `do batch ${batchId}. ` +
+                                  "Busque transações compatíveis e sugira a melhor correspondência.",
+                              );
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            <Sparkles className="h-3.5 w-3.5 text-primary" />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
