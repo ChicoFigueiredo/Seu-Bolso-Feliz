@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import type { Json } from "@sbf/shared-types";
 
 // Engine de reconciliação reutilizada do worker (lógica pura, sem dependências de runtime)
 // Importamos diretamente as heurísticas para evitar duplicação
@@ -264,8 +265,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ dra
     .from("draft_records")
     .update({
       reconciliation_status: status,
-      reconciliation_candidates:
-        candidates as unknown as import("@seu-bolso-feliz/shared-types").Json,
+      reconciliation_candidates: candidates as unknown as Json,
       reconciled_at: new Date().toISOString(),
     })
     .eq("id", draftId)
