@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
-import { PlusCircle, Trash2, Link2, Unlink, Loader2, Check } from "lucide-react";
+import { PlusCircle, Trash2, Link2, Unlink, Loader2, Check, Sparkles } from "lucide-react";
 import type { SourceDocument, DraftRecord, DraftBatch } from "@sbf/shared-types";
 import {
   listDocumentSplits,
@@ -35,6 +35,9 @@ import {
 } from "@/app/actions/document-transactions";
 import { updateDocumentMetadata } from "@/app/actions/document-metadata";
 import { getDraftRecords, approveDraftRecord, approveDraftBatch } from "@/app/actions/ingestion";
+import { AIFieldBadge, CONFIDENCE_THRESHOLD } from "@/components/ai-field-badge";
+import { useAISuggest } from "@/hooks/use-ai-suggest";
+import { useChatContext } from "@/contexts/chat-context";
 
 // react-pdf — sem SSR
 const PDFPreview = dynamic(() => import("@/components/pdf-preview"), {
@@ -74,6 +77,7 @@ export interface DocumentDetailNewProps {
 function MetadataCard({ doc }: { doc: SourceDocument }) {
   const extDoc = doc as SourceDocument & { supplier_name_raw?: string };
   const meta = (doc.metadata ?? {}) as Record<string, unknown>;
+  const overallConfidence = meta["confidence"] != null ? Number(meta["confidence"]) : 1;
 
   const [editing, setEditing] = useState(false);
   const [supplierName, setSupplierName] = useState(extDoc.supplier_name_raw ?? "");
@@ -175,17 +179,50 @@ function MetadataCard({ doc }: { doc: SourceDocument }) {
           </div>
         ) : (
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <dt className="text-muted-foreground">Fornecedor</dt>
-              <dd className="font-medium">{supplierName || "Não identificado"}</dd>
+              <dd className="flex items-center gap-1 font-medium">
+                {supplierName || "Não identificado"}
+                {overallConfidence < CONFIDENCE_THRESHOLD && (
+                  <AIFieldBadge
+                    fieldLabel="Fornecedor"
+                    confidence={overallConfidence}
+                    source={(meta["extraction_source"] as string) ?? "ocr"}
+                    documentId={doc.id}
+                    value={supplierName || undefined}
+                  />
+                )}
+              </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <dt className="text-muted-foreground">Data</dt>
-              <dd>{formatDate(docDate || null)}</dd>
+              <dd className="flex items-center gap-1">
+                {formatDate(docDate || null)}
+                {overallConfidence < CONFIDENCE_THRESHOLD && docDate && (
+                  <AIFieldBadge
+                    fieldLabel="Data do documento"
+                    confidence={overallConfidence}
+                    source={(meta["extraction_source"] as string) ?? "ocr"}
+                    documentId={doc.id}
+                    value={docDate}
+                  />
+                )}
+              </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <dt className="text-muted-foreground">Valor</dt>
-              <dd className="font-medium">{formatCurrency(docAmount)}</dd>
+              <dd className="flex items-center gap-1 font-medium">
+                {formatCurrency(docAmount)}
+                {overallConfidence < CONFIDENCE_THRESHOLD && docAmount != null && (
+                  <AIFieldBadge
+                    fieldLabel="Valor"
+                    confidence={overallConfidence}
+                    source={(meta["extraction_source"] as string) ?? "ocr"}
+                    documentId={doc.id}
+                    value={formatCurrency(docAmount)}
+                  />
+                )}
+              </dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Tipo MIME</dt>
@@ -212,6 +249,26 @@ function SplitsCard({
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
+
+  // S4-005: sugestão de rateio via IA
+  const { suggest: suggestSplits, loading: loadingSplits } = useAISuggest<{
+    result: { suggestion?: string; message?: string };
+  }>();
+
+  const { setDrawerOpen, setPendingMessage } = useChatContext();
+
+  async function handleSuggestSplits() {
+    const res = await suggestSplits("suggest_splits", {
+      document_id: sourceDocumentId,
+      total_amount: docAmount ?? undefined,
+    });
+    if (res?.result?.suggestion) {
+      setPendingMessage(
+        `Sugira um rateio para este documento. ${res.result.suggestion} Valor total: ${formatCurrency(docAmount)}.`,
+      );
+      setDrawerOpen(true);
+    }
+  }
 
   const load = useCallback(() => {
     listDocumentSplits(sourceDocumentId)
@@ -260,7 +317,25 @@ function SplitsCard({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold">Rateios</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">Rateios</CardTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            onClick={handleSuggestSplits}
+            disabled={loadingSplits}
+            title="Deixar a IA sugerir como ratear este documento"
+          >
+            {loadingSplits ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Sparkles className="h-3 w-3" />
+            )}
+            IA sugere rateio
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {docAmount != null && (
@@ -345,6 +420,27 @@ function LinkedTransactionsCard({ sourceDocumentId }: { sourceDocumentId: string
   const [txInput, setTxInput] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
 
+  // S4-004: sugestão de reconciliação via IA
+  const { suggest: suggestRecon, loading: loadingRecon } = useAISuggest<{
+    result: {
+      candidates?: { id: string; description: string; amount: number }[];
+      message?: string;
+    };
+  }>();
+  const [reconCandidates, setReconCandidates] = useState<
+    { id: string; description: string; amount: number }[]
+  >([]);
+
+  async function handleSuggestRecon() {
+    const res = await suggestRecon("suggest_reconciliation", { document_id: sourceDocumentId });
+    const candidates = res?.result?.candidates ?? [];
+    if (candidates.length > 0) {
+      setReconCandidates(candidates);
+    } else {
+      setReconCandidates([]);
+    }
+  }
+
   const load = useCallback(() => {
     listLinkedTransactions(sourceDocumentId)
       .then(setLinks)
@@ -380,9 +476,54 @@ function LinkedTransactionsCard({ sourceDocumentId }: { sourceDocumentId: string
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold">Transações vinculadas</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">Transações vinculadas</CardTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            onClick={handleSuggestRecon}
+            disabled={loadingRecon}
+            title="Sugerir transações para vincular via IA"
+          >
+            {loadingRecon ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Sparkles className="h-3 w-3" />
+            )}
+            Sugerir via IA
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Candidatos sugeridos pela IA */}
+        {reconCandidates.length > 0 && (
+          <div className="space-y-1.5 rounded-md border border-dashed border-primary/40 bg-primary/5 p-2">
+            <p className="text-xs font-medium text-primary">Sugestões da IA</p>
+            {reconCandidates.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between gap-2 rounded-sm bg-background px-2 py-1 text-xs"
+              >
+                <span className="flex-1 truncate">{c.description}</span>
+                <span className="tabular-nums">{formatCurrency(c.amount)}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => {
+                    setTxInput(c.id);
+                    setReconCandidates([]);
+                  }}
+                >
+                  Usar
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
         {links.length === 0 ? (
           <p className="text-xs text-muted-foreground">Nenhuma transação vinculada.</p>
         ) : (
