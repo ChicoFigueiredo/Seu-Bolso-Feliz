@@ -1,11 +1,24 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, FileText, ExternalLink } from "lucide-react";
-import { getSourceDocument, getDocumentStorageUrl } from "@/app/actions/ingestion";
+import {
+  getSourceDocument,
+  getDocumentStorageUrl,
+  getDraftBatchByDocumentId,
+} from "@/app/actions/ingestion";
+import DocumentDetailNew, { type DocumentDetailVariant } from "@/components/document-detail-new";
+
+// ─── Resolver variant com base em document_type ───────────────────────────────
+
+const STATEMENT_TYPES = new Set(["credit_card_statement", "bank_statement"]);
+
+function resolveVariant(documentType: string | null | undefined): DocumentDetailVariant {
+  if (documentType && STATEMENT_TYPES.has(documentType)) return "statement";
+  return "generic";
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +69,15 @@ export default async function DocumentDetailPage({ params }: Props) {
 
   const signedUrl = doc.storage_path ? await getDocumentStorageUrl(doc.storage_path) : null;
 
+  // Resolver variant com base em document_type
+  const variant = resolveVariant(doc.document_type);
+
+  // Carregar draft_batch apenas para fatura
+  let draftBatch = null;
+  if (variant === "statement") {
+    draftBatch = await getDraftBatchByDocumentId(doc.id).catch(() => null);
+  }
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb / voltar */}
@@ -86,83 +108,55 @@ export default async function DocumentDetailPage({ params }: Props) {
         </Badge>
       </div>
 
+      {/* Metadados rápidos */}
+      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+        <span>
+          <span className="mr-1 font-medium text-foreground">ID:</span>
+          <span className="font-mono text-xs">{doc.id}</span>
+        </span>
+        {doc.mime_type && (
+          <span>
+            <span className="mr-1 font-medium text-foreground">MIME:</span>
+            {doc.mime_type}
+          </span>
+        )}
+        {doc.file_size_bytes && (
+          <span>
+            <span className="mr-1 font-medium text-foreground">Tamanho:</span>
+            {formatFileSize(doc.file_size_bytes)}
+          </span>
+        )}
+        {doc.created_at && (
+          <span>
+            <span className="mr-1 font-medium text-foreground">Criado:</span>
+            {new Date(doc.created_at).toLocaleString("pt-BR", {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
+          </span>
+        )}
+        {signedUrl && (
+          <a
+            href={signedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            <ExternalLink className="size-3" />
+            Abrir arquivo
+          </a>
+        )}
+      </div>
+
       <Separator />
 
-      {/* Metadados */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Metadados</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="text-muted-foreground">ID</dt>
-              <dd className="font-mono text-xs">{doc.id}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Tipo MIME</dt>
-              <dd>{doc.mime_type ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Tamanho</dt>
-              <dd>{formatFileSize(doc.file_size_bytes ?? null)}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Origem</dt>
-              <dd>{ORIGIN_LABEL[doc.origin_type] ?? doc.origin_type}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Chave de origem</dt>
-              <dd className="truncate font-mono text-xs">{doc.origin_key}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Criado em</dt>
-              <dd>
-                {doc.created_at
-                  ? new Date(doc.created_at).toLocaleString("pt-BR", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })
-                  : "—"}
-              </dd>
-            </div>
-            {doc.gmail_subject && (
-              <div className="col-span-2">
-                <dt className="text-muted-foreground">Assunto (Gmail)</dt>
-                <dd>{doc.gmail_subject}</dd>
-              </div>
-            )}
-            {doc.gmail_from && (
-              <div>
-                <dt className="text-muted-foreground">Remetente (Gmail)</dt>
-                <dd>{doc.gmail_from}</dd>
-              </div>
-            )}
-          </dl>
-        </CardContent>
-      </Card>
-
-      {/* Acesso ao arquivo */}
-      {signedUrl && (
-        <div className="flex">
-          <Button variant="outline" asChild>
-            <a href={signedUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 size-4" />
-              Abrir arquivo
-            </a>
-          </Button>
-        </div>
-      )}
-
-      {/* Placeholder para Sprint 3 */}
-      <Card className="border-dashed">
-        <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            Visualização do documento, extração de dados e detalhes do pipeline serão adicionados na
-            Sprint 3.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Tela 13 (generic) ou Tela 14 (statement) */}
+      <DocumentDetailNew
+        doc={doc}
+        signedUrl={signedUrl}
+        variant={variant}
+        draftBatch={draftBatch}
+      />
     </div>
   );
 }

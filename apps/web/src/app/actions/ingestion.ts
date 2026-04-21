@@ -202,12 +202,16 @@ export async function getIngestionRuns(limit = 20): Promise<IngestionRun[]> {
 export async function getDraftBatches(filters?: {
   status?: string;
   limit?: number;
+  source_document_id?: string;
 }): Promise<DraftBatch[]> {
   const supabase = await createClient();
   let query = supabase.from("draft_batches").select("*").order("created_at", { ascending: false });
 
   if (filters?.status) {
     query = query.eq("status", filters.status);
+  }
+  if (filters?.source_document_id) {
+    query = query.eq("source_document_id", filters.source_document_id);
   }
   if (filters?.limit) {
     query = query.limit(filters.limit);
@@ -216,6 +220,13 @@ export async function getDraftBatches(filters?: {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+export async function getDraftBatchByDocumentId(
+  sourceDocumentId: string,
+): Promise<DraftBatch | null> {
+  const batches = await getDraftBatches({ source_document_id: sourceDocumentId, limit: 1 });
+  return batches[0] ?? null;
 }
 
 export async function getDraftBatch(id: string): Promise<DraftBatch | null> {
