@@ -469,6 +469,108 @@ export type Database = {
           },
         ];
       };
+      document_splits: {
+        Row: {
+          amount: number;
+          category_id: string | null;
+          created_at: string;
+          description: string | null;
+          id: string;
+          source_document_id: string;
+          tags: string[];
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount: number;
+          category_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          source_document_id: string;
+          tags?: string[];
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          amount?: number;
+          category_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          source_document_id?: string;
+          tags?: string[];
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_splits_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "categories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_splits_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_transactions: {
+        Row: {
+          confidence: number | null;
+          created_at: string;
+          created_by: string;
+          id: string;
+          link_type: string;
+          notes: string | null;
+          source_document_id: string;
+          transaction_id: string;
+          user_id: string;
+        };
+        Insert: {
+          confidence?: number | null;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          link_type: string;
+          notes?: string | null;
+          source_document_id: string;
+          transaction_id: string;
+          user_id: string;
+        };
+        Update: {
+          confidence?: number | null;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          link_type?: string;
+          notes?: string | null;
+          source_document_id?: string;
+          transaction_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_transactions_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_transactions_transaction_id_fkey";
+            columns: ["transaction_id"];
+            isOneToOne: false;
+            referencedRelation: "transactions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       documents: {
         Row: {
           created_at: string;
@@ -546,6 +648,7 @@ export type Database = {
           name: string | null;
           rejected_count: number | null;
           run_id: string | null;
+          source_document_id: string | null;
           status: string;
           total_drafts: number | null;
           updated_at: string | null;
@@ -558,6 +661,7 @@ export type Database = {
           name?: string | null;
           rejected_count?: number | null;
           run_id?: string | null;
+          source_document_id?: string | null;
           status?: string;
           total_drafts?: number | null;
           updated_at?: string | null;
@@ -570,6 +674,7 @@ export type Database = {
           name?: string | null;
           rejected_count?: number | null;
           run_id?: string | null;
+          source_document_id?: string | null;
           status?: string;
           total_drafts?: number | null;
           updated_at?: string | null;
@@ -581,6 +686,13 @@ export type Database = {
             columns: ["run_id"];
             isOneToOne: false;
             referencedRelation: "ingestion_runs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_batches_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
             referencedColumns: ["id"];
           },
         ];
@@ -2366,6 +2478,14 @@ export type Database = {
       };
       decrypt_secret: { Args: { ciphertext: string }; Returns: string };
       encrypt_secret: { Args: { plaintext: string }; Returns: string };
+      fn_reconciliation_progress: {
+        Args: { p_batch_id: string };
+        Returns: {
+          progress_pct: number;
+          reconciled_count: number;
+          total_count: number;
+        }[];
+      };
       generate_financial_periods: {
         Args: {
           p_anchor_date?: string;
