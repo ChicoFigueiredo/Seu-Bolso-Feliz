@@ -483,7 +483,7 @@ function StatementSummaryCard({ doc, batchId }: { doc: SourceDocument; batchId: 
             <dt className="text-muted-foreground">Vencimento</dt>
             <dd>{formatDate((meta["due_date"] as string) ?? null)}</dd>
           </div>
-          {meta["cycle_start"] && meta["cycle_end"] && (
+          {!!meta["cycle_start"] && !!meta["cycle_end"] && (
             <div className="col-span-2">
               <dt className="text-muted-foreground">Ciclo</dt>
               <dd>
@@ -531,7 +531,7 @@ function DraftTable({ batchId }: { batchId: string }) {
   const [isPending, startTransition] = useTransition();
 
   const load = useCallback(() => {
-    getDraftRecords(batchId)
+    getDraftRecords({ batchId })
       .then(setRecords)
       .catch(() => {});
   }, [batchId]);
@@ -657,7 +657,7 @@ function DraftTable({ batchId }: { batchId: string }) {
               </thead>
               <tbody className="divide-y">
                 {filtered.map((r) => {
-                  const rData = (r.data ?? r.draft_data) as Record<string, unknown> | null;
+                  const rData = r.draft_data as Record<string, unknown> | null;
                   const chip = DRAFT_CHIP[r.status] ?? {
                     label: r.status,
                     variant: "outline" as const,
