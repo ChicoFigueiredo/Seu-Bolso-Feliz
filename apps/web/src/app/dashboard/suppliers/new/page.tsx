@@ -16,6 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Sparkles, Loader2 } from "lucide-react";
+import { useAISuggest } from "@/hooks/use-ai-suggest";
 
 const typeOptions = [
   { value: "company", label: "Empresa" },
@@ -32,15 +34,46 @@ export default function NewSupplierPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  // S4-008: campos controlados para pré-preenchimento via IA
+  const [name, setName] = useState("");
+  const [tradeName, setTradeName] = useState("");
+  const [documentNumber, setDocumentNumber] = useState("");
+
+  const { suggest: suggestName, loading: loadingAI } = useAISuggest<{
+    result: {
+      name?: string;
+      trade_name?: string;
+      aliases?: string[];
+      found?: boolean;
+      message?: string;
+    };
+  }>();
+
+  async function handleCNPJBlur() {
+    const raw = documentNumber.trim();
+    if (raw.replace(/\D/g, "").length < 11) return; // mínimo CPF
+    if (name) return; // já tem nome — não sobrescrever
+
+    const res = await suggestName("suggest_supplier_name", { document_number: raw });
+    const data = res?.result;
+    if (!data) return;
+
+    if (data.name && !name) setName(data.name);
+    if (data.trade_name && !tradeName) setTradeName(data.trade_name);
+
+    if (data.found) {
+      toast.info("Fornecedor já cadastrado", { description: data.message ?? "" });
+    } else if (data.suggested_names && data.suggested_names.length > 0) {
+      toast.success("Nome sugerido pela IA", { description: data.message ?? "" });
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    const name = formData.get("name") as string;
     const type = formData.get("type") as string;
-    const document_number = (formData.get("document_number") as string) || null;
-    const trade_name = (formData.get("trade_name") as string) || null;
     const notes = (formData.get("notes") as string) || null;
 
     const supabase = createClient();
@@ -52,9 +85,14 @@ export default function NewSupplierPage() {
       return;
     }
 
-    const { error } = await supabase
-      .from("suppliers")
-      .insert({ name, type, document_number, trade_name, notes, user_id: user.id });
+    const { error } = await supabase.from("suppliers").insert({
+      name,
+      type,
+      document_number: documentNumber || null,
+      trade_name: tradeName || null,
+      notes,
+      user_id: user.id,
+    });
 
     if (error) {
       toast.error("Erro ao criar fornecedor", { description: error.message });
@@ -83,7 +121,13 @@ export default function NewSupplierPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Nome</Label>
-              <Input id="name" name="name" placeholder="Ex: Neoenergia, GitHub, Vivo" required />
+              <Input
+                id="name"
+                placeholder="Ex: Neoenergia, GitHub, Vivo"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="type">Tipo</Label>
@@ -102,14 +146,30 @@ export default function NewSupplierPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="trade_name">Nome Fantasia</Label>
-              <Input id="trade_name" name="trade_name" placeholder="Ex: Neoenergia Pernambuco" />
+              <Input
+                id="trade_name"
+                placeholder="Ex: Neoenergia Pernambuco"
+                value={tradeName}
+                onChange={(e) => setTradeName(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="document_number">CNPJ / CPF</Label>
+              <Label htmlFor="document_number" className="flex items-center gap-1.5">
+                CNPJ / CPF
+                {loadingAI && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                {!loadingAI && documentNumber.replace(/\D/g, "").length >= 11 && !name && (
+                  <Sparkles
+                    className="h-3 w-3 text-primary"
+                    title="Saia do campo para buscar via IA"
+                  />
+                )}
+              </Label>
               <Input
                 id="document_number"
-                name="document_number"
                 placeholder="Ex: 12.345.678/0001-90"
+                value={documentNumber}
+                onChange={(e) => setDocumentNumber(e.target.value)}
+                onBlur={handleCNPJBlur}
               />
             </div>
             <div className="space-y-2">
