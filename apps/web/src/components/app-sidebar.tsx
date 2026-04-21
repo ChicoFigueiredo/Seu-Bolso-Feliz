@@ -16,11 +16,6 @@ import {
   TrendingDown,
   Upload,
   Wallet,
-  Activity,
-  ScanLine,
-  ClipboardCheck,
-  Files,
-  BookOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -44,16 +39,11 @@ const navFinanceiro = [
   { title: "Recorrências", href: "/dashboard/recurring", icon: Repeat },
   { title: "Faturas", href: "/dashboard/statements", icon: CreditCard },
   { title: "Dívidas", href: "/dashboard/liabilities", icon: TrendingDown },
+  { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },
 ];
 
 const navGestao = [
-  { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },
   { title: "Documentos", href: "/dashboard/documents", icon: FileText },
-  { title: "Ingestão", href: "/dashboard/ingestion", icon: ScanLine },
-  { title: "Documentos Ingeridos", href: "/dashboard/ingestion/documents", icon: Files },
-  { title: "Revisão", href: "/dashboard/ingestion/review", icon: ClipboardCheck },
-  { title: "Padrões", href: "/dashboard/ingestion/patterns", icon: BookOpen },
-  { title: "Logs Ingestão", href: "/dashboard/ingestion/logs", icon: Activity },
   { title: "Importar", href: "/dashboard/import", icon: Upload },
   { title: "Relatórios", href: "/dashboard/reports", icon: LayoutDashboard },
 ];
