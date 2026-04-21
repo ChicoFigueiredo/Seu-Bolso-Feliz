@@ -277,7 +277,7 @@ export default function DocumentsPage() {
                       {formatFileSize(doc.file_size_bytes ?? null)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {new Date(doc.created_at).toLocaleDateString("pt-BR")}
+                      {doc.created_at ? new Date(doc.created_at).toLocaleDateString("pt-BR") : "—"}
                     </TableCell>
                     <TableCell>
                       <Link href={`/dashboard/documents/${doc.id}`}>

@@ -118,10 +118,12 @@ export default async function DocumentDetailPage({ params }: Props) {
             <div>
               <dt className="text-muted-foreground">Criado em</dt>
               <dd>
-                {new Date(doc.created_at).toLocaleString("pt-BR", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })}
+                {doc.created_at
+                  ? new Date(doc.created_at).toLocaleString("pt-BR", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })
+                  : "—"}
               </dd>
             </div>
             {doc.gmail_subject && (
