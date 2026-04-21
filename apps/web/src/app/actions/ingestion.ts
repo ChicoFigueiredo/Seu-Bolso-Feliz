@@ -407,3 +407,72 @@ export async function getIngestionStats(): Promise<{
     recentErrors: errorsResult.count ?? 0,
   };
 }
+
+// ══════════════════════════════════════════════════════════════
+// Upload Manual de Documento (S2-004)
+// Cria registro em source_documents + ingestion_job + dispara run
+// ══════════════════════════════════════════════════════════════
+
+export async function uploadDocument(formData: FormData): Promise<SourceDocument> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const file = formData.get("file") as File | null;
+  if (!file) throw new Error("Arquivo não informado");
+
+  // 1. Upload para Storage (bucket ingestion-originals)
+  const ext = file.name.split(".").pop() ?? "bin";
+  const storagePath = `${user.id}/manual/${crypto.randomUUID()}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from("ingestion-originals")
+    .upload(storagePath, file, { contentType: file.type, upsert: false });
+
+  if (uploadError) throw new Error(`Erro no upload: ${uploadError.message}`);
+
+  // 2. Criar source_document
+  const originKey = `manual::${storagePath}`;
+  const { data: srcDoc, error: srcError } = await supabase
+    .from("source_documents")
+    .insert({
+      user_id: user.id,
+      origin_type: "manual_upload",
+      origin_key: originKey,
+      filename: file.name,
+      mime_type: file.type || ext,
+      file_size_bytes: file.size,
+      storage_path: storagePath,
+      status: "new",
+    })
+    .select()
+    .single();
+
+  if (srcError) throw new Error(`Erro ao registrar documento: ${srcError.message}`);
+
+  // 3. Criar ingestion_run + ingestion_job para processar o documento
+  const { data: run, error: runError } = await supabase
+    .from("ingestion_runs")
+    .insert({
+      user_id: user.id,
+      source_type: "manual_upload",
+      status: "running",
+      metadata: { source: "manual_upload", filename: file.name },
+    })
+    .select()
+    .single();
+
+  if (runError) throw new Error(`Erro ao criar run: ${runError.message}`);
+
+  await supabase.from("ingestion_jobs").insert({
+    run_id: run.id,
+    user_id: user.id,
+    source_document_id: srcDoc.id,
+    status: "queued",
+    metadata: { source: "manual_upload" },
+  });
+
+  return srcDoc;
+}
