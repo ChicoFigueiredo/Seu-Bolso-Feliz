@@ -710,3 +710,58 @@ Time, a Verônica respondeu:
 - NÃO CODAR! apenas conferir e ajustar o documento #file:2026-04-21-10-36-refino-alinhamento-design-telas-plano-acao.md com o ajuste da equipe
 
 ---
+
+Desenvolvimento aprovado:
+
+- Crie o checklist `docs/checklist/006-esporro-veronica.md` com:
+  - Tudo que foi combinado nos documentos #file:2026-04-21-10-36-refino-alinhamento-design-telas-plano-acao.md e #file:003-alteracoes-novas-telas.md com fases, nome da branch
+  - Critérios de aceite
+  - Nome da branch de cada fase
+- Faça o commit geral e push (se os testes falharem, corrija os testes)
+- Crie a primeira branch e fique preparado para começar após revisar o checklist criado
+
+---
+
+Liberado time, vamos codar:
+
+- Crie uma branch para cada sprint, seguindo o checklist criado #006-esporro-veronica.md
+- Faça commits pequenos, claros e frequentes, para que a gente possa acompanhar o progresso e ter rastreabilidade. push ao final da sprint, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+- Ao final de cada ciclo de prompt que eu fizer, quero:
+  - push no repositório, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+  - um resumo do que foi feito, do que falta, e do que é prioridade
+  - um link para o checklist atualizado
+  - um link para o passo-a-passo atualizado
+- NÃO MEXER (INEGOCIÁVEL)
+  - nas branchs main, hmp e develop
+    Vamos evoluir!
+
+---
+
+Sigamos para a Sprint 2
+
+- Faça commits pequenos, claros e frequentes, para que a gente possa acompanhar o progresso e ter rastreabilidade. push ao final da sprint, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+- Ao final de cada ciclo de prompt que eu fizer, quero:
+  - push no repositório, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+  - um resumo do que foi feito, do que falta, e do que é prioridade
+  - um link para o checklist atualizado
+  - um link para o passo-a-passo atualizado
+- NÃO MEXER (INEGOCIÁVEL)
+  - nas branchs main, hmp e develop
+    Vamos evoluir!
+
+---
+
+Sigamos para a Sprint 4:
+
+- Faça commits pequenos, claros e frequentes, para que a gente possa acompanhar o progresso e ter rastreabilidade. push ao final da sprint, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+- Ao final de cada ciclo de prompt que eu fizer, quero:
+  - atualizar #file:006-esporro-veronica.md com progresso
+  - push no repositório, sem baypassar os hooks, para que a gente possa acompanhar o progresso e ter rastreabilidade. Se os hooks falharem, corrija os hooks e/ou o commit para garantir que o código suba seguindo as regras definidas.
+  - um resumo do que foi feito, do que falta, e do que é prioridade
+  - um link para o checklist atualizado
+  - um link para o passo-a-passo atualizado
+- NÃO MEXER (INEGOCIÁVEL)
+  - nas branchs main, hmp e develop
+    Vamos evoluir!
+
+---
