@@ -1686,6 +1686,7 @@ export type Database = {
         Row: {
           content_hash: string | null;
           created_at: string | null;
+          document_type: string | null;
           file_size_bytes: number | null;
           filename: string;
           gmail_attachment_id: string | null;
@@ -1698,17 +1699,21 @@ export type Database = {
           id: string;
           local_filepath: string | null;
           local_mtime: string | null;
+          metadata: Json | null;
           mime_type: string | null;
           origin_key: string;
           origin_type: string;
           status: string;
           storage_path: string | null;
+          supplier_id: string | null;
+          supplier_name_raw: string | null;
           updated_at: string | null;
           user_id: string;
         };
         Insert: {
           content_hash?: string | null;
           created_at?: string | null;
+          document_type?: string | null;
           file_size_bytes?: number | null;
           filename: string;
           gmail_attachment_id?: string | null;
@@ -1721,17 +1726,21 @@ export type Database = {
           id?: string;
           local_filepath?: string | null;
           local_mtime?: string | null;
+          metadata?: Json | null;
           mime_type?: string | null;
           origin_key: string;
           origin_type: string;
           status?: string;
           storage_path?: string | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
           updated_at?: string | null;
           user_id: string;
         };
         Update: {
           content_hash?: string | null;
           created_at?: string | null;
+          document_type?: string | null;
           file_size_bytes?: number | null;
           filename?: string;
           gmail_attachment_id?: string | null;
@@ -1744,15 +1753,33 @@ export type Database = {
           id?: string;
           local_filepath?: string | null;
           local_mtime?: string | null;
+          metadata?: Json | null;
           mime_type?: string | null;
           origin_key?: string;
           origin_type?: string;
           status?: string;
           storage_path?: string | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
           updated_at?: string | null;
           user_id?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "source_documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "source_documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       statement_cycles: {
         Row: {
@@ -2190,6 +2217,7 @@ export type Database = {
           origin_type: string;
           priority: string | null;
           recurring_instance_id: string | null;
+          source_document_id: string | null;
           statement_cycle_id: string | null;
           supplier_id: string | null;
           type: string;
@@ -2213,6 +2241,7 @@ export type Database = {
           origin_type?: string;
           priority?: string | null;
           recurring_instance_id?: string | null;
+          source_document_id?: string | null;
           statement_cycle_id?: string | null;
           supplier_id?: string | null;
           type: string;
@@ -2236,6 +2265,7 @@ export type Database = {
           origin_type?: string;
           priority?: string | null;
           recurring_instance_id?: string | null;
+          source_document_id?: string | null;
           statement_cycle_id?: string | null;
           supplier_id?: string | null;
           type?: string;
@@ -2276,6 +2306,13 @@ export type Database = {
             columns: ["recurring_instance_id"];
             isOneToOne: false;
             referencedRelation: "recurring_instances";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "transactions_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
             referencedColumns: ["id"];
           },
           {
