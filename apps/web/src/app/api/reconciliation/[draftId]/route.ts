@@ -70,7 +70,8 @@ async function runReconciliation(
   const dueDate = typeof draftData.due_date === "string" ? draftData.due_date : null;
   const supplierId = typeof draftData.supplier_id === "string" ? draftData.supplier_id : null;
   const supplierName = typeof draftData.supplier_name === "string" ? draftData.supplier_name : null;
-  const competenceDate = typeof draftData.competence_date === "string" ? draftData.competence_date : null;
+  const competenceDate =
+    typeof draftData.competence_date === "string" ? draftData.competence_date : null;
 
   // Regra 1: Duplicate hash
   if (sourceDocumentId) {
@@ -94,7 +95,10 @@ async function runReconciliation(
           .from("draft_records")
           .select("id, draft_data, created_at")
           .eq("user_id", userId)
-          .in("source_document_id", dupes.map((d: { id: string }) => d.id))
+          .in(
+            "source_document_id",
+            dupes.map((d: { id: string }) => d.id),
+          )
           .in("status", ["approved", "posted"])
           .limit(1);
 
@@ -201,19 +205,15 @@ async function runReconciliation(
   }
 
   candidates.sort((a, b) => b.score - a.score);
-  const status: ReconciliationStatus = candidates.length > 0
-    ? (candidates[0]!.matchType as ReconciliationStatus)
-    : "no_match";
+  const status: ReconciliationStatus =
+    candidates.length > 0 ? (candidates[0]!.matchType as ReconciliationStatus) : "no_match";
 
   return { status, candidates };
 }
 
 // ── GET /api/reconciliation/[draftId] ─────────────────────────────────────
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ draftId: string }> },
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = await params;
   const supabase = await createClient();
   const {
@@ -264,13 +264,20 @@ export async function GET(
     .from("draft_records")
     .update({
       reconciliation_status: status,
-      reconciliation_candidates: candidates,
+      reconciliation_candidates:
+        candidates as unknown as import("@seu-bolso-feliz/shared-types").Json,
       reconciled_at: new Date().toISOString(),
     })
     .eq("id", draftId)
     .eq("user_id", user.id);
 
-  return NextResponse.json({ draftId, status, candidates, checkedAt: new Date().toISOString(), cached: false });
+  return NextResponse.json({
+    draftId,
+    status,
+    candidates,
+    checkedAt: new Date().toISOString(),
+    cached: false,
+  });
 }
 
 // ── PATCH /api/reconciliation/[draftId] — confirmar decisão ──────────────
