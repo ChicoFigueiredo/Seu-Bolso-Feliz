@@ -28,7 +28,7 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { context } = useChatContext();
+  const { context, pendingMessage, setPendingMessage } = useChatContext();
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, error, append } = useChat({
     api: "/api/chat",
@@ -58,6 +58,14 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [open]);
+
+  // Injetar mensagem pendente quando drawer abrir (ex.: "Por que?" do AIFieldBadge)
+  useEffect(() => {
+    if (open && pendingMessage) {
+      void append({ role: "user", content: pendingMessage });
+      setPendingMessage(null);
+    }
+  }, [open, pendingMessage, append, setPendingMessage]);
 
   async function createSession() {
     const supabase = createClient();
