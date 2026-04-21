@@ -2,6 +2,14 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  webpack: (config) => {
+    // react-pdf usa canvas e pdfjs-dist; evitar erros de SSR
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false,
+    };
+    return config;
+  },
   async redirects() {
     return [
       // Rotas de ingestão que saíram do sidebar principal
