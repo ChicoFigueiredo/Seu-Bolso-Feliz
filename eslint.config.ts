@@ -15,6 +15,7 @@ export default tseslint.config(
       "supabase/functions/**",
       "docs-html/",
       "**/*.d.ts",
+      "**/database.types.ts", // auto-gerado pelo Supabase CLI
       "src/",
       "build.ts",
       "styles/",
