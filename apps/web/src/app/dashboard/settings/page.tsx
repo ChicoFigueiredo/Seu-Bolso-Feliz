@@ -346,12 +346,12 @@ export default function SettingsPage() {
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2">
             <Link
-              href="/dashboard/ingestion"
+              href="/dashboard/documents"
               className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
             >
               <ScanLine className="size-4 shrink-0 text-muted-foreground" />
               <div>
-                <p className="font-medium">Ingestão</p>
+                <p className="font-medium">Documentos</p>
                 <p className="text-xs text-muted-foreground">Visão geral do pipeline</p>
               </div>
             </Link>
