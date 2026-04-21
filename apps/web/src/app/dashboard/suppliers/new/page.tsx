@@ -160,7 +160,7 @@ export default function NewSupplierPage() {
                 {!loadingAI && documentNumber.replace(/\D/g, "").length >= 11 && !name && (
                   <Sparkles
                     className="h-3 w-3 text-primary"
-                    title="Saia do campo para buscar via IA"
+                    aria-label="Saia do campo para buscar via IA"
                   />
                 )}
               </Label>
