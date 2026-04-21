@@ -77,16 +77,30 @@ A IA **não pode**:
 - Modelo "copiloto" vs "autopiloto": IA sugere, humano decide
 - Em fase futura, com confiança >98% e histórico de acertos, podemos reavaliar auto-aprovação para padrões conhecidos
 
-### 4. Function Calling com 15 tools específicas
+### 4. Function Calling com tools específicas
 
 A IA opera via **function calling** (tool_choice: auto), com tools que mapeiam operações reais:
 
-| Grupo   | Tools                                                                                                  |
-| ------- | ------------------------------------------------------------------------------------------------------ |
-| Leitura | list_pending_documents, get_document_details, list_drafts, get_draft_details, list_recent_transactions |
-| Análise | analyze_document_image, extract_document_data, suggest_supplier, suggest_category_tags                 |
-| Ação    | approve_draft, reject_draft, reprocess_document, register_pattern                                      |
-| Padrão  | list_patterns, suggest_reconciliation                                                                  |
+| Grupo       | Tools                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| Leitura     | list_pending_documents, get_document_details, list_drafts, get_draft_details, list_recent_transactions |
+| Análise     | suggest_supplier, suggest_category_tags, suggest_document_type, suggest_reconciliation                 |
+| Explicação  | explain_classification, explain_extraction                                                             |
+| Ação        | approve_draft, reject_draft, reprocess_document, register_pattern, batch_approve_drafts                |
+| Rateio      | suggest_splits                                                                                         |
+| Fornecedor  | suggest_supplier_name (resolução de CNPJ → razão social e aliases)                                     |
+| Padrão      | list_document_patterns, register_document_pattern, update_document_pattern                             |
+| Diagnóstico | list_error_documents, list_missing_password_documents                                                  |
+
+#### Sprint 4 — Novas tools registradas (2026-04)
+
+| Tool                    | Propósito                                                                                   | Endpoint          |
+| ----------------------- | ------------------------------------------------------------------------------------------- | ----------------- |
+| `suggest_splits`        | Sugere desdobramento (rateio) de um documento em múltiplas linhas de custo                  | `/api/ai-suggest` |
+| `suggest_supplier_name` | Dado um CNPJ, retorna razão social e aliases inferidos para pré-preenchimento de fornecedor | `/api/ai-suggest` |
+| `explain_extraction`    | Explica por que um campo específico foi extraído com determinada confiança e valor          | `/api/ai-suggest` |
+
+**Regra**: Toda nova tool deve ser registrada aqui **antes** de ser adicionada ao `sbfTools` em `apps/web/src/lib/ai/tools.ts`.
 
 **Justificativa:**
 
@@ -94,6 +108,7 @@ A IA opera via **function calling** (tool_choice: auto), com tools que mapeiam o
 - Cada tool tem schema Zod definido — validação automática
 - Tools de ação requerem confirmação explícita antes de executar
 - Log de toda tool call para auditoria
+- Sprint 4 adiciona endpoint `POST /api/ai-suggest` para tools pontuais sem streaming (inline suggestions)
 
 ### 5. Rate limiting e controle de custo
 

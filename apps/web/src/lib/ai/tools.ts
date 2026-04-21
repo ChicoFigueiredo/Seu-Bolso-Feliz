@@ -803,6 +803,196 @@ export const batchApproveDrafts = tool({
 });
 
 // ══════════════════════════════════════════════════════════════
+// Sprint 4 Tools: suggest_splits, suggest_supplier_name, explain_extraction
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * suggest_splits — S4-005
+ * Sugere como desdobrar um documento em múltiplas linhas de rateio.
+ */
+export const suggestSplits = tool({
+  description:
+    "Sugere como dividir (ratear) um documento de custo em múltiplas linhas de despesa. " +
+    "Analisa o tipo do documento, valor total e histórico de padrões para propor splits.",
+  parameters: z.object({
+    document_id: z.string().describe("UUID do documento fonte"),
+    total_amount: z
+      .number()
+      .optional()
+      .describe("Valor total do documento (usado quando não disponível no banco)"),
+    hint: z
+      .string()
+      .optional()
+      .describe("Dica adicional do usuário sobre como dividir (ex: 50% pessoal, 50% empresa)"),
+  }),
+  execute: async ({ document_id, total_amount, hint }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // Buscar detalhes do documento
+    const { data: doc } = await supabase
+      .from("source_documents")
+      .select("id, filename, document_type, supplier_name_raw, metadata")
+      .eq("id", document_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!doc) return { error: "Documento não encontrado" };
+
+    const meta = doc.metadata as Record<string, unknown> | null;
+    const amount = total_amount ?? (meta?.total_amount as number | null) ?? null;
+
+    return {
+      document_id,
+      filename: doc.filename,
+      document_type: doc.document_type,
+      supplier_name_raw: doc.supplier_name_raw,
+      total_amount: amount,
+      hint: hint ?? null,
+      suggestion:
+        "Com base no tipo de documento e fornecedor, analise os splits mais prováveis. " +
+        "Se for nota fiscal de serviço, considere rateio por centro de custo. " +
+        "Se for fatura de utilidade, considere pessoal vs. profissional. " +
+        "Retorne uma lista de splits sugeridos com percentual e descrição.",
+      message: "Revise e ajuste os percentuais conforme necessário antes de confirmar o rateio.",
+    };
+  },
+});
+
+/**
+ * suggest_supplier_name — S4-008
+ * Dado um CNPJ, retorna razão social e aliases inferidos.
+ */
+export const suggestSupplierName = tool({
+  description:
+    "Dado um CNPJ, sugere a razão social e possíveis aliases/nomes alternativos do fornecedor " +
+    "com base no histórico de documentos ingeridos e padrões conhecidos.",
+  parameters: z.object({
+    document_number: z.string().describe("CNPJ ou CPF do fornecedor (apenas dígitos ou formatado)"),
+  }),
+  execute: async ({ document_number }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    // Normaliza CNPJ para apenas dígitos
+    const digits = document_number.replace(/\D/g, "");
+
+    // Buscar fornecedores com esse documento no histórico
+    const { data: existing } = await supabase
+      .from("suppliers")
+      .select("id, name, trade_name, document_number")
+      .eq("user_id", user.id)
+      .eq("document_number", document_number)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      const s = existing[0];
+      return {
+        found: true,
+        supplier_id: s.id,
+        name: s.name,
+        trade_name: s.trade_name,
+        document_number: s.document_number,
+        aliases: [s.name, s.trade_name].filter(Boolean),
+        message: "Fornecedor já cadastrado — dados recuperados do histórico.",
+      };
+    }
+
+    // Buscar em documentos ingeridos com esse CNPJ nos metadados
+    const { data: docs } = await supabase
+      .from("source_documents")
+      .select("supplier_name_raw, metadata")
+      .eq("user_id", user.id)
+      .not("supplier_name_raw", "is", null)
+      .limit(20);
+
+    const found = docs?.filter((d) => {
+      const meta = d.metadata as Record<string, unknown> | null;
+      const cnpj = (meta?.cnpj as string | null)?.replace(/\D/g, "");
+      return cnpj === digits;
+    });
+
+    const namesFound = [
+      ...new Set(found?.map((d) => d.supplier_name_raw).filter(Boolean) ?? []),
+    ] as string[];
+
+    return {
+      found: false,
+      document_number: document_number,
+      digits,
+      suggested_names: namesFound,
+      aliases: namesFound,
+      message:
+        namesFound.length > 0
+          ? `Encontrados ${namesFound.length} nomes nos documentos ingeridos.`
+          : "Nenhum histórico encontrado. Consulte a Receita Federal ou insira manualmente.",
+    };
+  },
+});
+
+/**
+ * explain_extraction — S4-002/003
+ * Explica por que um campo foi extraído com determinada confiança.
+ */
+export const explainExtraction = tool({
+  description:
+    "Explica por que um campo específico foi extraído com determinada confiança por OCR ou IA. " +
+    "Analisa o documento e fornece contexto sobre a qualidade da extração.",
+  parameters: z.object({
+    document_id: z.string().describe("UUID do documento fonte"),
+    field_name: z.string().describe("Nome do campo (ex: total_amount, supplier_name, due_date)"),
+    extracted_value: z.string().optional().describe("Valor extraído (para verificação)"),
+    confidence: z.number().optional().describe("Confiança reportada (0-1)"),
+    source: z.string().optional().describe("Método de extração (ex: ocr, regex, gpt-4o)"),
+  }),
+  execute: async ({ document_id, field_name, extracted_value, confidence, source }) => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Não autenticado" };
+
+    const { data: doc } = await supabase
+      .from("source_documents")
+      .select("id, filename, document_type, metadata, status")
+      .eq("id", document_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!doc) return { error: "Documento não encontrado" };
+
+    const meta = doc.metadata as Record<string, unknown> | null;
+    const docConfidence = (meta?.confidence as number | null) ?? null;
+
+    return {
+      document_id,
+      filename: doc.filename,
+      document_type: doc.document_type,
+      field_name,
+      extracted_value: extracted_value ?? null,
+      confidence: confidence ?? docConfidence,
+      source: source ?? "desconhecido",
+      context: {
+        document_status: doc.status,
+        overall_confidence: docConfidence,
+      },
+      explanation:
+        `O campo "${field_name}" foi extraído via ${source ?? "método não informado"} ` +
+        `com confiança ${confidence !== undefined ? Math.round(confidence * 100) + "%" : "não informada"}. ` +
+        "Fatores que podem reduzir a confiança: qualidade do scan, layout não padronizado, " +
+        "caracteres ambíguos (O/0, l/1), carimbo sobreposto, ou modelo de documento desconhecido. " +
+        "Recomenda-se verificar visualmente o PDF e corrigir o valor se necessário.",
+    };
+  },
+});
+
+// ══════════════════════════════════════════════════════════════
 // Tool registry for the chat route
 // ══════════════════════════════════════════════════════════════
 
@@ -826,4 +1016,8 @@ export const sbfTools = {
   list_error_documents: listErrorDocuments,
   list_missing_password_documents: listMissingPasswordDocuments,
   batch_approve_drafts: batchApproveDrafts,
+  // Sprint 4
+  suggest_splits: suggestSplits,
+  suggest_supplier_name: suggestSupplierName,
+  explain_extraction: explainExtraction,
 };
