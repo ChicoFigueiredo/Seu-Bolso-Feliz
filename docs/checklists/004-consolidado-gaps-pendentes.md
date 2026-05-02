@@ -2,6 +2,12 @@
 
 > Visão agrupada de TODOS os itens pendentes do projeto, extraída dos checklists 002 e 003.
 > Referência: [Ata de refino 2026-03-25](../refinos/2026-03/2026-03-25-21-07-refino-estado-atual-e-proximos-passos.md)
+>
+> Atualização 2026-05-02: este documento virou histórico de contexto. Para execução atual, priorizar:
+>
+> - [006-esporro-veronica.md](006-esporro-veronica.md)
+> - [2026-04-01-implementacao-plano-acao.md](2026-04-01-implementacao-plano-acao.md)
+> - [005-checklist-implementacao-ingestao-ia-staging.md](005-checklist-implementacao-ingestao-ia-staging.md)
 
 ---
 
@@ -226,6 +232,16 @@ G (prep ChatGPT)           ← junho
   ↓
 I (hardening produção)     ← contínuo
 ```
+
+---
+
+## Prioridade Operacional Vigente (2026-05-02)
+
+1. Rodada local completa de validação de documentos (telas 12/13/14).
+2. Rodada local completa de IA inline + explicabilidade.
+3. Coleta de evidências para homologação em staging.
+
+Checklist objetivo desta rodada: seção **Foco Imediato — Validação Local** em [005-checklist-implementacao-ingestao-ia-staging.md](005-checklist-implementacao-ingestao-ia-staging.md).
 
 ---
 

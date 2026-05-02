@@ -199,6 +199,22 @@ export async function getIngestionJob(id: string): Promise<IngestionJob | null> 
   return data;
 }
 
+export async function getLatestIngestionJobByDocumentId(
+  sourceDocumentId: string,
+): Promise<IngestionJob | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ingestion_jobs")
+    .select("*")
+    .eq("source_document_id", sourceDocumentId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
 // ══════════════════════════════════════════════════════════════
 // Ingestion Runs
 // ══════════════════════════════════════════════════════════════
@@ -246,7 +262,23 @@ export async function getDraftBatchByDocumentId(
   sourceDocumentId: string,
 ): Promise<DraftBatch | null> {
   const batches = await getDraftBatches({ source_document_id: sourceDocumentId, limit: 1 });
-  return batches[0] ?? null;
+  if (batches[0]) return batches[0];
+
+  // Fallback para batches antigos que não tinham source_document_id preenchido.
+  const supabase = await createClient();
+  const { data: latestDraft, error } = await supabase
+    .from("draft_records")
+    .select("batch_id")
+    .eq("source_document_id", sourceDocumentId)
+    .not("batch_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!latestDraft?.batch_id) return null;
+
+  return getDraftBatch(latestDraft.batch_id);
 }
 
 export async function getDraftBatch(id: string): Promise<DraftBatch | null> {

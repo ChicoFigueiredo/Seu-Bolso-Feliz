@@ -8,6 +8,7 @@ import {
   getSourceDocument,
   getDocumentStorageUrl,
   getDraftBatchByDocumentId,
+  getLatestIngestionJobByDocumentId,
 } from "@/app/actions/ingestion";
 import DocumentDetailNew, { type DocumentDetailVariant } from "@/components/document-detail-new";
 import { DeleteDocumentButton } from "@/components/delete-document-button";
@@ -75,11 +76,42 @@ export default async function DocumentDetailPage({ params }: Props) {
   // Resolver variant com base em document_type
   const variant = resolveVariant(doc.document_type);
 
-  // Carregar draft_batch apenas para fatura
-  let draftBatch = null;
-  if (variant === "statement") {
-    draftBatch = await getDraftBatchByDocumentId(doc.id).catch(() => null);
-  }
+  // Carregar dados de revisão para qualquer variante.
+  const [draftBatch, latestJob] = await Promise.all([
+    getDraftBatchByDocumentId(doc.id).catch(() => null),
+    getLatestIngestionJobByDocumentId(doc.id).catch(() => null),
+  ]);
+
+  const latestJobMeta = (latestJob?.metadata ?? {}) as Record<string, unknown>;
+  const confidenceValue = latestJobMeta["confidence"];
+  const confidence =
+    typeof confidenceValue === "number"
+      ? confidenceValue
+      : typeof confidenceValue === "string"
+        ? Number(confidenceValue)
+        : null;
+
+  const draftTypesRaw = latestJobMeta["draft_types"];
+  const draftTypes = Array.isArray(draftTypesRaw)
+    ? draftTypesRaw.filter((value): value is string => typeof value === "string")
+    : [];
+
+  const draftCountValue = latestJobMeta["draft_count"];
+  const draftCount =
+    typeof draftCountValue === "number"
+      ? draftCountValue
+      : typeof draftCountValue === "string"
+        ? Number(draftCountValue)
+        : null;
+
+  const ingestionMetadata = {
+    parserType:
+      typeof latestJobMeta["parser_type"] === "string" ? latestJobMeta["parser_type"] : null,
+    confidence: Number.isFinite(confidence) ? confidence : null,
+    classification: draftTypes,
+    draftCount: Number.isFinite(draftCount) ? draftCount : null,
+    jobStatus: latestJob?.status ?? null,
+  };
 
   return (
     <div className="space-y-6">
@@ -164,6 +196,7 @@ export default async function DocumentDetailPage({ params }: Props) {
         signedUrl={signedUrl}
         variant={variant}
         draftBatch={draftBatch}
+        ingestionMetadata={ingestionMetadata}
       />
     </div>
   );

@@ -2,6 +2,8 @@
 
 > Referência: [refino 2026-03-31](../refinos/2026-03/2026-03-31-19-40-refino-plano-acao-ingestao-ia-staging.md)
 
+> Atualização 2026-05-02: este checklist permanece útil para rastrear pendências operacionais, mas o recorte de telas 12/13/14 + IA inline foi consolidado em [006-esporro-veronica.md](006-esporro-veronica.md).
+
 ---
 
 ## Marco 1 — Staging Operacional (Fase A)
@@ -43,7 +45,7 @@
 - [x] 018 — Server action: approveDraft (gravar no ledger + update status)
 - [x] 019 — Server action: rejectDraft (marcar rejeitado + motivo)
 - [x] 020 — Server action: reprocessDocument (resetar para QUEUED)
-- [ ] 021 — Batch approval: selecionar + aprovar múltiplos drafts
+- [x] 021 — Batch approval: selecionar + aprovar múltiplos drafts
 - [x] 022 — Indicadores visuais: erro, pendência, falta de senha, baixa confiança
 - [x] 023a — Upload manual via UI: drag & drop na página de ingestão
 
@@ -59,11 +61,11 @@
 - [x] 026 — System prompt do SBF (contexto financeiro, personalidade)
 - [x] 027 — Function calling tools (12 tools implementadas)
 - [x] 028 — Componente `<AIChatDrawer />` com Vercel AI SDK useChat
-- [ ] 029 — Upload de arquivo no chat (drag & drop)
-- [ ] 030 — Renderização de mensagens: markdown, tabelas, badges
+- [x] 029 — Upload de arquivo no chat (drag & drop)
+- [x] 030 — Renderização de mensagens: markdown, tabelas, badges
 - [ ] 031 — Parser OpenAI: fallback quando regex falha
 - [ ] 032 — OpenAI Vision: análise de imagem de documento
-- [ ] 033 — Auditoria: log toda interação com IA
+- [x] 033 — Auditoria: log toda interação com IA
 - [ ] 034 — Config `OPENAI_API_KEY` no Vercel env vars
 
 **Critério Marco 4:** CEO abre drawer de chat, arrasta PDF, recebe sugestão, aprova via chat.
@@ -89,7 +91,7 @@
 - [ ] 044 — Integrar reconciliação no ingestion worker
 - [ ] 045 — API Route: buscar candidatos de conciliação para draft_id
 - [ ] 046 — Componente `<ReconciliationPanel />` no detalhe do documento
-- [ ] 047 — Tool IA: suggest_reconciliation
+- [x] 047 — Tool IA: suggest_reconciliation
 - [ ] 048 — Testes: cenários match, não-match, duplicado, recorrência
 
 ### Gmail Avançado (Fase F)
@@ -126,3 +128,28 @@
 - [ ] 066 — Gráficos e visualizações em relatórios
 - [ ] 067 — Merge visual de fornecedores
 - [ ] 068 — Cronograma visual de amortização
+
+---
+
+## Foco Imediato — Validação Local (Documentos + IA + Interpretação)
+
+- [ ] L-001 — Subir stack local (Supabase + web + worker ingestion) sem erro
+  - **Aceite:** serviços sobem e `bun run typecheck` passa
+- [ ] L-002 — Upload manual em `/dashboard/documents` cria `source_document` e job
+  - **Aceite:** documento aparece na lista em menos de 10s
+- [ ] L-003 — Abrir detalhe genérico (`variant="generic"`) com preview PDF funcional
+  - **Aceite:** paginação/zoom e metadados visíveis
+- [ ] L-004 — Abrir detalhe de fatura (`variant="statement"`) com progress bar e drafts
+  - **Aceite:** tabela de drafts, filtros e seleção em lote visíveis
+- [ ] L-005 — Validar IA inline em metadados (badge + por quê)
+  - **Aceite:** `AIFieldBadge` aparece com baixa confiança e abre explicação no drawer
+- [ ] L-006 — Validar IA inline em reconciliação/rateio
+  - **Aceite:** `Sugerir via IA` e `IA sugere rateio` retornam sugestões
+- [ ] L-007 — Validar `Conciliar com IA` por draft não aprovado
+  - **Aceite:** botão abre drawer com contexto do lançamento
+- [ ] L-008 — Validar `Explicar` na lista de documentos com confiança baixa
+  - **Aceite:** botão aparece e abre drawer com mensagem contextual
+- [ ] L-009 — Validar sugestão de fornecedor por CNPJ em `/dashboard/suppliers/new`
+  - **Aceite:** onBlur preenche nome/nome fantasia quando houver sugestão
+- [ ] L-010 — Registrar evidências (prints + IDs de documento) para homologação
+  - **Aceite:** anexos prontos para checklist de staging

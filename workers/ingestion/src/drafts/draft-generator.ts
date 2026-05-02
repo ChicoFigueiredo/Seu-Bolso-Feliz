@@ -46,7 +46,12 @@ export function classifyDraftTypes(extractionData: Record<string, unknown> | nul
   }
 
   // Se tem totalAmount/dueDate, é no mínimo uma transaction
-  if (extractionData.totalAmount || extractionData.total_amount || extractionData.dueDate || extractionData.due_date) {
+  if (
+    extractionData.totalAmount ||
+    extractionData.total_amount ||
+    extractionData.dueDate ||
+    extractionData.due_date
+  ) {
     types.push("transaction");
   }
 
@@ -110,7 +115,9 @@ export function buildRecurringTemplateDraft(er: Record<string, unknown>): Record
 
 /** Cria o draft_data JSONB para um consumption_metric */
 export function buildConsumptionMetricDraft(er: Record<string, unknown>): Record<string, unknown> {
-  const consumption = (er.consumption_data ?? er.consumption) as Record<string, unknown> | undefined;
+  const consumption = (er.consumption_data ?? er.consumption) as
+    | Record<string, unknown>
+    | undefined;
   return {
     supplier_name: er.supplier_name_raw ?? er.supplierNameRaw ?? null,
     contract_identifier: er.contract_identifier ?? er.contractIdentifier ?? null,
@@ -123,12 +130,13 @@ export function buildConsumptionMetricDraft(er: Record<string, unknown>): Record
   };
 }
 
-const DRAFT_BUILDERS: Record<DraftType, (er: Record<string, unknown>) => Record<string, unknown>> = {
-  transaction: buildTransactionDraft,
-  recurring_template: buildRecurringTemplateDraft,
-  consumption_metric: buildConsumptionMetricDraft,
-  liability: buildTransactionDraft, // Fallback para MVP
-};
+const DRAFT_BUILDERS: Record<DraftType, (er: Record<string, unknown>) => Record<string, unknown>> =
+  {
+    transaction: buildTransactionDraft,
+    recurring_template: buildRecurringTemplateDraft,
+    consumption_metric: buildConsumptionMetricDraft,
+    liability: buildTransactionDraft, // Fallback para MVP
+  };
 
 /** Pipeline completo de geração de drafts */
 export async function generateDrafts(input: DraftGenerationInput): Promise<DraftGenerationResult> {
@@ -151,7 +159,10 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
   // Classificar tipos de draft
   const draftTypes = classifyDraftTypes(extractionData);
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
     `Classificado: ${draftTypes.join(", ")} (confiança: ${(confidence * 100).toFixed(0)}%)`,
   );
 
@@ -161,6 +172,7 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
     .insert({
       user_id: userId,
       run_id: ctx.runId,
+      source_document_id: sourceDocumentId,
       name: `Auto-import ${new Date().toISOString().split("T")[0]}`,
       status: "open",
       total_drafts: draftTypes.length,
@@ -177,10 +189,13 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
 
   for (const draftType of draftTypes) {
     const builder = DRAFT_BUILDERS[draftType];
-    const draftData = extractionData ? builder(extractionData) : { description: "Documento sem dados extraídos" };
+    const draftData = extractionData
+      ? builder(extractionData)
+      : { description: "Documento sem dados extraídos" };
 
     // Ajustar confiança por tipo
-    const draftConfidence = draftType === "transaction" ? confidence : Math.max(confidence - 0.1, 0);
+    const draftConfidence =
+      draftType === "transaction" ? confidence : Math.max(confidence - 0.1, 0);
 
     const { data: draft, error: draftError } = await supabase
       .from("draft_records")
@@ -198,7 +213,10 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
       .single();
 
     if (draftError) {
-      await writeLog(supabase, ctx, IngestionLogLevel.WARN,
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.WARN,
         `Failed to create draft (${draftType}): ${draftError.message}`,
       );
       continue;
@@ -209,7 +227,10 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
     }
   }
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO,
+  await writeLog(
+    supabase,
+    ctx,
+    IngestionLogLevel.INFO,
     `Gerados ${drafts.length} drafts no batch ${batch.id}`,
     { batchId: batch.id, draftTypes },
   );

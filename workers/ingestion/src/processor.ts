@@ -426,6 +426,7 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
         ...meta,
         batch_id: result.batchId,
         draft_count: result.drafts.length,
+        draft_types: result.drafts.map((d) => d.draftType),
         draft_ids: result.drafts.map((d) => d.id),
       },
     },

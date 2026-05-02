@@ -70,6 +70,90 @@ export interface DocumentDetailNewProps {
   signedUrl: string | null;
   variant: DocumentDetailVariant;
   draftBatch?: DraftBatch | null;
+  ingestionMetadata?: {
+    parserType?: string | null;
+    confidence?: number | null;
+    classification?: string[];
+    draftCount?: number | null;
+    jobStatus?: string | null;
+  };
+}
+
+function formatConfidencePercentage(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.max(0, Math.min(100, normalized)).toFixed(0)}%`;
+}
+
+const JOB_STATUS_LABEL: Record<string, string> = {
+  queued: "Na fila",
+  processing: "Processando",
+  parsed: "Parseado",
+  normalized: "Normalizado",
+  validated: "Validado",
+  reconciled: "Reconciliado",
+  drafted: "Rascunhado",
+  pending_review: "Aguardando revisão",
+  approved: "Aprovado",
+  failed: "Falhou",
+};
+
+function IngestionInsightsCard({
+  metadata,
+}: {
+  metadata?: DocumentDetailNewProps["ingestionMetadata"];
+}) {
+  const parserType = metadata?.parserType ?? null;
+  const confidence = metadata?.confidence ?? null;
+  const classification = metadata?.classification ?? [];
+  const draftCount = metadata?.draftCount ?? null;
+  const jobStatus = metadata?.jobStatus ?? null;
+
+  if (!parserType && confidence == null && classification.length === 0 && draftCount == null) {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-semibold">Pipeline de ingestão</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Parser</span>
+          <span className="font-medium">{parserType ?? "—"}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Confiança</span>
+          <span className="font-medium">{formatConfidencePercentage(confidence)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Status do job</span>
+          <Badge variant="outline">
+            {jobStatus ? (JOB_STATUS_LABEL[jobStatus] ?? jobStatus) : "—"}
+          </Badge>
+        </div>
+        <div className="flex items-start justify-between gap-3">
+          <span className="pt-0.5 text-muted-foreground">Classificação</span>
+          <div className="flex flex-wrap justify-end gap-1">
+            {classification.length > 0 ? (
+              classification.map((item) => (
+                <Badge key={item} variant="secondary" className="text-xs">
+                  {item}
+                </Badge>
+              ))
+            ) : (
+              <span>—</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Drafts gerados</span>
+          <span className="font-medium">{draftCount ?? "—"}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 // ─── Card Metadados editável (S3-010) ─────────────────────────────────────────
@@ -884,6 +968,7 @@ export default function DocumentDetailNew({
   signedUrl,
   variant,
   draftBatch,
+  ingestionMetadata,
 }: DocumentDetailNewProps) {
   const gridCols =
     variant === "statement"
@@ -913,13 +998,24 @@ export default function DocumentDetailNew({
         {variant === "generic" ? (
           <>
             {/* Tela 13 */}
+            <IngestionInsightsCard metadata={ingestionMetadata} />
             <MetadataCard doc={doc} />
+            {draftBatch ? (
+              <DraftTable batchId={draftBatch.id} />
+            ) : (
+              <Card>
+                <CardContent className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhum lote de rascunhos vinculado a este documento.
+                </CardContent>
+              </Card>
+            )}
             <SplitsCard sourceDocumentId={doc.id} docAmount={docAmount} />
             <LinkedTransactionsCard sourceDocumentId={doc.id} />
           </>
         ) : (
           <>
             {/* Tela 14 */}
+            <IngestionInsightsCard metadata={ingestionMetadata} />
             <StatementSummaryCard doc={doc} batchId={draftBatch?.id ?? null} />
             {draftBatch ? (
               <DraftTable batchId={draftBatch.id} />
