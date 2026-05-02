@@ -515,3 +515,55 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
   return srcDoc;
 }
+
+// ══════════════════════════════════════════════════════════════
+// Deletar Documento
+// Remove o documento e todos os dados vinculados (storage + tabelas)
+// ══════════════════════════════════════════════════════════════
+
+export async function deleteSourceDocument(id: string): Promise<void> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+
+  // Busca o documento garantindo que pertence ao usuário (RLS)
+  const { data: doc, error: fetchError } = await supabase
+    .from("source_documents")
+    .select("id, storage_path, content_hash")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (fetchError || !doc) throw new Error("Documento não encontrado ou sem permissão");
+
+  // 1. Remove arquivo do Storage (não falha se já não existir)
+  if (doc.storage_path) {
+    await supabase.storage.from("ingestion-originals").remove([doc.storage_path]);
+  }
+
+  // 2. Remove dados vinculados (ordem importa por FK)
+  await supabase.from("draft_records").delete().eq("source_document_id", id);
+  await supabase.from("draft_batches").delete().eq("source_document_id", id);
+  await supabase.from("ingestion_jobs").delete().eq("source_document_id", id);
+
+  // 3. Remove fingerprint (libera o hash para reupload)
+  if (doc.content_hash) {
+    await supabase
+      .from("document_fingerprints")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("content_hash", doc.content_hash);
+  }
+
+  // 4. Remove o documento em si
+  const { error: deleteError } = await supabase
+    .from("source_documents")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (deleteError) throw new Error(`Erro ao deletar documento: ${deleteError.message}`);
+}

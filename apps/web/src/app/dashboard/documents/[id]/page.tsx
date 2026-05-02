@@ -10,6 +10,7 @@ import {
   getDraftBatchByDocumentId,
 } from "@/app/actions/ingestion";
 import DocumentDetailNew, { type DocumentDetailVariant } from "@/components/document-detail-new";
+import { DeleteDocumentButton } from "@/components/delete-document-button";
 
 // ─── Resolver variant com base em document_type ───────────────────────────────
 
@@ -106,6 +107,7 @@ export default async function DocumentDetailPage({ params }: Props) {
         <Badge variant={STATUS_VARIANT[doc.status] ?? "outline"}>
           {STATUS_LABEL[doc.status] ?? doc.status}
         </Badge>
+        <DeleteDocumentButton documentId={doc.id} filename={doc.filename} />
       </div>
 
       {/* Metadados rápidos */}

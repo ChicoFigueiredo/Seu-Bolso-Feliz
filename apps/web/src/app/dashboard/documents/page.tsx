@@ -1,9 +1,7 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -11,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Table,
@@ -20,14 +19,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { FileUp, FileText, Loader2, ChevronRight, Sparkles } from "lucide-react";
+import { FileText, Loader2, ChevronRight, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { getSourceDocuments, uploadDocument } from "@/app/actions/ingestion";
+import { getSourceDocuments, deleteSourceDocument } from "@/app/actions/ingestion";
 import type { SourceDocument } from "@sbf/shared-types";
 import { useChatContext } from "@/contexts/chat-context";
 import { CONFIDENCE_THRESHOLD } from "@/components/ai-field-badge";
+import { DocumentUploadDnD } from "@/components/document-upload-dnd";
 
 // ─── Helpers de exibição ────────────────────────────────────────────────────
 
@@ -70,7 +81,6 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<SourceDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
 
   // S4-009
   const { setDrawerOpen, setPendingMessage } = useChatContext();
@@ -78,6 +88,7 @@ export default function DocumentsPage() {
   // Filtros
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterOrigin, setFilterOrigin] = useState("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
 
   useEffect(() => {
@@ -107,27 +118,19 @@ export default function DocumentsPage() {
     loadDocs();
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    startTransition(async () => {
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        await uploadDocument(formData);
-        toast.success("Documento enviado", {
-          description: "O pipeline de ingestão foi iniciado.",
-        });
-        loadDocs();
-      } catch (err) {
-        toast.error("Erro no upload", {
-          description: err instanceof Error ? err.message : "Erro desconhecido",
-        });
-      }
-    });
-
-    e.target.value = "";
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteSourceDocument(id);
+      toast.success("Documento excluído");
+      loadDocs();
+    } catch (err) {
+      toast.error("Erro ao excluir", {
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -139,36 +142,16 @@ export default function DocumentsPage() {
         </p>
       </div>
 
-      {/* Upload manual */}
+      {/* Upload manual — DnD */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileUp className="size-5" />
-            Enviar Documento
-          </CardTitle>
+          <CardTitle className="flex items-center gap-2">Enviar Documento</CardTitle>
           <CardDescription>
             O arquivo será enviado para o pipeline de ingestão e processado automaticamente.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="file-upload">Arquivo</Label>
-              <Input
-                id="file-upload"
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif"
-                onChange={handleUpload}
-                disabled={isPending}
-              />
-            </div>
-            {isPending && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Enviando…
-              </div>
-            )}
-          </div>
+          <DocumentUploadDnD onSuccess={loadDocs} />
         </CardContent>
       </Card>
 
@@ -246,6 +229,7 @@ export default function DocumentsPage() {
                   <TableHead>Data</TableHead>
                   <TableHead className="w-8">IA</TableHead>
                   <TableHead className="w-8" />
+                  <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -316,6 +300,44 @@ export default function DocumentsPage() {
                       <Link href={`/dashboard/documents/${doc.id}`}>
                         <ChevronRight className="size-4 text-muted-foreground" />
                       </Link>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-muted-foreground hover:text-destructive"
+                            disabled={deletingId === doc.id}
+                            title="Excluir documento"
+                          >
+                            {deletingId === doc.id ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-3.5" />
+                            )}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Excluir documento?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              O arquivo <span className="font-semibold">{doc.filename}</span> e
+                              todos os dados vinculados (drafts, jobs, fingerprint) serão removidos
+                              permanentemente. Esta ação não pode ser desfeita.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              onClick={() => handleDelete(doc.id)}
+                            >
+                              Excluir
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </TableCell>
                   </TableRow>
                 ))}
