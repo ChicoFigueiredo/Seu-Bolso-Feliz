@@ -611,7 +611,6 @@ export async function deleteSourceDocument(
   throwIfError(versionsError, "buscar versões parseadas do documento");
 
   const jobIds = (jobs ?? []).map((job) => job.id);
-  const runIds = Array.from(new Set((jobs ?? []).map((job) => job.run_id).filter(Boolean)));
   const parsedVersionIds = (parsedVersions ?? []).map((version) => version.id);
 
   // 2. Remove dependências explícitas na ordem das FKs.
@@ -675,33 +674,9 @@ export async function deleteSourceDocument(
     .eq("user_id", user.id);
   throwIfError(jobsDeleteError, "remover jobs de ingestão do documento");
 
-  if (runIds.length > 0) {
-    const { data: remainingJobs, error: remainingJobsError } = await supabase
-      .from("ingestion_jobs")
-      .select("run_id")
-      .in("run_id", runIds)
-      .eq("user_id", user.id);
-    throwIfError(remainingJobsError, "verificar jobs remanescentes das runs");
-
-    const remainingRunIds = new Set((remainingJobs ?? []).map((job) => job.run_id));
-    const orphanRunIds = runIds.filter((runId) => !remainingRunIds.has(runId));
-
-    if (orphanRunIds.length > 0) {
-      const { error: logsByRunError } = await supabase
-        .from("ingestion_logs")
-        .delete()
-        .in("run_id", orphanRunIds)
-        .eq("user_id", user.id);
-      throwIfError(logsByRunError, "remover logs órfãos das runs do documento");
-
-      const { error: runsDeleteError } = await supabase
-        .from("ingestion_runs")
-        .delete()
-        .in("id", orphanRunIds)
-        .eq("user_id", user.id);
-      throwIfError(runsDeleteError, "remover runs órfãs do documento");
-    }
-  }
+  // Não removemos ingestion_runs aqui para evitar falhas por relacionamentos
+  // compartilhados (ex.: draft_batches de outros documentos na mesma run).
+  // A limpeza de runs órfãs deve ser feita por rotina de manutenção dedicada.
 
   // 3. Remove o documento em si. Relacionamentos como transactions usam ON DELETE SET NULL.
   const { error: deleteError } = await supabase
