@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack -p 3105",
+    "dev": "node scripts/dev-with-port-fallback.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
