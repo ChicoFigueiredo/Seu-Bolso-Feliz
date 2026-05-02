@@ -19,25 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { FileText, Loader2, ChevronRight, Sparkles, Trash2 } from "lucide-react";
+import { FileText, Loader2, ChevronRight, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { getSourceDocuments, deleteSourceDocument } from "@/app/actions/ingestion";
+import { getSourceDocuments } from "@/app/actions/ingestion";
 import type { SourceDocument } from "@sbf/shared-types";
 import { useChatContext } from "@/contexts/chat-context";
 import { CONFIDENCE_THRESHOLD } from "@/components/ai-field-badge";
+import { DeleteDocumentButton } from "@/components/delete-document-button";
 import { DocumentUploadDnD } from "@/components/document-upload-dnd";
 
 // ─── Helpers de exibição ────────────────────────────────────────────────────
@@ -49,6 +39,7 @@ const STATUS_LABEL: Record<string, string> = {
   processed: "Processado",
   pending_review: "Aguardando revisão",
   approved: "Aprovado",
+  deleted: "Removido",
   failed: "Erro",
 };
 
@@ -59,6 +50,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   processed: "default",
   pending_review: "secondary",
   approved: "default",
+  deleted: "outline",
   failed: "destructive",
 };
 
@@ -88,7 +80,6 @@ export default function DocumentsPage() {
   // Filtros
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterOrigin, setFilterOrigin] = useState("all");
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
 
   useEffect(() => {
@@ -116,21 +107,6 @@ export default function DocumentsPage() {
   function handleFilterSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     loadDocs();
-  }
-
-  async function handleDelete(id: string) {
-    setDeletingId(id);
-    try {
-      await deleteSourceDocument(id);
-      toast.success("Documento excluído");
-      loadDocs();
-    } catch (err) {
-      toast.error("Erro ao excluir", {
-        description: err instanceof Error ? err.message : "Erro desconhecido",
-      });
-    } finally {
-      setDeletingId(null);
-    }
   }
 
   return (
@@ -302,42 +278,12 @@ export default function DocumentsPage() {
                       </Link>
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive"
-                            disabled={deletingId === doc.id}
-                            title="Excluir documento"
-                          >
-                            {deletingId === doc.id ? (
-                              <Loader2 className="size-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-3.5" />
-                            )}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Excluir documento?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              O arquivo <span className="font-semibold">{doc.filename}</span> e
-                              todos os dados vinculados (drafts, jobs, fingerprint) serão removidos
-                              permanentemente. Esta ação não pode ser desfeita.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              onClick={() => handleDelete(doc.id)}
-                            >
-                              Excluir
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                      <DeleteDocumentButton
+                        documentId={doc.id}
+                        filename={doc.filename}
+                        triggerVariant="icon"
+                        onDeleted={loadDocs}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

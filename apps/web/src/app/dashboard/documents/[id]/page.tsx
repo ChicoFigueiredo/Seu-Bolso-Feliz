@@ -30,6 +30,7 @@ const STATUS_LABEL: Record<string, string> = {
   processed: "Processado",
   pending_review: "Aguardando revisão",
   approved: "Aprovado",
+  deleted: "Removido",
   failed: "Erro",
 };
 
@@ -40,6 +41,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   processed: "default",
   pending_review: "secondary",
   approved: "default",
+  deleted: "outline",
   failed: "destructive",
 };
 
@@ -107,7 +109,11 @@ export default async function DocumentDetailPage({ params }: Props) {
         <Badge variant={STATUS_VARIANT[doc.status] ?? "outline"}>
           {STATUS_LABEL[doc.status] ?? doc.status}
         </Badge>
-        <DeleteDocumentButton documentId={doc.id} filename={doc.filename} />
+        <DeleteDocumentButton
+          documentId={doc.id}
+          filename={doc.filename}
+          redirectTo="/dashboard/documents"
+        />
       </div>
 
       {/* Metadados rápidos */}

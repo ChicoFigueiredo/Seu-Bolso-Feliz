@@ -18,6 +18,14 @@ async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<strin
     .join("");
 }
 
+export type DeleteSourceDocumentMode = "document_only" | "document_and_ingestion";
+
+function throwIfError(error: { message: string } | null, context: string): void {
+  if (error) {
+    throw new Error(`Erro ao ${context}: ${error.message}`);
+  }
+}
+
 // ══════════════════════════════════════════════════════════════
 // Source Documents
 // ══════════════════════════════════════════════════════════════
@@ -37,6 +45,10 @@ export async function getSourceDocuments(filters?: {
     .from("source_documents")
     .select("*", { count: "exact" })
     .order("created_at", { ascending: false });
+
+  if (!filters?.status) {
+    query = query.neq("status", "deleted");
+  }
 
   if (filters?.status) {
     query = query.eq("status", filters.status);
@@ -518,10 +530,15 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
 // ══════════════════════════════════════════════════════════════
 // Deletar Documento
-// Remove o documento e todos os dados vinculados (storage + tabelas)
+// document_only: remove o arquivo original e oculta o documento da lista,
+// preservando trilha de ingestão e auditoria.
+// document_and_ingestion: remove documento + artefatos de ingestão vinculados.
 // ══════════════════════════════════════════════════════════════
 
-export async function deleteSourceDocument(id: string): Promise<void> {
+export async function deleteSourceDocument(
+  id: string,
+  mode: DeleteSourceDocumentMode = "document_and_ingestion",
+): Promise<void> {
   const supabase = await createClient();
 
   const {
@@ -532,38 +549,166 @@ export async function deleteSourceDocument(id: string): Promise<void> {
   // Busca o documento garantindo que pertence ao usuário (RLS)
   const { data: doc, error: fetchError } = await supabase
     .from("source_documents")
-    .select("id, storage_path, content_hash")
+    .select("id, storage_path, content_hash, metadata, status")
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
 
   if (fetchError || !doc) throw new Error("Documento não encontrado ou sem permissão");
 
-  // 1. Remove arquivo do Storage (não falha se já não existir)
+  const now = new Date().toISOString();
+
+  // 1. Remove arquivo do Storage.
   if (doc.storage_path) {
-    await supabase.storage.from("ingestion-originals").remove([doc.storage_path]);
+    const { error: storageError } = await supabase.storage
+      .from("ingestion-originals")
+      .remove([doc.storage_path]);
+    throwIfError(storageError, "remover arquivo do storage");
   }
 
-  // 2. Remove dados vinculados (ordem importa por FK)
-  await supabase.from("draft_records").delete().eq("source_document_id", id);
-  await supabase.from("draft_batches").delete().eq("source_document_id", id);
-  await supabase.from("ingestion_jobs").delete().eq("source_document_id", id);
+  if (mode === "document_only") {
+    const metadata = {
+      ...((doc.metadata as Record<string, unknown> | null) ?? {}),
+      deletion: {
+        mode,
+        deleted_at: now,
+        deleted_by: user.id,
+        original_status: doc.status,
+        original_storage_path: doc.storage_path,
+      },
+    };
 
-  // 3. Remove fingerprint (libera o hash para reupload)
-  if (doc.content_hash) {
-    await supabase
-      .from("document_fingerprints")
+    const { error: updateError } = await supabase
+      .from("source_documents")
+      .update({
+        status: "deleted",
+        storage_path: null,
+        updated_at: now,
+        metadata: metadata as unknown as Record<string, never>,
+      })
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    throwIfError(updateError, "marcar documento como removido");
+    return;
+  }
+
+  const [{ data: jobs, error: jobsError }, { data: parsedVersions, error: versionsError }] =
+    await Promise.all([
+      supabase
+        .from("ingestion_jobs")
+        .select("id, run_id")
+        .eq("source_document_id", id)
+        .eq("user_id", user.id),
+      supabase
+        .from("parsed_document_versions")
+        .select("id")
+        .eq("source_document_id", id)
+        .eq("user_id", user.id),
+    ]);
+
+  throwIfError(jobsError, "buscar jobs de ingestão do documento");
+  throwIfError(versionsError, "buscar versões parseadas do documento");
+
+  const jobIds = (jobs ?? []).map((job) => job.id);
+  const runIds = Array.from(new Set((jobs ?? []).map((job) => job.run_id).filter(Boolean)));
+  const parsedVersionIds = (parsedVersions ?? []).map((version) => version.id);
+
+  // 2. Remove dependências explícitas na ordem das FKs.
+  const { error: draftsError } = await supabase
+    .from("draft_records")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(draftsError, "remover drafts do documento");
+
+  const { error: feedbackError } = await supabase
+    .from("pattern_feedback")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(feedbackError, "remover feedbacks de padrões do documento");
+
+  if (parsedVersionIds.length > 0) {
+    const { error: extractionError } = await supabase
+      .from("extraction_results")
       .delete()
-      .eq("user_id", user.id)
-      .eq("content_hash", doc.content_hash);
+      .in("parsed_version_id", parsedVersionIds)
+      .eq("user_id", user.id);
+    throwIfError(extractionError, "remover resultados de extração do documento");
   }
 
-  // 4. Remove o documento em si
+  const { error: parsedVersionsDeleteError } = await supabase
+    .from("parsed_document_versions")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(parsedVersionsDeleteError, "remover versões parseadas do documento");
+
+  const { error: batchesError } = await supabase
+    .from("draft_batches")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(batchesError, "remover batches vinculados ao documento");
+
+  const { error: fingerprintError } = await supabase
+    .from("document_fingerprints")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(fingerprintError, "remover fingerprints do documento");
+
+  if (jobIds.length > 0) {
+    const { error: logsByJobError } = await supabase
+      .from("ingestion_logs")
+      .delete()
+      .in("job_id", jobIds)
+      .eq("user_id", user.id);
+    throwIfError(logsByJobError, "remover logs dos jobs do documento");
+  }
+
+  const { error: jobsDeleteError } = await supabase
+    .from("ingestion_jobs")
+    .delete()
+    .eq("source_document_id", id)
+    .eq("user_id", user.id);
+  throwIfError(jobsDeleteError, "remover jobs de ingestão do documento");
+
+  if (runIds.length > 0) {
+    const { data: remainingJobs, error: remainingJobsError } = await supabase
+      .from("ingestion_jobs")
+      .select("run_id")
+      .in("run_id", runIds)
+      .eq("user_id", user.id);
+    throwIfError(remainingJobsError, "verificar jobs remanescentes das runs");
+
+    const remainingRunIds = new Set((remainingJobs ?? []).map((job) => job.run_id));
+    const orphanRunIds = runIds.filter((runId) => !remainingRunIds.has(runId));
+
+    if (orphanRunIds.length > 0) {
+      const { error: logsByRunError } = await supabase
+        .from("ingestion_logs")
+        .delete()
+        .in("run_id", orphanRunIds)
+        .eq("user_id", user.id);
+      throwIfError(logsByRunError, "remover logs órfãos das runs do documento");
+
+      const { error: runsDeleteError } = await supabase
+        .from("ingestion_runs")
+        .delete()
+        .in("id", orphanRunIds)
+        .eq("user_id", user.id);
+      throwIfError(runsDeleteError, "remover runs órfãs do documento");
+    }
+  }
+
+  // 3. Remove o documento em si. Relacionamentos como transactions usam ON DELETE SET NULL.
   const { error: deleteError } = await supabase
     .from("source_documents")
     .delete()
     .eq("id", id)
     .eq("user_id", user.id);
 
-  if (deleteError) throw new Error(`Erro ao deletar documento: ${deleteError.message}`);
+  throwIfError(deleteError, "deletar documento");
 }
