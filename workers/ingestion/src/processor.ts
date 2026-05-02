@@ -54,6 +54,7 @@ async function failJob(
   supabase: SupabaseClient,
   ctx: LogContext,
   jobId: string,
+  sourceDocumentId: string | null,
   currentStatus: string,
   error: unknown,
 ): Promise<void> {
@@ -72,6 +73,16 @@ async function failJob(
       updated_at: new Date().toISOString(),
     })
     .eq("id", jobId);
+
+  if (sourceDocumentId) {
+    await supabase
+      .from("source_documents")
+      .update({
+        status: "failed",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", sourceDocumentId);
+  }
 }
 
 /**
@@ -150,6 +161,14 @@ async function stepHash(
       },
       { onConflict: "user_id,content_hash" },
     );
+
+    await supabase
+      .from("source_documents")
+      .update({
+        content_hash: contentHash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.source_document_id);
   }
 
   if (!existing || existing.length === 0) {
@@ -212,6 +231,16 @@ async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   );
   if (!ok) return;
   job.status = IngestionJobStatus.PARSING;
+
+  if (job.source_document_id) {
+    await supabase
+      .from("source_documents")
+      .update({
+        status: "processing",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.source_document_id);
+  }
 
   // Fetch source document metadata
   const { data: doc } = await supabase
@@ -436,6 +465,16 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     IngestionLogLevel.INFO,
     `Drafts gerados e aguardando revisão (batch: ${result.batchId}, ${result.drafts.length} drafts)`,
   );
+
+  if (job.source_document_id) {
+    await supabase
+      .from("source_documents")
+      .update({
+        status: "pending_review",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.source_document_id);
+  }
 }
 
 /**
@@ -514,6 +553,6 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
       await stepDraft(supabase, ctx, job);
     }
   } catch (err) {
-    await failJob(supabase, ctx, job.id, job.status, err);
+    await failJob(supabase, ctx, job.id, job.source_document_id, job.status, err);
   }
 }

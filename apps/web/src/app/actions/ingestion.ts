@@ -10,6 +10,14 @@ import type {
   DraftRecord,
 } from "@sbf/shared-types";
 
+async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<string> {
+  const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer as unknown as BufferSource);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 // ══════════════════════════════════════════════════════════════
 // Source Documents
 // ══════════════════════════════════════════════════════════════
@@ -435,6 +443,25 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
   const file = formData.get("file") as File | null;
   if (!file) throw new Error("Arquivo não informado");
 
+  // 0. Deduplicação exata por hash ANTES de criar source_document/job.
+  // Isso evita abrir novo fluxo para arquivo já ingerido.
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  const contentHash = await computeContentHash(fileBytes);
+
+  const { data: duplicateFingerprint } = await supabase
+    .from("document_fingerprints")
+    .select("source_document_id")
+    .eq("user_id", user.id)
+    .eq("content_hash", contentHash)
+    .limit(1)
+    .maybeSingle();
+
+  if (duplicateFingerprint?.source_document_id) {
+    throw new Error(
+      `Documento duplicado detectado (mesmo hash). ID original: ${duplicateFingerprint.source_document_id}`,
+    );
+  }
+
   // 1. Upload para Storage (bucket ingestion-originals)
   const ext = file.name.split(".").pop() ?? "bin";
   const storagePath = `${user.id}/manual/${crypto.randomUUID()}.${ext}`;
@@ -456,7 +483,8 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
       mime_type: file.type || ext,
       file_size_bytes: file.size,
       storage_path: storagePath,
-      status: "new",
+      content_hash: contentHash,
+      status: "queued",
     })
     .select()
     .single();
@@ -481,7 +509,7 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
     run_id: run.id,
     user_id: user.id,
     source_document_id: srcDoc.id,
-    status: "queued",
+    status: "discovered",
     metadata: { source: "manual_upload" },
   });
 
