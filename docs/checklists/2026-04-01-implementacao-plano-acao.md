@@ -119,6 +119,8 @@
 
 - [x] M3-012 — Indicadores no detalhe: erro (vermelho), pendência (amarelo), falta de senha (ícone cadeado), baixa confiança (alerta)
   - **Aceite:** Indicadores visuais no `DocumentDetailView` e `StatusBadge`
+- [x] M3-013 — Exclusão operacional de documentos com dois modos (`só documento` e `documento + ingestão`)
+  - **Aceite:** diálogo explica o impacto de cada opção; `só documento` preserva trilha de ingestão e oculta o item da lista; `documento + ingestão` limpa jobs/logs/drafts/parse/fingerprint sem quebrar FKs
 
 **Critério do Marco:** CEO faz upload de PDF, vê no split-view, edita campos, aprova, e transação aparece no dashboard.
 
@@ -248,3 +250,26 @@
 - [ ] POST-004 — Gráficos e visualizações em relatórios
 - [ ] POST-005 — Merge visual de fornecedores
 - [ ] POST-006 — Cronograma visual de amortização
+
+---
+
+## Marco Local — Homologação Técnica (Documentos + IA + Interpretação)
+
+> Adicionado em 2026-05-02 para reduzir risco antes de staging. Foco direto no que Verônica e CEO pediram para as telas 12/13/14 e IA inline.
+
+- [ ] ML-001 — Subir ambiente local completo (web + supabase + worker ingestion)
+  - **Aceite:** app acessível e sem erros críticos de build
+- [ ] ML-002 — Validar lista unificada em `/dashboard/documents` com upload manual
+  - **Aceite:** documento novo aparece com status de pipeline
+- [ ] ML-003 — Validar tela 13 (`variant="generic"`) com preview PDF e edição de metadados
+  - **Aceite:** preview navega páginas e salva metadados
+- [ ] ML-004 — Validar tela 14 (`variant="statement"`) com progress bar server-side
+  - **Aceite:** progress bar usa `fn_reconciliation_progress` e tabela de drafts renderiza
+- [ ] ML-005 — Validar IA de explicabilidade (`AIFieldBadge` + botão "Por que?")
+  - **Aceite:** drawer abre com contexto e resposta de explicação
+- [ ] ML-006 — Validar IA de reconciliação/rateio/documentos
+  - **Aceite:** `suggest_reconciliation`, `suggest_splits`, `explain_classification` retornam resultados na UI
+- [ ] ML-007 — Validar sugestão de fornecedor por CNPJ
+  - **Aceite:** formulário de fornecedor pré-preenche nome quando houver sugestão
+- [ ] ML-008 — Registrar evidências para staging
+  - **Aceite:** lista de IDs testados + prints dos fluxos 12/13/14 + IA anexada ao MR
