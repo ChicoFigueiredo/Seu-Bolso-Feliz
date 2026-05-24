@@ -34,7 +34,12 @@ import {
   type DocumentTransactionLinkWithTransaction,
 } from "@/app/actions/document-transactions";
 import { updateDocumentMetadata } from "@/app/actions/document-metadata";
-import { getDraftRecords, approveDraftRecord, approveDraftBatch } from "@/app/actions/ingestion";
+import {
+  getDraftRecords,
+  approveDraftRecord,
+  approveDraftBatch,
+  triggerAiFullAnalysis,
+} from "@/app/actions/ingestion";
 import { AIFieldBadge, CONFIDENCE_THRESHOLD } from "@/components/ai-field-badge";
 import { useAISuggest } from "@/hooks/use-ai-suggest";
 import { useChatContext } from "@/contexts/chat-context";
@@ -76,6 +81,13 @@ export interface DocumentDetailNewProps {
     classification?: string[];
     draftCount?: number | null;
     jobStatus?: string | null;
+    // Campos enriquecidos pela IA
+    aiEnrichmentType?: string | null;
+    confidencePerField?: Record<string, number> | null;
+    reasoning?: string | null;
+    financialIntent?: string | null;
+    needsFullAiReview?: boolean;
+    documentId?: string;
   };
 }
 
@@ -89,6 +101,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
   queued: "Na fila",
   processing: "Processando",
   parsed: "Parseado",
+  ai_lite_enriching: "Enriquecimento IA lite",
   normalized: "Normalizado",
   validated: "Validado",
   reconciled: "Reconciliado",
@@ -97,6 +110,55 @@ const JOB_STATUS_LABEL: Record<string, string> = {
   approved: "Aprovado",
   failed: "Falhou",
 };
+
+const FIELD_LABELS: Record<string, string> = {
+  total_amount: "Valor total",
+  due_date: "Vencimento",
+  supplier_name_raw: "Fornecedor",
+  competence_date: "Competência",
+  document_number: "Nº documento",
+  document_type: "Tipo",
+};
+
+function confidenceBadgeVariant(value: number): "default" | "secondary" | "destructive" {
+  if (value >= 0.8) return "default";
+  if (value >= 0.5) return "secondary";
+  return "destructive";
+}
+
+function confidenceColor(value: number): string {
+  if (value >= 0.8) return "text-green-600 dark:text-green-400";
+  if (value >= 0.5) return "text-yellow-600 dark:text-yellow-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function AIOriginBadge({ type }: { type: string | null | undefined }) {
+  if (!type)
+    return (
+      <Badge variant="outline" className="text-xs">
+        regex
+      </Badge>
+    );
+  if (type === "lite")
+    return (
+      <Badge variant="secondary" className="text-xs gap-1">
+        <Sparkles className="h-3 w-3" />
+        IA lite
+      </Badge>
+    );
+  if (type === "full")
+    return (
+      <Badge className="text-xs gap-1 bg-violet-600 hover:bg-violet-700">
+        <Sparkles className="h-3 w-3" />
+        IA full
+      </Badge>
+    );
+  return (
+    <Badge variant="outline" className="text-xs">
+      {type}
+    </Badge>
+  );
+}
 
 function IngestionInsightsCard({
   metadata,
@@ -108,9 +170,30 @@ function IngestionInsightsCard({
   const classification = metadata?.classification ?? [];
   const draftCount = metadata?.draftCount ?? null;
   const jobStatus = metadata?.jobStatus ?? null;
+  const aiEnrichmentType = metadata?.aiEnrichmentType ?? null;
+  const confidencePerField = metadata?.confidencePerField ?? null;
+  const reasoning = metadata?.reasoning ?? null;
+  const financialIntent = metadata?.financialIntent ?? null;
+  const needsFullAiReview = metadata?.needsFullAiReview ?? false;
+  const documentId = metadata?.documentId ?? null;
+
+  const [showReasoning, setShowReasoning] = useState(false);
+  const [aiFullPending, setAiFullPending] = useState(false);
+  const [aiFullDone, setAiFullDone] = useState(false);
 
   if (!parserType && confidence == null && classification.length === 0 && draftCount == null) {
     return null;
+  }
+
+  async function handleTriggerAiFull() {
+    if (!documentId) return;
+    setAiFullPending(true);
+    try {
+      await triggerAiFullAnalysis(documentId);
+      setAiFullDone(true);
+    } finally {
+      setAiFullPending(false);
+    }
   }
 
   return (
@@ -124,15 +207,65 @@ function IngestionInsightsCard({
           <span className="font-medium">{parserType ?? "—"}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Confiança</span>
-          <span className="font-medium">{formatConfidencePercentage(confidence)}</span>
+          <span className="text-muted-foreground">Confiança geral</span>
+          <span className={`font-medium ${confidenceColor(confidence ?? 0)}`}>
+            {formatConfidencePercentage(confidence)}
+          </span>
         </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Origem dos dados</span>
+          <AIOriginBadge type={aiEnrichmentType} />
+        </div>
+        {financialIntent && (
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Intenção financeira</span>
+            <Badge variant="outline" className="text-xs capitalize">
+              {financialIntent}
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Status do job</span>
           <Badge variant="outline">
             {jobStatus ? (JOB_STATUS_LABEL[jobStatus] ?? jobStatus) : "—"}
           </Badge>
         </div>
+
+        {/* Confiança por campo */}
+        {confidencePerField && Object.keys(confidencePerField).length > 0 && (
+          <div className="mt-2 space-y-1 border-t pt-2">
+            <p className="text-xs font-medium text-muted-foreground">Confiança por campo</p>
+            {Object.entries(confidencePerField).map(([field, val]) => (
+              <div key={field} className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {FIELD_LABELS[field] ?? field}
+                </span>
+                <Badge variant={confidenceBadgeVariant(val)} className="text-xs">
+                  {(val * 100).toFixed(0)}%
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Reasoning colapsável */}
+        {reasoning && (
+          <div className="mt-2 border-t pt-2">
+            <button
+              type="button"
+              onClick={() => setShowReasoning((v) => !v)}
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            >
+              {showReasoning ? "Ocultar raciocínio da IA" : "Ver raciocínio da IA"}
+            </button>
+            {showReasoning && (
+              <p className="mt-1 rounded-md bg-muted/50 p-2 text-xs leading-relaxed text-muted-foreground">
+                {reasoning}
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex items-start justify-between gap-3">
           <span className="pt-0.5 text-muted-foreground">Classificação</span>
           <div className="flex flex-wrap justify-end gap-1">
@@ -151,6 +284,34 @@ function IngestionInsightsCard({
           <span className="text-muted-foreground">Drafts gerados</span>
           <span className="font-medium">{draftCount ?? "—"}</span>
         </div>
+
+        {/* Botão IA full */}
+        {documentId && (needsFullAiReview || aiEnrichmentType !== "full") && (
+          <div className="mt-2 border-t pt-2">
+            {aiFullDone ? (
+              <p className="text-xs text-green-600">
+                Análise com IA full agendada. Recarregue em breve.
+              </p>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full gap-1.5 text-xs"
+                onClick={handleTriggerAiFull}
+                disabled={aiFullPending}
+              >
+                {aiFullPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3 text-violet-500" />
+                )}
+                {needsFullAiReview
+                  ? "Analisar com IA full (recomendado)"
+                  : "Analisar com IA full (visão)"}
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

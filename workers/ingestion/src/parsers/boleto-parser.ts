@@ -34,7 +34,7 @@ export function parseBoleto(text: string): BoletoExtractionResult {
   };
 
   let hits = 0;
-  const maxHits = 5;
+  const maxHits = 7; // totalAmount, dueDate, competenceDate, cnpj, supplierNameRaw, documentNumber, barcodeDigitableLine
 
   // ── Valor ──
   const valorMatch =
@@ -78,17 +78,20 @@ export function parseBoleto(text: string): BoletoExtractionResult {
   }
 
   // ── Nome do cedente/beneficiário ──
-  const cedenteMatch = text.match(
-    /(?:CEDENTE|BENEFICI[AÁ]RIO)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i,
-  );
+  const cedenteMatch =
+    text.match(/(?:CEDENTE|BENEFICI[AÁ]RIO)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i) ??
+    text.match(/(?:PAGADOR|SACADO)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i) ??
+    text.match(/(?:EMPRESA|FORNECEDOR)[:\s]*([A-ZÁÀÂÃÉÈÊÍÏÓÔÕÚÜÇ][^\n]{3,60})/i);
   if (cedenteMatch) {
     result.supplierNameRaw = cedenteMatch[1]!.trim();
+    hits++;
   }
 
   // ── Número do documento ──
   const docMatch =
     text.match(/(?:N[ÚU]MERO\s+(?:DO\s+)?DOCUMENTO)[:\s]*(\S+)/i) ??
-    text.match(/(?:NOSSO\s+N[ÚU]MERO)[:\s]*(\S+)/i);
+    text.match(/(?:NOSSO\s+N[ÚU]MERO)[:\s]*(\S+)/i) ??
+    text.match(/(?:N[ÚU]MERO\s+DA\s+FATURA)[:\s]*(\S+)/i);
   if (docMatch) {
     result.documentNumber = docMatch[1]!;
     hits++;
@@ -98,9 +101,14 @@ export function parseBoleto(text: string): BoletoExtractionResult {
   const linhaMatch = text.match(/(\d{5}\.?\d{5}\s*\d{5}\.?\d{6}\s*\d{5}\.?\d{6}\s*\d\s*\d{14})/);
   if (linhaMatch) {
     result.barcodeDigitableLine = linhaMatch[1]!.replace(/\s+/g, "");
+    hits++;
   }
 
-  result.confidence = Math.min(hits / maxHits, 1);
+  // ── Confiança: penaliza ausência de campos críticos ──
+  // Se totalAmount OU dueDate estiver ausente, o documento está incompleto para uso
+  const rawConf = hits / maxHits;
+  const hasBothCriticalAmounts = result.totalAmount !== null && result.dueDate !== null;
+  result.confidence = hasBothCriticalAmounts ? rawConf : Math.min(rawConf, 0.4);
 
   return result;
 }

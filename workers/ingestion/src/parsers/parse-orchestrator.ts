@@ -9,7 +9,10 @@ import { extractText, PdfPasswordRequiredError } from "./text-extractor";
 import { findPdfPassword } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
+import { extractWithBoletoUtils } from "./boleto-utils-extractor";
+import { applySupplierTemplate } from "./supplier-templates";
 import { findMatchingPattern } from "./pattern-matcher";
+import { resolveFieldConsensus, toFieldCandidates, type FieldCandidate } from "./field-consensus";
 import { writeLog, type LogContext } from "../logger";
 
 interface ParseContext {
@@ -26,6 +29,131 @@ export interface ParseResult {
   parserType: string;
   confidence: number;
   success: boolean;
+}
+
+interface DetectionDiagnostics {
+  criticalDetected: number;
+  criticalTotal: number;
+  criticalCoverage: number;
+  missingCriticalFields: string[];
+  suspiciousFields: string[];
+  rawConfidence: number;
+  normalizedConfidence: number;
+}
+
+const CRITICAL_KEYS = ["total_amount", "due_date", "supplier_name_raw"] as const;
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function buildExtractedFieldsLogDetails(
+  extractionData: Record<string, unknown>,
+  parserType: string,
+  confidence: number,
+  diagnostics: DetectionDiagnostics | null,
+): Record<string, unknown> {
+  const { confidence: extractedConfidence, ...fields } = extractionData;
+
+  return {
+    parser_type: parserType,
+    confidence,
+    extracted_confidence: extractedConfidence,
+    found_fields: Object.entries(fields)
+      .filter(([, value]) => hasMeaningfulValue(value))
+      .map(([key]) => key),
+    fields,
+    detection_diagnostics: diagnostics,
+  };
+}
+
+function normalizeExtractedFields(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    total_amount: data.totalAmount ?? data.total_amount ?? null,
+    due_date: data.dueDate ?? data.due_date ?? null,
+    supplier_name_raw: data.supplierNameRaw ?? data.supplier_name_raw ?? null,
+  };
+}
+
+function fieldMissing(field: (typeof CRITICAL_KEYS)[number], value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return true;
+    if (field === "total_amount") return value <= 0;
+  }
+  return false;
+}
+
+function fieldSuspicious(field: (typeof CRITICAL_KEYS)[number], value: unknown): boolean {
+  if (fieldMissing(field, value)) return true;
+
+  if (field === "supplier_name_raw" && typeof value === "string") {
+    const cleaned = value.trim();
+    return cleaned.length < 4 || !/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(cleaned);
+  }
+
+  if (field === "due_date" && typeof value === "string") {
+    return !/^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+
+  if (field === "total_amount" && typeof value === "number") {
+    return value <= 0 || value > 10_000_000;
+  }
+
+  return false;
+}
+
+function evaluateDetectionConfidence(
+  rawConfidence: number,
+  extractionData: Record<string, unknown> | null,
+): { normalizedConfidence: number; diagnostics: DetectionDiagnostics | null } {
+  if (!extractionData) {
+    return { normalizedConfidence: rawConfidence, diagnostics: null };
+  }
+
+  const normalized = normalizeExtractedFields(extractionData);
+  const missingCriticalFields: string[] = [];
+  const suspiciousFields: string[] = [];
+  let criticalDetected = 0;
+
+  for (const field of CRITICAL_KEYS) {
+    const value = normalized[field];
+    if (fieldMissing(field, value)) {
+      missingCriticalFields.push(field);
+      continue;
+    }
+    criticalDetected += 1;
+    if (fieldSuspicious(field, value)) suspiciousFields.push(field);
+  }
+
+  const criticalCoverage = criticalDetected / CRITICAL_KEYS.length;
+
+  // Cap de confiança por cobertura crítica:
+  // 0/3 => 0.35 | 1/3 => 0.57 | 2/3 => 0.78 | 3/3 => 1.0
+  const coverageCap = 0.35 + criticalCoverage * 0.65;
+  const suspiciousPenalty = suspiciousFields.length > 0 ? 0.1 : 0;
+  const normalizedConfidence = Math.max(
+    0,
+    Math.min(rawConfidence, coverageCap - suspiciousPenalty),
+  );
+
+  return {
+    normalizedConfidence,
+    diagnostics: {
+      criticalDetected,
+      criticalTotal: CRITICAL_KEYS.length,
+      criticalCoverage,
+      missingCriticalFields,
+      suspiciousFields,
+      rawConfidence,
+      normalizedConfidence,
+    },
+  };
 }
 
 /**
@@ -46,12 +174,16 @@ export async function parseDocument(
   let text: string;
   let pages: number;
   let wasProtected: boolean;
+  let extractionMethod: string;
+  let ocrApplied: boolean;
 
   try {
     const result = await extractText(fileData, mimeType);
     text = result.text;
     pages = result.pages;
     wasProtected = result.wasProtected;
+    extractionMethod = result.extractionMethod;
+    ocrApplied = result.ocrApplied;
   } catch (err) {
     if (err instanceof PdfPasswordRequiredError) {
       await writeLog(supabase, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
@@ -71,6 +203,8 @@ export async function parseDocument(
       text = retryResult.text;
       pages = retryResult.pages;
       wasProtected = true;
+      extractionMethod = retryResult.extractionMethod;
+      ocrApplied = retryResult.ocrApplied;
     } else {
       throw err;
     }
@@ -86,10 +220,14 @@ export async function parseDocument(
     ctx,
     IngestionLogLevel.INFO,
     `Texto extraído: ${text.length} chars, ${pages} páginas${wasProtected ? " (PDF protegido)" : ""}`,
+    {
+      extraction_method: extractionMethod,
+      ocr_applied: ocrApplied,
+    },
   );
 
   // ── 2. Detecção de parser e extração ──
-  let parserType = ParserType.LOCAL_TEXT;
+  let parserType: string = ParserType.LOCAL_TEXT;
   let extractionData: Record<string, unknown> | null = null;
   let confidence = 0.3; // Confiança base para texto bruto
 
@@ -118,6 +256,22 @@ export async function parseDocument(
         `Parser boleto genérico (confiança: ${(confidence * 100).toFixed(0)}%)`,
       );
     }
+  }
+
+  const { normalizedConfidence, diagnostics } = evaluateDetectionConfidence(
+    confidence,
+    extractionData,
+  );
+  confidence = normalizedConfidence;
+
+  if (diagnostics) {
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      `Detecção determinística: cobertura crítica ${diagnostics.criticalDetected}/${diagnostics.criticalTotal}, confiança normalizada ${(diagnostics.normalizedConfidence * 100).toFixed(0)}%`,
+      diagnostics as unknown as Record<string, unknown>,
+    );
   }
 
   // ── 2b. Busca de padrão do usuário (ADR-006) ──
@@ -150,6 +304,137 @@ export async function parseDocument(
     }
   }
 
+  if (extractionData) {
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      "Campos extraídos do documento",
+      buildExtractedFieldsLogDetails(extractionData, parserType, confidence, diagnostics),
+    );
+  }
+
+  // ── 2c. Enriquecimento determinístico com templates + boleto-utils e consenso por campo ──
+  const consensusCandidates: FieldCandidate[] = [];
+  const normalizedFromParser = extractionData
+    ? toNormalizedExtractionFields(extractionData)
+    : ({} as Record<string, unknown>);
+  if (extractionData) {
+    consensusCandidates.push(
+      ...toFieldCandidates(
+        "deterministic_parser",
+        confidence,
+        normalizedFromParser,
+        `parser:${parserType}`,
+      ),
+    );
+  }
+
+  const templateMatch = applySupplierTemplate(text);
+  if (templateMatch) {
+    consensusCandidates.push(
+      ...toFieldCandidates(
+        "supplier_template",
+        templateMatch.confidence,
+        {
+          supplier_name_raw: templateMatch.supplierNameRaw,
+          supplier_cnpj: templateMatch.supplierCnpj,
+          total_amount: templateMatch.totalAmount,
+          due_date: templateMatch.dueDate,
+          competence_date: templateMatch.competenceDate,
+          document_number: templateMatch.documentNumber,
+        },
+        `template:${templateMatch.templateId}`,
+      ),
+    );
+
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      `Template local aplicado: ${templateMatch.templateId} (confiança ${(templateMatch.confidence * 100).toFixed(0)}%)`,
+      {
+        matched_rules: templateMatch.matchedRules,
+        template_fields: {
+          supplier_name_raw: templateMatch.supplierNameRaw,
+          supplier_cnpj: templateMatch.supplierCnpj,
+          total_amount: templateMatch.totalAmount,
+          due_date: templateMatch.dueDate,
+          competence_date: templateMatch.competenceDate,
+          document_number: templateMatch.documentNumber,
+        },
+      },
+    );
+  }
+
+  const boletoUtilsMatch = await extractWithBoletoUtils(text);
+  if (boletoUtilsMatch) {
+    consensusCandidates.push(
+      ...toFieldCandidates(
+        "boleto_utils",
+        boletoUtilsMatch.confidence,
+        {
+          supplier_name_raw: boletoUtilsMatch.supplierNameRaw,
+          total_amount: boletoUtilsMatch.totalAmount,
+          due_date: boletoUtilsMatch.dueDate,
+          barcode_digitable_line: boletoUtilsMatch.barcodeDigitableLine,
+          document_type: boletoUtilsMatch.boletoType,
+        },
+        boletoUtilsMatch.reason,
+      ),
+    );
+
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      `Boleto validado por boleto-utils (tipo: ${boletoUtilsMatch.boletoType ?? "desconhecido"})`,
+      {
+        boleto_utils_fields: {
+          due_date: boletoUtilsMatch.dueDate,
+          total_amount: boletoUtilsMatch.totalAmount,
+          barcode_digitable_line: boletoUtilsMatch.barcodeDigitableLine,
+          supplier_name_raw: boletoUtilsMatch.supplierNameRaw,
+        },
+      },
+    );
+  }
+
+  let consensusMeta: {
+    sourcePerField: Record<string, string>;
+    confidencePerField: Record<string, number>;
+    decisions: Record<string, unknown>;
+    overallConfidence: number;
+  } | null = null;
+
+  if (consensusCandidates.length > 0) {
+    const consensus = resolveFieldConsensus(consensusCandidates);
+    const legacyConsensus = toLegacyExtractionFields(consensus.values);
+
+    extractionData = {
+      ...(extractionData ?? {}),
+      ...legacyConsensus,
+      confidence:
+        confidence > 0
+          ? Math.max(consensus.overallConfidence, confidence)
+          : consensus.overallConfidence,
+    };
+
+    confidence = (extractionData.confidence as number) ?? confidence;
+    consensusMeta = {
+      sourcePerField: consensus.sourcePerField,
+      confidencePerField: consensus.confidencePerField,
+      decisions: consensus.decisions,
+      overallConfidence: consensus.overallConfidence,
+    };
+
+    await writeLog(supabase, ctx, IngestionLogLevel.INFO, "Consenso por campo aplicado", {
+      consensus_overall_confidence: consensus.overallConfidence,
+      source_per_field: consensus.sourcePerField,
+      confidence_per_field: consensus.confidencePerField,
+    });
+  }
+
   // ── 3. Persistir parsed_document_version ──
   const { data: lastVersion } = await supabase
     .from("parsed_document_versions")
@@ -176,6 +461,10 @@ export async function parseDocument(
         pages,
         was_protected: wasProtected,
         text_length: text.length,
+        extraction_method: extractionMethod,
+        ocr_applied: ocrApplied,
+        detection_diagnostics: diagnostics,
+        field_consensus: consensusMeta,
       },
     })
     .select("id")
@@ -216,7 +505,19 @@ export async function parseDocument(
         category_suggestion: suggestCategory(ed),
         tags_suggestion: suggestTags(ed),
         priority_suggestion: "alta",
-        metadata: { parser_type: parserType, parser_version: "1.0.0" },
+        metadata: {
+          parser_type: parserType,
+          parser_version: "1.0.0",
+          detection_diagnostics: diagnostics,
+          source_per_field: consensusMeta?.sourcePerField ?? null,
+          confidence_per_field: consensusMeta?.confidencePerField ?? null,
+          field_decisions: consensusMeta?.decisions ?? null,
+          // Campos sem coluna dedicada — disponíveis para a camada de IA
+          deterministic_extras: {
+            supplier_cnpj: (ed.supplierCnpj as string) ?? null,
+            barcode_digitable_line: (ed.barcodeDigitableLine as string) ?? null,
+          },
+        },
       })
       .select("id")
       .single();
@@ -331,6 +632,32 @@ function suggestTags(data: Record<string, unknown>): string[] {
     tags.push("energia");
   }
   return tags;
+}
+
+function toNormalizedExtractionFields(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    total_amount: data.totalAmount ?? data.total_amount ?? null,
+    due_date: data.dueDate ?? data.due_date ?? null,
+    supplier_name_raw: data.supplierNameRaw ?? data.supplier_name_raw ?? null,
+    competence_date: data.competenceDate ?? data.competence_date ?? null,
+    supplier_cnpj: data.supplierCnpj ?? data.supplier_cnpj ?? null,
+    document_number: data.documentNumber ?? data.document_number ?? null,
+    barcode_digitable_line: data.barcodeDigitableLine ?? data.barcode_digitable_line ?? null,
+    document_type: data.documentType ?? data.document_type ?? null,
+  };
+}
+
+function toLegacyExtractionFields(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    totalAmount: data.total_amount ?? null,
+    dueDate: data.due_date ?? null,
+    supplierNameRaw: data.supplier_name_raw ?? null,
+    competenceDate: data.competence_date ?? null,
+    supplierCnpj: data.supplier_cnpj ?? null,
+    documentNumber: data.document_number ?? null,
+    barcodeDigitableLine: data.barcode_digitable_line ?? null,
+    documentType: data.document_type ?? null,
+  };
 }
 
 /**

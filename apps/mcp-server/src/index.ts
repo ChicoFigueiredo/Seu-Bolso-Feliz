@@ -17,6 +17,7 @@ import { listDraftBatches } from "./tools/list-draft-batches.js";
 import { approveDraftBatch } from "./tools/approve-draft-batch.js";
 import { findDocumentsWithoutPassword } from "./tools/find-documents-without-password.js";
 import { recomputeFinancialPeriods } from "./tools/recompute-financial-periods.js";
+import { ingestDocument } from "./tools/ingest-document.js";
 
 const server = new McpServer({
   name: "sbf-mcp-server",
@@ -53,10 +54,7 @@ server.tool(
   "Lista documentos que ainda não foram processados (status: discovered, downloaded, hashed, queued). Opcionalmente inclui documentos com erro.",
   {
     limit: z.number().optional().describe("Máximo de resultados (padrão: 50)"),
-    includeErrors: z
-      .boolean()
-      .optional()
-      .describe("Incluir documentos com status FAILED"),
+    includeErrors: z.boolean().optional().describe("Incluir documentos com status FAILED"),
   },
   async ({ limit, includeErrors }) => {
     const supabase = getSupabaseClient();
@@ -83,10 +81,7 @@ server.tool(
   "reprocess_document",
   "Força reprocessamento de um documento específico, criando nova run e novo job com force_reprocess=true.",
   {
-    documentId: z
-      .string()
-      .uuid()
-      .describe("UUID do source_document a reprocessar"),
+    documentId: z.string().uuid().describe("UUID do source_document a reprocessar"),
   },
   async ({ documentId }) => {
     const supabase = getSupabaseClient();
@@ -141,9 +136,7 @@ server.tool(
     status: z
       .string()
       .optional()
-      .describe(
-        "Filtrar por status do batch (open, reviewing, approved, partial, rejected)",
-      ),
+      .describe("Filtrar por status do batch (open, reviewing, approved, partial, rejected)"),
     limit: z.number().optional().describe("Máximo de resultados (padrão: 20)"),
   },
   async ({ status, limit }) => {
@@ -172,9 +165,7 @@ server.tool(
     rejectDraftIds: z
       .array(z.string().uuid())
       .optional()
-      .describe(
-        "Lista de UUIDs de draft_records específicos a rejeitar neste batch",
-      ),
+      .describe("Lista de UUIDs de draft_records específicos a rejeitar neste batch"),
   },
   async ({ batchId, rejectDraftIds }) => {
     const supabase = getSupabaseClient();
@@ -244,6 +235,35 @@ server.tool(
       startDay,
       monthsAhead,
     });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: ingest_document
+// ---------------------------------------------------------------------------
+server.tool(
+  "ingest_document",
+  "Dispara ingestão (ou reprocessamento com IA) de um documento financeiro. Use aiMode='full' para análise com visão (gpt-4o), 'lite' para enriquecimento rápido (gpt-4o-mini), 'skip' para apenas parsing determinístico, ou 'auto' (padrão) para decidir automaticamente pela confiança.",
+  {
+    documentId: z.string().uuid().describe("ID (UUID) do documento em source_documents"),
+    aiMode: z
+      .enum(["auto", "lite", "full", "skip"])
+      .optional()
+      .default("auto")
+      .describe("Modo de IA: auto | lite | full | skip"),
+  },
+  async ({ documentId, aiMode }) => {
+    const supabase = getSupabaseClient();
+    const userId = getUserId();
+    const result = await ingestDocument(supabase, userId, documentId, aiMode ?? "auto");
     return {
       content: [
         {

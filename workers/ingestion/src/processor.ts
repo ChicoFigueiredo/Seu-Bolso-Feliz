@@ -1,7 +1,8 @@
 /**
  * @sbf/worker-ingestion — Job processor
  * Processa um job individual pela máquina de estados.
- * Fluxo completo: discovered → downloaded → hashed → queued → parsing → parsed.
+ * Fluxo: discovered → downloaded → hashed → queued → parsing → parsed
+ *        → ai_lite_enriching (condicional) → classified → reconciled → drafted → pending_review.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionJobStatus, IngestionLogLevel } from "@sbf/ingestion-types";
@@ -11,6 +12,13 @@ import { writeLog, type LogContext } from "./logger";
 import { parseDocument } from "./parsers/parse-orchestrator";
 import { generateDrafts } from "./drafts/draft-generator";
 import { findReconciliationCandidates, isDuplicateRisk } from "./reconciliation/reconciliation";
+import {
+  enrichWithAiLite,
+  computeCriticalCoverage,
+  shouldActivateAiLite,
+  type AiLiteInput,
+} from "./parsers/ai-lite-enricher";
+import { enrichWithAiFull } from "./parsers/ai-full-enricher";
 
 interface JobRow {
   id: string;
@@ -311,8 +319,225 @@ async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
 }
 
 /**
+ * Step: AI lite enrichment — enriquece extraction_result via IA barata quando
+ * o parser determinístico ficou abaixo do limiar ou deixou campos críticos vazios.
+ * Transição: parsed → ai_lite_enriching → classified.
+ */
+async function stepAiLiteEnrichment(
+  supabase: SupabaseClient,
+  ctx: LogContext,
+  job: JobRow,
+): Promise<void> {
+  const meta = job.metadata as Record<string, unknown>;
+  let extractionResultId = meta.extraction_result_id as string | null;
+  const currentConfidence = (meta.confidence as number) ?? 0;
+  const aiMode = String(meta.ai_mode ?? "auto");
+
+  if (aiMode === "skip") {
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      "IA desabilitada por ai_mode=skip — seguindo com camada determinística",
+    );
+    return;
+  }
+
+  if (!job.source_document_id) {
+    throw new Error("Job sem source_document_id não pode executar enriquecimento por IA");
+  }
+
+  const { data: sourceDoc } = await supabase
+    .from("source_documents")
+    .select("storage_path, mime_type")
+    .eq("id", job.source_document_id)
+    .single();
+
+  if (!extractionResultId) {
+    // Sem extraction_result: documento sem dados estruturados. Escalar direto para IA full.
+    if (!sourceDoc?.storage_path) {
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.WARN,
+        "IA full não pôde iniciar: source_document sem storage_path",
+      );
+      return;
+    }
+
+    const { data: createdEr } = await supabase
+      .from("extraction_results")
+      .insert({
+        parsed_version_id: meta.parsed_version_id as string,
+        user_id: ctx.userId,
+        metadata: { created_by: "ai_full_fallback" },
+      })
+      .select("id")
+      .single();
+
+    extractionResultId = createdEr?.id ?? null;
+    meta.extraction_result_id = extractionResultId;
+
+    if (!extractionResultId) {
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.WARN,
+        "IA full não pôde iniciar: falha ao criar extraction_result fallback",
+      );
+      return;
+    }
+
+    const ok = await transitionJob(
+      supabase,
+      job.id,
+      IngestionJobStatus.PARSED,
+      IngestionJobStatus.AI_LITE_ENRICHING,
+    );
+    if (!ok) return;
+    job.status = IngestionJobStatus.AI_LITE_ENRICHING;
+
+    const { data: pv } = await supabase
+      .from("parsed_document_versions")
+      .select("raw_text")
+      .eq("id", meta.parsed_version_id as string)
+      .single();
+
+    const full = await enrichWithAiFull(supabase, ctx, {
+      extractionResultId,
+      sourceDocumentId: job.source_document_id,
+      storagePath: sourceDoc.storage_path,
+      mimeType: sourceDoc.mime_type ?? "application/octet-stream",
+      rawText: pv?.raw_text ?? "",
+    });
+
+    meta.confidence = full.overallConfidence;
+    meta.ai_enriched = full.enriched;
+    meta.ai_enrichment_type = "full";
+    meta.needs_full_ai_review = false;
+    job.metadata = meta;
+
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      "IA full executada por ausência de extraction_result na camada determinística",
+    );
+    return;
+  }
+
+  // Carregar extraction_result para verificar campos
+  const { data: er } = await supabase
+    .from("extraction_results")
+    .select("total_amount, due_date, supplier_name_raw, competence_date, document_number, metadata")
+    .eq("id", extractionResultId)
+    .single();
+
+  if (!er) return;
+
+  // barcode_digitable_line e supplier_cnpj são salvos no metadata (sem coluna dedicada)
+  const erMeta = (er.metadata as Record<string, unknown>) ?? {};
+  const erDeterministic = (erMeta.deterministic_extras as Record<string, unknown>) ?? {};
+
+  const extractedFields: AiLiteInput["extractedFields"] = {
+    total_amount: er.total_amount ?? null,
+    due_date: er.due_date ?? null,
+    supplier_name_raw: er.supplier_name_raw ?? null,
+    competence_date: er.competence_date ?? null,
+    document_number: er.document_number ?? null,
+    supplier_cnpj: (erDeterministic.supplier_cnpj as string | null) ?? null,
+    barcode_digitable_line: (erDeterministic.barcode_digitable_line as string | null) ?? null,
+  };
+
+  const criticalCoverage = computeCriticalCoverage(extractedFields);
+
+  // Modo full força escalonamento direto para a camada 3.
+  const shouldForceFull = aiMode === "full";
+  // Em modo auto/lite, ativa camada lite se confiança fraca, campo crítico faltante ou suspeito.
+  const shouldRunLite =
+    !shouldForceFull && shouldActivateAiLite(currentConfidence, extractedFields);
+
+  // Força full quando a cobertura crítica é insuficiente, mesmo com confiança alta.
+  const shouldEscalateByCoverage = criticalCoverage < 1;
+
+  if (!shouldForceFull && !shouldRunLite && !shouldEscalateByCoverage) {
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.INFO,
+      `IA: confiança ${(currentConfidence * 100).toFixed(0)}% e cobertura crítica 100% — sem escalonamento`,
+    );
+    return;
+  }
+
+  // Transição parsed → ai_lite_enriching
+  const ok = await transitionJob(
+    supabase,
+    job.id,
+    IngestionJobStatus.PARSED,
+    IngestionJobStatus.AI_LITE_ENRICHING,
+  );
+  if (!ok) return;
+  job.status = IngestionJobStatus.AI_LITE_ENRICHING;
+
+  // Buscar texto bruto para o prompt
+  const { data: pv } = await supabase
+    .from("parsed_document_versions")
+    .select("raw_text")
+    .eq("id", meta.parsed_version_id as string)
+    .single();
+
+  const rawText = pv?.raw_text ?? "";
+
+  let updatedConf = currentConfidence;
+  let needsFullReview = shouldEscalateByCoverage || shouldForceFull;
+  let enrichmentType: "lite" | "full" | null = null;
+
+  if (shouldRunLite) {
+    const result = await enrichWithAiLite(supabase, ctx, {
+      extractionResultId,
+      rawText,
+      currentConfidence,
+      extractedFields,
+    });
+
+    updatedConf = result.enriched ? result.overallConfidence : currentConfidence;
+    needsFullReview = needsFullReview || result.needsFullReview;
+    enrichmentType = "lite";
+  }
+
+  if (needsFullReview && sourceDoc?.storage_path) {
+    const full = await enrichWithAiFull(supabase, ctx, {
+      extractionResultId,
+      sourceDocumentId: job.source_document_id,
+      storagePath: sourceDoc.storage_path,
+      mimeType: sourceDoc.mime_type ?? "application/octet-stream",
+      rawText,
+    });
+
+    updatedConf = full.enriched ? full.overallConfidence : updatedConf;
+    needsFullReview = !full.enriched;
+    enrichmentType = full.enriched ? "full" : enrichmentType;
+  }
+
+  if (needsFullReview) {
+    await supabase
+      .from("ingestion_jobs")
+      .update({ needs_full_ai_review: true, updated_at: new Date().toISOString() })
+      .eq("id", job.id);
+  }
+
+  // Transição ai_lite_enriching → classified via stepDraft (chamado após)
+  meta.confidence = updatedConf;
+  meta.ai_enriched = enrichmentType !== null;
+  meta.ai_enrichment_type = enrichmentType;
+  meta.needs_full_ai_review = needsFullReview;
+  job.metadata = meta;
+}
+
+/**
  * Step: draft — classifica, reconcilia e gera drafts.
- * Transições: parsed → classified → reconciled → drafted → pending_review.
+ * Transições: parsed|ai_lite_enriching → classified → reconciled → drafted → pending_review.
  * No MVP, classify e reconcile são passthrough automáticos.
  */
 async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow): Promise<void> {
@@ -322,16 +547,11 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
 
   const meta = job.metadata as Record<string, unknown>;
 
-  // parsed → classified (auto: determinado pelo tipo de extração)
-  let ok = await transitionJob(
-    supabase,
-    job.id,
-    IngestionJobStatus.PARSED,
-    IngestionJobStatus.CLASSIFIED,
-    {
-      metadata: { ...meta, classified_at: new Date().toISOString() },
-    },
-  );
+  // parsed|ai_lite_enriching → classified
+  const fromStatus = job.status as IngestionJobStatus;
+  let ok = await transitionJob(supabase, job.id, fromStatus, IngestionJobStatus.CLASSIFIED, {
+    metadata: { ...meta, classified_at: new Date().toISOString() },
+  });
   if (!ok) return;
   job.status = IngestionJobStatus.CLASSIFIED;
 
@@ -480,8 +700,8 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
 
 /**
  * Processa um único job pela state machine.
- * Fluxo completo: discovered → downloaded → hashed → queued → parsing → parsed
- *                 → classified → reconciled → drafted → pending_review.
+ * Fluxo: discovered → downloaded → hashed → queued → parsing → parsed
+ *        → ai_lite_enriching (condicional) → classified → reconciled → drafted → pending_review.
  */
 export async function processJob(supabase: SupabaseClient, job: JobRow): Promise<void> {
   const ctx: LogContext = {
@@ -549,8 +769,16 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
       await stepParse(supabase, ctx, job);
     }
 
-    // Step 5: parsed → classified → reconciled → drafted → pending_review
+    // Step 5: parsed → ai_lite_enriching (condicional) → classified
     if (job.status === IngestionJobStatus.PARSED) {
+      await stepAiLiteEnrichment(supabase, ctx, job);
+    }
+
+    // Step 6: parsed|ai_lite_enriching → classified → reconciled → drafted → pending_review
+    if (
+      job.status === IngestionJobStatus.PARSED ||
+      job.status === IngestionJobStatus.AI_LITE_ENRICHING
+    ) {
       await stepDraft(supabase, ctx, job);
     }
   } catch (err) {

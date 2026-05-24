@@ -719,3 +719,212 @@ export async function deleteSourceDocument(
 
   throwIfError(deleteError, "deletar documento");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Autopilot / IA
+// ══════════════════════════════════════════════════════════════
+
+export interface AutopilotResult {
+  documentId: string;
+  status: "complete" | "needs_review" | "failed";
+  extraction: {
+    supplier_name: string | null;
+    total_amount: number | null;
+    due_date: string | null;
+    competence_date: string | null;
+    financial_intent: string | null;
+    document_type: string | null;
+    ai_enrichment_type: string | null;
+    confidence_per_field: Record<string, number> | null;
+    reasoning: string | null;
+  } | null;
+  pipeline: {
+    parser_used: string;
+    ai_enriched: boolean;
+    needs_full_ai_review: boolean;
+    job_status: string | null;
+  };
+  drafts: {
+    count: number;
+    batch_id: string | null;
+  };
+  issues: string[];
+  decision_suggestion: "approve" | "review_required" | "reject";
+}
+
+/**
+ * Retorna um resumo autopilot do estado atual de ingestão de um documento.
+ * Não dispara novo processamento — apenas consolida o estado atual.
+ */
+export async function getAutopilotStatus(documentId: string): Promise<AutopilotResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+
+  // Buscar documento
+  const { data: doc, error: docError } = await supabase
+    .from("source_documents")
+    .select("id, filename, mime_type, status")
+    .eq("id", documentId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (docError || !doc) throw new Error("Documento não encontrado");
+
+  // Último job
+  const { data: job } = await supabase
+    .from("ingestion_jobs")
+    .select("id, status, metadata, needs_full_ai_review")
+    .eq("source_document_id", documentId)
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const meta = (job?.metadata ?? {}) as Record<string, unknown>;
+  const extractionResultId = meta.extraction_result_id as string | null;
+
+  // Extraction result
+  let extraction: AutopilotResult["extraction"] = null;
+  if (extractionResultId) {
+    const { data: er } = await supabase
+      .from("extraction_results")
+      .select(
+        "supplier_name_raw, total_amount, due_date, competence_date, financial_intent, ai_enrichment_type, confidence_per_field, reasoning",
+      )
+      .eq("id", extractionResultId)
+      .single();
+
+    if (er) {
+      extraction = {
+        supplier_name: er.supplier_name_raw,
+        total_amount: er.total_amount,
+        due_date: er.due_date,
+        competence_date: er.competence_date,
+        financial_intent: er.financial_intent ?? null,
+        document_type: (meta.document_type as string) ?? null,
+        ai_enrichment_type: er.ai_enrichment_type ?? null,
+        confidence_per_field: (er.confidence_per_field as Record<string, number>) ?? null,
+        reasoning: er.reasoning ?? null,
+      };
+    }
+  }
+
+  // Drafts
+  const { data: draftBatches } = await supabase
+    .from("draft_batches")
+    .select("id")
+    .eq("source_document_id", documentId)
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  const batchId = draftBatches?.id ?? null;
+
+  let draftCount = 0;
+  if (batchId) {
+    const { count } = await supabase
+      .from("draft_records")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", batchId)
+      .eq("user_id", user.id);
+    draftCount = count ?? 0;
+  }
+
+  // Montar issues
+  const issues: string[] = [];
+  if (!extraction?.total_amount) issues.push("Valor total não identificado");
+  if (!extraction?.due_date) issues.push("Data de vencimento não identificada");
+  if (!extraction?.supplier_name) issues.push("Fornecedor não identificado");
+  if (job?.needs_full_ai_review) issues.push("Requer análise de IA completa (visão)");
+  if (draftCount === 0) issues.push("Nenhum draft gerado para revisão");
+
+  const needsFullReview = (job?.needs_full_ai_review as boolean) ?? false;
+  const jobStatus = job?.status ?? null;
+  const aiEnriched = (meta.ai_enriched as boolean) ?? false;
+
+  const decisionSuggestion: AutopilotResult["decision_suggestion"] =
+    issues.length === 0
+      ? "approve"
+      : issues.some((i) => i.includes("Valor") || i.includes("Nenhum draft"))
+        ? "reject"
+        : "review_required";
+
+  return {
+    documentId,
+    status: issues.length === 0 ? "complete" : jobStatus === "failed" ? "failed" : "needs_review",
+    extraction,
+    pipeline: {
+      parser_used: (meta.parser_type as string) ?? "unknown",
+      ai_enriched: aiEnriched,
+      needs_full_ai_review: needsFullReview,
+      job_status: jobStatus,
+    },
+    drafts: { count: draftCount, batch_id: batchId },
+    issues,
+    decision_suggestion: decisionSuggestion,
+  };
+}
+
+/**
+ * Dispara análise de IA full (visão) para um documento específico.
+ * Cria um novo job com flag ai_mode = 'full' para o worker processar.
+ */
+export async function triggerAiFullAnalysis(documentId: string): Promise<{ jobId: string }> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+
+  // Verificar que documento pertence ao usuário
+  const { data: doc, error: docError } = await supabase
+    .from("source_documents")
+    .select("id, filename")
+    .eq("id", documentId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (docError || !doc) throw new Error("Documento não encontrado");
+
+  // Buscar ou criar run para o job
+  const { data: run } = await supabase
+    .from("ingestion_runs")
+    .insert({
+      user_id: user.id,
+      source_type: "manual_upload",
+      status: "running",
+      metadata: { triggered_by: "ai_full_request", document_id: documentId },
+    })
+    .select("id")
+    .single();
+
+  if (!run) throw new Error("Falha ao criar run para análise full");
+
+  // Criar job com ai_mode full a partir do estado parsed
+  const { data: job } = await supabase
+    .from("ingestion_jobs")
+    .insert({
+      run_id: run.id,
+      user_id: user.id,
+      source_document_id: documentId,
+      status: "queued",
+      metadata: {
+        ai_mode: "full",
+        force_reprocess: true,
+        triggered_by: "user_request",
+      },
+    })
+    .select("id")
+    .single();
+
+  if (!job) throw new Error("Falha ao criar job de análise full");
+
+  await supabase.from("ingestion_runs").update({ status: "completed" }).eq("id", run.id);
+
+  return { jobId: job.id };
+}

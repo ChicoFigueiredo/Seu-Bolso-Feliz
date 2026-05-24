@@ -3,6 +3,10 @@
  * Suporta PDF (com e sem senha), CSV e texto plano.
  */
 // Import from lib/ to avoid pdf-parse@1.x debug code that runs on top-level import
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 export interface TextExtractResult {
@@ -10,6 +14,16 @@ export interface TextExtractResult {
   pages: number;
   mimeType: string;
   wasProtected: boolean;
+  extractionMethod: "pdf_native" | "pdf_native_plus_ocrmypdf" | "text_plain" | "image_placeholder";
+  ocrApplied: boolean;
+}
+
+export const OCR_MIN_TEXT_LENGTH = 80;
+
+export function shouldAttemptOcrFallback(mimeType: string, text: string): boolean {
+  if (mimeType !== "application/pdf") return false;
+  if (process.env.INGESTION_ENABLE_OCRMYPDF !== "true") return false;
+  return text.trim().length < OCR_MIN_TEXT_LENGTH;
 }
 
 /**
@@ -33,6 +47,8 @@ export async function extractText(
       pages: 1,
       mimeType,
       wasProtected: false,
+      extractionMethod: "text_plain",
+      ocrApplied: false,
     };
   }
 
@@ -43,6 +59,8 @@ export async function extractText(
       pages: 1,
       mimeType,
       wasProtected: false,
+      extractionMethod: "image_placeholder",
+      ocrApplied: false,
     };
   }
 
@@ -52,6 +70,8 @@ export async function extractText(
     pages: 1,
     mimeType,
     wasProtected: false,
+    extractionMethod: "text_plain",
+    ocrApplied: false,
   };
 }
 
@@ -62,12 +82,26 @@ async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtra
   }
 
   try {
-    const result = await pdfParse(buf, options);
+    let result = await pdfParse(buf, options);
+    let extractionMethod: TextExtractResult["extractionMethod"] = "pdf_native";
+    let ocrApplied = false;
+
+    if (shouldAttemptOcrFallback("application/pdf", result.text)) {
+      const ocrBuffer = await runOcrMyPdf(buf);
+      if (ocrBuffer) {
+        result = await pdfParse(ocrBuffer, options);
+        extractionMethod = "pdf_native_plus_ocrmypdf";
+        ocrApplied = true;
+      }
+    }
+
     return {
       text: result.text,
       pages: result.numpages,
       mimeType: "application/pdf",
       wasProtected: !!password,
+      extractionMethod,
+      ocrApplied,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -79,6 +113,36 @@ async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtra
 
     throw new TextExtractionError(`Falha na extração de texto do PDF: ${msg}`);
   }
+}
+
+async function runOcrMyPdf(inputBuffer: Buffer): Promise<Buffer | null> {
+  const workdir = await mkdtemp(join(tmpdir(), "sbf-ocrmypdf-"));
+  const inputPath = join(workdir, "input.pdf");
+  const outputPath = join(workdir, "output.pdf");
+  const cmd = process.env.OCRMYPDF_BIN ?? "ocrmypdf";
+
+  try {
+    await writeFile(inputPath, inputBuffer);
+    const args = ["--skip-text", "--force-ocr", "--quiet", inputPath, outputPath];
+    const exitCode = await runProcess(cmd, args);
+    if (exitCode !== 0) return null;
+    return await readFile(outputPath);
+  } catch {
+    return null;
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
+}
+
+function runProcess(command: string, args: string[]): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: "ignore",
+    });
+
+    child.on("error", () => resolve(1));
+    child.on("close", (code) => resolve(code ?? 1));
+  });
 }
 
 function isPasswordError(message: string): boolean {

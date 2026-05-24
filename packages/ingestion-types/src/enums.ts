@@ -17,6 +17,7 @@ export const IngestionJobStatus = {
   QUEUED: "queued",
   PARSING: "parsing",
   PARSED: "parsed",
+  AI_LITE_ENRICHING: "ai_lite_enriching",
   CLASSIFIED: "classified",
   RECONCILED: "reconciled",
   DRAFTED: "drafted",

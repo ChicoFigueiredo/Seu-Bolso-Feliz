@@ -7,8 +7,11 @@
     "workers/*"
   ],
   "scripts": {
-    "dev": "cd apps/web && bun run dev",
+    "dev": "node scripts/dev-with-worker.mjs",
+    "dev:web": "cd apps/web && bun run dev",
+    "dev:worker": "cd workers/ingestion && bun run dev",
     "dev:mobile": "cd apps/mobile && bun run start",
+    "git:push:all:no-ci": "bash scripts/push-all-remotes-no-ci.sh",
     "build": "cd apps/web && bun run build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

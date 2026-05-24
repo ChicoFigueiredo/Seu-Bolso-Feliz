@@ -11,6 +11,7 @@
     "@sbf/domain": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
     "@sbf/operations": "workspace:*",
+    "@mrmgomes/boleto-utils": "^1.3.3",
     "@supabase/supabase-js": "^2",
     "pdf-parse": "1.1.1"
   }

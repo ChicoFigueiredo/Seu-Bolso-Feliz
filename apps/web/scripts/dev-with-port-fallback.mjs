@@ -2,7 +2,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 
 const host = process.env.HOST ?? "0.0.0.0";
-const preferredPort = toPositiveInt(process.env.PORT, 3000);
+const preferredPort = toPositiveInt(process.env.PORT, 3105);
 const maxPortScan = toPositiveInt(process.env.MAX_PORT_SCAN, 50);
 
 function toPositiveInt(raw, fallback) {
@@ -30,7 +30,6 @@ function isPortAvailable(port, bindHost) {
 async function findAvailablePort(startPort, bindHost, attempts) {
   for (let offset = 0; offset <= attempts; offset += 1) {
     const port = startPort + offset;
-    // eslint-disable-next-line no-await-in-loop
     const available = await isPortAvailable(port, bindHost);
     if (available) return port;
   }

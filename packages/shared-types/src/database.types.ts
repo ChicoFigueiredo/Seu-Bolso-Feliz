@@ -807,20 +807,25 @@ export type Database = {
       };
       extraction_results: {
         Row: {
+          ai_enrichment_at: string | null;
+          ai_enrichment_type: string | null;
           breakdown: Json | null;
           category_suggestion: string | null;
           competence_date: string | null;
+          confidence_per_field: Json | null;
           consumption_data: Json | null;
           contract_identifier: string | null;
           created_at: string | null;
           currency: string | null;
           document_number: string | null;
           due_date: string | null;
+          financial_intent: string | null;
           financial_period_suggestion: Json | null;
           id: string;
           metadata: Json | null;
           parsed_version_id: string;
           priority_suggestion: string | null;
+          reasoning: string | null;
           supplier_confidence: number | null;
           supplier_id: string | null;
           supplier_name_raw: string | null;
@@ -829,20 +834,25 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          ai_enrichment_at?: string | null;
+          ai_enrichment_type?: string | null;
           breakdown?: Json | null;
           category_suggestion?: string | null;
           competence_date?: string | null;
+          confidence_per_field?: Json | null;
           consumption_data?: Json | null;
           contract_identifier?: string | null;
           created_at?: string | null;
           currency?: string | null;
           document_number?: string | null;
           due_date?: string | null;
+          financial_intent?: string | null;
           financial_period_suggestion?: Json | null;
           id?: string;
           metadata?: Json | null;
           parsed_version_id: string;
           priority_suggestion?: string | null;
+          reasoning?: string | null;
           supplier_confidence?: number | null;
           supplier_id?: string | null;
           supplier_name_raw?: string | null;
@@ -851,20 +861,25 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          ai_enrichment_at?: string | null;
+          ai_enrichment_type?: string | null;
           breakdown?: Json | null;
           category_suggestion?: string | null;
           competence_date?: string | null;
+          confidence_per_field?: Json | null;
           consumption_data?: Json | null;
           contract_identifier?: string | null;
           created_at?: string | null;
           currency?: string | null;
           document_number?: string | null;
           due_date?: string | null;
+          financial_intent?: string | null;
           financial_period_suggestion?: Json | null;
           id?: string;
           metadata?: Json | null;
           parsed_version_id?: string;
           priority_suggestion?: string | null;
+          reasoning?: string | null;
           supplier_confidence?: number | null;
           supplier_id?: string | null;
           supplier_name_raw?: string | null;
@@ -1041,6 +1056,7 @@ export type Database = {
           id: string;
           max_retries: number | null;
           metadata: Json | null;
+          needs_full_ai_review: boolean | null;
           retry_count: number | null;
           run_id: string;
           source_document_id: string | null;
@@ -1055,6 +1071,7 @@ export type Database = {
           id?: string;
           max_retries?: number | null;
           metadata?: Json | null;
+          needs_full_ai_review?: boolean | null;
           retry_count?: number | null;
           run_id: string;
           source_document_id?: string | null;
@@ -1069,6 +1086,7 @@ export type Database = {
           id?: string;
           max_retries?: number | null;
           metadata?: Json | null;
+          needs_full_ai_review?: boolean | null;
           retry_count?: number | null;
           run_id?: string;
           source_document_id?: string | null;
