@@ -1,2 +1,29 @@
-export { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin, DraftRecordType, DraftRecordStatus, DraftBatchStatus, IngestionLogLevel, ParserType } from "./enums";
-export type { IngestionRun, IngestionJob, SourceDocument, DocumentFingerprint, ParsedDocumentVersion, ExtractionResult, DraftRecord, DraftBatch, IngestionLog } from "./types";
+export {
+  IngestionRunStatus,
+  IngestionJobStatus,
+  SourceDocumentOrigin,
+  DraftRecordType,
+  DraftRecordStatus,
+  DraftBatchStatus,
+  IngestionLogLevel,
+  ParserType,
+} from "./enums";
+export type {
+  IngestionRun,
+  IngestionJob,
+  SourceDocument,
+  DocumentFingerprint,
+  ParsedDocumentVersion,
+  ExtractionResult,
+  DraftRecord,
+  DraftBatch,
+  IngestionLog,
+} from "./types";
+export type { SourceKind, SourceEvent, RawEvidenceBundle, SourceAdapter } from "./source-adapter";
+export type {
+  FinancialIntent,
+  FieldCandidateSource,
+  FieldCandidate,
+  ReconciliationCandidate,
+  EvidenceEnvelope,
+} from "./evidence-envelope";

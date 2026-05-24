@@ -1,0 +1,16 @@
+{
+  "name": "@sbf/worker-financial-evidence",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Orquestrador de evidências financeiras — une Gmail e pasta local em pipeline unificado",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "@sbf/domain": "workspace:*",
+    "@sbf/ingestion-types": "workspace:*",
+    "@sbf/operations": "workspace:*",
+    "@supabase/supabase-js": "^2"
+  }
+}

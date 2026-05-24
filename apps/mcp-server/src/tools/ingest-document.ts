@@ -3,6 +3,7 @@
  * Dispara ingestão (ou reprocessamento) de um documento com modo de IA configurável.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 
 export type AiMode = "auto" | "lite" | "full" | "skip";
 
@@ -45,8 +46,8 @@ export async function ingestDocument(
     .from("ingestion_runs")
     .insert({
       user_id: userId,
-      source_type: "manual_upload",
-      status: "running",
+      source_type: SourceDocumentOrigin.MANUAL_UPLOAD,
+      status: IngestionRunStatus.RUNNING,
       metadata: {
         triggered_by: "mcp",
         document_id: documentId,
@@ -74,7 +75,7 @@ export async function ingestDocument(
       run_id: run.id,
       user_id: userId,
       source_document_id: documentId,
-      status: "queued",
+      status: IngestionJobStatus.QUEUED,
       metadata: {
         ai_mode: aiMode,
         triggered_by: "mcp",
@@ -86,7 +87,10 @@ export async function ingestDocument(
 
   if (jobError || !job) {
     // Limpar run órfã
-    await supabase.from("ingestion_runs").update({ status: "failed" }).eq("id", run.id);
+    await supabase
+      .from("ingestion_runs")
+      .update({ status: IngestionRunStatus.FAILED })
+      .eq("id", run.id);
     return {
       success: false,
       jobId: null,
@@ -98,7 +102,10 @@ export async function ingestDocument(
   }
 
   // Marcar run como enfileirada (o worker processa de forma assíncrona)
-  await supabase.from("ingestion_runs").update({ status: "running" }).eq("id", run.id);
+  await supabase
+    .from("ingestion_runs")
+    .update({ status: IngestionRunStatus.RUNNING })
+    .eq("id", run.id);
 
   const aiModeNote =
     aiMode === "full"

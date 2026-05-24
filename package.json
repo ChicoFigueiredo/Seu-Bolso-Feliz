@@ -28,6 +28,12 @@
     "html:docs": "html-gen-docs --input docs/ --output docs-html/ --port 12468 --clean --theme catppuccin",
     "get:gmail-token": "bun run workers/gmail-scanner/get-token.ts",
     "prepare": "command -v git >/dev/null 2>&1 && husky || true",
+    "--- Workers individuais ---": "",
+    "worker:ingestion": "cd workers/ingestion && bun run src/index.ts",
+    "worker:gmail": "bun run workers/gmail-scanner/src/index.ts",
+    "worker:local": "bun run workers/local-scanner/src/index.ts",
+    "worker:financial": "bun run workers/financial-evidence-worker/src/index.ts",
+    "worker:financial:dry": "bun run workers/financial-evidence-worker/src/index.ts --dry-run",
     "--- PIPELINE: Passo-a-Passo para dados no Dashboard ---": "",
     "pipeline:passo00:db-reset": "npx supabase db reset",
     "pipeline:passo00:db-start": "npx supabase start",
@@ -38,6 +44,9 @@
     "pipeline:passo01:scan-local": "bun run workers/local-scanner/src/index.ts",
     "pipeline:passo02:ingest": "bun run workers/ingestion/src/index.ts",
     "pipeline:passo03:dev": "cd apps/web && bun run dev",
+    "pipeline:scan-gmail": "bun run worker:gmail --label Comprovantes --include-body --include-attachments",
+    "pipeline:scan-local": "bun run worker:local --dir ./inbox --scan-once",
+    "pipeline:process": "bun run worker:ingestion",
     "pipeline:tudo": "echo '⚠️  Execute em terminais separados:\\n  Terminal 1: bun run pipeline:passo01:scan-gmail\\n  Terminal 2: bun run pipeline:passo02:ingest\\n  Terminal 3: bun run pipeline:passo03:dev\\n\\nOu use os passos individuais na ordem numérica.'"
   },
   "devDependencies": {
