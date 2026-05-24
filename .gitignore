@@ -11,7 +11,7 @@ coverage
 *.lcov
 
 # logs
-logs
+/logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
@@ -44,3 +44,10 @@ supabase/.temp/
 .env
 .env.local
 .env.*.local
+secrets/
+docs-html/
+.vercel
+.env*.local
+
+# Arquivos temporários de execução
+tmp/

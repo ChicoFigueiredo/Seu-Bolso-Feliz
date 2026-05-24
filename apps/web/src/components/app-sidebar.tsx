@@ -12,6 +12,7 @@ import {
   Receipt,
   Repeat,
   Settings,
+  Store,
   TrendingDown,
   Upload,
   Wallet,
@@ -38,6 +39,7 @@ const navFinanceiro = [
   { title: "Recorrências", href: "/dashboard/recurring", icon: Repeat },
   { title: "Faturas", href: "/dashboard/statements", icon: CreditCard },
   { title: "Dívidas", href: "/dashboard/liabilities", icon: TrendingDown },
+  { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },
 ];
 
 const navGestao = [

@@ -3,11 +3,15 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "workers/*"
   ],
   "scripts": {
-    "dev": "cd apps/web && bun run dev",
+    "dev": "node scripts/dev-with-worker.mjs",
+    "dev:web": "cd apps/web && bun run dev",
+    "dev:worker": "cd workers/ingestion && bun run dev",
     "dev:mobile": "cd apps/mobile && bun run start",
+    "git:push:all:no-ci": "bash scripts/push-all-remotes-no-ci.sh",
     "build": "cd apps/web && bun run build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -21,20 +25,34 @@
     "generate-types": "bash scripts/generate-types.sh",
     "db:migrate": "npx supabase db push",
     "db:reset": "npx supabase db reset",
-    "html:docs": "rm -Rf docs-html/ && html-gen-docs --input docs --output docs-html --port 12468",
-    "prepare": "command -v git >/dev/null 2>&1 && husky || true"
+    "html:docs": "html-gen-docs --input docs/ --output docs-html/ --port 12468 --clean --theme catppuccin",
+    "get:gmail-token": "bun run workers/gmail-scanner/get-token.ts",
+    "prepare": "command -v git >/dev/null 2>&1 && husky || true",
+    "--- PIPELINE: Passo-a-Passo para dados no Dashboard ---": "",
+    "pipeline:passo00:db-reset": "npx supabase db reset",
+    "pipeline:passo00:db-start": "npx supabase start",
+    "pipeline:passo00:db-status": "npx supabase status",
+    "pipeline:passo01:scan-gmail": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50",
+    "pipeline:passo01:scan-gmail:dry": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50 --dry-run",
+    "pipeline:passo01:scan-gmail:10": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 10",
+    "pipeline:passo01:scan-local": "bun run workers/local-scanner/src/index.ts",
+    "pipeline:passo02:ingest": "bun run workers/ingestion/src/index.ts",
+    "pipeline:passo03:dev": "cd apps/web && bun run dev",
+    "pipeline:tudo": "echo '⚠️  Execute em terminais separados:\\n  Terminal 1: bun run pipeline:passo01:scan-gmail\\n  Terminal 2: bun run pipeline:passo02:ingest\\n  Terminal 3: bun run pipeline:passo03:dev\\n\\nOu use os passos individuais na ordem numérica.'"
   },
   "devDependencies": {
-    "@sbf/domain": "workspace:*",
-    "@sbf/validation": "workspace:*",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
+    "@sbf/domain": "workspace:*",
+    "@sbf/validation": "workspace:*",
+    "@supabase/supabase-js": "^2.100.0",
     "@types/bun": "latest",
+    "@types/pdf-parse": "^1.1.5",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
-    "html-gen-docs": "^1.5.2",
+    "html-gen-docs": "^1.9.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
@@ -51,6 +69,13 @@
     "radix-ui": "^1.4.3",
     "react-day-picker": "^9.14.0",
     "sonner": "^2.0.7",
+    "supabase": "^2.98.0",
     "zod": "~3.24.3"
+  },
+  "overrides": {
+    "zod-to-json-schema": "~3.24.6"
+  },
+  "resolutions": {
+    "zod-to-json-schema": "3.24.6"
   }
 }

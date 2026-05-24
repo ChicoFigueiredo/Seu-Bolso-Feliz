@@ -28,6 +28,98 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_chat_messages: {
+        Row: {
+          content: string | null;
+          created_at: string | null;
+          id: string;
+          latency_ms: number | null;
+          model: string | null;
+          role: string;
+          session_id: string;
+          tokens_used: number | null;
+          tool_call_id: string | null;
+          tool_calls: Json | null;
+          tool_name: string | null;
+          user_id: string;
+        };
+        Insert: {
+          content?: string | null;
+          created_at?: string | null;
+          id?: string;
+          latency_ms?: number | null;
+          model?: string | null;
+          role: string;
+          session_id: string;
+          tokens_used?: number | null;
+          tool_call_id?: string | null;
+          tool_calls?: Json | null;
+          tool_name?: string | null;
+          user_id: string;
+        };
+        Update: {
+          content?: string | null;
+          created_at?: string | null;
+          id?: string;
+          latency_ms?: number | null;
+          model?: string | null;
+          role?: string;
+          session_id?: string;
+          tokens_used?: number | null;
+          tool_call_id?: string | null;
+          tool_calls?: Json | null;
+          tool_name?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_messages_session_id_fkey";
+            columns: ["session_id"];
+            isOneToOne: false;
+            referencedRelation: "ai_chat_sessions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ai_chat_sessions: {
+        Row: {
+          context_id: string | null;
+          context_type: string | null;
+          created_at: string | null;
+          id: string;
+          message_count: number | null;
+          model: string;
+          title: string | null;
+          total_tokens_used: number | null;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          context_id?: string | null;
+          context_type?: string | null;
+          created_at?: string | null;
+          id?: string;
+          message_count?: number | null;
+          model?: string;
+          title?: string | null;
+          total_tokens_used?: number | null;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          context_id?: string | null;
+          context_type?: string | null;
+          created_at?: string | null;
+          id?: string;
+          message_count?: number | null;
+          model?: string;
+          title?: string | null;
+          total_tokens_used?: number | null;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       audit_logs: {
         Row: {
           action: string;
@@ -241,11 +333,237 @@ export type Database = {
             foreignKeyName: "consumption_metrics_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "consumption_metrics_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
             referencedRelation: "suppliers";
             referencedColumns: ["id"];
           },
           {
             foreignKeyName: "consumption_metrics_transaction_id_fkey";
+            columns: ["transaction_id"];
+            isOneToOne: false;
+            referencedRelation: "transactions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_fingerprints: {
+        Row: {
+          canonical_fingerprint: string | null;
+          content_hash: string;
+          created_at: string | null;
+          hash_algorithm: string | null;
+          id: string;
+          source_document_id: string;
+          user_id: string;
+        };
+        Insert: {
+          canonical_fingerprint?: string | null;
+          content_hash: string;
+          created_at?: string | null;
+          hash_algorithm?: string | null;
+          id?: string;
+          source_document_id: string;
+          user_id: string;
+        };
+        Update: {
+          canonical_fingerprint?: string | null;
+          content_hash?: string;
+          created_at?: string | null;
+          hash_algorithm?: string | null;
+          id?: string;
+          source_document_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_fingerprints_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_patterns: {
+        Row: {
+          confidence_threshold: number;
+          created_at: string;
+          document_type: string;
+          extraction_rules: Json;
+          feedback_count: number;
+          field_mappings: Json;
+          id: string;
+          institution_id: string | null;
+          is_active: boolean;
+          name: string;
+          sample_fingerprints: string[];
+          success_count: number;
+          supplier_id: string | null;
+          updated_at: string;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          confidence_threshold?: number;
+          created_at?: string;
+          document_type: string;
+          extraction_rules?: Json;
+          feedback_count?: number;
+          field_mappings?: Json;
+          id?: string;
+          institution_id?: string | null;
+          is_active?: boolean;
+          name: string;
+          sample_fingerprints?: string[];
+          success_count?: number;
+          supplier_id?: string | null;
+          updated_at?: string;
+          user_id: string;
+          version?: number;
+        };
+        Update: {
+          confidence_threshold?: number;
+          created_at?: string;
+          document_type?: string;
+          extraction_rules?: Json;
+          feedback_count?: number;
+          field_mappings?: Json;
+          id?: string;
+          institution_id?: string | null;
+          is_active?: boolean;
+          name?: string;
+          sample_fingerprints?: string[];
+          success_count?: number;
+          supplier_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_patterns_institution_id_fkey";
+            columns: ["institution_id"];
+            isOneToOne: false;
+            referencedRelation: "institutions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_patterns_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "document_patterns_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_splits: {
+        Row: {
+          amount: number;
+          category_id: string | null;
+          created_at: string;
+          description: string | null;
+          id: string;
+          source_document_id: string;
+          tags: string[];
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount: number;
+          category_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          source_document_id: string;
+          tags?: string[];
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          amount?: number;
+          category_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          source_document_id?: string;
+          tags?: string[];
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_splits_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "categories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_splits_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_transactions: {
+        Row: {
+          confidence: number | null;
+          created_at: string;
+          created_by: string;
+          id: string;
+          link_type: string;
+          notes: string | null;
+          source_document_id: string;
+          transaction_id: string;
+          user_id: string;
+        };
+        Insert: {
+          confidence?: number | null;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          link_type: string;
+          notes?: string | null;
+          source_document_id: string;
+          transaction_id: string;
+          user_id: string;
+        };
+        Update: {
+          confidence?: number | null;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          link_type?: string;
+          notes?: string | null;
+          source_document_id?: string;
+          transaction_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_transactions_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_transactions_transaction_id_fkey";
             columns: ["transaction_id"];
             isOneToOne: false;
             referencedRelation: "transactions";
@@ -308,6 +626,284 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      draft_batches: {
+        Row: {
+          approved_count: number | null;
+          created_at: string | null;
+          id: string;
+          name: string | null;
+          rejected_count: number | null;
+          run_id: string | null;
+          source_document_id: string | null;
+          status: string;
+          total_drafts: number | null;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          approved_count?: number | null;
+          created_at?: string | null;
+          id?: string;
+          name?: string | null;
+          rejected_count?: number | null;
+          run_id?: string | null;
+          source_document_id?: string | null;
+          status?: string;
+          total_drafts?: number | null;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          approved_count?: number | null;
+          created_at?: string | null;
+          id?: string;
+          name?: string | null;
+          rejected_count?: number | null;
+          run_id?: string | null;
+          source_document_id?: string | null;
+          status?: string;
+          total_drafts?: number | null;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "draft_batches_run_id_fkey";
+            columns: ["run_id"];
+            isOneToOne: false;
+            referencedRelation: "ingestion_runs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_batches_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      draft_records: {
+        Row: {
+          approved_at: string | null;
+          approved_by: string | null;
+          batch_id: string | null;
+          confidence_score: number | null;
+          corrections: Json | null;
+          created_at: string | null;
+          draft_data: Json;
+          draft_type: string;
+          extraction_result_id: string | null;
+          id: string;
+          posted_record_id: string | null;
+          posted_record_type: string | null;
+          reconciled_at: string | null;
+          reconciled_template_id: string | null;
+          reconciled_transaction_id: string | null;
+          reconciliation_candidates: Json | null;
+          reconciliation_status: string;
+          source_document_id: string | null;
+          status: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          approved_at?: string | null;
+          approved_by?: string | null;
+          batch_id?: string | null;
+          confidence_score?: number | null;
+          corrections?: Json | null;
+          created_at?: string | null;
+          draft_data: Json;
+          draft_type: string;
+          extraction_result_id?: string | null;
+          id?: string;
+          posted_record_id?: string | null;
+          posted_record_type?: string | null;
+          reconciled_at?: string | null;
+          reconciled_template_id?: string | null;
+          reconciled_transaction_id?: string | null;
+          reconciliation_candidates?: Json | null;
+          reconciliation_status?: string;
+          source_document_id?: string | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          approved_at?: string | null;
+          approved_by?: string | null;
+          batch_id?: string | null;
+          confidence_score?: number | null;
+          corrections?: Json | null;
+          created_at?: string | null;
+          draft_data?: Json;
+          draft_type?: string;
+          extraction_result_id?: string | null;
+          id?: string;
+          posted_record_id?: string | null;
+          posted_record_type?: string | null;
+          reconciled_at?: string | null;
+          reconciled_template_id?: string | null;
+          reconciled_transaction_id?: string | null;
+          reconciliation_candidates?: Json | null;
+          reconciliation_status?: string;
+          source_document_id?: string | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "draft_records_batch_id_fkey";
+            columns: ["batch_id"];
+            isOneToOne: false;
+            referencedRelation: "draft_batches";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_records_extraction_result_id_fkey";
+            columns: ["extraction_result_id"];
+            isOneToOne: false;
+            referencedRelation: "extraction_results";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_records_reconciled_template_id_fkey";
+            columns: ["reconciled_template_id"];
+            isOneToOne: false;
+            referencedRelation: "recurring_templates";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_records_reconciled_transaction_id_fkey";
+            columns: ["reconciled_transaction_id"];
+            isOneToOne: false;
+            referencedRelation: "transactions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "draft_records_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      extraction_results: {
+        Row: {
+          ai_enrichment_at: string | null;
+          ai_enrichment_type: string | null;
+          breakdown: Json | null;
+          category_suggestion: string | null;
+          competence_date: string | null;
+          confidence_per_field: Json | null;
+          consumption_data: Json | null;
+          contract_identifier: string | null;
+          created_at: string | null;
+          currency: string | null;
+          document_number: string | null;
+          due_date: string | null;
+          financial_intent: string | null;
+          financial_period_suggestion: Json | null;
+          id: string;
+          metadata: Json | null;
+          parsed_version_id: string;
+          priority_suggestion: string | null;
+          reasoning: string | null;
+          supplier_confidence: number | null;
+          supplier_id: string | null;
+          supplier_name_raw: string | null;
+          tags_suggestion: string[] | null;
+          total_amount: number | null;
+          user_id: string;
+        };
+        Insert: {
+          ai_enrichment_at?: string | null;
+          ai_enrichment_type?: string | null;
+          breakdown?: Json | null;
+          category_suggestion?: string | null;
+          competence_date?: string | null;
+          confidence_per_field?: Json | null;
+          consumption_data?: Json | null;
+          contract_identifier?: string | null;
+          created_at?: string | null;
+          currency?: string | null;
+          document_number?: string | null;
+          due_date?: string | null;
+          financial_intent?: string | null;
+          financial_period_suggestion?: Json | null;
+          id?: string;
+          metadata?: Json | null;
+          parsed_version_id: string;
+          priority_suggestion?: string | null;
+          reasoning?: string | null;
+          supplier_confidence?: number | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          tags_suggestion?: string[] | null;
+          total_amount?: number | null;
+          user_id: string;
+        };
+        Update: {
+          ai_enrichment_at?: string | null;
+          ai_enrichment_type?: string | null;
+          breakdown?: Json | null;
+          category_suggestion?: string | null;
+          competence_date?: string | null;
+          confidence_per_field?: Json | null;
+          consumption_data?: Json | null;
+          contract_identifier?: string | null;
+          created_at?: string | null;
+          currency?: string | null;
+          document_number?: string | null;
+          due_date?: string | null;
+          financial_intent?: string | null;
+          financial_period_suggestion?: Json | null;
+          id?: string;
+          metadata?: Json | null;
+          parsed_version_id?: string;
+          priority_suggestion?: string | null;
+          reasoning?: string | null;
+          supplier_confidence?: number | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          tags_suggestion?: string[] | null;
+          total_amount?: number | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "extraction_results_parsed_version_id_fkey";
+            columns: ["parsed_version_id"];
+            isOneToOne: false;
+            referencedRelation: "parsed_document_versions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "extraction_results_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "extraction_results_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
             referencedRelation: "suppliers";
@@ -452,6 +1048,156 @@ export type Database = {
         };
         Relationships: [];
       };
+      ingestion_jobs: {
+        Row: {
+          created_at: string | null;
+          error_details: Json | null;
+          error_message: string | null;
+          id: string;
+          max_retries: number | null;
+          metadata: Json | null;
+          needs_full_ai_review: boolean | null;
+          retry_count: number | null;
+          run_id: string;
+          source_document_id: string | null;
+          status: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          error_details?: Json | null;
+          error_message?: string | null;
+          id?: string;
+          max_retries?: number | null;
+          metadata?: Json | null;
+          needs_full_ai_review?: boolean | null;
+          retry_count?: number | null;
+          run_id: string;
+          source_document_id?: string | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          error_details?: Json | null;
+          error_message?: string | null;
+          id?: string;
+          max_retries?: number | null;
+          metadata?: Json | null;
+          needs_full_ai_review?: boolean | null;
+          retry_count?: number | null;
+          run_id?: string;
+          source_document_id?: string | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_jobs_run_id_fkey";
+            columns: ["run_id"];
+            isOneToOne: false;
+            referencedRelation: "ingestion_runs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ingestion_jobs_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ingestion_logs: {
+        Row: {
+          created_at: string | null;
+          details: Json | null;
+          id: string;
+          job_id: string | null;
+          level: string;
+          message: string;
+          run_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          details?: Json | null;
+          id?: string;
+          job_id?: string | null;
+          level?: string;
+          message: string;
+          run_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          details?: Json | null;
+          id?: string;
+          job_id?: string | null;
+          level?: string;
+          message?: string;
+          run_id?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_logs_job_id_fkey";
+            columns: ["job_id"];
+            isOneToOne: false;
+            referencedRelation: "ingestion_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ingestion_logs_run_id_fkey";
+            columns: ["run_id"];
+            isOneToOne: false;
+            referencedRelation: "ingestion_runs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ingestion_runs: {
+        Row: {
+          completed_at: string | null;
+          created_at: string | null;
+          id: string;
+          metadata: Json | null;
+          source_type: string;
+          started_at: string;
+          stats: Json | null;
+          status: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          completed_at?: string | null;
+          created_at?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          source_type: string;
+          started_at?: string;
+          stats?: Json | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          completed_at?: string | null;
+          created_at?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          source_type?: string;
+          started_at?: string;
+          stats?: Json | null;
+          status?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       institutions: {
         Row: {
           color: string | null;
@@ -567,6 +1313,13 @@ export type Database = {
             foreignKeyName: "liabilities_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "liabilities_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
             referencedRelation: "suppliers";
             referencedColumns: ["id"];
           },
@@ -660,6 +1413,104 @@ export type Database = {
             columns: ["tag_id"];
             isOneToOne: false;
             referencedRelation: "tags";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      parsed_document_versions: {
+        Row: {
+          confidence_score: number | null;
+          created_at: string | null;
+          id: string;
+          metadata: Json | null;
+          parser_type: string;
+          parser_version: string | null;
+          raw_text: string | null;
+          source_document_id: string;
+          structured_data: Json | null;
+          user_id: string;
+          version_number: number;
+        };
+        Insert: {
+          confidence_score?: number | null;
+          created_at?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          parser_type: string;
+          parser_version?: string | null;
+          raw_text?: string | null;
+          source_document_id: string;
+          structured_data?: Json | null;
+          user_id: string;
+          version_number?: number;
+        };
+        Update: {
+          confidence_score?: number | null;
+          created_at?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          parser_type?: string;
+          parser_version?: string | null;
+          raw_text?: string | null;
+          source_document_id?: string;
+          structured_data?: Json | null;
+          user_id?: string;
+          version_number?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "parsed_document_versions_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      pattern_feedback: {
+        Row: {
+          corrections: Json;
+          created_at: string;
+          feedback_type: string;
+          id: string;
+          notes: string | null;
+          pattern_id: string;
+          source_document_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          corrections?: Json;
+          created_at?: string;
+          feedback_type: string;
+          id?: string;
+          notes?: string | null;
+          pattern_id: string;
+          source_document_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          corrections?: Json;
+          created_at?: string;
+          feedback_type?: string;
+          id?: string;
+          notes?: string | null;
+          pattern_id?: string;
+          source_document_id?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pattern_feedback_pattern_id_fkey";
+            columns: ["pattern_id"];
+            isOneToOne: false;
+            referencedRelation: "document_patterns";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "pattern_feedback_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
             referencedColumns: ["id"];
           },
         ];
@@ -837,6 +1688,112 @@ export type Database = {
             foreignKeyName: "recurring_templates_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "recurring_templates_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      source_documents: {
+        Row: {
+          content_hash: string | null;
+          created_at: string | null;
+          document_type: string | null;
+          file_size_bytes: number | null;
+          filename: string;
+          gmail_attachment_id: string | null;
+          gmail_date: string | null;
+          gmail_from: string | null;
+          gmail_label: string | null;
+          gmail_message_id: string | null;
+          gmail_subject: string | null;
+          gmail_thread_id: string | null;
+          id: string;
+          local_filepath: string | null;
+          local_mtime: string | null;
+          metadata: Json | null;
+          mime_type: string | null;
+          origin_key: string;
+          origin_type: string;
+          status: string;
+          storage_path: string | null;
+          supplier_id: string | null;
+          supplier_name_raw: string | null;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          content_hash?: string | null;
+          created_at?: string | null;
+          document_type?: string | null;
+          file_size_bytes?: number | null;
+          filename: string;
+          gmail_attachment_id?: string | null;
+          gmail_date?: string | null;
+          gmail_from?: string | null;
+          gmail_label?: string | null;
+          gmail_message_id?: string | null;
+          gmail_subject?: string | null;
+          gmail_thread_id?: string | null;
+          id?: string;
+          local_filepath?: string | null;
+          local_mtime?: string | null;
+          metadata?: Json | null;
+          mime_type?: string | null;
+          origin_key: string;
+          origin_type: string;
+          status?: string;
+          storage_path?: string | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          content_hash?: string | null;
+          created_at?: string | null;
+          document_type?: string | null;
+          file_size_bytes?: number | null;
+          filename?: string;
+          gmail_attachment_id?: string | null;
+          gmail_date?: string | null;
+          gmail_from?: string | null;
+          gmail_label?: string | null;
+          gmail_message_id?: string | null;
+          gmail_subject?: string | null;
+          gmail_thread_id?: string | null;
+          id?: string;
+          local_filepath?: string | null;
+          local_mtime?: string | null;
+          metadata?: Json | null;
+          mime_type?: string | null;
+          origin_key?: string;
+          origin_type?: string;
+          status?: string;
+          storage_path?: string | null;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "source_documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "source_documents_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
             referencedRelation: "suppliers";
             referencedColumns: ["id"];
           },
@@ -950,6 +1907,13 @@ export type Database = {
             foreignKeyName: "statement_items_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "statement_items_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
             referencedRelation: "suppliers";
             referencedColumns: ["id"];
           },
@@ -1003,6 +1967,13 @@ export type Database = {
           valid_until?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "supplier_aliases_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
           {
             foreignKeyName: "supplier_aliases_supplier_id_fkey";
             columns: ["supplier_id"];
@@ -1063,6 +2034,13 @@ export type Database = {
             foreignKeyName: "supplier_contracts_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "supplier_contracts_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
             referencedRelation: "suppliers";
             referencedColumns: ["id"];
           },
@@ -1091,6 +2069,13 @@ export type Database = {
           user_id?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "supplier_tags_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
           {
             foreignKeyName: "supplier_tags_supplier_id_fkey";
             columns: ["supplier_id"];
@@ -1250,6 +2235,7 @@ export type Database = {
           origin_type: string;
           priority: string | null;
           recurring_instance_id: string | null;
+          source_document_id: string | null;
           statement_cycle_id: string | null;
           supplier_id: string | null;
           type: string;
@@ -1273,6 +2259,7 @@ export type Database = {
           origin_type?: string;
           priority?: string | null;
           recurring_instance_id?: string | null;
+          source_document_id?: string | null;
           statement_cycle_id?: string | null;
           supplier_id?: string | null;
           type: string;
@@ -1296,6 +2283,7 @@ export type Database = {
           origin_type?: string;
           priority?: string | null;
           recurring_instance_id?: string | null;
+          source_document_id?: string | null;
           statement_cycle_id?: string | null;
           supplier_id?: string | null;
           type?: string;
@@ -1339,11 +2327,25 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "transactions_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "transactions_statement_cycle_id_fkey";
             columns: ["statement_cycle_id"];
             isOneToOne: false;
             referencedRelation: "statement_cycles";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "transactions_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
           },
           {
             foreignKeyName: "transactions_supplier_id_fkey";
@@ -1458,6 +2460,7 @@ export type Database = {
         Row: {
           created_at: string;
           encrypted_value: string;
+          encryption_version: number;
           entity_id: string | null;
           entity_type: string | null;
           id: string;
@@ -1468,6 +2471,7 @@ export type Database = {
         Insert: {
           created_at?: string;
           encrypted_value: string;
+          encryption_version?: number;
           entity_id?: string | null;
           entity_type?: string | null;
           id?: string;
@@ -1478,6 +2482,7 @@ export type Database = {
         Update: {
           created_at?: string;
           encrypted_value?: string;
+          encryption_version?: number;
           entity_id?: string | null;
           entity_type?: string | null;
           id?: string;
@@ -1489,6 +2494,20 @@ export type Database = {
       };
     };
     Views: {
+      mv_supplier_spending: {
+        Row: {
+          first_transaction_date: string | null;
+          last_transaction_date: string | null;
+          periods_active: number | null;
+          supplier_id: string | null;
+          supplier_name: string | null;
+          supplier_type: string | null;
+          total_spent: number | null;
+          transaction_count: number | null;
+          user_id: string | null;
+        };
+        Relationships: [];
+      };
       v_expenses_deduplicated: {
         Row: {
           amount: number | null;
@@ -1508,6 +2527,20 @@ export type Database = {
       };
     };
     Functions: {
+      confirm_supplier_associations: {
+        Args: { p_confirmations: Json; p_user_id: string };
+        Returns: Json;
+      };
+      decrypt_secret: { Args: { ciphertext: string }; Returns: string };
+      encrypt_secret: { Args: { plaintext: string }; Returns: string };
+      fn_reconciliation_progress: {
+        Args: { p_batch_id: string };
+        Returns: {
+          progress_pct: number;
+          reconciled_count: number;
+          total_count: number;
+        }[];
+      };
       generate_financial_periods: {
         Args: {
           p_anchor_date?: string;
@@ -1519,6 +2552,45 @@ export type Database = {
       get_financial_period_for_date: {
         Args: { p_date: string };
         Returns: string;
+      };
+      increment_session_tokens: {
+        Args: { p_messages?: number; p_session_id: string; p_tokens: number };
+        Returns: undefined;
+      };
+      merge_suppliers: {
+        Args: {
+          p_source_id: string;
+          p_source_name: string;
+          p_target_id: string;
+          p_target_name: string;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
+      refresh_mv_supplier_spending: { Args: never; Returns: undefined };
+      register_pattern_feedback: {
+        Args: {
+          p_corrections?: Json;
+          p_feedback_type: string;
+          p_pattern_id: string;
+          p_source_document_id: string;
+        };
+        Returns: {
+          corrections: Json;
+          created_at: string;
+          feedback_type: string;
+          id: string;
+          notes: string | null;
+          pattern_id: string;
+          source_document_id: string | null;
+          user_id: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "pattern_feedback";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
       };
       search_suppliers: {
         Args: { p_limit?: number; p_query: string };

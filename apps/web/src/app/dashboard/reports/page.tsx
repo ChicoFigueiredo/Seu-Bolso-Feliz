@@ -9,6 +9,7 @@ interface SearchParams {
   mode?: string;
   from?: string;
   to?: string;
+  supplier?: string;
 }
 
 export default async function ReportsPage({
@@ -52,42 +53,70 @@ export default async function ReportsPage({
     to = d.toISOString().split("T")[0]!;
   }
 
-  // Queries
-  const [incomeRes, expenseRes, byCategoryRes, byTypeRes, topExpensesRes] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select("amount")
-      .eq("type", "income")
-      .gte("event_date", from)
-      .lte("event_date", to),
-    supabase
-      .from("transactions")
-      .select("amount")
-      .in("type", ["expense", "fee", "interest_charge"])
-      .gte("event_date", from)
-      .lte("event_date", to),
-    supabase
-      .from("transactions")
-      .select("amount, categories(name)")
-      .in("type", ["expense", "fee", "interest_charge"])
-      .gte("event_date", from)
-      .lte("event_date", to)
-      .not("category_id", "is", null)
-      .order("amount", { ascending: false }),
-    supabase
-      .from("transactions")
-      .select("type, amount")
-      .gte("event_date", from)
-      .lte("event_date", to),
-    supabase
-      .from("transactions")
-      .select("description, amount, event_date, type")
-      .in("type", ["expense", "fee", "interest_charge"])
-      .gte("event_date", from)
-      .lte("event_date", to)
-      .order("amount", { ascending: false })
-      .limit(10),
-  ]);
+  const supplierId = params.supplier || null;
+
+  // Fetch suppliers for the filter dropdown
+  const suppliersRes = await supabase
+    .from("suppliers")
+    .select("id, name")
+    .eq("is_active", true)
+    .order("name");
+
+  // Queries — each applies date range + optional supplier filter
+  const incomeQ = supabase
+    .from("transactions")
+    .select("amount")
+    .eq("type", "income")
+    .gte("event_date", from)
+    .lte("event_date", to);
+  const expenseQ = supabase
+    .from("transactions")
+    .select("amount")
+    .in("type", ["expense", "fee", "interest_charge"])
+    .gte("event_date", from)
+    .lte("event_date", to);
+  const byCategoryQ = supabase
+    .from("transactions")
+    .select("amount, categories(name)")
+    .in("type", ["expense", "fee", "interest_charge"])
+    .gte("event_date", from)
+    .lte("event_date", to)
+    .not("category_id", "is", null)
+    .order("amount", { ascending: false });
+  const byTypeQ = supabase
+    .from("transactions")
+    .select("type, amount")
+    .gte("event_date", from)
+    .lte("event_date", to);
+  const topExpensesQ = supabase
+    .from("transactions")
+    .select("description, amount, event_date, type")
+    .in("type", ["expense", "fee", "interest_charge"])
+    .gte("event_date", from)
+    .lte("event_date", to)
+    .order("amount", { ascending: false })
+    .limit(10);
+  const bySupplierQ = supabase
+    .from("transactions")
+    .select("amount, suppliers(name)")
+    .in("type", ["expense", "fee", "interest_charge"])
+    .gte("event_date", from)
+    .lte("event_date", to)
+    .not("supplier_id", "is", null)
+    .order("amount", { ascending: false });
+
+  // Apply supplier filter when selected
+  if (supplierId) {
+    incomeQ.eq("supplier_id", supplierId);
+    expenseQ.eq("supplier_id", supplierId);
+    byCategoryQ.eq("supplier_id", supplierId);
+    byTypeQ.eq("supplier_id", supplierId);
+    topExpensesQ.eq("supplier_id", supplierId);
+    bySupplierQ.eq("supplier_id", supplierId);
+  }
+
+  const [incomeRes, expenseRes, byCategoryRes, byTypeRes, topExpensesRes, bySupplierRes] =
+    await Promise.all([incomeQ, expenseQ, byCategoryQ, byTypeQ, topExpensesQ, bySupplierQ]);
 
   const totalIncome = (incomeRes.data ?? []).reduce((s, r) => s + r.amount, 0);
   const totalExpense = (expenseRes.data ?? []).reduce((s, r) => s + r.amount, 0);
@@ -106,6 +135,14 @@ export default async function ReportsPage({
   for (const row of byTypeRes.data ?? []) {
     typeMap.set(row.type, (typeMap.get(row.type) ?? 0) + row.amount);
   }
+
+  // Group by supplier
+  const supplierMap = new Map<string, number>();
+  for (const row of bySupplierRes.data ?? []) {
+    const supplierName = (row.suppliers as { name: string } | null)?.name ?? "Sem fornecedor";
+    supplierMap.set(supplierName, (supplierMap.get(supplierName) ?? 0) + row.amount);
+  }
+  const bySupplier = [...supplierMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
 
   const typeLabels: Record<string, string> = {
     income: "Receita",
@@ -128,7 +165,10 @@ export default async function ReportsPage({
         </p>
       </div>
 
-      <ReportFilters current={{ mode: params.mode, from, to }} />
+      <ReportFilters
+        current={{ mode: params.mode, from, to, supplier: supplierId ?? undefined }}
+        suppliers={suppliersRes.data ?? []}
+      />
 
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -197,6 +237,45 @@ export default async function ReportsPage({
                       <div className="h-2 w-full rounded-full bg-muted">
                         <div
                           className="h-full rounded-full bg-primary"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* By Supplier */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="size-5" />
+              Despesas por Fornecedor
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {bySupplier.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma despesa com fornecedor neste período.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {bySupplier.map(([name, amount]) => {
+                  const pct = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
+                  return (
+                    <div key={name} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-medium">{name}</span>
+                        <span className="text-muted-foreground">
+                          {formatCurrency(amount)} ({pct.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-violet-500"
                           style={{ width: `${pct}%` }}
                         />
                       </div>

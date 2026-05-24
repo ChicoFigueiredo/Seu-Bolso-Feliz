@@ -40,6 +40,17 @@ export type SupplierAlias = Row<"supplier_aliases">;
 export type SupplierContract = Row<"supplier_contracts">;
 export type ConsumptionMetric = Row<"consumption_metrics">;
 
+// ── Ingestão ──
+export type IngestionRun = Row<"ingestion_runs">;
+export type DraftBatch = Row<"draft_batches">;
+export type SourceDocument = Row<"source_documents">;
+export type IngestionJob = Row<"ingestion_jobs">;
+export type DocumentFingerprint = Row<"document_fingerprints">;
+export type ParsedDocumentVersion = Row<"parsed_document_versions">;
+export type ExtractionResult = Row<"extraction_results">;
+export type DraftRecord = Row<"draft_records">;
+export type IngestionLog = Row<"ingestion_logs">;
+
 // ── Tabelas de junção ──
 export type TransactionTag = Row<"transaction_tags">;
 export type RecurringTemplateTag = Row<"recurring_template_tags">;
@@ -143,3 +154,25 @@ export type SearchSupplierResult = Functions["search_suppliers"]["Returns"][numb
 
 // ── Deduplication source types (ADR-001) ──
 export type DeduplicatedSourceType = "statement_item" | "transaction";
+
+// ── Ingestion enums ──
+export type IngestionJobStatus =
+  | "discovered"
+  | "downloaded"
+  | "hashed"
+  | "queued"
+  | "parsed"
+  | "classified"
+  | "reconciled"
+  | "drafted"
+  | "pending_review"
+  | "approved"
+  | "posted"
+  | "failed"
+  | "skipped";
+
+export type IngestionLogLevel = "debug" | "info" | "warn" | "error";
+
+export type DraftBatchStatus = "open" | "reviewing" | "approved" | "rejected" | "partial";
+
+export type DraftRecordStatus = "pending" | "approved" | "rejected" | "edited" | "posted";
