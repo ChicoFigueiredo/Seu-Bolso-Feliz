@@ -148,6 +148,16 @@
         "zod": "~3.24.3",
       },
     },
+    "workers/financial-evidence-worker": {
+      "name": "@sbf/worker-financial-evidence",
+      "version": "0.0.1",
+      "dependencies": {
+        "@sbf/domain": "workspace:*",
+        "@sbf/ingestion-types": "workspace:*",
+        "@sbf/operations": "workspace:*",
+        "@supabase/supabase-js": "^2",
+      },
+    },
     "workers/gmail-scanner": {
       "name": "@sbf/worker-gmail-scanner",
       "version": "0.0.1",
@@ -924,6 +934,8 @@
     "@sbf/validation": ["@sbf/validation@workspace:packages/validation"],
 
     "@sbf/web": ["@sbf/web@workspace:apps/web"],
+
+    "@sbf/worker-financial-evidence": ["@sbf/worker-financial-evidence@workspace:workers/financial-evidence-worker"],
 
     "@sbf/worker-gmail-scanner": ["@sbf/worker-gmail-scanner@workspace:workers/gmail-scanner"],
 

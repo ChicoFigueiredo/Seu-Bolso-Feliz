@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(bun run *)",
+      "Bash(git stash *)",
+      "Bash(git commit -m 'docs\\(passo-a-passo\\): guia de rotação de chaves Supabase após vazamento *)"
+    ]
+  }
+}
