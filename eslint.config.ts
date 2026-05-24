@@ -7,6 +7,16 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
+    files: ["scripts/**/*.mjs", "apps/**/scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+  },
+  {
     ignores: [
       "node_modules/",
       "dist/",
@@ -15,6 +25,7 @@ export default tseslint.config(
       "supabase/functions/**",
       "docs-html/",
       "**/*.d.ts",
+      "**/database.types.ts", // auto-gerado pelo Supabase CLI
       "src/",
       "build.ts",
       "styles/",

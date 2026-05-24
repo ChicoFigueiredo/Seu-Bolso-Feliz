@@ -1,0 +1,333 @@
+# Parecer de Análise Cruzada entre Markdown e Código
+
+**Data da análise:** 2026-04-15  
+**Escopo:** inventário dos arquivos Markdown da repo, leitura do propósito declarado neles e confronto com o código efetivamente presente no repositório.
+
+## 1. Inventário analisado
+
+Foram encontrados **60 arquivos Markdown versionados na repo**:
+
+- **1** `README.md` na raiz
+- **47** arquivos em `docs/`
+- **12** arquivos em `.github/`
+
+Agrupamento principal em `docs/`:
+
+- `docs/adrs`: **6**
+- `docs/aprenda`: **3**
+- `docs/planejamento`: **6**
+- `docs/passo-a-passo`: **7**
+- `docs/checklists`: **6**
+- `docs/refinos`: **16**
+- `docs/Veronica`: **2**
+- `docs/README.md`: **1**
+
+Agrupamento principal em `.github/`:
+
+- `.github/prompts.md`
+- `.github/prompts/prompts-ate-20260331220400.md`
+- `.github/copilot-instructions.md`
+- `.github/agents/*.agent.md` (**9** arquivos)
+
+## 2. Como li a documentação
+
+O conjunto de Markdown não é homogêneo. Ele se divide, na prática, em quatro camadas:
+
+1. **Especificação de produto e domínio**
+   - `docs/Veronica/001-prompt.inicial.md`
+   - `.github/copilot-instructions.md`
+   - `.github/agents/*.agent.md`
+
+2. **Histórico de decisões e refinos**
+   - `docs/refinos/...`
+   - `.github/prompts.md`
+   - `.github/prompts/prompts-ate-20260331220400.md`
+
+3. **Decisões arquiteturais e operacionais**
+   - `docs/adrs/*.md`
+   - `docs/planejamento/*.md`
+   - `docs/checklists/*.md`
+
+4. **Material de onboarding/explicação**
+   - `docs/aprenda/*.md`
+   - `docs/passo-a-passo/*.md`
+   - `docs/README.md`
+   - `README.md`
+
+O arquivo mais importante para entender a virada de prioridade do projeto é mesmo **`.github/prompts.md`**. Ele registra a mudança de foco do repositório:
+
+- sair de um MVP financeiro genérico;
+- priorizar ingestão documental real;
+- colocar isso em staging;
+- acoplar IA como copiloto operacional;
+- adiar mobile;
+- tratar a documentação mais nova como canônica.
+
+## 3. Propósito do projeto levantado nos Markdown
+
+O propósito consolidado que emerge dos Markdown é:
+
+- construir um sistema de organização financeira pessoal com domínio forte;
+- separar corretamente despesa, transferência interna, pagamento de fatura e passivo;
+- suportar ciclos financeiros personalizados;
+- permitir documentos, ingestão, revisão humana e trilha de auditoria;
+- evoluir para um fluxo operacional com IA, chat e MCP;
+- tratar **ingestão + revisão + assistente** como eixo prioritário do momento.
+
+Esse propósito aparece de forma muito consistente entre:
+
+- `docs/Veronica/001-prompt.inicial.md`
+- `.github/copilot-instructions.md`
+- `.github/prompts.md`
+- `docs/adrs/ADR-005-arquitetura-integracao-ia-chat-openai.md`
+- `docs/adrs/ADR-006-padroes-documentais-aprendizado.md`
+
+## 4. O que o código mostra hoje
+
+O código confirma que a repo já não é mais um template simples. Hoje ela é um monorepo com:
+
+- **workspaces Bun** no `package.json` raiz
+- **apps**: `apps/web`, `apps/mcp-server`, `apps/mobile`
+- **packages**: domínio, validação, tipos, operações, tokens, config
+- **workers**: `ingestion`, `gmail-scanner`, `local-scanner`
+- **Supabase** com **21 migrations**
+- cerca de **40 `CREATE TABLE`** nas migrations
+- **35 páginas `page.tsx`** no app web
+- **18 arquivos de teste** com cerca de **287 casos `it(...)`**
+
+Também há sinais de legado do bootstrap inicial:
+
+- `README.md` raiz ainda descreve um template Bun genérico
+- existe uma árvore antiga em `src/` na raiz, paralela ao app real em `apps/web`
+
+## 5. Cruzamento principal: documentação x implementação
+
+### 5.1. Onde há alinhamento forte
+
+**Domínio financeiro**
+
+- Forte alinhamento.
+- `packages/domain` implementa ciclos financeiros, amortização, deduplicação e priorização.
+- Os testes confirmam que as regras centrais descritas em `docs/Veronica/001-prompt.inicial.md` e `.github/copilot-instructions.md` realmente viraram comportamento.
+
+**Arquitetura de monorepo**
+
+- Forte alinhamento.
+- Os ADRs e planos falam em monorepo com apps, packages, workers e Supabase.
+- Isso está materializado no layout atual do repositório.
+
+**Pipeline de ingestão como eixo do projeto**
+
+- Alinhamento parcial para forte.
+- Há schema, workers, páginas web, logs, revisão, padrões, reconciliação e chat.
+- O projeto claramente já foi reorientado pelo que está em `.github/prompts.md`.
+
+**IA como camada assistiva**
+
+- Alinhamento parcial.
+- Existe `apps/web/src/app/api/chat/route.ts`, `apps/web/src/lib/ai/system-prompt.ts`, `apps/web/src/lib/ai/tools.ts` e `apps/web/src/components/ai-chat-drawer.tsx`.
+- A IA já está acoplada ao app e ao domínio de ingestão.
+
+**Padrões documentais e feedback**
+
+- Alinhamento bom no banco e razoável na aplicação.
+- Há migration para `document_patterns` e `pattern_feedback`.
+- Há páginas, server actions e tools para padrões.
+
+### 5.2. Onde há alinhamento parcial ou frágil
+
+**Web app**
+
+- A documentação recente descreve uma UI bem mais madura do que o README raiz sugere.
+- O código confirma que o app web está de fato avançado.
+- Porém parte dos documentos históricos ainda subestima ou descreve estágios antigos.
+
+**MCP**
+
+- Há um MCP real em `apps/mcp-server`.
+- Mas o conjunto de tools ainda não fecha tudo que os prompts mais ambiciosos projetam, especialmente em Gmail e operação remota completa.
+
+**Mobile**
+
+- A documentação mais nova diz que mobile não é prioridade.
+- O código confirma isso.
+- `apps/mobile` tem só `package.json` e `tsconfig.json`, sem implementação de app.
+
+## 6. Achados críticos de desalinhamento
+
+### 6.1. `README.md` raiz está objetivamente obsoleto
+
+Ele ainda descreve um template Bun simples e não o monorepo real.
+
+**Parecer:** hoje ele atrapalha mais do que ajuda.
+
+### 6.2. `docs/README.md` está parcialmente desatualizado e com links incoerentes
+
+O índice faz referências úteis, mas parte dos links para ADRs não acompanha a estrutura real em `docs/adrs/`.
+
+**Parecer:** serve como mapa histórico, mas não como guia confiável sem revisão.
+
+### 6.3. O fluxo de upload manual para ingestão parece quebrado por drift de schema
+
+`supabase/functions/trigger-ingestion/index.ts` usa nomenclaturas antigas:
+
+- `file_name`
+- `file_path`
+- `source_type`
+- `current_step`
+
+Mas a schema real de `source_documents`/`ingestion_jobs` usa:
+
+- `filename`
+- `storage_path`
+- `origin_type`
+- `status` e `metadata`
+
+Além disso, `UploadDocuments` e `AIChatDrawer` dependem dessa edge function.
+
+**Parecer:** a documentação recente trata upload manual como entregue, mas o código aponta risco concreto de quebra operacional.
+
+### 6.4. Há mais de um contrato antigo/novo convivendo no ecossistema de ingestão
+
+Exemplos:
+
+- `workers/local-scanner/src/scanner.ts` usa o contrato novo
+- `apps/mcp-server/src/tools/scan-local-folder.ts` usa campos que não batem com a schema atual, como `file_size` e `metadata` em `source_documents`
+- `apps/mcp-server/src/tools/reprocess-document.ts` força `source_type` do run como `LOCAL_FILE`, independentemente da origem real do documento
+
+**Parecer:** existe drift estrutural entre banco, workers, MCP e edge functions.
+
+### 6.5. Aprovar draft ainda não equivale a “lançar no ledger”
+
+Os documentos mais recentes sugerem que revisão aprovada passa a valer no sistema e alimenta dashboard.
+
+No código, `approveDraftRecord()` e `approveDraftBatch()` em `apps/web/src/app/actions/ingestion.ts` apenas:
+
+- atualizam `status`
+- gravam `approved_at`
+- gravam `approved_by`
+
+Não há materialização automática em:
+
+- `transactions`
+- `recurring_templates`
+- `liabilities`
+- `consumption_metrics`
+
+**Parecer:** a documentação de execução está adiantada em relação ao comportamento real.
+
+### 6.6. Os tipos compartilhados estão desatualizados em relação ao banco e ao app
+
+`packages/shared-types/src/domain/index.ts` define enums que não batem com o uso atual.
+
+Exemplos:
+
+- `DraftRecordStatus` fala em `pending` e `edited`, enquanto o app usa `pending_review` e `corrected`
+- `IngestionJobStatus` inclui `skipped`, mas a migration principal não o define
+
+O próprio código já admite drift em `apps/web/src/lib/supabase/untyped.ts`.
+
+**Parecer:** o repositório tem uma camada tipada importante, mas ela não está totalmente sincronizada com a verdade do banco.
+
+### 6.7. ADR-005 não bate 100% com a implementação atual do chat
+
+O ADR fala em:
+
+- `Browser -> /api/chat -> Edge Function -> OpenAI`
+
+O código atual faz:
+
+- `Browser -> /api/chat -> OpenAI` diretamente via `@ai-sdk/openai`
+
+**Parecer:** a direção estratégica está alinhada, mas a implementação real simplificou a arquitetura e ficou diferente do ADR.
+
+### 6.8. ADR-006 fala em versionamento; parte do app atual ainda atualiza em-place
+
+O ADR-006 descreve criação de nova versão para mudanças relevantes.
+
+No código:
+
+- existe `createPatternVersion()` nas server actions
+- mas `updateDocumentPattern` em `apps/web/src/lib/ai/tools.ts` atualiza o padrão existente diretamente
+
+**Parecer:** há alinhamento conceitual, mas a regra de versionamento ainda não está uniformemente aplicada.
+
+### 6.9. A documentação histórica exagera ou envelheceu em números
+
+Exemplos de drift quantitativo:
+
+- docs falam em **17** ou **19 migrations**; o código hoje tem **21**
+- docs falam em **26 rotas/telas**; o app hoje tem **35 páginas**
+- docs falam em **168+ testes**; o repositório hoje tem cerca de **287 casos `it(...)`**
+
+**Parecer:** a documentação recente descreve a direção certa, mas os números já não são estáveis.
+
+### 6.10. Há mistura de duas linhas de produto/documento
+
+Convivem lado a lado:
+
+- uma trilha antiga de `documents` genéricos em `apps/web/src/app/dashboard/documents/page.tsx`
+- uma trilha nova e prioritária de ingestão em `/dashboard/ingestion/*`
+
+**Parecer:** isso reforça a sensação de transição de arquitetura e pode confundir implementação futura.
+
+## 7. Leitura específica de `.github/prompts.md`
+
+Esse arquivo é central para entender o repositório, mas não deve ser lido como especificação técnica final.
+
+Ele funciona melhor como:
+
+- trilha de decisão
+- registro de mudança de prioridade
+- explicação do porquê da existência de ingestão, chat, padrões e reconciliação
+
+Ele funciona pior como:
+
+- contrato exato de implementação
+- checklist confiável de “já entregue”
+
+O valor dele está em mostrar que o projeto saiu de uma modelagem de finanças pessoais ampla para um foco operacional muito concreto:
+
+- ingestão real
+- staging testável
+- revisão humana
+- IA acoplada
+- MCP como camada operacional
+
+**Parecer sobre `.github/prompts.md`:** excelente como contexto estratégico; perigoso como fonte única da verdade do estado atual.
+
+## 8. Fonte da verdade recomendada
+
+Hoje, a hierarquia mais segura para orientar entendimento e implementação é:
+
+1. **Código + migrations + testes**
+2. **ADRs recentes**, especialmente `ADR-005` e `ADR-006`
+3. **Checklist e planejamento mais novos**
+4. **`.github/prompts.md`** como histórico de direcionamento
+5. **Refinos antigos** apenas como contexto
+6. **`README.md` raiz** como documento a ser despriorizado até ser reescrito
+
+## 9. Conclusão
+
+Meu parecer é que o repositório tem **propósito claro e código substancial**, principalmente em:
+
+- domínio financeiro
+- modelagem de banco
+- pipeline de ingestão
+- UI web de gestão e revisão
+- integração inicial com IA
+
+Mas ele também tem **drift relevante entre documentação e implementação**, especialmente em:
+
+- contratos de ingestão
+- status reais das entregas
+- edge functions e tools MCP
+- sincronização de tipos
+- README e índices documentais
+
+Em termos práticos, o projeto **não está “só na documentação”**. Há muita implementação real e valiosa.  
+Ao mesmo tempo, a documentação mais otimista, principalmente checklist e partes dos refinamentos, **antecipa comportamentos que o código ainda não fecha ponta a ponta**.
+
+## 10. Parecer final
+
+**Síntese curta:** o propósito levantado nos Markdown está majoritariamente coerente com a direção do código, sobretudo após a guinada registrada em `.github/prompts.md`; porém o estado real da implementação é mais irregular do que a documentação recente sugere, com pontos críticos de inconsistência no fluxo de ingestão, no posting dos drafts e na sincronização entre schema, tipos, workers, MCP e edge functions.

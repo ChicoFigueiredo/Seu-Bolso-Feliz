@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Plus, Receipt } from "lucide-react";
+import { Plus, Receipt, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import {
@@ -45,7 +45,7 @@ export default async function TransactionsPage({
   let query = supabase
     .from("transactions")
     .select(
-      "id, description, amount, event_date, type, is_confirmed, priority, supplier_id, suppliers(name)",
+      "id, description, amount, event_date, type, is_confirmed, priority, supplier_id, source_document_id, suppliers(name)",
       { count: "exact" },
     )
     .order("event_date", { ascending: false });
@@ -113,6 +113,7 @@ export default async function TransactionsPage({
                     <TableHead>Tipo</TableHead>
                     <TableHead>Confirmado</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
+                    <TableHead>Documento</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -148,6 +149,20 @@ export default async function TransactionsPage({
                       >
                         {t.type === "income" || t.type === "refund" ? "+" : "-"}
                         {formatCurrency(Math.abs(t.amount))}
+                      </TableCell>
+                      <TableCell>
+                        {(t as { source_document_id?: string | null }).source_document_id ? (
+                          <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
+                            <Link
+                              href={`/dashboard/documents/${(t as { source_document_id: string }).source_document_id}`}
+                            >
+                              <FileText className="size-3.5" />
+                              Ver
+                            </Link>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" asChild>

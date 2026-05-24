@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "supabase-local": {
+      "type": "http",
+      "url": "http://127.0.0.1:54321/mcp"
+    },
+    "sbf": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "${workspaceFolder}/apps/mcp-server/src/index.ts"],
+      "env": {
+        "SUPABASE_URL": "http://127.0.0.1:54321",
+        "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q",
+        "LOCAL_USER_ID": "00000000-0000-0000-0000-000000000001"
+      }
+    }
+  }
+}

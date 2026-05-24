@@ -64,9 +64,9 @@ export function getCurrentPeriod(
   const nextStart = getStartDate(endYear, endMonth, startDay);
   const endDate = new Date(nextStart.getTime() - 86400000); // -1 dia
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const isCurrent = today >= startDate && today <= endDate;
+  const refNormalized = new Date(ref);
+  refNormalized.setHours(0, 0, 0, 0);
+  const isCurrent = refNormalized >= startDate && refNormalized <= endDate;
 
   return {
     startDate,
@@ -100,8 +100,8 @@ export function generatePeriods(
     }
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const anchorNormalized = new Date(anchor);
+  anchorNormalized.setHours(0, 0, 0, 0);
 
   for (let i = 0; i < count; i++) {
     let currentMonth = month + i;
@@ -122,7 +122,7 @@ export function generatePeriods(
     const nextStart = getStartDate(nextYear, nextMonth, startDay);
     const endDate = new Date(nextStart.getTime() - 86400000);
 
-    const isCurrent = today >= startDate && today <= endDate;
+    const isCurrent = anchorNormalized >= startDate && anchorNormalized <= endDate;
 
     periods.push({
       startDate,

@@ -3,16 +3,25 @@
 import { useRouter, usePathname } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FiltersProps {
   current: {
     mode?: string;
     from?: string;
     to?: string;
+    supplier?: string;
   };
+  suppliers: { id: string; name: string }[];
 }
 
-export function ReportFilters({ current }: FiltersProps) {
+export function ReportFilters({ current, suppliers }: FiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -66,6 +75,26 @@ export function ReportFilters({ current }: FiltersProps) {
           </div>
         </>
       )}
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">Fornecedor</label>
+        <Select
+          value={current.supplier ?? "all"}
+          onValueChange={(v) => update("supplier", v === "all" ? undefined : v)}
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Todos" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            {suppliers.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

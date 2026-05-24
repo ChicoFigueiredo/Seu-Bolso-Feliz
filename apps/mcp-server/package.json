@@ -1,0 +1,16 @@
+{
+  "name": "@sbf/mcp-server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "MCP server local para operação assistida via Copilot/VS Code",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@sbf/ingestion-types": "workspace:*",
+    "@sbf/operations": "workspace:*",
+    "@supabase/supabase-js": "^2.100.0"
+  }
+}

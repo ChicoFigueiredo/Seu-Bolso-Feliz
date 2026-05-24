@@ -1,0 +1,15 @@
+{
+  "name": "@sbf/worker-gmail-scanner",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Scanner de e-mails do Gmail para ingestão de comprovantes",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "@sbf/operations": "workspace:*",
+    "@sbf/ingestion-types": "workspace:*",
+    "@supabase/supabase-js": "^2"
+  }
+}

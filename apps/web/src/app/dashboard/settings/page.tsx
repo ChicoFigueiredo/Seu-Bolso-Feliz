@@ -16,7 +16,17 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Plus, Trash2, Settings2 } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Settings2,
+  ScanLine,
+  Files,
+  ClipboardCheck,
+  BookOpen,
+  Activity,
+} from "lucide-react";
+import Link from "next/link";
 
 interface Category {
   id: string;
@@ -319,6 +329,73 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Avançado / Pipeline */}
+      <Card id="avancado">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings2 className="size-5" />
+            Avançado / Pipeline
+          </CardTitle>
+          <CardDescription>
+            Ferramentas técnicas de ingestão, revisão e automação de documentos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Link
+              href="/dashboard/documents"
+              className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
+            >
+              <ScanLine className="size-4 shrink-0 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Documentos</p>
+                <p className="text-xs text-muted-foreground">Visão geral do pipeline</p>
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/ingestion/documents"
+              className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
+            >
+              <Files className="size-4 shrink-0 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Documentos Ingeridos</p>
+                <p className="text-xs text-muted-foreground">Listagem técnica por job</p>
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/ingestion/review"
+              className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
+            >
+              <ClipboardCheck className="size-4 shrink-0 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Revisão</p>
+                <p className="text-xs text-muted-foreground">Aprovação e rejeição de drafts</p>
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/ingestion/patterns"
+              className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
+            >
+              <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Padrões</p>
+                <p className="text-xs text-muted-foreground">Templates de extração por tipo</p>
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/ingestion/logs"
+              className="flex items-center gap-3 rounded-lg border p-3 text-sm hover:bg-muted/50 transition-colors"
+            >
+              <Activity className="size-4 shrink-0 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Logs de Ingestão</p>
+                <p className="text-xs text-muted-foreground">Histórico e diagnóstico</p>
+              </div>
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>

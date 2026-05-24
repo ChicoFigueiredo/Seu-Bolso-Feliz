@@ -1,0 +1,15 @@
+{
+  "name": "@sbf/worker-local-scanner",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Scanner de arquivos locais para ingestão de documentos",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "@sbf/operations": "workspace:*",
+    "@sbf/ingestion-types": "workspace:*",
+    "@supabase/supabase-js": "^2"
+  }
+}
