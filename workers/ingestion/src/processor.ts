@@ -12,6 +12,7 @@ import { writeLog, type LogContext } from "./logger";
 import { parseDocument } from "./parsers/parse-orchestrator";
 import { generateDrafts } from "./drafts/draft-generator";
 import { findReconciliationCandidates, isDuplicateRisk } from "./reconciliation/reconciliation";
+import { upsertObligationFromEvidence } from "./obligations";
 import {
   enrichWithAiLite,
   computeCriticalCoverage,
@@ -562,12 +563,17 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   // (neste ponto os drafts ainda não existem — reconciliação ocorre antes de gerar)
   // Carregamos extraction_result para obter os dados necessários
   let reconciliationConflicts = 0;
+  // Hoisted: a mesma linha de extração alimenta a reconciliação e, logo
+  // abaixo, a convergência para a obrigação canônica.
+  let extractionRow: Record<string, unknown> | null = null;
   if (meta.extraction_result_id) {
     const { data: er } = await supabase
       .from("extraction_results")
       .select("*")
       .eq("id", meta.extraction_result_id as string)
       .single();
+
+    extractionRow = (er as Record<string, unknown> | null) ?? null;
 
     if (er) {
       const draftDataForReconciliation: Record<string, unknown> = {
@@ -608,6 +614,47 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     }
   }
 
+  // Convergência para a obrigação financeira canônica.
+  //
+  // Fica aqui, ainda dentro do estado `classified`, porque a obrigação é o que
+  // permite reconhecer que este documento fala da MESMA conta que outro já
+  // visto — antes de gerar um segundo lote de revisão para ela. Nenhum status
+  // novo é introduzido: a máquina de estados segue intacta.
+  let obligationId: string | null = null;
+  try {
+    const obligation = await upsertObligationFromEvidence({
+      supabase,
+      userId: ctx.userId,
+      sourceDocumentId: job.source_document_id,
+      extraction: extractionRow,
+      intent: (meta.financial_intent as string | null) ?? null,
+      confidence: (meta.confidence as number | null) ?? null,
+    });
+
+    if (obligation) {
+      obligationId = obligation.obligationId;
+      meta.obligation_id = obligation.obligationId;
+      meta.obligation_matched_by = obligation.matchedBy;
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.INFO,
+        obligation.isNew
+          ? `Obrigação criada (${obligation.obligationId.slice(0, 8)})`
+          : `Evidência anexada a obrigação existente por ${obligation.matchedBy} — ${obligation.evidenceCount} evidência(s)`,
+      );
+    }
+  } catch (err) {
+    // Falhar aqui não deve derrubar a ingestão: o documento ainda tem valor
+    // como draft, mesmo sem obrigação canônica.
+    await writeLog(
+      supabase,
+      ctx,
+      IngestionLogLevel.WARN,
+      `Não foi possível convergir para obrigação: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   ok = await transitionJob(
     supabase,
     job.id,
@@ -634,6 +681,7 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     parsedVersionId: meta.parsed_version_id as string,
     parserType: meta.parser_type as string,
     confidence: (meta.confidence as number) ?? 0.3,
+    obligationId,
   });
 
   ok = await transitionJob(

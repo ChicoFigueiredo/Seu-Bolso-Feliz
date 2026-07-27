@@ -14,3 +14,4 @@ export * from "./draft";
 export * from "./draft/migrate-v0";
 export * from "./draft/parse";
 export * from "./mappers/extraction-to-draft";
+export * from "./obligation/intent-to-obligation-type";

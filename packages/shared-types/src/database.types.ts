@@ -2551,6 +2551,15 @@ export type Database = {
       };
       decrypt_secret: { Args: { ciphertext: string }; Returns: string };
       encrypt_secret: { Args: { plaintext: string }; Returns: string };
+      fn_upsert_financial_obligation: {
+        Args: {
+          p_evidence: Json;
+          p_keys: Json;
+          p_payload: Json;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
       fn_materialize_draft_record: {
         Args: {
           p_actor?: string;

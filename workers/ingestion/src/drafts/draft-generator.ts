@@ -32,6 +32,8 @@ export interface DraftGenerationInput {
   parsedVersionId: string;
   parserType: string;
   confidence: number;
+  /** Obrigação canônica desta evidência, quando houve convergência (P0-7). */
+  obligationId?: string | null;
 }
 
 export interface DraftGenerationResult {
@@ -54,6 +56,7 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
     parsedVersionId,
     parserType,
     confidence,
+    obligationId = null,
   } = input;
 
   // Buscar extraction_result se existir
@@ -67,6 +70,37 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
 
     if (er) {
       extractionData = er as unknown as Record<string, unknown>;
+    }
+  }
+
+  // Supressão por obrigação: se esta obrigação já tem draft vivo, uma segunda
+  // evidência dela (o mesmo boleto vindo do Gmail e da pasta local) não deve
+  // gerar um segundo lote de revisão. Este é o retorno concreto de convergir
+  // evidências para uma obrigação canônica.
+  if (obligationId) {
+    const { data: existing } = await supabase
+      .from("draft_records")
+      .select("id, batch_id, draft_type")
+      .eq("user_id", userId)
+      .eq("obligation_id", obligationId)
+      .not("status", "in", "(rejected,archived)");
+
+    if (existing && existing.length > 0) {
+      const batchId = (existing[0] as { batch_id: string | null }).batch_id;
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.INFO,
+        `Obrigação ${obligationId.slice(0, 8)} já possui ${existing.length} draft(s); evidência anexada sem gerar novo lote.`,
+      );
+      return {
+        batchId: batchId ?? "",
+        drafts: existing.map((d) => ({
+          id: (d as { id: string }).id,
+          draftType: (d as { draft_type: DraftType }).draft_type,
+          confidence,
+        })),
+      };
     }
   }
 
@@ -149,6 +183,7 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
         status: "pending_review",
         draft_data: draftData ?? { description: "Documento sem dados extraídos" },
         draft_schema_version: draftData ? DRAFT_SCHEMA_VERSION : 0,
+        obligation_id: obligationId,
         confidence_score: draftConfidence,
       })
       .select("id")
