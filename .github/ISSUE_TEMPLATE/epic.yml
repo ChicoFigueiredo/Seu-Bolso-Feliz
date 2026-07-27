@@ -1,0 +1,22 @@
+name: Épico
+description: Bloco de trabalho ligado a um marco do §18 do plano mestre.
+labels: ["epic"]
+body:
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Marco
+      options:
+        - "Marco 1 — Um documento fecha o ciclo"
+        - "Marco 2 — Fatura de cartão utilizável"
+        - "Marco 3 — Backfill supervisionado"
+        - "Marco 4 — Planejamento financeiro"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado esperado
+      description: Que decisão financeira o usuário passa a conseguir tomar.
+    validations:
+      required: true

@@ -1,0 +1,24 @@
+name: Feature
+description: Agrupa issues que entregam uma capacidade.
+labels: ["feature"]
+body:
+  - type: input
+    id: epic
+    attributes:
+      label: Épico pai
+      placeholder: "#"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Objetivo
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Quando esta feature está pronta
+      description: Critério observável no produto, não na base de código.
+    validations:
+      required: true

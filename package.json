@@ -46,7 +46,8 @@
     "pipeline:scan-local": "bun run workers/cli/src/index.ts --local --dir ./inbox",
     "pipeline:process": "bun run workers/cli/src/index.ts --process",
     "pipeline:tudo": "bun run workers/cli/src/index.ts --both --process",
-    "cli": "bun run workers/cli/src/index.ts"
+    "cli": "bun run workers/cli/src/index.ts",
+    "test:e2e": "vitest run --project e2e"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.3",

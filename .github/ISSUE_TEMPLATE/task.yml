@@ -1,0 +1,60 @@
+name: Issue (task)
+description: Unidade executável de trabalho, filha de uma feature.
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **Este repositório é público.** Não inclua caminhos com dados
+        > pessoais, valores reais, nomes de instituições, ids de projeto
+        > Supabase, chaves ou trechos de documentos financeiros.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Feature pai
+      description: Número da feature a que esta issue pertence (ex. #12).
+      placeholder: "#"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto
+      description: Por que isto existe. Qual problema real resolve.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Critérios de aceite
+      description: Observáveis e verificáveis. "Compila" não é critério.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Testes
+      description: Caminho do arquivo de teste que prova o critério.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidência
+      description: Como demonstrar que funciona (comando, saída, link).
+    validations:
+      required: true
+
+  - type: textarea
+    id: deps
+    attributes:
+      label: Dependências e riscos
+      description: Use "Blocked by #N" para dependências.
