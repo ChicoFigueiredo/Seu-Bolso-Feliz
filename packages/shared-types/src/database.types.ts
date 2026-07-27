@@ -2476,6 +2476,10 @@ export type Database = {
       };
       user_secrets: {
         Row: {
+          contract_identifier: string | null;
+          label: string | null;
+          last_used_at: string | null;
+          success_count: number;
           created_at: string;
           encrypted_value: string;
           encryption_version: number;
@@ -2487,6 +2491,10 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          contract_identifier?: string | null;
+          label?: string | null;
+          last_used_at?: string | null;
+          success_count?: number;
           created_at?: string;
           encrypted_value: string;
           encryption_version?: number;
@@ -2498,6 +2506,10 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          contract_identifier?: string | null;
+          label?: string | null;
+          last_used_at?: string | null;
+          success_count?: number;
           created_at?: string;
           encrypted_value?: string;
           encryption_version?: number;
@@ -2559,6 +2571,32 @@ export type Database = {
           p_user_id: string;
         };
         Returns: Json;
+      };
+      fn_get_secrets: {
+        Args: { p_limit?: number; p_secret_type: string; p_user_id: string };
+        Returns: {
+          contract_identifier: string | null;
+          entity_id: string | null;
+          entity_type: string | null;
+          label: string | null;
+          secret_id: string;
+          value: string;
+        }[];
+      };
+      fn_set_secret: {
+        Args: {
+          p_contract_identifier?: string | null;
+          p_entity_id?: string | null;
+          p_entity_type?: string | null;
+          p_label?: string | null;
+          p_plaintext: string;
+          p_secret_type: string;
+        };
+        Returns: string;
+      };
+      fn_mark_secret_used: {
+        Args: { p_secret_id: string; p_user_id: string };
+        Returns: undefined;
       };
       fn_materialize_draft_record: {
         Args: {
