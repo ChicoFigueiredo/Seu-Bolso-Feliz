@@ -10,10 +10,10 @@ export function getSupabaseClient(): SupabaseClient {
   if (_client) return _client;
 
   const url = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY;
 
   if (!key) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for worker");
+    throw new Error("SUPABASE_SECRET_KEY is required for worker");
   }
 
   _client = createClient(url, key, {

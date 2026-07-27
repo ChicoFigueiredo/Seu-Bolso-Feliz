@@ -702,7 +702,7 @@ Deno.serve(async (req) => {
   // Usar service_role_key para bypass de RLS
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    Deno.env.get("SUPABASE_SECRET_KEY")!,
   );
 
   // Validar que ambos pertencem ao mesmo user_id

@@ -46,7 +46,7 @@
 
 - [ ] Supabase local rodando: `supabase status` deve mostrar URL `http://127.0.0.1:54321`
 - [ ] `.env` com `GOOGLE_MAIL_CLIENT_ID`, `GOOGLE_MAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`
-- [ ] `.env.local` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `LOCAL_USER_ID`
+- [ ] `.env.local` com `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `LOCAL_USER_ID`
 - [ ] Label "Comprovantes" criada no Gmail
 - [ ] Bun instalado (`bun --version`)
 
@@ -119,11 +119,11 @@ Deve conter **todas** estas variáveis:
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon_key_local>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable_key_local>
 
 # Workers (Supabase local)
 SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_SERVICE_ROLE_KEY=<service_role_key_local>
+SUPABASE_SECRET_KEY=<service_role_key_local>
 LOCAL_USER_ID=<seu_user_id>
 
 # Gmail
@@ -398,7 +398,7 @@ Aprove o batch <id>
 
 ## 10. Troubleshooting {#10-troubleshooting}
 
-### ❌ `SUPABASE_SERVICE_ROLE_KEY is required`
+### ❌ `SUPABASE_SECRET_KEY is required`
 
 A key não está no `.env.local`. Verifique e atualize:
 

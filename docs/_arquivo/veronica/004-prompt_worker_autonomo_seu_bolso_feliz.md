@@ -120,7 +120,7 @@ Critério de aceite:
 - Não depender exclusivamente de IA.
 - Não materializar registros financeiros automaticamente sem revisão humana nesta fase.
 - Não gravar secrets no frontend.
-- Não usar `SUPABASE_SERVICE_ROLE_KEY` no cliente web.
+- Não usar `SUPABASE_SECRET_KEY` no cliente web.
 - Não criar VPS como requisito obrigatório.
 - Não quebrar RLS.
 - Não esconder erro em `console.log` sem persistir em `ingestion_logs`.

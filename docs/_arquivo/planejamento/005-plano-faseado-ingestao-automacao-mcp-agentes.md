@@ -161,8 +161,8 @@ Infraestrutura real de deployment e ambientes prontos para ingestão.
 | Variável | Local | Staging | Production |
 |----------|-------|---------|------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | supabase local | projeto staging | projeto production |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | local | staging | production |
-| `SUPABASE_SERVICE_ROLE_KEY` | local | staging | production |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | local | staging | production |
+| `SUPABASE_SECRET_KEY` | local | staging | production |
 | `SUPABASE_DB_PASSWORD` | local | staging | production |
 | `SUPABASE_PROJECT_ID` | — | staging ID | production ID |
 | `SUPABASE_ACCESS_TOKEN` | token pessoal | CI/CD | CI/CD |
@@ -418,7 +418,7 @@ INGESTION JOB STATES:
 
 **Modo de execução:**
 - `bun run workers/ingestion/src/index.ts` — processo standalone
-- Configurável por env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `POLL_INTERVAL_MS`
+- Configurável por env vars: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `POLL_INTERVAL_MS`
 
 ### 2.5 Scanner Local
 
@@ -682,7 +682,7 @@ apps/mcp-server/
       "args": ["run", "apps/mcp-server/src/index.ts"],
       "env": {
         "SUPABASE_URL": "${env:SUPABASE_URL}",
-        "SUPABASE_SERVICE_ROLE_KEY": "${env:SUPABASE_SERVICE_ROLE_KEY}"
+        "SUPABASE_SECRET_KEY": "${env:SUPABASE_SECRET_KEY}"
       }
     }
   }

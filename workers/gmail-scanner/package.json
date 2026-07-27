@@ -8,6 +8,7 @@
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {
+    "@sbf/domain": "workspace:*",
     "@sbf/operations": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
     "@supabase/supabase-js": "^2"

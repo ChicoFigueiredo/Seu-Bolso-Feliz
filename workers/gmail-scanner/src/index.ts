@@ -13,10 +13,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey, computeContentHash } from "@sbf/operations";
+import { classifyFinancialIntent } from "@sbf/domain";
 
 import { createGmailClient, type GmailClient } from "./gmail-client";
 import {
   processMessage,
+  extractBodyText,
   decodeBase64Url,
   type AttachmentInfo,
   type MessageMetadata,
@@ -27,24 +29,33 @@ import { getSupabaseClient } from "./supabase";
 
 interface ScanOptions {
   label: string;
+  query: string;
   limit: number;
   dryRun: boolean;
   batchSize: number;
+  includeBody: boolean;
+  includeAttachments: boolean;
 }
 
 function parseArgs(): ScanOptions {
   const args = process.argv.slice(2);
   const options: ScanOptions = {
     label: "Comprovantes",
+    query: "",
     limit: Infinity,
     dryRun: false,
     batchSize: 50,
+    includeBody: false,
+    includeAttachments: true,
   };
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case "--label":
         options.label = args[++i] ?? "Comprovantes";
+        break;
+      case "--query":
+        options.query = args[++i] ?? "";
         break;
       case "--limit":
         options.limit = Number(args[++i]) || Infinity;
@@ -55,14 +66,23 @@ function parseArgs(): ScanOptions {
       case "--batch-size":
         options.batchSize = Number(args[++i]) || 50;
         break;
+      case "--include-body":
+        options.includeBody = true;
+        break;
+      case "--no-attachments":
+        options.includeAttachments = false;
+        break;
       case "--help":
         console.log(`
 Gmail Scanner — Escaneia label do Gmail e cria jobs de ingestão
 
 Opções:
   --label <nome>       Nome da label do Gmail (padrão: Comprovantes)
+  --query <q>          Query Gmail adicional (ex: 'from:nubank newer_than:30d')
   --limit <n>          Processar no máximo N mensagens (padrão: todas)
   --batch-size <n>     Tamanho do batch para listagem (padrão: 50)
+  --include-body       Processar corpo de emails (além de anexos)
+  --no-attachments     Não processar anexos (somente corpo)
   --dry-run            Apenas listar, não criar jobs nem fazer upload
   --help               Exibir esta ajuda
 `);
@@ -81,6 +101,8 @@ interface ScanStats {
   attachmentsFound: number;
   attachmentsUploaded: number;
   jobsCreated: number;
+  bodiesProcessed: number;
+  bodiesSkipped: number;
   skippedAlreadyProcessed: number;
   skippedByMsgFilename: number;
   skippedByContentHash: number;
@@ -94,6 +116,8 @@ function createStats(): ScanStats {
     attachmentsFound: 0,
     attachmentsUploaded: 0,
     jobsCreated: 0,
+    bodiesProcessed: 0,
+    bodiesSkipped: 0,
     skippedAlreadyProcessed: 0,
     skippedByMsgFilename: 0,
     skippedByContentHash: 0,
@@ -313,6 +337,128 @@ async function processAttachment(
 }
 
 /**
+ * Processa o corpo de um email como evidência financeira.
+ * Aplica FinancialIntent classifier e cria source_document + job se houver sinal.
+ */
+async function processEmailBody(
+  supabase: SupabaseClient,
+  userId: string,
+  runId: string,
+  metadata: MessageMetadata,
+  bodyText: string,
+  stats: ScanStats,
+): Promise<void> {
+  const bodyFilename = `gmail-message-${metadata.messageId}.txt`;
+
+  // Dedup: já processamos o corpo desta mensagem?
+  if (await isAlreadyProcessedByMsgFile(supabase, userId, metadata.messageId, bodyFilename)) {
+    stats.bodiesSkipped++;
+    return;
+  }
+
+  // Classificar intenção financeira
+  const classification = classifyFinancialIntent({
+    text: bodyText,
+    subject: metadata.subject,
+    from: metadata.from,
+  });
+
+  if (classification.intent === "unknown" || classification.confidence < 0.2) {
+    stats.bodiesSkipped++;
+    return;
+  }
+
+  const bodyBuffer = new TextEncoder().encode(bodyText);
+  const contentHash = await computeContentHash(bodyBuffer.buffer);
+
+  if (await isContentHashDuplicate(supabase, userId, contentHash)) {
+    stats.bodiesSkipped++;
+    return;
+  }
+
+  const originKey = buildOriginKey({
+    type: "gmail",
+    messageId: metadata.messageId,
+    contentHash,
+  });
+
+  // Upload corpo como .txt no Storage
+  const storagePath = `${userId}/${crypto.randomUUID()}/${bodyFilename}`;
+  const { error: uploadError } = await supabase.storage
+    .from("ingestion-originals")
+    .upload(storagePath, bodyBuffer, { contentType: "text/plain; charset=utf-8" });
+
+  if (uploadError) {
+    console.error(`  ❌ Body upload failed (${metadata.messageId}): ${uploadError.message}`);
+    stats.errors++;
+    return;
+  }
+
+  const { data: doc, error: docError } = await supabase
+    .from("source_documents")
+    .insert({
+      user_id: userId,
+      origin_type: SourceDocumentOrigin.GMAIL,
+      origin_key: originKey,
+      gmail_message_id: metadata.messageId,
+      gmail_thread_id: metadata.threadId,
+      gmail_label: metadata.labelIds.join(","),
+      gmail_date: parseEmailDate(metadata.date),
+      gmail_from: metadata.from,
+      gmail_subject: metadata.subject,
+      filename: bodyFilename,
+      mime_type: "text/plain",
+      file_size_bytes: bodyBuffer.byteLength,
+      storage_path: storagePath,
+      content_hash: contentHash,
+      status: "active",
+    })
+    .select("id")
+    .single();
+
+  if (docError || !doc) {
+    console.error(`  ❌ Body source_document failed (${metadata.messageId}): ${docError?.message}`);
+    stats.errors++;
+    return;
+  }
+
+  await supabase.from("document_fingerprints").insert({
+    source_document_id: doc.id,
+    user_id: userId,
+    content_hash: contentHash,
+    hash_algorithm: "sha256",
+  });
+
+  const { error: jobError } = await supabase.from("ingestion_jobs").insert({
+    run_id: runId,
+    user_id: userId,
+    source_document_id: doc.id,
+    status: IngestionJobStatus.DISCOVERED,
+    metadata: {
+      filename: bodyFilename,
+      origin: "gmail_body",
+      financial_intent: classification.intent,
+      financial_confidence: classification.confidence,
+      gmail_subject: metadata.subject,
+      gmail_from: metadata.from,
+      gmail_date: parseEmailDate(metadata.date),
+    },
+  });
+
+  if (jobError) {
+    console.error(`  ❌ Body job failed (${metadata.messageId}): ${jobError.message}`);
+    stats.errors++;
+    return;
+  }
+
+  stats.bodiesProcessed++;
+  stats.jobsCreated++;
+  console.log(
+    `  📄 Corpo: ${classification.intent} (${Math.round(classification.confidence * 100)}%) — job criado`,
+  );
+}
+
+/**
  * Formata bytes em formato legível.
  */
 function formatBytes(bytes: number): string {
@@ -332,7 +478,8 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
 
   console.log(`\n📧 Gmail Scanner — Label: "${options.label}"`);
   console.log(`   Limit: ${options.limit === Infinity ? "todas" : options.limit}`);
-  console.log(`   Dry run: ${options.dryRun ? "SIM" : "NÃO"}`);
+  console.log(`   Modo: ${options.dryRun ? "DRY RUN" : "REAL"}`);
+  console.log(`   Processar: ${[options.includeAttachments && "anexos", options.includeBody && "corpo"].filter(Boolean).join(", ") || "nada"}`);
   console.log("");
 
   // 1. Buscar label ID
@@ -405,12 +552,13 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
         const message = await gmail.getMessage(msgRef.id);
         const processed = processMessage(message);
 
-        if (processed.attachments.length === 0) {
+        const hasAttachments = processed.attachments.length > 0;
+        const willProcessAttachments = options.includeAttachments && hasAttachments;
+        const willProcessBody = options.includeBody;
+
+        if (!willProcessAttachments && !willProcessBody) {
           continue;
         }
-
-        stats.messagesWithAttachments++;
-        stats.attachmentsFound += processed.attachments.length;
 
         const { metadata, attachments } = processed;
         const dateStr = metadata.date ? new Date(metadata.date).toLocaleDateString("pt-BR") : "?";
@@ -418,21 +566,49 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
         console.log(`📨 [${totalProcessed}] ${dateStr} — ${metadata.subject.substring(0, 60)}`);
         console.log(`   De: ${metadata.from.substring(0, 50)} | Anexos: ${attachments.length}`);
 
+        if (willProcessAttachments) {
+          stats.messagesWithAttachments++;
+          stats.attachmentsFound += attachments.length;
+        }
+
         if (options.dryRun) {
-          for (const att of attachments) {
-            console.log(`  📎 ${att.filename} (${att.mimeType}, ${formatBytes(att.size)})`);
+          if (willProcessAttachments) {
+            for (const att of attachments) {
+              console.log(`  📎 ${att.filename} (${att.mimeType}, ${formatBytes(att.size)})`);
+            }
+          }
+          if (willProcessBody) {
+            console.log(`  📄 Corpo: será classificado em modo real`);
           }
           continue;
         }
 
         // Processar cada attachment
-        for (const attachment of attachments) {
+        if (willProcessAttachments) {
+          for (const attachment of attachments) {
+            try {
+              await processAttachment(gmail, supabase, userId, runId, metadata, attachment, stats);
+            } catch (err) {
+              stats.errors++;
+              console.error(
+                `  ❌ Erro processando ${attachment.filename}:`,
+                err instanceof Error ? err.message : String(err),
+              );
+            }
+          }
+        }
+
+        // Processar corpo do email se solicitado
+        if (willProcessBody) {
           try {
-            await processAttachment(gmail, supabase, userId, runId, metadata, attachment, stats);
+            const bodyText = extractBodyText(message);
+            if (bodyText.length >= 50) {
+              await processEmailBody(supabase, userId, runId, metadata, bodyText, stats);
+            }
           } catch (err) {
             stats.errors++;
             console.error(
-              `  ❌ Erro processando ${attachment.filename}:`,
+              `  ❌ Erro processando corpo (${metadata.messageId}):`,
               err instanceof Error ? err.message : String(err),
             );
           }
@@ -477,6 +653,10 @@ async function main(): Promise<void> {
   console.log(`   Anexos encontrados:         ${stats.attachmentsFound}`);
   if (!options.dryRun) {
     console.log(`   Anexos enviados ao Storage: ${stats.attachmentsUploaded}`);
+    if (options.includeBody) {
+      console.log(`   Corpos com sinal financeiro:${stats.bodiesProcessed}`);
+      console.log(`   Corpos ignorados:           ${stats.bodiesSkipped}`);
+    }
     console.log(`   Jobs de ingestão criados:   ${stats.jobsCreated}`);
   }
   console.log(`   Já processados (skip):      ${stats.skippedAlreadyProcessed}`);

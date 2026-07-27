@@ -344,8 +344,8 @@ npx supabase init
 ```bash
 # ── Supabase ──
 NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-anon-key-aqui
-SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key-aqui
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sua-publishable-key-aqui
+SUPABASE_SECRET_KEY=sua-secret-key-aqui
 SUPABASE_DB_PASSWORD=sua-senha-aqui
 
 # ── Supabase CLI (para scripts e CI) ──

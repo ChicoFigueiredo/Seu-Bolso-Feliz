@@ -75,9 +75,9 @@ bun install -g supabase vercel
 
 | Variável                        | Preview (staging)      | Production                |
 | ------------------------------- | ---------------------- | ------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | URL do projeto staging | URL do projeto production |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key staging       | Anon key production       |
-| `SUPABASE_SERVICE_ROLE_KEY`     | Service role staging   | Service role production   |
+| `NEXT_PUBLIC_SUPABASE_URL`            | URL do projeto staging      | URL do projeto production |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key staging    | Publishable key production |
+| `SUPABASE_SECRET_KEY`                 | Secret key staging          | Secret key production      |
 
 3. Marque service_role_key como **Sensitive** (não visível no log de build)
 
@@ -117,8 +117,8 @@ bun install -g supabase vercel
 4. Aguarde a criação (pode levar 1-2 minutos)
 5. Anote:
    - **Project URL** (ex: `https://xxxxx.supabase.co`)
-   - **Anon Key** (Settings → API → `anon` `public`)
-   - **Service Role Key** (Settings → API → `service_role` — **NUNCA exponha publicamente**)
+   - **Publishable Key** (Settings → API → `publishable`)
+   - **Secret Key** (Settings → API → `secret` — **NUNCA exponha publicamente**)
    - **Database Password** (a que você definiu)
    - **Project ID** (visível na URL: `supabase.com/dashboard/project/XXXXX`)
 
@@ -211,8 +211,8 @@ supabase functions deploy retroactive-supplier-association
 | Variável                    | Valor                      | Protegida | Masked |
 | --------------------------- | -------------------------- | --------- | ------ |
 | `SUPABASE_URL`              | URL do projeto staging     | ✅        | ❌     |
-| `SUPABASE_ANON_KEY`         | Anon key staging           | ✅        | ✅     |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role staging       | ✅        | ✅     |
+| `SUPABASE_PUBLISHABLE_KEY`  | Publishable key staging    | ✅        | ✅     |
+| `SUPABASE_SECRET_KEY`       | Secret key staging         | ✅        | ✅     |
 | `SUPABASE_DB_PASSWORD`      | Senha do banco staging     | ✅        | ✅     |
 | `SUPABASE_PROJECT_ID`       | Project ID staging         | ✅        | ❌     |
 | `SUPABASE_ACCESS_TOKEN`     | Token pessoal Supabase CLI | ✅        | ✅     |
@@ -222,8 +222,8 @@ supabase functions deploy retroactive-supplier-association
 | Variável                    | Valor                     | Protegida | Masked |
 | --------------------------- | ------------------------- | --------- | ------ |
 | `SUPABASE_URL`              | URL do projeto production | ✅        | ❌     |
-| `SUPABASE_ANON_KEY`         | Anon key production       | ✅        | ✅     |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role production   | ✅        | ✅     |
+| `SUPABASE_PUBLISHABLE_KEY`  | Publishable key production | ✅        | ✅     |
+| `SUPABASE_SECRET_KEY`       | Secret key production      | ✅        | ✅     |
 | `SUPABASE_DB_PASSWORD`      | Senha do banco production | ✅        | ✅     |
 | `SUPABASE_PROJECT_ID`       | Project ID production     | ✅        | ❌     |
 
@@ -566,8 +566,8 @@ Crie ou atualize o `.env` na raiz do projeto:
 ```env
 # Supabase Local (desenvolvimento)
 SUPABASE_URL=http://localhost:54321
-SUPABASE_SERVICE_ROLE_KEY=<sua_service_role_key_local>
-SUPABASE_ANON_KEY=<sua_anon_key_local>
+SUPABASE_SECRET_KEY=<sua_secret_key_local>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sua_publishable_key_local>
 
 # Gmail (para workers)
 GOOGLE_OAUTH_CLIENT_ID=<client_id>
@@ -591,7 +591,7 @@ O time criará o arquivo `.vscode/mcp.json`:
       "args": ["run", "apps/mcp-server/src/index.ts"],
       "env": {
         "SUPABASE_URL": "${env:SUPABASE_URL}",
-        "SUPABASE_SERVICE_ROLE_KEY": "${env:SUPABASE_SERVICE_ROLE_KEY}",
+        "SUPABASE_SECRET_KEY": "${env:SUPABASE_SECRET_KEY}",
       },
     },
   },

@@ -23,7 +23,7 @@ import { IngestionJobStatus, IngestionRunStatus, SourceDocumentOrigin } from "@s
 
 const SUPABASE_URL = "http://127.0.0.1:54321";
 const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+  process.env.SUPABASE_SECRET_KEY ??
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
 const TEST_USER_ID = "00000000-0000-0000-0000-000000000001";
 const INBOX_DIR = join(process.cwd(), "__tests__/integration/.test-inbox");
@@ -36,7 +36,7 @@ beforeAll(async () => {
   });
   process.env.LOCAL_USER_ID = TEST_USER_ID;
   process.env.SUPABASE_URL = SUPABASE_URL;
-  process.env.SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_KEY;
+  process.env.SUPABASE_SECRET_KEY = SUPABASE_SERVICE_KEY;
 
   // Garantir que o user existe no auth (necessário para RLS/FK)
   await supabase.auth.admin

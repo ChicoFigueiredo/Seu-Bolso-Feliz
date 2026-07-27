@@ -83,8 +83,8 @@ Edite `.env.local`:
 ```bash
 # ── Supabase Local ──
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key do supabase start>
-SUPABASE_SERVICE_ROLE_KEY=<service_role key do supabase start>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable key do supabase start>
+SUPABASE_SECRET_KEY=<secret key do supabase start>
 SUPABASE_DB_PASSWORD=postgres
 
 # ── App ──
@@ -395,7 +395,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 Deno.serve(async (req) => {
   const supabaseClient = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    Deno.env.get("SUPABASE_SECRET_KEY")!,
   );
 
   // Lógica aqui...

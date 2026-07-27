@@ -1,57 +1,20 @@
-# Planejamento — Seu Bolso Feliz
+# Documentação — Seu Bolso Feliz
 
-Este diretório contém a documentação de planejamento técnico do projeto, incluindo ADRs (Architecture Decision Records) e guias de implementação.
+## Fonte da verdade
 
----
+➡️ **[`specs/`](specs/)** — specs autoritativos, um por capacidade, verificados contra o código.
+Comece por [`specs/00-estado-real.md`](specs/00-estado-real.md).
 
-## Índice de Documentos
+O guia operacional para agentes/devs é o [`CLAUDE.md`](../CLAUDE.md) na raiz.
 
-### ADRs (Architecture Decision Records)
+## Histórico
 
-| #       | Documento                                                                                                            | Status      | Resumo                                                                              |
-| ------- | -------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
-| ADR-001 | [Deduplicação Transação vs Item de Fatura](ADR-001-deduplicacao-transacao-item-fatura.md)                            | ✅ Aprovado | Vínculo explícito via FK, regras de precedência, view `v_expenses_deduplicated`     |
-| ADR-002 | [Norma de `consumption_metrics`](ADR-002-norma-consumption-metrics.md)                                               | ✅ Aprovado | Distinção métrica vs atributo vs metadado, constraint no banco, convenções por tipo |
-| ADR-003 | [Governança de Aliases de Fornecedor](ADR-003-governanca-aliases-fornecedor.md)                                      | ✅ Aprovado | Unicidade temporal, auto-alias, merge atômico, revisão humana                       |
-| ADR-004 | [Arquitetura Operacional: Repositório, CI/CD e Engenharia](adrs/ADR-004-arquitetura-operacional-repositorio-cicd.md) | ✅ Aprovado | Monorepo Bun workspaces, GitLab CI/CD 6 stages, trunk-based, Conventional Commits   |
+📦 **[`_arquivo/`](_arquivo/)** — os ~54 documentos do processo antigo (refinos, checklists,
+planejamento, passo-a-passo, ADRs, prompts da Verônica). **Histórico, não fonte da verdade.**
+Vários afirmam que features estão "não iniciadas" quando estão construídas. Consulte só para
+contexto e para o *porquê* das decisões (ADRs). Se contradisser o código, o código vence.
 
-### Guias
+## Regra de ouro
 
-| Documento                                                                                      | Descrição                                                                                      |
-| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [Guia de Implementação Passo a Passo](planejamento/001-guia-implementacao-passo-a-passo.md)    | 5 etapas sequenciais (Etapas 1–5) com entregáveis, SQL, critérios de aceitação e ações manuais |
-| [Guia de CI/CD e Engenharia Operacional](planejamento/002-guia-cicd-engenharia-operacional.md) | Etapa 0 (Sprint 0): setup monorepo, pipeline, ambientes, migrações, deploy, fluxo de trabalho  |
-
----
-
-## Contexto
-
-Estes documentos foram gerados a partir dos 3 ajustes obrigatórios identificados no **Parecer Formal de Revisão** da consultora Verônica, que aprovou o refino da dimensão fornecedor com as seguintes condições de pré-implementação:
-
-1. **Fechar estratégia de deduplicação** entre `transaction` e `statement_item` → ADR-001
-2. **Fechar norma de uso** de `consumption_metrics` → ADR-002
-3. **Fechar governança técnica** de aliases de fornecedor → ADR-003
-
-Adicionalmente, decidiu-se que `supplier_tags` entra no schema (Etapa 1) mas sem UI no MVP.
-
-## Sequenciamento Aprovado
-
-```
-Etapa 0: Setup Monorepo + CI/CD  → Sprint 0: estrutura, workspaces, pipeline, tooling (ADR-004)
-Etapa 1: Base Estrutural         → Migrations, RLS, índices, constraints, triggers
-Etapa 2: Contrato Comportamental → 27+ testes mandatórios escritos (red)
-Etapa 3: Núcleo Funcional        → CRUD fornecedor, aliases, autocomplete, associações
-Etapa 4: Relatórios e Filtros    → View dedup, relatórios, filtros compostos, home
-Etapa 5: Recursos Avançados      → Métricas, merge atômico, retroatividade, audit
-```
-
-## Documentos de Referência
-
-| Documento                                   | Caminho                                                                                      |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Ata do checkpoint pré-implementação         | `docs/refinos/2026-03/2026-03-21-13-30-checkpoint-pre-implementacao-ajustes-obrigatorios.md` |
-| Refino técnico-funcional (kickoff)          | `docs/refinos/2026-03/2026-03-21-10-40-refino-tecnico-funcional-kickoff-seu-bolso-feliz.md`  |
-| Revisão dimensão fornecedor                 | `docs/refinos/2026-03/2026-03-21-11-57-revisao-refino-dimensao-fornecedor.md`                |
-| Prompt inicial Verônica                     | `docs/Veronica/001-prompt.inicial.md`                                                        |
-| Especificação fornecedor                    | `docs/Veronica/002-fornecedor.md`                                                            |
-| Refino de Arquitetura de Engenharia e CI/CD | `docs/refinos/2026-03/2026-03-21-14-19-refino-arquitetura-engenharia-cicd.md`                |
+Nenhum documento substitui rodar `bun run typecheck` e `bun run test`. A verdade é o que
+compila e passa nos testes; os specs apenas a descrevem e apontam os gaps reais.

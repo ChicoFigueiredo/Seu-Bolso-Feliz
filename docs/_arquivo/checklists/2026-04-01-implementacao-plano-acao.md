@@ -14,7 +14,7 @@
 
 - [ ] M1-001 — Verificar 19 migrations aplicadas em staging (supabase db push --linked)
   - **Aceite:** `supabase db push` sem erros
-- [ ] M1-002 — Configurar env vars no Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)
+- [ ] M1-002 — Configurar env vars no Vercel (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
   - **Aceite:** Variáveis visíveis no painel Vercel
 - [ ] M1-003 — Substituir placeholder de deploy no CI/CD por deploy Vercel real
   - **Aceite:** Push na branch principal gera deploy em staging

@@ -1,6 +1,6 @@
 # Rotação de Chaves Supabase após Vazamento
 
-> **Quando usar este guia:** Sempre que uma chave (`ANON_KEY`, `SERVICE_ROLE_KEY` ou `DB_PASSWORD`)
+> **Quando usar este guia:** Sempre que uma chave (`SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` ou `DB_PASSWORD`)
 > for exposta — em commits, logs, Slack, e-mail ou qualquer lugar público.
 
 ---
@@ -13,7 +13,7 @@ A rotação invalida a chave antiga e emite uma nova — a antiga para de funcio
 
 ---
 
-## 1. Rotacionar `ANON_KEY` e `SERVICE_ROLE_KEY` (JWT secrets)
+## 1. Rotacionar `SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY`
 
 Essas chaves são geradas a partir do **JWT secret** do projeto.
 Rotacionar o JWT secret regenera ambas.
@@ -31,8 +31,8 @@ Rotacionar o JWT secret regenera ambas.
 > Execute fora do horário de uso se houver usuários reais.
 
 7. Copie os novos valores de:
-   - `anon` (pública) → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` (secreta) → `SUPABASE_SERVICE_ROLE_KEY`
+   - `publishable` (pública) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `secret` (secreta) → `SUPABASE_SECRET_KEY`
 
 8. Atualize o `.env` local e os secrets do ambiente de deploy (Vercel, Railway, etc.)
 
@@ -70,7 +70,7 @@ Após gerar as novas chaves, atualize **obrigatoriamente**:
 
 | Onde                                    | O que atualizar                               |
 | --------------------------------------- | --------------------------------------------- |
-| `.env` local (produção)                 | `ANON_KEY`, `SERVICE_ROLE_KEY`, `DB_PASSWORD` |
+| `.env` local (produção)                 | `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `DB_PASSWORD` |
 | `.env` local (staging)                  | Mesmas chaves do projeto de staging           |
 | Vercel / Railway / plataforma de deploy | Environment variables do projeto              |
 | GitHub Actions / CI secrets             | Se usar CI para deploy                        |
