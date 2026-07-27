@@ -699,6 +699,12 @@ export type Database = {
       };
       draft_records: {
         Row: {
+          draft_data_legacy: Json | null;
+          draft_schema_version: number;
+          materialization_error: Json | null;
+          materialization_key: string;
+          obligation_id: string | null;
+          posted_at: string | null;
           approved_at: string | null;
           approved_by: string | null;
           batch_id: string | null;
@@ -722,6 +728,12 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
+          materialization_error?: Json | null;
+          materialization_key?: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -745,6 +757,12 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
+          materialization_error?: Json | null;
+          materialization_key?: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -2533,6 +2551,16 @@ export type Database = {
       };
       decrypt_secret: { Args: { ciphertext: string }; Returns: string };
       encrypt_secret: { Args: { plaintext: string }; Returns: string };
+      fn_materialize_draft_record: {
+        Args: {
+          p_actor?: string;
+          p_draft_id: string;
+          p_insert_payload: Json;
+          p_target_table: string;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
       fn_reconciliation_progress: {
         Args: { p_batch_id: string };
         Returns: {

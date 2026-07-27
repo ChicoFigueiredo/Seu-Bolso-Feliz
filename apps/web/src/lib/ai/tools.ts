@@ -279,7 +279,40 @@ export const approveDraft = tool({
       .eq("user_id", user.id);
 
     if (error) return { error: error.message };
-    return { success: true, message: `Draft ${draftId} aprovado.` };
+    return {
+      success: true,
+      message: `Draft ${draftId} aprovado. Ainda NÃO foi lançado — use postDraft para criar o registro financeiro.`,
+    };
+  },
+});
+
+/**
+ * Lançamento é uma tool separada de propósito: a IA não deve conseguir criar
+ * um registro financeiro numa única chamada. Aprovar e lançar continuam sendo
+ * dois atos observáveis, mesmo quando quem os executa é o assistente.
+ */
+export const postDraft = tool({
+  description:
+    "Lança um draft JÁ APROVADO, criando o registro financeiro definitivo (transação, dívida, recorrência ou métrica). IMPORTANTE: só funciona em drafts aprovados; sempre confirme com o usuário antes de executar.",
+  parameters: z.object({
+    draftId: z.string().uuid().describe("ID do draft aprovado a lançar"),
+  }),
+  execute: async ({ draftId }) => {
+    const { postApprovedDraftRecord } = await import("@/app/actions/materialization");
+    const result = await postApprovedDraftRecord(draftId);
+
+    if (!result.success) {
+      return {
+        error: result.message,
+        validationErrors: result.validationErrors,
+      };
+    }
+    return {
+      success: true,
+      message: result.message,
+      postedRecordId: result.postedRecordId,
+      postedRecordType: result.postedRecordType,
+    };
   },
 });
 
@@ -796,8 +829,31 @@ export const batchApproveDrafts = tool({
 
     return {
       success: true,
-      message: `Batch concluído: ${approved} aprovados, ${failed} falharam.`,
+      message: `Batch concluído: ${approved} aprovados, ${failed} falharam. Nenhum foi lançado — use postDraftBatch para criar os registros financeiros.`,
       details: results,
+    };
+  },
+});
+
+export const postDraftBatch = tool({
+  description:
+    "Lança todos os drafts JÁ APROVADOS de um batch, criando os registros financeiros definitivos. IMPORTANTE: sempre confirme com o usuário antes de executar.",
+  parameters: z.object({
+    batchId: z.string().uuid().describe("ID do batch a lançar"),
+  }),
+  execute: async ({ batchId }) => {
+    const { postApprovedDraftBatch } = await import("@/app/actions/materialization");
+    const result = await postApprovedDraftBatch(batchId);
+
+    return {
+      success: result.failed === 0,
+      message: `Lançamento concluído: ${result.succeeded} lançados, ${result.failed} com problema.`,
+      details: result.results.map((r) => ({
+        id: r.draftRecordId,
+        success: r.success,
+        message: r.message,
+        validationErrors: r.validationErrors,
+      })),
     };
   },
 });
@@ -1007,6 +1063,7 @@ export const sbfTools = {
   suggest_document_type: suggestDocumentType,
   explain_classification: explainClassification,
   approve_draft: approveDraft,
+  post_draft: postDraft,
   reject_draft: rejectDraft,
   reprocess_document: reprocessDocumentTool,
   list_document_patterns: listDocumentPatterns,
@@ -1016,6 +1073,7 @@ export const sbfTools = {
   list_error_documents: listErrorDocuments,
   list_missing_password_documents: listMissingPasswordDocuments,
   batch_approve_drafts: batchApproveDrafts,
+  post_draft_batch: postDraftBatch,
   // Sprint 4
   suggest_splits: suggestSplits,
   suggest_supplier_name: suggestSupplierName,
