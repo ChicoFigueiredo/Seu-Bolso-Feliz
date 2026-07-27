@@ -7,6 +7,7 @@ const aliases = {
   "@sbf/shared-types": resolve(__dirname, "packages/shared-types/src/index.ts"),
   "@sbf/operations": resolve(__dirname, "packages/operations/src/index.ts"),
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
+  "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
 };
 
 const sharedTestConfig = {
@@ -56,6 +57,7 @@ export default defineConfig({
         "packages/domain/src/**",
         "packages/validation/src/**",
         "packages/operations/src/**",
+        "packages/contracts/src/**",
       ],
     },
   },

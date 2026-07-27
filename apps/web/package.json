@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "1.3.24",
+    "@sbf/contracts": "workspace:*",
     "@sbf/domain": "workspace:*",
     "@sbf/shared-types": "workspace:*",
     "@supabase/ssr": "^0.9.0",
