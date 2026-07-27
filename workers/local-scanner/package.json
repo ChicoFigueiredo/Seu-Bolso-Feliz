@@ -10,6 +10,6 @@
   "dependencies": {
     "@sbf/operations": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
-    "@supabase/supabase-js": "^2"
+    "@supabase/supabase-js": "^2.110.9"
   }
 }

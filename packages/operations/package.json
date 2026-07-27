@@ -13,6 +13,6 @@
     "@sbf/domain": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
     "@sbf/validation": "workspace:*",
-    "@supabase/supabase-js": "^2"
+    "@supabase/supabase-js": "^2.110.9"
   }
 }
