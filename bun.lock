@@ -136,13 +136,14 @@
         "zod": "~3.24.3",
       },
     },
-    "workers/financial-evidence-worker": {
-      "name": "@sbf/worker-financial-evidence",
+    "workers/cli": {
+      "name": "@sbf/cli",
       "version": "0.0.1",
       "dependencies": {
-        "@sbf/domain": "workspace:*",
         "@sbf/ingestion-types": "workspace:*",
-        "@sbf/operations": "workspace:*",
+        "@sbf/worker-gmail-scanner": "workspace:*",
+        "@sbf/worker-ingestion": "workspace:*",
+        "@sbf/worker-local-scanner": "workspace:*",
         "@supabase/supabase-js": "^2.110.9",
       },
     },
@@ -911,6 +912,8 @@
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.10", "", {}, "sha512-UkVDEFk1w3mveXeKgaTuYfKWtPbvgck1dT8TUG3bnccrH0XtLTuAyfCoks4Q/M5ZGToSVJTIQYCzy2g/atAOeg=="],
 
+    "@sbf/cli": ["@sbf/cli@workspace:workers/cli"],
+
     "@sbf/config": ["@sbf/config@workspace:packages/config"],
 
     "@sbf/contracts": ["@sbf/contracts@workspace:packages/contracts"],
@@ -932,8 +935,6 @@
     "@sbf/validation": ["@sbf/validation@workspace:packages/validation"],
 
     "@sbf/web": ["@sbf/web@workspace:apps/web"],
-
-    "@sbf/worker-financial-evidence": ["@sbf/worker-financial-evidence@workspace:workers/financial-evidence-worker"],
 
     "@sbf/worker-gmail-scanner": ["@sbf/worker-gmail-scanner@workspace:workers/gmail-scanner"],
 

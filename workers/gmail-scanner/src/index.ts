@@ -15,6 +15,7 @@ import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@s
 import { buildOriginKey, computeContentHash } from "@sbf/operations";
 import { classifyFinancialIntent } from "@sbf/domain";
 
+import { buildGmailQuery } from "./query-builder";
 import { createGmailClient, type GmailClient } from "./gmail-client";
 import {
   processMessage,
@@ -30,6 +31,10 @@ import { getSupabaseClient } from "./supabase";
 interface ScanOptions {
   label: string;
   query: string;
+  /** Início do período, YYYY-MM-DD. Compõe `after:` na query do Gmail. */
+  fromDate: string | null;
+  /** Fim do período, YYYY-MM-DD, inclusivo. Compõe `before:` (com +1 dia). */
+  toDate: string | null;
   limit: number;
   dryRun: boolean;
   batchSize: number;
@@ -42,6 +47,8 @@ function parseArgs(): ScanOptions {
   const options: ScanOptions = {
     label: "Comprovantes",
     query: "",
+    fromDate: null,
+    toDate: null,
     limit: Infinity,
     dryRun: false,
     batchSize: 50,
@@ -56,6 +63,12 @@ function parseArgs(): ScanOptions {
         break;
       case "--query":
         options.query = args[++i] ?? "";
+        break;
+      case "--from-date":
+        options.fromDate = args[++i] ?? null;
+        break;
+      case "--to-date":
+        options.toDate = args[++i] ?? null;
         break;
       case "--limit":
         options.limit = Number(args[++i]) || Infinity;
@@ -78,7 +91,9 @@ Gmail Scanner — Escaneia label do Gmail e cria jobs de ingestão
 
 Opções:
   --label <nome>       Nome da label do Gmail (padrão: Comprovantes)
-  --query <q>          Query Gmail adicional (ex: 'from:nubank newer_than:30d')
+  --query <q>          Query Gmail adicional (ex: 'from:nubank has:attachment')
+  --from-date <data>   Início do período, YYYY-MM-DD (vira after:)
+  --to-date <data>     Fim do período, YYYY-MM-DD, inclusivo (vira before:)
   --limit <n>          Processar no máximo N mensagens (padrão: todas)
   --batch-size <n>     Tamanho do batch para listagem (padrão: 50)
   --include-body       Processar corpo de emails (além de anexos)
@@ -87,6 +102,18 @@ Opções:
   --help               Exibir esta ajuda
 `);
         process.exit(0);
+      // eslint-disable-next-line no-fallthrough -- process.exit não retorna
+      default: {
+        const arg = args[i]!;
+        // Um switch sem `default` engolia silenciosamente qualquer flag
+        // desconhecida — foi assim que --from-date, --to-date e --process
+        // passaram meses parecendo suportados sem nunca chegar a lugar algum.
+        if (arg.startsWith("--")) {
+          console.error(`Flag desconhecida: ${arg}`);
+          console.error("Use --help para ver as opções disponíveis.");
+          process.exit(2);
+        }
+      }
     }
   }
 
@@ -476,7 +503,15 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   const supabase = getSupabaseClient();
   const userId = getUserId();
 
+  // Query composta a partir de --query, --from-date e --to-date.
+  const gmailQuery = buildGmailQuery({
+    query: options.query,
+    fromDate: options.fromDate,
+    toDate: options.toDate,
+  });
+
   console.log(`\n📧 Gmail Scanner — Label: "${options.label}"`);
+  if (gmailQuery) console.log(`   Query: ${gmailQuery}`);
   console.log(`   Limit: ${options.limit === Infinity ? "todas" : options.limit}`);
   console.log(`   Modo: ${options.dryRun ? "DRY RUN" : "REAL"}`);
   console.log(
@@ -510,6 +545,9 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
         metadata: {
           label: options.label,
           label_id: labelId,
+          query: gmailQuery || null,
+          from_date: options.fromDate,
+          to_date: options.toDate,
           limit: options.limit === Infinity ? null : options.limit,
         },
       })
@@ -535,7 +573,12 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
 
       if (fetchSize <= 0) break;
 
-      const listResult = await gmail.listMessages(labelId, fetchSize, pageToken);
+      const listResult = await gmail.listMessages({
+        labelId,
+        q: gmailQuery || undefined,
+        maxResults: fetchSize,
+        pageToken,
+      });
 
       if (!listResult.messages || listResult.messages.length === 0) {
         if (totalProcessed === 0) {

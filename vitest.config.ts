@@ -8,6 +8,10 @@ const aliases = {
   "@sbf/operations": resolve(__dirname, "packages/operations/src/index.ts"),
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
   "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
+  "@sbf/cli": resolve(__dirname, "workers/cli/src/index.ts"),
+  "@sbf/worker-ingestion": resolve(__dirname, "workers/ingestion/src/index.ts"),
+  "@sbf/worker-gmail-scanner": resolve(__dirname, "workers/gmail-scanner/src/index.ts"),
+  "@sbf/worker-local-scanner": resolve(__dirname, "workers/local-scanner/src/index.ts"),
 };
 
 const sharedTestConfig = {
