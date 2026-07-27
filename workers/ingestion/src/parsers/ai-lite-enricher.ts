@@ -74,11 +74,7 @@ export interface AiLiteOutput {
     document_type: string | null;
     // Classificação semântica
     financial_intent:
-      | "transaction"
-      | "recurring_expense"
-      | "metric"
-      | "liability_payment"
-      | "unknown";
+      "transaction" | "recurring_expense" | "metric" | "liability_payment" | "unknown";
     // Descrição livre gerada pela IA
     description: string | null;
   };

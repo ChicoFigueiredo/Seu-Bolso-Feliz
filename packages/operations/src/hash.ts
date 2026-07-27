@@ -20,10 +20,7 @@ export async function computeContentHash(data: ArrayBuffer | Uint8Array): Promis
  * Detecta documento semanticamente equivalente (mesmo conteúdo em PDFs diferentes).
  */
 export async function computeCanonicalFingerprint(extractedText: string): Promise<string> {
-  const normalized = extractedText
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  const normalized = extractedText.toLowerCase().replace(/\s+/g, " ").trim();
 
   const encoder = new TextEncoder();
   const data = encoder.encode(normalized);

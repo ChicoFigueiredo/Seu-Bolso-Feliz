@@ -116,8 +116,7 @@ export function buildRecurringTemplateDraft(er: Record<string, unknown>): Record
 /** Cria o draft_data JSONB para um consumption_metric */
 export function buildConsumptionMetricDraft(er: Record<string, unknown>): Record<string, unknown> {
   const consumption = (er.consumption_data ?? er.consumption) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   return {
     supplier_name: er.supplier_name_raw ?? er.supplierNameRaw ?? null,
     contract_identifier: er.contract_identifier ?? er.contractIdentifier ?? null,

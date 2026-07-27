@@ -2,8 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -31,11 +30,9 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SECRET_KEY")!;
 
   // Verificar identidade do usuário
-  const userClient = createClient(
-    supabaseUrl,
-    Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
+  const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+    global: { headers: { Authorization: authHeader } },
+  });
 
   const {
     data: { user },
@@ -52,9 +49,7 @@ Deno.serve(async (req) => {
   // Service role para executar refresh (SECURITY DEFINER)
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const { error: refreshError } = await supabase.rpc(
-    "refresh_mv_supplier_spending",
-  );
+  const { error: refreshError } = await supabase.rpc("refresh_mv_supplier_spending");
 
   if (refreshError) {
     return new Response(
@@ -69,11 +64,8 @@ Deno.serve(async (req) => {
     );
   }
 
-  return new Response(
-    JSON.stringify({ success: true, refreshed_at: new Date().toISOString() }),
-    {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    },
-  );
+  return new Response(JSON.stringify({ success: true, refreshed_at: new Date().toISOString() }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 });

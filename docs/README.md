@@ -12,7 +12,7 @@ O guia operacional para agentes/devs é o [`CLAUDE.md`](../CLAUDE.md) na raiz.
 📦 **[`_arquivo/`](_arquivo/)** — os ~54 documentos do processo antigo (refinos, checklists,
 planejamento, passo-a-passo, ADRs, prompts da Verônica). **Histórico, não fonte da verdade.**
 Vários afirmam que features estão "não iniciadas" quando estão construídas. Consulte só para
-contexto e para o *porquê* das decisões (ADRs). Se contradisser o código, o código vence.
+contexto e para o _porquê_ das decisões (ADRs). Se contradisser o código, o código vence.
 
 ## Regra de ouro
 

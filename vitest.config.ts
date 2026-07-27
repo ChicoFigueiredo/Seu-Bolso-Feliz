@@ -24,7 +24,11 @@ export default defineConfig({
         test: {
           ...sharedTestConfig,
           name: "unit",
-          include: ["packages/*/src/**/*.test.ts", "__tests__/domain/**/*.test.ts", "workers/*/src/**/*.test.ts"],
+          include: [
+            "packages/*/src/**/*.test.ts",
+            "__tests__/domain/**/*.test.ts",
+            "workers/*/src/**/*.test.ts",
+          ],
         },
       },
       {
@@ -48,7 +52,11 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["packages/domain/src/**", "packages/validation/src/**", "packages/operations/src/**"],
+      include: [
+        "packages/domain/src/**",
+        "packages/validation/src/**",
+        "packages/operations/src/**",
+      ],
     },
   },
 });

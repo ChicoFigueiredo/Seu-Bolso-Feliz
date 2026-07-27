@@ -22,13 +22,13 @@ financeiros personalizados** (não o mês civil). Núcleo determinístico, isola
 
 ## Módulos de domínio (verificado) — `packages/domain/src/`
 
-| Módulo | Função | Estado |
-| --- | --- | --- |
-| `financial-cycle` | `getCurrentPeriod`, `generatePeriods`, `findPeriodForDate`, `daysRemainingInPeriod` (startDay 1–31) | ✅ |
-| `amortization` | `generateSchedule` (SAC/Price/Misto), `getOutstandingBalanceAfter`, `totalInterestPaid`, `simulateEarlyPayoff` | ✅ |
-| `deduplication` | `deduplicateExpenses`, `sumDeduplicatedExpenses`, `getStatementComposition` (ADR-001) | ✅ |
-| `priority` | prioridade efetiva de 5 níveis (manual + tags + tipo), score de urgência | ✅ |
-| `financial-intent` | classifica texto como transação/recorrência/métrica/passivo | ✅ |
+| Módulo             | Função                                                                                                         | Estado |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- | ------ |
+| `financial-cycle`  | `getCurrentPeriod`, `generatePeriods`, `findPeriodForDate`, `daysRemainingInPeriod` (startDay 1–31)            | ✅     |
+| `amortization`     | `generateSchedule` (SAC/Price/Misto), `getOutstandingBalanceAfter`, `totalInterestPaid`, `simulateEarlyPayoff` | ✅     |
+| `deduplication`    | `deduplicateExpenses`, `sumDeduplicatedExpenses`, `getStatementComposition` (ADR-001)                          | ✅     |
+| `priority`         | prioridade efetiva de 5 níveis (manual + tags + tipo), score de urgência                                       | ✅     |
+| `financial-intent` | classifica texto como transação/recorrência/métrica/passivo                                                    | ✅     |
 
 ## Três janelas temporais (devem conviver sem ambiguidade)
 
@@ -52,11 +52,11 @@ Tabelas: `transactions`, `statement_cycles`, `liabilities` (+ `liability_install
 
 ## Gaps e critérios de aceite
 
-| Gap | Critério de aceite | Prioridade |
-| --- | --- | --- |
-| 🟡 Matriz documento→registro como contrato | Ver [`02-conciliacao.md`](02-conciliacao.md): tabela explícita + teste | Alta |
-| ⬜ Primeira tela orientada a decisão | Tela inicial responde: o que vence primeiro, o que é essencial, quanto o dinheiro precisa durar (não dashboard passivo) | Média |
-| ⬜ Auditoria histórica por fornecedor na UI | Ver gasto/histórico consolidado por fornecedor | Baixa |
+| Gap                                         | Critério de aceite                                                                                                      | Prioridade |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 🟡 Matriz documento→registro como contrato  | Ver [`02-conciliacao.md`](02-conciliacao.md): tabela explícita + teste                                                  | Alta       |
+| ⬜ Primeira tela orientada a decisão        | Tela inicial responde: o que vence primeiro, o que é essencial, quanto o dinheiro precisa durar (não dashboard passivo) | Média      |
+| ⬜ Auditoria histórica por fornecedor na UI | Ver gasto/histórico consolidado por fornecedor                                                                          | Baixa      |
 
 ## Referências de código
 

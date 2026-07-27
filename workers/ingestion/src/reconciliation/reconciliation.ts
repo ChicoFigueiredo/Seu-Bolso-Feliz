@@ -30,7 +30,10 @@ export type ReconciliationStatus =
 export interface ReconciliationCandidate {
   transactionId: string | null;
   recurringTemplateId: string | null;
-  matchType: Exclude<ReconciliationStatus, "not_checked" | "no_match" | "confirmed_new" | "confirmed_duplicate">;
+  matchType: Exclude<
+    ReconciliationStatus,
+    "not_checked" | "no_match" | "confirmed_new" | "confirmed_duplicate"
+  >;
   score: number; // 0.0-1.0 — quanto maior, mais confiante o match
   description: string;
   /** Dados resumidos do candidato para exibição */
@@ -104,8 +107,7 @@ export async function findReconciliationCandidates(
         ? draftData.dueDate
         : null;
 
-  const supplierId =
-    typeof draftData.supplier_id === "string" ? draftData.supplier_id : null;
+  const supplierId = typeof draftData.supplier_id === "string" ? draftData.supplier_id : null;
 
   const supplierName =
     typeof draftData.supplier_name === "string"
@@ -180,14 +182,24 @@ export async function findReconciliationCandidates(
       .toISOString()
       .split("T")[0];
 
-    const { data: txns } = await (supabase as unknown as Record<string, unknown>["from"] extends never ? never : typeof supabase)
+    const { data: txns } = (await (
+      supabase as unknown as Record<string, unknown>["from"] extends never ? never : typeof supabase
+    )
       .from("transactions" as never)
       .select("id, amount, transaction_date, supplier_name, category")
       .eq("user_id", userId)
       .eq("supplier_id", supplierId)
       .gte("transaction_date", fromDate!)
       .lte("transaction_date", toDate!)
-      .limit(10) as unknown as { data: Array<{ id: string; amount: number; transaction_date: string; supplier_name: string | null; category: string | null }> | null };
+      .limit(10)) as unknown as {
+      data: Array<{
+        id: string;
+        amount: number;
+        transaction_date: string;
+        supplier_name: string | null;
+        category: string | null;
+      }> | null;
+    };
 
     for (const txn of txns ?? []) {
       if (!amountWithinPct(amount, txn.amount)) continue;
@@ -213,28 +225,38 @@ export async function findReconciliationCandidates(
 
   // ── Regra 3: Match por recorrência (template mensal mesmo competence) ──
   if (supplierId && competenceDate) {
-    const { data: templates } = await (supabase as unknown as typeof supabase)
+    const { data: templates } = (await (supabase as unknown as typeof supabase)
       .from("recurring_templates" as never)
       .select("id, name, amount, frequency, supplier_id")
       .eq("user_id", userId)
       .eq("supplier_id", supplierId)
       .eq("is_active", true)
       .eq("frequency", "monthly")
-      .limit(5) as unknown as { data: Array<{ id: string; name: string; amount: number; frequency: string; supplier_id: string }> | null };
+      .limit(5)) as unknown as {
+      data: Array<{
+        id: string;
+        name: string;
+        amount: number;
+        frequency: string;
+        supplier_id: string;
+      }> | null;
+    };
 
     for (const tpl of templates ?? []) {
       if (amount !== null && !amountWithinPct(amount, tpl.amount, 0.15)) continue;
 
       // Verificar se já existe instância no mesmo mês/ano
       const compKey = competenceKey(competenceDate);
-      const { data: instances } = await (supabase as unknown as typeof supabase)
+      const { data: instances } = (await (supabase as unknown as typeof supabase)
         .from("recurring_instances" as never)
         .select("id, due_date, status")
         .eq("user_id", userId)
         .eq("template_id", tpl.id)
         .gte("due_date", `${compKey}-01`)
         .lte("due_date", `${compKey}-31`)
-        .limit(1) as unknown as { data: Array<{ id: string; due_date: string; status: string }> | null };
+        .limit(1)) as unknown as {
+        data: Array<{ id: string; due_date: string; status: string }> | null;
+      };
 
       const hasInstance = instances && instances.length > 0;
       candidates.push({

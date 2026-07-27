@@ -13,12 +13,14 @@ contaminar extrações futuras**.
 ## Modelagem (contrato) — migração `20260403100000`
 
 **`document_patterns`** — verificado:
+
 - `name`, `document_type`, `supplier_id?`, `institution_id?`
 - `extraction_rules JSONB`, `field_mappings JSONB`, `sample_fingerprints TEXT[]`
 - contadores de feedback: `feedback_count`, (+ positivos/negativos e taxa de sucesso)
 - RLS por `auth.uid() = user_id`
 
 **`pattern_feedback`** — verificado:
+
 - `pattern_id`, `source_document_id?`, sinal de feedback humano (positivo/negativo)
 
 **Proteção contra padrão ruim — JÁ EXISTE:** trigger de **auto-desativação quando feedback
@@ -36,12 +38,12 @@ UI: `/dashboard/ingestion/patterns` (lista) + `[id]` (detalhe).
 
 ## Gaps e critérios de aceite
 
-| Gap | Critério de aceite | Prioridade |
-| --- | --- | --- |
-| 🟡 Ligação padrão → parsing | Confirmar/garantir que `parsers/supplier-templates.ts` consome `document_patterns` da tabela (não só templates hardcoded). Critério: criar padrão na UI muda a extração de um novo documento do mesmo fornecedor | **Alta** |
-| 🟡 Loop fechado de feedback na UI | A partir de uma revisão de draft, "salvar como padrão" e "corrigir padrão" em ≤2 cliques; feedback negativo reflete nos contadores | Média |
-| ⬜ Teste do trigger de auto-desativação | Teste de integração: 4 feedbacks negativos + sucesso <50% desativa o padrão automaticamente | Média |
-| ⬜ Tools MCP de padrões | `suggest_document_pattern`, `register_document_pattern`, `list_documents_by_pattern` para uso por agente | Baixa |
+| Gap                                     | Critério de aceite                                                                                                                                                                                               | Prioridade |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 🟡 Ligação padrão → parsing             | Confirmar/garantir que `parsers/supplier-templates.ts` consome `document_patterns` da tabela (não só templates hardcoded). Critério: criar padrão na UI muda a extração de um novo documento do mesmo fornecedor | **Alta**   |
+| 🟡 Loop fechado de feedback na UI       | A partir de uma revisão de draft, "salvar como padrão" e "corrigir padrão" em ≤2 cliques; feedback negativo reflete nos contadores                                                                               | Média      |
+| ⬜ Teste do trigger de auto-desativação | Teste de integração: 4 feedbacks negativos + sucesso <50% desativa o padrão automaticamente                                                                                                                      | Média      |
+| ⬜ Tools MCP de padrões                 | `suggest_document_pattern`, `register_document_pattern`, `list_documents_by_pattern` para uso por agente                                                                                                         | Baixa      |
 
 ## Alinhamento histórico
 

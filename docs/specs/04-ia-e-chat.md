@@ -11,14 +11,14 @@ ledger sem revisão humana** nas fases atuais. Determinístico primeiro, IA depo
 
 ## Componentes (contrato) — verificado
 
-| Componente | Onde | Modelo | Função |
-| --- | --- | --- | --- |
-| Chat drawer | `apps/web/src/components/ai-chat-drawer.tsx` | — | UI lateral, histórico, streaming, upload |
-| Chat API | `apps/web/src/app/api/chat/route.ts` | gpt-4o | assistente com tool use, rate limit 10/min·100/dia, log de sessão |
-| Sugestões inline | `apps/web/src/app/api/ai-suggest/route.ts` | gpt-4o-mini | single-shot, whitelist de tools, rate limit 20/min |
-| Enrich lite (pipeline) | `workers/ingestion/src/parsers/ai-lite-enricher.ts` | gpt-4o-mini | preenche campos críticos faltantes |
-| Enrich full (pipeline) | `workers/ingestion/src/parsers/ai-full-enricher.ts` | gpt-4o Vision | imagens/escaneados |
-| Auditoria | tabelas `ai_chat_sessions`, `ai_chat_messages` | — | trilha de conversa (migração `20260401100000`) |
+| Componente             | Onde                                                | Modelo        | Função                                                            |
+| ---------------------- | --------------------------------------------------- | ------------- | ----------------------------------------------------------------- |
+| Chat drawer            | `apps/web/src/components/ai-chat-drawer.tsx`        | —             | UI lateral, histórico, streaming, upload                          |
+| Chat API               | `apps/web/src/app/api/chat/route.ts`                | gpt-4o        | assistente com tool use, rate limit 10/min·100/dia, log de sessão |
+| Sugestões inline       | `apps/web/src/app/api/ai-suggest/route.ts`          | gpt-4o-mini   | single-shot, whitelist de tools, rate limit 20/min                |
+| Enrich lite (pipeline) | `workers/ingestion/src/parsers/ai-lite-enricher.ts` | gpt-4o-mini   | preenche campos críticos faltantes                                |
+| Enrich full (pipeline) | `workers/ingestion/src/parsers/ai-full-enricher.ts` | gpt-4o Vision | imagens/escaneados                                                |
+| Auditoria              | tabelas `ai_chat_sessions`, `ai_chat_messages`      | —             | trilha de conversa (migração `20260401100000`)                    |
 
 ## Upload-pelo-chat (fluxo verificado)
 
@@ -28,13 +28,13 @@ grava em bucket `ingestion-originals` → chama Edge `trigger-ingestion` → man
 
 ## Casos de uso do chat (do prompt original) — estado
 
-| Caso | Estado |
-| --- | --- |
-| Receber upload no chat e mandar pro pipeline | ✅ |
-| Consultar documentos ingeridos / pendências / com erro / sem senha | 🟡 via tools MCP no backend; expor todas no chat a confirmar |
-| Sugerir fornecedor / tipo / campos / conciliação | ✅ (`/api/ai-suggest`) |
-| Explicar por que classificou de tal forma | 🟡 tool `explain_extraction`/`explain_classification` existe; calibrar com dados reais |
-| Aprovar em lote com segurança | 🟡 aprovação em lote existe na UI; via chat a confirmar |
+| Caso                                                               | Estado                                                                                 |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Receber upload no chat e mandar pro pipeline                       | ✅                                                                                     |
+| Consultar documentos ingeridos / pendências / com erro / sem senha | 🟡 via tools MCP no backend; expor todas no chat a confirmar                           |
+| Sugerir fornecedor / tipo / campos / conciliação                   | ✅ (`/api/ai-suggest`)                                                                 |
+| Explicar por que classificou de tal forma                          | 🟡 tool `explain_extraction`/`explain_classification` existe; calibrar com dados reais |
+| Aprovar em lote com segurança                                      | 🟡 aprovação em lote existe na UI; via chat a confirmar                                |
 
 ## Sugestões inline (tools whitelisted em `/api/ai-suggest`)
 
@@ -44,12 +44,12 @@ de documento/transação. ✅
 
 ## Gaps e critérios de aceite
 
-| Gap | Critério de aceite | Prioridade |
-| --- | --- | --- |
-| 🟡 Cobertura completa de casos de uso no chat | Lista acima toda ✅: cada caso responde no chat com dados reais do usuário | Média |
-| 🟡 Explicabilidade calibrada | Para um documento real, a explicação cita campos extraídos, fonte (parser/IA) e confiança | Média |
-| ⬜ Teste "IA não grava sem revisão" | Teste garante que nenhuma sugestão de IA muda o ledger sem ação humana explícita | Alta |
-| ⬜ Teste "chamadas IA auditáveis" | Toda chamada registra prompt/response/tokens/custo | Média |
+| Gap                                           | Critério de aceite                                                                        | Prioridade |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------- |
+| 🟡 Cobertura completa de casos de uso no chat | Lista acima toda ✅: cada caso responde no chat com dados reais do usuário                | Média      |
+| 🟡 Explicabilidade calibrada                  | Para um documento real, a explicação cita campos extraídos, fonte (parser/IA) e confiança | Média      |
+| ⬜ Teste "IA não grava sem revisão"           | Teste garante que nenhuma sugestão de IA muda o ledger sem ação humana explícita          | Alta       |
+| ⬜ Teste "chamadas IA auditáveis"             | Toda chamada registra prompt/response/tokens/custo                                        | Média      |
 
 ## Restrições (do CEO)
 

@@ -479,7 +479,9 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   console.log(`\n📧 Gmail Scanner — Label: "${options.label}"`);
   console.log(`   Limit: ${options.limit === Infinity ? "todas" : options.limit}`);
   console.log(`   Modo: ${options.dryRun ? "DRY RUN" : "REAL"}`);
-  console.log(`   Processar: ${[options.includeAttachments && "anexos", options.includeBody && "corpo"].filter(Boolean).join(", ") || "nada"}`);
+  console.log(
+    `   Processar: ${[options.includeAttachments && "anexos", options.includeBody && "corpo"].filter(Boolean).join(", ") || "nada"}`,
+  );
   console.log("");
 
   // 1. Buscar label ID

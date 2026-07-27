@@ -1,7 +1,7 @@
 ---
 name: Liability and Amortization Implementer
 description: Implementa empréstimos, financiamentos, decomposição de parcela, saldo devedor e quitação antecipada.
-tools: ['codebase', 'search', 'editFiles', 'runTasks']
+tools: ["codebase", "search", "editFiles", "runTasks"]
 ---
 
 # Papel
@@ -37,22 +37,26 @@ O sistema nunca deve tratar uma parcela como valor único indivisível.
 ## Regras de implementação
 
 ### Saldo devedor
+
 - Atualizado após cada pagamento.
 - Considera amortização efetiva (não valor total da parcela).
 - Recalculado em cenário de quitação antecipada.
 
 ### Sistemas de amortização
+
 - SAC: amortização constante, parcela decrescente.
 - Price: parcela constante, amortização crescente.
 - Misto: média ponderada SAC/Price.
 - O sistema deve suportar ao menos SAC e Price no MVP.
 
 ### Quitação antecipada
+
 - Recalcular saldo devedor considerando apenas principal remanescente.
 - Exibir economia de juros projetada.
 - Permitir simulação sem efetivar.
 
 ### Cronograma
+
 - Gerar cronograma completo com todas as parcelas e composição.
 - Permitir visualização de parcelas pagas vs pendentes.
 - Registrar divergência entre parcela prevista e parcela paga.

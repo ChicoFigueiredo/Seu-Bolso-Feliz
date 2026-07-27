@@ -12,14 +12,14 @@ Substituem a pilha de ~54 documentos antigos (agora em [`../_arquivo/`](../_arqu
 
 ## Índice
 
-| Spec | Capacidade | Estado resumido |
-| --- | --- | --- |
-| [00-estado-real](00-estado-real.md) | Mapa geral + saúde do código | — |
-| [01-ingestao](01-ingestao.md) | Pipeline de documentos (3 canais) | ✅ construído e testado |
-| [02-conciliacao](02-conciliacao.md) | Documento × registros | ✅ motor · 🟡 UX |
-| [03-padroes-documentais](03-padroes-documentais.md) | Memória operacional | ✅ modelo · 🟡 ligação parsing |
-| [04-ia-e-chat](04-ia-e-chat.md) | Interface inteligente | ✅ integrado |
-| [05-dominio-financeiro](05-dominio-financeiro.md) | Núcleo determinístico | ✅ testado |
+| Spec                                                | Capacidade                        | Estado resumido                |
+| --------------------------------------------------- | --------------------------------- | ------------------------------ |
+| [00-estado-real](00-estado-real.md)                 | Mapa geral + saúde do código      | —                              |
+| [01-ingestao](01-ingestao.md)                       | Pipeline de documentos (3 canais) | ✅ construído e testado        |
+| [02-conciliacao](02-conciliacao.md)                 | Documento × registros             | ✅ motor · 🟡 UX               |
+| [03-padroes-documentais](03-padroes-documentais.md) | Memória operacional               | ✅ modelo · 🟡 ligação parsing |
+| [04-ia-e-chat](04-ia-e-chat.md)                     | Interface inteligente             | ✅ integrado                   |
+| [05-dominio-financeiro](05-dominio-financeiro.md)   | Núcleo determinístico             | ✅ testado                     |
 
 ## Regras de manutenção (spec-driven)
 

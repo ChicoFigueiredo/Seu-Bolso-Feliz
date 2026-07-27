@@ -37,12 +37,12 @@ Orquestração: `parsers/parse-orchestrator.ts` → grava `parsed_document_versi
 
 ## Canais de entrada
 
-| Canal | Estado | Entrada |
-| --- | --- | --- |
-| Upload manual / chat | ✅ | UI `/dashboard/ingestion` + `ai-chat-drawer` → bucket `ingestion-originals` → Edge `trigger-ingestion` |
-| Gmail | ✅ | `workers/gmail-scanner` — OAuth2 refresh-token, scan por label/query, dedup por (msgId+filename) e por hash |
-| Pasta local | ✅ | `workers/local-scanner` — scan-once ou watch, filtro por extensão, dedup por (path+mtime) |
-| Orquestrador | ✅ | `workers/financial-evidence-worker` — CLI unificada Gmail+local com `--dry-run` |
+| Canal                | Estado | Entrada                                                                                                     |
+| -------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| Upload manual / chat | ✅     | UI `/dashboard/ingestion` + `ai-chat-drawer` → bucket `ingestion-originals` → Edge `trigger-ingestion`      |
+| Gmail                | ✅     | `workers/gmail-scanner` — OAuth2 refresh-token, scan por label/query, dedup por (msgId+filename) e por hash |
+| Pasta local          | ✅     | `workers/local-scanner` — scan-once ou watch, filtro por extensão, dedup por (path+mtime)                   |
+| Orquestrador         | ✅     | `workers/financial-evidence-worker` — CLI unificada Gmail+local com `--dry-run`                             |
 
 ## Idempotência (invariante crítica)
 
@@ -51,12 +51,12 @@ Orquestração: `parsers/parse-orchestrator.ts` → grava `parsed_document_versi
 
 ## Gaps e critérios de aceite
 
-| Gap | Critério de aceite | Prioridade |
-| --- | --- | --- |
-| 🟡 Split-view de revisão com edição inline | Tela mostra arquivo original lado a lado com draft, permite editar cada campo antes de aprovar, com indicação de confiança/origem do valor | Alta |
-| 🟡 `boleto-parser` genérico raso | Boleto não-CEMIG sem template extrai valor, vencimento, beneficiário, linha digitável com confiança ≥0.8 em N amostras reais | Média |
-| ⬜ Validação com documentos reais do CEO | Rodar lote real (Gmail label + pasta) ponta a ponta; registrar taxa de sucesso/falha/pendência | **Alta (🔒 CEO)** |
-| ⬜ Observabilidade estruturada | Para cada documento dá para responder em ≤1 clique: entrou? falhou (por quê)? pendente? aprovado? | Média |
+| Gap                                        | Critério de aceite                                                                                                                         | Prioridade        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| 🟡 Split-view de revisão com edição inline | Tela mostra arquivo original lado a lado com draft, permite editar cada campo antes de aprovar, com indicação de confiança/origem do valor | Alta              |
+| 🟡 `boleto-parser` genérico raso           | Boleto não-CEMIG sem template extrai valor, vencimento, beneficiário, linha digitável com confiança ≥0.8 em N amostras reais               | Média             |
+| ⬜ Validação com documentos reais do CEO   | Rodar lote real (Gmail label + pasta) ponta a ponta; registrar taxa de sucesso/falha/pendência                                             | **Alta (🔒 CEO)** |
+| ⬜ Observabilidade estruturada             | Para cada documento dá para responder em ≤1 clique: entrou? falhou (por quê)? pendente? aprovado?                                          | Média             |
 
 ## Referências de código
 

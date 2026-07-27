@@ -153,8 +153,12 @@ async function main(): Promise<void> {
 
   if (opts.watch) {
     let running = true;
-    process.on("SIGTERM", () => { running = false; });
-    process.on("SIGINT", () => { running = false; });
+    process.on("SIGTERM", () => {
+      running = false;
+    });
+    process.on("SIGINT", () => {
+      running = false;
+    });
 
     while (running) {
       try {

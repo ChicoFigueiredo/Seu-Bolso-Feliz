@@ -33,34 +33,26 @@ async function findAvailablePort(startPort, bindHost, attempts) {
     const available = await isPortAvailable(port, bindHost);
     if (available) return port;
   }
-  throw new Error(
-    `Nenhuma porta livre encontrada entre ${startPort} e ${startPort + attempts}.`,
-  );
+  throw new Error(`Nenhuma porta livre encontrada entre ${startPort} e ${startPort + attempts}.`);
 }
 
 async function main() {
   const port = await findAvailablePort(preferredPort, host, maxPortScan);
 
   if (port !== preferredPort) {
-    console.warn(
-      `[web:dev] Porta ${preferredPort} ocupada. Usando porta ${port} automaticamente.`,
-    );
+    console.warn(`[web:dev] Porta ${preferredPort} ocupada. Usando porta ${port} automaticamente.`);
   } else {
     console.info(`[web:dev] Usando porta ${port}.`);
   }
 
-  const child = spawn(
-    "next",
-    ["dev", "--turbopack", "-p", String(port), "-H", host],
-    {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        PORT: String(port),
-      },
-      shell: process.platform === "win32",
+  const child = spawn("next", ["dev", "--turbopack", "-p", String(port), "-H", host], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      PORT: String(port),
     },
-  );
+    shell: process.platform === "win32",
+  });
 
   child.on("exit", (code, signal) => {
     if (signal) {

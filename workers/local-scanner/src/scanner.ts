@@ -3,13 +3,9 @@
  * Escaneia diretório por arquivos novos, faz upload e cria jobs.
  */
 import { readdir, stat, readFile, rename, mkdir } from "node:fs/promises";
-import { join, extname, dirname } from "node:path";
+import { join, extname } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  IngestionRunStatus,
-  IngestionJobStatus,
-  SourceDocumentOrigin,
-} from "@sbf/ingestion-types";
+import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
 
 export interface ScannerOptions {
@@ -22,8 +18,16 @@ export interface ScannerOptions {
 
 /** Extensões aceitas para ingestão */
 const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf", ".png", ".jpg", ".jpeg", ".webp",
-  ".csv", ".xls", ".xlsx", ".xml", ".ofx",
+  ".pdf",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".csv",
+  ".xls",
+  ".xlsx",
+  ".xml",
+  ".ofx",
 ]);
 
 /** Mapa de extensão → MIME type */
@@ -238,7 +242,10 @@ export async function scanDirectory(
         await rename(filePath, dest);
         if (verbose) console.log(`[SCANNER]   → movido para ${dest}`);
       } catch (err) {
-        console.warn(`[SCANNER] Falha ao mover ${entry}:`, err instanceof Error ? err.message : err);
+        console.warn(
+          `[SCANNER] Falha ao mover ${entry}:`,
+          err instanceof Error ? err.message : err,
+        );
       }
     }
   }

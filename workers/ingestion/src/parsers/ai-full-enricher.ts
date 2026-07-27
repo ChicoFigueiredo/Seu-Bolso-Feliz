@@ -34,11 +34,7 @@ export interface AiFullOutput {
     document_number: string | null;
     document_type: string | null;
     financial_intent:
-      | "transaction"
-      | "recurring_expense"
-      | "metric"
-      | "liability_payment"
-      | "unknown";
+      "transaction" | "recurring_expense" | "metric" | "liability_payment" | "unknown";
   };
   confidencePerField: Record<string, number>;
   reasoning: string | null;

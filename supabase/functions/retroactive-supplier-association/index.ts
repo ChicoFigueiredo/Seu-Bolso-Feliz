@@ -180,13 +180,10 @@ async function handleConfirm(
   }
 
   // Confirm atômico via RPC PL/pgSQL (transação única)
-  const { data: result, error: rpcError } = await supabase.rpc(
-    "confirm_supplier_associations",
-    {
-      p_user_id: userId,
-      p_confirmations: confirmations,
-    },
-  );
+  const { data: result, error: rpcError } = await supabase.rpc("confirm_supplier_associations", {
+    p_user_id: userId,
+    p_confirmations: confirmations,
+  });
 
   if (rpcError) {
     return new Response(
@@ -195,8 +192,8 @@ async function handleConfirm(
     );
   }
 
-  return new Response(
-    JSON.stringify({ success: true, ...result }),
-    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
+  return new Response(JSON.stringify({ success: true, ...result }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }

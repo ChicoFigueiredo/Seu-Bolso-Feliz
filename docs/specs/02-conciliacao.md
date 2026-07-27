@@ -19,12 +19,12 @@ de `draft_records` (migração `20260403110000`).
 
 `findReconciliationCandidates()` aplica 4 regras, em ordem de força:
 
-| Regra | Sinal | Status | Score |
-| --- | --- | --- | --- |
-| Duplicata | mesmo `content_hash` | `match_duplicate` | 1.0 |
-| Exato | `supplier_id` + valor ±5% + vencimento ±7 dias | `match_exact` | 0.95 |
-| Fuzzy | `supplier_id` + valor ±5%, data diverge | `match_fuzzy` | 0.7 |
-| Recorrência | `supplier_id` + padrão mensal esperado | `match_recurring` | — |
+| Regra       | Sinal                                          | Status            | Score |
+| ----------- | ---------------------------------------------- | ----------------- | ----- |
+| Duplicata   | mesmo `content_hash`                           | `match_duplicate` | 1.0   |
+| Exato       | `supplier_id` + valor ±5% + vencimento ±7 dias | `match_exact`     | 0.95  |
+| Fuzzy       | `supplier_id` + valor ±5%, data diverge        | `match_fuzzy`     | 0.7   |
+| Recorrência | `supplier_id` + padrão mensal esperado         | `match_recurring` | —     |
 
 `isDuplicateRisk()` → `true` quando `match_duplicate`. **Política: duplicata bloqueia autopost.**
 
@@ -41,25 +41,25 @@ A lógica de "que tipo de documento gera que tipo de registro" hoje vive em `dra
 (`classifyDraftTypes`, `buildTransactionDraft`, etc., cobertos por `draft-generation.test.ts`).
 Precisa ser **extraída para uma tabela explícita** neste spec, ex.:
 
-| Documento | Vira | Quando |
-| --- | --- | --- |
-| Boleto de fornecedor | transação (despesa) | pagamento avulso |
-| Conta de consumo (CEMIG) | transação + métrica de consumo | recorrente por fornecedor |
-| Fatura de cartão | statement_cycle + itens | ciclo de cartão |
-| Comprovante de pagamento de fatura | pagamento de fatura (não nova despesa) | concilia com statement |
-| Extrato | múltiplas transações | importação |
-| Doc sem valor lançável | documento de apoio | anexo |
+| Documento                          | Vira                                   | Quando                    |
+| ---------------------------------- | -------------------------------------- | ------------------------- |
+| Boleto de fornecedor               | transação (despesa)                    | pagamento avulso          |
+| Conta de consumo (CEMIG)           | transação + métrica de consumo         | recorrente por fornecedor |
+| Fatura de cartão                   | statement_cycle + itens                | ciclo de cartão           |
+| Comprovante de pagamento de fatura | pagamento de fatura (não nova despesa) | concilia com statement    |
+| Extrato                            | múltiplas transações                   | importação                |
+| Doc sem valor lançável             | documento de apoio                     | anexo                     |
 
 > ⚠️ Invariante de domínio (ver [`05-dominio-financeiro.md`](05-dominio-financeiro.md)):
 > pagamento de fatura **não** é nova despesa; transferência interna **não** é gasto.
 
 ## Gaps e critérios de aceite
 
-| Gap | Critério de aceite | Prioridade |
-| --- | --- | --- |
-| 🟡 Tela dedicada de revisão de conciliação | UI mostra candidatos com score/sinal e permite "é novo" / "é duplicata de X" / "anexar a registro existente" | Média |
-| ⬜ Matriz documental como contrato testado | Tabela acima vira spec + teste que falha se a classificação divergir | Alta |
-| ⬜ Tool MCP `suggest_reconciliation` | Expor conciliação via MCP para uso por agente externo | Baixa |
+| Gap                                        | Critério de aceite                                                                                           | Prioridade |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ---------- |
+| 🟡 Tela dedicada de revisão de conciliação | UI mostra candidatos com score/sinal e permite "é novo" / "é duplicata de X" / "anexar a registro existente" | Média      |
+| ⬜ Matriz documental como contrato testado | Tabela acima vira spec + teste que falha se a classificação divergir                                         | Alta       |
+| ⬜ Tool MCP `suggest_reconciliation`       | Expor conciliação via MCP para uso por agente externo                                                        | Baixa      |
 
 ## Referências de código
 

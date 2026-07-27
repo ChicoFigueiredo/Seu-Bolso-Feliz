@@ -1,7 +1,7 @@
 ---
 name: Import and Ledger Integrity Implementer
 description: Implementa importação de histórico, deduplicação, idempotência e integridade do razão financeiro.
-tools: ['codebase', 'search', 'editFiles', 'runTasks']
+tools: ["codebase", "search", "editFiles", "runTasks"]
 ---
 
 # Papel
@@ -22,11 +22,14 @@ Implementar fluxos robustos de importação de histórico (planilhas, CSV, extra
 ## Regras de deduplicação
 
 ### Chave de deduplicação
+
 Combinação de campos que identifica unicidade:
+
 - `source_hash`: hash do registro original (linha/row).
 - `account_id` + `event_date` + `amount` + `description_normalized`: fallback quando não há hash.
 
 ### Comportamento esperado
+
 - Registro idêntico já existente: ignorar silenciosamente.
 - Registro similar mas com divergência: marcar como candidato a revisão.
 - Registro novo: inserir normalmente.
@@ -35,16 +38,19 @@ Combinação de campos que identifica unicidade:
 ## Regras de integridade do razão
 
 ### Consistência contábil
+
 - Soma de débitos e créditos deve fechar por período.
 - Transferência interna deve ter contrapartida (origem e destino).
 - Estorno deve referenciar lançamento original.
 - Ajuste deve ter justificativa.
 
 ### Imutabilidade de registros conciliados
+
 - Lançamento conciliado não pode ser editado sem desfazer conciliação.
 - Lançamento importado mantém referência ao registro original.
 
 ### Auditoria
+
 - Toda importação gera registro em audit_log com: arquivo, quantidade de registros, duplicados ignorados, erros, operador.
 - Importação deve ser reversível (soft-delete por job).
 

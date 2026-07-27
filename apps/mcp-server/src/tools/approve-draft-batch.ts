@@ -67,11 +67,12 @@ export async function approveDraftBatch(
     }
   }
 
-  const batchStatus = rejectedCount > 0 && approvedCount > 0
-    ? DraftBatchStatus.PARTIAL
-    : rejectedCount === drafts.length
-      ? DraftBatchStatus.REJECTED
-      : DraftBatchStatus.APPROVED;
+  const batchStatus =
+    rejectedCount > 0 && approvedCount > 0
+      ? DraftBatchStatus.PARTIAL
+      : rejectedCount === drafts.length
+        ? DraftBatchStatus.REJECTED
+        : DraftBatchStatus.APPROVED;
 
   await supabase
     .from("draft_batches")
