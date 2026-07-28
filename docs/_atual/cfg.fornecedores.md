@@ -29,9 +29,10 @@ Faça nesta ordem. Cada passo depende do anterior.
 
 Copie `.env.example` para `.env` e complete.
 
-> ⚠️ **O `.env.example` está incompleto.** Ele lista 8 variáveis; o código lê **17**.
-> As nove ausentes estão marcadas com ⚠️ abaixo. Enquanto o arquivo não for corrigido,
-> use esta tabela como referência.
+> O `.env.example` listava 8 variáveis enquanto o código lê **17** — faltavam
+> `LOCAL_USER_ID` e `SUPABASE_URL` (sem as quais nenhum worker sobe), as três do Gmail,
+> as três da OpenAI e as de OCR. **Já foi corrigido**; as tabelas abaixo detalham cada
+> uma e onde é lida.
 
 ### Supabase — obrigatórias
 
@@ -40,7 +41,7 @@ Copie `.env.example` para `.env` e complete.
 | `NEXT_PUBLIC_SUPABASE_URL`             | `apps/web/src/lib/supabase/*` | URL do projeto                          |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | idem                          | chave publicável (pode ir ao navegador) |
 | `SUPABASE_SECRET_KEY`                  | workers, MCP, scripts         | **service_role — nunca no navegador**   |
-| ⚠️ `SUPABASE_URL`                      | workers, MCP                  | mesma URL, sem o prefixo `NEXT_PUBLIC_` |
+| `SUPABASE_URL`                         | workers, MCP                  | mesma URL, sem o prefixo `NEXT_PUBLIC_` |
 | `SUPABASE_DB_PASSWORD`                 | CLI                           | senha do Postgres                       |
 | `SUPABASE_ACCESS_TOKEN`                | CLI e CI                      | token da conta Supabase                 |
 | `SUPABASE_PROJECT_ID`                  | CLI e CI                      | ref do projeto                          |
@@ -51,9 +52,9 @@ Copie `.env.example` para `.env` e complete.
 
 ### Identidade local — obrigatória para workers e MCP
 
-| Variável           | Onde é lida                                                    | Valor                               |
-| ------------------ | -------------------------------------------------------------- | ----------------------------------- |
-| ⚠️ `LOCAL_USER_ID` | `workers/*/src/supabase.ts`, `apps/mcp-server/src/supabase.ts` | UUID do seu usuário em `auth.users` |
+| Variável        | Onde é lida                                                    | Valor                               |
+| --------------- | -------------------------------------------------------------- | ----------------------------------- |
+| `LOCAL_USER_ID` | `workers/*/src/supabase.ts`, `apps/mcp-server/src/supabase.ts` | UUID do seu usuário em `auth.users` |
 
 Os workers rodam fora do navegador, sem sessão de autenticação, então precisam saber
 de quem são os dados. Para descobrir o seu:
@@ -71,30 +72,30 @@ docker exec -i supabase_db_<projeto> psql -U postgres -d postgres \
 
 ### Gmail — só se for usar ingestão por e-mail
 
-| Variável                       | Onde é lida                                 |
-| ------------------------------ | ------------------------------------------- |
-| ⚠️ `GOOGLE_MAIL_CLIENT_ID`     | `workers/gmail-scanner/src/gmail-client.ts` |
-| ⚠️ `GOOGLE_MAIL_CLIENT_SECRET` | idem                                        |
-| ⚠️ `GMAIL_REFRESH_TOKEN`       | idem                                        |
+| Variável                    | Onde é lida                                 |
+| --------------------------- | ------------------------------------------- |
+| `GOOGLE_MAIL_CLIENT_ID`     | `workers/gmail-scanner/src/gmail-client.ts` |
+| `GOOGLE_MAIL_CLIENT_SECRET` | idem                                        |
+| `GMAIL_REFRESH_TOKEN`       | idem                                        |
 
 ### OpenAI — só se for usar enriquecimento por IA
 
-| Variável               | Padrão        | Onde é lida                                              |
-| ---------------------- | ------------- | -------------------------------------------------------- |
-| ⚠️ `OPENAI_API_KEY`    | —             | `parsers/ai-*-enricher.ts`, `api/chat`, `api/ai-suggest` |
-| ⚠️ `OPENAI_LITE_MODEL` | `gpt-4o-mini` | `ai-lite-enricher.ts`                                    |
-| ⚠️ `OPENAI_FULL_MODEL` | `gpt-4o`      | `ai-full-enricher.ts`                                    |
+| Variável            | Padrão        | Onde é lida                                              |
+| ------------------- | ------------- | -------------------------------------------------------- |
+| `OPENAI_API_KEY`    | —             | `parsers/ai-*-enricher.ts`, `api/chat`, `api/ai-suggest` |
+| `OPENAI_LITE_MODEL` | `gpt-4o-mini` | `ai-lite-enricher.ts`                                    |
+| `OPENAI_FULL_MODEL` | `gpt-4o`      | `ai-full-enricher.ts`                                    |
 
 ### Operação dos workers — opcionais
 
-| Variável                       | Padrão     | Efeito                                                             |
-| ------------------------------ | ---------- | ------------------------------------------------------------------ |
-| ⚠️ `INGESTION_ENABLE_OCRMYPDF` | `false`    | **Desligado por padrão.** Sem isto, PDF escaneado não extrai texto |
-| ⚠️ `OCRMYPDF_BIN`              | `ocrmypdf` | Caminho do binário                                                 |
-| `POLL_INTERVAL_MS`             | 5000       | Intervalo do worker de ingestão                                    |
-| `BATCH_SIZE`                   | 10         | Jobs por rodada                                                    |
-| ⚠️ `WATCH_DIR`                 | `./inbox`  | Pasta vigiada pelo scanner local                                   |
-| `SCAN_INTERVAL_MS`             | 30000      | Intervalo do scanner local em modo watch                           |
+| Variável                    | Padrão     | Efeito                                                             |
+| --------------------------- | ---------- | ------------------------------------------------------------------ |
+| `INGESTION_ENABLE_OCRMYPDF` | `false`    | **Desligado por padrão.** Sem isto, PDF escaneado não extrai texto |
+| `OCRMYPDF_BIN`              | `ocrmypdf` | Caminho do binário                                                 |
+| `POLL_INTERVAL_MS`          | 5000       | Intervalo do worker de ingestão                                    |
+| `BATCH_SIZE`                | 10         | Jobs por rodada                                                    |
+| `WATCH_DIR`                 | `./inbox`  | Pasta vigiada pelo scanner local                                   |
+| `SCAN_INTERVAL_MS`          | 30000      | Intervalo do scanner local em modo watch                           |
 
 ---
 
