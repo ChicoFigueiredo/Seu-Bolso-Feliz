@@ -20,15 +20,15 @@ chamadores**: nenhuma UI, action, worker, tool de IA ou MCP a invocava.
 
 ## Saúde do código (medida em 2026-07-27, não afirmada)
 
-| Sinal                | Resultado                     | Como reproduzir                 |
-| -------------------- | ----------------------------- | ------------------------------- |
-| TypeScript           | 🟡 **5 erros pré-existentes** | `bun run typecheck`             |
-| Lint                 | ✅ limpo                      | `bun run lint`                  |
-| Formatação           | ✅ limpo                      | `bun run format:check`          |
-| Testes unitários     | ✅ **433/433** (25 arquivos)  | `bun run test:unit`             |
-| Testes de integração | ✅ **60/60** (6 arquivos)     | `bun run test:integration`      |
-| Testes E2E           | ✅ **12/12** (2 arquivos)     | `bunx vitest run --project e2e` |
-| Build web            | a confirmar                   | `bun run build`                 |
+| Sinal                | Resultado                    | Como reproduzir                 |
+| -------------------- | ---------------------------- | ------------------------------- |
+| TypeScript           | ✅ **zero erros**            | `bun run typecheck`             |
+| Lint                 | ✅ limpo                     | `bun run lint`                  |
+| Formatação           | ✅ limpo                     | `bun run format:check`          |
+| Testes unitários     | ✅ **433/433** (25 arquivos) | `bun run test:unit`             |
+| Testes de integração | ✅ **60/60** (6 arquivos)    | `bun run test:integration`      |
+| Testes E2E           | ✅ **12/12** (2 arquivos)    | `bunx vitest run --project e2e` |
+| Build web            | ✅ passa                     | `bun run build`                 |
 
 **Correções em relação à versão anterior deste documento:**
 

@@ -41,9 +41,15 @@ REVOKE ALL ON TABLE private.crypto_keys FROM anon, authenticated;
 COMMENT ON TABLE private.crypto_keys IS
   'Chaves de criptografia dos segredos. Rotação = inserir nova versão e re-encriptar as linhas.';
 
--- Semente de desenvolvimento. Em produção o operador substitui a versão 1 por
--- uma chave real; o CHECK de tamanho evita que a semente vá a produção por
--- descuido silencioso.
+-- Gera a chave versão 1 se ainda não existir.
+--
+-- São 32 bytes de `gen_random_bytes`, criptograficamente aleatórios: serve para
+-- produção como está, e não precisa ser substituída por nada.
+--
+-- O que ela EXIGE do operador é backup. A chave nasce dentro do banco e nunca
+-- sai dele — essa é a propriedade que a torna segura, e é também o que faz um
+-- dump que exclua o schema `private` tornar todos os segredos indecifráveis
+-- para sempre. Ver docs/_atual/_checklist.imediato.md.
 INSERT INTO private.crypto_keys (version, key)
 SELECT 1, encode(gen_random_bytes(32), 'base64')
 WHERE NOT EXISTS (SELECT 1 FROM private.crypto_keys WHERE version = 1);

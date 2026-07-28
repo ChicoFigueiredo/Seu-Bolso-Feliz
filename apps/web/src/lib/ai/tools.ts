@@ -66,7 +66,10 @@ export const getDocumentDetails = tool({
         .single(),
       supabase
         .from("ingestion_jobs")
-        .select("id, status, step, error_message, created_at, updated_at")
+        // Sem `step`: a coluna não existe em `ingestion_jobs` — a etapa é o
+        // próprio `status`. O typecheck não pega string de `.select()`, então
+        // isto falharia só em runtime.
+        .select("id, status, error_message, created_at, updated_at")
         .eq("source_document_id", documentId)
         .order("created_at", { ascending: false }),
       supabase
@@ -169,14 +172,18 @@ export const listRecentTransactions = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
+    // As colunas corretas são `event_date`, `category_id` e `supplier_id`.
+    // Esta query pedia `transaction_date`, `category` e `supplier_name`, que
+    // NÃO EXISTEM em `transactions` — a tool falhava em toda execução contra o
+    // schema real. Nomes legíveis vêm por join.
     let query = supabase
       .from("transactions")
-      .select("id, description, amount, transaction_date, category, supplier_name, created_at")
+      .select("id, description, amount, event_date, created_at, categories(name), suppliers(name)")
       .eq("user_id", user.id)
-      .order("transaction_date", { ascending: false })
+      .order("event_date", { ascending: false })
       .limit(limit);
 
-    if (category) query = query.eq("category", category);
+    if (category) query = query.eq("categories.name", category);
 
     const { data, error } = await query;
     if (error) return { error: error.message };
@@ -374,9 +381,11 @@ export const reprocessDocumentTool = tool({
       .limit(1);
 
     if (jobs && jobs.length > 0 && jobs[0]) {
+      // `ingestion_jobs` não tem coluna `step` — a etapa é o próprio `status`.
+      // Gravar `step: "hash"` fazia o update falhar silenciosamente.
       await supabase
         .from("ingestion_jobs")
-        .update({ status: "queued" as const, step: "hash" })
+        .update({ status: "queued" as const })
         .eq("id", jobs[0].id);
     }
 
@@ -768,16 +777,19 @@ export const listMissingPasswordDocuments = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Search for jobs that failed at parse step (typically password issues)
+    // Jobs que falharam por senha ausente.
+    //
+    // A versão anterior filtrava por uma coluna `step` que não existe em
+    // `ingestion_jobs` — a etapa é o próprio `status`. O filtro real é o texto
+    // do erro, que é o que distingue falha de senha de qualquer outra.
     const { data, error } = await supabase
       .from("ingestion_jobs")
       .select(
-        "id, source_document_id, status, step, error_message, source_documents!inner(filename, user_id)",
+        "id, source_document_id, status, error_message, source_documents!inner(filename, user_id)",
       )
       .eq("source_documents.user_id", user.id)
       .eq("status", "failed")
-      .eq("step", "parse")
-      .ilike("error_message", "%password%")
+      .or("error_message.ilike.%password%,error_message.ilike.%senha%")
       .order("created_at", { ascending: false })
       .limit(limit);
 

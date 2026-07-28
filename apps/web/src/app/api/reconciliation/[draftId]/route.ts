@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { Database } from "@sbf/shared-types";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@sbf/shared-types";
 
@@ -304,7 +305,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
   }
 
-  const updateData: Record<string, unknown> = {
+  // Tipado como o Update da tabela, e nao Record<string, unknown>: a tipagem
+  // do supabase-js recusa indice generico para impedir que uma coluna
+  // inexistente passe despercebida.
+  const updateData: Database["public"]["Tables"]["draft_records"]["Update"] = {
     reconciliation_status: body.action,
   };
 

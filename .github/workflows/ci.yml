@@ -42,12 +42,11 @@ jobs:
       - name: Formatação
         run: bun run format:check
 
-      # typecheck ainda tem erros pré-existentes (ver docs/specs/00-estado-real.md).
-      # Reportamos sem quebrar o build, e o `continue-on-error` sai assim que
-      # os 5 erros forem corrigidos — não antes, para não normalizar o vermelho.
+      # Sem tolerância: os 5 erros pré-existentes foram corrigidos, e três deles
+      # eram consultas a colunas inexistentes que quebravam o `next build` — ou
+      # seja, o deploy no Vercel. Deixar passar de novo custaria a produção.
       - name: Typecheck
         run: bun run typecheck
-        continue-on-error: true
 
   validate-commits:
     name: Convenção de commits

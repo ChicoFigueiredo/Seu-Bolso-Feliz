@@ -1,12 +1,16 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import type { Database, Json } from "@sbf/shared-types";
+
+type SourceDocumentUpdate = Database["public"]["Tables"]["source_documents"]["Update"];
 
 // ─── S3-010 — Atualização de metadados de source_document ─────────────────────
 
 interface UpdateDocumentMetadataInput {
   supplier_name_raw?: string;
-  metadata?: Record<string, unknown>;
+  /** A coluna é `jsonb`; tipar como Json impede gravar valor não serializável. */
+  metadata?: Json;
   document_type?: string;
 }
 
@@ -21,8 +25,12 @@ export async function updateDocumentMetadata(
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Não autenticado");
 
-  // Monta objeto de update apenas com campos fornecidos
-  const updatePayload: Record<string, unknown> = {};
+  // Monta objeto de update apenas com campos fornecidos.
+  //
+  // Tipado como o Update da própria tabela, e não como Record<string, unknown>:
+  // a tipagem do supabase-js rejeita índices genéricos para impedir que uma
+  // coluna inexistente passe despercebida.
+  const updatePayload: SourceDocumentUpdate = {};
   if (input.supplier_name_raw !== undefined) {
     updatePayload.supplier_name_raw = input.supplier_name_raw;
   }
