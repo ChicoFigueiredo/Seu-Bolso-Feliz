@@ -68,8 +68,11 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
+      # Sem `--no-verify-jwt`: o `verify_jwt` de cada função está declarado em
+      # supabase/config.toml. O flag global desligaria a verificação para toda
+      # função futura sem que ninguém decidisse isso.
       - name: Deploy das Edge Functions
-        run: supabase functions deploy --no-verify-jwt
+        run: supabase functions deploy
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 

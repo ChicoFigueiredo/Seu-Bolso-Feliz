@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getPublishableKey, getSecretKey } from "../_shared/keys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,9 +38,9 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SECRET_KEY")!;
+  const secretKey = getSecretKey();
 
-  const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+  const userClient = createClient(supabaseUrl, getPublishableKey(), {
     global: { headers: { Authorization: authHeader } },
   });
 
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = createClient(supabaseUrl, secretKey);
 
   // GET — buscar candidatos para associação
   // POST — confirmar associações em lote

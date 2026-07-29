@@ -18,15 +18,49 @@ import {
 } from "../../workers/ingestion/src/parsers/secret-lookup";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
-const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SECRET_KEY ??
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const SUPABASE_SERVICE_KEY = exigirSupabaseSecretKey();
+
+/**
+ * A chave secreta local é fixa (mesmo valor em qualquer máquina, sai de
+ * `supabase status`), mas não pode ficar hardcoded aqui: o padrão
+ * `sb_secret_...` aciona o secret scanning do GitHub mesmo sendo local.
+ * O CI exporta SUPABASE_SECRET_KEY logo após subir o Supabase local.
+ */
+function exigirSupabaseSecretKey(): string {
+  const key = process.env.SUPABASE_SECRET_KEY;
+  if (!key) {
+    throw new Error(
+      "SUPABASE_SECRET_KEY não definida. Rode `supabase status` e copie SECRET_KEY para .env.",
+    );
+  }
+  return key;
+}
 
 /** Sentinela: se este valor aparecer em qualquer lugar indevido, o teste falha. */
 const SENTINEL = "SenhaUltraSecreta-42!";
 
 let supabase: SupabaseClient;
 let userId: string;
+let otherUserId: string;
+
+/**
+ * Cria o usuário de teste ou, se já existir de uma execução anterior, faz
+ * login para recuperar o id — mesma tolerância que `userId` já tinha.
+ */
+async function criarOuAcharUsuario(email: string): Promise<string> {
+  const created = await supabase.auth.admin.createUser({
+    email,
+    password: "TestPass123!",
+    email_confirm: true,
+  });
+  if (created.data?.user?.id) return created.data.user.id;
+
+  const probe = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const signedIn = await probe.auth.signInWithPassword({ email, password: "TestPass123!" });
+  return signedIn.data!.user!.id;
+}
 
 /**
  * Insere um segredo já criptografado.
@@ -67,31 +101,20 @@ beforeAll(async () => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const email = "test-secrets@sbf.local";
-  const created = await supabase.auth.admin.createUser({
-    email,
-    password: "TestPass123!",
-    email_confirm: true,
-  });
-  if (created.data?.user?.id) {
-    userId = created.data.user.id;
-  } else {
-    const probe = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const signedIn = await probe.auth.signInWithPassword({ email, password: "TestPass123!" });
-    userId = signedIn.data!.user!.id;
-  }
+  userId = await criarOuAcharUsuario("test-secrets@sbf.local");
+  otherUserId = await criarOuAcharUsuario("test-secrets-other@sbf.local");
 });
 
 beforeEach(async () => {
   await supabase.from("user_secrets").delete().eq("user_id", userId);
   await supabase.from("audit_logs").delete().eq("user_id", userId);
+  await supabase.from("audit_logs").delete().eq("user_id", otherUserId);
 });
 
 afterAll(async () => {
   await supabase.from("user_secrets").delete().eq("user_id", userId);
   await supabase.from("audit_logs").delete().eq("user_id", userId);
+  await supabase.from("audit_logs").delete().eq("user_id", otherUserId);
 });
 
 describe("criptografia", () => {
@@ -190,8 +213,7 @@ describe("ordenação e escopo", () => {
 
   it("não devolve segredos de outro usuário", async () => {
     await seedSecret(SENTINEL);
-    const otherId = "00000000-0000-0000-0000-000000000001";
-    const candidates = await listPdfPasswordCandidates(supabase, otherId);
+    const candidates = await listPdfPasswordCandidates(supabase, otherUserId);
     expect(candidates.every((c) => c.value !== SENTINEL)).toBe(true);
   });
 });

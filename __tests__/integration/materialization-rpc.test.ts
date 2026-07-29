@@ -17,9 +17,23 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
-const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SECRET_KEY ??
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+const SUPABASE_SERVICE_KEY = exigirSupabaseSecretKey();
+
+/**
+ * A chave secreta local é fixa (mesmo valor em qualquer máquina, sai de
+ * `supabase status`), mas não pode ficar hardcoded aqui: o padrão
+ * `sb_secret_...` aciona o secret scanning do GitHub mesmo sendo local.
+ * O CI exporta SUPABASE_SECRET_KEY logo após subir o Supabase local.
+ */
+function exigirSupabaseSecretKey(): string {
+  const key = process.env.SUPABASE_SECRET_KEY;
+  if (!key) {
+    throw new Error(
+      "SUPABASE_SECRET_KEY não definida. Rode `supabase status` e copie SECRET_KEY para .env.",
+    );
+  }
+  return key;
+}
 
 let supabase: SupabaseClient;
 let userId: string;

@@ -34,21 +34,123 @@ Copie `.env.example` para `.env` e complete.
 > as três da OpenAI e as de OCR. **Já foi corrigido**; as tabelas abaixo detalham cada
 > uma e onde é lida.
 
-### Supabase — obrigatórias
+### 1.1 As chaves de API — use as novas
 
-| Variável                               | Onde é lida                   | Valor                                   |
-| -------------------------------------- | ----------------------------- | --------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`             | `apps/web/src/lib/supabase/*` | URL do projeto                          |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | idem                          | chave publicável (pode ir ao navegador) |
-| `SUPABASE_SECRET_KEY`                  | workers, MCP, scripts         | **service_role — nunca no navegador**   |
-| `SUPABASE_URL`                         | workers, MCP                  | mesma URL, sem o prefixo `NEXT_PUBLIC_` |
-| `SUPABASE_DB_PASSWORD`                 | CLI                           | senha do Postgres                       |
-| `SUPABASE_ACCESS_TOKEN`                | CLI e CI                      | token da conta Supabase                 |
-| `SUPABASE_PROJECT_ID`                  | CLI e CI                      | ref do projeto                          |
+O Supabase tem dois modelos de chave convivendo. **Este projeto usa o novo.**
+
+| Modelo     | Formato              | Substitui      | Rotação                        |
+| ---------- | -------------------- | -------------- | ------------------------------ |
+| Publicável | `sb_publishable_...` | `anon`         | independente, sem downtime     |
+| Secreta    | `sb_secret_...`      | `service_role` | independente, uma por serviço  |
+| Legacy     | `eyJ...` (JWT)       | —              | **impossível** — vence em 2026 |
+
+**Se um valor começa com `eyJ`, é chave legacy e está errado.** Elas derivam do JWT
+secret do projeto, e é por isso que não podem ser rotacionadas: mexer numa mexeria em
+tudo que o secret assina. Não existe botão "Rotate" para elas — o caminho é criar as
+novas e desativar as antigas, em **Settings → API Keys**.
+
+As chaves secretas novas ainda ganham uma proteção que a `service_role` não tinha:
+respondem **HTTP 401 se usadas a partir de um navegador**, detectado pelo `User-Agent`.
+
+#### Onde cada uma vive
+
+| Variável                               | Onde é lida                   | Formato              |
+| -------------------------------------- | ----------------------------- | -------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | `apps/web/src/lib/supabase/*` | URL do projeto       |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | idem                          | `sb_publishable_...` |
+| `SUPABASE_SECRET_KEY`                  | workers, MCP, scripts         | `sb_secret_...`      |
+| `SUPABASE_URL`                         | workers, MCP                  | mesma URL            |
+| `SUPABASE_DB_PASSWORD`                 | CLI                           | senha do Postgres    |
+| `SUPABASE_ACCESS_TOKEN`                | CLI e CI                      | token da conta       |
+| `SUPABASE_PROJECT_ID`                  | CLI e CI                      | ref do projeto       |
 
 > `SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_URL` têm o **mesmo valor** e ambas são
 > necessárias: o Next só expõe ao cliente variáveis com o prefixo `NEXT_PUBLIC_`,
 > e os workers não rodam dentro do Next.
+
+> ⚠️ `SUPABASE_SECRET_KEY` **nunca** vai para o Vercel nem para o GitHub. Ela mora só na
+> sua máquina, onde rodam os workers e o MCP. O GitHub guarda `SUPABASE_ACCESS_TOKEN`,
+> que é outra coisa: credencial da sua conta, usada pelo CLI para fazer deploy.
+
+#### Ambiente local
+
+O Supabase local tem chaves novas fixas, **embutidas no binário do CLI e iguais em
+qualquer máquina** — não são segredo e já estão no `.env.example`:
+
+```bash
+supabase status   # mostra Publishable e Secret do stack local
+```
+
+#### As chaves nas Edge Functions
+
+Aqui os nomes são **diferentes**, e é onde a migração costuma quebrar. A plataforma
+injeta as chaves novas no **plural**, e o valor é um JSON indexado por nome:
+
+```
+SUPABASE_SECRET_KEYS      = {"default":"sb_secret_..."}
+SUPABASE_PUBLISHABLE_KEYS = {"default":"sb_publishable_..."}
+```
+
+Não adianta contornar criando uma variável no singular: **o CLI recusa qualquer secret
+com prefixo `SUPABASE_`** (`Env name cannot start with SUPABASE_, skipping`). Ou seja,
+uma função que leia `SUPABASE_SECRET_KEY` sobe com a chave `undefined` — foi exatamente
+o defeito encontrado nas quatro funções deste projeto, corrigido em
+`supabase/functions/_shared/keys.ts`:
+
+```ts
+import { getPublishableKey, getSecretKey } from "../_shared/keys.ts";
+
+const admin = createClient(Deno.env.get("SUPABASE_URL")!, getSecretKey());
+```
+
+> ⚠️ **A armadilha do `Invalid JWT`:** as chaves novas não são JWT. Em
+> `Authorization: Bearer` a plataforma tenta lê-las como token e rejeita — elas vão no
+> cabeçalho `apikey`, que é o que o `supabase-js` já faz sozinho. Como o `verify_jwt`
+> embutido só entende chave legacy, cada função declara `verify_jwt = false` em
+> `supabase/config.toml` e autoriza no próprio código, com `auth.getUser()`.
+
+#### Se você chamar o banco a partir do Postgres
+
+`pg_net` e Database Webhooks costumam mandar a chave em `Authorization: Bearer`. Com
+chave nova isso falha. Use `apikey`, e leia do Vault em vez de escrever o valor no SQL:
+
+```sql
+headers := jsonb_build_object(
+  'Content-Type', 'application/json',
+  'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'secret_key')
+);
+```
+
+Hoje o projeto **não usa** `pg_net` nem Database Webhooks — fica registrado para quando
+usar.
+
+### 1.2 O que alterar e o que remover nos `.env`
+
+Nenhum **nome** de variável muda. O que muda são valores — e um punhado de coisas
+precisa sumir.
+
+**Alterar** (só o valor, para o formato novo):
+
+| Arquivo           | Variável                               | Para                 |
+| ----------------- | -------------------------------------- | -------------------- |
+| `.env.production` | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` |
+| `.env.production` | `SUPABASE_SECRET_KEY`                  | `sb_secret_...`      |
+| `.env` (cofre)    | `PRD_PUBLISHABLE_KEY`                  | `sb_publishable_...` |
+| `.env` (cofre)    | `PRD_SECRET_KEY`                       | `sb_secret_...`      |
+
+**Remover:**
+
+| O quê                                                                                                                                                        | Por quê                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `STAGING_POSTGRES_PASSWORD`, `STAGING_PROJECT_NAME`, `STAGING_PROJECT_URL`, `STAGING_PUBLISHABLE_KEY`, `STAGING_SECRET_KEY`, `STAGING_SUPABASE_ID` no `.env` | Staging foi eliminado; as chaves continuam abrindo um banco |
+| O arquivo `.env.staging`                                                                                                                                     | Idem                                                        |
+| `.env.local.bak-*`                                                                                                                                           | Backup da migração; contém as chaves locais antigas         |
+
+E, fora do repositório: o projeto Supabase `seu-bolso-feliz-staging`. Enquanto ele
+existir, as chaves dele valem — remover a variável não desativa nada.
+
+**Já migrado, não precisa mexer:** `.env.local` (aponta para `127.0.0.1:54321`, chaves
+públicas do CLI), os fallbacks nos testes e o `.vscode/mcp.json`.
 
 ### Identidade local — obrigatória para workers e MCP
 
@@ -432,6 +534,9 @@ sudo apt install ocrmypdf tesseract-ocr-por   # Debian/Ubuntu/WSL
 ## Verificar se está tudo certo
 
 ```bash
+# 0. Nenhuma chave legacy sobrou (não deve imprimir nada)
+grep -l "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" .env* 2>/dev/null
+
 # 1. Ambiente e banco
 supabase start && bun run db:migrate
 

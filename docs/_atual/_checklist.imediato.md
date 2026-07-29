@@ -29,97 +29,96 @@
 
 ## 1. Supabase de produção
 
-### 1.1 🔒 Neutralizar as chaves expostas — **antes de qualquer outra coisa**
+### 1.1 🔒 Migrar para as chaves novas e desativar as legacy — **antes de tudo**
 
 As chaves vazaram no commit `38b8126`. Enquanto valerem, qualquer pessoa com acesso ao
 histórico do repositório **público** entra no banco.
 
 > **Não existe botão "Rotate" para elas, e não é falta de procurar.** As suas chaves são
-> as **legacy** (`anon` e `service_role`), que derivam do JWT secret do projeto. O
-> Supabase **removeu a capacidade de rotacioná-las** — a documentação diz textualmente
-> que _"não é mais possível rotacionar as legacy anon, service e JWT secrets"_.
+> as **legacy** (`anon` e `service_role`). Elas derivam do JWT secret do projeto — é
+> justamente isso que as torna irrotacionáveis, porque mexer nelas mexeria em tudo que o
+> secret assina. A documentação de migração diz, textualmente: _"as chaves legacy `anon`
+> e `service_role` continuam funcionando até o fim de 2026"_ — e o caminho oferecido não
+> é rotação, é substituição.
 >
-> O caminho hoje é outro: **criar chaves novas e desativar as antigas**. O efeito de
-> segurança é o mesmo — as chaves vazadas param de funcionar — e passa a existir rotação
-> de verdade daqui em diante.
+> **Criar chaves novas e desativar as antigas** tem o mesmo efeito de segurança: as
+> vazadas param de valer. E a partir daí passa a existir rotação de verdade, chave por
+> chave, sem downtime.
 
-**Como estão as suas hoje** (verificado): os _nomes_ das variáveis já são os novos
-(`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`), mas os _valores_ são
-JWTs legacy (começam com `eyJ...`). Só os valores mudam — **nenhum código precisa ser
-alterado**.
+#### O que já foi feito no código (não precisa refazer)
 
-| Chave legacy   | Substituta  | Quem usa                      |
-| -------------- | ----------- | ----------------------------- |
-| `anon`         | publishable | navegador (`NEXT_PUBLIC_...`) |
-| `service_role` | secret      | workers, MCP, Edge Functions  |
+| Feito                                                          | Onde                                      |
+| -------------------------------------------------------------- | ----------------------------------------- |
+| Edge Functions leem `SUPABASE_SECRET_KEYS` / `..._KEYS` (JSON) | `supabase/functions/_shared/keys.ts`      |
+| `verify_jwt = false` declarado por função                      | `supabase/config.toml`                    |
+| `--no-verify-jwt` global removido do deploy                    | `.github/workflows/deploy.yml`            |
+| `.env.local` e fixtures de teste em `sb_secret_...`            | `.env.local`, `__tests__/`                |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` órfã removida do CI            | `.github/workflows/ci.yml`                |
+| `.env.example` documentando o formato exigido                  | `.env.example`, `.env.production.example` |
 
-#### Passo a passo
+Prova: 505/505 testes, typecheck e build verdes com as chaves novas.
+
+#### O que só você pode fazer
 
 **a. Criar as chaves novas** — **Settings → API Keys** → aba **Publishable and secret
-API keys**. Se aparecer **Create new API keys**, clique. É seguro: as novas nascem ao
-lado das legacy, e as legacy continuam funcionando. Vêm com o nome `default`.
+API keys** → **Create new API keys**. É seguro: as novas nascem ao lado das legacy, que
+continuam funcionando. Vêm com o nome `default` — é esse nome que o código procura.
 
-**b. Trocar os valores.** Em cada lugar, substitua o `eyJ...` pelo novo:
+**b. Trocar os valores.** Nenhum nome de variável muda; só o valor.
 
-| Onde                                    | Variável                               | Valor novo                                          |
-| --------------------------------------- | -------------------------------------- | --------------------------------------------------- |
-| `.env`, `.env.local`, `.env.production` | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...`                                |
-| idem                                    | `SUPABASE_SECRET_KEY`                  | `sb_secret_...`                                     |
-| Vercel → Environment Variables          | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...`                                |
-| GitHub → Secrets                        | —                                      | não guarda chave de API, só `SUPABASE_ACCESS_TOKEN` |
+| Onde                           | Variável                               | De       | Para                 |
+| ------------------------------ | -------------------------------------- | -------- | -------------------- |
+| `.env.production`              | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `eyJ...` | `sb_publishable_...` |
+| `.env.production`              | `SUPABASE_SECRET_KEY`                  | `eyJ...` | `sb_secret_...`      |
+| `.env` (cofre)                 | `PRD_PUBLISHABLE_KEY`                  | `eyJ...` | `sb_publishable_...` |
+| `.env` (cofre)                 | `PRD_SECRET_KEY`                       | `eyJ...` | `sb_secret_...`      |
+| Vercel → Environment Variables | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `eyJ...` | `sb_publishable_...` |
 
-**c. Edge Functions.** Você tem quatro (`merge-suppliers`,
-`refresh-mv-supplier-spending`, `retroactive-supplier-association`,
-`trigger-ingestion`), e todas leem `Deno.env.get("SUPABASE_SECRET_KEY")`. O Supabase
-injeta as novas num formato diferente — um JSON indexado por nome:
+**A remover, não substituir:**
 
-```ts
-// antes
-const secretKey = Deno.env.get("SUPABASE_SECRET_KEY")!;
+| O quê                                                 | Por quê                                                       |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `STAGING_*` no `.env` (6 variáveis)                   | Staging foi eliminado. As chaves ainda valem — são um passivo |
+| O arquivo `.env.staging`                              | Idem                                                          |
+| O projeto Supabase `seu-bolso-feliz-staging`          | Enquanto existir, as chaves dele continuam abrindo um banco   |
+| `.env.local.bak-*` (backup criado durante a migração) | Contém as chaves locais antigas                               |
 
-// depois
-const secretKey = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS")!)["default"];
+> `.env.local` aponta para `127.0.0.1:54321` e já foi migrado. As chaves de lá **não são
+> segredo**: estão embutidas no binário do CLI e são iguais em toda máquina.
+> **Nada do que vazou de `.env.local` importa** — o que importa é `.env.production` e o
+> `PRD_*` do `.env`.
+
+**c. Conferir que nada mais usa as legacy.** Não há indicador automático de uso — é
+conferência manual, e é o passo que as pessoas pulam. Além do óbvio: o MCP configurado
+na sua máquina, `~/.config`, scripts avulsos, e qualquer `.env` fora deste repositório.
+
+⚙️ Uma varredura que pega a maior parte:
+
+```bash
+grep -rn "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" ~ --include=".env*" --include="*.json" 2>/dev/null
 ```
 
-> ⚠️ **A armadilha que faz tudo dar `Invalid JWT`:** as chaves novas **não são JWT**.
-> Se forem enviadas no header `Authorization: Bearer`, a plataforma tenta interpretá-las
-> como token e rejeita. Elas vão no header `apikey`. O `supabase-js` já faz isso
-> sozinho, mas o `verify_jwt` embutido das Edge Functions só entende chave legacy —
-> então cada função precisa de `verify_jwt = false` no `supabase/config.toml` e
-> autorização no próprio código:
->
-> ```toml
-> [functions.merge-suppliers]
-> verify_jwt = false
-> ```
->
-> Hoje o seu `config.toml` **não define `verify_jwt` para nenhuma função**.
+**d. Desativar as legacy** — mesma tela **Settings → API Keys**. **É este passo que
+neutraliza o vazamento**; tudo antes dele é preparação. É reversível: se descobrir um
+cliente esquecido, dá para reativar.
 
-> Nota: `trigger-ingestion` está quebrada contra o schema real (insere quatro colunas
-> que não existem) e o plano prevê deletá-la. Não gaste tempo migrando essa.
+**e. Redeploy das Edge Functions.** Elas leem a chave em tempo de execução, mas o
+`verify_jwt = false` só vale a partir de um deploy novo:
 
-**d. Conferir que nada mais usa as legacy.** Não há indicador automático de uso — é
-conferência manual. Além do óbvio: MCP na sua máquina, scripts, e qualquer `.env` que
-você tenha em outro lugar.
-
-**e. Desativar as legacy** — mesma tela **Settings → API Keys**. **É este passo que
-neutraliza o vazamento.** É reversível: se descobrir um cliente esquecido, dá para
-reativar.
+```bash
+supabase functions deploy
+```
 
 #### Depois: JWT signing keys (migração separada)
 
 As chaves de API novas não tocam mais o JWT secret, mas os tokens que o Supabase Auth
 emite para os seus usuários **ainda são assinados por ele**. Migrar para
-**Settings → JWT Keys → JWT Signing Keys** tira o projeto inteiro do segredo
-compartilhado e habilita rotação sem downtime (aí sim com botão **Rotate Keys**, e um
-**Revoke** para invalidar a chave anterior).
+**Settings → JWT Keys** tira o projeto inteiro do segredo compartilhado (aí sim com
+botão **Rotate Keys** e um **Revoke** para invalidar a anterior).
 
-Não é urgente como (e), mas é o que fecha o assunto de vez.
+Não é urgente como (d), mas é o que fecha o assunto de vez.
 
-> As legacy funcionam até o **fim de 2026**. Para uso normal isso daria tempo de sobra —
-> mas as suas **vazaram**, então o passo (e) é para agora.
-
-→ [cfg §1 — variáveis](cfg.fornecedores.md#1-variáveis-de-ambiente)
+→ [cfg §1.1 — chaves de API](cfg.fornecedores.md#11-as-chaves-de-api--use-as-novas)
 → [Migrar para publishable/secret](https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys)
 → [JWT Signing Keys](https://supabase.com/docs/guides/auth/signing-keys)
 
@@ -227,15 +226,17 @@ Distinto dos secrets do GitHub: estas são as que a aplicação lê em runtime.
 
 Em **Settings → Environment Variables**, ambiente Production:
 
-| Variável                               | Valor                                |
-| -------------------------------------- | ------------------------------------ |
-| `NEXT_PUBLIC_SUPABASE_URL`             | `https://<ref>.supabase.co`          |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | chave publicável **rotacionada**     |
-| `NEXT_PUBLIC_APP_URL`                  | `https://seudominio.com.br`          |
-| `OPENAI_API_KEY`                       | só se quiser chat e sugestões na web |
+| Variável                               | Valor                                        |
+| -------------------------------------- | -------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | `https://<ref>.supabase.co`                  |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` — **nunca um `eyJ...`** |
+| `NEXT_PUBLIC_APP_URL`                  | `https://seudominio.com.br`                  |
+| `OPENAI_API_KEY`                       | só se quiser chat e sugestões na web         |
 
-> ⚠️ **`SUPABASE_SECRET_KEY` NÃO vai no Vercel.** É a `service_role`, que ignora RLS.
-> Ela pertence à sua máquina, onde rodam os workers e o MCP.
+> ⚠️ **`SUPABASE_SECRET_KEY` NÃO vai no Vercel.** Ignora RLS. Ela pertence à sua
+> máquina, onde rodam os workers e o MCP. A chave secreta nova ainda tem uma proteção a
+> mais que a `service_role` não tinha: responde **HTTP 401 se for usada a partir de um
+> navegador**. Rede de segurança, não substituto de cuidado.
 
 → [cfg §1 — variáveis](cfg.fornecedores.md#1-variáveis-de-ambiente)
 
@@ -348,7 +349,7 @@ Não são bloqueadores de subida, mas evitam surpresa:
 
 ## Resumo: o que só depende de você
 
-1. **Neutralizar as chaves vazadas** (1.1) — criar publishable/secret novas e **desativar** as legacy. Não existe "Rotate" para chave legacy: o Supabase removeu essa capacidade
+1. **Neutralizar as chaves vazadas** (1.1) — criar as `sb_publishable_...` / `sb_secret_...`, trocar os valores e **desativar as legacy**. Não existe "Rotate" para chave legacy; a substituição é o caminho. O código já está pronto para as novas
 2. Fazer **backup da chave de criptografia** (1.4) — perdê-la é irreversível
 3. URLs de Auth no Supabase (1.5)
 4. Projeto, variáveis e domínio no Vercel (2.1–2.3)

@@ -373,6 +373,36 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# ── Edge Functions ───────────────────────────────────────────────────────────
+#
+# `verify_jwt = false` é OBRIGATÓRIO com as chaves de API novas: a verificação
+# embutida da plataforma só entende as chaves legacy (que eram JWT). As chaves
+# `sb_publishable_...` / `sb_secret_...` não são JWT, então o verificador
+# embutido rejeitaria a chamada antes de o código rodar.
+#
+# Isto NÃO afrouxa a segurança: as quatro funções exigem o cabeçalho
+# `Authorization` e validam a identidade com `userClient.auth.getUser()` na
+# primeira dúzia de linhas. A autorização apenas saiu da plataforma e passou a
+# ser explícita no código — que é o que a documentação de migração prescreve.
+#
+# Declarado por função de propósito, em vez do `--no-verify-jwt` global no
+# deploy: assim uma função nova nasce com verificação ligada e a decisão de
+# desligá-la fica visível aqui.
+
+[functions.merge-suppliers]
+verify_jwt = false
+
+[functions.refresh-mv-supplier-spending]
+verify_jwt = false
+
+[functions.retroactive-supplier-association]
+verify_jwt = false
+
+# Quebrada contra o schema real (insere quatro colunas que não existem).
+# Prevista para deleção; declarada aqui só para não ficar meio configurada.
+[functions.trigger-ingestion]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
