@@ -96,7 +96,7 @@ export async function setSecret(input: SetSecretInput): Promise<{ id: string }> 
 
   if (error) throw new Error(error.message);
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings/passwords");
   return { id: data as unknown as string };
 }
 
@@ -114,5 +114,5 @@ export async function deleteSecret(id: string): Promise<void> {
     .eq("user_id", user.id);
 
   if (error) throw new Error(error.message);
-  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/settings/passwords");
 }

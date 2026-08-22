@@ -25,6 +25,7 @@ import {
   ClipboardCheck,
   BookOpen,
   Activity,
+  KeyRound,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -177,8 +178,26 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
-        <p className="text-muted-foreground">Ciclo financeiro, categorias e tags</p>
+        <p className="text-muted-foreground">Ciclo financeiro, categorias, tags e senhas</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <KeyRound className="size-5" />
+            Senhas de documentos
+          </CardTitle>
+          <CardDescription>
+            Faturas em PDF protegido não são lidas sem a senha cadastrada. O valor é criptografado
+            no banco e nunca volta para o navegador.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline">
+            <Link href="/dashboard/settings/passwords">Gerenciar senhas</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Financial Cycle Preferences */}
       <Card>
