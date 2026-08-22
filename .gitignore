@@ -53,3 +53,8 @@ docs-html/
 
 # Arquivos temporários de execução
 tmp/
+
+# Pasta de entrada do scanner local: são os SEUS documentos financeiros, não
+# artefato de código. `bun run pipeline:scan-local` e `--dir ./inbox` apontam
+# para cá por padrão.
+inbox/
