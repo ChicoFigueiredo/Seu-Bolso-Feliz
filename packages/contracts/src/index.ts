@@ -10,6 +10,7 @@
  *
  * Agora os dois lados importam os mesmos schemas daqui.
  */
+export * from "./formats";
 export * from "./draft";
 export * from "./draft/migrate-v0";
 export * from "./draft/parse";

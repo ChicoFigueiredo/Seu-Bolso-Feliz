@@ -5,34 +5,17 @@
  * e gera fingerprint para idempotência.
  */
 
+import { EXTENSOES_ACEITAS, MIME_TYPES_ACEITOS } from "@sbf/contracts";
 import type { GmailMessage, GmailPart } from "./gmail-client";
 
-/** Tipos de MIME aceitos para ingestão de anexos */
-const ACCEPTED_MIME_TYPES = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "text/csv",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/xml",
-  "application/octet-stream",
-]);
-
-/** Extensões aceitas (fallback se MIME não for confiável) */
-const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".csv",
-  ".xls",
-  ".xlsx",
-  ".xml",
-  ".ofx",
-]);
+/**
+ * MIMEs e extensões vêm do registro único (`@sbf/contracts`).
+ *
+ * As duas listas locais anteriores divergiam do resto do sistema: aceitavam
+ * `.xls`, que nenhum parser abre, e não conheciam `application/x-ofx`.
+ */
+const ACCEPTED_MIME_TYPES = MIME_TYPES_ACEITOS;
+const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
 
 export interface MessageMetadata {
   messageId: string;

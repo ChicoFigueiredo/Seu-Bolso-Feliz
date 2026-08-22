@@ -7,6 +7,7 @@ import { join, extname } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
+import { EXTENSOES_ACEITAS, MIME_POR_EXTENSAO } from "@sbf/contracts";
 
 export interface ScannerOptions {
   recursive?: boolean;
@@ -16,33 +17,15 @@ export interface ScannerOptions {
   moveProcessedTo?: string;
 }
 
-/** Extensões aceitas para ingestão */
-const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".csv",
-  ".xls",
-  ".xlsx",
-  ".xml",
-  ".ofx",
-]);
-
-/** Mapa de extensão → MIME type */
-const MIME_MAP: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".csv": "text/csv",
-  ".xls": "application/vnd.ms-excel",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".xml": "application/xml",
-  ".ofx": "application/octet-stream",
-};
+/**
+ * Extensões e MIMEs vêm do registro único (`@sbf/contracts`).
+ *
+ * Antes eram duas listas locais que divergiram do resto: aceitavam `.xls`, que
+ * o pipeline não abre, e rotulavam `.ofx` como `application/octet-stream`, o
+ * que fazia o extrato bancário chegar ao extrator sem nenhuma pista do que era.
+ */
+const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
+const MIME_MAP = MIME_POR_EXTENSAO;
 
 /**
  * ID do usuário local — em ambiente de desenvolvimento, usa variável de ambiente.

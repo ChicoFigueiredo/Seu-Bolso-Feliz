@@ -9,8 +9,9 @@
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {
-    "@sbf/operations": "workspace:*",
+    "@sbf/contracts": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
+    "@sbf/operations": "workspace:*",
     "@supabase/supabase-js": "^2.110.9"
   }
 }

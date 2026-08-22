@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { FileUp, Loader2 } from "lucide-react";
+import { ACCEPT_UPLOAD } from "@sbf/contracts";
 
-const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export function UploadDocuments({ onUploadComplete }: { onUploadComplete?: () => void }) {
@@ -146,7 +146,7 @@ export function UploadDocuments({ onUploadComplete }: { onUploadComplete?: () =>
             ref={inputRef}
             type="file"
             className="hidden"
-            accept={ACCEPTED_TYPES}
+            accept={ACCEPT_UPLOAD}
             multiple
             onChange={(e) => {
               if (e.target.files) uploadFiles(e.target.files);
