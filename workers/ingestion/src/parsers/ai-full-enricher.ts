@@ -13,6 +13,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 import { writeLog, type LogContext } from "../logger";
+import { chamarChatCompletions } from "./llm-endpoint";
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -101,18 +102,8 @@ async function callOpenAiVision(
   imageBase64: string,
   mimeType: string,
 ): Promise<Record<string, unknown>> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY não configurada — enriquecimento full não disponível");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const response = await chamarChatCompletions(
+    {
       model: process.env.OPENAI_FULL_MODEL ?? "gpt-4o",
       messages: [
         {
@@ -129,12 +120,13 @@ async function callOpenAiVision(
       max_tokens: 600,
       temperature: 0,
       response_format: { type: "json_object" },
-    }),
-  });
+    },
+    "enriquecimento full por visão",
+  );
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`OpenAI Vision API error ${response.status}: ${body.slice(0, 200)}`);
+    throw new Error(`LLM Vision API error ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {
@@ -145,29 +137,20 @@ async function callOpenAiVision(
 }
 
 async function callOpenAiText(rawText: string): Promise<Record<string, unknown>> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY não configurada — enriquecimento full não disponível");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const response = await chamarChatCompletions(
+    {
       model: process.env.OPENAI_FULL_MODEL ?? "gpt-4o",
       messages: [{ role: "user", content: buildTextFallbackPrompt(rawText) }],
       max_tokens: 600,
       temperature: 0,
       response_format: { type: "json_object" },
-    }),
-  });
+    },
+    "enriquecimento full por texto",
+  );
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`OpenAI API error ${response.status}: ${body.slice(0, 200)}`);
+    throw new Error(`LLM API error ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {
