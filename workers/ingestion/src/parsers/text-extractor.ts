@@ -2,19 +2,34 @@
  * Extração de texto de documentos.
  * Suporta PDF (com e sem senha), CSV e texto plano.
  */
-// Import from lib/ to avoid pdf-parse@1.x debug code that runs on top-level import
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { extrairTextoPdf, PdfPasswordError } from "./pdf-text";
+import {
+  csvParaTexto,
+  decodificarTexto,
+  ofxParaTexto,
+  parseCsv,
+  parseOfx,
+  xlsxParaTexto,
+} from "./tabular";
 
 export interface TextExtractResult {
   text: string;
   pages: number;
   mimeType: string;
   wasProtected: boolean;
-  extractionMethod: "pdf_native" | "pdf_native_plus_ocrmypdf" | "text_plain" | "image_placeholder";
+  extractionMethod:
+    | "pdf_native"
+    | "pdf_native_plus_ocrmypdf"
+    | "text_plain"
+    | "image_placeholder"
+    | "image_ocr"
+    | "spreadsheet"
+    | "ofx"
+    | "csv";
   ocrApplied: boolean;
 }
 
@@ -41,32 +56,63 @@ export async function extractText(
     return extractPdfText(buf, password);
   }
 
-  if (mimeType === "text/csv" || mimeType === "application/xml") {
+  if (ehPlanilha(mimeType)) {
     return {
-      text: buf.toString("utf-8"),
+      text: await xlsxParaTexto(buf),
       pages: 1,
       mimeType,
       wasProtected: false,
-      extractionMethod: "text_plain",
+      extractionMethod: "spreadsheet",
       ocrApplied: false,
     };
   }
 
-  // Imagens não extraem texto no MVP (futuro: OCR / OpenAI Vision)
+  const texto = decodificarTexto(buf);
+
+  // OFX é reconhecido pelo conteúdo, não pelo MIME: bancos servem o arquivo
+  // como `application/octet-stream` com frequência, e o scanner registra
+  // exatamente isso. Confiar só no MIME deixaria todo extrato OFX cair no
+  // caminho de texto puro.
+  if (ehOfx(mimeType, texto)) {
+    return {
+      text: ofxParaTexto(parseOfx(texto)),
+      pages: 1,
+      mimeType,
+      wasProtected: false,
+      extractionMethod: "ofx",
+      ocrApplied: false,
+    };
+  }
+
+  if (mimeType === "text/csv") {
+    const tabela = parseCsv(texto);
+
+    // Só converte o que é tabela de verdade. `delimitador: null` significa
+    // "texto corrido salvo com extensão .csv" — comum em conta de luz
+    // exportada —, e forçá-lo a virar tabela quebraria `R$ 245,50` em dois
+    // campos. Sem linha de dados também não há o que converter.
+    if (tabela.delimitador !== null && tabela.linhas.length > 0) {
+      return {
+        text: csvParaTexto(tabela),
+        pages: 1,
+        mimeType,
+        wasProtected: false,
+        extractionMethod: "csv",
+        ocrApplied: false,
+      };
+    }
+  }
+
+  // Imagens não extraem texto sem OCR — ver `INGESTION_ENABLE_IMAGE_OCR`.
   if (mimeType.startsWith("image/")) {
-    return {
-      text: "",
-      pages: 1,
-      mimeType,
-      wasProtected: false,
-      extractionMethod: "image_placeholder",
-      ocrApplied: false,
-    };
+    return extrairTextoDeImagem(buf, mimeType);
   }
 
-  // Fallback: tentar como texto
+  // Fallback: texto puro, agora com detecção de codificação. Antes era
+  // `buf.toString("utf-8")` cru, o que transformava todo acento de arquivo
+  // latin-1 em U+FFFD e fazia o alias do fornecedor deixar de casar.
   return {
-    text: buf.toString("utf-8"),
+    text: texto,
     pages: 1,
     mimeType,
     wasProtected: false,
@@ -75,21 +121,35 @@ export async function extractText(
   };
 }
 
-async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtractResult> {
-  const options: Record<string, unknown> = {};
-  if (password) {
-    options.password = password;
-  }
+const MIMES_DE_PLANILHA = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+]);
 
+function ehPlanilha(mimeType: string): boolean {
+  return MIMES_DE_PLANILHA.has(mimeType);
+}
+
+/**
+ * OFX 1.x abre com `OFXHEADER:`; o 2.x é XML com a raiz `<OFX>`. Os dois cabem
+ * nos primeiros bytes, então a checagem é barata e não depende do MIME.
+ */
+function ehOfx(mimeType: string, texto: string): boolean {
+  if (mimeType === "application/x-ofx") return true;
+  const inicio = texto.slice(0, 512).toUpperCase();
+  return inicio.includes("OFXHEADER") || /<OFX[\s>]/.test(inicio);
+}
+
+async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtractResult> {
   try {
-    let result = await pdfParse(buf, options);
+    let result = await extrairTextoPdf(buf, password);
     let extractionMethod: TextExtractResult["extractionMethod"] = "pdf_native";
     let ocrApplied = false;
 
     if (shouldAttemptOcrFallback("application/pdf", result.text)) {
       const ocrBuffer = await runOcrMyPdf(buf);
       if (ocrBuffer) {
-        result = await pdfParse(ocrBuffer, options);
+        result = await extrairTextoPdf(ocrBuffer, password);
         extractionMethod = "pdf_native_plus_ocrmypdf";
         ocrApplied = true;
       }
@@ -97,16 +157,21 @@ async function extractPdfText(buf: Buffer, password?: string): Promise<TextExtra
 
     return {
       text: result.text,
-      pages: result.numpages,
+      pages: result.pages,
       mimeType: "application/pdf",
       wasProtected: !!password,
       extractionMethod,
       ocrApplied,
     };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    // O pdf.js distingue "precisa de senha" de "a senha está errada", e essa
+    // diferença importa: sem senha, o orquestrador vai buscar as cadastradas;
+    // com senha errada, ele passa para a próxima candidata.
+    if (err instanceof PdfPasswordError && err.needsPassword && !password) {
+      throw new PdfPasswordRequiredError();
+    }
 
-    // Detectar PDF protegido que precisa de senha
+    const msg = err instanceof Error ? err.message : String(err);
     if (isPasswordError(msg) && !password) {
       throw new PdfPasswordRequiredError();
     }
@@ -143,6 +208,71 @@ function runProcess(command: string, args: string[]): Promise<number> {
     child.on("error", () => resolve(1));
     child.on("close", (code) => resolve(code ?? 1));
   });
+}
+
+/** Idioma do OCR. `por+eng` cobre boleto em português com termos em inglês. */
+const OCR_IDIOMA_PADRAO = "por+eng";
+
+export function ocrDeImagemHabilitado(): boolean {
+  return process.env.INGESTION_ENABLE_IMAGE_OCR === "true";
+}
+
+/**
+ * OCR de imagem via tesseract.
+ *
+ * Antes, toda imagem devolvia `extractionMethod: "image_placeholder"` com texto
+ * VAZIO — e sem erro. O documento atravessava o pipeline inteiro, gerava um
+ * `extraction_result` sem campo algum e parava em revisão sem explicação, como
+ * se o parser tivesse tentado e não achado nada. Fotografar um boleto com o
+ * celular é o caminho mais natural que existe para quem usa o sistema pelo
+ * telefone, e era exatamente o que não funcionava.
+ *
+ * Fica DESLIGADO por padrão, como o OCR de PDF: depende de um binário externo
+ * (`sudo apt install tesseract-ocr tesseract-ocr-por`) e ligá-lo sozinho faria
+ * o worker falhar em máquina sem ele. Quando desligado — ou quando o binário
+ * não existe — o comportamento antigo é preservado, mas agora com o motivo
+ * registrado no resultado em vez de silêncio.
+ */
+async function extrairTextoDeImagem(buf: Buffer, mimeType: string): Promise<TextExtractResult> {
+  const placeholder: TextExtractResult = {
+    text: "",
+    pages: 1,
+    mimeType,
+    wasProtected: false,
+    extractionMethod: "image_placeholder",
+    ocrApplied: false,
+  };
+
+  if (!ocrDeImagemHabilitado()) return placeholder;
+
+  const workdir = await mkdtemp(join(tmpdir(), "sbf-ocr-imagem-"));
+  const inputPath = join(workdir, "entrada");
+  const outputBase = join(workdir, "saida");
+  const cmd = process.env.TESSERACT_BIN ?? "tesseract";
+  const idioma = process.env.INGESTION_OCR_LANG ?? OCR_IDIOMA_PADRAO;
+
+  try {
+    await writeFile(inputPath, buf);
+    // O tesseract acrescenta `.txt` ao caminho de saída por conta própria.
+    const exitCode = await runProcess(cmd, [inputPath, outputBase, "-l", idioma]);
+    if (exitCode !== 0) return placeholder;
+
+    const texto = await readFile(`${outputBase}.txt`, "utf-8");
+    if (texto.trim().length === 0) return placeholder;
+
+    return {
+      text: texto,
+      pages: 1,
+      mimeType,
+      wasProtected: false,
+      extractionMethod: "image_ocr",
+      ocrApplied: true,
+    };
+  } catch {
+    return placeholder;
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
 }
 
 function isPasswordError(message: string): boolean {

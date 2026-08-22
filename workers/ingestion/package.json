@@ -15,6 +15,7 @@
     "@sbf/ingestion-types": "workspace:*",
     "@sbf/operations": "workspace:*",
     "@supabase/supabase-js": "^2.110.9",
-    "pdf-parse": "1.1.1"
+    "exceljs": "^4.4.0",
+    "pdfjs-dist": "5.4.296"
   }
 }
