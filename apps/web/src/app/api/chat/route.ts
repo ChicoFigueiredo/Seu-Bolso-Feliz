@@ -1,5 +1,5 @@
 import { streamText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { iaConfigurada, modeloDeConversa } from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { untypedFrom, untypedRpc } from "@/lib/supabase/untyped";
 import { SBF_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
@@ -77,10 +77,10 @@ export async function POST(req: Request) {
   }
 
   // Validate API key is configured
-  if (!process.env.OPENAI_API_KEY) {
+  if (!iaConfigurada()) {
     return new Response(
       JSON.stringify({
-        error: "API key OpenAI não configurada. Adicione OPENAI_API_KEY ao .env",
+        error: "IA não configurada. Defina OPENAI_API_KEY ou OPENROUTER_API_KEY no .env",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
   }
 
   const result = streamText({
-    model: openai("gpt-4o"),
+    model: modeloDeConversa(),
     system: SBF_SYSTEM_PROMPT,
     messages,
     tools: sbfTools,

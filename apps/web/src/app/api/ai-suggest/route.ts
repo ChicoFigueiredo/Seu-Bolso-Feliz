@@ -9,7 +9,7 @@
  */
 
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { iaConfigurada, modeloDeSugestao } from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { sbfTools } from "@/lib/ai/tools";
 
@@ -61,8 +61,11 @@ export async function POST(req: Request) {
   }
 
   // API key
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json({ error: "OPENAI_API_KEY não configurada." }, { status: 500 });
+  if (!iaConfigurada()) {
+    return Response.json(
+      { error: "IA não configurada. Defina OPENAI_API_KEY ou OPENROUTER_API_KEY." },
+      { status: 500 },
+    );
   }
 
   // Parse body
@@ -97,7 +100,7 @@ export async function POST(req: Request) {
   try {
     // Executa via generateText com a única ferramenta solicitada + toolChoice forçado
     const { toolResults } = await generateText({
-      model: openai("gpt-4o-mini"),
+      model: modeloDeSugestao(),
       tools: { [toolName]: tool } as typeof sbfTools,
       toolChoice: { type: "tool", toolName: toolName as keyof typeof sbfTools },
       maxSteps: 1,
