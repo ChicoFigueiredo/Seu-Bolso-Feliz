@@ -18,29 +18,26 @@ sem registrar que **quatro dos cinco não eram importados por nenhuma tela**. O 
 para a camada de materialização, que tinha 533 linhas, testes de tipo nenhum e **zero
 chamadores**: nenhuma UI, action, worker, tool de IA ou MCP a invocava.
 
-## Saúde do código (medida em 2026-07-27, não afirmada)
+## Saúde do código (medida em 2026-08-05 a partir de `db reset` limpo, não afirmada)
 
 | Sinal                | Resultado                    | Como reproduzir                 |
 | -------------------- | ---------------------------- | ------------------------------- |
 | TypeScript           | ✅ **zero erros**            | `bun run typecheck`             |
 | Lint                 | ✅ limpo                     | `bun run lint`                  |
 | Formatação           | ✅ limpo                     | `bun run format:check`          |
-| Testes unitários     | ✅ **433/433** (25 arquivos) | `bun run test:unit`             |
-| Testes de integração | ✅ **60/60** (6 arquivos)    | `bun run test:integration`      |
+| Testes unitários     | ✅ **499/499** (30 arquivos) | `bun run test:unit`             |
+| Testes de integração | ✅ **66/66** (7 arquivos)    | `bun run test:integration`      |
 | Testes E2E           | ✅ **12/12** (2 arquivos)    | `bunx vitest run --project e2e` |
 | Build web            | ✅ passa                     | `bun run build`                 |
 
-**Correções em relação à versão anterior deste documento:**
+**Como estes números foram obtidos:** `supabase db reset` limpo, reinício do kong
+(ver §11) e as três suítes reexecutadas. Rodar sobre um banco que já acumulou dados
+de execuções anteriores esconde exatamente a classe de defeito que o CI encontra.
 
-- Dizia "TypeScript ✅ passa limpo". **Não passava**: havia 7 erros, medidos contra o
-  baseline com as dependências antigas. Restam 5, em 3 arquivos (`document-metadata.ts`,
-  `api/reconciliation/[draftId]/route.ts`, `lib/ai/tools.ts`). Dois deles são bugs reais
-  que a tipagem mais estrita expôs: consultas às colunas `transactions.category` e
-  `ingestion_logs.step`, que **não existem**.
-- Dizia "319/319 (20 arquivos)" para testes unitários. O número correto hoje é 433/433 em
-  25 arquivos, e os projetos `integration` e `e2e` são contados separadamente.
-- `lint` e `format:check` também estavam vermelhos (1 erro de lint, 38 arquivos fora de
-  formato) e não eram mencionados.
+**Histórico:** os 5 erros de typecheck — dois deles consultas a colunas inexistentes
+(`transactions.category`, `ingestion_jobs.step`) — foram corrigidos em `ab07bf4`. Os
+unitários eram 319 em 20 arquivos; hoje são 499 em 30, e os projetos `integration` e
+`e2e` são contados separadamente.
 
 ---
 
@@ -50,37 +47,43 @@ chamadores**: nenhuma UI, action, worker, tool de IA ou MCP a invocava.
 
 Spec detalhado: [`01-ingestao.md`](01-ingestao.md)
 
-| Item                                                             | Estado                       | Evidência                                                            |
-| ---------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------- |
-| Máquina de estados (13 status)                                   | ✅                           | `workers/ingestion/src/state-machine.ts` + testes                    |
-| Processor (download→hash→parse→enrich→obrigação→draft)           | ✅                           | `workers/ingestion/src/processor.ts`                                 |
-| Extração de texto PDF nativo                                     | ✅                           | `parsers/text-extractor.ts` + **E2E com PDF real**                   |
-| Parsers determinísticos (boleto, CEMIG, boleto-utils, templates) | ✅ (boleto-parser 🟡 básico) | `parsers/*.ts`                                                       |
-| Consenso de campos multi-fonte                                   | ✅                           | `parsers/field-consensus.ts`                                         |
-| Enriquecimento IA lite/full                                      | ✅                           | `parsers/ai-lite-enricher.ts`, `ai-full-enricher.ts`                 |
-| **Contrato de draft unificado e versionado**                     | ✅                           | `packages/contracts/` (57 testes) — ver §9 abaixo                    |
-| **Convergência para obrigação canônica**                         | ✅                           | `workers/ingestion/src/obligations/` + `obligations.test.ts` (10)    |
-| Scanner Gmail com `--query` e período                            | ✅                           | `query-builder.ts` + `gmail-client.ts` — corrigido em P0-9           |
-| Scanner pasta local (scan-once + watch)                          | ✅                           | `workers/local-scanner/`                                             |
-| **CLI único de orquestração**                                    | ✅                           | `workers/cli/` (26 testes) — substitui `financial-evidence-worker`   |
-| OCR de PDF escaneado (`ocrmypdf`)                                | 🟡                           | existe, mas `INGESTION_ENABLE_OCRMYPDF` é **desligado por padrão**   |
-| Checkpoint de backfill retomável                                 | 🟡                           | tabela `ingestion_checkpoints` criada; escrita pelo scanner pendente |
+| Item                                                             | Estado                       | Evidência                                                             |
+| ---------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------- |
+| Máquina de estados (13 status)                                   | ✅                           | `workers/ingestion/src/state-machine.ts` + testes                     |
+| Processor (download→hash→parse→enrich→obrigação→draft)           | ✅                           | `workers/ingestion/src/processor.ts`                                  |
+| Extração de texto PDF nativo                                     | ✅                           | `parsers/pdf-text.ts` (pdfjs-dist) + **E2E com PDF real**             |
+| Parsers determinísticos (boleto, CEMIG, boleto-utils, templates) | ✅ (boleto-parser 🟡 básico) | `parsers/*.ts`                                                        |
+| Consenso de campos multi-fonte                                   | ✅                           | `parsers/field-consensus.ts`                                          |
+| Enriquecimento IA lite/full                                      | ✅                           | `parsers/ai-lite-enricher.ts`, `ai-full-enricher.ts`                  |
+| **Contrato de draft unificado e versionado**                     | ✅                           | `packages/contracts/` (57 testes) — ver §9 abaixo                     |
+| **Convergência para obrigação canônica**                         | ✅                           | `workers/ingestion/src/obligations/` + `obligations.test.ts` (10)     |
+| Scanner Gmail com `--query` e período                            | ✅                           | `query-builder.ts` + `gmail-client.ts` — corrigido em P0-9            |
+| Scanner pasta local (scan-once + watch)                          | ✅                           | `workers/local-scanner/`                                              |
+| **CLI único de orquestração**                                    | ✅                           | `workers/cli/` (26 testes) — substitui `financial-evidence-worker`    |
+| OCR de PDF escaneado e de imagem                                 | 🟡                           | existe; `INGESTION_ENABLE_OCRMYPDF` e `..._IMAGE_OCR` default `false` |
+| Checkpoint de backfill retomável                                 | 🟡                           | tabela `ingestion_checkpoints` criada; escrita pelo scanner pendente  |
 
-### 2. Formatos suportados — 🟡 a UI anuncia mais do que o código faz
+### 2. Formatos suportados — ✅ o que a UI anuncia é o que o código lê
 
-| Formato    | Estado | Realidade                                                                     |
-| ---------- | ------ | ----------------------------------------------------------------------------- |
-| PDF        | ✅     | `pdf-parse`, com retry de senha. Coberto por E2E com PDF real.                |
-| CSV        | 🟡     | lido como texto puro; **não há parser de CSV** (sem delimitador, sem latin-1) |
-| Imagens    | ⬜     | `extractionMethod: "image_placeholder"`, texto vazio. **Sem OCR.**            |
-| XLSX / XLS | ⬜     | cai em `Buffer.toString()`. XLSX é ZIP → lixo binário.                        |
-| DOC / DOCX | ⬜     | idem                                                                          |
-| OFX        | ⬜     | sem parser. É SGML, "lê" como texto, mas nada é extraído.                     |
-| QIF        | ⬜     | **nem sequer está nas extensões aceitas pelos scanners**                      |
+Fonte única: `packages/contracts/src/formats.ts`. A regra do registro é **um
+formato só entra quando existe código que o lê**; não há categoria "planejado".
 
-> A interface de upload anuncia todos esses formatos
-> (`document-upload-dnd.tsx`, `upload-documents.tsx`, `ai-chat-drawer.tsx`).
-> Isso é uma promessa não cumprida e deve ser corrigido junto com P1.
+| Formato    | Estado | Realidade                                                                 |
+| ---------- | ------ | ------------------------------------------------------------------------- |
+| PDF        | ✅     | `pdfjs-dist`, com retry de senha. Coberto por E2E com PDF real.           |
+| CSV        | ✅     | delimitador detectado por consistência; latin-1 e BOM tratados            |
+| XLSX       | ✅     | `exceljs`; datas convertidas para o padrão brasileiro                     |
+| OFX        | ✅     | SGML (1.x) e XML (2.x) com o mesmo código; aceita vírgula decimal         |
+| XML        | ✅     | lido como texto — o que se extrai depende do documento                    |
+| Imagens    | 🟡     | OCR via tesseract atrás de `INGESTION_ENABLE_IMAGE_OCR` (default `false`) |
+| XLS        | ⬜     | **removido da UI**: o `exceljs` lê XLSX e não lê XLS                      |
+| DOC / DOCX | ⬜     | **removidos da UI**: sem parser, e nenhum scanner os aceitava             |
+| QIF        | ⬜     | **removido da UI**: nem estava na lista de nenhum scanner                 |
+
+> O teste de equivalência (`formats.test.ts`) lê os arquivos reais — os três
+> componentes de upload, os dois scanners e a migration do bucket — e falha se
+> alguém reintroduzir uma lista literal ao lado do import. Eram cinco listas
+> divergentes antes disso.
 
 ### 3. UI de ingestão e revisão — ✅ o ciclo fecha; 🟡 falta split-view
 
@@ -95,7 +98,7 @@ Spec detalhado: [`01-ingestao.md`](01-ingestao.md)
 | `/ingestion/patterns` + `[id]`                           | 🟡     | UI existe; ciclo de feedback não fecha                 |
 | `/ingestion/logs`                                        | ✅     | `ingestion/logs/page.tsx`                              |
 | Split-view documento × draft com edição inline           | 🟡     | aprovar/lançar/rejeitar OK; sem painel lado-a-lado     |
-| Gestão de senhas de documentos protegidos                | 🟡     | `actions/secrets.ts` existe; **falta a tela**          |
+| Gestão de senhas de documentos protegidos                | ✅     | `/dashboard/settings/passwords`                        |
 
 ### 4. IA e Chat — ✅ integrado
 
@@ -141,10 +144,10 @@ Esta é a correção mais importante do documento. A versão anterior marcava tu
 
 | Item                                   | Estado | **Consumidor em produção?**                                                                                       |
 | -------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
-| Ciclo financeiro personalizado         | 🟡     | **Nenhum.** `reports/page.tsx:36-46` reimplementa a matemática inline                                             |
+| Ciclo financeiro personalizado         | ✅     | `reports/report-period.ts` chama `getCurrentPeriod` (#17)                                                         |
 | Amortização SAC/Price/Misto + quitação | 🟡     | **Nenhum.** `liabilities/[id]` só renderiza parcelas armazenadas                                                  |
 | Prioridade de pagamento (5 níveis)     | ✅     | `dashboard/page.tsx:119` usa `prioritizeItems` — único consumidor                                                 |
-| Deduplicação ADR-001                   | 🟡     | **Nenhum.** Relatórios somam `transactions` cru e ignoram a view `v_expenses_deduplicated`                        |
+| Deduplicação ADR-001                   | ✅     | `reports/page.tsx` consome `v_expenses_deduplicated` (#18) — 6 testes de integração                               |
 | Identity key financeira                | ✅     | `obligations/obligation-writer.ts` — ganhou consumidor em P0-7                                                    |
 | Telas CRUD (transactions…settings)     | ✅     | existem e funcionam como CRUD                                                                                     |
 | Detecção de recorrência por histórico  | ⬜     | a regra antiga (`hasSupplier && hasCompetence`) foi **removida** em P0-1 por criar recorrência de um documento só |
@@ -154,7 +157,7 @@ Esta é a correção mais importante do documento. A versão anterior marcava tu
 | Agenda consolidada de pagamentos       | ⬜     | home mostra 3 listas separadas; `liability_installments` não aparece                                              |
 | Projeção de caixa                      | ⬜     | não existe                                                                                                        |
 | Avalanche / bola de neve               | ⬜     | não existe                                                                                                        |
-| Rota `/dashboard/cards`                | ⬜     | **não é possível cadastrar um cartão pela interface**                                                             |
+| Rota `/dashboard/cards`                | ✅     | lista, criação e edição, com limite, fechamento e vencimento (#4, #5)                                             |
 
 ### 8. Segurança e segredos — ✅ corrigido em P0-8
 
@@ -179,30 +182,60 @@ Esta é a correção mais importante do documento. A versão anterior marcava tu
 | Tools de Gmail / conciliação / decisão financeira via MCP | ⬜     | —                                                                                              |
 | Identidade de dispositivo e auditoria por chamador        | ⬜     | usa `SUPABASE_SECRET_KEY` + `LOCAL_USER_ID`                                                    |
 
-### 10. Infra, deploy e ambientes — 🟡 o maior buraco restante
+### 10. Infra, deploy e ambientes — 🟡 escrito e verde localmente; nunca executado em nuvem
 
-| Item                                    | Estado | Evidência                                                                                   |
-| --------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
-| Deploy de migrations e Edge Functions   | ✅     | `.gitlab-ci.yml` — real e funcional                                                         |
-| **Deploy web (Vercel)**                 | ⬜     | ainda é `echo "configurar provedor"` (`.gitlab-ci.yml:188,231`)                             |
-| Migração para GitHub Actions            | ⬜     | decidida, não executada                                                                     |
-| `.vercel/project.json` commitado        | ⬜     | artefato local que expõe org/project id em repo público                                     |
-| Filtro `changes:` de `test-integration` | ⬜     | não inclui `workers/**` — **nunca disparou** em mudança de ingestão                         |
-| Cobertura de teste                      | 🟡     | inclui só `packages/{domain,validation,operations,contracts}`; `apps/web` e `workers/` fora |
-| Promoção entre ambientes                | ⬜     | não existe                                                                                  |
+| Item                                   | Estado | Evidência                                                                                   |
+| -------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| **Privilégios das tabelas para a API** | ✅     | `20260804220000_grant_api_roles.sql` — ver §11, era o bloqueador de tudo                    |
+| Migração para GitHub Actions           | ✅     | `.github/workflows/{ci,deploy}.yml` — o `.gitlab-ci.yml` não existe mais                    |
+| **Deploy web (Vercel)**                | ✅     | `deploy.yml` roda `vercel pull/build/deploy --prod` de verdade                              |
+| Primeira execução do CI                | ⬜     | **nunca rodou**: 18 commits ainda não enviados                                              |
+| `.vercel/project.json` commitado       | ✅     | não está versionado — `git ls-files .vercel/` vazio, e `.gitignore` cobre                   |
+| Cobertura de teste                     | 🟡     | inclui só `packages/{domain,validation,operations,contracts}`; `apps/web` e `workers/` fora |
+| Promoção entre ambientes               | ⬜     | não existe, por decisão: ambiente único                                                     |
+| Segredos do GitHub e do Vercel         | 🔒     | seis secrets e as variáveis do Vercel dependem de você                                      |
 
----
+### 11. O bloqueador que estava invisível — privilégios de tabela
+
+Descoberto por execução em 2026-08-04, não por leitura. Depois de um
+`supabase db reset` limpo, **nenhuma** das 47 tabelas e views de `public` era
+acessível por `service_role` nem por `authenticated`: o worker recebia
+`permission denied for table ingestion_runs`, a web não lia nada, e 29 dos 60
+testes de integração falhavam.
+
+As migrations criavam objetos como papel `postgres` e dependiam de um
+`ALTER DEFAULT PRIVILEGES` implícito do Supabase que existe **só para
+`supabase_admin`**. O privilégio nunca foi concedido — apenas presumido. A
+chave legacy `service_role` falhava exatamente igual à `sb_secret_...`, o que
+descarta problema de formato de chave.
+
+| Depois da migration         | Antes |
+| --------------------------- | ----- |
+| 47/47 tabelas acessíveis    | 0/47  |
+| integração **66/66**        | 31/60 |
+| E2E **12/12** em reset frio | 10/12 |
 
 ## Gaps reais, em ordem de importância
 
-1. **Formatos anunciados sem parser** — a UI aceita XLSX/OFX/DOCX/QIF e o código não os lê. Ou o parser entra, ou a promessa sai.
-2. **Domínio financeiro sem consumidor** — amortização, ciclo e deduplicação são bibliotecas testadas que nenhuma tela chama. É o maior desperdício de código pronto do repositório.
-3. **Nenhuma inteligência de cartão** — sem `/dashboard/cards`, sem derivação de ciclo, sem parcelas, sem limite comprometido. É o caminho crítico da jornada P1 escolhida.
-4. **Deploy web real** — placeholder no CI. (🔒 credenciais Vercel)
-5. **Validação com documentos reais seus** — o pipeline agora tem um E2E com PDF sintético, mas nunca viu suas faturas. (🔒 depende de você fornecer amostras anonimizadas)
-6. **OCR desligado por padrão** — `INGESTION_ENABLE_OCRMYPDF` default `false`, e imagens não têm OCR nenhum.
-7. **5 erros de typecheck**, dois deles bugs reais de coluna inexistente.
-8. **Rotação das chaves Supabase expostas** — pendência de segurança aberta. (🔒 você)
+Atualizado em 2026-08-05. Os fechados ficam na lista, riscados, porque saber o
+que já foi resolvido evita reabrir a discussão.
+
+1. **Rotação das chaves Supabase expostas** — pendência de segurança aberta desde o commit `38b8126`, num repositório público. (🔒 você)
+2. **Primeira execução do CI** — os workflows existem e nunca rodaram: 18 commits ainda não enviados. A paridade só se confirma na primeira execução.
+3. **Validação com documentos reais seus** — o pipeline tem E2E com PDF sintético e nunca viu suas faturas. (🔒 depende de você fornecer amostras anonimizadas)
+4. **Inteligência de cartão** — `/dashboard/cards` agora existe (#4, #5), mas derivação de ciclo (#8), parcelas (#9) e limite comprometido (#10) continuam abertos.
+5. **OCR desligado por padrão** — `INGESTION_ENABLE_OCRMYPDF` e `INGESTION_ENABLE_IMAGE_OCR` default `false`. O código existe; ligar depende de instalar os binários.
+6. **Lógica de reconciliação duplicada** — `reconciliation.ts` e `api/reconciliation/[draftId]/route.ts` são cópias que podem divergir.
+7. **Upload-pelo-chat** — chama `trigger-ingestion`, uma Edge Function quebrada contra o schema real.
+
+Fechados em 2026-08-05:
+
+- ~~**Privilégios de tabela**~~ — descoberto e corrigido. Era o bloqueador de tudo; ver §11.
+- ~~**Formatos anunciados sem parser**~~ — XLSX, OFX e CSV têm parser; `.doc`, `.docx`, `.qif` e `.xls` saíram da UI. Registro único em `@sbf/contracts/formats`.
+- ~~**Domínio financeiro sem consumidor**~~ — relatórios chamam `financial-cycle` (#17) e a view `v_expenses_deduplicated` (#18).
+- ~~**Deploy web real**~~ — `deploy.yml` publica no Vercel de verdade.
+- ~~**5 erros de typecheck**~~ — corrigidos; dois eram bugs de coluna inexistente.
+- ~~**`pdf-parse@1.1.1`**~~ — substituído por `pdfjs-dist`. A build de 2018 devolvia erros DIFERENTES para os mesmos bytes no mesmo processo, e reprovava o E2E em toda primeira execução após reset.
 
 ## Como manter este mapa honesto
 
