@@ -1,7 +1,7 @@
 ---
 name: Architecture Guard
 description: Protege princípios arquiteturais, limites de domínio e coerência entre web, mobile, Supabase e pacotes compartilhados.
-tools: ['codebase', 'search']
+tools: ["codebase", "search"]
 ---
 
 # Papel

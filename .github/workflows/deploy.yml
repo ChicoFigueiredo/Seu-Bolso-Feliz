@@ -1,0 +1,111 @@
+# Deploy — ambiente único de produção.
+#
+# Staging foi eliminado por decisão do CEO. A premissa que torna isso razoável
+# está registrada: o produto tem UM ÚNICO usuário, que é o próprio CEO. Se
+# aparecer um segundo usuário, esta decisão cai e staging volta.
+#
+# Compensações pela ausência de pré-produção, todas obrigatórias:
+#   1. `supabase db reset` a cada PR (no ci.yml) prova que as migrations
+#      reconstroem o schema do zero;
+#   2. todo arquivo de migration carrega um bloco `-- rollback:` revisado;
+#   3. dump do banco como artifact ANTES de qualquer `db push`;
+#   4. portão humano: environment `production` com required reviewer, e
+#      workflow_dispatch — nunca dispara sozinho num push.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_migrations:
+        description: "Pular o deploy de migrations"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  HUSKY: "0"
+
+jobs:
+  database:
+    name: Migrations e Edge Functions
+    if: ${{ !inputs.skip_migrations }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Vincular projeto
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # Rede de segurança obrigatória sem staging: se uma migration corromper
+      # dados, o dump anterior é o caminho de volta.
+      - name: Backup antes de migrar
+        run: supabase db dump --file "backup-$(date -u +%Y%m%dT%H%M%SZ).sql"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.sha }}
+          path: backup-*.sql
+          retention-days: 30
+
+      - name: Aplicar migrations
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # Sem `--no-verify-jwt`: o `verify_jwt` de cada função está declarado em
+      # supabase/config.toml. O flag global desligaria a verificação para toda
+      # função futura sem que ninguém decidisse isso.
+      - name: Deploy das Edge Functions
+        run: supabase functions deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  web:
+    name: Web (Vercel)
+    needs: [database]
+    # `always()` para que pular migrations não bloqueie o deploy web.
+    if: ${{ always() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      # Deploy real, substituindo o `echo "configurar provedor"` que ocupava
+      # este lugar no .gitlab-ci.yml e nunca publicou nada.
+      - name: Vercel pull
+        run: bunx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel build
+        run: bunx vercel@latest build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel deploy
+        run: bunx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

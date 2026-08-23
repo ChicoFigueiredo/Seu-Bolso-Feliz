@@ -90,11 +90,7 @@ export type Priority = "essential" | "high" | "medium" | "low" | "optional";
 export type StatementCycleStatus = "open" | "closed" | "paid" | "partial" | "overdue";
 
 export type LiabilityType =
-  | "personal_loan"
-  | "mortgage"
-  | "overdraft"
-  | "installment_plan"
-  | "other";
+  "personal_loan" | "mortgage" | "overdraft" | "installment_plan" | "other";
 
 export type LiabilityStatus = "active" | "paid_off" | "renegotiated" | "defaulted";
 
@@ -105,20 +101,10 @@ export type RateType = "monthly" | "annual";
 export type InstallmentStatus = "pending" | "paid" | "partial" | "overdue" | "waived";
 
 export type RecurringInstanceStatus =
-  | "pending"
-  | "paid"
-  | "partial"
-  | "skipped"
-  | "overdue"
-  | "cancelled";
+  "pending" | "paid" | "partial" | "skipped" | "overdue" | "cancelled";
 
 export type RecurringFrequency =
-  | "monthly"
-  | "weekly"
-  | "biweekly"
-  | "quarterly"
-  | "annual"
-  | "custom";
+  "monthly" | "weekly" | "biweekly" | "quarterly" | "annual" | "custom";
 
 export type DocumentType = "receipt" | "invoice" | "statement" | "contract" | "proof" | "other";
 
@@ -126,28 +112,13 @@ export type ImportSourceType = "csv" | "xlsx" | "manual" | "api";
 export type ImportStatus = "pending" | "processing" | "completed" | "failed" | "partial";
 
 export type SupplierType =
-  | "company"
-  | "individual"
-  | "government"
-  | "utility"
-  | "telecom"
-  | "saas"
-  | "platform"
-  | "other";
+  "company" | "individual" | "government" | "utility" | "telecom" | "saas" | "platform" | "other";
 
 export type SupplierAliasType =
-  | "former_name"
-  | "abbreviation"
-  | "trade_name"
-  | "billing_name"
-  | "other";
+  "former_name" | "abbreviation" | "trade_name" | "billing_name" | "other";
 
 export type SupplierContractType =
-  | "subscription"
-  | "installment"
-  | "on_demand"
-  | "prepaid"
-  | "other";
+  "subscription" | "installment" | "on_demand" | "prepaid" | "other";
 
 // ── RPC types ──
 export type SearchSupplierResult = Functions["search_suppliers"]["Returns"][number];

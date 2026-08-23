@@ -5,16 +5,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readdir, stat, readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
-import {
-  IngestionRunStatus,
-  IngestionJobStatus,
-  SourceDocumentOrigin,
-} from "@sbf/ingestion-types";
+import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
 
 const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf", ".png", ".jpg", ".jpeg", ".webp",
-  ".csv", ".xls", ".xlsx", ".xml", ".ofx",
+  ".pdf",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".csv",
+  ".xls",
+  ".xlsx",
+  ".xml",
+  ".ofx",
 ]);
 
 const MIME_MAP: Record<string, string> = {
@@ -70,7 +74,11 @@ export async function scanLocalFolder(
       const fileStat = await stat(filePath);
       if (!fileStat.isFile()) continue;
 
-      const originKey = buildOriginKey({ type: "local_file", filepath: filePath, mtimeMs: fileStat.mtimeMs });
+      const originKey = buildOriginKey({
+        type: "local_file",
+        filepath: filePath,
+        mtimeMs: fileStat.mtimeMs,
+      });
       const { data: existing } = await supabase
         .from("source_documents")
         .select("id")
@@ -79,7 +87,10 @@ export async function scanLocalFolder(
         .eq("origin_key", originKey)
         .maybeSingle();
 
-      if (existing) { skipped++; continue; }
+      if (existing) {
+        skipped++;
+        continue;
+      }
 
       const fileData = await readFile(filePath);
       const storagePath = `${userId}/${Date.now()}-${entry}`;
@@ -88,7 +99,10 @@ export async function scanLocalFolder(
       const { error: uploadError } = await supabase.storage
         .from("ingestion-originals")
         .upload(storagePath, fileData, { contentType: mimeType });
-      if (uploadError) { errors.push(`Upload failed for ${entry}: ${uploadError.message}`); continue; }
+      if (uploadError) {
+        errors.push(`Upload failed for ${entry}: ${uploadError.message}`);
+        continue;
+      }
 
       const { data: doc } = await supabase
         .from("source_documents")
@@ -98,14 +112,17 @@ export async function scanLocalFolder(
           origin_key: originKey,
           filename: entry,
           mime_type: mimeType,
-          file_size: fileStat.size,
+          file_size_bytes: fileStat.size,
           storage_path: storagePath,
           metadata: { local_path: filePath },
         })
         .select("id")
         .single();
 
-      if (!doc) { errors.push(`Failed to create source_document for ${entry}`); continue; }
+      if (!doc) {
+        errors.push(`Failed to create source_document for ${entry}`);
+        continue;
+      }
 
       await supabase.from("ingestion_jobs").insert({
         run_id: run.id,
@@ -125,7 +142,13 @@ export async function scanLocalFolder(
     .from("ingestion_runs")
     .update({
       status: IngestionRunStatus.COMPLETED,
-      metadata: { directory: dirPath, triggered_by: "mcp", discovered, skipped, error_count: errors.length },
+      metadata: {
+        directory: dirPath,
+        triggered_by: "mcp",
+        discovered,
+        skipped,
+        error_count: errors.length,
+      },
     })
     .eq("id", run.id);
 

@@ -319,16 +319,31 @@ export async function getDraftRecords(filters?: {
   return data ?? [];
 }
 
+/**
+ * Aprova um draft. NÃO cria registro financeiro.
+ *
+ * Aprovação e lançamento são atos distintos (§9 do plano mestre): o draft
+ * passa de fato por `approved` no banco, ficando observável, e só então
+ * `postApprovedDraftRecord` o transforma em transação. Use
+ * `approveAndPostDraftRecord` quando quiser os dois numa ação de UI.
+ */
 export async function approveDraftRecord(id: string): Promise<DraftRecord> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) throw new Error("Não autenticado");
+
   const { data, error } = await supabase
     .from("draft_records")
-    .update({ status: "approved", approved_at: new Date().toISOString(), approved_by: user?.id })
+    .update({ status: "approved", approved_at: new Date().toISOString(), approved_by: user.id })
     .eq("id", id)
+    // O filtro por usuário faltava: a ação dependia inteiramente da RLS.
+    .eq("user_id", user.id)
+    // Impede re-aprovar um draft já lançado, o que zeraria approved_at e
+    // reabriria um registro que já virou dinheiro.
+    .in("status", ["pending_review", "corrected"])
     .select()
     .single();
 
@@ -373,13 +388,27 @@ export async function rejectDraftRecord(id: string, reason?: string): Promise<Dr
   return data;
 }
 
+/**
+ * Aprova todos os drafts pendentes de um batch. NÃO cria registros financeiros.
+ * O lançamento é feito por `postApprovedDraftBatch`.
+ */
 export async function approveDraftBatch(batchId: string): Promise<void> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) throw new Error("Não autenticado");
 
   const { error: recordsError } = await supabase
     .from("draft_records")
-    .update({ status: "approved", approved_at: new Date().toISOString() })
+    .update({
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      approved_by: user.id,
+    })
     .eq("batch_id", batchId)
+    .eq("user_id", user.id)
     .eq("status", "pending_review");
 
   if (recordsError) throw new Error(recordsError.message);
@@ -387,7 +416,8 @@ export async function approveDraftBatch(batchId: string): Promise<void> {
   const { error: batchError } = await supabase
     .from("draft_batches")
     .update({ status: "approved" })
-    .eq("id", batchId);
+    .eq("id", batchId)
+    .eq("user_id", user.id);
 
   if (batchError) throw new Error(batchError.message);
 }

@@ -699,6 +699,12 @@ export type Database = {
       };
       draft_records: {
         Row: {
+          draft_data_legacy: Json | null;
+          draft_schema_version: number;
+          materialization_error: Json | null;
+          materialization_key: string;
+          obligation_id: string | null;
+          posted_at: string | null;
           approved_at: string | null;
           approved_by: string | null;
           batch_id: string | null;
@@ -722,6 +728,12 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
+          materialization_error?: Json | null;
+          materialization_key?: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -745,6 +757,12 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
+          materialization_error?: Json | null;
+          materialization_key?: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -2458,6 +2476,10 @@ export type Database = {
       };
       user_secrets: {
         Row: {
+          contract_identifier: string | null;
+          label: string | null;
+          last_used_at: string | null;
+          success_count: number;
           created_at: string;
           encrypted_value: string;
           encryption_version: number;
@@ -2469,6 +2491,10 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          contract_identifier?: string | null;
+          label?: string | null;
+          last_used_at?: string | null;
+          success_count?: number;
           created_at?: string;
           encrypted_value: string;
           encryption_version?: number;
@@ -2480,6 +2506,10 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          contract_identifier?: string | null;
+          label?: string | null;
+          last_used_at?: string | null;
+          success_count?: number;
           created_at?: string;
           encrypted_value?: string;
           encryption_version?: number;
@@ -2533,6 +2563,51 @@ export type Database = {
       };
       decrypt_secret: { Args: { ciphertext: string }; Returns: string };
       encrypt_secret: { Args: { plaintext: string }; Returns: string };
+      fn_upsert_financial_obligation: {
+        Args: {
+          p_evidence: Json;
+          p_keys: Json;
+          p_payload: Json;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
+      fn_get_secrets: {
+        Args: { p_limit?: number; p_secret_type: string; p_user_id: string };
+        Returns: {
+          contract_identifier: string | null;
+          entity_id: string | null;
+          entity_type: string | null;
+          label: string | null;
+          secret_id: string;
+          value: string;
+        }[];
+      };
+      fn_set_secret: {
+        Args: {
+          p_contract_identifier?: string | null;
+          p_entity_id?: string | null;
+          p_entity_type?: string | null;
+          p_label?: string | null;
+          p_plaintext: string;
+          p_secret_type: string;
+        };
+        Returns: string;
+      };
+      fn_mark_secret_used: {
+        Args: { p_secret_id: string; p_user_id: string };
+        Returns: undefined;
+      };
+      fn_materialize_draft_record: {
+        Args: {
+          p_actor?: string;
+          p_draft_id: string;
+          p_insert_payload: Json;
+          p_target_table: string;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
       fn_reconciliation_progress: {
         Args: { p_batch_id: string };
         Returns: {
@@ -2624,12 +2699,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -2649,13 +2724,12 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -2674,13 +2748,12 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -2699,13 +2772,12 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -2716,13 +2788,12 @@ export type Enums<
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    keyof DefaultSchema["CompositeTypes"] | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }

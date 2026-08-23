@@ -37,6 +37,7 @@ const navFinanceiro = [
   { title: "Produtos", href: "/dashboard/products", icon: Wallet },
   { title: "Transações", href: "/dashboard/transactions", icon: Receipt },
   { title: "Recorrências", href: "/dashboard/recurring", icon: Repeat },
+  { title: "Cartões", href: "/dashboard/cards", icon: CreditCard },
   { title: "Faturas", href: "/dashboard/statements", icon: CreditCard },
   { title: "Dívidas", href: "/dashboard/liabilities", icon: TrendingDown },
   { title: "Fornecedores", href: "/dashboard/suppliers", icon: Store },

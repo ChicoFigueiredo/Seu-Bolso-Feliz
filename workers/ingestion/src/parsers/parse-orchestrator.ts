@@ -6,7 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionLogLevel, ParserType } from "@sbf/ingestion-types";
 import { extractText, PdfPasswordRequiredError } from "./text-extractor";
-import { findPdfPassword } from "./secret-lookup";
+import { listPdfPasswordCandidates, markSecretUsed } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
 import { extractWithBoletoUtils } from "./boleto-utils-extractor";
@@ -188,8 +188,8 @@ export async function parseDocument(
     if (err instanceof PdfPasswordRequiredError) {
       await writeLog(supabase, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
 
-      const secret = await findPdfPassword(supabase, userId);
-      if (!secret) {
+      const candidates = await listPdfPasswordCandidates(supabase, userId);
+      if (candidates.length === 0) {
         await writeLog(
           supabase,
           ctx,
@@ -199,12 +199,38 @@ export async function parseDocument(
         return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
       }
 
-      const retryResult = await extractText(fileData, mimeType, secret.value);
-      text = retryResult.text;
-      pages = retryResult.pages;
-      wasProtected = true;
-      extractionMethod = retryResult.extractionMethod;
-      ocrApplied = retryResult.ocrApplied;
+      // Neste ponto o fornecedor ainda é desconhecido — estamos ANTES de
+      // conseguir ler o documento — então tentamos as candidatas em ordem de
+      // uso recente. A anterior desistia após a primeira, o que fazia com que
+      // um usuário com mais de uma senha nunca abrisse a segunda fatura.
+      let opened = false;
+      for (const candidate of candidates) {
+        try {
+          const retryResult = await extractText(fileData, mimeType, candidate.value);
+          text = retryResult.text;
+          pages = retryResult.pages;
+          wasProtected = true;
+          extractionMethod = retryResult.extractionMethod;
+          ocrApplied = retryResult.ocrApplied;
+          opened = true;
+          // Sobe na ordem para o próximo documento resolver na 1ª tentativa.
+          await markSecretUsed(supabase, userId, candidate.secretId);
+          break;
+        } catch {
+          // Senha errada: seguir para a próxima. O valor nunca é registrado.
+          continue;
+        }
+      }
+
+      if (!opened) {
+        await writeLog(
+          supabase,
+          ctx,
+          IngestionLogLevel.WARN,
+          `Nenhuma das ${candidates.length} senha(s) cadastrada(s) abriu o documento`,
+        );
+        return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
+      }
     } else {
       throw err;
     }

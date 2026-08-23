@@ -7,6 +7,11 @@ const aliases = {
   "@sbf/shared-types": resolve(__dirname, "packages/shared-types/src/index.ts"),
   "@sbf/operations": resolve(__dirname, "packages/operations/src/index.ts"),
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
+  "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
+  "@sbf/cli": resolve(__dirname, "workers/cli/src/index.ts"),
+  "@sbf/worker-ingestion": resolve(__dirname, "workers/ingestion/src/index.ts"),
+  "@sbf/worker-gmail-scanner": resolve(__dirname, "workers/gmail-scanner/src/index.ts"),
+  "@sbf/worker-local-scanner": resolve(__dirname, "workers/local-scanner/src/index.ts"),
 };
 
 const sharedTestConfig = {
@@ -24,7 +29,11 @@ export default defineConfig({
         test: {
           ...sharedTestConfig,
           name: "unit",
-          include: ["packages/*/src/**/*.test.ts", "__tests__/domain/**/*.test.ts", "workers/*/src/**/*.test.ts"],
+          include: [
+            "packages/*/src/**/*.test.ts",
+            "__tests__/domain/**/*.test.ts",
+            "workers/*/src/**/*.test.ts",
+          ],
         },
       },
       {
@@ -48,7 +57,12 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["packages/domain/src/**", "packages/validation/src/**", "packages/operations/src/**"],
+      include: [
+        "packages/domain/src/**",
+        "packages/validation/src/**",
+        "packages/operations/src/**",
+        "packages/contracts/src/**",
+      ],
     },
   },
 });

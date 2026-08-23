@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { ReportFilters } from "./filters";
 import { BarChart3, TrendingUp, TrendingDown, ArrowRightLeft } from "lucide-react";
+import { resolverIntervalo } from "./report-period";
 
 interface SearchParams {
   mode?: string;
@@ -20,38 +21,17 @@ export default async function ReportsPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  // Default to current month if no params
-  const now = new Date();
-  let from: string =
-    params.from ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  let to: string = params.to ?? "";
+  // O cálculo do ciclo mora em @sbf/domain — ver report-period.ts para o
+  // porquê de a versão inline anterior ter sido removida.
+  const { data: prefs } =
+    params.mode === "financial_period"
+      ? await supabase
+          .from("user_financial_preferences")
+          .select("financial_cycle_start_day")
+          .maybeSingle()
+      : { data: null };
 
-  if (params.mode === "financial_period") {
-    // Load user financial preferences to calculate period
-    const { data: prefs } = await supabase
-      .from("user_financial_preferences")
-      .select("financial_cycle_start_day")
-      .maybeSingle();
-
-    if (prefs?.financial_cycle_start_day) {
-      const day = prefs.financial_cycle_start_day;
-      const today = new Date();
-      const periodStart = new Date(today.getFullYear(), today.getMonth(), day);
-      if (periodStart > today) periodStart.setMonth(periodStart.getMonth() - 1);
-      const periodEnd = new Date(periodStart);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
-      periodEnd.setDate(periodEnd.getDate() - 1);
-      from = periodStart.toISOString().split("T")[0]!;
-      to = periodEnd.toISOString().split("T")[0]!;
-    }
-  }
-
-  if (!to) {
-    const d = new Date(from);
-    d.setMonth(d.getMonth() + 1);
-    d.setDate(0); // last day of month
-    to = d.toISOString().split("T")[0]!;
-  }
+  const { from, to } = resolverIntervalo(params, prefs?.financial_cycle_start_day);
 
   const supplierId = params.supplier || null;
 
@@ -62,87 +42,103 @@ export default async function ReportsPage({
     .eq("is_active", true)
     .order("name");
 
-  // Queries — each applies date range + optional supplier filter
+  // Despesas vêm de `v_expenses_deduplicated`, não de `transactions` cru.
+  //
+  // A view aplica o ADR-001: um item de fatura já lançado como transação
+  // aparece UMA vez, não duas, e `statement_payment` (o pagamento da fatura em
+  // si) não entra como despesa. Somar `transactions` direto contava a compra e
+  // o pagamento da fatura que a incluía — o relatório inflava exatamente na
+  // proporção do que fosse pago com cartão, que é justamente a maior parte.
+  //
+  // A view já filtra por tipo de despesa; não há coluna `type` para filtrar
+  // aqui, e não deve haver.
+  const expensesQ = supabase
+    .from("v_expenses_deduplicated")
+    .select("canonical_id, amount, description, event_date, supplier_id, category_id")
+    .gte("event_date", from)
+    .lte("event_date", to);
+
+  // Receita continua em `transactions`: a view é de despesas.
   const incomeQ = supabase
     .from("transactions")
     .select("amount")
     .eq("type", "income")
     .gte("event_date", from)
     .lte("event_date", to);
-  const expenseQ = supabase
-    .from("transactions")
-    .select("amount")
-    .in("type", ["expense", "fee", "interest_charge"])
-    .gte("event_date", from)
-    .lte("event_date", to);
-  const byCategoryQ = supabase
-    .from("transactions")
-    .select("amount, categories(name)")
-    .in("type", ["expense", "fee", "interest_charge"])
-    .gte("event_date", from)
-    .lte("event_date", to)
-    .not("category_id", "is", null)
-    .order("amount", { ascending: false });
+
   const byTypeQ = supabase
     .from("transactions")
     .select("type, amount")
     .gte("event_date", from)
     .lte("event_date", to);
-  const topExpensesQ = supabase
-    .from("transactions")
-    .select("description, amount, event_date, type")
-    .in("type", ["expense", "fee", "interest_charge"])
-    .gte("event_date", from)
-    .lte("event_date", to)
-    .order("amount", { ascending: false })
-    .limit(10);
-  const bySupplierQ = supabase
-    .from("transactions")
-    .select("amount, suppliers(name)")
-    .in("type", ["expense", "fee", "interest_charge"])
-    .gte("event_date", from)
-    .lte("event_date", to)
-    .not("supplier_id", "is", null)
-    .order("amount", { ascending: false });
+
+  const categoriesQ = supabase.from("categories").select("id, name");
 
   // Apply supplier filter when selected
   if (supplierId) {
+    expensesQ.eq("supplier_id", supplierId);
     incomeQ.eq("supplier_id", supplierId);
-    expenseQ.eq("supplier_id", supplierId);
-    byCategoryQ.eq("supplier_id", supplierId);
     byTypeQ.eq("supplier_id", supplierId);
-    topExpensesQ.eq("supplier_id", supplierId);
-    bySupplierQ.eq("supplier_id", supplierId);
   }
 
-  const [incomeRes, expenseRes, byCategoryRes, byTypeRes, topExpensesRes, bySupplierRes] =
-    await Promise.all([incomeQ, expenseQ, byCategoryQ, byTypeQ, topExpensesQ, bySupplierQ]);
+  const [incomeRes, expensesRes, byTypeRes, categoriesRes] = await Promise.all([
+    incomeQ,
+    expensesQ,
+    byTypeQ,
+    categoriesQ,
+  ]);
+
+  const despesas = expensesRes.data ?? [];
+
+  // A view não embute `categories(name)` nem `suppliers(name)`: o PostgREST só
+  // faz embed onde há chave estrangeira declarada, e uma view não tem. Os nomes
+  // são resolvidos por mapa, com uma consulta cada.
+  const nomeDaCategoria = new Map(
+    (categoriesRes.data ?? []).map((c) => [c.id as string, c.name as string]),
+  );
+  const nomeDoFornecedor = new Map(
+    (suppliersRes.data ?? []).map((s) => [s.id as string, s.name as string]),
+  );
 
   const totalIncome = (incomeRes.data ?? []).reduce((s, r) => s + r.amount, 0);
-  const totalExpense = (expenseRes.data ?? []).reduce((s, r) => s + r.amount, 0);
+  const totalExpense = despesas.reduce((s, r) => s + Number(r.amount), 0);
   const balance = totalIncome - totalExpense;
 
-  // Group by category
-  const catMap = new Map<string, number>();
-  for (const row of byCategoryRes.data ?? []) {
-    const catName = (row.categories as { name: string } | null)?.name ?? "Sem categoria";
-    catMap.set(catName, (catMap.get(catName) ?? 0) + row.amount);
-  }
-  const byCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const agrupar = (chave: (r: (typeof despesas)[number]) => string) => {
+    const mapa = new Map<string, number>();
+    for (const row of despesas) {
+      const k = chave(row);
+      mapa.set(k, (mapa.get(k) ?? 0) + Number(row.amount));
+    }
+    return [...mapa.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  };
+
+  const byCategory = agrupar(
+    (r) => nomeDaCategoria.get(r.category_id as string) ?? "Sem categoria",
+  );
+  const bySupplier = agrupar(
+    (r) => nomeDoFornecedor.get(r.supplier_id as string) ?? "Sem fornecedor",
+  );
+
+  const topExpensesRes = {
+    data: [...despesas]
+      .sort((a, b) => Number(b.amount) - Number(a.amount))
+      .slice(0, 10)
+      .map((r) => ({
+        description: r.description,
+        amount: Number(r.amount),
+        event_date: r.event_date,
+        // A view já garante que só há tipos de despesa; o rótulo por linha
+        // deixou de existir junto com a soma de `transactions` cru.
+        type: "expense",
+      })),
+  };
 
   // Group by type
   const typeMap = new Map<string, number>();
   for (const row of byTypeRes.data ?? []) {
     typeMap.set(row.type, (typeMap.get(row.type) ?? 0) + row.amount);
   }
-
-  // Group by supplier
-  const supplierMap = new Map<string, number>();
-  for (const row of bySupplierRes.data ?? []) {
-    const supplierName = (row.suppliers as { name: string } | null)?.name ?? "Sem fornecedor";
-    supplierMap.set(supplierName, (supplierMap.get(supplierName) ?? 0) + row.amount);
-  }
-  const bySupplier = [...supplierMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
 
   const typeLabels: Record<string, string> = {
     income: "Receita",
@@ -331,7 +327,11 @@ export default async function ReportsPage({
                 >
                   <div>
                     <p className="font-medium">{t.description ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground">{formatDate(t.event_date)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {/* `event_date` é nullable na view: um item de fatura sem
+                          data lançada continua sendo uma despesa real. */}
+                      {t.event_date ? formatDate(t.event_date) : "sem data"}
+                    </p>
                   </div>
                   <span className="font-mono text-sm font-semibold text-red-600">
                     -{formatCurrency(t.amount)}

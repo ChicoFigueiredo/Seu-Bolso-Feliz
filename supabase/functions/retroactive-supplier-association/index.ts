@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getPublishableKey, getSecretKey } from "../_shared/keys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,9 +38,9 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const secretKey = getSecretKey();
 
-  const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+  const userClient = createClient(supabaseUrl, getPublishableKey(), {
     global: { headers: { Authorization: authHeader } },
   });
 
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = createClient(supabaseUrl, secretKey);
 
   // GET — buscar candidatos para associação
   // POST — confirmar associações em lote
@@ -180,13 +181,10 @@ async function handleConfirm(
   }
 
   // Confirm atômico via RPC PL/pgSQL (transação única)
-  const { data: result, error: rpcError } = await supabase.rpc(
-    "confirm_supplier_associations",
-    {
-      p_user_id: userId,
-      p_confirmations: confirmations,
-    },
-  );
+  const { data: result, error: rpcError } = await supabase.rpc("confirm_supplier_associations", {
+    p_user_id: userId,
+    p_confirmations: confirmations,
+  });
 
   if (rpcError) {
     return new Response(
@@ -195,8 +193,8 @@ async function handleConfirm(
     );
   }
 
-  return new Response(
-    JSON.stringify({ success: true, ...result }),
-    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
+  return new Response(JSON.stringify({ success: true, ...result }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }

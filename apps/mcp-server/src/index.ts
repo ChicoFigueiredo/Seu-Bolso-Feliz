@@ -15,6 +15,7 @@ import { reprocessDocument } from "./tools/reprocess-document.js";
 import { resolveSupplierCandidates } from "./tools/resolve-supplier-candidates.js";
 import { listDraftBatches } from "./tools/list-draft-batches.js";
 import { approveDraftBatch } from "./tools/approve-draft-batch.js";
+import { postDraftBatch } from "./tools/post-draft-batch.js";
 import { findDocumentsWithoutPassword } from "./tools/find-documents-without-password.js";
 import { recomputeFinancialPeriods } from "./tools/recompute-financial-periods.js";
 import { ingestDocument } from "./tools/ingest-document.js";
@@ -159,7 +160,7 @@ server.tool(
 // ---------------------------------------------------------------------------
 server.tool(
   "approve_draft_batch",
-  "Aprova um batch de drafts inteiro. Opcionalmente rejeita drafts específicos por ID (os demais são aprovados). Atualiza status do batch.",
+  "Aprova um batch de drafts inteiro. Opcionalmente rejeita drafts específicos por ID (os demais são aprovados). NÃO cria registros financeiros — use post_draft_batch em seguida.",
   {
     batchId: z.string().uuid().describe("UUID do draft_batch a aprovar"),
     rejectDraftIds: z
@@ -173,6 +174,30 @@ server.tool(
     const result = await approveDraftBatch(supabase, userId, batchId, {
       rejectDraftIds,
     });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: post_draft_batch
+// ---------------------------------------------------------------------------
+server.tool(
+  "post_draft_batch",
+  "Lanca os drafts JA APROVADOS de um batch, criando os registros financeiros definitivos (transacoes, dividas, recorrencias, metricas). Recusa drafts ainda em pending_review.",
+  {
+    batchId: z.string().uuid().describe("UUID do draft_batch a lancar"),
+  },
+  async ({ batchId }) => {
+    const supabase = getSupabaseClient();
+    const userId = getUserId();
+    const result = await postDraftBatch(supabase, userId, batchId);
     return {
       content: [
         {

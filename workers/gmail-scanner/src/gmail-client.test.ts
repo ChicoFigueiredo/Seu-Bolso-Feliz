@@ -156,7 +156,7 @@ describe("GmailClient — API methods", () => {
       }),
     );
 
-    const result = await client.listMessages("Label_1", 10);
+    const result = await client.listMessages({ labelId: "Label_1", maxResults: 10 });
 
     expect(result.messages).toHaveLength(1);
 
@@ -167,11 +167,34 @@ describe("GmailClient — API methods", () => {
     expect(url.searchParams.get("maxResults")).toBe("10");
   });
 
+  it("listMessages envia q quando ha query", async () => {
+    // O parametro `q` era a peca que faltava: o worker aceitava --query desde
+    // sempre, mas listMessages nao tinha slot para recebe-lo, entao a query
+    // era descartada e a varredura historica por periodo era impossivel.
+    setupToken();
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({ messages: [], resultSizeEstimate: 0 }));
+
+    await client.listMessages({ labelId: "Label_1", q: "after:2026/01/01 from:nubank" });
+
+    const url = new URL(fetchSpy.mock.calls[1]![0] as string);
+    expect(url.searchParams.get("q")).toBe("after:2026/01/01 from:nubank");
+  });
+
+  it("listMessages omite q quando nao ha query", async () => {
+    setupToken();
+    fetchSpy.mockResolvedValueOnce(mockFetchResponse({ messages: [], resultSizeEstimate: 0 }));
+
+    await client.listMessages({ labelId: "Label_1" });
+
+    const url = new URL(fetchSpy.mock.calls[1]![0] as string);
+    expect(url.searchParams.has("q")).toBe(false);
+  });
+
   it("listMessages envia pageToken quando fornecido", async () => {
     setupToken();
     fetchSpy.mockResolvedValueOnce(mockFetchResponse({ messages: [], resultSizeEstimate: 0 }));
 
-    await client.listMessages("Label_1", 50, "page-token-abc");
+    await client.listMessages({ labelId: "Label_1", maxResults: 50, pageToken: "page-token-abc" });
 
     const apiCall = fetchSpy.mock.calls[1]!;
     const url = new URL(apiCall[0] as string);

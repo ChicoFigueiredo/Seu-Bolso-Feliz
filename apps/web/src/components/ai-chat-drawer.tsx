@@ -12,8 +12,8 @@ import { ChatMarkdown } from "@/components/chat-markdown";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useChatContext } from "@/contexts/chat-context";
+import { ACCEPT_UPLOAD } from "@sbf/contracts";
 
-const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 interface AIChatDrawerProps {
@@ -309,7 +309,7 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
               ref={fileInputRef}
               type="file"
               className="hidden"
-              accept={ACCEPTED_TYPES}
+              accept={ACCEPT_UPLOAD}
               multiple
               onChange={handleFileUpload}
               disabled={uploading}

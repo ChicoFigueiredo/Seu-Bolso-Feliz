@@ -1,4 +1,5 @@
 import { getDraftBatch, getDraftRecords } from "@/app/actions/ingestion";
+import { getFinancialProducts } from "@/app/actions/financial-products";
 import { DraftReviewForm } from "@/components/draft-review-form";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -16,7 +17,12 @@ export default async function BatchReviewPage({ params }: Props) {
     notFound();
   }
 
-  const drafts = await getDraftRecords({ batchId: batch.id });
+  // A conta é obrigatória para lançar e o pipeline não tem como inferi-la,
+  // então a lista precisa chegar junto com os rascunhos.
+  const [drafts, financialProducts] = await Promise.all([
+    getDraftRecords({ batchId: batch.id }),
+    getFinancialProducts(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -36,7 +42,7 @@ export default async function BatchReviewPage({ params }: Props) {
         </div>
       </div>
 
-      <DraftReviewForm batch={batch} drafts={drafts} />
+      <DraftReviewForm batch={batch} drafts={drafts} financialProducts={financialProducts} />
     </div>
   );
 }

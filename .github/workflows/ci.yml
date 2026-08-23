@@ -1,0 +1,134 @@
+# CI — verificação de todo push e PR.
+#
+# Substitui os stages validate/install/check/test/build do .gitlab-ci.yml.
+#
+# Diferença importante em relação ao pipeline anterior: o filtro de caminhos
+# dos testes de integração incluía apenas supabase/**, packages/domain/** e
+# packages/validation/**, de modo que NENHUMA mudança em workers/ingestion
+# jamais disparou os testes de integração. Aqui os testes rodam sempre.
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feat/**", "fix/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HUSKY: "0"
+
+jobs:
+  check:
+    name: Tipos, lint e formatação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Mesma versão usada no desenvolvimento. O pipeline anterior fixava
+          # 1.3.10 enquanto o dev rodava 1.3.11.
+          bun-version: 1.3.11
+
+      - run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Formatação
+        run: bun run format:check
+
+      # Sem tolerância: os 5 erros pré-existentes foram corrigidos, e três deles
+      # eram consultas a colunas inexistentes que quebravam o `next build` — ou
+      # seja, o deploy no Vercel. Deixar passar de novo custaria a produção.
+      - name: Typecheck
+        run: bun run typecheck
+
+  validate-commits:
+    name: Convenção de commits
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: bun install --frozen-lockfile
+      - run: bunx commitlint --from ${{ github.event.pull_request.base.sha }} --to HEAD
+
+  test:
+    name: Testes (unit, integração, e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # `db reset` aplica TODAS as migrations do zero. Isso é o que valida que
+      # elas reconstroem o schema — verificação que nunca existiu, porque o
+      # job antigo gerava tipos a partir de um projeto remoto já migrado.
+      - name: Subir Supabase local e aplicar migrations
+        run: |
+          supabase start
+          supabase db reset --no-seed
+
+      # A chave secreta local é fixa (mesmo valor em qualquer máquina), mas
+      # não pode ficar hardcoded em código: o padrão `sb_secret_...` aciona o
+      # secret scanning do GitHub mesmo sendo uma credencial só de localhost.
+      # Lida em runtime a partir do `supabase start` desta run.
+      - name: Exportar chave secreta local do Supabase
+        run: |
+          SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d'"' -f2)
+          echo "SUPABASE_SECRET_KEY=$SECRET_KEY" >> "$GITHUB_ENV"
+
+      - name: Validar tipos gerados contra o schema
+        run: |
+          supabase gen types typescript --local > /tmp/generated.ts
+          if ! diff -q packages/shared-types/src/database.types.ts /tmp/generated.ts; then
+            echo "::warning::database.types.ts diverge do schema. Rode 'bun run generate-types'."
+            diff packages/shared-types/src/database.types.ts /tmp/generated.ts || true
+          fi
+
+      - name: Testes unitários
+        run: bun run test:unit
+
+      - name: Testes de integração
+        run: bun run test:integration
+
+      - name: Testes E2E
+        run: bunx vitest run --project e2e
+
+      - name: Parar Supabase
+        if: always()
+        run: supabase stop || true
+
+  build:
+    name: Build web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+        # Valores de fachada: o build não fala com o Supabase, mas o cliente é
+        # construído em tempo de import. `NEXT_PUBLIC_SUPABASE_ANON_KEY` ficava
+        # aqui e não era lida por ninguém — o código lê a variável abaixo.
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder

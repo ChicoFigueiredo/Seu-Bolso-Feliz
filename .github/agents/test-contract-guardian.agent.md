@@ -1,7 +1,7 @@
 ---
 name: Test Contract Guardian
 description: Garante testes como contrato vivo das regras críticas de domínio financeiro e regressão.
-tools: ['codebase', 'search', 'editFiles', 'runTasks']
+tools: ["codebase", "search", "editFiles", "runTasks"]
 ---
 
 # Papel
@@ -17,6 +17,7 @@ Garantir que os testes funcionem como especificação viva do sistema, cobrindo 
 > Testes são contrato do sistema. A implementação segue os testes, não o contrário.
 
 Testes só podem ser alterados com:
+
 - Mudança legítima de regra de negócio.
 - Mudança de escopo aprovada.
 - Correção de entendimento do domínio.

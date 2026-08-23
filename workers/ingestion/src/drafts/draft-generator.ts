@@ -2,19 +2,26 @@
  * Gerador de drafts financeiros.
  * Transforma extraction_results em draft_records para revisão do usuário.
  *
- * Tipos de draft suportados:
- * - transaction: despesa/receita simples
- * - recurring_template: despesa recorrente (ex: conta de luz mensal)
- * - consumption_metric: métrica de consumo (ex: kWh)
- * - liability: passivo/dívida (futuro)
- *
- * Itens 4.8-4.14 do checklist.
+ * A classificação e a montagem do payload vivem em @sbf/contracts, importadas
+ * também pelo materializador. Antes, cada lado tinha a sua própria ideia do
+ * formato — o gerador emitia `type: "despesa"`/`due_date`/`base_amount` e o
+ * materializador exigia `type: "expense"`/`event_date`/`amount` — e nada os
+ * obrigava a concordar, então nenhum draft gerado jamais foi materializável.
+ * Este arquivo agora cuida só de persistência.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  DRAFT_SCHEMA_VERSION,
+  DRAFT_SCHEMAS,
+  buildDraftPayload,
+  classifyDraftTypes,
+  type DraftType,
+} from "@sbf/contracts";
 import { writeLog, type LogContext } from "../logger";
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 
-export type DraftType = "transaction" | "recurring_template" | "consumption_metric" | "liability";
+export type { DraftType };
+export { classifyDraftTypes };
 
 export interface DraftGenerationInput {
   supabase: SupabaseClient;
@@ -25,6 +32,8 @@ export interface DraftGenerationInput {
   parsedVersionId: string;
   parserType: string;
   confidence: number;
+  /** Obrigação canônica desta evidência, quando houve convergência (P0-7). */
+  obligationId?: string | null;
 }
 
 export interface DraftGenerationResult {
@@ -36,111 +45,19 @@ export interface DraftGenerationResult {
   }>;
 }
 
-/** Classificação automática: determina que tipo(s) de draft gerar */
-export function classifyDraftTypes(extractionData: Record<string, unknown> | null): DraftType[] {
-  const types: DraftType[] = [];
-
-  if (!extractionData) {
-    types.push("transaction");
-    return types;
-  }
-
-  // Se tem totalAmount/dueDate, é no mínimo uma transaction
-  if (
-    extractionData.totalAmount ||
-    extractionData.total_amount ||
-    extractionData.dueDate ||
-    extractionData.due_date
-  ) {
-    types.push("transaction");
-  }
-
-  // Se tem consumption_data ou kWh, gerar também consumption_metric
-  const consumption = extractionData.consumption ?? extractionData.consumption_data;
-  if (consumption && typeof consumption === "object") {
-    const c = consumption as Record<string, unknown>;
-    if (c.kwh || c.m3 || c.litros) {
-      types.push("consumption_metric");
-    }
-  }
-
-  // Se parece ser conta recorrente (fornecedor conhecido, competência mensal)
-  const hasSupplier = extractionData.supplierNameRaw || extractionData.supplier_name_raw;
-  const hasCompetence = extractionData.competenceDate || extractionData.competence_date;
-  if (hasSupplier && hasCompetence) {
-    types.push("recurring_template");
-  }
-
-  // Fallback: sempre pelo menos transaction
-  if (types.length === 0) {
-    types.push("transaction");
-  }
-
-  return types;
-}
-
-/** Cria o draft_data JSONB para uma transaction */
-export function buildTransactionDraft(er: Record<string, unknown>): Record<string, unknown> {
-  return {
-    type: "despesa",
-    description: er.supplier_name_raw ?? er.supplierNameRaw ?? "Documento importado",
-    amount: er.total_amount ?? er.totalAmount ?? null,
-    currency: er.currency ?? "BRL",
-    due_date: er.due_date ?? er.dueDate ?? null,
-    competence_date: er.competence_date ?? er.competenceDate ?? null,
-    category: er.category_suggestion ?? null,
-    tags: er.tags_suggestion ?? [],
-    supplier_name: er.supplier_name_raw ?? er.supplierNameRaw ?? null,
-    supplier_id: er.supplier_id ?? null,
-    document_number: er.document_number ?? er.documentNumber ?? null,
-    contract_identifier: er.contract_identifier ?? er.contractIdentifier ?? null,
-  };
-}
-
-/** Cria o draft_data JSONB para um recurring_template */
-export function buildRecurringTemplateDraft(er: Record<string, unknown>): Record<string, unknown> {
-  return {
-    name: `${er.supplier_name_raw ?? er.supplierNameRaw ?? "Conta"} - mensal`,
-    type: "despesa",
-    recurrence: "monthly",
-    base_amount: er.total_amount ?? er.totalAmount ?? null,
-    currency: er.currency ?? "BRL",
-    category: er.category_suggestion ?? null,
-    tags: er.tags_suggestion ?? [],
-    supplier_name: er.supplier_name_raw ?? er.supplierNameRaw ?? null,
-    supplier_id: er.supplier_id ?? null,
-    contract_identifier: er.contract_identifier ?? er.contractIdentifier ?? null,
-  };
-}
-
-/** Cria o draft_data JSONB para um consumption_metric */
-export function buildConsumptionMetricDraft(er: Record<string, unknown>): Record<string, unknown> {
-  const consumption = (er.consumption_data ?? er.consumption) as
-    | Record<string, unknown>
-    | undefined;
-  return {
-    supplier_name: er.supplier_name_raw ?? er.supplierNameRaw ?? null,
-    contract_identifier: er.contract_identifier ?? er.contractIdentifier ?? null,
-    competence_date: er.competence_date ?? er.competenceDate ?? null,
-    kwh: consumption?.kwh ?? null,
-    m3: consumption?.m3 ?? null,
-    days: consumption?.days ?? null,
-    amount: er.total_amount ?? er.totalAmount ?? null,
-    unit_cost: null, // Calculável: amount / kwh
-  };
-}
-
-const DRAFT_BUILDERS: Record<DraftType, (er: Record<string, unknown>) => Record<string, unknown>> =
-  {
-    transaction: buildTransactionDraft,
-    recurring_template: buildRecurringTemplateDraft,
-    consumption_metric: buildConsumptionMetricDraft,
-    liability: buildTransactionDraft, // Fallback para MVP
-  };
-
 /** Pipeline completo de geração de drafts */
 export async function generateDrafts(input: DraftGenerationInput): Promise<DraftGenerationResult> {
-  const { supabase, ctx, userId, sourceDocumentId, extractionResultId, confidence } = input;
+  const {
+    supabase,
+    ctx,
+    userId,
+    sourceDocumentId,
+    extractionResultId,
+    parsedVersionId,
+    parserType,
+    confidence,
+    obligationId = null,
+  } = input;
 
   // Buscar extraction_result se existir
   let extractionData: Record<string, unknown> | null = null;
@@ -153,6 +70,37 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
 
     if (er) {
       extractionData = er as unknown as Record<string, unknown>;
+    }
+  }
+
+  // Supressão por obrigação: se esta obrigação já tem draft vivo, uma segunda
+  // evidência dela (o mesmo boleto vindo do Gmail e da pasta local) não deve
+  // gerar um segundo lote de revisão. Este é o retorno concreto de convergir
+  // evidências para uma obrigação canônica.
+  if (obligationId) {
+    const { data: existing } = await supabase
+      .from("draft_records")
+      .select("id, batch_id, draft_type")
+      .eq("user_id", userId)
+      .eq("obligation_id", obligationId)
+      .not("status", "in", "(rejected,archived)");
+
+    if (existing && existing.length > 0) {
+      const batchId = (existing[0] as { batch_id: string | null }).batch_id;
+      await writeLog(
+        supabase,
+        ctx,
+        IngestionLogLevel.INFO,
+        `Obrigação ${obligationId.slice(0, 8)} já possui ${existing.length} draft(s); evidência anexada sem gerar novo lote.`,
+      );
+      return {
+        batchId: batchId ?? "",
+        drafts: existing.map((d) => ({
+          id: (d as { id: string }).id,
+          draftType: (d as { draft_type: DraftType }).draft_type,
+          confidence,
+        })),
+      };
     }
   }
 
@@ -188,10 +136,34 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
   const drafts: DraftGenerationResult["drafts"] = [];
 
   for (const draftType of draftTypes) {
-    const builder = DRAFT_BUILDERS[draftType];
     const draftData = extractionData
-      ? builder(extractionData)
-      : { description: "Documento sem dados extraídos" };
+      ? buildDraftPayload(draftType, extractionData, {
+          provenance: {
+            source_document_id: sourceDocumentId,
+            extraction_result_id: extractionResultId,
+            parsed_version_id: parsedVersionId,
+            parser_type: parserType,
+          },
+        })
+      : null;
+
+    // Um payload que não passa no próprio schema honesto indica extração
+    // corrompida. Registrar e pular é melhor que gravar um draft que a tela
+    // de revisão não conseguirá abrir.
+    if (draftData) {
+      const check = DRAFT_SCHEMAS[draftType].safeParse(draftData);
+      if (!check.success) {
+        await writeLog(
+          supabase,
+          ctx,
+          IngestionLogLevel.WARN,
+          `Payload inválido para draft ${draftType}: ${check.error.errors
+            .map((e) => `${e.path.join(".")}: ${e.message}`)
+            .join("; ")}`,
+        );
+        continue;
+      }
+    }
 
     // Ajustar confiança por tipo
     const draftConfidence =
@@ -205,8 +177,13 @@ export async function generateDrafts(input: DraftGenerationInput): Promise<Draft
         source_document_id: sourceDocumentId,
         extraction_result_id: extractionResultId,
         draft_type: draftType,
-        status: confidence >= 0.7 ? "pending_review" : "pending_review",
-        draft_data: draftData,
+        // Todo draft nasce aguardando revisão humana. O ternário anterior
+        // tinha os dois ramos idênticos, sugerindo uma regra de confiança
+        // que nunca existiu.
+        status: "pending_review",
+        draft_data: draftData ?? { description: "Documento sem dados extraídos" },
+        draft_schema_version: draftData ? DRAFT_SCHEMA_VERSION : 0,
+        obligation_id: obligationId,
         confidence_score: draftConfidence,
       })
       .select("id")

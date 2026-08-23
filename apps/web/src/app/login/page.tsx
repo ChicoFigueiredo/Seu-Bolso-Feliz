@@ -168,72 +168,73 @@ export default function LoginPage() {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                E-mail
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@email.com"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                disabled={status === "loading"}
-              />
-            </div>
+              <div className="space-y-2">
+                <label htmlFor="email" className="text-sm font-medium">
+                  E-mail
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  disabled={status === "loading"}
+                />
+              </div>
 
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">
-                Senha de desenvolvimento
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Minimo de 6 caracteres"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                disabled={status === "loading"}
-              />
-              <p className="text-xs text-muted-foreground">
-                Para login com senha local, crie uma conta de teste ou use uma conta ja cadastrada.
-              </p>
-            </div>
+              <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium">
+                  Senha de desenvolvimento
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Minimo de 6 caracteres"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  disabled={status === "loading"}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Para login com senha local, crie uma conta de teste ou use uma conta ja
+                  cadastrada.
+                </p>
+              </div>
 
-            {status === "error" && (
-              <p className="text-sm text-red-600 dark:text-red-400">{errorMsg}</p>
-            )}
+              {status === "error" && (
+                <p className="text-sm text-red-600 dark:text-red-400">{errorMsg}</p>
+              )}
 
-            <div className="space-y-2">
-              <button
-                type="submit"
-                disabled={status === "loading"}
-                className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {status === "loading" ? "Processando..." : "Entrar com Magic Link"}
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="submit"
+                  disabled={status === "loading"}
+                  className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {status === "loading" ? "Processando..." : "Entrar com Magic Link"}
+                </button>
 
-              <button
-                type="button"
-                disabled={status === "loading" || !email || !password}
-                onClick={handlePasswordLogin}
-                className="w-full rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-              >
-                Entrar com E-mail e Senha
-              </button>
+                <button
+                  type="button"
+                  disabled={status === "loading" || !email || !password}
+                  onClick={handlePasswordLogin}
+                  className="w-full rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  Entrar com E-mail e Senha
+                </button>
 
-              <button
-                type="button"
-                disabled={status === "loading" || !email || password.length < 6}
-                onClick={handleCreateTestAccount}
-                className="w-full rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-              >
-                Criar Conta de Teste Local
-              </button>
-            </div>
-          </form>
+                <button
+                  type="button"
+                  disabled={status === "loading" || !email || password.length < 6}
+                  onClick={handleCreateTestAccount}
+                  className="w-full rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  Criar Conta de Teste Local
+                </button>
+              </div>
+            </form>
           </>
         )}
       </div>

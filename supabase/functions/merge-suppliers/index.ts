@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getPublishableKey, getSecretKey } from "../_shared/keys.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,10 +41,10 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const secretKey = getSecretKey();
 
   // Client do usuário para verificar identidade
-  const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+  const userClient = createClient(supabaseUrl, getPublishableKey(), {
     global: { headers: { Authorization: authHeader } },
   });
 
@@ -60,7 +61,7 @@ Deno.serve(async (req) => {
   }
 
   // Service role client para bypass de RLS durante merge atômico
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = createClient(supabaseUrl, secretKey);
 
   let body: MergeRequest;
   try {

@@ -207,13 +207,26 @@ describe("4.5: Parser Boleto genérico", () => {
 // ══════════════════════════════════════════════════════════════
 
 describe("4.1: Text extractor", () => {
-  it("extrai texto de CSV (text/csv)", async () => {
+  it("converte CSV em linhas rotuladas, não devolve o arquivo cru", async () => {
+    // Mudança deliberada de contrato: antes o CSV era devolvido como texto
+    // puro e os parsers a jusante — que procuram `Campo: valor` — não achavam
+    // nada nele. Agora cada linha vira o mesmo formato que sai de um PDF.
     const content = "data,valor,descricao\n2026-03-01,100.50,Teste";
-    const buf = Buffer.from(content);
-    const result = await extractText(buf, "text/csv");
-    expect(result.text).toBe(content);
+    const result = await extractText(Buffer.from(content), "text/csv");
+
+    expect(result.text).toContain("data: 2026-03-01");
+    expect(result.text).toContain("valor: 100.50");
+    expect(result.text).toContain("descricao: Teste");
+    expect(result.extractionMethod).toBe("csv");
     expect(result.pages).toBe(1);
     expect(result.wasProtected).toBe(false);
+  });
+
+  it("devolve o texto cru quando o CSV não tem linha de dados", async () => {
+    // Só cabeçalho, ou um texto qualquer rotulado como CSV: converter daria
+    // string vazia e apagaria o conteúdo.
+    const result = await extractText(Buffer.from("apenas um cabecalho"), "text/csv");
+    expect(result.text).toBe("apenas um cabecalho");
   });
 
   it("extrai texto de XML (application/xml)", async () => {

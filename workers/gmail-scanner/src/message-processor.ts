@@ -5,34 +5,17 @@
  * e gera fingerprint para idempotência.
  */
 
+import { EXTENSOES_ACEITAS, MIME_TYPES_ACEITOS } from "@sbf/contracts";
 import type { GmailMessage, GmailPart } from "./gmail-client";
 
-/** Tipos de MIME aceitos para ingestão de anexos */
-const ACCEPTED_MIME_TYPES = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "text/csv",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/xml",
-  "application/octet-stream",
-]);
-
-/** Extensões aceitas (fallback se MIME não for confiável) */
-const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".csv",
-  ".xls",
-  ".xlsx",
-  ".xml",
-  ".ofx",
-]);
+/**
+ * MIMEs e extensões vêm do registro único (`@sbf/contracts`).
+ *
+ * As duas listas locais anteriores divergiam do resto do sistema: aceitavam
+ * `.xls`, que nenhum parser abre, e não conheciam `application/x-ofx`.
+ */
+const ACCEPTED_MIME_TYPES = MIME_TYPES_ACEITOS;
+const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
 
 export interface MessageMetadata {
   messageId: string;
@@ -132,6 +115,73 @@ export function processMessage(message: GmailMessage): ProcessedMessage {
   const attachments = findAttachments(message.payload.parts);
 
   return { metadata, attachments };
+}
+
+/**
+ * Remove tags HTML de uma string, preservando espaços entre elementos.
+ */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * Decodes base64url to UTF-8 string.
+ */
+function decodeBase64UrlText(data: string): string {
+  const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+/**
+ * Extrai texto do corpo de uma mensagem Gmail.
+ * Prioridade: text/plain > text/html (com strip de tags).
+ * Retorna string vazia se não houver corpo.
+ */
+export function extractBodyText(message: GmailMessage): string {
+  // Recursively find parts by mimeType
+  function findPart(parts: GmailPart[] | undefined, mime: string): GmailPart | null {
+    if (!parts) return null;
+    for (const part of parts) {
+      if (part.mimeType === mime && !part.filename && part.body.data) return part;
+      const nested = findPart(part.parts, mime);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  // Simple payload (no multipart)
+  if (message.payload.body.data) {
+    const text = decodeBase64UrlText(message.payload.body.data);
+    if (message.payload.mimeType === "text/html") return stripHtml(text);
+    return text;
+  }
+
+  const plainPart = findPart(message.payload.parts, "text/plain");
+  if (plainPart?.body.data) {
+    return decodeBase64UrlText(plainPart.body.data);
+  }
+
+  const htmlPart = findPart(message.payload.parts, "text/html");
+  if (htmlPart?.body.data) {
+    return stripHtml(decodeBase64UrlText(htmlPart.body.data));
+  }
+
+  return "";
 }
 
 /**

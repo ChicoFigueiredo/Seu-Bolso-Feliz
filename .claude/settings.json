@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(bun run *)",
+      "Bash(git stash *)",
+      "Bash(git commit -m 'docs\\(passo-a-passo\\): guia de rotação de chaves Supabase após vazamento *)",
+      "Bash(sed -i s/SUPABASE_SERVICE_ROLE_KEY/SUPABASE_SECRET_KEY/g /mnt/d/Chico/seu.bolso.feliz/docs/planejamento/005-plano-faseado-ingestao-automacao-mcp-agentes.md /mnt/d/Chico/seu.bolso.feliz/docs/planejamento/001-guia-implementacao-passo-a-passo.md /mnt/d/Chico/seu.bolso.feliz/docs/aprenda/002-tecnologias-ciclo-ingestao-automacao-mcp.md /mnt/d/Chico/seu.bolso.feliz/docs/veronica/004-prompt_worker_autonomo_seu_bolso_feliz.md)",
+      "Bash(sed -i s/NEXT_PUBLIC_SUPABASE_ANON_KEY/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/g /mnt/d/Chico/seu.bolso.feliz/docs/planejamento/005-plano-faseado-ingestao-automacao-mcp-agentes.md /mnt/d/Chico/seu.bolso.feliz/docs/checklists/2026-04-01-implementacao-plano-acao.md)",
+      "Bash(sed -i s/SUPABASE_ANON_KEY/SUPABASE_PUBLISHABLE_KEY/g /mnt/d/Chico/seu.bolso.feliz/docs/planejamento/005-plano-faseado-ingestao-automacao-mcp-agentes.md)",
+      "Bash(xargs -I{} ls -la {})"
+    ]
+  }
+}

@@ -5,19 +5,12 @@ import { Loader2, Upload, FileUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { uploadDocument } from "@/app/actions/ingestion";
-
-const ACCEPTED_EXTENSIONS = ".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif";
-const ACCEPTED_TYPES = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/csv",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/x-ofx",
-  "application/x-qif",
-]);
+import {
+  ACCEPT_UPLOAD,
+  MIME_TYPES_ACEITOS,
+  descricaoDosFormatos,
+  extensaoAceita,
+} from "@sbf/contracts";
 
 interface Props {
   onSuccess?: () => void;
@@ -78,9 +71,12 @@ export function DocumentUploadDnD({ onSuccess }: Props) {
       const file = e.dataTransfer.files[0];
       if (!file) return;
 
-      if (!ACCEPTED_TYPES.has(file.type) && !isAcceptedByExtension(file.name)) {
+      // A extensão manda, e o MIME só ajuda: o navegador rotula OFX e CSV
+      // como `application/octet-stream` com frequência, e recusar por MIME
+      // barraria arquivo válido antes de qualquer tentativa de leitura.
+      if (!extensaoAceita(file.name) && !MIME_TYPES_ACEITOS.has(file.type)) {
         toast.error("Tipo de arquivo não suportado", {
-          description: `Aceitos: ${ACCEPTED_EXTENSIONS}`,
+          description: `Aceitos: ${descricaoDosFormatos()}`,
         });
         return;
       }
@@ -122,7 +118,7 @@ export function DocumentUploadDnD({ onSuccess }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPTED_EXTENSIONS}
+        accept={ACCEPT_UPLOAD}
         className="sr-only"
         onChange={onInputChange}
         disabled={isPending}
@@ -151,15 +147,10 @@ export function DocumentUploadDnD({ onSuccess }: Props) {
                 clique para selecionar
               </span>
             </p>
-            <p className="mt-1 text-xs">PDF, PNG, JPG, XLSX, CSV, DOC, OFX, QIF</p>
+            <p className="mt-1 text-xs">{descricaoDosFormatos()}</p>
           </div>
         </>
       )}
     </div>
   );
-}
-
-function isAcceptedByExtension(filename: string): boolean {
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  return ["pdf", "png", "jpg", "jpeg", "xlsx", "csv", "doc", "docx", "ofx", "qif"].includes(ext);
 }

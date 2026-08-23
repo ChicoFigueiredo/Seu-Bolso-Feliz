@@ -66,7 +66,10 @@ export const getDocumentDetails = tool({
         .single(),
       supabase
         .from("ingestion_jobs")
-        .select("id, status, step, error_message, created_at, updated_at")
+        // Sem `step`: a coluna não existe em `ingestion_jobs` — a etapa é o
+        // próprio `status`. O typecheck não pega string de `.select()`, então
+        // isto falharia só em runtime.
+        .select("id, status, error_message, created_at, updated_at")
         .eq("source_document_id", documentId)
         .order("created_at", { ascending: false }),
       supabase
@@ -169,14 +172,18 @@ export const listRecentTransactions = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
+    // As colunas corretas são `event_date`, `category_id` e `supplier_id`.
+    // Esta query pedia `transaction_date`, `category` e `supplier_name`, que
+    // NÃO EXISTEM em `transactions` — a tool falhava em toda execução contra o
+    // schema real. Nomes legíveis vêm por join.
     let query = supabase
       .from("transactions")
-      .select("id, description, amount, transaction_date, category, supplier_name, created_at")
+      .select("id, description, amount, event_date, created_at, categories(name), suppliers(name)")
       .eq("user_id", user.id)
-      .order("transaction_date", { ascending: false })
+      .order("event_date", { ascending: false })
       .limit(limit);
 
-    if (category) query = query.eq("category", category);
+    if (category) query = query.eq("categories.name", category);
 
     const { data, error } = await query;
     if (error) return { error: error.message };
@@ -279,7 +286,40 @@ export const approveDraft = tool({
       .eq("user_id", user.id);
 
     if (error) return { error: error.message };
-    return { success: true, message: `Draft ${draftId} aprovado.` };
+    return {
+      success: true,
+      message: `Draft ${draftId} aprovado. Ainda NÃO foi lançado — use postDraft para criar o registro financeiro.`,
+    };
+  },
+});
+
+/**
+ * Lançamento é uma tool separada de propósito: a IA não deve conseguir criar
+ * um registro financeiro numa única chamada. Aprovar e lançar continuam sendo
+ * dois atos observáveis, mesmo quando quem os executa é o assistente.
+ */
+export const postDraft = tool({
+  description:
+    "Lança um draft JÁ APROVADO, criando o registro financeiro definitivo (transação, dívida, recorrência ou métrica). IMPORTANTE: só funciona em drafts aprovados; sempre confirme com o usuário antes de executar.",
+  parameters: z.object({
+    draftId: z.string().uuid().describe("ID do draft aprovado a lançar"),
+  }),
+  execute: async ({ draftId }) => {
+    const { postApprovedDraftRecord } = await import("@/app/actions/materialization");
+    const result = await postApprovedDraftRecord(draftId);
+
+    if (!result.success) {
+      return {
+        error: result.message,
+        validationErrors: result.validationErrors,
+      };
+    }
+    return {
+      success: true,
+      message: result.message,
+      postedRecordId: result.postedRecordId,
+      postedRecordType: result.postedRecordType,
+    };
   },
 });
 
@@ -341,9 +381,11 @@ export const reprocessDocumentTool = tool({
       .limit(1);
 
     if (jobs && jobs.length > 0 && jobs[0]) {
+      // `ingestion_jobs` não tem coluna `step` — a etapa é o próprio `status`.
+      // Gravar `step: "hash"` fazia o update falhar silenciosamente.
       await supabase
         .from("ingestion_jobs")
-        .update({ status: "queued" as const, step: "hash" })
+        .update({ status: "queued" as const })
         .eq("id", jobs[0].id);
     }
 
@@ -735,16 +777,19 @@ export const listMissingPasswordDocuments = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Search for jobs that failed at parse step (typically password issues)
+    // Jobs que falharam por senha ausente.
+    //
+    // A versão anterior filtrava por uma coluna `step` que não existe em
+    // `ingestion_jobs` — a etapa é o próprio `status`. O filtro real é o texto
+    // do erro, que é o que distingue falha de senha de qualquer outra.
     const { data, error } = await supabase
       .from("ingestion_jobs")
       .select(
-        "id, source_document_id, status, step, error_message, source_documents!inner(filename, user_id)",
+        "id, source_document_id, status, error_message, source_documents!inner(filename, user_id)",
       )
       .eq("source_documents.user_id", user.id)
       .eq("status", "failed")
-      .eq("step", "parse")
-      .ilike("error_message", "%password%")
+      .or("error_message.ilike.%password%,error_message.ilike.%senha%")
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -796,8 +841,31 @@ export const batchApproveDrafts = tool({
 
     return {
       success: true,
-      message: `Batch concluído: ${approved} aprovados, ${failed} falharam.`,
+      message: `Batch concluído: ${approved} aprovados, ${failed} falharam. Nenhum foi lançado — use postDraftBatch para criar os registros financeiros.`,
       details: results,
+    };
+  },
+});
+
+export const postDraftBatch = tool({
+  description:
+    "Lança todos os drafts JÁ APROVADOS de um batch, criando os registros financeiros definitivos. IMPORTANTE: sempre confirme com o usuário antes de executar.",
+  parameters: z.object({
+    batchId: z.string().uuid().describe("ID do batch a lançar"),
+  }),
+  execute: async ({ batchId }) => {
+    const { postApprovedDraftBatch } = await import("@/app/actions/materialization");
+    const result = await postApprovedDraftBatch(batchId);
+
+    return {
+      success: result.failed === 0,
+      message: `Lançamento concluído: ${result.succeeded} lançados, ${result.failed} com problema.`,
+      details: result.results.map((r) => ({
+        id: r.draftRecordId,
+        success: r.success,
+        message: r.message,
+        validationErrors: r.validationErrors,
+      })),
     };
   },
 });
@@ -1007,6 +1075,7 @@ export const sbfTools = {
   suggest_document_type: suggestDocumentType,
   explain_classification: explainClassification,
   approve_draft: approveDraft,
+  post_draft: postDraft,
   reject_draft: rejectDraft,
   reprocess_document: reprocessDocumentTool,
   list_document_patterns: listDocumentPatterns,
@@ -1016,6 +1085,7 @@ export const sbfTools = {
   list_error_documents: listErrorDocuments,
   list_missing_password_documents: listMissingPasswordDocuments,
   batch_approve_drafts: batchApproveDrafts,
+  post_draft_batch: postDraftBatch,
   // Sprint 4
   suggest_splits: suggestSplits,
   suggest_supplier_name: suggestSupplierName,

@@ -4,3 +4,6 @@ dist
 docs-html
 bun.lock
 supabase/.temp
+
+# Material historico: preservado como foi arquivado, nao reformatar.
+docs/_arquivo

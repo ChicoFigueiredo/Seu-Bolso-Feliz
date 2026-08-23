@@ -14,6 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 import { writeLog, type LogContext } from "../logger";
+import { chamarChatCompletions } from "./llm-endpoint";
 
 // ── Constantes ──────────────────────────────────────────────────────────────
 
@@ -74,11 +75,7 @@ export interface AiLiteOutput {
     document_type: string | null;
     // Classificação semântica
     financial_intent:
-      | "transaction"
-      | "recurring_expense"
-      | "metric"
-      | "liability_payment"
-      | "unknown";
+      "transaction" | "recurring_expense" | "metric" | "liability_payment" | "unknown";
     // Descrição livre gerada pela IA
     description: string | null;
   };
@@ -244,29 +241,20 @@ Responda APENAS com JSON válido, sem texto adicional, sem markdown, sem backtic
  * Chama o OpenAI com retry simples (1 tentativa extra em caso de falha de parse).
  */
 async function callOpenAi(prompt: string): Promise<Record<string, unknown>> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY não configurada — enriquecimento lite não disponível");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const response = await chamarChatCompletions(
+    {
       model: process.env.OPENAI_LITE_MODEL ?? "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 400,
       temperature: 0,
       response_format: { type: "json_object" },
-    }),
-  });
+    },
+    "enriquecimento lite",
+  );
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`OpenAI API error ${response.status}: ${body.slice(0, 200)}`);
+    throw new Error(`LLM API error ${response.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await response.json()) as {

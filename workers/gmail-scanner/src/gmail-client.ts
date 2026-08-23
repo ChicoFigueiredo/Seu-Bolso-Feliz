@@ -162,21 +162,27 @@ export class GmailClient {
   }
 
   /**
-   * Lista mensagens por label com paginação.
+   * Lista mensagens por label e/ou query, com paginação.
+   *
+   * O parâmetro `q` era a peça que faltava: o worker aceitava `--query` desde
+   * sempre, mas esta função não tinha nem sequer um slot para recebê-lo, então
+   * a query era descartada silenciosamente e a varredura histórica por período
+   * era impossível.
    */
-  async listMessages(
-    labelId: string,
-    maxResults: number = 100,
-    pageToken?: string,
-  ): Promise<GmailListResponse> {
-    const params: Record<string, string> = {
-      labelIds: labelId,
-      maxResults: String(maxResults),
+  async listMessages(params: {
+    labelId?: string;
+    q?: string;
+    maxResults?: number;
+    pageToken?: string;
+  }): Promise<GmailListResponse> {
+    const p: Record<string, string> = {
+      maxResults: String(params.maxResults ?? 100),
     };
-    if (pageToken) {
-      params.pageToken = pageToken;
-    }
-    return this.apiRequest<GmailListResponse>("/messages", params);
+    if (params.labelId) p.labelIds = params.labelId;
+    if (params.q) p.q = params.q;
+    if (params.pageToken) p.pageToken = params.pageToken;
+
+    return this.apiRequest<GmailListResponse>("/messages", p);
   }
 
   /**
