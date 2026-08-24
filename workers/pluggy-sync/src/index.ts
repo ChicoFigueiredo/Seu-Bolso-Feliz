@@ -3,13 +3,21 @@
  *
  * Sincroniza transações Pluggy de todas as conexões ativas do usuário.
  * Rodagem única (pensado pra cron na VPS, não poll loop contínuo — ver
- * Fase 5 do plano de integração Pluggy). Não faz backfill de 365 dias
- * (Fase 3, ainda não implementada): a janela padrão é curta, pra sync
- * incremental.
+ * Fase 5 do plano de integração Pluggy).
+ *
+ * Dois modos, mesma função (syncProviderConnection) — só a janela e o uso
+ * de checkpoint mudam:
+ *   - incremental (padrão): janela curta (7 dias, ou desde last_synced_at),
+ *     sem checkpoint — poucas páginas, last_synced_at já é retomável o
+ *     suficiente.
+ *   - --backfill: janela de 365 dias por padrão, com checkpoint em
+ *     ingestion_checkpoints por conta — retomável entre execuções (Fase 3).
  *
  * Uso:
  *   bun run workers/pluggy-sync/src/index.ts
  *   bun run workers/pluggy-sync/src/index.ts --from 2026-01-01 --to 2026-08-24
+ *   bun run workers/pluggy-sync/src/index.ts --backfill
+ *   bun run workers/pluggy-sync/src/index.ts --backfill --from 2025-08-24
  */
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
 import { getSupabaseClient } from "./supabase";
@@ -18,18 +26,21 @@ import { syncProviderConnection, type AccountMapping } from "./sync-runner";
 export { syncProviderConnection } from "./sync-runner";
 
 const DEFAULT_LOOKBACK_DAYS = 7;
+const BACKFILL_LOOKBACK_DAYS = 365;
 
 interface CliOptions {
   from?: string;
   to?: string;
+  backfill: boolean;
 }
 
 function parseArgs(): CliOptions {
   const args = process.argv.slice(2);
-  const opts: CliOptions = {};
+  const opts: CliOptions = { backfill: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--from") opts.from = args[++i];
     if (args[i] === "--to") opts.to = args[++i];
+    if (args[i] === "--backfill") opts.backfill = true;
   }
   return opts;
 }
@@ -82,8 +93,10 @@ async function main(): Promise<void> {
 
     const from =
       opts.from ??
-      (connection.last_synced_at as string | null)?.split("T")[0] ??
-      isoDaysAgo(DEFAULT_LOOKBACK_DAYS);
+      (opts.backfill
+        ? isoDaysAgo(BACKFILL_LOOKBACK_DAYS)
+        : ((connection.last_synced_at as string | null)?.split("T")[0] ??
+          isoDaysAgo(DEFAULT_LOOKBACK_DAYS)));
     const to = opts.to ?? new Date().toISOString().split("T")[0]!;
 
     const result = await syncProviderConnection({
@@ -94,11 +107,13 @@ async function main(): Promise<void> {
       mappings,
       from,
       to,
+      mode: opts.backfill ? "backfill" : "incremental",
     });
 
     console.log(
       `Conexão ${connection.id}: ${result.created} draft(s) criado(s), ` +
-        `${result.skippedDuplicate} já sincronizado(s), ${result.skippedIgnored} ignorado(s).`,
+        `${result.skippedDuplicate} já sincronizado(s), ${result.skippedIgnored} ignorado(s), ` +
+        `${result.itemErrors} erro(s).`,
     );
 
     await supabase
