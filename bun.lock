@@ -107,6 +107,13 @@
       "name": "@sbf/domain",
       "version": "0.0.1",
     },
+    "packages/financial-connectors": {
+      "name": "@sbf/financial-connectors",
+      "version": "0.0.1",
+      "dependencies": {
+        "@sbf/contracts": "workspace:*",
+      },
+    },
     "packages/ingestion-types": {
       "name": "@sbf/ingestion-types",
       "version": "0.0.1",
@@ -926,6 +933,8 @@
     "@sbf/contracts": ["@sbf/contracts@workspace:packages/contracts"],
 
     "@sbf/domain": ["@sbf/domain@workspace:packages/domain"],
+
+    "@sbf/financial-connectors": ["@sbf/financial-connectors@workspace:packages/financial-connectors"],
 
     "@sbf/ingestion-types": ["@sbf/ingestion-types@workspace:packages/ingestion-types"],
 
