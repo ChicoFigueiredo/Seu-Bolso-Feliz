@@ -1,6 +1,9 @@
 # Arquitetura-alvo híbrida
 
 > Entregável §16.2 do plano mestre. Data: 2026-07-27.
+> **Atualizado por ADR-008 (2026-08-24):** o backend de banco migra de Supabase Postgres
+> para Neon; ver seção ADR-008 ao final. O pipeline canônico abaixo continua correto e
+> não muda.
 
 ## Contexto
 
@@ -10,6 +13,9 @@ os limites do §5 e registra o que **já foi construído** em P0 versus o que co
 sendo alvo.
 
 ## C4 — Nível 1: contexto
+
+> Diagrama histórico (2026-07-27), pré-ADR-008. Para o desenho de infraestrutura atual
+> (Neon + VPS), ver o diagrama na seção ADR-008.
 
 ```mermaid
 graph TB
@@ -38,6 +44,9 @@ graph TB
 ```
 
 ## C4 — Nível 2: containers e responsabilidades
+
+> Tabela histórica (2026-07-27), pré-ADR-008. "Supabase" nesta linha refere-se ao Postgres,
+> que migra para Neon — ver ADR-008. Auth/Storage permanecem Supabase por ora.
 
 | Container    | Faz                                                                                                                 | **Não** faz                                                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -138,6 +147,86 @@ aparecer um segundo, esta decisão cai.
 
 **Compensações obrigatórias:** `db reset` a cada PR, bloco `-- rollback:` em toda
 migration, dump antes de push, portão humano no deploy.
+
+### ADR-008 — Migração de infraestrutura: Vercel + Neon + Worker VPS São Paulo
+
+**Status:** Aprovada — 2026-08-24.
+
+**Contexto:** decisão do CEO de mudar a arquitetura-alvo ("Estou mudando a arquitetura,
+se vira"), no âmbito da integração Pluggy (Open Finance). Motivada pela necessidade de um
+worker de longa duração e confiável (backfill de 365 dias, sync periódico de contas
+bancárias) que não dependa de a máquina local do CEO estar ligada — requisito que o
+"agente local instalável" (alvo P2 acima) não cobre para uma fonte de dados que precisa
+rodar continuamente.
+
+**Referências:** `docs/prompts/2026-08-24-prompt-integracao-pluggy.md`,
+`docs/planejamento/2026-08-24-plano-integracao-pluggy.md`.
+
+**Decisão:**
+
+| Camada                  | Antes (ADR-007 / diagrama acima)           | Depois (ADR-008)                                                                                |
+| ----------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Banco                   | Supabase Postgres                          | **Neon Postgres** (produção)                                                                    |
+| Web/API                 | Vercel                                     | Vercel (mantém)                                                                                 |
+| Worker de longa duração | Máquina local (agente instalável, alvo P2) | **VPS São Paulo** (`ssh root@ssh.chico-figueiredo.com.br`); local continua como alternativo/dev |
+| Auth/Storage            | Supabase Auth + Storage                    | **Mantém Supabase Auth + Storage nesta fase** — ver gap abaixo                                  |
+
+**Gap explícito, não fechado por esta ADR:** o app usa RLS do Supabase Auth e Storage
+(buckets `ingestion-originals` etc.) em ~15 Server Actions e no scanner de Gmail. Migrar
+Auth e Storage para fora do Supabase é um segundo projeto, fora de escopo aqui. Leitura
+padrão adotada: migrar **apenas o Postgres** para Neon nesta fase — menor mudança que
+satisfaz a decisão do CEO sem reescrever autenticação e upload. Reavaliar se o CEO pedir
+saída completa do Supabase.
+
+**Worker já isolado da Vercel:** verificado em 2026-08-24 — `workers/ingestion` já é um
+pacote Bun standalone (`@sbf/worker-ingestion`, `package.json`/`tsconfig.json` próprios,
+entrypoint `src/index.ts`), sem import algum a partir de `apps/web`. `bun run build` da
+Vercel roda só `apps/web` (script `build` na raiz: `cd apps/web && bun run build`). Não
+foi necessária mudança de código para este item — o isolamento já existia antes desta ADR.
+
+```mermaid
+graph TB
+    CEO["CEO<br/>(usuário único)"]
+    subgraph Vercel
+        WEB["Web<br/>Next.js App Router"]
+    end
+    subgraph Neon
+        DB[("Postgres<br/>RLS + RPCs")]
+    end
+    subgraph Supabase
+        ST["Storage"]
+        AU["Auth"]
+    end
+    subgraph "VPS São Paulo"
+        WK["Worker pluggy-sync<br/>+ ingestion (produção)"]
+    end
+    subgraph "Máquina local (dev/alternativo)"
+        AGL["Worker local"]
+        MCP["MCP server"]
+    end
+    PLUGGY["Pluggy<br/>(Open Finance)"]
+    GM["Gmail API"]
+    AI["OpenAI"]
+
+    CEO --> WEB
+    WEB --> DB & ST & AU
+    WK --> DB & ST
+    WK --> PLUGGY & GM & AI
+    AGL --> DB & ST
+    AGL --> GM & AI
+    MCP --> DB
+```
+
+**Consequências:**
+
+- Positivas: worker roda 24/7 independente da máquina do CEO; Neon dá branching de banco
+  (dev/preview isolados sem custo de um segundo projeto Supabase pago).
+- Negativas / trade-offs: dois provedores de infra (Neon + Supabase) em vez de um só,
+  até o gap de Auth/Storage ser resolvido; migração de dump/restore tem janela de corte
+  a coordenar com o CEO (portão manual, ver ADR-007).
+- Riscos mitigados: nenhum secret de produção (`DATABASE_URL`, `PLUGGY_CLIENT_SECRET`)
+  entra no repo — checagem automatizada no CI antes de cada fechamento de fase (ver
+  plano de integração Pluggy, seção 5).
 
 ## Alvo ainda não construído
 
