@@ -709,6 +709,7 @@ export type Database = {
           draft_data_legacy: Json | null;
           draft_schema_version: number;
           draft_type: string;
+          external_ref: string | null;
           extraction_result_id: string | null;
           id: string;
           materialization_error: Json | null;
@@ -738,6 +739,7 @@ export type Database = {
           draft_data_legacy?: Json | null;
           draft_schema_version?: number;
           draft_type: string;
+          external_ref?: string | null;
           extraction_result_id?: string | null;
           id?: string;
           materialization_error?: Json | null;
@@ -767,6 +769,7 @@ export type Database = {
           draft_data_legacy?: Json | null;
           draft_schema_version?: number;
           draft_type?: string;
+          external_ref?: string | null;
           extraction_result_id?: string | null;
           id?: string;
           materialization_error?: Json | null;
