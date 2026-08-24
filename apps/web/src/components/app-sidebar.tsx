@@ -9,6 +9,7 @@ import {
   Home,
   Landmark,
   LayoutDashboard,
+  Plug,
   Receipt,
   Repeat,
   Settings,
@@ -44,6 +45,7 @@ const navFinanceiro = [
 ];
 
 const navGestao = [
+  { title: "Conexões", href: "/dashboard/connections", icon: Plug },
   { title: "Documentos", href: "/dashboard/documents", icon: FileText },
   { title: "Importar", href: "/dashboard/import", icon: Upload },
   { title: "Relatórios", href: "/dashboard/reports", icon: LayoutDashboard },
