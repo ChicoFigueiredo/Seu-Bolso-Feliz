@@ -189,6 +189,16 @@
         "@supabase/supabase-js": "^2.110.9",
       },
     },
+    "workers/pluggy-sync": {
+      "name": "@sbf/worker-pluggy-sync",
+      "version": "0.0.1",
+      "dependencies": {
+        "@sbf/contracts": "workspace:*",
+        "@sbf/financial-connectors": "workspace:*",
+        "@sbf/worker-ingestion": "workspace:*",
+        "@supabase/supabase-js": "^2.110.9",
+      },
+    },
   },
   "overrides": {
     "zod-to-json-schema": "~3.24.6",
@@ -957,6 +967,8 @@
     "@sbf/worker-ingestion": ["@sbf/worker-ingestion@workspace:workers/ingestion"],
 
     "@sbf/worker-local-scanner": ["@sbf/worker-local-scanner@workspace:workers/local-scanner"],
+
+    "@sbf/worker-pluggy-sync": ["@sbf/worker-pluggy-sync@workspace:workers/pluggy-sync"],
 
     "@segment/loosely-validate-event": ["@segment/loosely-validate-event@2.0.0", "", { "dependencies": { "component-type": "^1.2.1", "join-component": "^1.1.0" } }, "sha512-ZMCSfztDBqwotkl848ODgVcAmN4OItEWDCkshcKz0/W6gGSQayuuCtWV/MlodFivAZD793d6UgANd6wCXUfrIw=="],
 
