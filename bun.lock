@@ -14,6 +14,7 @@
         "@eslint/js": "^10.0.1",
         "@sbf/domain": "workspace:*",
         "@sbf/validation": "workspace:*",
+        "@sbf/worker-ingestion": "workspace:*",
         "@supabase/supabase-js": "^2.110.9",
         "@types/bun": "latest",
         "@vitest/coverage-v8": "^4.1.10",
@@ -196,6 +197,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@sbf/contracts": "workspace:*",
+        "@sbf/domain": "workspace:*",
         "@sbf/financial-connectors": "workspace:*",
         "@sbf/worker-ingestion": "workspace:*",
         "@supabase/supabase-js": "^2.110.9",

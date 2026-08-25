@@ -9,6 +9,14 @@ const aliases = {
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
   "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
   "@sbf/cli": resolve(__dirname, "workers/cli/src/index.ts"),
+  // Precisa vir antes de "@sbf/worker-ingestion": Vite casa por prefixo, e a
+  // entrada genérica intercepta o subpath (o alias vira o caminho do arquivo
+  // index.ts + "/reconciliation", que não existe — mesmo se o package.json
+  // do pacote já declara esse subpath via "exports").
+  "@sbf/worker-ingestion/reconciliation": resolve(
+    __dirname,
+    "workers/ingestion/src/reconciliation/reconciliation.ts",
+  ),
   "@sbf/worker-ingestion": resolve(__dirname, "workers/ingestion/src/index.ts"),
   "@sbf/worker-gmail-scanner": resolve(__dirname, "workers/gmail-scanner/src/index.ts"),
   "@sbf/worker-local-scanner": resolve(__dirname, "workers/local-scanner/src/index.ts"),
