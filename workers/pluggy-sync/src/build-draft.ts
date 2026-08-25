@@ -30,10 +30,16 @@ const PLUGGY_CONFIDENCE_SCORE = 1.0;
 
 export function buildDraftRecordInsert(
   tx: NormalizedTransaction,
-  options: { batchId: string; userId: string; financialProductId: string | null },
+  options: {
+    batchId: string;
+    userId: string;
+    financialProductId: string | null;
+    supplierId?: string | null;
+  },
 ): DraftRecordInsert {
   const draftData = pluggyTransactionToDraft(tx, {
     financialProductId: options.financialProductId,
+    supplierId: options.supplierId,
   });
 
   return {

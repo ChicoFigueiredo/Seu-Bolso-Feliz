@@ -62,4 +62,18 @@ describe("pluggyTransactionToDraft", () => {
     );
     expect(draft.description).toBe("PIX RECEBIDO");
   });
+
+  it("repassa supplierId resolvido pelo chamador", () => {
+    const supplierId = "33333333-3333-3333-3333-333333333333";
+    const draft = pluggyTransactionToDraft(makeNormalized(), {
+      financialProductId: null,
+      supplierId,
+    });
+    expect(draft.supplier_id).toBe(supplierId);
+  });
+
+  it("supplier_id nasce null quando o resolver não achou match (options omitido)", () => {
+    const draft = pluggyTransactionToDraft(makeNormalized(), { financialProductId: null });
+    expect(draft.supplier_id).toBeNull();
+  });
 });

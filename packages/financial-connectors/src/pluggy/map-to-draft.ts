@@ -24,6 +24,12 @@ export interface MapToDraftOptions {
    * financeiro (a materialização exige isso; o draft honesto, não).
    */
   financialProductId: string | null;
+  /**
+   * Resolvido pelo chamador via `resolveSupplierForTransaction` (@sbf/domain)
+   * — null quando não há match exato de alias (`needs_review`). Draft nasce
+   * honesto mesmo sem fornecedor; a revisão humana resolve depois.
+   */
+  supplierId?: string | null;
 }
 
 /**
@@ -67,7 +73,7 @@ export function pluggyTransactionToDraft(
     competence_date: null,
     description: tx.description || tx.descriptionRaw || null,
     supplier_name_raw: tx.merchantName ?? null,
-    supplier_id: null,
+    supplier_id: options.supplierId ?? null,
     category_suggestion: tx.category ?? null,
     category_id: null,
     tags: [],

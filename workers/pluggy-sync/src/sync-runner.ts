@@ -16,6 +16,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FinancialDataProvider } from "@sbf/financial-connectors";
 import { findReconciliationCandidates } from "@sbf/worker-ingestion/reconciliation";
+import { resolveSupplierForTransaction, type SupplierAliasCandidate } from "@sbf/domain";
 import { buildDraftRecordInsert } from "./build-draft";
 import { completeCheckpoint, recordPageProgress, startOrResumeCheckpoint } from "./checkpoint";
 
@@ -90,6 +91,27 @@ export async function syncProviderConnection(
     throw new Error(`Falha ao criar draft_batch: ${batchError?.message}`);
   }
 
+  // Buscado uma vez por sync (não por transação) — supplier_aliases não tem
+  // coluna normalizada, então o match exato compara candidatos já filtrados
+  // por user_id em memória (ver resolveSupplierForTransaction, @sbf/domain).
+  const { data: aliasRows, error: aliasError } = await supabase
+    .from("supplier_aliases")
+    .select("supplier_id, alias_name")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+
+  if (aliasError) {
+    console.error(
+      `[pluggy-sync] falha ao buscar supplier_aliases (não crítico): ${aliasError.message}`,
+    );
+  }
+
+  const supplierAliasCandidates: SupplierAliasCandidate[] = (aliasRows ?? []).map((row) => ({
+    supplierId: row.supplier_id as string,
+    aliasName: row.alias_name as string,
+    isActive: true,
+  }));
+
   let created = 0;
   let skippedDuplicate = 0;
   let itemErrors = 0;
@@ -121,10 +143,18 @@ export async function syncProviderConnection(
       let pageErrors = 0;
 
       for (const tx of page.transactions) {
+        const supplierResolution = resolveSupplierForTransaction(
+          tx.merchantName ?? "",
+          supplierAliasCandidates,
+        );
+        const supplierId =
+          supplierResolution.status === "matched" ? supplierResolution.supplierId : null;
+
         const insertRow = buildDraftRecordInsert(tx, {
           batchId: batch.id as string,
           userId,
           financialProductId: mapping.financialProductId,
+          supplierId,
         });
 
         let draftId: string | undefined;
@@ -164,7 +194,7 @@ export async function syncProviderConnection(
               amount: (insertRow.draft_data as { amount_cents: number }).amount_cents / 100,
               due_date: tx.date,
               competence_date: tx.date,
-              supplier_id: null,
+              supplier_id: supplierId,
               supplier_name: tx.merchantName ?? null,
             },
             null,

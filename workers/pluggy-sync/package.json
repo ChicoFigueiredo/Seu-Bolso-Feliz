@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@sbf/contracts": "workspace:*",
+    "@sbf/domain": "workspace:*",
     "@sbf/financial-connectors": "workspace:*",
     "@sbf/worker-ingestion": "workspace:*",
     "@supabase/supabase-js": "^2.110.9"

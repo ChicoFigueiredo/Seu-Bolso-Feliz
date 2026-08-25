@@ -68,4 +68,15 @@ describe("buildDraftRecordInsert", () => {
     });
     expect(row.status).toBe("pending_review");
   });
+
+  it("repassa supplierId resolvido pro draft_data", () => {
+    const supplierId = "44444444-4444-4444-4444-444444444444";
+    const row = buildDraftRecordInsert(makeNormalized(), {
+      batchId: "batch-1",
+      userId: "user-1",
+      financialProductId: null,
+      supplierId,
+    });
+    expect((row.draft_data as { supplier_id: string | null }).supplier_id).toBe(supplierId);
+  });
 });
