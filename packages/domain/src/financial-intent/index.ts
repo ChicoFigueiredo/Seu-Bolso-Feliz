@@ -4,6 +4,7 @@ export {
   buildFinancialIdentityKeys,
   buildFinancialIdentityKey,
   amountToCents,
+  normalizeName,
 } from "./identity-key";
 export type {
   FinancialIdentityInput,

@@ -92,7 +92,7 @@ const KIND_ORDER: KeyKind[] = [
   "supplier_period",
 ];
 
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .normalize("NFD")
