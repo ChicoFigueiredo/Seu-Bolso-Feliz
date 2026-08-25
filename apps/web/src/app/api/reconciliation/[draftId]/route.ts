@@ -13,8 +13,9 @@ import type { Database } from "@sbf/shared-types";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@sbf/shared-types";
 
-// Engine de reconciliação reutilizada do worker (lógica pura, sem dependências de runtime)
-// Importamos diretamente as heurísticas para evitar duplicação
+// Cópia independente das regras de workers/ingestion/src/reconciliation/reconciliation.ts
+// (duplicação catalogada em docs/specs/00-estado-real.md item 6) — as duas precisam ficar
+// em sincronia manualmente até serem extraídas para um módulo compartilhado.
 
 type ReconciliationStatus =
   | "not_checked"
