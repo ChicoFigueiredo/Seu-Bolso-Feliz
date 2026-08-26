@@ -1,3 +1,42 @@
+/**
+ * Schema Drizzle do Neon — gerado por `drizzle-kit introspect`
+ * (dentro de packages/db: `bunx drizzle-kit introspect`, ou o script
+ * `db:introspect` do package.json) a partir do banco real, MAS COM EDIÇÕES
+ * MANUAIS. Não é 100% auto-gerado, apesar de estar na lista de ignorados do
+ * eslint.config.ts junto com os arquivos que são.
+ *
+ * ⚠️ Rodar a introspecção de novo SOBRESCREVE este arquivo e apaga as edições
+ * abaixo em silêncio. Se você reintrospectar, reaplique-as:
+ *
+ *   1. `transactions.recurringInstanceId` — a FK para `recurring_instances`
+ *      é declarada inline na coluna, via
+ *      `.references((): AnyPgColumn => recurringInstances.id, { onDelete: "set null" })`,
+ *      em vez do `foreignKey({...})` builder na lista de constraints da
+ *      tabela (que é o que a introspecção gera). Motivo: `transactions` e
+ *      `recurring_instances` se referenciam mutuamente e o builder produz um
+ *      ciclo de inferência de tipos — `tsc` falha com TS7022/TS7024. O
+ *      callback anotado com `AnyPgColumn` quebra o ciclo (mesmo padrão que o
+ *      próprio drizzle-kit usa para auto-referências, ex. `categories.parentId`).
+ *      Efeito colateral aceito: o nome do constraint passa a ser o default do
+ *      Drizzle em vez de `transactions_recurring_instance_id_fkey` — irrelevante
+ *      aqui, porque este schema NUNCA é usado para `drizzle-kit generate`/`push`
+ *      (a fonte da verdade do DDL é packages/db/schema.sql, aplicado no Neon).
+ *
+ *   2. `userSecrets` — o parâmetro do callback de constraints é `_table`, não
+ *      `table`. O índice único `uq_user_secrets_scope` usa `sql\`\`` cru
+ *      (COALESCE não é representável encadeando `table.coluna`), então o
+ *      parâmetro fica sem uso e o `noUnusedParameters` do tsc reclama (TS6133).
+ *
+ * ⚠️ Passo manual de local: `drizzle.config.ts` tem `out: "./drizzle"` (o
+ * drizzle-kit escreve schema.ts + relations.ts + snapshot SQL + meta/ todos
+ * nessa mesma pasta; apontar `out` para `./src` sujaria src/ com artefatos de
+ * migration). Depois de rodar a introspecção, mova à mão:
+ *
+ *     packages/db/drizzle/schema.ts     -> packages/db/src/schema.ts
+ *     packages/db/drizzle/relations.ts  -> packages/db/src/relations.ts
+ *
+ * e descarte o resto (packages/db/drizzle/ é gitignorado justamente por isso).
+ */
 import {
   pgTable,
   uniqueIndex,
@@ -47,6 +86,7 @@ export const userSecrets = pgTable(
   // `table` não é usado aqui: o índice único abaixo precisou cair para sql`` cru
   // (COALESCE não é representável via table.coluna encadeado), então o parâmetro
   // fica sem uso — prefixado com "_" para o `noUnusedParameters` do tsc.
+  // (Edição manual nº 2 — ver cabeçalho deste arquivo.)
   (_table) => [
     uniqueIndex("uq_user_secrets_scope").using(
       "btree",
@@ -1919,8 +1959,9 @@ export const transactions = pgTable(
     // Referência cruzada para recurring_instances (declarada mais abaixo neste
     // arquivo): usa .references() com callback tipado (AnyPgColumn) em vez do
     // foreignKey() builder para quebrar o ciclo de inferência de tipos entre
-    // transactions <-> recurring_instances (ver task-4-report.md, achado do
-    // fix report). O nome do constraint gerado pelo Drizzle passa a ser o
+    // transactions <-> recurring_instances (TS7022/TS7024 — ver edição manual
+    // nº 1 no cabeçalho deste arquivo). O nome do constraint gerado pelo
+    // Drizzle passa a ser o
     // default automático em vez de "transactions_recurring_instance_id_fkey"
     // (mesma semântica de onDelete "set null"); isso não afeta queries, só
     // teria efeito se este schema fosse usado para `drizzle-kit generate`/push,
