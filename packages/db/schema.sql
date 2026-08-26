@@ -22,7 +22,7 @@ SET row_security = off;
 -- Name: public; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA public;
+CREATE SCHEMA IF NOT EXISTS public;
 
 
 --
@@ -35,15 +35,57 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 --
 -- Name: pg_trgm; Type: EXTENSION; Schema: public; Owner: -
 --
--- NOTA: `pg_dump --schema=public` não inclui CREATE EXTENSION (extensões não
--- pertencem ao schema public mesmo quando seus operadores são registrados
--- nele) -- reinstalada manualmente aqui porque dois índices GIN
--- (idx_supplier_aliases_trgm, idx_suppliers_name_trgm) dependem do operator
--- class public.gin_trgm_ops. Confirmado disponível no Neon via
--- pg_available_extensions antes de adicionar esta linha.
+-- NOTA: pg_dump --schema=public nao inclui CREATE EXTENSION (extensoes
+-- nao pertencem ao schema public mesmo quando seus operadores sao
+-- registrados nele) -- reinstalada aqui porque os indices GIN
+-- idx_supplier_aliases_trgm e idx_suppliers_name_trgm dependem do
+-- operator class public.gin_trgm_ops. Confirmado disponivel no Neon
+-- via pg_available_extensions antes de adicionar esta linha.
 --
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+--
+-- NOTA (ADR-009 Fase 1 -> Fase 2 -- ver
+-- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md e
+-- .superpowers/sdd/2026-08-25-adr-009-fase1-neon-drizzle/task-3-report.md):
+--
+-- 1. O schema `private` NAO foi portado (private.crypto_keys,
+--    private.get_crypto_key -- ver
+--    supabase/migrations/20260727184000_fix_secrets_encryption.sql), porque
+--    `pg_dump --schema=public` nunca o incluiu. A chave de criptografia em
+--    si e DADO, nao DDL -- recria-la (ou decidir uma alternativa) e decisao
+--    de Fase 2, nao desta task. Ate la, chamar public.encrypt_secret(),
+--    public.decrypt_secret() ou public.fn_get_secrets() no Neon falha em
+--    runtime: function private.get_crypto_key(integer) does not exist.
+--
+-- 2. As FK para auth.users(id) foram removidas por completo (auth.users nao
+--    existe no Neon). 30 das 46 removidas tinham ON DELETE CASCADE --
+--    ou seja, isso tambem derrubou integridade referencial, nao so
+--    autorizacao: apagar um "usuario" hoje no Neon deixaria orfaos em
+--    audit_logs, cards, categories, consumption_metrics, document_patterns,
+--    documents_legacy, financial_obligation_evidences,
+--    financial_obligation_identity_keys, financial_obligations,
+--    financial_periods, financial_products, import_jobs,
+--    ingestion_checkpoints, institutions, liabilities,
+--    liability_installments, pattern_feedback, recurring_instances,
+--    recurring_templates, statement_cycles, statement_items,
+--    supplier_aliases, supplier_contracts, supplier_tags, suppliers, tags,
+--    transactions, transfers, user_financial_preferences e user_secrets.
+--    Fase 2 provavelmente precisa de uma tabela `users` propria + FKs
+--    reinstaladas.
+--
+-- 3. fn_get_secrets, fn_mark_secret_used, fn_materialize_draft_record e
+--    fn_upsert_financial_obligation tiveram a checagem
+--    `auth.uid() IS NOT NULL AND auth.uid() <> p_user_id` removida. Essa
+--    checagem NAO era redundante em Supabase: ela amarrava p_user_id a
+--    identidade do JWT nestas funcoes SECURITY DEFINER expostas via
+--    PostgREST -- sem ela, qualquer portador de JWT valido podia chamar a
+--    RPC passando o p_user_id de outra pessoa. Nao virou Critical aqui
+--    porque o Neon so e alcancavel via DATABASE_URL de servidor (sem
+--    PostgREST, sem auth.uid(), essa classe de ataque nao existe hoje) --
+--    mas Fase 2 PRECISA amarrar p_user_id a sessao real por outro mecanismo
+--    antes de expor qualquer uma dessas 4 funcoes a um cliente nao confiavel.
+--
 
 
 --
@@ -195,6 +237,7 @@ $$;
 
 --
 -- Name: decrypt_secret(text, integer); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: depende de private.get_crypto_key(), nao portado nesta task -- ver NOTA no topo do arquivo (item 1).
 --
 
 CREATE FUNCTION public.decrypt_secret(ciphertext text, p_version integer DEFAULT NULL::integer) RETURNS text
@@ -219,6 +262,7 @@ $$;
 
 --
 -- Name: encrypt_secret(text, integer); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: depende de private.get_crypto_key(), nao portado nesta task -- ver NOTA no topo do arquivo (item 1).
 --
 
 CREATE FUNCTION public.encrypt_secret(plaintext text, p_version integer DEFAULT NULL::integer) RETURNS text
@@ -254,6 +298,8 @@ $$;
 
 --
 -- Name: fn_get_secrets(uuid, text, integer); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: depende de private.get_crypto_key(), nao portado nesta task -- ver NOTA no topo do arquivo (item 1).
+-- NOTA: checagem auth.uid() <> p_user_id removida aqui NAO era redundante -- ver NOTA no topo do arquivo (item 3).
 --
 
 CREATE FUNCTION public.fn_get_secrets(p_user_id uuid, p_secret_type text, p_limit integer DEFAULT 20) RETURNS TABLE(secret_id uuid, value text, entity_type text, entity_id uuid, contract_identifier text, label text)
@@ -285,6 +331,7 @@ $$;
 
 --
 -- Name: fn_mark_secret_used(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: checagem auth.uid() <> p_user_id removida aqui NAO era redundante -- ver NOTA no topo do arquivo (item 3).
 --
 
 CREATE FUNCTION public.fn_mark_secret_used(p_user_id uuid, p_secret_id uuid) RETURNS void
@@ -301,6 +348,7 @@ $$;
 
 --
 -- Name: fn_materialize_draft_record(uuid, uuid, text, jsonb, text); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: checagem auth.uid() <> p_user_id removida aqui NAO era redundante -- ver NOTA no topo do arquivo (item 3).
 --
 
 CREATE FUNCTION public.fn_materialize_draft_record(p_user_id uuid, p_draft_id uuid, p_target_table text, p_insert_payload jsonb, p_actor text DEFAULT 'web'::text) RETURNS jsonb
@@ -524,6 +572,7 @@ $$;
 
 --
 -- Name: fn_upsert_financial_obligation(uuid, jsonb, jsonb, jsonb); Type: FUNCTION; Schema: public; Owner: -
+-- NOTA: checagem auth.uid() <> p_user_id removida aqui NAO era redundante -- ver NOTA no topo do arquivo (item 3).
 --
 
 CREATE FUNCTION public.fn_upsert_financial_obligation(p_user_id uuid, p_payload jsonb, p_keys jsonb, p_evidence jsonb) RETURNS jsonb
@@ -4301,3 +4350,6 @@ ALTER TABLE ONLY public.transfers
 ALTER TABLE ONLY public.transfers
     ADD CONSTRAINT transfers_target_product_id_fkey FOREIGN KEY (target_product_id) REFERENCES public.financial_products(id) ON DELETE CASCADE;
 
+--
+-- PostgreSQL database dump complete
+--

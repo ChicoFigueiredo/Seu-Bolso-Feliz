@@ -23,13 +23,29 @@
 #     generate_financial_periods, get_financial_period_for_date,
 #     increment_session_tokens, register_pattern_feedback, search_suppliers) —
 #     portar essas de verdade é trabalho de Fase 2+, não de "portar o DDL"
-#   - dentro de funções que JÁ recebem p_user_id como parâmetro e usam
-#     auth.uid() só como checagem extra de consistência, remove só essa
-#     checagem (a função continua funcionando, a posse já é garantida pelo
-#     parâmetro)
+#   - dentro de 4 funções que JÁ recebem p_user_id como parâmetro e usam
+#     auth.uid() para amarrar esse parâmetro à identidade do JWT, remove só
+#     essa checagem -- NÃO porque fosse redundante (não era, em Supabase),
+#     mas porque não há auth.uid()/JWT/PostgREST no Neon para checar contra.
+#     Fase 2 precisa reintroduzir essa amarração por outro mecanismo antes
+#     de expor qualquer uma dessas 4 funções a um cliente não confiável
+#     (ver NOTA no topo do schema.sql gerado).
 #
-# Depois da limpeza, o script confirma com grep que não sobrou nenhuma
-# referência a auth./CREATE POLICY/ROW LEVEL SECURITY.
+# Depois de limpar, o script ainda:
+#   - reinstala `CREATE EXTENSION IF NOT EXISTS pg_trgm` (perdido pelo
+#     --schema=public do pg_dump, necessário pros índices GIN
+#     idx_supplier_aliases_trgm / idx_suppliers_name_trgm)
+#   - troca `CREATE SCHEMA public;` por `CREATE SCHEMA IF NOT EXISTS public;`
+#     (Neon já vem com `public` criado -- sem o IF NOT EXISTS, aplicar este
+#     arquivo numa instância Neon nova e nunca tocada falha na linha 1)
+#   - grava no topo do arquivo gerado uma NOTA com os 3 gaps que esta task
+#     deliberadamente NÃO fecha (schema `private`/chave de criptografia,
+#     perda de ON DELETE CASCADE nas 46 FKs de auth.users removidas, e a
+#     amarração JWT->p_user_id acima) -- ver task-3-report.md
+#
+# Confirma com grep (escopado a linhas fora de comentário `--`, já que a
+# NOTA acima menciona auth.uid()/auth.users de propósito) que não sobrou
+# nenhuma referência FUNCIONAL a auth./CREATE POLICY/ROW LEVEL SECURITY.
 
 set -euo pipefail
 
