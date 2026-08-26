@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 describe("getDb", () => {
   const originalUrl = process.env.DATABASE_URL;
 
   beforeEach(() => {
+    vi.resetModules();
     process.env.DATABASE_URL = "postgresql://user:pass@example.com/db";
   });
 
