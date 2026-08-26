@@ -24,6 +24,7 @@ export default {
         "ingestion",
         "mcp-server",
         "local-scanner",
+        "db",
       ],
     ],
   },
