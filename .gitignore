@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# superpowers subagent-driven-development scratch workspace
+.superpowers
+
 # output
 out
 dist
