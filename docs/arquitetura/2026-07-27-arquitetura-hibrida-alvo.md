@@ -228,6 +228,94 @@ graph TB
   entra no repo — checagem automatizada no CI antes de cada fechamento de fase (ver
   plano de integração Pluggy, seção 5).
 
+### ADR-009 — Remoção completa do Supabase: Neon direto, sem Auth/Storage/PostgREST
+
+**Status:** Aprovada — 2026-08-25.
+
+**Contexto:** ADR-008 deixou um gap explícito, não fechado: "migrar Auth e Storage para
+fora do Supabase é um segundo projeto... reavaliar se o CEO pedir saída completa do
+Supabase." O CEO pediu, diretamente e sem meio-termo, nesta sessão — corrigindo uma
+tentativa de deploy interino que ainda apontava pro Supabase Cloud existente
+(`opwelsgdhksuuewdbefk`, distinto do projeto que a sessão de supervisão havia checado por
+engano). Confirmado explicitamente: não é self-host de Auth/PostgREST/Storage na frente
+do Neon (que manteria `@supabase/supabase-js` intacto) — é remoção total, SQL direto.
+
+**Levantamento de impacto** (levantado antes de qualquer reescrita, não estimado de
+cabeça):
+
+- 17 Server Actions (3.496 linhas) em `apps/web/src/app/actions/`, todas usando
+  `supabase.auth.getUser()` como portão de autorização.
+- 48 arquivos no repo importam `@supabase/supabase-js` ou `@supabase/ssr` diretamente.
+- 69 `CREATE POLICY` em 14 migrations, ~41 tabelas — majoritariamente o padrão simples
+  `auth.uid() = user_id`; 3 tabelas de junção com `EXISTS`; 8 policies de bypass
+  `service_role`; 8 em `storage.objects`.
+- 12 pontos de chamada de Storage: 7 em `apps/web` (`import/page.tsx`,
+  `upload-documents.tsx`, `ai-chat-drawer.tsx`, `actions/ingestion.ts`), 5 espalhados nos
+  workers (`ingestion`, `gmail-scanner`, `local-scanner`).
+- 4 workers ativos usando `supabase-js` só para CRUD via service-role (sem Auth, sem
+  Storage exceto os já citados): `ingestion` (~37 chamadas `.from()`, 11 tabelas),
+  `gmail-scanner` (~10, 4 tabelas), `local-scanner` (~5, 3 tabelas), `pluggy-sync` (~13, 6
+  tabelas). `financial-evidence-worker` está vazio — zero impacto.
+- `apps/mcp-server`: 12 arquivos, ~27 chamadas `.from()`, 7 tabelas, sem Auth/Storage.
+- 4 Edge Functions (`merge-suppliers`, `refresh-mv-supplier-spending`,
+  `retroactive-supplier-association`, `trigger-ingestion`) rodam no runtime Deno do
+  Supabase, usando `supabase-js` de verdade (via esm.sh) — dependem de Auth (verificação
+  de JWT do chamador) e de PostgREST, precisam de um novo lar.
+- Auth em uso de verdade: Google OAuth, magic link, senha, refresh de sessão em
+  `middleware.ts` (via `@supabase/ssr`). Confirmado com o CEO: só **Google OAuth** é
+  usado no dia a dia — magic link e senha são superfície morta, não precisam de
+  substituto equivalente.
+
+**Decisão:**
+
+| Camada                | Antes (ADR-008)                                   | Depois (ADR-009)                                                                                               |
+| --------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Banco                 | Neon Postgres, acesso via PostgREST/`supabase-js` | Neon Postgres, **SQL direto** (`@neondatabase/serverless` + Drizzle)                                           |
+| Auth                  | Supabase Auth (OAuth+magic link+senha)            | Auth próprio mínimo — **só Google OAuth**, sessão via cookie assinado                                          |
+| Storage               | Supabase Storage-API                              | **Vercel Blob direto** (`@vercel/blob` SDK) — obsoleta o design do shim S3-compatível cogitado antes desta ADR |
+| Autorização por linha | RLS via PostgREST (69 policies)                   | **Filtragem explícita `WHERE user_id = $1`** na camada de aplicação — ver justificativa abaixo                 |
+| Edge Functions        | Deno runtime do Supabase                          | Novo lar a decidir na execução (Vercel Functions/Cron) — não bloqueia esta ADR                                 |
+
+**Por que abandonar RLS em vez de portar para o Neon (Neon suporta RLS nativamente):**
+ADR-007 registra que este é um app de **usuário único** — o CEO. RLS existe pra impedir
+que o usuário A veja dado do usuário B; essa classe de risco não existe aqui. Portar RLS
+exigiria recriar o mecanismo que o PostgREST fazia de configurar `request.jwt.claims`/role
+por requisição — complexidade real sem uma ameaça real que justifique. Filtragem explícita
+por `user_id` na camada de aplicação é mais simples, mais direta de auditar, e reversível
+(nada impede adicionar RLS no Neon depois, se um segundo usuário aparecer e ADR-007 cair).
+
+**Fases e estimativa realista** (não "hoje" — o CEO foi informado do porte antes de
+começar):
+
+1. Provisionar Neon via integração nativa da Vercel Marketplace; camada de acesso a dados
+   (Drizzle) com schema portado das migrations existentes.
+2. Auth mínimo: Google OAuth + cookie de sessão assinado, substituindo `middleware.ts` e
+   os 17 pontos de `getUser()`.
+3. Storage: 12 pontos de chamada migrados pra `@vercel/blob`.
+4. Reescrita das 17 Server Actions + arquivos dependentes usando a nova camada de dados e
+   auth.
+5. Workers (4 ativos) + MCP server: ~92 chamadas `.from()` portadas pra SQL/Drizzle.
+6. Edge Functions: novo lar definido e portado.
+
+Estimativa: **~1,5 semana** de trabalho focado, dado o corte de escopo de Auth (só Google
+OAuth). Preservar os 3 métodos de auth teria levado a estimativa a 2-3 semanas.
+
+**Consequências:**
+
+- Positivas: um único provedor de infra (Neon + Vercel), sem Supabase em lugar nenhum;
+  remove a dependência de PostgREST pra qualquer coisa; simplifica o modelo mental de
+  autorização (uma linha de `WHERE`, não uma policy separada por tabela).
+- Negativas / trade-offs: ~3.500 linhas de Server Actions + ~92 chamadas de worker
+  reescritas é superfície grande pra revisar; Edge Functions perdem o runtime que as
+  hospedava e precisam de destino novo; perde-se a defesa em profundidade de RLS (aceito
+  dado ADR-007).
+- Obsoleta: o design do `blob-s3-gateway` (shim S3-compatível pra Vercel Blob) cogitado
+  antes desta ADR — não será implementado, o Storage-API que ele serviria deixa de
+  existir.
+- Riscos mitigados: nenhuma reescrita de Server Action começa antes desta ADR existir e
+  ser revisada (regra da Verônica: spec antes de código, dado que a mudança toca
+  autenticação e autorização de dados financeiros).
+
 ## Alvo ainda não construído
 
 ### Fila durável com lease (`worker_jobs`)
