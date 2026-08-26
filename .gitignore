@@ -61,4 +61,9 @@ tmp/
 # artefato de código. `bun run pipeline:scan-local` e `--dir ./inbox` apontam
 # para cá por padrão.
 inbox/
-.env*
+
+# Saída do `drizzle-kit introspect` (packages/db). O schema.ts/relations.ts
+# reais vivem em packages/db/src/ (movidos à mão depois da introspecção — ver
+# cabeçalho de packages/db/src/schema.ts); esta pasta é artefato de
+# reexportação (snapshot SQL + meta/_journal.json) e nunca deve ser commitada.
+packages/db/drizzle/
