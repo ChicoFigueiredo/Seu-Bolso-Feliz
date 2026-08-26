@@ -8,6 +8,7 @@ const aliases = {
   "@sbf/operations": resolve(__dirname, "packages/operations/src/index.ts"),
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
   "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
+  "@sbf/db": resolve(__dirname, "packages/db/src/index.ts"),
   "@sbf/cli": resolve(__dirname, "workers/cli/src/index.ts"),
   // Precisa vir antes de "@sbf/worker-ingestion": Vite casa por prefixo, e a
   // entrada genérica intercepta o subpath (o alias vira o caminho do arquivo
