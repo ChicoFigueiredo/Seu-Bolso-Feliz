@@ -5,6 +5,7 @@
     { "path": "packages/shared-types" },
     { "path": "packages/validation" },
     { "path": "packages/contracts" },
+    { "path": "packages/db" },
     { "path": "packages/domain" },
     { "path": "packages/financial-connectors" },
     { "path": "packages/ui-tokens" }

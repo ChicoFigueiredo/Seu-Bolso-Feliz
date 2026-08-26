@@ -44,7 +44,10 @@ export const userSecrets = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
     successCount: integer("success_count").default(0).notNull(),
   },
-  (table) => [
+  // `table` não é usado aqui: o índice único abaixo precisou cair para sql`` cru
+  // (COALESCE não é representável via table.coluna encadeado), então o parâmetro
+  // fica sem uso — prefixado com "_" para o `noUnusedParameters` do tsc.
+  (_table) => [
     uniqueIndex("uq_user_secrets_scope").using(
       "btree",
       sql`user_id`,
@@ -1913,7 +1916,19 @@ export const transactions = pgTable(
       .defaultNow()
       .notNull(),
     originType: text("origin_type").default("manual").notNull(),
-    recurringInstanceId: uuid("recurring_instance_id"),
+    // Referência cruzada para recurring_instances (declarada mais abaixo neste
+    // arquivo): usa .references() com callback tipado (AnyPgColumn) em vez do
+    // foreignKey() builder para quebrar o ciclo de inferência de tipos entre
+    // transactions <-> recurring_instances (ver task-4-report.md, achado do
+    // fix report). O nome do constraint gerado pelo Drizzle passa a ser o
+    // default automático em vez de "transactions_recurring_instance_id_fkey"
+    // (mesma semântica de onDelete "set null"); isso não afeta queries, só
+    // teria efeito se este schema fosse usado para `drizzle-kit generate`/push,
+    // o que não é o caso neste projeto (schema.sql/Neon são a fonte da verdade).
+    recurringInstanceId: uuid("recurring_instance_id").references(
+      (): AnyPgColumn => recurringInstances.id,
+      { onDelete: "set null" },
+    ),
     supplierId: uuid("supplier_id"),
     sourceDocumentId: uuid("source_document_id"),
   },
@@ -1976,11 +1991,9 @@ export const transactions = pgTable(
       foreignColumns: [liabilityInstallments.id],
       name: "transactions_liability_installment_id_fkey",
     }).onDelete("set null"),
-    foreignKey({
-      columns: [table.recurringInstanceId],
-      foreignColumns: [recurringInstances.id],
-      name: "transactions_recurring_instance_id_fkey",
-    }).onDelete("set null"),
+    // FK para recurring_instances agora definida inline na coluna acima
+    // (recurringInstanceId.references(...)) para quebrar o ciclo de tipos —
+    // ver comentário na definição da coluna.
     foreignKey({
       columns: [table.sourceDocumentId],
       foreignColumns: [sourceDocuments.id],
