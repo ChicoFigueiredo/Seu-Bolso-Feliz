@@ -26,6 +26,8 @@ export default tseslint.config(
       "docs-html/",
       "**/*.d.ts",
       "**/database.types.ts", // auto-gerado pelo Supabase CLI
+      "packages/db/src/schema.ts", // auto-gerado por drizzle-kit introspect
+      "packages/db/src/relations.ts", // auto-gerado por drizzle-kit introspect
       "src/",
       "build.ts",
       "styles/",
