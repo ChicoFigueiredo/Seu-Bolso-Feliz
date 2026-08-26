@@ -44,10 +44,28 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 --
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- Name: pgcrypto; Type: EXTENSION; Schema: public; Owner: -
+--
+-- NOTA: mesmo motivo do pg_trgm acima (pg_dump --schema=public nao
+-- inclui CREATE EXTENSION) -- reinstalada aqui porque
+-- public.encrypt_secret e public.decrypt_secret chamam
+-- pgp_sym_encrypt/pgp_sym_decrypt, que sao do pgcrypto. Diferente do
+-- pg_trgm, a falta desta extensao NAO quebra a aplicacao deste DDL
+-- (check_function_bodies = false no topo do arquivo): quebraria so em
+-- RUNTIME, ao chamar essas duas funcoes. Instalada no schema public
+-- porque as funcoes declaram search_path 'public','private',
+-- 'extensions' e no Neon so `public` existe. ATENCAO: isso sozinho
+-- NAO fecha o gap de criptografia -- ver NOTA no topo do arquivo
+-- (item 1), o schema `private` e a chave continuam faltando.
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --
 -- NOTA (ADR-009 Fase 1 -> Fase 2 -- ver
--- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md e
--- .superpowers/sdd/2026-08-25-adr-009-fase1-neon-drizzle/task-3-report.md):
+-- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md):
 --
 -- 1. O schema `private` NAO foi portado (private.crypto_keys,
 --    private.get_crypto_key -- ver
@@ -57,6 +75,16 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 --    de Fase 2, nao desta task. Ate la, chamar public.encrypt_secret(),
 --    public.decrypt_secret() ou public.fn_get_secrets() no Neon falha em
 --    runtime: function private.get_crypto_key(integer) does not exist.
+--    A extensao `pgcrypto` (que fornece pgp_sym_encrypt/pgp_sym_decrypt,
+--    chamadas por encrypt_secret/decrypt_secret) FOI reinstalada aqui, no
+--    schema public, pelo mesmo motivo do pg_trgm -- mas isso sozinho NAO
+--    fecha o gap: continuam faltando o schema `private`, a tabela
+--    private.crypto_keys e a chave em si. Alem disso as duas funcoes
+--    declaram `SET search_path TO 'public', 'private', 'extensions'` e o
+--    schema `extensions` (convencao do Supabase) tambem nao existe no Neon;
+--    com pgcrypto no public isso e inofensivo (search_path ignora schema
+--    inexistente), mas Fase 2 deve revisar essa clausula ao recriar o
+--    `private`.
 --
 -- 2. As FK para auth.users(id) foram removidas por completo (auth.users nao
 --    existe no Neon). 30 das 46 removidas tinham ON DELETE CASCADE --
@@ -85,6 +113,29 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 --    PostgREST, sem auth.uid(), essa classe de ataque nao existe hoje) --
 --    mas Fase 2 PRECISA amarrar p_user_id a sessao real por outro mecanismo
 --    antes de expor qualquer uma dessas 4 funcoes a um cliente nao confiavel.
+--
+-- 4. SEIS funcoes foram descartadas POR INTEIRO (nao existem neste arquivo):
+--    fn_set_secret, generate_financial_periods, get_financial_period_for_date,
+--    increment_session_tokens, register_pattern_feedback e search_suppliers.
+--    Todas sabiam "quem e o usuario atual" SO via auth.uid()/auth.role(), sem
+--    receber user_id como parametro -- nao da para salva-las apagando uma
+--    linha. Isso NAO e esquecimento, mas tambem NAO e inofensivo: as seis tem
+--    call sites reais em producao hoje (via supabase.rpc()):
+--      - fn_set_secret ................. apps/web/src/app/actions/secrets.ts
+--                                        workers/ingestion/src/parsers/secret-lookup.ts
+--      - generate_financial_periods .... apps/web/src/app/actions/financial-periods.ts
+--                                        apps/mcp-server/src/tools/recompute-financial-periods.ts
+--      - get_financial_period_for_date . apps/web/src/app/actions/financial-periods.ts
+--      - increment_session_tokens ...... apps/web/src/app/api/chat/route.ts
+--      - register_pattern_feedback ..... apps/web/src/app/actions/patterns.ts
+--      - search_suppliers .............. apps/web/src/app/actions/suppliers.ts
+--    Enquanto esses call sites falarem com o Supabase, nada quebra. Mas a
+--    Fase 2 -- que reescreve essas Server Actions/workers para falar com o
+--    Neon direto via Drizzle -- PRECISA, antes ou junto com a reescrita,
+--    recriar cada uma dessas funcoes no Neon com a assinatura mudada para
+--    receber `p_user_id` como parametro explicito (ou reimplementar a logica
+--    em TypeScript). Migrar o call site sem isso da "function ... does not
+--    exist" em runtime.
 --
 
 

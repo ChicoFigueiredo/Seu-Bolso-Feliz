@@ -21,7 +21,11 @@ Categories removed:
      These are genuinely Supabase-Auth-session-shaped and can't be salvaged by
      deleting a line -- porting them for real is a Fase 2+ business-logic task,
      not part of "port the DDL." Verified before removal: none of them is
-     called by any trigger, view, or other function in this dump.
+     called by any trigger, view, or other function in this dump. They DO,
+     however, have live supabase.rpc() call sites in app/worker code today --
+     enumerated in item 4 of the NOTA block written into the output, because
+     whoever migrates those call sites to Neon has to recreate the functions
+     (with p_user_id as an explicit parameter) first.
   E. Inside functions that already take an explicit p_user_id parameter and use
      auth.uid() only to bind that parameter to the JWT identity
      (`IF auth.uid() IS NOT NULL AND auth.uid() <> p_user_id THEN RAISE ...`),
@@ -35,16 +39,20 @@ Also documented/fixed inline in the output (not just here):
   - CREATE SCHEMA public -> CREATE SCHEMA IF NOT EXISTS public, so applying
     this file works against a brand-new Neon database (which already has a
     `public` schema out of the box) without a manual DROP SCHEMA first.
-  - CREATE EXTENSION IF NOT EXISTS pg_trgm, re-added because
+  - CREATE EXTENSION IF NOT EXISTS pg_trgm and pgcrypto, re-added because
     `pg_dump --schema=public` drops extension DDL even when the extension's
     objects (like the gin_trgm_ops operator class two indexes depend on) are
-    registered inside the public schema.
-  - A NOTA block (right after the pg_trgm extension) spelling out, in the
-    file itself, the three things this port does NOT carry over and that a
-    later ADR-009 phase has to address: the `private` schema (crypto key
-    material for encrypt_secret/decrypt_secret/fn_get_secrets), the lost
-    ON DELETE CASCADE on 30 user-owned tables, and the JWT-binding check
-    removed from 4 kept functions.
+    registered inside the public schema. pg_trgm broke DDL *application*
+    (two GIN indexes); pgcrypto breaks only at *runtime*, inside
+    encrypt_secret/decrypt_secret (they call pgp_sym_encrypt/pgp_sym_decrypt),
+    which is why it went unnoticed until the branch-wide review.
+  - A NOTA block (right after the extensions) spelling out, in the file
+    itself, the four things this port does NOT carry over and that a later
+    ADR-009 phase has to address: the `private` schema (crypto key material
+    for encrypt_secret/decrypt_secret/fn_get_secrets), the lost ON DELETE
+    CASCADE on 30 user-owned tables, the JWT-binding check removed from 4
+    kept functions, and the 6 whole functions of category D above -- with
+    their real, still-live call sites named.
 """
 import re
 import sys
@@ -78,8 +86,7 @@ PRIVATE_SCHEMA_DEPENDENT_FUNCTIONS = {
 
 NOTA_BLOCK = """--
 -- NOTA (ADR-009 Fase 1 -> Fase 2 -- ver
--- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md e
--- .superpowers/sdd/2026-08-25-adr-009-fase1-neon-drizzle/task-3-report.md):
+-- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md):
 --
 -- 1. O schema `private` NAO foi portado (private.crypto_keys,
 --    private.get_crypto_key -- ver
@@ -89,6 +96,16 @@ NOTA_BLOCK = """--
 --    de Fase 2, nao desta task. Ate la, chamar public.encrypt_secret(),
 --    public.decrypt_secret() ou public.fn_get_secrets() no Neon falha em
 --    runtime: function private.get_crypto_key(integer) does not exist.
+--    A extensao `pgcrypto` (que fornece pgp_sym_encrypt/pgp_sym_decrypt,
+--    chamadas por encrypt_secret/decrypt_secret) FOI reinstalada aqui, no
+--    schema public, pelo mesmo motivo do pg_trgm -- mas isso sozinho NAO
+--    fecha o gap: continuam faltando o schema `private`, a tabela
+--    private.crypto_keys e a chave em si. Alem disso as duas funcoes
+--    declaram `SET search_path TO 'public', 'private', 'extensions'` e o
+--    schema `extensions` (convencao do Supabase) tambem nao existe no Neon;
+--    com pgcrypto no public isso e inofensivo (search_path ignora schema
+--    inexistente), mas Fase 2 deve revisar essa clausula ao recriar o
+--    `private`.
 --
 -- 2. As FK para auth.users(id) foram removidas por completo (auth.users nao
 --    existe no Neon). 30 das 46 removidas tinham ON DELETE CASCADE --
@@ -117,6 +134,29 @@ NOTA_BLOCK = """--
 --    PostgREST, sem auth.uid(), essa classe de ataque nao existe hoje) --
 --    mas Fase 2 PRECISA amarrar p_user_id a sessao real por outro mecanismo
 --    antes de expor qualquer uma dessas 4 funcoes a um cliente nao confiavel.
+--
+-- 4. SEIS funcoes foram descartadas POR INTEIRO (nao existem neste arquivo):
+--    fn_set_secret, generate_financial_periods, get_financial_period_for_date,
+--    increment_session_tokens, register_pattern_feedback e search_suppliers.
+--    Todas sabiam "quem e o usuario atual" SO via auth.uid()/auth.role(), sem
+--    receber user_id como parametro -- nao da para salva-las apagando uma
+--    linha. Isso NAO e esquecimento, mas tambem NAO e inofensivo: as seis tem
+--    call sites reais em producao hoje (via supabase.rpc()):
+--      - fn_set_secret ................. apps/web/src/app/actions/secrets.ts
+--                                        workers/ingestion/src/parsers/secret-lookup.ts
+--      - generate_financial_periods .... apps/web/src/app/actions/financial-periods.ts
+--                                        apps/mcp-server/src/tools/recompute-financial-periods.ts
+--      - get_financial_period_for_date . apps/web/src/app/actions/financial-periods.ts
+--      - increment_session_tokens ...... apps/web/src/app/api/chat/route.ts
+--      - register_pattern_feedback ..... apps/web/src/app/actions/patterns.ts
+--      - search_suppliers .............. apps/web/src/app/actions/suppliers.ts
+--    Enquanto esses call sites falarem com o Supabase, nada quebra. Mas a
+--    Fase 2 -- que reescreve essas Server Actions/workers para falar com o
+--    Neon direto via Drizzle -- PRECISA, antes ou junto com a reescrita,
+--    recriar cada uma dessas funcoes no Neon com a assinatura mudada para
+--    receber `p_user_id` como parametro explicito (ou reimplementar a logica
+--    em TypeScript). Migrar o call site sem isso da "function ... does not
+--    exist" em runtime.
 --
 
 """
@@ -249,7 +289,7 @@ def main(src_path, dst_path):
         r"^CREATE SCHEMA public;$", "CREATE SCHEMA IF NOT EXISTS public;", text2, count=1, flags=re.M
     )
 
-    # --- Pass 4: re-add the pg_trgm extension pg_dump --schema=public dropped ---
+    # --- Pass 4: re-add the extensions pg_dump --schema=public dropped ---
     pg_trgm_block = (
         "\n\n--\n"
         "-- Name: pg_trgm; Type: EXTENSION; Schema: public; Owner: -\n"
@@ -263,13 +303,38 @@ def main(src_path, dst_path):
         "--\n\n"
         "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;\n"
     )
+    pgcrypto_block = (
+        "\n\n--\n"
+        "-- Name: pgcrypto; Type: EXTENSION; Schema: public; Owner: -\n"
+        "--\n"
+        "-- NOTA: mesmo motivo do pg_trgm acima (pg_dump --schema=public nao\n"
+        "-- inclui CREATE EXTENSION) -- reinstalada aqui porque\n"
+        "-- public.encrypt_secret e public.decrypt_secret chamam\n"
+        "-- pgp_sym_encrypt/pgp_sym_decrypt, que sao do pgcrypto. Diferente do\n"
+        "-- pg_trgm, a falta desta extensao NAO quebra a aplicacao deste DDL\n"
+        "-- (check_function_bodies = false no topo do arquivo): quebraria so em\n"
+        "-- RUNTIME, ao chamar essas duas funcoes. Instalada no schema public\n"
+        "-- porque as funcoes declaram search_path 'public','private',\n"
+        "-- 'extensions' e no Neon so `public` existe. ATENCAO: isso sozinho\n"
+        "-- NAO fecha o gap de criptografia -- ver NOTA no topo do arquivo\n"
+        "-- (item 1), o schema `private` e a chave continuam faltando.\n"
+        "--\n\n"
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;\n"
+    )
     anchor = "COMMENT ON SCHEMA public IS 'standard public schema';\n"
     idx = text2.find(anchor)
     if idx == -1:
-        print("ERRO: âncora do schema public não encontrada -- não consegui inserir pg_trgm.", file=sys.stderr)
+        print("ERRO: âncora do schema public não encontrada -- não consegui inserir as extensões.", file=sys.stderr)
         sys.exit(1)
     insert_at = idx + len(anchor)
-    text2 = text2[:insert_at] + pg_trgm_block + NOTA_BLOCK.rstrip("\n") + "\n" + text2[insert_at:]
+    text2 = (
+        text2[:insert_at]
+        + pg_trgm_block
+        + pgcrypto_block
+        + NOTA_BLOCK.rstrip("\n")
+        + "\n"
+        + text2[insert_at:]
+    )
 
     # --- Pass 5: per-function back-reference comments (Category 1/3 gaps) ---
     text2 = _annotate_function_headers(text2)
