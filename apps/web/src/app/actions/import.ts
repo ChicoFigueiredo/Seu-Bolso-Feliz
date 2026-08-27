@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, eq } from "drizzle-orm";
+import { requireTransactionForeignKeysOwned } from "./_shared/transaction-fk-ownership";
 
 type ImportJob = typeof schema.import_jobs.$inferSelect;
 type ImportJobInsert = Omit<typeof schema.import_jobs.$inferInsert, "user_id" | "id">;
@@ -60,23 +61,19 @@ export async function createTransactionFromImport(input: TransactionInsert): Pro
   const userId = await requireUserId();
   const db = getDb();
 
-  // Valida posse do financial_product_id recebido do cliente antes de
-  // gravar — sem isso, o usuário A poderia criar uma transação (com o
-  // próprio user_id) apontando para um financial_product_id de outro
-  // usuário, poluindo saldos/extratos que ele não deveria conseguir tocar.
-  // O RLS antigo em `financial_products` cobria esse gap de graça; sem RLS,
-  // a checagem precisa ser explícita aqui (mesmo padrão de
-  // document-transactions.ts, commit b5995eb).
-  const [product] = await db
-    .select({ id: schema.financial_products.id })
-    .from(schema.financial_products)
-    .where(
-      and(
-        eq(schema.financial_products.id, input.financial_product_id),
-        eq(schema.financial_products.user_id, userId),
-      ),
-    );
-  if (!product) throw new Error("Produto financeiro não encontrado");
+  // Valida posse de TODAS as FKs recebidas do cliente antes de gravar — não
+  // só financial_product_id. `input` é o mesmo TransactionInsert completo de
+  // transactions.ts::createTransaction (mesma tabela), então está sujeito ao
+  // mesmo achado CRITICAL da varredura de segurança: sem checar posse de
+  // financial_period_id/statement_cycle_id/category_id/supplier_id/
+  // liability_installment_id/recurring_instance_id/source_document_id, o
+  // usuário A poderia gravar uma transação (com o próprio user_id) apontando
+  // para qualquer uma dessas FKs pertencentes a outro usuário —
+  // source_document_id é o caso mais grave, porque contorna inteiramente a
+  // validação de posse de linkTransactionToDocument
+  // (document-transactions.ts). Helper compartilhado com transactions.ts via
+  // ./_shared/transaction-fk-ownership — mesma validação, uma só definição.
+  await requireTransactionForeignKeysOwned(input, userId);
 
   const [row] = await db
     .insert(schema.transactions)
