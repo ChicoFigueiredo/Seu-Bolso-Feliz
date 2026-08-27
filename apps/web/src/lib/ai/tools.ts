@@ -281,8 +281,23 @@ export const listRecentTransactions = tool({
         supplier_name: schema.suppliers.name,
       })
       .from(schema.transactions)
-      .leftJoin(schema.categories, eq(schema.transactions.category_id, schema.categories.id))
-      .leftJoin(schema.suppliers, eq(schema.transactions.supplier_id, schema.suppliers.id))
+      .leftJoin(
+        schema.categories,
+        and(
+          eq(schema.transactions.category_id, schema.categories.id),
+          // Defesa em profundidade: mesmo que `category_id` aponte pra uma
+          // categoria de outro usuário (dado legado/bug de escrita anterior),
+          // nunca devolver o nome dela — mesmo padrão de cards.ts.
+          eq(schema.categories.user_id, user.id),
+        ),
+      )
+      .leftJoin(
+        schema.suppliers,
+        and(
+          eq(schema.transactions.supplier_id, schema.suppliers.id),
+          eq(schema.suppliers.user_id, user.id),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(schema.transactions.event_date))
       .limit(limit);
@@ -804,7 +819,14 @@ export const suggestReconciliation = tool({
         supplier_name: schema.suppliers.name,
       })
       .from(schema.transactions)
-      .leftJoin(schema.suppliers, eq(schema.transactions.supplier_id, schema.suppliers.id))
+      .leftJoin(
+        schema.suppliers,
+        and(
+          eq(schema.transactions.supplier_id, schema.suppliers.id),
+          // Defesa em profundidade: mesmo padrão de cards.ts/listRecentTransactions.
+          eq(schema.suppliers.user_id, user.id),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(schema.transactions.event_date))
       .limit(5);
