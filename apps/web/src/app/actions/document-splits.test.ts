@@ -35,13 +35,41 @@ async function seedSourceDocument(userId: string, amount?: number) {
   return row;
 }
 
+async function seedCategory(userId: string) {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.categories)
+    .values({ user_id: userId, name: `Categoria teste ${crypto.randomUUID()}` })
+    .returning();
+  if (!row) throw new Error("Falha ao semear category de teste");
+  return row;
+}
+
+async function seedTag(userId: string) {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.tags)
+    .values({ user_id: userId, name: `Tag teste ${crypto.randomUUID()}` })
+    .returning();
+  if (!row) throw new Error("Falha ao semear tag de teste");
+  return row;
+}
+
 describe.skipIf(!process.env.TEST_DATABASE_URL)("document-splits actions", () => {
   const sourceDocumentIds: string[] = [];
+  const categoryIds: string[] = [];
+  const tagIds: string[] = [];
 
   afterEach(async () => {
     const db = getDb();
     for (const id of sourceDocumentIds.splice(0)) {
       await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
+    }
+    for (const id of categoryIds.splice(0)) {
+      await db.delete(schema.categories).where(eq(schema.categories.id, id));
+    }
+    for (const id of tagIds.splice(0)) {
+      await db.delete(schema.tags).where(eq(schema.tags.id, id));
     }
   });
 
@@ -102,6 +130,40 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-splits actions", () =>
     await expect(createDocumentSplit({ source_document_id: docB.id, amount: 10 })).rejects.toThrow(
       /Documento não encontrado/,
     );
+  });
+
+  // IDOR fechado (achado da revisão da Task 16, mesma classe do
+  // source_document_id acima): createDocumentSplit recebia category_id do
+  // cliente e gravava sem validar posse contra categories.user_id.
+  it("lança erro ao criar rateio apontando para categoria de outro usuário", async () => {
+    currentUserId = USER_B;
+    const categoryB = await seedCategory(USER_B);
+    categoryIds.push(categoryB.id);
+
+    currentUserId = USER_A;
+    const doc = await seedSourceDocument(USER_A, 100);
+    sourceDocumentIds.push(doc.id);
+
+    await expect(
+      createDocumentSplit({ source_document_id: doc.id, amount: 10, category_id: categoryB.id }),
+    ).rejects.toThrow(/Categoria não encontrada/);
+  });
+
+  // Mesma classe de IDOR, agora em `tags` (array de uuids do cliente): sem
+  // validar posse contra tags.user_id, o usuário A conseguia marcar o
+  // próprio rateio com a tag de outro usuário B.
+  it("lança erro ao criar rateio apontando para tag de outro usuário", async () => {
+    currentUserId = USER_B;
+    const tagB = await seedTag(USER_B);
+    tagIds.push(tagB.id);
+
+    currentUserId = USER_A;
+    const doc = await seedSourceDocument(USER_A, 100);
+    sourceDocumentIds.push(doc.id);
+
+    await expect(
+      createDocumentSplit({ source_document_id: doc.id, amount: 10, tags: [tagB.id] }),
+    ).rejects.toThrow(/Uma ou mais tags não pertencem ao usuário/);
   });
 
   it("não exclui (nem lança erro) rateio de outro usuário — comportamento preservado", async () => {

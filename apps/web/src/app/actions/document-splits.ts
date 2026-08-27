@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 export type DocumentSplit = typeof schema.document_splits.$inferSelect;
 
@@ -23,6 +23,42 @@ async function requireUserId(): Promise<string> {
   return user.id;
 }
 
+// IDOR fechado (achado da revisão da Task 16, mesma classe do fix de
+// source_document_id abaixo e do padrão em transactions.ts/recurring.ts):
+// category_id vem do cliente e era gravado sem checar posse contra
+// categories.user_id — usuário A conseguia apontar o próprio rateio pra
+// categoria de outro usuário B.
+async function requireOwnedCategory(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  categoryId: string,
+): Promise<void> {
+  const [category] = await db
+    .select({ id: schema.categories.id })
+    .from(schema.categories)
+    .where(and(eq(schema.categories.id, categoryId), eq(schema.categories.user_id, userId)));
+  if (!category) throw new Error("Categoria não encontrada");
+}
+
+// Mesma classe de IDOR: `tags` é um array de uuids vindo do cliente e era
+// gravado sem checar posse contra tags.user_id (mesmo padrão de
+// requireTagsOwned em transactions.ts / assertOwnsTags em recurring.ts).
+async function requireOwnedTags(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  tagIds: string[],
+): Promise<void> {
+  const uniqueIds = [...new Set(tagIds)];
+  if (uniqueIds.length === 0) return;
+  const owned = await db
+    .select({ id: schema.tags.id })
+    .from(schema.tags)
+    .where(and(inArray(schema.tags.id, uniqueIds), eq(schema.tags.user_id, userId)));
+  if (owned.length !== uniqueIds.length) {
+    throw new Error("Uma ou mais tags não pertencem ao usuário");
+  }
+}
+
 export async function listDocumentSplits(sourceDocumentId: string): Promise<DocumentSplit[]> {
   const userId = await requireUserId();
   const db = getDb();
@@ -41,6 +77,9 @@ export async function listDocumentSplits(sourceDocumentId: string): Promise<Docu
 export async function createDocumentSplit(input: DocumentSplitInsert): Promise<DocumentSplit> {
   const userId = await requireUserId();
   const db = getDb();
+
+  if (input.category_id) await requireOwnedCategory(db, userId, input.category_id);
+  if (input.tags && input.tags.length > 0) await requireOwnedTags(db, userId, input.tags);
 
   // Validação de soma server-side (além do trigger DB fn_validate_splits_sum).
   const existing = await db
