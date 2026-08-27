@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 
 type RecurringTemplate = typeof schema.recurring_templates.$inferSelect;
 type RecurringTemplateInsert = Omit<
@@ -26,6 +26,73 @@ async function requireUserId(): Promise<string> {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Não autenticado");
   return user.id;
+}
+
+// Fecha IDOR (achado da varredura retroativa, mesma classe do fix em
+// document-transactions.ts, commit b5995eb): create/update aceitavam
+// financial_product_id/category_id/supplier_id vindos do cliente e
+// gravavam sem checar que pertencem ao usuário chamador. Um usuário A
+// conseguia criar/atualizar um template apontando para um produto
+// financeiro, categoria ou fornecedor de outro usuário B (e a partir daí
+// referenciar/vazar dados de B via joins em outras telas). Valida posse de
+// cada FK presente antes do insert/update — mesmo padrão SELECT id WHERE
+// id = fk AND user_id = userId, lançando erro se vazio.
+async function assertOwnsRecurringTemplateForeignKeys(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  input: Pick<RecurringTemplateInsert, "financial_product_id" | "category_id" | "supplier_id">,
+): Promise<void> {
+  if (input.financial_product_id) {
+    const [product] = await db
+      .select({ id: schema.financial_products.id })
+      .from(schema.financial_products)
+      .where(
+        and(
+          eq(schema.financial_products.id, input.financial_product_id),
+          eq(schema.financial_products.user_id, userId),
+        ),
+      );
+    if (!product) throw new Error("Produto financeiro não encontrado");
+  }
+
+  if (input.category_id) {
+    const [category] = await db
+      .select({ id: schema.categories.id })
+      .from(schema.categories)
+      .where(
+        and(eq(schema.categories.id, input.category_id), eq(schema.categories.user_id, userId)),
+      );
+    if (!category) throw new Error("Categoria não encontrada");
+  }
+
+  if (input.supplier_id) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, input.supplier_id), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) throw new Error("Fornecedor não encontrado");
+  }
+}
+
+// Mesmo anti-padrão, achado secundário da mesma varredura: tag_id (dentro de
+// tagIds) nunca era validado contra tags.user_id antes de gravar em
+// recurring_template_tags. A ordem de escrita (template já
+// validado/committado antes de tocar nas tags) já impede vazamento de leitura
+// hoje, mas sem esta checagem um usuário A conseguiria associar ao próprio
+// template uma tag_id de outro usuário B.
+async function assertOwnsTags(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  tagIds: string[],
+): Promise<void> {
+  const uniqueIds = [...new Set(tagIds)];
+  const owned = await db
+    .select({ id: schema.tags.id })
+    .from(schema.tags)
+    .where(and(inArray(schema.tags.id, uniqueIds), eq(schema.tags.user_id, userId)));
+  if (owned.length !== uniqueIds.length) {
+    throw new Error("Uma ou mais tags não pertencem ao usuário");
+  }
 }
 
 export async function getRecurringTemplates(activeOnly = true): Promise<RecurringTemplate[]> {
@@ -58,6 +125,9 @@ export async function createRecurringTemplate(
 ): Promise<RecurringTemplate> {
   const userId = await requireUserId();
   const db = getDb();
+  await assertOwnsRecurringTemplateForeignKeys(db, userId, input);
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
+
   const [row] = await db
     .insert(schema.recurring_templates)
     .values({ ...input, user_id: userId })
@@ -79,6 +149,9 @@ export async function updateRecurringTemplate(
 ): Promise<RecurringTemplate> {
   const userId = await requireUserId();
   const db = getDb();
+  await assertOwnsRecurringTemplateForeignKeys(db, userId, input);
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
+
   const [row] = await db
     .update(schema.recurring_templates)
     .set(input)
