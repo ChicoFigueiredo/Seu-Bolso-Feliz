@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 type Liability = typeof schema.liabilities.$inferSelect;
 type LiabilityInsert = Omit<typeof schema.liabilities.$inferInsert, "user_id" | "id">;
@@ -18,6 +18,25 @@ async function requireUserId(): Promise<string> {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Não autenticado");
   return user.id;
+}
+
+// Mesmo padrão de recurring.ts::assertOwnsTags / transactions.ts::requireTagsOwned
+// / document-splits.ts::requireOwnedTags — sem esta checagem, o usuário A
+// conseguiria associar à própria dívida uma tag_id que pertence a outro
+// usuário B (o RLS antigo cobria isso de graça em `liability_tags`).
+async function assertOwnsTags(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  tagIds: string[],
+): Promise<void> {
+  const uniqueIds = [...new Set(tagIds)];
+  const owned = await db
+    .select({ id: schema.tags.id })
+    .from(schema.tags)
+    .where(and(inArray(schema.tags.id, uniqueIds), eq(schema.tags.user_id, userId)));
+  if (owned.length !== uniqueIds.length) {
+    throw new Error("Uma ou mais tags não pertencem ao usuário");
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -83,6 +102,8 @@ export async function createLiability(
     if (!supplier) throw new Error("Fornecedor não encontrado");
   }
 
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
+
   const [row] = await db
     .insert(schema.liabilities)
     .values({ ...input, user_id: userId })
@@ -130,6 +151,8 @@ export async function updateLiability(
       .where(and(eq(schema.suppliers.id, input.supplier_id), eq(schema.suppliers.user_id, userId)));
     if (!supplier) throw new Error("Fornecedor não encontrado");
   }
+
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
 
   const [row] = await db
     .update(schema.liabilities)
@@ -220,6 +243,24 @@ export async function updateLiabilityInstallment(
 ): Promise<LiabilityInstallment> {
   const userId = await requireUserId();
   const db = getDb();
+
+  // Achado CRITICAL da revisão final de branch: createLiabilityInstallment já
+  // validava liability_id (fix da varredura retroativa), mas este update não
+  // validava o mesmo campo — um usuário A conseguia repontar a própria
+  // parcela para a dívida de outro usuário B via
+  // updateLiabilityInstallment({ liability_id: <de B> }). Mesma checagem,
+  // só que aqui é opcional (Partial) — só valida quando o caller está de
+  // fato trocando o valor.
+  if (input.liability_id) {
+    const [liability] = await db
+      .select({ id: schema.liabilities.id })
+      .from(schema.liabilities)
+      .where(
+        and(eq(schema.liabilities.id, input.liability_id), eq(schema.liabilities.user_id, userId)),
+      );
+    if (!liability) throw new Error("Dívida não encontrada");
+  }
+
   const [row] = await db
     .update(schema.liability_installments)
     .set(input)

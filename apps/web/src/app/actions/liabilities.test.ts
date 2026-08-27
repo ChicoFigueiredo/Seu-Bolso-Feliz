@@ -1,5 +1,7 @@
 import "./test-db-setup";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
 import { cleanupInstitution, seedFinancialProduct, seedInstitution } from "./__tests__/fixtures";
 import {
   createLiability,
@@ -8,6 +10,7 @@ import {
   getLiability,
   getLiabilities,
   updateLiability,
+  updateLiabilityInstallment,
 } from "./liabilities";
 
 let currentUserId = "";
@@ -26,12 +29,27 @@ async function seedProductFor(userId: string) {
   return { institutionId: institution.id, productId: product.id };
 }
 
+async function seedTag(userId: string) {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.tags)
+    .values({ user_id: userId, name: `Tag de teste ${crypto.randomUUID()}` })
+    .returning();
+  if (!row) throw new Error("Falha ao semear tag de teste");
+  return row;
+}
+
 describe.skipIf(!process.env.TEST_DATABASE_URL)("liabilities actions", () => {
   const institutionIds: string[] = [];
+  const tagIds: string[] = [];
 
   afterEach(async () => {
     for (const id of institutionIds.splice(0)) {
       await cleanupInstitution(id); // CASCADE remove financial_products/liabilities/liability_installments
+    }
+    const db = getDb();
+    for (const id of tagIds.splice(0)) {
+      await db.delete(schema.tags).where(eq(schema.tags.id, id));
     }
   });
 
@@ -174,5 +192,93 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("liabilities actions", () => {
         total_amount: 100,
       }),
     ).rejects.toThrow();
+  });
+
+  // IDOR fechado (achado CRITICAL da revisão final de branch: assimetria
+  // create/update — createLiabilityInstallment já validava liability_id,
+  // updateLiabilityInstallment não): usuário A conseguia repontar a própria
+  // parcela para a dívida de outro usuário B.
+  it("lança erro ao atualizar parcela apontando liability_id de outro usuário", async () => {
+    currentUserId = USER_A;
+    const seedA = await seedProductFor(USER_A);
+    institutionIds.push(seedA.institutionId);
+    const liabilityA = await createLiability({
+      financial_product_id: seedA.productId,
+      name: "Dívida A parcelada",
+      type: "personal_loan",
+      original_amount: 1200,
+      outstanding_balance: 1200,
+      status: "active",
+    });
+    const installmentA = await createLiabilityInstallment({
+      liability_id: liabilityA.id,
+      installment_number: 1,
+      due_date: "2026-09-01",
+      total_amount: 100,
+    });
+
+    currentUserId = USER_B;
+    const seedB = await seedProductFor(USER_B);
+    institutionIds.push(seedB.institutionId);
+    const liabilityB = await createLiability({
+      financial_product_id: seedB.productId,
+      name: "Dívida B",
+      type: "personal_loan",
+      original_amount: 800,
+      outstanding_balance: 800,
+      status: "active",
+    });
+
+    currentUserId = USER_A;
+    await expect(
+      updateLiabilityInstallment(installmentA.id, { liability_id: liabilityB.id }),
+    ).rejects.toThrow();
+  });
+
+  // IDOR fechado (achado Important da revisão final de branch): create/update
+  // não validavam tagIds contra tags.user_id antes de gravar em
+  // liability_tags — mesmo anti-padrão já corrigido em recurring.ts,
+  // transactions.ts e document-splits.ts.
+  it("lança erro ao criar dívida com tagIds de outro usuário", async () => {
+    currentUserId = USER_B;
+    const tagB = await seedTag(USER_B);
+    tagIds.push(tagB.id);
+
+    currentUserId = USER_A;
+    const seedA = await seedProductFor(USER_A);
+    institutionIds.push(seedA.institutionId);
+    await expect(
+      createLiability(
+        {
+          financial_product_id: seedA.productId,
+          name: "Dívida com tag alheia",
+          type: "personal_loan",
+          original_amount: 300,
+          outstanding_balance: 300,
+          status: "active",
+        },
+        [tagB.id],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("lança erro ao atualizar dívida com tagIds de outro usuário", async () => {
+    currentUserId = USER_B;
+    const tagB = await seedTag(USER_B);
+    tagIds.push(tagB.id);
+
+    currentUserId = USER_A;
+    const seedA = await seedProductFor(USER_A);
+    institutionIds.push(seedA.institutionId);
+    const liabilityA = await createLiability({
+      financial_product_id: seedA.productId,
+      name: "Dívida A sem tag",
+      type: "personal_loan",
+      original_amount: 400,
+      outstanding_balance: 400,
+      status: "active",
+    });
+
+    await expect(updateLiability(liabilityA.id, {}, [tagB.id])).rejects.toThrow();
   });
 });
