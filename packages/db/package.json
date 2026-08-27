@@ -11,9 +11,11 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "@sbf/shared-types": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.31.10"
   }
 }
