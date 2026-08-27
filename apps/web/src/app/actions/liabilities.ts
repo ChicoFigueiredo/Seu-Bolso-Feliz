@@ -60,6 +60,29 @@ export async function createLiability(
   const userId = await requireUserId();
   const db = getDb();
 
+  // Valida posse das FKs antes de gravar — sem isso, o usuário A poderia
+  // apontar a própria dívida para um financial_product ou supplier que
+  // pertence a outro usuário. O RLS antigo cobria esse gap de graça; sem
+  // RLS, a checagem precisa ser explícita aqui.
+  const [product] = await db
+    .select({ id: schema.financial_products.id })
+    .from(schema.financial_products)
+    .where(
+      and(
+        eq(schema.financial_products.id, input.financial_product_id),
+        eq(schema.financial_products.user_id, userId),
+      ),
+    );
+  if (!product) throw new Error("Produto financeiro não encontrado");
+
+  if (input.supplier_id) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, input.supplier_id), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) throw new Error("Fornecedor não encontrado");
+  }
+
   const [row] = await db
     .insert(schema.liabilities)
     .values({ ...input, user_id: userId })
@@ -83,6 +106,30 @@ export async function updateLiability(
 ): Promise<Liability> {
   const userId = await requireUserId();
   const db = getDb();
+
+  // Mesma validação de posse de createLiability, só que aqui as FKs são
+  // opcionais (Partial) — só checa quando o caller está de fato trocando o
+  // valor.
+  if (input.financial_product_id) {
+    const [product] = await db
+      .select({ id: schema.financial_products.id })
+      .from(schema.financial_products)
+      .where(
+        and(
+          eq(schema.financial_products.id, input.financial_product_id),
+          eq(schema.financial_products.user_id, userId),
+        ),
+      );
+    if (!product) throw new Error("Produto financeiro não encontrado");
+  }
+
+  if (input.supplier_id) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, input.supplier_id), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) throw new Error("Fornecedor não encontrado");
+  }
 
   const [row] = await db
     .update(schema.liabilities)
@@ -145,6 +192,20 @@ export async function createLiabilityInstallment(
 ): Promise<LiabilityInstallment> {
   const userId = await requireUserId();
   const db = getDb();
+
+  // Valida posse de liability_id antes de gravar — sem isso, o usuário B
+  // conseguia criar uma parcela apontando para a dívida de outro usuário
+  // (achado CRITICAL confirmado empiricamente contra Postgres real pela
+  // varredura de segurança). O RLS antigo cobria esse gap de graça; sem
+  // RLS, a checagem precisa ser explícita aqui.
+  const [liability] = await db
+    .select({ id: schema.liabilities.id })
+    .from(schema.liabilities)
+    .where(
+      and(eq(schema.liabilities.id, input.liability_id), eq(schema.liabilities.user_id, userId)),
+    );
+  if (!liability) throw new Error("Dívida não encontrada");
+
   const [row] = await db
     .insert(schema.liability_installments)
     .values({ ...input, user_id: userId })
