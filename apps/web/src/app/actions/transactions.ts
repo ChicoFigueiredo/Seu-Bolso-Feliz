@@ -1,10 +1,22 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Transaction, Insert, Update } from "@sbf/shared-types";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 
-type TransactionInsert = Omit<Insert<"transactions">, "user_id">;
-type TransactionUpdate = Update<"transactions">;
+type Transaction = typeof schema.transactions.$inferSelect;
+type TransactionInsert = Omit<typeof schema.transactions.$inferInsert, "user_id" | "id">;
+type TransactionUpdate = Partial<TransactionInsert>;
+type DeduplicatedExpense = typeof schema.v_expenses_deduplicated.$inferSelect;
+
+async function requireUserId(): Promise<string> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+  return user.id;
+}
 
 export async function getTransactions(filters?: {
   financialProductId?: string;
@@ -15,76 +27,58 @@ export async function getTransactions(filters?: {
   endDate?: string;
   limit?: number;
 }): Promise<Transaction[]> {
-  const supabase = await createClient();
-  let query = supabase.from("transactions").select("*").order("event_date", { ascending: false });
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (filters?.financialProductId) {
-    query = query.eq("financial_product_id", filters.financialProductId);
-  }
-  if (filters?.financialPeriodId) {
-    query = query.eq("financial_period_id", filters.financialPeriodId);
-  }
-  if (filters?.statementCycleId) {
-    query = query.eq("statement_cycle_id", filters.statementCycleId);
-  }
-  if (filters?.type) {
-    query = query.eq("type", filters.type);
-  }
-  if (filters?.startDate) {
-    query = query.gte("event_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("event_date", filters.endDate);
-  }
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
-  }
+  const conditions = [eq(schema.transactions.user_id, userId)];
+  if (filters?.financialProductId)
+    conditions.push(eq(schema.transactions.financial_product_id, filters.financialProductId));
+  if (filters?.financialPeriodId)
+    conditions.push(eq(schema.transactions.financial_period_id, filters.financialPeriodId));
+  if (filters?.statementCycleId)
+    conditions.push(eq(schema.transactions.statement_cycle_id, filters.statementCycleId));
+  if (filters?.type) conditions.push(eq(schema.transactions.type, filters.type));
+  if (filters?.startDate) conditions.push(gte(schema.transactions.event_date, filters.startDate));
+  if (filters?.endDate) conditions.push(lte(schema.transactions.event_date, filters.endDate));
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data;
+  const base = db
+    .select()
+    .from(schema.transactions)
+    .where(and(...conditions))
+    .orderBy(desc(schema.transactions.event_date));
+  return filters?.limit ? base.limit(filters.limit) : base;
 }
 
 export async function getTransaction(id: string): Promise<Transaction | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("transactions").select("*").eq("id", id).single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null;
-    throw new Error(error.message);
-  }
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.transactions)
+    .where(and(eq(schema.transactions.id, id), eq(schema.transactions.user_id, userId)));
+  return row ?? null;
 }
 
 export async function createTransaction(
   input: TransactionInsert,
   tagIds?: string[],
 ): Promise<Transaction> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert({ ...input, user_id: user.id })
-    .select()
-    .single();
+  const [row] = await db
+    .insert(schema.transactions)
+    .values({ ...input, user_id: userId })
+    .returning();
+  if (!row) throw new Error("Falha ao criar transação");
 
-  if (error) throw new Error(error.message);
-
-  // Associar tags se fornecidas
   if (tagIds && tagIds.length > 0) {
-    const tagInserts = tagIds.map((tag_id) => ({
-      transaction_id: data.id,
-      tag_id,
-    }));
-    const { error: tagError } = await supabase.from("transaction_tags").insert(tagInserts);
-    if (tagError) throw new Error(tagError.message);
+    await db
+      .insert(schema.transaction_tags)
+      .values(tagIds.map((tag_id) => ({ transaction_id: row.id, tag_id })));
   }
 
-  return data;
+  return row;
 }
 
 export async function updateTransaction(
@@ -92,40 +86,39 @@ export async function updateTransaction(
   input: TransactionUpdate,
   tagIds?: string[],
 ): Promise<Transaction> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("transactions")
-    .update(input)
-    .eq("id", id)
-    .select()
-    .single();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
+  const [row] = await db
+    .update(schema.transactions)
+    .set(input)
+    .where(and(eq(schema.transactions.id, id), eq(schema.transactions.user_id, userId)))
+    .returning();
 
-  // Atualizar tags se fornecidas
+  if (!row) throw new Error("Transação não encontrada");
+
   if (tagIds !== undefined) {
-    // Remover tags existentes
-    await supabase.from("transaction_tags").delete().eq("transaction_id", id);
-
-    // Inserir novas
+    await db.delete(schema.transaction_tags).where(eq(schema.transaction_tags.transaction_id, id));
     if (tagIds.length > 0) {
-      const tagInserts = tagIds.map((tag_id) => ({
-        transaction_id: id,
-        tag_id,
-      }));
-      const { error: tagError } = await supabase.from("transaction_tags").insert(tagInserts);
-      if (tagError) throw new Error(tagError.message);
+      await db
+        .insert(schema.transaction_tags)
+        .values(tagIds.map((tag_id) => ({ transaction_id: id, tag_id })));
     }
   }
 
-  return data;
+  return row;
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("transactions").delete().eq("id", id);
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
+  const result = await db
+    .delete(schema.transactions)
+    .where(and(eq(schema.transactions.id, id), eq(schema.transactions.user_id, userId)))
+    .returning({ id: schema.transactions.id });
+
+  if (result.length === 0) throw new Error("Transação não encontrada");
 }
 
 // ── Despesas deduplicadas (ADR-001) ──
@@ -135,27 +128,27 @@ export async function getDeduplicatedExpenses(filters?: {
   statementCycleId?: string;
   supplierId?: string;
   categoryId?: string;
-}) {
-  const supabase = await createClient();
-  let query = supabase
-    .from("v_expenses_deduplicated")
-    .select("*")
-    .order("event_date", { ascending: false });
+}): Promise<DeduplicatedExpense[]> {
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (filters?.financialPeriodId) {
-    query = query.eq("financial_period_id", filters.financialPeriodId);
-  }
-  if (filters?.statementCycleId) {
-    query = query.eq("statement_cycle_id", filters.statementCycleId);
-  }
-  if (filters?.supplierId) {
-    query = query.eq("supplier_id", filters.supplierId);
-  }
-  if (filters?.categoryId) {
-    query = query.eq("category_id", filters.categoryId);
-  }
+  const conditions = [eq(schema.v_expenses_deduplicated.user_id, userId)];
+  if (filters?.financialPeriodId)
+    conditions.push(
+      eq(schema.v_expenses_deduplicated.financial_period_id, filters.financialPeriodId),
+    );
+  if (filters?.statementCycleId)
+    conditions.push(
+      eq(schema.v_expenses_deduplicated.statement_cycle_id, filters.statementCycleId),
+    );
+  if (filters?.supplierId)
+    conditions.push(eq(schema.v_expenses_deduplicated.supplier_id, filters.supplierId));
+  if (filters?.categoryId)
+    conditions.push(eq(schema.v_expenses_deduplicated.category_id, filters.categoryId));
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data;
+  return db
+    .select()
+    .from(schema.v_expenses_deduplicated)
+    .where(and(...conditions))
+    .orderBy(desc(schema.v_expenses_deduplicated.event_date));
 }
