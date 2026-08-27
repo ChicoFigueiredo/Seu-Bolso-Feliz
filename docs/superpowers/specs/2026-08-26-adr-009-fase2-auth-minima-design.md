@@ -186,6 +186,14 @@ pelo `apps/web/src/app/dashboard/layout.tsx` (Server Component, já chama
 
 ## Substituição do `trigger-ingestion`
 
+**Movida para a Fase 4a-bis (ruling da Veronica-Bolso, 2026-08-27):** o desenho
+abaixo não depende de nenhuma mudança de auth — `requireUser()` continua
+chamando `supabase.auth.getUser()` normalmente até a Fase 2 trocar só a
+_origem_ de `user.id`. Como o upload-via-chat já está quebrado em produção
+hoje (achado desta seção), implementar esta correção na Fase 4a-bis conserta o
+bug sem esperar a Fase 2 — a seção permanece aqui como registro do desenho
+original, mas a implementação e o plano vivem na spec/plano da Fase 4a-bis.
+
 **Achado durante o design** (não estava no levantamento de impacto original da
 ADR-009): a Supabase Edge Function `trigger-ingestion` está quebrada contra o schema
 real hoje — insere `file_name`/`file_path`/`source_type` em `source_documents` (as
