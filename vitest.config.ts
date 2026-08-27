@@ -56,6 +56,14 @@ export default defineConfig({
             "apps/web/src/lib/ai/**/*.test.ts",
           ],
           testTimeout: 30_000,
+          // Todos os arquivos deste projeto compartilham o mesmo Postgres
+          // real e os mesmos UUIDs literais de usuário de teste
+          // (USER_A/USER_B). Rodar arquivos em paralelo deixa consultas sem
+          // filtro adicional (ex.: "produto financeiro padrão do usuário",
+          // sem ORDER BY, por design) verem linhas semeadas por OUTRO
+          // arquivo de teste rodando ao mesmo tempo — flakiness real, não
+          // hipotética (achado ao rodar a suíte inteira acumulada).
+          fileParallelism: false,
         },
       },
       {
