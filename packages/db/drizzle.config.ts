@@ -12,6 +12,9 @@ export default defineConfig({
   // e reaplique as edições manuais listadas no cabeçalho de src/schema.ts.
   // packages/db/drizzle/ é gitignorado (artefato descartável).
   out: "./drizzle",
+  introspect: {
+    casing: "preserve",
+  },
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },

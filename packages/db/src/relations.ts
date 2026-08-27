@@ -1,574 +1,580 @@
 import { relations } from "drizzle-orm/relations";
 import {
   institutions,
-  documentPatterns,
+  document_patterns,
   suppliers,
-  patternFeedback,
-  sourceDocuments,
-  financialProducts,
+  pattern_feedback,
+  source_documents,
+  financial_products,
   cards,
   categories,
-  documentsLegacy,
-  consumptionMetrics,
-  supplierContracts,
+  documents_legacy,
+  consumption_metrics,
+  supplier_contracts,
   transactions,
-  documentSplits,
-  draftBatches,
-  draftRecords,
-  extractionResults,
-  financialObligations,
-  recurringTemplates,
-  aiChatSessions,
-  aiChatMessages,
-  documentFingerprints,
-  documentTransactions,
-  ingestionRuns,
-  externalAccountMappings,
-  providerConnections,
-  financialObligationIdentityKeys,
-  ingestionJobs,
-  ingestionLogs,
-  parsedDocumentVersions,
+  document_splits,
+  draft_batches,
+  draft_records,
+  extraction_results,
+  financial_obligations,
+  recurring_templates,
+  ai_chat_sessions,
+  ai_chat_messages,
+  document_fingerprints,
+  document_transactions,
+  ingestion_runs,
+  external_account_mappings,
+  provider_connections,
+  financial_obligation_identity_keys,
+  ingestion_jobs,
+  ingestion_logs,
+  parsed_document_versions,
   liabilities,
-  financialObligationEvidences,
-  supplierAliases,
-  statementCycles,
-  statementItems,
-  liabilityInstallments,
-  financialPeriods,
-  recurringInstances,
-  supplierTags,
+  financial_obligation_evidences,
+  supplier_aliases,
+  statement_cycles,
+  statement_items,
+  liability_installments,
+  financial_periods,
+  recurring_instances,
+  supplier_tags,
   tags,
   transfers,
-  liabilityTags,
-  recurringTemplateTags,
-  transactionTags,
+  liability_tags,
+  recurring_template_tags,
+  transaction_tags,
 } from "./schema";
 
-export const documentPatternsRelations = relations(documentPatterns, ({ one, many }) => ({
+export const document_patternsRelations = relations(document_patterns, ({ one, many }) => ({
   institution: one(institutions, {
-    fields: [documentPatterns.institutionId],
+    fields: [document_patterns.institution_id],
     references: [institutions.id],
   }),
   supplier: one(suppliers, {
-    fields: [documentPatterns.supplierId],
+    fields: [document_patterns.supplier_id],
     references: [suppliers.id],
   }),
-  patternFeedbacks: many(patternFeedback),
+  pattern_feedbacks: many(pattern_feedback),
 }));
 
 export const institutionsRelations = relations(institutions, ({ many }) => ({
-  documentPatterns: many(documentPatterns),
-  financialProducts: many(financialProducts),
+  document_patterns: many(document_patterns),
+  financial_products: many(financial_products),
   suppliers: many(suppliers),
 }));
 
 export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
-  documentPatterns: many(documentPatterns),
-  consumptionMetrics: many(consumptionMetrics),
-  documentsLegacies: many(documentsLegacy),
-  extractionResults: many(extractionResults),
-  financialObligations: many(financialObligations),
+  document_patterns: many(document_patterns),
+  consumption_metrics: many(consumption_metrics),
+  documents_legacies: many(documents_legacy),
+  extraction_results: many(extraction_results),
+  financial_obligations: many(financial_obligations),
   liabilities: many(liabilities),
-  supplierAliases: many(supplierAliases),
-  sourceDocuments: many(sourceDocuments),
-  recurringTemplates: many(recurringTemplates),
-  statementItems: many(statementItems),
-  supplierContracts: many(supplierContracts),
+  supplier_aliases: many(supplier_aliases),
+  source_documents: many(source_documents),
+  recurring_templates: many(recurring_templates),
+  statement_items: many(statement_items),
+  supplier_contracts: many(supplier_contracts),
   institution: one(institutions, {
-    fields: [suppliers.institutionId],
+    fields: [suppliers.institution_id],
     references: [institutions.id],
   }),
   transactions: many(transactions),
-  supplierTags: many(supplierTags),
+  supplier_tags: many(supplier_tags),
 }));
 
-export const patternFeedbackRelations = relations(patternFeedback, ({ one }) => ({
-  documentPattern: one(documentPatterns, {
-    fields: [patternFeedback.patternId],
-    references: [documentPatterns.id],
+export const pattern_feedbackRelations = relations(pattern_feedback, ({ one }) => ({
+  document_pattern: one(document_patterns, {
+    fields: [pattern_feedback.pattern_id],
+    references: [document_patterns.id],
   }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [patternFeedback.sourceDocumentId],
-    references: [sourceDocuments.id],
+  source_document: one(source_documents, {
+    fields: [pattern_feedback.source_document_id],
+    references: [source_documents.id],
   }),
 }));
 
-export const sourceDocumentsRelations = relations(sourceDocuments, ({ one, many }) => ({
-  patternFeedbacks: many(patternFeedback),
-  documentSplits: many(documentSplits),
-  draftRecords: many(draftRecords),
-  documentFingerprints: many(documentFingerprints),
-  documentTransactions: many(documentTransactions),
-  draftBatches: many(draftBatches),
-  ingestionJobs: many(ingestionJobs),
-  financialObligationEvidences: many(financialObligationEvidences),
+export const source_documentsRelations = relations(source_documents, ({ one, many }) => ({
+  pattern_feedbacks: many(pattern_feedback),
+  document_splits: many(document_splits),
+  draft_records: many(draft_records),
+  document_fingerprints: many(document_fingerprints),
+  document_transactions: many(document_transactions),
+  draft_batches: many(draft_batches),
+  ingestion_jobs: many(ingestion_jobs),
+  financial_obligation_evidences: many(financial_obligation_evidences),
   supplier: one(suppliers, {
-    fields: [sourceDocuments.supplierId],
+    fields: [source_documents.supplier_id],
     references: [suppliers.id],
   }),
-  parsedDocumentVersions: many(parsedDocumentVersions),
+  parsed_document_versions: many(parsed_document_versions),
   transactions: many(transactions),
 }));
 
 export const cardsRelations = relations(cards, ({ one, many }) => ({
-  financialProduct: one(financialProducts, {
-    fields: [cards.financialProductId],
-    references: [financialProducts.id],
+  financial_product: one(financial_products, {
+    fields: [cards.financial_product_id],
+    references: [financial_products.id],
   }),
-  statementCycles: many(statementCycles),
+  statement_cycles: many(statement_cycles),
 }));
 
-export const financialProductsRelations = relations(financialProducts, ({ one, many }) => ({
+export const financial_productsRelations = relations(financial_products, ({ one, many }) => ({
   cards: many(cards),
-  externalAccountMappings: many(externalAccountMappings),
+  external_account_mappings: many(external_account_mappings),
   institution: one(institutions, {
-    fields: [financialProducts.institutionId],
+    fields: [financial_products.institution_id],
     references: [institutions.id],
   }),
-  financialObligations: many(financialObligations),
+  financial_obligations: many(financial_obligations),
   liabilities: many(liabilities),
-  recurringTemplates: many(recurringTemplates),
+  recurring_templates: many(recurring_templates),
   transactions: many(transactions),
-  transfers_sourceProductId: many(transfers, {
-    relationName: "transfers_sourceProductId_financialProducts_id",
+  transfers_source_product_id: many(transfers, {
+    relationName: "transfers_source_product_id_financial_products_id",
   }),
-  transfers_targetProductId: many(transfers, {
-    relationName: "transfers_targetProductId_financialProducts_id",
+  transfers_target_product_id: many(transfers, {
+    relationName: "transfers_target_product_id_financial_products_id",
   }),
 }));
 
 export const categoriesRelations = relations(categories, ({ one, many }) => ({
   category: one(categories, {
-    fields: [categories.parentId],
+    fields: [categories.parent_id],
     references: [categories.id],
-    relationName: "categories_parentId_categories_id",
+    relationName: "categories_parent_id_categories_id",
   }),
   categories: many(categories, {
-    relationName: "categories_parentId_categories_id",
+    relationName: "categories_parent_id_categories_id",
   }),
-  documentSplits: many(documentSplits),
-  recurringTemplates: many(recurringTemplates),
+  document_splits: many(document_splits),
+  recurring_templates: many(recurring_templates),
   transactions: many(transactions),
 }));
 
-export const consumptionMetricsRelations = relations(consumptionMetrics, ({ one }) => ({
-  documentsLegacy: one(documentsLegacy, {
-    fields: [consumptionMetrics.documentId],
-    references: [documentsLegacy.id],
+export const consumption_metricsRelations = relations(consumption_metrics, ({ one }) => ({
+  documents_legacy: one(documents_legacy, {
+    fields: [consumption_metrics.document_id],
+    references: [documents_legacy.id],
   }),
-  supplierContract: one(supplierContracts, {
-    fields: [consumptionMetrics.supplierContractId],
-    references: [supplierContracts.id],
+  supplier_contract: one(supplier_contracts, {
+    fields: [consumption_metrics.supplier_contract_id],
+    references: [supplier_contracts.id],
   }),
   supplier: one(suppliers, {
-    fields: [consumptionMetrics.supplierId],
+    fields: [consumption_metrics.supplier_id],
     references: [suppliers.id],
   }),
   transaction: one(transactions, {
-    fields: [consumptionMetrics.transactionId],
+    fields: [consumption_metrics.transaction_id],
     references: [transactions.id],
   }),
 }));
 
-export const documentsLegacyRelations = relations(documentsLegacy, ({ one, many }) => ({
-  consumptionMetrics: many(consumptionMetrics),
+export const documents_legacyRelations = relations(documents_legacy, ({ one, many }) => ({
+  consumption_metrics: many(consumption_metrics),
   supplier: one(suppliers, {
-    fields: [documentsLegacy.supplierId],
+    fields: [documents_legacy.supplier_id],
     references: [suppliers.id],
   }),
 }));
 
-export const supplierContractsRelations = relations(supplierContracts, ({ one, many }) => ({
-  consumptionMetrics: many(consumptionMetrics),
+export const supplier_contractsRelations = relations(supplier_contracts, ({ one, many }) => ({
+  consumption_metrics: many(consumption_metrics),
   supplier: one(suppliers, {
-    fields: [supplierContracts.supplierId],
+    fields: [supplier_contracts.supplier_id],
     references: [suppliers.id],
   }),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one, many }) => ({
-  consumptionMetrics: many(consumptionMetrics),
-  draftRecords: many(draftRecords),
-  documentTransactions: many(documentTransactions),
-  statementItems: many(statementItems),
+  consumption_metrics: many(consumption_metrics),
+  draft_records: many(draft_records),
+  document_transactions: many(document_transactions),
+  statement_items: many(statement_items),
   category: one(categories, {
-    fields: [transactions.categoryId],
+    fields: [transactions.category_id],
     references: [categories.id],
   }),
-  financialPeriod: one(financialPeriods, {
-    fields: [transactions.financialPeriodId],
-    references: [financialPeriods.id],
+  financial_period: one(financial_periods, {
+    fields: [transactions.financial_period_id],
+    references: [financial_periods.id],
   }),
-  financialProduct: one(financialProducts, {
-    fields: [transactions.financialProductId],
-    references: [financialProducts.id],
+  financial_product: one(financial_products, {
+    fields: [transactions.financial_product_id],
+    references: [financial_products.id],
   }),
-  liabilityInstallment: one(liabilityInstallments, {
-    fields: [transactions.liabilityInstallmentId],
-    references: [liabilityInstallments.id],
+  liability_installment: one(liability_installments, {
+    fields: [transactions.liability_installment_id],
+    references: [liability_installments.id],
   }),
-  recurringInstance: one(recurringInstances, {
-    fields: [transactions.recurringInstanceId],
-    references: [recurringInstances.id],
-    relationName: "transactions_recurringInstanceId_recurringInstances_id",
+  recurring_instance: one(recurring_instances, {
+    fields: [transactions.recurring_instance_id],
+    references: [recurring_instances.id],
+    relationName: "transactions_recurring_instance_id_recurring_instances_id",
   }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [transactions.sourceDocumentId],
-    references: [sourceDocuments.id],
+  source_document: one(source_documents, {
+    fields: [transactions.source_document_id],
+    references: [source_documents.id],
   }),
-  statementCycle: one(statementCycles, {
-    fields: [transactions.statementCycleId],
-    references: [statementCycles.id],
+  statement_cycle: one(statement_cycles, {
+    fields: [transactions.statement_cycle_id],
+    references: [statement_cycles.id],
   }),
   supplier: one(suppliers, {
-    fields: [transactions.supplierId],
+    fields: [transactions.supplier_id],
     references: [suppliers.id],
   }),
-  recurringInstances: many(recurringInstances, {
-    relationName: "recurringInstances_transactionId_transactions_id",
+  recurring_instances: many(recurring_instances, {
+    relationName: "recurring_instances_transaction_id_transactions_id",
   }),
-  transactionTags: many(transactionTags),
+  transaction_tags: many(transaction_tags),
 }));
 
-export const documentSplitsRelations = relations(documentSplits, ({ one }) => ({
+export const document_splitsRelations = relations(document_splits, ({ one }) => ({
   category: one(categories, {
-    fields: [documentSplits.categoryId],
+    fields: [document_splits.category_id],
     references: [categories.id],
   }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [documentSplits.sourceDocumentId],
-    references: [sourceDocuments.id],
+  source_document: one(source_documents, {
+    fields: [document_splits.source_document_id],
+    references: [source_documents.id],
   }),
 }));
 
-export const draftRecordsRelations = relations(draftRecords, ({ one }) => ({
-  draftBatch: one(draftBatches, {
-    fields: [draftRecords.batchId],
-    references: [draftBatches.id],
+export const draft_recordsRelations = relations(draft_records, ({ one }) => ({
+  draft_batch: one(draft_batches, {
+    fields: [draft_records.batch_id],
+    references: [draft_batches.id],
   }),
-  extractionResult: one(extractionResults, {
-    fields: [draftRecords.extractionResultId],
-    references: [extractionResults.id],
+  extraction_result: one(extraction_results, {
+    fields: [draft_records.extraction_result_id],
+    references: [extraction_results.id],
   }),
-  financialObligation: one(financialObligations, {
-    fields: [draftRecords.obligationId],
-    references: [financialObligations.id],
+  financial_obligation: one(financial_obligations, {
+    fields: [draft_records.obligation_id],
+    references: [financial_obligations.id],
   }),
-  recurringTemplate: one(recurringTemplates, {
-    fields: [draftRecords.reconciledTemplateId],
-    references: [recurringTemplates.id],
+  recurring_template: one(recurring_templates, {
+    fields: [draft_records.reconciled_template_id],
+    references: [recurring_templates.id],
   }),
   transaction: one(transactions, {
-    fields: [draftRecords.reconciledTransactionId],
+    fields: [draft_records.reconciled_transaction_id],
     references: [transactions.id],
   }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [draftRecords.sourceDocumentId],
-    references: [sourceDocuments.id],
+  source_document: one(source_documents, {
+    fields: [draft_records.source_document_id],
+    references: [source_documents.id],
   }),
 }));
 
-export const draftBatchesRelations = relations(draftBatches, ({ one, many }) => ({
-  draftRecords: many(draftRecords),
-  ingestionRun: one(ingestionRuns, {
-    fields: [draftBatches.runId],
-    references: [ingestionRuns.id],
+export const draft_batchesRelations = relations(draft_batches, ({ one, many }) => ({
+  draft_records: many(draft_records),
+  ingestion_run: one(ingestion_runs, {
+    fields: [draft_batches.run_id],
+    references: [ingestion_runs.id],
   }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [draftBatches.sourceDocumentId],
-    references: [sourceDocuments.id],
+  source_document: one(source_documents, {
+    fields: [draft_batches.source_document_id],
+    references: [source_documents.id],
   }),
 }));
 
-export const extractionResultsRelations = relations(extractionResults, ({ one, many }) => ({
-  draftRecords: many(draftRecords),
-  parsedDocumentVersion: one(parsedDocumentVersions, {
-    fields: [extractionResults.parsedVersionId],
-    references: [parsedDocumentVersions.id],
+export const extraction_resultsRelations = relations(extraction_results, ({ one, many }) => ({
+  draft_records: many(draft_records),
+  parsed_document_version: one(parsed_document_versions, {
+    fields: [extraction_results.parsed_version_id],
+    references: [parsed_document_versions.id],
   }),
   supplier: one(suppliers, {
-    fields: [extractionResults.supplierId],
+    fields: [extraction_results.supplier_id],
     references: [suppliers.id],
   }),
 }));
 
-export const financialObligationsRelations = relations(financialObligations, ({ one, many }) => ({
-  draftRecords: many(draftRecords),
-  financialObligationIdentityKeys: many(financialObligationIdentityKeys),
-  financialProduct: one(financialProducts, {
-    fields: [financialObligations.financialProductId],
-    references: [financialProducts.id],
+export const financial_obligationsRelations = relations(financial_obligations, ({ one, many }) => ({
+  draft_records: many(draft_records),
+  financial_obligation_identity_keys: many(financial_obligation_identity_keys),
+  financial_product: one(financial_products, {
+    fields: [financial_obligations.financial_product_id],
+    references: [financial_products.id],
   }),
   supplier: one(suppliers, {
-    fields: [financialObligations.supplierId],
+    fields: [financial_obligations.supplier_id],
     references: [suppliers.id],
   }),
-  financialObligationEvidences: many(financialObligationEvidences),
+  financial_obligation_evidences: many(financial_obligation_evidences),
 }));
 
-export const recurringTemplatesRelations = relations(recurringTemplates, ({ one, many }) => ({
-  draftRecords: many(draftRecords),
+export const recurring_templatesRelations = relations(recurring_templates, ({ one, many }) => ({
+  draft_records: many(draft_records),
   category: one(categories, {
-    fields: [recurringTemplates.categoryId],
+    fields: [recurring_templates.category_id],
     references: [categories.id],
   }),
-  financialProduct: one(financialProducts, {
-    fields: [recurringTemplates.financialProductId],
-    references: [financialProducts.id],
+  financial_product: one(financial_products, {
+    fields: [recurring_templates.financial_product_id],
+    references: [financial_products.id],
   }),
   supplier: one(suppliers, {
-    fields: [recurringTemplates.supplierId],
+    fields: [recurring_templates.supplier_id],
     references: [suppliers.id],
   }),
-  recurringInstances: many(recurringInstances),
-  recurringTemplateTags: many(recurringTemplateTags),
+  recurring_instances: many(recurring_instances),
+  recurring_template_tags: many(recurring_template_tags),
 }));
 
-export const aiChatMessagesRelations = relations(aiChatMessages, ({ one }) => ({
-  aiChatSession: one(aiChatSessions, {
-    fields: [aiChatMessages.sessionId],
-    references: [aiChatSessions.id],
+export const ai_chat_messagesRelations = relations(ai_chat_messages, ({ one }) => ({
+  ai_chat_session: one(ai_chat_sessions, {
+    fields: [ai_chat_messages.session_id],
+    references: [ai_chat_sessions.id],
   }),
 }));
 
-export const aiChatSessionsRelations = relations(aiChatSessions, ({ many }) => ({
-  aiChatMessages: many(aiChatMessages),
+export const ai_chat_sessionsRelations = relations(ai_chat_sessions, ({ many }) => ({
+  ai_chat_messages: many(ai_chat_messages),
 }));
 
-export const documentFingerprintsRelations = relations(documentFingerprints, ({ one }) => ({
-  sourceDocument: one(sourceDocuments, {
-    fields: [documentFingerprints.sourceDocumentId],
-    references: [sourceDocuments.id],
+export const document_fingerprintsRelations = relations(document_fingerprints, ({ one }) => ({
+  source_document: one(source_documents, {
+    fields: [document_fingerprints.source_document_id],
+    references: [source_documents.id],
   }),
 }));
 
-export const documentTransactionsRelations = relations(documentTransactions, ({ one }) => ({
-  sourceDocument: one(sourceDocuments, {
-    fields: [documentTransactions.sourceDocumentId],
-    references: [sourceDocuments.id],
+export const document_transactionsRelations = relations(document_transactions, ({ one }) => ({
+  source_document: one(source_documents, {
+    fields: [document_transactions.source_document_id],
+    references: [source_documents.id],
   }),
   transaction: one(transactions, {
-    fields: [documentTransactions.transactionId],
+    fields: [document_transactions.transaction_id],
     references: [transactions.id],
   }),
 }));
 
-export const ingestionRunsRelations = relations(ingestionRuns, ({ many }) => ({
-  draftBatches: many(draftBatches),
-  ingestionJobs: many(ingestionJobs),
-  ingestionLogs: many(ingestionLogs),
+export const ingestion_runsRelations = relations(ingestion_runs, ({ many }) => ({
+  draft_batches: many(draft_batches),
+  ingestion_jobs: many(ingestion_jobs),
+  ingestion_logs: many(ingestion_logs),
 }));
 
-export const externalAccountMappingsRelations = relations(externalAccountMappings, ({ one }) => ({
-  financialProduct: one(financialProducts, {
-    fields: [externalAccountMappings.financialProductId],
-    references: [financialProducts.id],
-  }),
-  providerConnection: one(providerConnections, {
-    fields: [externalAccountMappings.providerConnectionId],
-    references: [providerConnections.id],
-  }),
-}));
-
-export const providerConnectionsRelations = relations(providerConnections, ({ many }) => ({
-  externalAccountMappings: many(externalAccountMappings),
-}));
-
-export const financialObligationIdentityKeysRelations = relations(
-  financialObligationIdentityKeys,
+export const external_account_mappingsRelations = relations(
+  external_account_mappings,
   ({ one }) => ({
-    financialObligation: one(financialObligations, {
-      fields: [financialObligationIdentityKeys.obligationId],
-      references: [financialObligations.id],
+    financial_product: one(financial_products, {
+      fields: [external_account_mappings.financial_product_id],
+      references: [financial_products.id],
+    }),
+    provider_connection: one(provider_connections, {
+      fields: [external_account_mappings.provider_connection_id],
+      references: [provider_connections.id],
     }),
   }),
 );
 
-export const ingestionJobsRelations = relations(ingestionJobs, ({ one, many }) => ({
-  ingestionRun: one(ingestionRuns, {
-    fields: [ingestionJobs.runId],
-    references: [ingestionRuns.id],
-  }),
-  sourceDocument: one(sourceDocuments, {
-    fields: [ingestionJobs.sourceDocumentId],
-    references: [sourceDocuments.id],
-  }),
-  ingestionLogs: many(ingestionLogs),
+export const provider_connectionsRelations = relations(provider_connections, ({ many }) => ({
+  external_account_mappings: many(external_account_mappings),
 }));
 
-export const ingestionLogsRelations = relations(ingestionLogs, ({ one }) => ({
-  ingestionJob: one(ingestionJobs, {
-    fields: [ingestionLogs.jobId],
-    references: [ingestionJobs.id],
+export const financial_obligation_identity_keysRelations = relations(
+  financial_obligation_identity_keys,
+  ({ one }) => ({
+    financial_obligation: one(financial_obligations, {
+      fields: [financial_obligation_identity_keys.obligation_id],
+      references: [financial_obligations.id],
+    }),
   }),
-  ingestionRun: one(ingestionRuns, {
-    fields: [ingestionLogs.runId],
-    references: [ingestionRuns.id],
+);
+
+export const ingestion_jobsRelations = relations(ingestion_jobs, ({ one, many }) => ({
+  ingestion_run: one(ingestion_runs, {
+    fields: [ingestion_jobs.run_id],
+    references: [ingestion_runs.id],
+  }),
+  source_document: one(source_documents, {
+    fields: [ingestion_jobs.source_document_id],
+    references: [source_documents.id],
+  }),
+  ingestion_logs: many(ingestion_logs),
+}));
+
+export const ingestion_logsRelations = relations(ingestion_logs, ({ one }) => ({
+  ingestion_job: one(ingestion_jobs, {
+    fields: [ingestion_logs.job_id],
+    references: [ingestion_jobs.id],
+  }),
+  ingestion_run: one(ingestion_runs, {
+    fields: [ingestion_logs.run_id],
+    references: [ingestion_runs.id],
   }),
 }));
 
-export const parsedDocumentVersionsRelations = relations(
-  parsedDocumentVersions,
+export const parsed_document_versionsRelations = relations(
+  parsed_document_versions,
   ({ one, many }) => ({
-    extractionResults: many(extractionResults),
-    sourceDocument: one(sourceDocuments, {
-      fields: [parsedDocumentVersions.sourceDocumentId],
-      references: [sourceDocuments.id],
+    extraction_results: many(extraction_results),
+    source_document: one(source_documents, {
+      fields: [parsed_document_versions.source_document_id],
+      references: [source_documents.id],
     }),
   }),
 );
 
 export const liabilitiesRelations = relations(liabilities, ({ one, many }) => ({
-  financialProduct: one(financialProducts, {
-    fields: [liabilities.financialProductId],
-    references: [financialProducts.id],
+  financial_product: one(financial_products, {
+    fields: [liabilities.financial_product_id],
+    references: [financial_products.id],
   }),
   supplier: one(suppliers, {
-    fields: [liabilities.supplierId],
+    fields: [liabilities.supplier_id],
     references: [suppliers.id],
   }),
-  liabilityInstallments: many(liabilityInstallments),
-  liabilityTags: many(liabilityTags),
+  liability_installments: many(liability_installments),
+  liability_tags: many(liability_tags),
 }));
 
-export const financialObligationEvidencesRelations = relations(
-  financialObligationEvidences,
+export const financial_obligation_evidencesRelations = relations(
+  financial_obligation_evidences,
   ({ one }) => ({
-    financialObligation: one(financialObligations, {
-      fields: [financialObligationEvidences.obligationId],
-      references: [financialObligations.id],
+    financial_obligation: one(financial_obligations, {
+      fields: [financial_obligation_evidences.obligation_id],
+      references: [financial_obligations.id],
     }),
-    sourceDocument: one(sourceDocuments, {
-      fields: [financialObligationEvidences.sourceDocumentId],
-      references: [sourceDocuments.id],
+    source_document: one(source_documents, {
+      fields: [financial_obligation_evidences.source_document_id],
+      references: [source_documents.id],
     }),
   }),
 );
 
-export const supplierAliasesRelations = relations(supplierAliases, ({ one }) => ({
+export const supplier_aliasesRelations = relations(supplier_aliases, ({ one }) => ({
   supplier: one(suppliers, {
-    fields: [supplierAliases.supplierId],
+    fields: [supplier_aliases.supplier_id],
     references: [suppliers.id],
   }),
 }));
 
-export const statementCyclesRelations = relations(statementCycles, ({ one, many }) => ({
+export const statement_cyclesRelations = relations(statement_cycles, ({ one, many }) => ({
   card: one(cards, {
-    fields: [statementCycles.cardId],
+    fields: [statement_cycles.card_id],
     references: [cards.id],
   }),
-  statementItems: many(statementItems),
+  statement_items: many(statement_items),
   transactions: many(transactions),
 }));
 
-export const statementItemsRelations = relations(statementItems, ({ one }) => ({
-  statementCycle: one(statementCycles, {
-    fields: [statementItems.statementCycleId],
-    references: [statementCycles.id],
+export const statement_itemsRelations = relations(statement_items, ({ one }) => ({
+  statement_cycle: one(statement_cycles, {
+    fields: [statement_items.statement_cycle_id],
+    references: [statement_cycles.id],
   }),
   supplier: one(suppliers, {
-    fields: [statementItems.supplierId],
+    fields: [statement_items.supplier_id],
     references: [suppliers.id],
   }),
   transaction: one(transactions, {
-    fields: [statementItems.transactionId],
+    fields: [statement_items.transaction_id],
     references: [transactions.id],
   }),
 }));
 
-export const liabilityInstallmentsRelations = relations(liabilityInstallments, ({ one, many }) => ({
-  liability: one(liabilities, {
-    fields: [liabilityInstallments.liabilityId],
-    references: [liabilities.id],
+export const liability_installmentsRelations = relations(
+  liability_installments,
+  ({ one, many }) => ({
+    liability: one(liabilities, {
+      fields: [liability_installments.liability_id],
+      references: [liabilities.id],
+    }),
+    transactions: many(transactions),
   }),
-  transactions: many(transactions),
-}));
+);
 
-export const financialPeriodsRelations = relations(financialPeriods, ({ many }) => ({
+export const financial_periodsRelations = relations(financial_periods, ({ many }) => ({
   transactions: many(transactions),
   transfers: many(transfers),
 }));
 
-export const recurringInstancesRelations = relations(recurringInstances, ({ one, many }) => ({
+export const recurring_instancesRelations = relations(recurring_instances, ({ one, many }) => ({
   transactions: many(transactions, {
-    relationName: "transactions_recurringInstanceId_recurringInstances_id",
+    relationName: "transactions_recurring_instance_id_recurring_instances_id",
   }),
-  recurringTemplate: one(recurringTemplates, {
-    fields: [recurringInstances.recurringTemplateId],
-    references: [recurringTemplates.id],
+  recurring_template: one(recurring_templates, {
+    fields: [recurring_instances.recurring_template_id],
+    references: [recurring_templates.id],
   }),
   transaction: one(transactions, {
-    fields: [recurringInstances.transactionId],
+    fields: [recurring_instances.transaction_id],
     references: [transactions.id],
-    relationName: "recurringInstances_transactionId_transactions_id",
+    relationName: "recurring_instances_transaction_id_transactions_id",
   }),
 }));
 
-export const supplierTagsRelations = relations(supplierTags, ({ one }) => ({
+export const supplier_tagsRelations = relations(supplier_tags, ({ one }) => ({
   supplier: one(suppliers, {
-    fields: [supplierTags.supplierId],
+    fields: [supplier_tags.supplier_id],
     references: [suppliers.id],
   }),
   tag: one(tags, {
-    fields: [supplierTags.tagId],
+    fields: [supplier_tags.tag_id],
     references: [tags.id],
   }),
 }));
 
 export const tagsRelations = relations(tags, ({ many }) => ({
-  supplierTags: many(supplierTags),
-  liabilityTags: many(liabilityTags),
-  recurringTemplateTags: many(recurringTemplateTags),
-  transactionTags: many(transactionTags),
+  supplier_tags: many(supplier_tags),
+  liability_tags: many(liability_tags),
+  recurring_template_tags: many(recurring_template_tags),
+  transaction_tags: many(transaction_tags),
 }));
 
 export const transfersRelations = relations(transfers, ({ one }) => ({
-  financialPeriod: one(financialPeriods, {
-    fields: [transfers.financialPeriodId],
-    references: [financialPeriods.id],
+  financial_period: one(financial_periods, {
+    fields: [transfers.financial_period_id],
+    references: [financial_periods.id],
   }),
-  financialProduct_sourceProductId: one(financialProducts, {
-    fields: [transfers.sourceProductId],
-    references: [financialProducts.id],
-    relationName: "transfers_sourceProductId_financialProducts_id",
+  financial_product_source_product_id: one(financial_products, {
+    fields: [transfers.source_product_id],
+    references: [financial_products.id],
+    relationName: "transfers_source_product_id_financial_products_id",
   }),
-  financialProduct_targetProductId: one(financialProducts, {
-    fields: [transfers.targetProductId],
-    references: [financialProducts.id],
-    relationName: "transfers_targetProductId_financialProducts_id",
+  financial_product_target_product_id: one(financial_products, {
+    fields: [transfers.target_product_id],
+    references: [financial_products.id],
+    relationName: "transfers_target_product_id_financial_products_id",
   }),
 }));
 
-export const liabilityTagsRelations = relations(liabilityTags, ({ one }) => ({
+export const liability_tagsRelations = relations(liability_tags, ({ one }) => ({
   liability: one(liabilities, {
-    fields: [liabilityTags.liabilityId],
+    fields: [liability_tags.liability_id],
     references: [liabilities.id],
   }),
   tag: one(tags, {
-    fields: [liabilityTags.tagId],
+    fields: [liability_tags.tag_id],
     references: [tags.id],
   }),
 }));
 
-export const recurringTemplateTagsRelations = relations(recurringTemplateTags, ({ one }) => ({
-  recurringTemplate: one(recurringTemplates, {
-    fields: [recurringTemplateTags.recurringTemplateId],
-    references: [recurringTemplates.id],
+export const recurring_template_tagsRelations = relations(recurring_template_tags, ({ one }) => ({
+  recurring_template: one(recurring_templates, {
+    fields: [recurring_template_tags.recurring_template_id],
+    references: [recurring_templates.id],
   }),
   tag: one(tags, {
-    fields: [recurringTemplateTags.tagId],
+    fields: [recurring_template_tags.tag_id],
     references: [tags.id],
   }),
 }));
 
-export const transactionTagsRelations = relations(transactionTags, ({ one }) => ({
+export const transaction_tagsRelations = relations(transaction_tags, ({ one }) => ({
   tag: one(tags, {
-    fields: [transactionTags.tagId],
+    fields: [transaction_tags.tag_id],
     references: [tags.id],
   }),
   transaction: one(transactions, {
-    fields: [transactionTags.transactionId],
+    fields: [transaction_tags.transaction_id],
     references: [transactions.id],
   }),
 }));

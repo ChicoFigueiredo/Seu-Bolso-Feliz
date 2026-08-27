@@ -5,24 +5,29 @@
  * MANUAIS. Não é 100% auto-gerado, apesar de estar na lista de ignorados do
  * eslint.config.ts junto com os arquivos que são.
  *
+ * `drizzle.config.ts` usa `introspect.casing: "preserve"`: os nomes de coluna
+ * saem snake_case (iguais ao Postgres), sem alias camelCase. Os identificadores
+ * de tabela (`export const ...`) TAMBÉM saem snake_case (ex.: `financial_periods`,
+ * `recurring_templates`, `user_secrets`) — não camelCase.
+ *
  * ⚠️ Rodar a introspecção de novo SOBRESCREVE este arquivo e apaga as edições
  * abaixo em silêncio. Se você reintrospectar, reaplique-as:
  *
- *   1. `transactions.recurringInstanceId` — a FK para `recurring_instances`
+ *   1. `transactions.recurring_instance_id` — a FK para `recurring_instances`
  *      é declarada inline na coluna, via
- *      `.references((): AnyPgColumn => recurringInstances.id, { onDelete: "set null" })`,
+ *      `.references((): AnyPgColumn => recurring_instances.id, { onDelete: "set null" })`,
  *      em vez do `foreignKey({...})` builder na lista de constraints da
  *      tabela (que é o que a introspecção gera). Motivo: `transactions` e
  *      `recurring_instances` se referenciam mutuamente e o builder produz um
  *      ciclo de inferência de tipos — `tsc` falha com TS7022/TS7024. O
  *      callback anotado com `AnyPgColumn` quebra o ciclo (mesmo padrão que o
- *      próprio drizzle-kit usa para auto-referências, ex. `categories.parentId`).
+ *      próprio drizzle-kit usa para auto-referências, ex. `categories.parent_id`).
  *      Efeito colateral aceito: o nome do constraint passa a ser o default do
  *      Drizzle em vez de `transactions_recurring_instance_id_fkey` — irrelevante
  *      aqui, porque este schema NUNCA é usado para `drizzle-kit generate`/`push`
  *      (a fonte da verdade do DDL é packages/db/schema.sql, aplicado no Neon).
  *
- *   2. `userSecrets` — o parâmetro do callback de constraints é `_table`, não
+ *   2. `user_secrets` — o parâmetro do callback de constraints é `_table`, não
  *      `table`. O índice único `uq_user_secrets_scope` usa `sql\`\`` cru
  *      (COALESCE não é representável encadeando `table.coluna`), então o
  *      parâmetro fica sem uso e o `noUnusedParameters` do tsc reclama (TS6133).
@@ -36,6 +41,11 @@
  *     packages/db/drizzle/relations.ts  -> packages/db/src/relations.ts
  *
  * e descarte o resto (packages/db/drizzle/ é gitignorado justamente por isso).
+ *
+ * ⚠️ Toda coluna `numeric(...)` precisa de `mode: "number"` no objeto de
+ * opções (a introspecção não adiciona isso sozinha) — sem ele o Drizzle
+ * devolve `string`, não `number`. Reaplicar em toda ocorrência depois de
+ * reintrospectar.
  */
 import {
   pgTable,
@@ -62,31 +72,27 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const userSecrets = pgTable(
+export const user_secrets = pgTable(
   "user_secrets",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    secretType: text("secret_type").notNull(),
-    entityType: text("entity_type"),
-    entityId: uuid("entity_id"),
-    encryptedValue: text("encrypted_value").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    encryptionVersion: integer("encryption_version").default(1).notNull(),
-    contractIdentifier: text("contract_identifier"),
+    user_id: uuid().notNull(),
+    secret_type: text().notNull(),
+    entity_type: text(),
+    entity_id: uuid(),
+    encrypted_value: text().notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    encryption_version: integer().default(1).notNull(),
+    contract_identifier: text(),
     label: text(),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
-    successCount: integer("success_count").default(0).notNull(),
+    last_used_at: timestamp({ withTimezone: true, mode: "string" }),
+    success_count: integer().default(0).notNull(),
+    // `table` não é usado aqui: o índice único abaixo precisou cair para sql`` cru
+    // (COALESCE não é representável via table.coluna encadeado), então o parâmetro
+    // fica sem uso — prefixado com "_" para o `noUnusedParameters` do tsc.
+    // (Edição manual nº 2 — ver cabeçalho deste arquivo.)
   },
-  // `table` não é usado aqui: o índice único abaixo precisou cair para sql`` cru
-  // (COALESCE não é representável via table.coluna encadeado), então o parâmetro
-  // fica sem uso — prefixado com "_" para o `noUnusedParameters` do tsc.
-  // (Edição manual nº 2 — ver cabeçalho deste arquivo.)
   (_table) => [
     uniqueIndex("uq_user_secrets_scope").using(
       "btree",
@@ -104,61 +110,57 @@ export const userSecrets = pgTable(
   ],
 );
 
-export const documentPatterns = pgTable(
+export const document_patterns = pgTable(
   "document_patterns",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
-    supplierId: uuid("supplier_id"),
-    documentType: text("document_type").notNull(),
-    institutionId: uuid("institution_id"),
-    extractionRules: jsonb("extraction_rules").default({}).notNull(),
-    fieldMappings: jsonb("field_mappings").default({}).notNull(),
-    sampleFingerprints: text("sample_fingerprints").array().default([""]).notNull(),
-    confidenceThreshold: numeric("confidence_threshold", { precision: 3, scale: 2 })
-      .default("0.80")
+    supplier_id: uuid(),
+    document_type: text().notNull(),
+    institution_id: uuid(),
+    extraction_rules: jsonb().default({}).notNull(),
+    field_mappings: jsonb().default({}).notNull(),
+    sample_fingerprints: text().array().default([""]).notNull(),
+    confidence_threshold: numeric({ precision: 3, scale: 2, mode: "number" })
+      .default(0.8)
       .notNull(),
     version: integer().default(1).notNull(),
-    isActive: boolean("is_active").default(true).notNull(),
-    feedbackCount: integer("feedback_count").default(0).notNull(),
-    successCount: integer("success_count").default(0).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    is_active: boolean().default(true).notNull(),
+    feedback_count: integer().default(0).notNull(),
+    success_count: integer().default(0).notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_document_patterns_institution")
-      .using("btree", table.institutionId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.institution_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(is_active = true)`),
     index("idx_document_patterns_supplier_type")
       .using(
         "btree",
-        table.supplierId.asc().nullsLast().op("text_ops"),
-        table.documentType.asc().nullsLast().op("text_ops"),
+        table.supplier_id.asc().nullsLast().op("text_ops"),
+        table.document_type.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(is_active = true)`),
     index("idx_document_patterns_user_active").using(
       "btree",
-      table.userId.asc().nullsLast().op("bool_ops"),
-      table.isActive.asc().nullsLast().op("bool_ops"),
+      table.user_id.asc().nullsLast().op("bool_ops"),
+      table.is_active.asc().nullsLast().op("bool_ops"),
     ),
     foreignKey({
-      columns: [table.institutionId],
+      columns: [table.institution_id],
       foreignColumns: [institutions.id],
       name: "document_patterns_institution_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "document_patterns_supplier_id_fkey",
     }).onDelete("set null"),
     unique("document_patterns_user_id_name_version_key").on(
       table.name,
-      table.userId,
+      table.user_id,
       table.version,
     ),
     check(
@@ -170,42 +172,40 @@ export const documentPatterns = pgTable(
   ],
 );
 
-export const patternFeedback = pgTable(
+export const pattern_feedback = pgTable(
   "pattern_feedback",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    patternId: uuid("pattern_id").notNull(),
-    sourceDocumentId: uuid("source_document_id"),
-    feedbackType: text("feedback_type").notNull(),
+    user_id: uuid().notNull(),
+    pattern_id: uuid().notNull(),
+    source_document_id: uuid(),
+    feedback_type: text().notNull(),
     corrections: jsonb().default({}).notNull(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_pattern_feedback_document")
-      .using("btree", table.sourceDocumentId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.source_document_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(source_document_id IS NOT NULL)`),
     index("idx_pattern_feedback_pattern").using(
       "btree",
-      table.patternId.asc().nullsLast().op("timestamptz_ops"),
-      table.createdAt.desc().nullsFirst().op("timestamptz_ops"),
+      table.pattern_id.asc().nullsLast().op("timestamptz_ops"),
+      table.created_at.desc().nullsFirst().op("timestamptz_ops"),
     ),
     index("idx_pattern_feedback_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
-      table.createdAt.desc().nullsFirst().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
+      table.created_at.desc().nullsFirst().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.patternId],
-      foreignColumns: [documentPatterns.id],
+      columns: [table.pattern_id],
+      foreignColumns: [document_patterns.id],
       name: "pattern_feedback_pattern_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "pattern_feedback_source_document_id_fkey",
     }).onDelete("set null"),
     check(
@@ -215,28 +215,26 @@ export const patternFeedback = pgTable(
   ],
 );
 
-export const auditLogs = pgTable(
+export const audit_logs = pgTable(
   "audit_logs",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     action: text().notNull(),
-    entityType: text("entity_type"),
-    entityId: uuid("entity_id"),
-    oldValues: jsonb("old_values"),
-    newValues: jsonb("new_values"),
-    ipAddress: inet("ip_address"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    entity_type: text(),
+    entity_id: uuid(),
+    old_values: jsonb(),
+    new_values: jsonb(),
+    ip_address: inet(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_audit_logs_entity").using(
       "btree",
-      table.entityType.asc().nullsLast().op("text_ops"),
-      table.entityId.asc().nullsLast().op("text_ops"),
+      table.entity_type.asc().nullsLast().op("text_ops"),
+      table.entity_id.asc().nullsLast().op("text_ops"),
     ),
-    index("idx_audit_logs_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_audit_logs_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
   ],
 );
 
@@ -244,32 +242,28 @@ export const cards = pgTable(
   "cards",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    financialProductId: uuid("financial_product_id").notNull(),
-    lastFourDigits: text("last_four_digits"),
-    cardBrand: text("card_brand"),
-    isPrimary: boolean("is_primary").default(true).notNull(),
-    holderName: text("holder_name"),
-    creditLimit: numeric("credit_limit", { precision: 15, scale: 2 }),
-    closingDay: integer("closing_day"),
-    dueDay: integer("due_day"),
-    isActive: boolean("is_active").default(true).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    user_id: uuid().notNull(),
+    financial_product_id: uuid().notNull(),
+    last_four_digits: text(),
+    card_brand: text(),
+    is_primary: boolean().default(true).notNull(),
+    holder_name: text(),
+    credit_limit: numeric({ precision: 15, scale: 2, mode: "number" }),
+    closing_day: integer(),
+    due_day: integer(),
+    is_active: boolean().default(true).notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_cards_financial_product_id").using(
       "btree",
-      table.financialProductId.asc().nullsLast().op("uuid_ops"),
+      table.financial_product_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_cards_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_cards_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "cards_financial_product_id_fkey",
     }).onDelete("cascade"),
     check("cards_closing_day_check", sql`(closing_day >= 1) AND (closing_day <= 31)`),
@@ -281,84 +275,76 @@ export const categories = pgTable(
   "categories",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
-    parentId: uuid("parent_id"),
+    parent_id: uuid(),
     icon: text(),
     color: text(),
-    displayOrder: integer("display_order"),
-    isActive: boolean("is_active").default(true).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    display_order: integer(),
+    is_active: boolean().default(true).notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_categories_parent_id").using(
       "btree",
-      table.parentId.asc().nullsLast().op("uuid_ops"),
+      table.parent_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_categories_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_categories_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.parentId],
+      columns: [table.parent_id],
       foreignColumns: [table.id],
       name: "categories_parent_id_fkey",
     }).onDelete("set null"),
   ],
 );
 
-export const consumptionMetrics = pgTable(
+export const consumption_metrics = pgTable(
   "consumption_metrics",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    supplierId: uuid("supplier_id").notNull(),
-    supplierContractId: uuid("supplier_contract_id"),
-    transactionId: uuid("transaction_id"),
-    documentId: uuid("document_id"),
-    referencePeriodStart: date("reference_period_start").notNull(),
-    referencePeriodEnd: date("reference_period_end").notNull(),
-    metricName: text("metric_name"),
-    metricUnit: text("metric_unit"),
-    quantity: numeric({ precision: 15, scale: 4 }),
-    unitPrice: numeric("unit_price", { precision: 15, scale: 6 }),
-    subtotal: numeric({ precision: 15, scale: 2 }),
+    user_id: uuid().notNull(),
+    supplier_id: uuid().notNull(),
+    supplier_contract_id: uuid(),
+    transaction_id: uuid(),
+    document_id: uuid(),
+    reference_period_start: date().notNull(),
+    reference_period_end: date().notNull(),
+    metric_name: text(),
+    metric_unit: text(),
+    quantity: numeric({ precision: 15, scale: 4, mode: "number" }),
+    unit_price: numeric({ precision: 15, scale: 6, mode: "number" }),
+    subtotal: numeric({ precision: 15, scale: 2, mode: "number" }),
     metadata: jsonb(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_consumption_metrics_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_consumption_metrics_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.documentId],
-      foreignColumns: [documentsLegacy.id],
+      columns: [table.document_id],
+      foreignColumns: [documents_legacy.id],
       name: "consumption_metrics_document_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierContractId],
-      foreignColumns: [supplierContracts.id],
+      columns: [table.supplier_contract_id],
+      foreignColumns: [supplier_contracts.id],
       name: "consumption_metrics_supplier_contract_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "consumption_metrics_supplier_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.transactionId],
+      columns: [table.transaction_id],
       foreignColumns: [transactions.id],
       name: "consumption_metrics_transaction_id_fkey",
     }).onDelete("set null"),
@@ -370,84 +356,79 @@ export const consumptionMetrics = pgTable(
   ],
 );
 
-export const documentSplits = pgTable(
+export const document_splits = pgTable(
   "document_splits",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    sourceDocumentId: uuid("source_document_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    categoryId: uuid("category_id"),
+    source_document_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    category_id: uuid(),
     tags: uuid().array().default([""]).notNull(),
-    amount: numeric({ precision: 14, scale: 2 }).notNull(),
+    amount: numeric({ precision: 14, scale: 2, mode: "number" }).notNull(),
     description: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_document_splits_category").using(
       "btree",
-      table.categoryId.asc().nullsLast().op("uuid_ops"),
+      table.category_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_document_splits_source_document").using(
       "btree",
-      table.sourceDocumentId.asc().nullsLast().op("uuid_ops"),
+      table.source_document_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_document_splits_user").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_document_splits_user").using(
+      "btree",
+      table.user_id.asc().nullsLast().op("uuid_ops"),
+    ),
     foreignKey({
-      columns: [table.categoryId],
+      columns: [table.category_id],
       foreignColumns: [categories.id],
       name: "document_splits_category_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "document_splits_source_document_id_fkey",
     }).onDelete("cascade"),
     check("document_splits_amount_positive", sql`amount > (0)::numeric`),
   ],
 );
 
-export const documentsLegacy = pgTable(
+export const documents_legacy = pgTable(
   "documents_legacy",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
     description: text(),
-    filePath: text("file_path").notNull(),
-    fileType: text("file_type"),
+    file_path: text().notNull(),
+    file_type: text(),
     // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-    fileSize: bigint("file_size", { mode: "number" }),
-    documentType: text("document_type"),
-    entityType: text("entity_type"),
-    entityId: uuid("entity_id"),
+    file_size: bigint({ mode: "number" }),
+    document_type: text(),
+    entity_type: text(),
+    entity_id: uuid(),
     version: integer().default(1).notNull(),
-    isPasswordProtected: boolean("is_password_protected").default(false).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    supplierId: uuid("supplier_id"),
+    is_password_protected: boolean().default(false).notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    supplier_id: uuid(),
   },
   (table) => [
     index("idx_documents_entity").using(
       "btree",
-      table.entityType.asc().nullsLast().op("text_ops"),
-      table.entityId.asc().nullsLast().op("text_ops"),
+      table.entity_type.asc().nullsLast().op("text_ops"),
+      table.entity_id.asc().nullsLast().op("text_ops"),
     ),
     index("idx_documents_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_documents_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_documents_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "documents_supplier_id_fkey",
     }).onDelete("set null"),
@@ -458,120 +439,120 @@ export const documentsLegacy = pgTable(
   ],
 );
 
-export const draftRecords = pgTable(
+export const draft_records = pgTable(
   "draft_records",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    batchId: uuid("batch_id"),
-    userId: uuid("user_id").notNull(),
-    sourceDocumentId: uuid("source_document_id"),
-    extractionResultId: uuid("extraction_result_id"),
-    draftType: text("draft_type").notNull(),
+    batch_id: uuid(),
+    user_id: uuid().notNull(),
+    source_document_id: uuid(),
+    extraction_result_id: uuid(),
+    draft_type: text().notNull(),
     status: text().default("pending_review").notNull(),
-    draftData: jsonb("draft_data").notNull(),
+    draft_data: jsonb().notNull(),
     corrections: jsonb(),
-    confidenceScore: numeric("confidence_score", { precision: 3, scale: 2 }),
-    approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
-    approvedBy: uuid("approved_by"),
-    postedRecordId: uuid("posted_record_id"),
-    postedRecordType: text("posted_record_type"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    reconciliationStatus: text("reconciliation_status").default("not_checked").notNull(),
-    reconciledTransactionId: uuid("reconciled_transaction_id"),
-    reconciledTemplateId: uuid("reconciled_template_id"),
-    reconciliationCandidates: jsonb("reconciliation_candidates").default([]),
-    reconciledAt: timestamp("reconciled_at", { withTimezone: true, mode: "string" }),
-    draftSchemaVersion: smallint("draft_schema_version").default(0).notNull(),
-    draftDataLegacy: jsonb("draft_data_legacy"),
-    materializationKey: text("materialization_key").notNull(),
-    postedAt: timestamp("posted_at", { withTimezone: true, mode: "string" }),
-    materializationError: jsonb("materialization_error"),
-    obligationId: uuid("obligation_id"),
-    externalRef: text("external_ref"),
+    confidence_score: numeric({ precision: 3, scale: 2, mode: "number" }),
+    approved_at: timestamp({ withTimezone: true, mode: "string" }),
+    approved_by: uuid(),
+    posted_record_id: uuid(),
+    posted_record_type: text(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    reconciliation_status: text().default("not_checked").notNull(),
+    reconciled_transaction_id: uuid(),
+    reconciled_template_id: uuid(),
+    reconciliation_candidates: jsonb().default([]),
+    reconciled_at: timestamp({ withTimezone: true, mode: "string" }),
+    draft_schema_version: smallint().default(0).notNull(),
+    draft_data_legacy: jsonb(),
+    materialization_key: text().notNull(),
+    posted_at: timestamp({ withTimezone: true, mode: "string" }),
+    materialization_error: jsonb(),
+    obligation_id: uuid(),
+    external_ref: text(),
   },
   (table) => [
     index("idx_draft_records_batch")
-      .using("btree", table.batchId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.batch_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(batch_id IS NOT NULL)`),
     uniqueIndex("idx_draft_records_external_ref")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.externalRef.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.external_ref.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(external_ref IS NOT NULL)`),
     index("idx_draft_records_reconciled_transaction")
-      .using("btree", table.reconciledTransactionId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.reconciled_transaction_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(reconciled_transaction_id IS NOT NULL)`),
     index("idx_draft_records_reconciliation_status")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.reconciliationStatus.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.reconciliation_status.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(reconciliation_status <> ALL (ARRAY['not_checked'::text, 'no_match'::text]))`),
     index("idx_draft_records_review_queue")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
         table.status.asc().nullsLast().op("text_ops"),
-        table.createdAt.asc().nullsLast().op("text_ops"),
+        table.created_at.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(status = 'pending_review'::text)`),
     index("idx_draft_records_source_doc")
-      .using("btree", table.sourceDocumentId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.source_document_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(source_document_id IS NOT NULL)`),
     index("ix_draft_records_obligation")
-      .using("btree", table.obligationId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.obligation_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(obligation_id IS NOT NULL)`),
     index("ix_draft_records_schema_version")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("int2_ops"),
-        table.draftSchemaVersion.asc().nullsLast().op("int2_ops"),
+        table.user_id.asc().nullsLast().op("int2_ops"),
+        table.draft_schema_version.asc().nullsLast().op("int2_ops"),
       )
       .where(sql`(draft_schema_version = 0)`),
     uniqueIndex("uq_draft_records_materialization_key").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
-      table.materializationKey.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
+      table.materialization_key.asc().nullsLast().op("text_ops"),
     ),
     uniqueIndex("uq_draft_records_posted_record")
       .using(
         "btree",
-        table.postedRecordType.asc().nullsLast().op("text_ops"),
-        table.postedRecordId.asc().nullsLast().op("text_ops"),
+        table.posted_record_type.asc().nullsLast().op("text_ops"),
+        table.posted_record_id.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(posted_record_id IS NOT NULL)`),
     foreignKey({
-      columns: [table.batchId],
-      foreignColumns: [draftBatches.id],
+      columns: [table.batch_id],
+      foreignColumns: [draft_batches.id],
       name: "draft_records_batch_id_fkey",
     }),
     foreignKey({
-      columns: [table.extractionResultId],
-      foreignColumns: [extractionResults.id],
+      columns: [table.extraction_result_id],
+      foreignColumns: [extraction_results.id],
       name: "draft_records_extraction_result_id_fkey",
     }),
     foreignKey({
-      columns: [table.obligationId],
-      foreignColumns: [financialObligations.id],
+      columns: [table.obligation_id],
+      foreignColumns: [financial_obligations.id],
       name: "draft_records_obligation_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.reconciledTemplateId],
-      foreignColumns: [recurringTemplates.id],
+      columns: [table.reconciled_template_id],
+      foreignColumns: [recurring_templates.id],
       name: "draft_records_reconciled_template_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.reconciledTransactionId],
+      columns: [table.reconciled_transaction_id],
       foreignColumns: [transactions.id],
       name: "draft_records_reconciled_transaction_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "draft_records_source_document_id_fkey",
     }),
     check(
@@ -589,61 +570,61 @@ export const draftRecords = pgTable(
   ],
 );
 
-export const aiChatSessions = pgTable(
+export const ai_chat_sessions = pgTable(
   "ai_chat_sessions",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     title: text(),
-    contextType: text("context_type"),
-    contextId: uuid("context_id"),
+    context_type: text(),
+    context_id: uuid(),
     model: text().default("gpt-4o").notNull(),
-    totalTokensUsed: integer("total_tokens_used").default(0),
-    messageCount: integer("message_count").default(0),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    total_tokens_used: integer().default(0),
+    message_count: integer().default(0),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_ai_chat_sessions_updated").using(
       "btree",
-      table.updatedAt.desc().nullsFirst().op("timestamptz_ops"),
+      table.updated_at.desc().nullsFirst().op("timestamptz_ops"),
     ),
     index("idx_ai_chat_sessions_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
   ],
 );
 
-export const aiChatMessages = pgTable(
+export const ai_chat_messages = pgTable(
   "ai_chat_messages",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    sessionId: uuid("session_id").notNull(),
-    userId: uuid("user_id").notNull(),
+    session_id: uuid().notNull(),
+    user_id: uuid().notNull(),
     role: text().notNull(),
     content: text(),
-    toolCalls: jsonb("tool_calls"),
-    toolCallId: text("tool_call_id"),
-    toolName: text("tool_name"),
-    tokensUsed: integer("tokens_used"),
-    latencyMs: integer("latency_ms"),
+    tool_calls: jsonb(),
+    tool_call_id: text(),
+    tool_name: text(),
+    tokens_used: integer(),
+    latency_ms: integer(),
     model: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_ai_chat_messages_session").using(
       "btree",
-      table.sessionId.asc().nullsLast().op("timestamptz_ops"),
-      table.createdAt.asc().nullsLast().op("timestamptz_ops"),
+      table.session_id.asc().nullsLast().op("timestamptz_ops"),
+      table.created_at.asc().nullsLast().op("timestamptz_ops"),
     ),
     index("idx_ai_chat_messages_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.sessionId],
-      foreignColumns: [aiChatSessions.id],
+      columns: [table.session_id],
+      foreignColumns: [ai_chat_sessions.id],
       name: "ai_chat_messages_session_id_fkey",
     }).onDelete("cascade"),
     check(
@@ -653,76 +634,74 @@ export const aiChatMessages = pgTable(
   ],
 );
 
-export const documentFingerprints = pgTable(
+export const document_fingerprints = pgTable(
   "document_fingerprints",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    sourceDocumentId: uuid("source_document_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    contentHash: text("content_hash").notNull(),
-    canonicalFingerprint: text("canonical_fingerprint"),
-    hashAlgorithm: text("hash_algorithm").default("sha256"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    source_document_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    content_hash: text().notNull(),
+    canonical_fingerprint: text(),
+    hash_algorithm: text().default("sha256"),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_document_fingerprints_canonical")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.canonicalFingerprint.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.canonical_fingerprint.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(canonical_fingerprint IS NOT NULL)`),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "document_fingerprints_source_document_id_fkey",
     }),
-    unique("document_fingerprints_user_id_content_hash_key").on(table.contentHash, table.userId),
+    unique("document_fingerprints_user_id_content_hash_key").on(table.content_hash, table.user_id),
   ],
 );
 
-export const documentTransactions = pgTable(
+export const document_transactions = pgTable(
   "document_transactions",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    sourceDocumentId: uuid("source_document_id").notNull(),
-    transactionId: uuid("transaction_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    linkType: text("link_type").notNull(),
-    confidence: numeric({ precision: 4, scale: 3 }),
-    createdBy: text("created_by").default("user").notNull(),
+    source_document_id: uuid().notNull(),
+    transaction_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    link_type: text().notNull(),
+    confidence: numeric({ precision: 4, scale: 3, mode: "number" }),
+    created_by: text().default("user").notNull(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_document_transactions_source").using(
       "btree",
-      table.sourceDocumentId.asc().nullsLast().op("uuid_ops"),
+      table.source_document_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_document_transactions_tx").using(
       "btree",
-      table.transactionId.asc().nullsLast().op("uuid_ops"),
+      table.transaction_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_document_transactions_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "document_transactions_source_document_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.transactionId],
+      columns: [table.transaction_id],
       foreignColumns: [transactions.id],
       name: "document_transactions_transaction_id_fkey",
     }).onDelete("cascade"),
     unique("document_transactions_source_document_id_transaction_id_lin_key").on(
-      table.linkType,
-      table.sourceDocumentId,
-      table.transactionId,
+      table.link_type,
+      table.source_document_id,
+      table.transaction_id,
     ),
     check(
       "document_transactions_confidence_range",
@@ -739,38 +718,38 @@ export const documentTransactions = pgTable(
   ],
 );
 
-export const draftBatches = pgTable(
+export const draft_batches = pgTable(
   "draft_batches",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    runId: uuid("run_id"),
+    user_id: uuid().notNull(),
+    run_id: uuid(),
     name: text(),
     status: text().default("open").notNull(),
-    totalDrafts: integer("total_drafts").default(0),
-    approvedCount: integer("approved_count").default(0),
-    rejectedCount: integer("rejected_count").default(0),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    sourceDocumentId: uuid("source_document_id"),
+    total_drafts: integer().default(0),
+    approved_count: integer().default(0),
+    rejected_count: integer().default(0),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    source_document_id: uuid(),
   },
   (table) => [
     index("idx_draft_batches_source_document")
-      .using("btree", table.sourceDocumentId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.source_document_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(source_document_id IS NOT NULL)`),
     index("idx_draft_batches_user_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("text_ops"),
     ),
     foreignKey({
-      columns: [table.runId],
-      foreignColumns: [ingestionRuns.id],
+      columns: [table.run_id],
+      foreignColumns: [ingestion_runs.id],
       name: "draft_batches_run_id_fkey",
     }),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "draft_batches_source_document_id_fkey",
     }).onDelete("set null"),
     check(
@@ -780,46 +759,46 @@ export const draftBatches = pgTable(
   ],
 );
 
-export const externalAccountMappings = pgTable(
+export const external_account_mappings = pgTable(
   "external_account_mappings",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    providerConnectionId: uuid("provider_connection_id").notNull(),
-    externalAccountId: text("external_account_id").notNull(),
-    externalAccountName: text("external_account_name"),
-    externalAccountType: text("external_account_type"),
-    financialProductId: uuid("financial_product_id"),
+    user_id: uuid().notNull(),
+    provider_connection_id: uuid().notNull(),
+    external_account_id: text().notNull(),
+    external_account_name: text(),
+    external_account_type: text(),
+    financial_product_id: uuid(),
     status: text().default("pending_mapping").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_external_account_mappings_connection").using(
       "btree",
-      table.providerConnectionId.asc().nullsLast().op("uuid_ops"),
+      table.provider_connection_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_external_account_mappings_product").using(
       "btree",
-      table.financialProductId.asc().nullsLast().op("uuid_ops"),
+      table.financial_product_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_external_account_mappings_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "external_account_mappings_financial_product_id_fkey",
     }),
     foreignKey({
-      columns: [table.providerConnectionId],
-      foreignColumns: [providerConnections.id],
+      columns: [table.provider_connection_id],
+      foreignColumns: [provider_connections.id],
       name: "external_account_mappings_provider_connection_id_fkey",
     }).onDelete("cascade"),
     unique("external_account_mappings_provider_connection_id_external_a_key").on(
-      table.externalAccountId,
-      table.providerConnectionId,
+      table.external_account_id,
+      table.provider_connection_id,
     ),
     check(
       "external_account_mappings_status_check",
@@ -832,22 +811,21 @@ export const institutions = pgTable(
   "institutions",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
     type: text().default("bank").notNull(),
-    iconUrl: text("icon_url"),
+    icon_url: text(),
     color: text(),
-    isActive: boolean("is_active").default(true).notNull(),
-    displayOrder: integer("display_order"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    is_active: boolean().default(true).notNull(),
+    display_order: integer(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_institutions_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_institutions_user_id").using(
+      "btree",
+      table.user_id.asc().nullsLast().op("uuid_ops"),
+    ),
     check(
       "institutions_type_check",
       sql`type = ANY (ARRAY['bank'::text, 'fintech'::text, 'broker'::text, 'other'::text])`,
@@ -855,32 +833,30 @@ export const institutions = pgTable(
   ],
 );
 
-export const financialObligationIdentityKeys = pgTable(
+export const financial_obligation_identity_keys = pgTable(
   "financial_obligation_identity_keys",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    obligationId: uuid("obligation_id").notNull(),
+    user_id: uuid().notNull(),
+    obligation_id: uuid().notNull(),
     key: text().notNull(),
-    keyKind: text("key_kind").notNull(),
+    key_kind: text().notNull(),
     strength: text().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("ix_fo_identity_keys_obligation").using(
       "btree",
-      table.obligationId.asc().nullsLast().op("uuid_ops"),
+      table.obligation_id.asc().nullsLast().op("uuid_ops"),
     ),
     uniqueIndex("uq_fo_identity_keys").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.key.asc().nullsLast().op("text_ops"),
     ),
     foreignKey({
-      columns: [table.obligationId],
-      foreignColumns: [financialObligations.id],
+      columns: [table.obligation_id],
+      foreignColumns: [financial_obligations.id],
       name: "financial_obligation_identity_keys_obligation_id_fkey",
     }).onDelete("cascade"),
     check(
@@ -894,56 +870,56 @@ export const financialObligationIdentityKeys = pgTable(
   ],
 );
 
-export const ingestionJobs = pgTable(
+export const ingestion_jobs = pgTable(
   "ingestion_jobs",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    runId: uuid("run_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    sourceDocumentId: uuid("source_document_id"),
+    run_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    source_document_id: uuid(),
     status: text().default("discovered").notNull(),
-    errorMessage: text("error_message"),
-    errorDetails: jsonb("error_details"),
-    retryCount: integer("retry_count").default(0),
-    maxRetries: integer("max_retries").default(3),
+    error_message: text(),
+    error_details: jsonb(),
+    retry_count: integer().default(0),
+    max_retries: integer().default(3),
     metadata: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    needsFullAiReview: boolean("needs_full_ai_review").default(false),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    needs_full_ai_review: boolean().default(false),
   },
   (table) => [
     index("idx_ingestion_jobs_needs_full_ai_review")
       .using(
         "btree",
-        table.needsFullAiReview.asc().nullsLast().op("bool_ops"),
-        table.userId.asc().nullsLast().op("bool_ops"),
+        table.needs_full_ai_review.asc().nullsLast().op("bool_ops"),
+        table.user_id.asc().nullsLast().op("bool_ops"),
       )
       .where(sql`(needs_full_ai_review = true)`),
     index("idx_ingestion_jobs_queue")
       .using(
         "btree",
         table.status.asc().nullsLast().op("timestamptz_ops"),
-        table.createdAt.asc().nullsLast().op("text_ops"),
+        table.created_at.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(status = ANY (ARRAY['queued'::text, 'discovered'::text]))`),
     index("idx_ingestion_jobs_run").using(
       "btree",
-      table.runId.asc().nullsLast().op("text_ops"),
+      table.run_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("text_ops"),
     ),
     index("idx_ingestion_jobs_user_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.runId],
-      foreignColumns: [ingestionRuns.id],
+      columns: [table.run_id],
+      foreignColumns: [ingestion_runs.id],
       name: "ingestion_jobs_run_id_fkey",
     }),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "ingestion_jobs_source_document_id_fkey",
     }),
     check(
@@ -953,62 +929,54 @@ export const ingestionJobs = pgTable(
   ],
 );
 
-export const financialPeriods = pgTable(
+export const financial_periods = pgTable(
   "financial_periods",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    startDate: date("start_date").notNull(),
-    endDate: date("end_date").notNull(),
+    user_id: uuid().notNull(),
+    start_date: date().notNull(),
+    end_date: date().notNull(),
     label: text(),
-    isCurrent: boolean("is_current").default(false).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    is_current: boolean().default(false).notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_financial_periods_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     check("chk_period_dates", sql`end_date >= start_date`),
   ],
 );
 
-export const financialProducts = pgTable(
+export const financial_products = pgTable(
   "financial_products",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    institutionId: uuid("institution_id").notNull(),
+    user_id: uuid().notNull(),
+    institution_id: uuid().notNull(),
     name: text().notNull(),
     type: text().notNull(),
-    currentBalance: numeric("current_balance", { precision: 15, scale: 2 }).default("0"),
-    creditLimit: numeric("credit_limit", { precision: 15, scale: 2 }),
-    isActive: boolean("is_active").default(true).notNull(),
-    displayOrder: integer("display_order"),
+    current_balance: numeric({ precision: 15, scale: 2, mode: "number" }).default(0),
+    credit_limit: numeric({ precision: 15, scale: 2, mode: "number" }),
+    is_active: boolean().default(true).notNull(),
+    display_order: integer(),
     metadata: jsonb(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_financial_products_institution_id").using(
       "btree",
-      table.institutionId.asc().nullsLast().op("uuid_ops"),
+      table.institution_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_financial_products_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.institutionId],
+      columns: [table.institution_id],
       foreignColumns: [institutions.id],
       name: "financial_products_institution_id_fkey",
     }).onDelete("cascade"),
@@ -1019,30 +987,26 @@ export const financialProducts = pgTable(
   ],
 );
 
-export const importJobs = pgTable(
+export const import_jobs = pgTable(
   "import_jobs",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    sourceType: text("source_type").notNull(),
-    filePath: text("file_path"),
+    user_id: uuid().notNull(),
+    source_type: text().notNull(),
+    file_path: text(),
     status: text().default("pending").notNull(),
-    totalRows: integer("total_rows"),
-    importedRows: integer("imported_rows").default(0).notNull(),
-    skippedRows: integer("skipped_rows").default(0).notNull(),
-    errorRows: integer("error_rows").default(0).notNull(),
-    errorDetails: jsonb("error_details"),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
-    completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    total_rows: integer(),
+    imported_rows: integer().default(0).notNull(),
+    skipped_rows: integer().default(0).notNull(),
+    error_rows: integer().default(0).notNull(),
+    error_details: jsonb(),
+    started_at: timestamp({ withTimezone: true, mode: "string" }),
+    completed_at: timestamp({ withTimezone: true, mode: "string" }),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_import_jobs_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_import_jobs_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     check(
       "import_jobs_source_type_check",
       sql`source_type = ANY (ARRAY['csv'::text, 'xlsx'::text, 'manual'::text, 'api'::text])`,
@@ -1054,47 +1018,47 @@ export const importJobs = pgTable(
   ],
 );
 
-export const ingestionLogs = pgTable(
+export const ingestion_logs = pgTable(
   "ingestion_logs",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    runId: uuid("run_id"),
-    jobId: uuid("job_id"),
+    user_id: uuid().notNull(),
+    run_id: uuid(),
+    job_id: uuid(),
     level: text().default("info").notNull(),
     message: text().notNull(),
     details: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_ingestion_logs_job")
       .using(
         "btree",
-        table.jobId.asc().nullsLast().op("timestamptz_ops"),
-        table.createdAt.asc().nullsLast().op("timestamptz_ops"),
+        table.job_id.asc().nullsLast().op("timestamptz_ops"),
+        table.created_at.asc().nullsLast().op("timestamptz_ops"),
       )
       .where(sql`(job_id IS NOT NULL)`),
     index("idx_ingestion_logs_run").using(
       "btree",
-      table.runId.asc().nullsLast().op("uuid_ops"),
-      table.createdAt.asc().nullsLast().op("timestamptz_ops"),
+      table.run_id.asc().nullsLast().op("uuid_ops"),
+      table.created_at.asc().nullsLast().op("timestamptz_ops"),
     ),
     index("idx_ingestion_logs_user_level")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("timestamptz_ops"),
+        table.user_id.asc().nullsLast().op("timestamptz_ops"),
         table.level.asc().nullsLast().op("timestamptz_ops"),
-        table.createdAt.asc().nullsLast().op("uuid_ops"),
+        table.created_at.asc().nullsLast().op("uuid_ops"),
       )
       .where(sql`(level = ANY (ARRAY['warn'::text, 'error'::text]))`),
     foreignKey({
-      columns: [table.jobId],
-      foreignColumns: [ingestionJobs.id],
+      columns: [table.job_id],
+      foreignColumns: [ingestion_jobs.id],
       name: "ingestion_logs_job_id_fkey",
     }),
     foreignKey({
-      columns: [table.runId],
-      foreignColumns: [ingestionRuns.id],
+      columns: [table.run_id],
+      foreignColumns: [ingestion_runs.id],
       name: "ingestion_logs_run_id_fkey",
     }),
     check(
@@ -1104,40 +1068,36 @@ export const ingestionLogs = pgTable(
   ],
 );
 
-export const ingestionCheckpoints = pgTable(
+export const ingestion_checkpoints = pgTable(
   "ingestion_checkpoints",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    sourceType: text("source_type").notNull(),
-    scopeKey: text("scope_key").notNull(),
-    cursorKind: text("cursor_kind").notNull(),
-    cursorValue: text("cursor_value"),
-    lastMessageId: text("last_message_id"),
-    messagesSeen: integer("messages_seen").default(0).notNull(),
-    documentsCreated: integer("documents_created").default(0).notNull(),
-    duplicatesSkipped: integer("duplicates_skipped").default(0).notNull(),
+    user_id: uuid().notNull(),
+    source_type: text().notNull(),
+    scope_key: text().notNull(),
+    cursor_kind: text().notNull(),
+    cursor_value: text(),
+    last_message_id: text(),
+    messages_seen: integer().default(0).notNull(),
+    documents_created: integer().default(0).notNull(),
+    duplicates_skipped: integer().default(0).notNull(),
     errors: integer().default(0).notNull(),
-    windowStart: date("window_start"),
-    windowEnd: date("window_end"),
+    window_start: date(),
+    window_end: date(),
     status: text().default("running").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("ix_ingestion_checkpoints_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("text_ops"),
     ),
     unique("ingestion_checkpoints_user_id_source_type_scope_key_key").on(
-      table.scopeKey,
-      table.sourceType,
-      table.userId,
+      table.scope_key,
+      table.source_type,
+      table.user_id,
     ),
     check(
       "ingestion_checkpoints_cursor_kind_check",
@@ -1154,57 +1114,57 @@ export const ingestionCheckpoints = pgTable(
   ],
 );
 
-export const extractionResults = pgTable(
+export const extraction_results = pgTable(
   "extraction_results",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    parsedVersionId: uuid("parsed_version_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    supplierNameRaw: text("supplier_name_raw"),
-    supplierId: uuid("supplier_id"),
-    supplierConfidence: numeric("supplier_confidence", { precision: 3, scale: 2 }),
-    competenceDate: date("competence_date"),
-    dueDate: date("due_date"),
-    totalAmount: numeric("total_amount", { precision: 12, scale: 2 }),
+    parsed_version_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    supplier_name_raw: text(),
+    supplier_id: uuid(),
+    supplier_confidence: numeric({ precision: 3, scale: 2, mode: "number" }),
+    competence_date: date(),
+    due_date: date(),
+    total_amount: numeric({ precision: 12, scale: 2, mode: "number" }),
     currency: text().default("BRL"),
     breakdown: jsonb(),
-    documentNumber: text("document_number"),
-    contractIdentifier: text("contract_identifier"),
-    consumptionData: jsonb("consumption_data"),
-    categorySuggestion: text("category_suggestion"),
-    tagsSuggestion: text("tags_suggestion").array(),
-    prioritySuggestion: text("priority_suggestion"),
-    financialPeriodSuggestion: jsonb("financial_period_suggestion"),
+    document_number: text(),
+    contract_identifier: text(),
+    consumption_data: jsonb(),
+    category_suggestion: text(),
+    tags_suggestion: text().array(),
+    priority_suggestion: text(),
+    financial_period_suggestion: jsonb(),
     metadata: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    aiEnrichmentType: text("ai_enrichment_type"),
-    aiEnrichmentAt: timestamp("ai_enrichment_at", { withTimezone: true, mode: "string" }),
-    confidencePerField: jsonb("confidence_per_field"),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    ai_enrichment_type: text(),
+    ai_enrichment_at: timestamp({ withTimezone: true, mode: "string" }),
+    confidence_per_field: jsonb(),
     reasoning: text(),
-    financialIntent: text("financial_intent"),
+    financial_intent: text(),
   },
   (table) => [
     index("idx_extraction_results_ai_enrichment_type")
-      .using("btree", table.aiEnrichmentType.asc().nullsLast().op("text_ops"))
+      .using("btree", table.ai_enrichment_type.asc().nullsLast().op("text_ops"))
       .where(sql`(ai_enrichment_type IS NOT NULL)`),
     index("idx_extraction_results_supplier")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("uuid_ops"),
-        table.supplierId.asc().nullsLast().op("uuid_ops"),
+        table.user_id.asc().nullsLast().op("uuid_ops"),
+        table.supplier_id.asc().nullsLast().op("uuid_ops"),
       )
       .where(sql`(supplier_id IS NOT NULL)`),
     index("idx_extraction_results_version").using(
       "btree",
-      table.parsedVersionId.asc().nullsLast().op("uuid_ops"),
+      table.parsed_version_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.parsedVersionId],
-      foreignColumns: [parsedDocumentVersions.id],
+      columns: [table.parsed_version_id],
+      foreignColumns: [parsed_document_versions.id],
       name: "extraction_results_parsed_version_id_fkey",
     }),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "extraction_results_supplier_id_fkey",
     }),
@@ -1219,53 +1179,49 @@ export const extractionResults = pgTable(
   ],
 );
 
-export const financialObligations = pgTable(
+export const financial_obligations = pgTable(
   "financial_obligations",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    obligationType: text("obligation_type").notNull(),
+    user_id: uuid().notNull(),
+    obligation_type: text().notNull(),
     status: text().default("open").notNull(),
-    supplierId: uuid("supplier_id"),
-    supplierNameRaw: text("supplier_name_raw"),
-    financialProductId: uuid("financial_product_id"),
-    amount: numeric({ precision: 15, scale: 2 }),
-    dueDate: date("due_date"),
-    competenceDate: date("competence_date"),
-    cycleStartDate: date("cycle_start_date"),
-    cycleEndDate: date("cycle_end_date"),
-    documentNumber: text("document_number"),
-    barcodeDigitableLine: text("barcode_digitable_line"),
-    financialIdentityKey: text("financial_identity_key"),
-    confidenceScore: numeric("confidence_score", { precision: 3, scale: 2 }),
+    supplier_id: uuid(),
+    supplier_name_raw: text(),
+    financial_product_id: uuid(),
+    amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    due_date: date(),
+    competence_date: date(),
+    cycle_start_date: date(),
+    cycle_end_date: date(),
+    document_number: text(),
+    barcode_digitable_line: text(),
+    financial_identity_key: text(),
+    confidence_score: numeric({ precision: 3, scale: 2, mode: "number" }),
     metadata: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("idx_financial_obligations_identity")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.financialIdentityKey.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.financial_identity_key.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(financial_identity_key IS NOT NULL)`),
     index("idx_financial_obligations_user_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("text_ops"),
     ),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "financial_obligations_financial_product_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "financial_obligations_supplier_id_fkey",
     }).onDelete("set null"),
@@ -1284,46 +1240,42 @@ export const liabilities = pgTable(
   "liabilities",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    financialProductId: uuid("financial_product_id").notNull(),
+    user_id: uuid().notNull(),
+    financial_product_id: uuid().notNull(),
     name: text().notNull(),
     type: text().notNull(),
-    originalAmount: numeric("original_amount", { precision: 15, scale: 2 }).notNull(),
-    outstandingBalance: numeric("outstanding_balance", { precision: 15, scale: 2 }).notNull(),
-    interestRate: numeric("interest_rate", { precision: 8, scale: 6 }),
-    rateType: text("rate_type"),
-    amortizationSystem: text("amortization_system"),
-    totalInstallments: integer("total_installments"),
-    paidInstallments: integer("paid_installments").default(0).notNull(),
-    startDate: date("start_date"),
-    endDate: date("end_date"),
+    original_amount: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
+    outstanding_balance: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
+    interest_rate: numeric({ precision: 8, scale: 6, mode: "number" }),
+    rate_type: text(),
+    amortization_system: text(),
+    total_installments: integer(),
+    paid_installments: integer().default(0).notNull(),
+    start_date: date(),
+    end_date: date(),
     status: text().default("active").notNull(),
     metadata: jsonb(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    supplierId: uuid("supplier_id"),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    supplier_id: uuid(),
   },
   (table) => [
     index("idx_liabilities_financial_product_id").using(
       "btree",
-      table.financialProductId.asc().nullsLast().op("uuid_ops"),
+      table.financial_product_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_liabilities_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_liabilities_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_liabilities_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "liabilities_financial_product_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "liabilities_supplier_id_fkey",
     }).onDelete("set null"),
@@ -1346,31 +1298,29 @@ export const liabilities = pgTable(
   ],
 );
 
-export const ingestionRuns = pgTable(
+export const ingestion_runs = pgTable(
   "ingestion_runs",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    sourceType: text("source_type").notNull(),
+    user_id: uuid().notNull(),
+    source_type: text().notNull(),
     status: text().default("running").notNull(),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+    started_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    completed_at: timestamp({ withTimezone: true, mode: "string" }),
     metadata: jsonb().default({}),
     stats: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_ingestion_runs_user_source").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
-      table.sourceType.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
+      table.source_type.asc().nullsLast().op("text_ops"),
     ),
     index("idx_ingestion_runs_user_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
       table.status.asc().nullsLast().op("uuid_ops"),
     ),
     check(
@@ -1384,43 +1334,41 @@ export const ingestionRuns = pgTable(
   ],
 );
 
-export const financialObligationEvidences = pgTable(
+export const financial_obligation_evidences = pgTable(
   "financial_obligation_evidences",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    obligationId: uuid("obligation_id").notNull(),
-    sourceDocumentId: uuid("source_document_id").notNull(),
-    evidenceRole: text("evidence_role").default("supporting").notNull(),
-    confidenceScore: numeric("confidence_score", { precision: 3, scale: 2 }),
+    user_id: uuid().notNull(),
+    obligation_id: uuid().notNull(),
+    source_document_id: uuid().notNull(),
+    evidence_role: text().default("supporting").notNull(),
+    confidence_score: numeric({ precision: 3, scale: 2, mode: "number" }),
     reasons: jsonb().default([]),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_financial_obligation_evidences_document").using(
       "btree",
-      table.sourceDocumentId.asc().nullsLast().op("uuid_ops"),
+      table.source_document_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_financial_obligation_evidences_obligation").using(
       "btree",
-      table.obligationId.asc().nullsLast().op("uuid_ops"),
+      table.obligation_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.obligationId],
-      foreignColumns: [financialObligations.id],
+      columns: [table.obligation_id],
+      foreignColumns: [financial_obligations.id],
       name: "financial_obligation_evidences_obligation_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "financial_obligation_evidences_source_document_id_fkey",
     }).onDelete("cascade"),
     unique("financial_obligation_evidence_user_id_obligation_id_source__key").on(
-      table.obligationId,
-      table.sourceDocumentId,
-      table.userId,
+      table.obligation_id,
+      table.source_document_id,
+      table.user_id,
     ),
     check(
       "financial_obligation_evidences_evidence_role_check",
@@ -1429,49 +1377,45 @@ export const financialObligationEvidences = pgTable(
   ],
 );
 
-export const supplierAliases = pgTable(
+export const supplier_aliases = pgTable(
   "supplier_aliases",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    supplierId: uuid("supplier_id").notNull(),
-    aliasName: text("alias_name").notNull(),
-    aliasType: text("alias_type").default("other").notNull(),
-    isActive: boolean("is_active").default(true).notNull(),
-    validFrom: date("valid_from"),
-    validUntil: date("valid_until"),
+    user_id: uuid().notNull(),
+    supplier_id: uuid().notNull(),
+    alias_name: text().notNull(),
+    alias_type: text().default("other").notNull(),
+    is_active: boolean().default(true).notNull(),
+    valid_from: date(),
+    valid_until: date(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_supplier_aliases_resolve")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("date_ops"),
-        table.aliasName.asc().nullsLast().op("uuid_ops"),
-        table.validFrom.asc().nullsLast().op("text_ops"),
-        table.validUntil.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("date_ops"),
+        table.alias_name.asc().nullsLast().op("uuid_ops"),
+        table.valid_from.asc().nullsLast().op("text_ops"),
+        table.valid_until.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(is_active = true)`),
     index("idx_supplier_aliases_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_supplier_aliases_trgm").using(
       "gin",
-      table.aliasName.asc().nullsLast().op("gin_trgm_ops"),
+      table.alias_name.asc().nullsLast().op("gin_trgm_ops"),
     ),
     index("idx_supplier_aliases_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "supplier_aliases_supplier_id_fkey",
     }).onDelete("cascade"),
@@ -1482,88 +1426,88 @@ export const supplierAliases = pgTable(
   ],
 );
 
-export const sourceDocuments = pgTable(
+export const source_documents = pgTable(
   "source_documents",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    originType: text("origin_type").notNull(),
-    originKey: text("origin_key").notNull(),
-    gmailMessageId: text("gmail_message_id"),
-    gmailThreadId: text("gmail_thread_id"),
-    gmailAttachmentId: text("gmail_attachment_id"),
-    gmailLabel: text("gmail_label"),
-    gmailDate: timestamp("gmail_date", { withTimezone: true, mode: "string" }),
-    gmailFrom: text("gmail_from"),
-    gmailSubject: text("gmail_subject"),
-    localFilepath: text("local_filepath"),
-    localMtime: timestamp("local_mtime", { withTimezone: true, mode: "string" }),
+    user_id: uuid().notNull(),
+    origin_type: text().notNull(),
+    origin_key: text().notNull(),
+    gmail_message_id: text(),
+    gmail_thread_id: text(),
+    gmail_attachment_id: text(),
+    gmail_label: text(),
+    gmail_date: timestamp({ withTimezone: true, mode: "string" }),
+    gmail_from: text(),
+    gmail_subject: text(),
+    local_filepath: text(),
+    local_mtime: timestamp({ withTimezone: true, mode: "string" }),
     filename: text().notNull(),
-    mimeType: text("mime_type"),
+    mime_type: text(),
     // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-    fileSizeBytes: bigint("file_size_bytes", { mode: "number" }),
-    storagePath: text("storage_path"),
+    file_size_bytes: bigint({ mode: "number" }),
+    storage_path: text(),
     status: text().default("new").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    contentHash: text("content_hash"),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    content_hash: text(),
     metadata: jsonb(),
-    documentType: text("document_type"),
-    supplierId: uuid("supplier_id"),
-    supplierNameRaw: text("supplier_name_raw"),
+    document_type: text(),
+    supplier_id: uuid(),
+    supplier_name_raw: text(),
   },
   (table) => [
     index("idx_source_documents_content_hash")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("uuid_ops"),
-        table.contentHash.asc().nullsLast().op("uuid_ops"),
+        table.user_id.asc().nullsLast().op("uuid_ops"),
+        table.content_hash.asc().nullsLast().op("uuid_ops"),
       )
       .where(sql`(content_hash IS NOT NULL)`),
     index("idx_source_documents_document_type")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("uuid_ops"),
-        table.documentType.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("uuid_ops"),
+        table.document_type.asc().nullsLast().op("text_ops"),
       )
       .where(sql`(document_type IS NOT NULL)`),
     index("idx_source_documents_gmail_msg")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.gmailMessageId.asc().nullsLast().op("uuid_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.gmail_message_id.asc().nullsLast().op("uuid_ops"),
       )
       .where(sql`(gmail_message_id IS NOT NULL)`),
     uniqueIndex("idx_source_documents_gmail_msg_file_dedup")
       .using(
         "btree",
-        table.userId.asc().nullsLast().op("text_ops"),
-        table.gmailMessageId.asc().nullsLast().op("text_ops"),
+        table.user_id.asc().nullsLast().op("text_ops"),
+        table.gmail_message_id.asc().nullsLast().op("text_ops"),
         table.filename.asc().nullsLast().op("uuid_ops"),
       )
       .where(sql`((origin_type = 'gmail'::text) AND (gmail_message_id IS NOT NULL))`),
     index("idx_source_documents_status").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.status.asc().nullsLast().op("text_ops"),
     ),
     index("idx_source_documents_supplier_id")
-      .using("btree", table.supplierId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.supplier_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(supplier_id IS NOT NULL)`),
     index("idx_source_documents_user_origin").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
-      table.originType.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
+      table.origin_type.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "source_documents_supplier_id_fkey",
     }).onDelete("set null"),
     unique("source_documents_user_id_origin_type_origin_key_key").on(
-      table.originKey,
-      table.originType,
-      table.userId,
+      table.origin_key,
+      table.origin_type,
+      table.user_id,
     ),
     check(
       "source_documents_origin_type_check",
@@ -1572,29 +1516,29 @@ export const sourceDocuments = pgTable(
   ],
 );
 
-export const providerConnections = pgTable(
+export const provider_connections = pgTable(
   "provider_connections",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     provider: text().notNull(),
-    externalItemId: text("external_item_id").notNull(),
-    institutionName: text("institution_name"),
+    external_item_id: text().notNull(),
+    institution_name: text(),
     status: text().default("active").notNull(),
-    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true, mode: "string" }),
+    last_synced_at: timestamp({ withTimezone: true, mode: "string" }),
     metadata: jsonb().default({}).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_provider_connections_user").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     unique("provider_connections_user_id_provider_external_item_id_key").on(
-      table.externalItemId,
+      table.external_item_id,
       table.provider,
-      table.userId,
+      table.user_id,
     ),
     check("provider_connections_provider_check", sql`provider = 'pluggy'::text`),
     check(
@@ -1604,35 +1548,35 @@ export const providerConnections = pgTable(
   ],
 );
 
-export const parsedDocumentVersions = pgTable(
+export const parsed_document_versions = pgTable(
   "parsed_document_versions",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    sourceDocumentId: uuid("source_document_id").notNull(),
-    userId: uuid("user_id").notNull(),
-    versionNumber: integer("version_number").default(1).notNull(),
-    parserType: text("parser_type").notNull(),
-    parserVersion: text("parser_version"),
-    rawText: text("raw_text"),
-    structuredData: jsonb("structured_data"),
-    confidenceScore: numeric("confidence_score", { precision: 3, scale: 2 }),
+    source_document_id: uuid().notNull(),
+    user_id: uuid().notNull(),
+    version_number: integer().default(1).notNull(),
+    parser_type: text().notNull(),
+    parser_version: text(),
+    raw_text: text(),
+    structured_data: jsonb(),
+    confidence_score: numeric({ precision: 3, scale: 2, mode: "number" }),
     metadata: jsonb().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
   },
   (table) => [
     index("idx_parsed_versions_doc").using(
       "btree",
-      table.sourceDocumentId.asc().nullsLast().op("int4_ops"),
-      table.versionNumber.desc().nullsFirst().op("uuid_ops"),
+      table.source_document_id.asc().nullsLast().op("int4_ops"),
+      table.version_number.desc().nullsFirst().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "parsed_document_versions_source_document_id_fkey",
     }),
     unique("parsed_document_versions_source_document_id_version_number_key").on(
-      table.sourceDocumentId,
-      table.versionNumber,
+      table.source_document_id,
+      table.version_number,
     ),
     check(
       "parsed_document_versions_parser_type_check",
@@ -1641,54 +1585,50 @@ export const parsedDocumentVersions = pgTable(
   ],
 );
 
-export const recurringTemplates = pgTable(
+export const recurring_templates = pgTable(
   "recurring_templates",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    financialProductId: uuid("financial_product_id"),
+    user_id: uuid().notNull(),
+    financial_product_id: uuid(),
     name: text().notNull(),
     type: text().notNull(),
-    amount: numeric({ precision: 15, scale: 2 }),
-    isVariableAmount: boolean("is_variable_amount").default(false).notNull(),
+    amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    is_variable_amount: boolean().default(false).notNull(),
     frequency: text().notNull(),
-    dayOfMonth: integer("day_of_month"),
-    customIntervalDays: integer("custom_interval_days"),
-    categoryId: uuid("category_id"),
+    day_of_month: integer(),
+    custom_interval_days: integer(),
+    category_id: uuid(),
     priority: text(),
-    startsAt: date("starts_at"),
-    endsAt: date("ends_at"),
-    isActive: boolean("is_active").default(true).notNull(),
+    starts_at: date(),
+    ends_at: date(),
+    is_active: boolean().default(true).notNull(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    supplierId: uuid("supplier_id"),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    supplier_id: uuid(),
   },
   (table) => [
     index("idx_recurring_templates_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_recurring_templates_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.categoryId],
+      columns: [table.category_id],
       foreignColumns: [categories.id],
       name: "recurring_templates_category_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "recurring_templates_financial_product_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "recurring_templates_supplier_id_fkey",
     }).onDelete("set null"),
@@ -1711,37 +1651,33 @@ export const recurringTemplates = pgTable(
   ],
 );
 
-export const statementCycles = pgTable(
+export const statement_cycles = pgTable(
   "statement_cycles",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    cardId: uuid("card_id").notNull(),
-    referenceMonth: date("reference_month").notNull(),
-    cycleStartDate: date("cycle_start_date").notNull(),
-    cycleEndDate: date("cycle_end_date").notNull(),
-    dueDate: date("due_date").notNull(),
-    totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).default("0"),
-    paidAmount: numeric("paid_amount", { precision: 15, scale: 2 }).default("0"),
+    user_id: uuid().notNull(),
+    card_id: uuid().notNull(),
+    reference_month: date().notNull(),
+    cycle_start_date: date().notNull(),
+    cycle_end_date: date().notNull(),
+    due_date: date().notNull(),
+    total_amount: numeric({ precision: 15, scale: 2, mode: "number" }).default(0),
+    paid_amount: numeric({ precision: 15, scale: 2, mode: "number" }).default(0),
     status: text().default("open").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_statement_cycles_card_id").using(
       "btree",
-      table.cardId.asc().nullsLast().op("uuid_ops"),
+      table.card_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_statement_cycles_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.cardId],
+      columns: [table.card_id],
       foreignColumns: [cards.id],
       name: "statement_cycles_card_id_fkey",
     }).onDelete("cascade"),
@@ -1752,92 +1688,84 @@ export const statementCycles = pgTable(
   ],
 );
 
-export const statementItems = pgTable(
+export const statement_items = pgTable(
   "statement_items",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    statementCycleId: uuid("statement_cycle_id").notNull(),
-    transactionId: uuid("transaction_id"),
+    user_id: uuid().notNull(),
+    statement_cycle_id: uuid().notNull(),
+    transaction_id: uuid(),
     description: text(),
-    amount: numeric({ precision: 15, scale: 2 }).notNull(),
-    transactionDate: date("transaction_date"),
-    installmentNumber: integer("installment_number"),
-    totalInstallments: integer("total_installments"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    supplierId: uuid("supplier_id"),
+    amount: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
+    transaction_date: date(),
+    installment_number: integer(),
+    total_installments: integer(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    supplier_id: uuid(),
   },
   (table) => [
     index("idx_statement_items_statement_cycle_id").using(
       "btree",
-      table.statementCycleId.asc().nullsLast().op("uuid_ops"),
+      table.statement_cycle_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_statement_items_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     uniqueIndex("idx_statement_items_transaction_id")
-      .using("btree", table.transactionId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.transaction_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(transaction_id IS NOT NULL)`),
     index("idx_statement_items_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.statementCycleId],
-      foreignColumns: [statementCycles.id],
+      columns: [table.statement_cycle_id],
+      foreignColumns: [statement_cycles.id],
       name: "statement_items_statement_cycle_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "statement_items_supplier_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.transactionId],
+      columns: [table.transaction_id],
       foreignColumns: [transactions.id],
       name: "statement_items_transaction_id_fkey",
     }).onDelete("set null"),
   ],
 );
 
-export const supplierContracts = pgTable(
+export const supplier_contracts = pgTable(
   "supplier_contracts",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    supplierId: uuid("supplier_id").notNull(),
-    contractType: text("contract_type").notNull(),
+    user_id: uuid().notNull(),
+    supplier_id: uuid().notNull(),
+    contract_type: text().notNull(),
     identifier: text(),
     label: text(),
-    isActive: boolean("is_active").default(true).notNull(),
-    startDate: date("start_date"),
-    endDate: date("end_date"),
+    is_active: boolean().default(true).notNull(),
+    start_date: date(),
+    end_date: date(),
     metadata: jsonb(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_supplier_contracts_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_supplier_contracts_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "supplier_contracts_supplier_id_fkey",
     }).onDelete("cascade"),
@@ -1848,40 +1776,36 @@ export const supplierContracts = pgTable(
   ],
 );
 
-export const liabilityInstallments = pgTable(
+export const liability_installments = pgTable(
   "liability_installments",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    liabilityId: uuid("liability_id").notNull(),
-    installmentNumber: integer("installment_number").notNull(),
-    dueDate: date("due_date").notNull(),
-    totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull(),
-    principalAmount: numeric("principal_amount", { precision: 15, scale: 2 }),
-    interestAmount: numeric("interest_amount", { precision: 15, scale: 2 }),
-    insuranceAmount: numeric("insurance_amount", { precision: 15, scale: 2 }),
-    feeAmount: numeric("fee_amount", { precision: 15, scale: 2 }),
-    paidAmount: numeric("paid_amount", { precision: 15, scale: 2 }).default("0").notNull(),
-    paidDate: date("paid_date"),
+    user_id: uuid().notNull(),
+    liability_id: uuid().notNull(),
+    installment_number: integer().notNull(),
+    due_date: date().notNull(),
+    total_amount: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
+    principal_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    interest_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    insurance_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    fee_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    paid_amount: numeric({ precision: 15, scale: 2, mode: "number" }).default(0).notNull(),
+    paid_date: date(),
     status: text().default("pending").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_liability_installments_liability_id").using(
       "btree",
-      table.liabilityId.asc().nullsLast().op("uuid_ops"),
+      table.liability_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_liability_installments_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.liabilityId],
+      columns: [table.liability_id],
       foreignColumns: [liabilities.id],
       name: "liability_installments_liability_id_fkey",
     }).onDelete("cascade"),
@@ -1896,30 +1820,26 @@ export const suppliers = pgTable(
   "suppliers",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
-    tradeName: text("trade_name"),
-    legalName: text("legal_name"),
-    documentNumber: text("document_number"),
+    trade_name: text(),
+    legal_name: text(),
+    document_number: text(),
     type: text().default("company").notNull(),
     website: text(),
-    contactInfo: jsonb("contact_info"),
+    contact_info: jsonb(),
     notes: text(),
-    institutionId: uuid("institution_id"),
-    isActive: boolean("is_active").default(true).notNull(),
-    displayOrder: integer("display_order"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    institution_id: uuid(),
+    is_active: boolean().default(true).notNull(),
+    display_order: integer(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_suppliers_name_trgm").using("gin", table.name.asc().nullsLast().op("gin_trgm_ops")),
-    index("idx_suppliers_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_suppliers_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.institutionId],
+      columns: [table.institution_id],
       foreignColumns: [institutions.id],
       name: "suppliers_institution_id_fkey",
     }).onDelete("set null"),
@@ -1934,119 +1854,117 @@ export const transactions = pgTable(
   "transactions",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    financialProductId: uuid("financial_product_id").notNull(),
+    user_id: uuid().notNull(),
+    financial_product_id: uuid().notNull(),
     type: text().notNull(),
-    amount: numeric({ precision: 15, scale: 2 }).notNull(),
+    amount: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
     description: text(),
-    eventDate: date("event_date").notNull(),
-    competenceDate: date("competence_date"),
-    financialPeriodId: uuid("financial_period_id"),
-    statementCycleId: uuid("statement_cycle_id"),
-    liabilityInstallmentId: uuid("liability_installment_id"),
-    categoryId: uuid("category_id"),
+    event_date: date().notNull(),
+    competence_date: date(),
+    financial_period_id: uuid(),
+    statement_cycle_id: uuid(),
+    liability_installment_id: uuid(),
+    category_id: uuid(),
     priority: text(),
-    isConfirmed: boolean("is_confirmed").default(false).notNull(),
+    is_confirmed: boolean().default(false).notNull(),
     notes: text(),
     metadata: jsonb(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    originType: text("origin_type").default("manual").notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    origin_type: text().default("manual").notNull(),
     // Referência cruzada para recurring_instances (declarada mais abaixo neste
     // arquivo): usa .references() com callback tipado (AnyPgColumn) em vez do
-    // foreignKey() builder para quebrar o ciclo de inferência de tipos entre
-    // transactions <-> recurring_instances (TS7022/TS7024 — ver edição manual
-    // nº 1 no cabeçalho deste arquivo). O nome do constraint gerado pelo
-    // Drizzle passa a ser o
-    // default automático em vez de "transactions_recurring_instance_id_fkey"
-    // (mesma semântica de onDelete "set null"); isso não afeta queries, só
-    // teria efeito se este schema fosse usado para `drizzle-kit generate`/push,
-    // o que não é o caso neste projeto (schema.sql/Neon são a fonte da verdade).
-    recurringInstanceId: uuid("recurring_instance_id").references(
-      (): AnyPgColumn => recurringInstances.id,
-      { onDelete: "set null" },
-    ),
-    supplierId: uuid("supplier_id"),
-    sourceDocumentId: uuid("source_document_id"),
+    // foreignKey() builder na lista de constraints para quebrar o ciclo de
+    // inferência de tipos entre transactions <-> recurring_instances
+    // (TS7022/TS7024 — ver edição manual nº 1 no cabeçalho deste arquivo). O
+    // nome do constraint gerado pelo Drizzle passa a ser o default automático
+    // em vez de "transactions_recurring_instance_id_fkey" (mesma semântica de
+    // onDelete "set null"); isso não afeta queries, só teria efeito se este
+    // schema fosse usado para `drizzle-kit generate`/push, o que não é o caso
+    // neste projeto (schema.sql/Neon são a fonte da verdade).
+    recurring_instance_id: uuid().references((): AnyPgColumn => recurring_instances.id, {
+      onDelete: "set null",
+    }),
+    supplier_id: uuid(),
+    source_document_id: uuid(),
   },
   (table) => [
     index("idx_transactions_category_id").using(
       "btree",
-      table.categoryId.asc().nullsLast().op("uuid_ops"),
+      table.category_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_event_date").using(
       "btree",
-      table.userId.asc().nullsLast().op("date_ops"),
-      table.eventDate.asc().nullsLast().op("date_ops"),
+      table.user_id.asc().nullsLast().op("date_ops"),
+      table.event_date.asc().nullsLast().op("date_ops"),
     ),
     index("idx_transactions_financial_period_id").using(
       "btree",
-      table.financialPeriodId.asc().nullsLast().op("uuid_ops"),
+      table.financial_period_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_financial_product_id").using(
       "btree",
-      table.financialProductId.asc().nullsLast().op("uuid_ops"),
+      table.financial_product_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_recurring_instance_id").using(
       "btree",
-      table.recurringInstanceId.asc().nullsLast().op("uuid_ops"),
+      table.recurring_instance_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_source_document_id")
-      .using("btree", table.sourceDocumentId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.source_document_id.asc().nullsLast().op("uuid_ops"))
       .where(sql`(source_document_id IS NOT NULL)`),
     index("idx_transactions_statement_cycle_id").using(
       "btree",
-      table.statementCycleId.asc().nullsLast().op("uuid_ops"),
+      table.statement_cycle_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transactions_type").using(
       "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
+      table.user_id.asc().nullsLast().op("text_ops"),
       table.type.asc().nullsLast().op("text_ops"),
     ),
-    index("idx_transactions_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_transactions_user_id").using(
+      "btree",
+      table.user_id.asc().nullsLast().op("uuid_ops"),
+    ),
     foreignKey({
-      columns: [table.categoryId],
+      columns: [table.category_id],
       foreignColumns: [categories.id],
       name: "transactions_category_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.financialPeriodId],
-      foreignColumns: [financialPeriods.id],
+      columns: [table.financial_period_id],
+      foreignColumns: [financial_periods.id],
       name: "transactions_financial_period_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.financialProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.financial_product_id],
+      foreignColumns: [financial_products.id],
       name: "transactions_financial_product_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.liabilityInstallmentId],
-      foreignColumns: [liabilityInstallments.id],
+      columns: [table.liability_installment_id],
+      foreignColumns: [liability_installments.id],
       name: "transactions_liability_installment_id_fkey",
     }).onDelete("set null"),
     // FK para recurring_instances agora definida inline na coluna acima
-    // (recurringInstanceId.references(...)) para quebrar o ciclo de tipos —
+    // (recurring_instance_id.references(...)) para quebrar o ciclo de tipos —
     // ver comentário na definição da coluna.
     foreignKey({
-      columns: [table.sourceDocumentId],
-      foreignColumns: [sourceDocuments.id],
+      columns: [table.source_document_id],
+      foreignColumns: [source_documents.id],
       name: "transactions_source_document_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.statementCycleId],
-      foreignColumns: [statementCycles.id],
+      columns: [table.statement_cycle_id],
+      foreignColumns: [statement_cycles.id],
       name: "transactions_statement_cycle_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "transactions_supplier_id_fkey",
     }).onDelete("set null"),
@@ -2065,42 +1983,38 @@ export const transactions = pgTable(
   ],
 );
 
-export const recurringInstances = pgTable(
+export const recurring_instances = pgTable(
   "recurring_instances",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    recurringTemplateId: uuid("recurring_template_id").notNull(),
-    expectedDate: date("expected_date").notNull(),
-    expectedAmount: numeric("expected_amount", { precision: 15, scale: 2 }),
-    actualAmount: numeric("actual_amount", { precision: 15, scale: 2 }),
+    user_id: uuid().notNull(),
+    recurring_template_id: uuid().notNull(),
+    expected_date: date().notNull(),
+    expected_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
+    actual_amount: numeric({ precision: 15, scale: 2, mode: "number" }),
     status: text().default("pending").notNull(),
-    paidDate: date("paid_date"),
-    transactionId: uuid("transaction_id"),
+    paid_date: date(),
+    transaction_id: uuid(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_recurring_instances_template_id").using(
       "btree",
-      table.recurringTemplateId.asc().nullsLast().op("uuid_ops"),
+      table.recurring_template_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_recurring_instances_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.recurringTemplateId],
-      foreignColumns: [recurringTemplates.id],
+      columns: [table.recurring_template_id],
+      foreignColumns: [recurring_templates.id],
       name: "recurring_instances_recurring_template_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.transactionId],
+      columns: [table.transaction_id],
       foreignColumns: [transactions.id],
       name: "recurring_instances_transaction_id_fkey",
     }).onDelete("set null"),
@@ -2111,33 +2025,31 @@ export const recurringInstances = pgTable(
   ],
 );
 
-export const supplierTags = pgTable(
+export const supplier_tags = pgTable(
   "supplier_tags",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    supplierId: uuid("supplier_id").notNull(),
-    tagId: uuid("tag_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    user_id: uuid().notNull(),
+    supplier_id: uuid().notNull(),
+    tag_id: uuid().notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_supplier_tags_supplier_id").using(
       "btree",
-      table.supplierId.asc().nullsLast().op("uuid_ops"),
+      table.supplier_id.asc().nullsLast().op("uuid_ops"),
     ),
     foreignKey({
-      columns: [table.supplierId],
+      columns: [table.supplier_id],
       foreignColumns: [suppliers.id],
       name: "supplier_tags_supplier_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.tagId],
+      columns: [table.tag_id],
       foreignColumns: [tags.id],
       name: "supplier_tags_tag_id_fkey",
     }).onDelete("cascade"),
-    unique("supplier_tags_supplier_id_tag_id_key").on(table.supplierId, table.tagId),
+    unique("supplier_tags_supplier_id_tag_id_key").on(table.supplier_id, table.tag_id),
   ],
 );
 
@@ -2145,20 +2057,16 @@ export const tags = pgTable(
   "tags",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
+    user_id: uuid().notNull(),
     name: text().notNull(),
     color: text(),
-    influencesPriority: boolean("influences_priority").default(false).notNull(),
-    suggestedPriority: text("suggested_priority"),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    influences_priority: boolean().default(false).notNull(),
+    suggested_priority: text(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_tags_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_tags_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     check(
       "tags_suggested_priority_check",
       sql`(suggested_priority IS NULL) OR (suggested_priority = ANY (ARRAY['essential'::text, 'high'::text, 'medium'::text, 'low'::text, 'optional'::text]))`,
@@ -2170,72 +2078,64 @@ export const transfers = pgTable(
   "transfers",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    sourceProductId: uuid("source_product_id").notNull(),
-    targetProductId: uuid("target_product_id").notNull(),
-    amount: numeric({ precision: 15, scale: 2 }).notNull(),
+    user_id: uuid().notNull(),
+    source_product_id: uuid().notNull(),
+    target_product_id: uuid().notNull(),
+    amount: numeric({ precision: 15, scale: 2, mode: "number" }).notNull(),
     description: text(),
-    eventDate: date("event_date").notNull(),
-    competenceDate: date("competence_date"),
-    financialPeriodId: uuid("financial_period_id"),
-    isConfirmed: boolean("is_confirmed").default(false).notNull(),
+    event_date: date().notNull(),
+    competence_date: date(),
+    financial_period_id: uuid(),
+    is_confirmed: boolean().default(false).notNull(),
     notes: text(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_transfers_source_product_id").using(
       "btree",
-      table.sourceProductId.asc().nullsLast().op("uuid_ops"),
+      table.source_product_id.asc().nullsLast().op("uuid_ops"),
     ),
     index("idx_transfers_target_product_id").using(
       "btree",
-      table.targetProductId.asc().nullsLast().op("uuid_ops"),
+      table.target_product_id.asc().nullsLast().op("uuid_ops"),
     ),
-    index("idx_transfers_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+    index("idx_transfers_user_id").using("btree", table.user_id.asc().nullsLast().op("uuid_ops")),
     foreignKey({
-      columns: [table.financialPeriodId],
-      foreignColumns: [financialPeriods.id],
+      columns: [table.financial_period_id],
+      foreignColumns: [financial_periods.id],
       name: "transfers_financial_period_id_fkey",
     }).onDelete("set null"),
     foreignKey({
-      columns: [table.sourceProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.source_product_id],
+      foreignColumns: [financial_products.id],
       name: "transfers_source_product_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.targetProductId],
-      foreignColumns: [financialProducts.id],
+      columns: [table.target_product_id],
+      foreignColumns: [financial_products.id],
       name: "transfers_target_product_id_fkey",
     }).onDelete("cascade"),
   ],
 );
 
-export const userFinancialPreferences = pgTable(
+export const user_financial_preferences = pgTable(
   "user_financial_preferences",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
-    userId: uuid("user_id").notNull(),
-    financialCycleStartDay: integer("financial_cycle_start_day"),
-    financialCycleAnchorDate: date("financial_cycle_anchor_date"),
-    defaultCurrency: text("default_currency").default("BRL").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-      .defaultNow()
-      .notNull(),
+    user_id: uuid().notNull(),
+    financial_cycle_start_day: integer(),
+    financial_cycle_anchor_date: date(),
+    default_currency: text().default("BRL").notNull(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_user_financial_preferences_user_id").using(
       "btree",
-      table.userId.asc().nullsLast().op("uuid_ops"),
+      table.user_id.asc().nullsLast().op("uuid_ops"),
     ),
-    unique("user_financial_preferences_user_id_key").on(table.userId),
+    unique("user_financial_preferences_user_id_key").on(table.user_id),
     check(
       "user_financial_preferences_financial_cycle_start_day_check",
       sql`(financial_cycle_start_day >= 1) AND (financial_cycle_start_day <= 31)`,
@@ -2243,100 +2143,100 @@ export const userFinancialPreferences = pgTable(
   ],
 );
 
-export const liabilityTags = pgTable(
+export const liability_tags = pgTable(
   "liability_tags",
   {
-    liabilityId: uuid("liability_id").notNull(),
-    tagId: uuid("tag_id").notNull(),
+    liability_id: uuid().notNull(),
+    tag_id: uuid().notNull(),
   },
   (table) => [
     foreignKey({
-      columns: [table.liabilityId],
+      columns: [table.liability_id],
       foreignColumns: [liabilities.id],
       name: "liability_tags_liability_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.tagId],
+      columns: [table.tag_id],
       foreignColumns: [tags.id],
       name: "liability_tags_tag_id_fkey",
     }).onDelete("cascade"),
-    primaryKey({ columns: [table.liabilityId, table.tagId], name: "liability_tags_pkey" }),
+    primaryKey({ columns: [table.liability_id, table.tag_id], name: "liability_tags_pkey" }),
   ],
 );
 
-export const recurringTemplateTags = pgTable(
+export const recurring_template_tags = pgTable(
   "recurring_template_tags",
   {
-    recurringTemplateId: uuid("recurring_template_id").notNull(),
-    tagId: uuid("tag_id").notNull(),
+    recurring_template_id: uuid().notNull(),
+    tag_id: uuid().notNull(),
   },
   (table) => [
     foreignKey({
-      columns: [table.recurringTemplateId],
-      foreignColumns: [recurringTemplates.id],
+      columns: [table.recurring_template_id],
+      foreignColumns: [recurring_templates.id],
       name: "recurring_template_tags_recurring_template_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.tagId],
+      columns: [table.tag_id],
       foreignColumns: [tags.id],
       name: "recurring_template_tags_tag_id_fkey",
     }).onDelete("cascade"),
     primaryKey({
-      columns: [table.recurringTemplateId, table.tagId],
+      columns: [table.recurring_template_id, table.tag_id],
       name: "recurring_template_tags_pkey",
     }),
   ],
 );
 
-export const transactionTags = pgTable(
+export const transaction_tags = pgTable(
   "transaction_tags",
   {
-    transactionId: uuid("transaction_id").notNull(),
-    tagId: uuid("tag_id").notNull(),
+    transaction_id: uuid().notNull(),
+    tag_id: uuid().notNull(),
   },
   (table) => [
     foreignKey({
-      columns: [table.tagId],
+      columns: [table.tag_id],
       foreignColumns: [tags.id],
       name: "transaction_tags_tag_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
-      columns: [table.transactionId],
+      columns: [table.transaction_id],
       foreignColumns: [transactions.id],
       name: "transaction_tags_transaction_id_fkey",
     }).onDelete("cascade"),
-    primaryKey({ columns: [table.tagId, table.transactionId], name: "transaction_tags_pkey" }),
+    primaryKey({ columns: [table.tag_id, table.transaction_id], name: "transaction_tags_pkey" }),
   ],
 );
-export const vExpensesDeduplicated = pgView("v_expenses_deduplicated", {
-  canonicalId: uuid("canonical_id"),
-  sourceType: text("source_type"),
-  userId: uuid("user_id"),
-  amount: numeric({ precision: 15, scale: 2 }),
+export const v_expenses_deduplicated = pgView("v_expenses_deduplicated", {
+  canonical_id: uuid(),
+  source_type: text(),
+  user_id: uuid(),
+  amount: numeric({ precision: 15, scale: 2, mode: "number" }),
   description: text(),
-  supplierId: uuid("supplier_id"),
-  categoryId: uuid("category_id"),
+  supplier_id: uuid(),
+  category_id: uuid(),
   priority: text(),
-  eventDate: date("event_date"),
-  competenceDate: date("competence_date"),
-  financialPeriodId: uuid("financial_period_id"),
-  statementCycleId: uuid("statement_cycle_id"),
+  event_date: date(),
+  competence_date: date(),
+  financial_period_id: uuid(),
+  statement_cycle_id: uuid(),
 }).as(
   sql`SELECT si.id AS canonical_id, 'statement_item'::text AS source_type, si.user_id, si.amount, si.description, si.supplier_id, NULL::uuid AS category_id, NULL::text AS priority, si.transaction_date AS event_date, NULL::date AS competence_date, NULL::uuid AS financial_period_id, si.statement_cycle_id FROM statement_items si WHERE si.transaction_id IS NULL UNION ALL SELECT t.id AS canonical_id, 'transaction'::text AS source_type, t.user_id, t.amount, t.description, t.supplier_id, t.category_id, t.priority, t.event_date, t.competence_date, t.financial_period_id, t.statement_cycle_id FROM transactions t WHERE (t.type = ANY (ARRAY['expense'::text, 'fee'::text, 'interest_charge'::text])) AND (t.type <> ALL (ARRAY['statement_payment'::text, 'refund'::text]))`,
 );
 
-export const mvSupplierSpending = pgMaterializedView("mv_supplier_spending", {
-  userId: uuid("user_id"),
-  supplierId: uuid("supplier_id"),
-  supplierName: text("supplier_name"),
-  supplierType: text("supplier_type"),
+export const mv_supplier_spending = pgMaterializedView("mv_supplier_spending", {
+  user_id: uuid(),
+  supplier_id: uuid(),
+  supplier_name: text(),
+  supplier_type: text(),
   // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-  transactionCount: bigint("transaction_count", { mode: "number" }),
-  totalSpent: numeric("total_spent"),
-  firstTransactionDate: date("first_transaction_date"),
-  lastTransactionDate: date("last_transaction_date"),
+  transaction_count: bigint({ mode: "number" }),
+  total_spent: numeric({ mode: "number" }),
+  first_transaction_date: date(),
+  last_transaction_date: date(),
   // You can use { mode: "bigint" } if numbers are exceeding js number limitations
-  periodsActive: bigint("periods_active", { mode: "number" }),
+  periods_active: bigint({ mode: "number" }),
 }).as(
   sql`SELECT s.user_id, s.id AS supplier_id, s.name AS supplier_name, s.type AS supplier_type, count(DISTINCT t.id) AS transaction_count, COALESCE(sum(t.amount), 0::numeric) AS total_spent, min(t.event_date) AS first_transaction_date, max(t.event_date) AS last_transaction_date, count(DISTINCT t.financial_period_id) AS periods_active FROM suppliers s LEFT JOIN transactions t ON t.supplier_id = s.id AND t.user_id = s.user_id AND (t.type = ANY (ARRAY['expense'::text, 'fee'::text, 'interest_charge'::text])) WHERE s.is_active = true GROUP BY s.user_id, s.id, s.name, s.type`,
 );
