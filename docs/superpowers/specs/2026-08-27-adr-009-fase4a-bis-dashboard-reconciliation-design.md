@@ -136,11 +136,17 @@ Fase 2:
   o signed-upload-URL do item 4 acima é ponte, não solução final.
 - Auth em si (`requireUser()`/`supabase.auth.getUser()` continuam iguais) —
   Fase 2.
-- As 4 RPCs já bloqueadas e conhecidas do lado web (`register_pattern_feedback`,
-  `search_suppliers`, `get_financial_period_for_date`) — continuam
-  intencionalmente intocadas, já documentadas no apêndice da Fase 4a; sua
-  resolução final é responsabilidade do plano operacional de cutover (Apêndice
-  B da spec da Fase 4b), não desta fase.
+- **5 RPCs já bloqueadas e conhecidas do lado web** (`register_pattern_feedback`,
+  `search_suppliers`, `get_financial_period_for_date`, `generate_financial_periods`,
+  `fn_set_secret`) — continuam intencionalmente intocadas, já documentadas no
+  apêndice da Fase 4a. As 2 últimas são **cross-surface** (achado da revisão
+  técnica da Veronica-Bolso): `generate_financial_periods`
+  (`actions/financial-periods.ts:120`) e `fn_set_secret`
+  (`actions/secrets.ts:97`) também são chamadas do lado worker/MCP, e sua
+  reimplementação em TypeScript é responsabilidade do Apêndice A da spec da
+  Fase 4b (num pacote compartilhado, não duplicada aqui) — não desta fase.
+  Sua resolução final entra no plano operacional de cutover (Apêndice B da
+  spec da Fase 4b).
 
 ## Critério fixo de revisão (herdado da Fase 4a, não repetir aqui a cada task)
 

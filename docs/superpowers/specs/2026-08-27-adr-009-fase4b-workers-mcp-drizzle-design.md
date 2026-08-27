@@ -102,10 +102,22 @@ mesmo padrão já usado e revisado na Task 13 da Fase 4a
 
 ## Apêndice A — RPCs bloqueadas: decisões a tomar na implementação
 
-| RPC                          | Chamada por                                          | Decisão a resolver na task                                                                                                                                                                                                                                                                                             |
-| ---------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fn_set_secret`              | `workers/ingestion` (`parsers/secret-lookup.ts`)     | Onde mora a chave de criptografia agora? Opções: (a) portar `private.crypto_keys` + `pgcrypto` pro Neon como estava; (b) usar uma envvar/KMS externo e reimplementar `encrypt_secret`/`decrypt_secret` em TS; (c) aceitar perda de feature com aval do CEO (mesmo critério do apêndice de RPCs bloqueadas da Fase 4a). |
-| `generate_financial_periods` | `apps/mcp-server` (`recompute-financial-periods.ts`) | Reimplementar em TS (candidato: reaproveitar `packages/domain`'s `financial-cycle`) ou aceitar que a tool fica indisponível até decisão futura — **já está quebrada hoje, então "não fazer nada" não piora o status quo**, mas resolver aqui é a oportunidade natural.                                                 |
+| RPC                          | Chamada por                                                                                                                      | Decisão a resolver na task                                                                                                                                                                                                                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fn_set_secret`              | `workers/ingestion` (`parsers/secret-lookup.ts`) **e também** `apps/web/src/app/actions/secrets.ts:97` (`setSecret`, lado web)   | Onde mora a chave de criptografia agora? Opções: (a) portar `private.crypto_keys` + `pgcrypto` pro Neon como estava; (b) usar uma envvar/KMS externo e reimplementar `encrypt_secret`/`decrypt_secret` em TS; (c) aceitar perda de feature com aval do CEO (mesmo critério do apêndice de RPCs bloqueadas da Fase 4a). |
+| `generate_financial_periods` | `apps/mcp-server` (`recompute-financial-periods.ts`) **e também** `apps/web/src/app/actions/financial-periods.ts:120` (lado web) | Reimplementar em TS (candidato: reaproveitar `packages/domain`'s `financial-cycle`) ou aceitar que a tool fica indisponível até decisão futura — **já está quebrada hoje, então "não fazer nada" não piora o status quo**, mas resolver aqui é a oportunidade natural.                                                 |
+
+**Exigência (achado da Veronica-Bolso na revisão técnica): as duas RPCs acima
+têm consumidor dos dois lados (web e worker/MCP)** — a reimplementação em
+TypeScript de cada uma precisa morar num pacote compartilhado (`packages/domain`
+é o candidato natural, `financial-cycle` já vive lá) para que `apps/web`,
+`apps/mcp-server` e `workers/ingestion` consumam a MESMA lógica de negócio, não
+duas implementações que divergem sutilmente com o tempo. Isso vale tanto para
+`generate_financial_periods` quanto para `fn_set_secret` (a lógica de
+criptografia, não só a leitura/escrita de bytes). A task de implementação que
+resolver qualquer uma das duas RPCs bloqueadas — seja aqui na 4b ou do lado web
+na 4a-bis — precisa checar se a outra já foi resolvida antes de duplicar
+código.
 
 **Nota de paridade (revisão da Veronica-Bolso):** `workers/pluggy-sync` tem uma
 lacuna documentada e deliberada — checkpoint sem claim atômico (ver
