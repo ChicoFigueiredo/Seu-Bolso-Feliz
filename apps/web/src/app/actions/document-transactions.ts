@@ -1,94 +1,106 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Transaction } from "@sbf/shared-types";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, count, eq } from "drizzle-orm";
 
-// ── Tipos locais (aguardando regeneração de database.types após migration) ────
+export type DocumentLinkType = "payment" | "refund" | "installment" | "support";
 
-export interface DocumentTransactionLink {
-  id: string;
-  source_document_id: string;
-  transaction_id: string;
-  user_id: string;
-  link_type: "payment" | "refund" | "installment" | "support";
-  confidence: number | null;
-  created_by: "user" | "ai" | "pattern";
-  notes: string | null;
-  created_at: string;
-}
+export type DocumentTransactionLink = typeof schema.document_transactions.$inferSelect;
 
 export interface DocumentTransactionLinkWithTransaction extends DocumentTransactionLink {
-  transaction: Transaction;
+  transaction: typeof schema.transactions.$inferSelect;
 }
 
-// ══════════════════════════════════════════════════════════════
-// S3-004 — Server actions para document_transactions
-// ══════════════════════════════════════════════════════════════
+async function requireUserId(): Promise<string> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+  return user.id;
+}
 
 export async function listLinkedTransactions(
   sourceDocumentId: string,
 ): Promise<DocumentTransactionLinkWithTransaction[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("document_transactions")
-    .select(
-      `
-      *,
-      transaction:transactions (*)
-    `,
-    )
-    .eq("source_document_id", sourceDocumentId)
-    .order("created_at", { ascending: true });
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as DocumentTransactionLinkWithTransaction[];
+  const rows = await db
+    .select({ link: schema.document_transactions, transaction: schema.transactions })
+    .from(schema.document_transactions)
+    .innerJoin(
+      schema.transactions,
+      eq(schema.document_transactions.transaction_id, schema.transactions.id),
+    )
+    .where(
+      and(
+        eq(schema.document_transactions.source_document_id, sourceDocumentId),
+        eq(schema.document_transactions.user_id, userId),
+      ),
+    )
+    .orderBy(asc(schema.document_transactions.created_at));
+
+  return rows.map(({ link, transaction }) => ({ ...link, transaction }));
 }
 
 export async function linkTransactionToDocument(
   sourceDocumentId: string,
   transactionId: string,
-  linkType: DocumentTransactionLink["link_type"],
+  linkType: DocumentLinkType,
   options?: { confidence?: number; notes?: string },
 ): Promise<DocumentTransactionLink> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-
-  const { data, error } = await supabase
-    .from("document_transactions")
-    .insert({
+  const [row] = await db
+    .insert(schema.document_transactions)
+    .values({
       source_document_id: sourceDocumentId,
       transaction_id: transactionId,
-      user_id: user.id,
+      user_id: userId,
       link_type: linkType,
       confidence: options?.confidence ?? null,
       created_by: "user",
       notes: options?.notes ?? null,
     })
-    .select()
-    .single();
+    .returning();
 
-  if (error) throw new Error(error.message);
-  return data as DocumentTransactionLink;
+  if (!row) throw new Error("Falha ao vincular transação ao documento");
+  return row;
 }
 
 export async function unlinkTransactionFromDocument(linkId: string): Promise<void> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("document_transactions").delete().eq("id", linkId);
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
+  const result = await db
+    .delete(schema.document_transactions)
+    .where(
+      and(
+        eq(schema.document_transactions.id, linkId),
+        eq(schema.document_transactions.user_id, userId),
+      ),
+    )
+    .returning({ id: schema.document_transactions.id });
+
+  if (result.length === 0) throw new Error("Vínculo não encontrado");
 }
 
 export async function getLinkedTransactionCount(sourceDocumentId: string): Promise<number> {
-  const supabase = await createClient();
-  const { count, error } = await supabase
-    .from("document_transactions")
-    .select("id", { count: "exact", head: true })
-    .eq("source_document_id", sourceDocumentId);
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
-  return count ?? 0;
+  const [row] = await db
+    .select({ value: count() })
+    .from(schema.document_transactions)
+    .where(
+      and(
+        eq(schema.document_transactions.source_document_id, sourceDocumentId),
+        eq(schema.document_transactions.user_id, userId),
+      ),
+    );
+
+  return row?.value ?? 0;
 }
