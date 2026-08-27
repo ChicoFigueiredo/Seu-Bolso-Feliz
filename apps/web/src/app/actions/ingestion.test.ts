@@ -37,6 +37,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ingestion actions — source do
         status: "new",
       })
       .returning();
+    if (!doc) throw new Error("Falha ao criar source_document de teste");
     docIds.push(doc.id);
     return doc;
   }

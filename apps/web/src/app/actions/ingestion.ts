@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne } from "drizzle-orm";
+import type { Json } from "@sbf/shared-types";
 
 async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<string> {
   const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -392,7 +393,7 @@ export async function updateDraftData(
   const [row] = await db
     .update(schema.draft_records)
     .set({
-      draft_data: draftData,
+      draft_data: draftData as Json,
       status: "corrected",
       corrections: { manual_edit: true, edited_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),

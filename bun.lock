@@ -114,6 +114,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
+        "@sbf/shared-types": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {
