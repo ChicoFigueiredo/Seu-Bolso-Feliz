@@ -23,6 +23,7 @@ export default tseslint.config(
       ".next/",
       "**/.next/",
       "supabase/functions/**",
+      "supabase/.temp/**", // artefato gitignorado do `supabase start`, não é código do projeto
       "docs-html/",
       "**/*.d.ts",
       "**/database.types.ts", // auto-gerado pelo Supabase CLI
