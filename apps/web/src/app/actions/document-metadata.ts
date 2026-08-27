@@ -1,35 +1,43 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Database, Json } from "@sbf/shared-types";
-
-type SourceDocumentUpdate = Database["public"]["Tables"]["source_documents"]["Update"];
+import { getDb, schema } from "@sbf/db";
+import { and, eq } from "drizzle-orm";
+import type { Json } from "@sbf/shared-types";
 
 // ─── S3-010 — Atualização de metadados de source_document ─────────────────────
 
+type SourceDocumentUpdate = Partial<
+  Pick<
+    typeof schema.source_documents.$inferInsert,
+    "supplier_name_raw" | "metadata" | "document_type"
+  >
+>;
+
 interface UpdateDocumentMetadataInput {
   supplier_name_raw?: string;
-  /** A coluna é `jsonb`; tipar como Json impede gravar valor não serializável. */
+  /** A coluna é `jsonb` tipada como `Json` no schema Drizzle (`.$type<Json>()`). */
   metadata?: Json;
   document_type?: string;
+}
+
+async function requireUserId(): Promise<string> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+  return user.id;
 }
 
 export async function updateDocumentMetadata(
   id: string,
   input: UpdateDocumentMetadataInput,
 ): Promise<void> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
   // Monta objeto de update apenas com campos fornecidos.
-  //
-  // Tipado como o Update da própria tabela, e não como Record<string, unknown>:
-  // a tipagem do supabase-js rejeita índices genéricos para impedir que uma
-  // coluna inexistente passe despercebida.
   const updatePayload: SourceDocumentUpdate = {};
   if (input.supplier_name_raw !== undefined) {
     updatePayload.supplier_name_raw = input.supplier_name_raw;
@@ -43,11 +51,11 @@ export async function updateDocumentMetadata(
 
   if (Object.keys(updatePayload).length === 0) return;
 
-  const { error } = await supabase
-    .from("source_documents")
-    .update(updatePayload)
-    .eq("id", id)
-    .eq("user_id", user.id); // RLS + double-check
+  const result = await db
+    .update(schema.source_documents)
+    .set(updatePayload)
+    .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)))
+    .returning({ id: schema.source_documents.id });
 
-  if (error) throw new Error(error.message);
+  if (result.length === 0) throw new Error("Documento não encontrado");
 }
