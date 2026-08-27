@@ -70,5 +70,11 @@ export async function deleteInstitution(id: string): Promise<void> {
     .delete(schema.institutions)
     .where(and(eq(schema.institutions.id, id), eq(schema.institutions.user_id, userId)))
     .returning({ id: schema.institutions.id });
+  // Nota: o código Supabase original não checava linhas afetadas (sem
+  // .select().single()) — pela regra geral do plano isso seria "exceção
+  // preservada" (não lançar). Decisão do controlador (ledger): lançar mesmo
+  // assim, porque é mais seguro que apagar silenciosamente algo que não
+  // pertence ao usuário, e não há call site hoje que dependa do silêncio
+  // antigo. Divergência deliberada, não descuido.
   if (result.length === 0) throw new Error("Instituição não encontrada");
 }
