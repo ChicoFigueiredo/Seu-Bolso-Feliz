@@ -123,6 +123,38 @@ export async function updateExternalAccountMapping(
 ): Promise<ExternalAccountMapping> {
   const userId = await requireUserId();
   const db = getDb();
+
+  // IDOR (achado da varredura retroativa de segurança, mesmo padrão do fix
+  // em document-transactions.ts): o `and(id, user_id)` abaixo protege a
+  // própria linha, mas não impede o `.set(input)` de reapontar
+  // financial_product_id/provider_connection_id pra um recurso de outro
+  // usuário. Valida posse das duas FKs antes de gravar, quando presentes no
+  // input.
+  if (input.financial_product_id != null) {
+    const [product] = await db
+      .select({ id: schema.financial_products.id })
+      .from(schema.financial_products)
+      .where(
+        and(
+          eq(schema.financial_products.id, input.financial_product_id),
+          eq(schema.financial_products.user_id, userId),
+        ),
+      );
+    if (!product) throw new Error("Produto financeiro não encontrado");
+  }
+  if (input.provider_connection_id != null) {
+    const [connection] = await db
+      .select({ id: schema.provider_connections.id })
+      .from(schema.provider_connections)
+      .where(
+        and(
+          eq(schema.provider_connections.id, input.provider_connection_id),
+          eq(schema.provider_connections.user_id, userId),
+        ),
+      );
+    if (!connection) throw new Error("Conexão do provedor não encontrada");
+  }
+
   const [row] = await db
     .update(schema.external_account_mappings)
     .set(input)

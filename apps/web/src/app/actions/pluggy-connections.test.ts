@@ -2,6 +2,7 @@ import "./test-db-setup";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@sbf/db";
+import { cleanupInstitution, seedFinancialProduct, seedInstitution } from "./__tests__/fixtures";
 import {
   getProviderConnections,
   revokeProviderConnection,
@@ -21,6 +22,7 @@ const USER_B = "00000000-0000-0000-0000-0000000000b2";
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", () => {
   const createdConnectionIds: string[] = [];
+  const institutionIds: string[] = [];
 
   afterEach(async () => {
     const db = getDb();
@@ -29,6 +31,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
         .delete(schema.external_account_mappings)
         .where(eq(schema.external_account_mappings.provider_connection_id, id));
       await db.delete(schema.provider_connections).where(eq(schema.provider_connections.id, id));
+    }
+    for (const id of institutionIds.splice(0)) {
+      await cleanupInstitution(id); // CASCADE remove financial_products
     }
   });
 
@@ -98,6 +103,75 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
     currentUserId = USER_A;
     await expect(
       updateExternalAccountMapping(mapping.id, { external_account_name: "Hackeado" }),
+    ).rejects.toThrow();
+  });
+
+  // IDOR fechado (achado da varredura retroativa de segurança, mesmo padrão
+  // do fix em document-transactions.ts / commit b5995eb): updateExternalAccountMapping
+  // não validava posse das FKs (financial_product_id/provider_connection_id)
+  // recebidas no `input` — só a própria linha (id + user_id) era checada. Um
+  // usuário A conseguia reapontar o próprio mapping pra um financial_product
+  // ou provider_connection que pertence a outro usuário.
+  it("lança erro ao reapontar mapping pra financial_product de outro usuário", async () => {
+    const db = getDb();
+    const [connA] = await db
+      .insert(schema.provider_connections)
+      .values({ user_id: USER_A, provider: "pluggy", external_item_id: "item-e", status: "active" })
+      .returning();
+    if (!connA) throw new Error("Falha ao semear conexão A");
+    createdConnectionIds.push(connA.id);
+    const [mappingA] = await db
+      .insert(schema.external_account_mappings)
+      .values({
+        user_id: USER_A,
+        provider_connection_id: connA.id,
+        external_account_id: "acc-a",
+        external_account_name: "Conta A",
+        external_account_type: "checking",
+      })
+      .returning();
+    if (!mappingA) throw new Error("Falha ao semear mapeamento A");
+
+    const institutionB = await seedInstitution(USER_B);
+    institutionIds.push(institutionB.id);
+    const productB = await seedFinancialProduct(USER_B, institutionB.id);
+
+    currentUserId = USER_A;
+    await expect(
+      updateExternalAccountMapping(mappingA.id, { financial_product_id: productB.id }),
+    ).rejects.toThrow();
+  });
+
+  it("lança erro ao reapontar mapping pra provider_connection de outro usuário", async () => {
+    const db = getDb();
+    const [connA] = await db
+      .insert(schema.provider_connections)
+      .values({ user_id: USER_A, provider: "pluggy", external_item_id: "item-f", status: "active" })
+      .returning();
+    if (!connA) throw new Error("Falha ao semear conexão A");
+    createdConnectionIds.push(connA.id);
+    const [mappingA] = await db
+      .insert(schema.external_account_mappings)
+      .values({
+        user_id: USER_A,
+        provider_connection_id: connA.id,
+        external_account_id: "acc-a2",
+        external_account_name: "Conta A",
+        external_account_type: "checking",
+      })
+      .returning();
+    if (!mappingA) throw new Error("Falha ao semear mapeamento A");
+
+    const [connB] = await db
+      .insert(schema.provider_connections)
+      .values({ user_id: USER_B, provider: "pluggy", external_item_id: "item-g", status: "active" })
+      .returning();
+    if (!connB) throw new Error("Falha ao semear conexão B");
+    createdConnectionIds.push(connB.id);
+
+    currentUserId = USER_A;
+    await expect(
+      updateExternalAccountMapping(mappingA.id, { provider_connection_id: connB.id }),
     ).rejects.toThrow();
   });
 });
