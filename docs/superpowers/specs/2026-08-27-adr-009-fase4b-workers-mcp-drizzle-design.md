@@ -107,6 +107,12 @@ mesmo padrão já usado e revisado na Task 13 da Fase 4a
 | `fn_set_secret`              | `workers/ingestion` (`parsers/secret-lookup.ts`)     | Onde mora a chave de criptografia agora? Opções: (a) portar `private.crypto_keys` + `pgcrypto` pro Neon como estava; (b) usar uma envvar/KMS externo e reimplementar `encrypt_secret`/`decrypt_secret` em TS; (c) aceitar perda de feature com aval do CEO (mesmo critério do apêndice de RPCs bloqueadas da Fase 4a). |
 | `generate_financial_periods` | `apps/mcp-server` (`recompute-financial-periods.ts`) | Reimplementar em TS (candidato: reaproveitar `packages/domain`'s `financial-cycle`) ou aceitar que a tool fica indisponível até decisão futura — **já está quebrada hoje, então "não fazer nada" não piora o status quo**, mas resolver aqui é a oportunidade natural.                                                 |
 
+**Nota de paridade (revisão da Veronica-Bolso):** `workers/pluggy-sync` tem uma
+lacuna documentada e deliberada — checkpoint sem claim atômico (ver
+`docs/integrations/pluggy-deploy.md`). A migração de código desta fase preserva
+esse comportamento tal como está; locking atômico é decisão separada, já
+registrada, não entra escondida junto da troca de driver.
+
 ## Apêndice B — Cutover de dados real (execução bloqueada, autorização própria)
 
 O Neon hoje só tem **schema**, não dados reais — todo o histórico de documentos,
@@ -128,6 +134,17 @@ spec de design):
 4. Manter o Postgres do Supabase **somente-leitura** por um período (a definir)
    como plano de rollback/auditoria antes de decomissionar de vez.
 5. Reativar os workers e o MCP contra o Neon.
+
+**Critério de aceite do flip (Veronica-Bolso): zero `supabase.*` em código
+ativo, verificado por grep.** Isso cobre mais RPCs bloqueadas do que as 2 do
+Apêndice A — as 4 do lado web que continuam como `supabase.rpc()` até então
+(`register_pattern_feedback`, `search_suppliers`, `get_financial_period_for_date`,
+`fn_reconciliation_progress`) também **morrem no flip** e precisam ter sua
+decisão (recriar no Neon com `p_user_id` / reimplementar em TS / aceitar perda
+com aval do CEO) resolvida no plano operacional do cutover, não deixadas pra
+depois. O plano operacional (fora desta spec) precisa de uma tabela própria
+listando as 6 RPCs bloqueadas do programa inteiro (2 daqui + 4 do lado web) e
+a decisão tomada para cada uma.
 
 **Esta execução não roda automaticamente ao final da implementação de código
 desta fase.** É um passo com dados financeiros reais, efetivamente irreversível
