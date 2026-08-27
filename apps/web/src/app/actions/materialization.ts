@@ -4,21 +4,25 @@
  * Materialização — transforma drafts APROVADOS em registros financeiros reais.
  *
  * Regra fundamental: nenhum registro financeiro é criado antes da aprovação
- * humana. Aprovar e lançar são atos distintos (§9 do plano mestre), e é a RPC
- * `fn_materialize_draft_record` que faz valer a regra — não este arquivo.
+ * humana. Aprovar e lançar são atos distintos (§9 do plano mestre), e é a
+ * função `fn_materialize_draft_record` que faz valer a regra — não este
+ * arquivo.
  *
  * Divisão de responsabilidade:
  *   - aqui: autenticar, ler o draft, validar com os schemas de @sbf/contracts
  *     (os MESMOS que o gerador usa) e montar o payload de INSERT;
- *   - na RPC: travar, conferir invariantes, inserir, marcar e auditar, tudo
- *     em uma única transação.
+ *   - na função SQL: travar, conferir invariantes, inserir, marcar e
+ *     auditar, tudo em uma única transação (`SECURITY DEFINER`,
+ *     `packages/db/schema.sql`).
  *
- * A versão anterior tinha 533 linhas, os schemas duplicados aqui (divergentes
- * dos do gerador, de modo que nenhum draft passava), inserts em dois
- * round-trips sem transação e uma checagem de idempotência TOCTOU.
+ * `p_user_id` é sempre o `user.id` da sessão autenticada (nunca um valor
+ * vindo do cliente) — a função é `SECURITY DEFINER` e materializa dados
+ * financeiros de verdade.
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { getDb, schema } from "@sbf/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   POSTABLE_SCHEMAS,
   TARGET_TABLES,
@@ -70,8 +74,12 @@ function failure(
  * Lança um draft aprovado, criando o registro financeiro definitivo.
  *
  * Não aprova nada: um draft ainda em `pending_review` é recusado, aqui e na
- * RPC. A checagem dupla é intencional — a daqui dá mensagem útil à UI, a da
- * RPC é a que nenhum cliente consegue contornar.
+ * função SQL. A checagem dupla é intencional — a daqui dá mensagem útil à
+ * UI, a de lá é a que nenhum cliente consegue contornar.
+ *
+ * "Sem usuário" e demais recusas são reportadas como objeto de falha
+ * (`success: false`), não exceção — a UI depende desse contrato, por isso
+ * não se usa aqui o padrão `requireUserId()` que lança.
  */
 export async function postApprovedDraftRecord(
   draftRecordId: string,
@@ -81,19 +89,22 @@ export async function postApprovedDraftRecord(
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return failure(draftRecordId, "Não autenticado");
+  // `!user?.id` (não só `!user`): um usuário com id vazio não é um usuário
+  // válido, e comparar user_id (uuid) contra "" faria a query abaixo
+  // estourar em erro de sintaxe em vez de recusar de forma limpa.
+  if (!user?.id) return failure(draftRecordId, "Não autenticado");
 
-  const { data: draft, error } = await supabase
-    .from("draft_records")
-    .select(
-      "id, draft_type, status, draft_data, draft_schema_version, source_document_id, posted_record_id, posted_record_type",
-    )
-    .eq("id", draftRecordId)
-    .eq("user_id", user.id)
-    .single();
+  const db = getDb();
 
-  if (error || !draft) {
-    return failure(draftRecordId, `Draft não encontrado: ${error?.message ?? "inexistente"}`);
+  const [draft] = await db
+    .select()
+    .from(schema.draft_records)
+    .where(
+      and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
+    );
+
+  if (!draft) {
+    return failure(draftRecordId, "Draft não encontrado: inexistente");
   }
 
   if (draft.posted_record_id) {
@@ -144,47 +155,56 @@ export async function postApprovedDraftRecord(
   // TO_INSERT é uma união de funções com parâmetros distintos por tipo de
   // draft; o despacho por `draftType` já garante o par correto, mas o
   // TypeScript não consegue estreitar os dois lados juntos. O payload segue
-  // para a RPC como jsonb, então o tipo de saída é Json.
+  // para a função SQL como jsonb, então o tipo de saída é Json.
   const buildInsert = TO_INSERT[draftType] as unknown as (p: unknown) => Json;
   const insertPayload = buildInsert(postable.data);
 
-  const { data: rpcResult, error: rpcError } = await supabase.rpc("fn_materialize_draft_record", {
-    p_user_id: user.id,
-    p_draft_id: draftRecordId,
-    p_target_table: targetTable,
-    p_insert_payload: insertPayload,
-    p_actor: "web",
-  });
+  let rpcResult:
+    { status: string; posted_record_id: string; posted_record_type: string } | undefined;
+  try {
+    // `fn_materialize_draft_record` RETURNS jsonb (um escalar, não uma
+    // tabela): "SELECT * FROM fn(...)" produziria uma coluna com o nome da
+    // função contendo o jsonb inteiro como valor único, não as três colunas
+    // esperadas. "SELECT fn(...) AS result" é a forma correta — confirmado
+    // empiricamente contra o Postgres local (driver `pg`, hostname
+    // localhost): a coluna `result` chega já desserializada em objeto JS.
+    const result = await db.execute<{
+      result: { status: string; posted_record_id: string; posted_record_type: string };
+    }>(
+      sql`SELECT fn_materialize_draft_record(
+        ${user.id}::uuid,
+        ${draftRecordId}::uuid,
+        ${targetTable}::text,
+        ${JSON.stringify(insertPayload)}::jsonb,
+        ${"web"}::text
+      ) AS result`,
+    );
+    rpcResult = result.rows[0]?.result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
 
-  if (rpcError) {
-    // Registro best-effort do motivo, para a tela de revisão poder explicar a
-    // falha sem obrigar ninguém a abrir logs. O draft segue 'approved' e
-    // retentável, porque a RPC reverteu tudo.
-    await supabase
-      .from("draft_records")
-      .update({
-        materialization_error: { message: rpcError.message, at: new Date().toISOString() },
-      })
-      .eq("id", draftRecordId)
-      .eq("user_id", user.id);
+    await db
+      .update(schema.draft_records)
+      .set({ materialization_error: { message, at: new Date().toISOString() } })
+      .where(
+        and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
+      );
 
-    return failure(draftRecordId, `Falha ao lançar: ${rpcError.message}`);
+    return failure(draftRecordId, `Falha ao lançar: ${message}`);
   }
 
-  const result = rpcResult as {
-    status: string;
-    posted_record_id: string;
-    posted_record_type: string;
-  };
+  if (!rpcResult) {
+    return failure(draftRecordId, "Falha ao lançar: função não retornou resultado");
+  }
 
   return {
     success: true,
     draftRecordId,
-    postedRecordId: result.posted_record_id,
-    postedRecordType: result.posted_record_type,
+    postedRecordId: rpcResult.posted_record_id,
+    postedRecordType: rpcResult.posted_record_type,
     validationErrors: [],
     message:
-      result.status === "already_posted"
+      rpcResult.status === "already_posted"
         ? "Draft já foi materializado anteriormente"
         : "Lançamento criado",
   };
@@ -200,7 +220,7 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (!user?.id) {
     return {
       batchId,
       totalProcessed: 0,
@@ -210,24 +230,32 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
     };
   }
 
-  const { data: drafts, error } = await supabase
-    .from("draft_records")
-    .select("id")
-    .eq("batch_id", batchId)
-    .eq("user_id", user.id)
-    .in("status", POSTABLE_STATUSES);
+  const db = getDb();
 
-  if (error) {
+  let drafts: { id: string }[];
+  try {
+    drafts = await db
+      .select({ id: schema.draft_records.id })
+      .from(schema.draft_records)
+      .where(
+        and(
+          eq(schema.draft_records.batch_id, batchId),
+          eq(schema.draft_records.user_id, user.id),
+          inArray(schema.draft_records.status, POSTABLE_STATUSES),
+        ),
+      );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return {
       batchId,
       totalProcessed: 0,
       succeeded: 0,
       failed: 1,
-      results: [failure("", `Erro ao buscar drafts: ${error.message}`)],
+      results: [failure("", `Erro ao buscar drafts: ${message}`)],
     };
   }
 
-  if (!drafts || drafts.length === 0) {
+  if (drafts.length === 0) {
     return { batchId, totalProcessed: 0, succeeded: 0, failed: 0, results: [] };
   }
 
@@ -240,16 +268,15 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
   const failed = results.length - succeeded;
 
   const batchStatus = failed === 0 ? "approved" : succeeded === 0 ? "rejected" : "partial";
-  await supabase
-    .from("draft_batches")
-    .update({
+  await db
+    .update(schema.draft_batches)
+    .set({
       status: batchStatus,
       approved_count: succeeded,
       rejected_count: failed,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", batchId)
-    .eq("user_id", user.id);
+    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, user.id)));
 
   return { batchId, totalProcessed: drafts.length, succeeded, failed, results };
 }
