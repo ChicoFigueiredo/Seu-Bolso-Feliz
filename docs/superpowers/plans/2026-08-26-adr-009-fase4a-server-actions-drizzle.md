@@ -79,11 +79,11 @@ Run: `grep -n "^export const" packages/db/drizzle/schema.ts`
 Expected: uma linha por tabela (ex.: `export const institutions = pgTable(...)`,
 `export const financialPeriods = pgTable(...)`). **Anotar exatamente esses nomes**
 — as tasks seguintes deste plano assumem que os identificadores de tabela
-continuam camelCase (`schema.financialPeriods`, `schema.recurringTemplates`,
-`schema.statementCycles`, `schema.providerConnections`,
-`schema.externalAccountMappings`, `schema.userFinancialPreferences`,
-`schema.recurringInstances`, `schema.recurringTemplateTags`,
-`schema.statementItems`, e demais tabelas por nome análogo) e que só as
+continuam camelCase (`schema.financial_periods`, `schema.recurring_templates`,
+`schema.statement_cycles`, `schema.provider_connections`,
+`schema.external_account_mappings`, `schema.user_financial_preferences`,
+`schema.recurring_instances`, `schema.recurring_template_tags`,
+`schema.statement_items`, e demais tabelas por nome análogo) e que só as
 **propriedades de coluna dentro de cada tabela** viram snake_case. Se a saída
 real divergir disso, corrigir os nomes usados nas tasks seguintes antes de
 prosseguir — isso é o único ponto de incerteza real deste plano.
@@ -269,7 +269,7 @@ export async function seedFinancialProduct(
 ) {
   const db = getDb();
   const [row] = await db
-    .insert(schema.financialProducts)
+    .insert(schema.financial_products)
     .values({ user_id: userId, institution_id: institutionId, name: "Produto de teste", type })
     .returning();
   return row;
@@ -519,7 +519,7 @@ git commit -m "feat(web): institutions.ts usa Drizzle/Neon com filtro user_id ex
 
 **Interfaces:**
 
-- Consome: `schema.financialPeriods`, `schema.userFinancialPreferences` (Task 1).
+- Consome: `schema.financial_periods`, `schema.user_financial_preferences` (Task 1).
 - Produz: nenhuma outra task depende diretamente.
 
 **Bloqueio conhecido (não resolvido nesta task):** `generate_financial_periods` e
@@ -564,7 +564,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("financial-periods actions", () 
   afterEach(async () => {
     const db = getDb();
     for (const id of createdIds.splice(0)) {
-      await db.delete(schema.financialPeriods).where(eq(schema.financialPeriods.id, id));
+      await db.delete(schema.financial_periods).where(eq(schema.financial_periods.id, id));
     }
   });
 
@@ -638,8 +638,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
 
-type FinancialPeriod = typeof schema.financialPeriods.$inferSelect;
-type FinancialPeriodInsert = Omit<typeof schema.financialPeriods.$inferInsert, "user_id" | "id">;
+type FinancialPeriod = typeof schema.financial_periods.$inferSelect;
+type FinancialPeriodInsert = Omit<typeof schema.financial_periods.$inferInsert, "user_id" | "id">;
 type FinancialPeriodUpdate = Partial<FinancialPeriodInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -663,22 +663,22 @@ export async function getFinancialPeriods(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.financialPeriods.user_id, userId)];
+  const conditions = [eq(schema.financial_periods.user_id, userId)];
   if (filters?.isCurrent !== undefined) {
-    conditions.push(eq(schema.financialPeriods.is_current, filters.isCurrent));
+    conditions.push(eq(schema.financial_periods.is_current, filters.isCurrent));
   }
   if (filters?.startDate) {
-    conditions.push(gte(schema.financialPeriods.start_date, filters.startDate));
+    conditions.push(gte(schema.financial_periods.start_date, filters.startDate));
   }
   if (filters?.endDate) {
-    conditions.push(lte(schema.financialPeriods.end_date, filters.endDate));
+    conditions.push(lte(schema.financial_periods.end_date, filters.endDate));
   }
 
   return db
     .select()
-    .from(schema.financialPeriods)
+    .from(schema.financial_periods)
     .where(and(...conditions))
-    .orderBy(asc(schema.financialPeriods.start_date));
+    .orderBy(asc(schema.financial_periods.start_date));
 }
 
 export async function getCurrentFinancialPeriod(): Promise<FinancialPeriod | null> {
@@ -686,11 +686,11 @@ export async function getCurrentFinancialPeriod(): Promise<FinancialPeriod | nul
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.financialPeriods)
+    .from(schema.financial_periods)
     .where(
       and(
-        eq(schema.financialPeriods.is_current, true),
-        eq(schema.financialPeriods.user_id, userId),
+        eq(schema.financial_periods.is_current, true),
+        eq(schema.financial_periods.user_id, userId),
       ),
     );
   return row ?? null;
@@ -702,7 +702,7 @@ export async function createFinancialPeriod(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.financialPeriods)
+    .insert(schema.financial_periods)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -715,9 +715,9 @@ export async function updateFinancialPeriod(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.financialPeriods)
+    .update(schema.financial_periods)
     .set(input)
-    .where(and(eq(schema.financialPeriods.id, id), eq(schema.financialPeriods.user_id, userId)))
+    .where(and(eq(schema.financial_periods.id, id), eq(schema.financial_periods.user_id, userId)))
     .returning();
   if (!row) throw new Error("Período financeiro não encontrado");
   return row;
@@ -731,8 +731,8 @@ export async function deleteFinancialPeriod(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.financialPeriods)
-    .where(and(eq(schema.financialPeriods.id, id), eq(schema.financialPeriods.user_id, userId)));
+    .delete(schema.financial_periods)
+    .where(and(eq(schema.financial_periods.id, id), eq(schema.financial_periods.user_id, userId)));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -794,8 +794,8 @@ export async function getFinancialPreferences() {
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.userFinancialPreferences)
-    .where(eq(schema.userFinancialPreferences.user_id, userId));
+    .from(schema.user_financial_preferences)
+    .where(eq(schema.user_financial_preferences.user_id, userId));
   return row ?? null;
 }
 
@@ -807,10 +807,10 @@ export async function upsertFinancialPreferences(input: {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.userFinancialPreferences)
+    .insert(schema.user_financial_preferences)
     .values({ ...input, user_id: userId })
     .onConflictDoUpdate({
-      target: schema.userFinancialPreferences.user_id,
+      target: schema.user_financial_preferences.user_id,
       set: input,
     })
     .returning();
@@ -841,7 +841,7 @@ git commit -m "feat(web): financial-periods.ts usa Drizzle/Neon (2 RPCs descarta
 
 **Interfaces:**
 
-- Consome: `schema.providerConnections`, `schema.externalAccountMappings` (Task 1).
+- Consome: `schema.provider_connections`, `schema.external_account_mappings` (Task 1).
 
 **Nota (candidato a Apêndice B, não decidido aqui):** `completePluggyConnection`
 faz upsert em `provider_connections` seguido de um loop de upserts em
@@ -880,21 +880,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
     const db = getDb();
     for (const id of createdConnectionIds.splice(0)) {
       await db
-        .delete(schema.externalAccountMappings)
-        .where(eq(schema.externalAccountMappings.provider_connection_id, id));
-      await db.delete(schema.providerConnections).where(eq(schema.providerConnections.id, id));
+        .delete(schema.external_account_mappings)
+        .where(eq(schema.external_account_mappings.provider_connection_id, id));
+      await db.delete(schema.provider_connections).where(eq(schema.provider_connections.id, id));
     }
   });
 
   it("isola conexões por usuário", async () => {
     const db = getDb();
     const [connA] = await db
-      .insert(schema.providerConnections)
+      .insert(schema.provider_connections)
       .values({ user_id: USER_A, provider: "pluggy", external_item_id: "item-a", status: "active" })
       .returning();
     createdConnectionIds.push(connA.id);
     const [connB] = await db
-      .insert(schema.providerConnections)
+      .insert(schema.provider_connections)
       .values({ user_id: USER_B, provider: "pluggy", external_item_id: "item-b", status: "active" })
       .returning();
     createdConnectionIds.push(connB.id);
@@ -908,7 +908,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
   it("lança erro ao revogar conexão de outro usuário e não afeta a linha", async () => {
     const db = getDb();
     const [connB] = await db
-      .insert(schema.providerConnections)
+      .insert(schema.provider_connections)
       .values({ user_id: USER_B, provider: "pluggy", external_item_id: "item-c", status: "active" })
       .returning();
     createdConnectionIds.push(connB.id);
@@ -920,20 +920,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
     await revokeProviderConnection(connB.id);
     const [stillActive] = await db
       .select()
-      .from(schema.providerConnections)
-      .where(eq(schema.providerConnections.id, connB.id));
+      .from(schema.provider_connections)
+      .where(eq(schema.provider_connections.id, connB.id));
     expect(stillActive.status).toBe("active");
   });
 
   it("lança erro ao atualizar mapeamento de outro usuário", async () => {
     const db = getDb();
     const [connB] = await db
-      .insert(schema.providerConnections)
+      .insert(schema.provider_connections)
       .values({ user_id: USER_B, provider: "pluggy", external_item_id: "item-d", status: "active" })
       .returning();
     createdConnectionIds.push(connB.id);
     const [mapping] = await db
-      .insert(schema.externalAccountMappings)
+      .insert(schema.external_account_mappings)
       .values({
         user_id: USER_B,
         provider_connection_id: connB.id,
@@ -966,10 +966,10 @@ import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, desc, eq } from "drizzle-orm";
 
-export type ProviderConnection = typeof schema.providerConnections.$inferSelect;
-export type ExternalAccountMapping = typeof schema.externalAccountMappings.$inferSelect;
+export type ProviderConnection = typeof schema.provider_connections.$inferSelect;
+export type ExternalAccountMapping = typeof schema.external_account_mappings.$inferSelect;
 type ExternalAccountMappingUpdate = Partial<
-  Omit<typeof schema.externalAccountMappings.$inferInsert, "user_id" | "id">
+  Omit<typeof schema.external_account_mappings.$inferInsert, "user_id" | "id">
 >;
 
 async function requireUserId(): Promise<string> {
@@ -986,9 +986,9 @@ export async function getProviderConnections(): Promise<ProviderConnection[]> {
   const db = getDb();
   return db
     .select()
-    .from(schema.providerConnections)
-    .where(eq(schema.providerConnections.user_id, userId))
-    .orderBy(desc(schema.providerConnections.created_at));
+    .from(schema.provider_connections)
+    .where(eq(schema.provider_connections.user_id, userId))
+    .orderBy(desc(schema.provider_connections.created_at));
 }
 
 export async function getExternalAccountMappings(
@@ -998,14 +998,14 @@ export async function getExternalAccountMappings(
   const db = getDb();
   return db
     .select()
-    .from(schema.externalAccountMappings)
+    .from(schema.external_account_mappings)
     .where(
       and(
-        eq(schema.externalAccountMappings.provider_connection_id, providerConnectionId),
-        eq(schema.externalAccountMappings.user_id, userId),
+        eq(schema.external_account_mappings.provider_connection_id, providerConnectionId),
+        eq(schema.external_account_mappings.user_id, userId),
       ),
     )
-    .orderBy(asc(schema.externalAccountMappings.created_at));
+    .orderBy(asc(schema.external_account_mappings.created_at));
 }
 
 /** Token de vida curta (30min) pro widget Pluggy Connect no navegador. */
@@ -1038,7 +1038,7 @@ export async function completePluggyConnection(
   const accounts = await provider.listAccounts(externalItemId);
 
   const [row] = await db
-    .insert(schema.providerConnections)
+    .insert(schema.provider_connections)
     .values({
       user_id: userId,
       provider: "pluggy",
@@ -1048,9 +1048,9 @@ export async function completePluggyConnection(
     })
     .onConflictDoUpdate({
       target: [
-        schema.providerConnections.user_id,
-        schema.providerConnections.provider,
-        schema.providerConnections.external_item_id,
+        schema.provider_connections.user_id,
+        schema.provider_connections.provider,
+        schema.provider_connections.external_item_id,
       ],
       set: { institution_name: connection.institutionName ?? null, status: "active" },
     })
@@ -1058,7 +1058,7 @@ export async function completePluggyConnection(
 
   for (const account of accounts) {
     await db
-      .insert(schema.externalAccountMappings)
+      .insert(schema.external_account_mappings)
       .values({
         user_id: userId,
         provider_connection_id: row.id,
@@ -1068,8 +1068,8 @@ export async function completePluggyConnection(
       })
       .onConflictDoNothing({
         target: [
-          schema.externalAccountMappings.provider_connection_id,
-          schema.externalAccountMappings.external_account_id,
+          schema.external_account_mappings.provider_connection_id,
+          schema.external_account_mappings.external_account_id,
         ],
       });
   }
@@ -1084,12 +1084,12 @@ export async function updateExternalAccountMapping(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.externalAccountMappings)
+    .update(schema.external_account_mappings)
     .set(input)
     .where(
       and(
-        eq(schema.externalAccountMappings.id, id),
-        eq(schema.externalAccountMappings.user_id, userId),
+        eq(schema.external_account_mappings.id, id),
+        eq(schema.external_account_mappings.user_id, userId),
       ),
     )
     .returning();
@@ -1103,10 +1103,10 @@ export async function revokeProviderConnection(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .update(schema.providerConnections)
+    .update(schema.provider_connections)
     .set({ status: "revoked" })
     .where(
-      and(eq(schema.providerConnections.id, id), eq(schema.providerConnections.user_id, userId)),
+      and(eq(schema.provider_connections.id, id), eq(schema.provider_connections.user_id, userId)),
     );
 }
 ```
@@ -1134,7 +1134,7 @@ git commit -m "feat(web): pluggy-connections.ts usa Drizzle/Neon com filtro user
 
 **Interfaces:**
 
-- Consome: `schema.statementCycles`, `schema.statementItems` (Task 1).
+- Consome: `schema.statement_cycles`, `schema.statement_items` (Task 1).
 
 - [ ] **Step 1: Escrever os testes**
 
@@ -1264,11 +1264,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, desc, eq } from "drizzle-orm";
 
-type StatementCycle = typeof schema.statementCycles.$inferSelect;
-type StatementCycleInsert = Omit<typeof schema.statementCycles.$inferInsert, "user_id" | "id">;
+type StatementCycle = typeof schema.statement_cycles.$inferSelect;
+type StatementCycleInsert = Omit<typeof schema.statement_cycles.$inferInsert, "user_id" | "id">;
 type StatementCycleUpdate = Partial<StatementCycleInsert>;
-type StatementItem = typeof schema.statementItems.$inferSelect;
-type StatementItemInsert = Omit<typeof schema.statementItems.$inferInsert, "user_id" | "id">;
+type StatementItem = typeof schema.statement_items.$inferSelect;
+type StatementItemInsert = Omit<typeof schema.statement_items.$inferInsert, "user_id" | "id">;
 type StatementItemUpdate = Partial<StatementItemInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -1283,13 +1283,13 @@ async function requireUserId(): Promise<string> {
 export async function getStatementCycles(cardId?: string): Promise<StatementCycle[]> {
   const userId = await requireUserId();
   const db = getDb();
-  const conditions = [eq(schema.statementCycles.user_id, userId)];
-  if (cardId) conditions.push(eq(schema.statementCycles.card_id, cardId));
+  const conditions = [eq(schema.statement_cycles.user_id, userId)];
+  if (cardId) conditions.push(eq(schema.statement_cycles.card_id, cardId));
   return db
     .select()
-    .from(schema.statementCycles)
+    .from(schema.statement_cycles)
     .where(and(...conditions))
-    .orderBy(desc(schema.statementCycles.due_date));
+    .orderBy(desc(schema.statement_cycles.due_date));
 }
 
 export async function getStatementCycle(id: string): Promise<StatementCycle | null> {
@@ -1297,8 +1297,8 @@ export async function getStatementCycle(id: string): Promise<StatementCycle | nu
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.statementCycles)
-    .where(and(eq(schema.statementCycles.id, id), eq(schema.statementCycles.user_id, userId)));
+    .from(schema.statement_cycles)
+    .where(and(eq(schema.statement_cycles.id, id), eq(schema.statement_cycles.user_id, userId)));
   return row ?? null;
 }
 
@@ -1306,7 +1306,7 @@ export async function createStatementCycle(input: StatementCycleInsert): Promise
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.statementCycles)
+    .insert(schema.statement_cycles)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -1319,9 +1319,9 @@ export async function updateStatementCycle(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.statementCycles)
+    .update(schema.statement_cycles)
     .set(input)
-    .where(and(eq(schema.statementCycles.id, id), eq(schema.statementCycles.user_id, userId)))
+    .where(and(eq(schema.statement_cycles.id, id), eq(schema.statement_cycles.user_id, userId)))
     .returning();
   if (!row) throw new Error("Ciclo de fatura não encontrado");
   return row;
@@ -1332,8 +1332,8 @@ export async function deleteStatementCycle(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.statementCycles)
-    .where(and(eq(schema.statementCycles.id, id), eq(schema.statementCycles.user_id, userId)));
+    .delete(schema.statement_cycles)
+    .where(and(eq(schema.statement_cycles.id, id), eq(schema.statement_cycles.user_id, userId)));
 }
 
 export async function getStatementItems(statementCycleId: string): Promise<StatementItem[]> {
@@ -1341,21 +1341,21 @@ export async function getStatementItems(statementCycleId: string): Promise<State
   const db = getDb();
   return db
     .select()
-    .from(schema.statementItems)
+    .from(schema.statement_items)
     .where(
       and(
-        eq(schema.statementItems.statement_cycle_id, statementCycleId),
-        eq(schema.statementItems.user_id, userId),
+        eq(schema.statement_items.statement_cycle_id, statementCycleId),
+        eq(schema.statement_items.user_id, userId),
       ),
     )
-    .orderBy(asc(schema.statementItems.transaction_date));
+    .orderBy(asc(schema.statement_items.transaction_date));
 }
 
 export async function createStatementItem(input: StatementItemInsert): Promise<StatementItem> {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.statementItems)
+    .insert(schema.statement_items)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -1368,9 +1368,9 @@ export async function updateStatementItem(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.statementItems)
+    .update(schema.statement_items)
     .set(input)
-    .where(and(eq(schema.statementItems.id, id), eq(schema.statementItems.user_id, userId)))
+    .where(and(eq(schema.statement_items.id, id), eq(schema.statement_items.user_id, userId)))
     .returning();
   if (!row) throw new Error("Item de fatura não encontrado");
   return row;
@@ -1381,8 +1381,8 @@ export async function deleteStatementItem(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.statementItems)
-    .where(and(eq(schema.statementItems.id, id), eq(schema.statementItems.user_id, userId)));
+    .delete(schema.statement_items)
+    .where(and(eq(schema.statement_items.id, id), eq(schema.statement_items.user_id, userId)));
 }
 ```
 
@@ -1409,7 +1409,7 @@ git commit -m "feat(web): statement-cycles.ts usa Drizzle/Neon com filtro user_i
 
 **Interfaces:**
 
-- Consome: `schema.recurringTemplates`, `schema.recurringInstances`, `schema.recurringTemplateTags` (Task 1).
+- Consome: `schema.recurring_templates`, `schema.recurring_instances`, `schema.recurring_template_tags` (Task 1).
 
 **Nota (candidato a Apêndice B, não decidido aqui):** `createRecurringTemplate`/
 `updateRecurringTemplate` escrevem em `recurring_templates` e depois
@@ -1451,9 +1451,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("recurring actions", () => {
     const db = getDb();
     for (const id of createdIds.splice(0)) {
       await db
-        .delete(schema.recurringTemplateTags)
-        .where(eq(schema.recurringTemplateTags.recurring_template_id, id));
-      await db.delete(schema.recurringTemplates).where(eq(schema.recurringTemplates.id, id));
+        .delete(schema.recurring_template_tags)
+        .where(eq(schema.recurring_template_tags.recurring_template_id, id));
+      await db.delete(schema.recurring_templates).where(eq(schema.recurring_templates.id, id));
     }
   });
 
@@ -1534,18 +1534,18 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 
-type RecurringTemplate = typeof schema.recurringTemplates.$inferSelect;
+type RecurringTemplate = typeof schema.recurring_templates.$inferSelect;
 type RecurringTemplateInsert = Omit<
-  typeof schema.recurringTemplates.$inferInsert,
+  typeof schema.recurring_templates.$inferInsert,
   "user_id" | "id"
 >;
 type RecurringTemplateUpdate = Partial<RecurringTemplateInsert>;
-type RecurringInstance = typeof schema.recurringInstances.$inferSelect;
+type RecurringInstance = typeof schema.recurring_instances.$inferSelect;
 type RecurringInstanceUpdate = Partial<
-  Omit<typeof schema.recurringInstances.$inferInsert, "user_id" | "id">
+  Omit<typeof schema.recurring_instances.$inferInsert, "user_id" | "id">
 >;
 type RecurringInstanceInsert = Omit<
-  typeof schema.recurringInstances.$inferInsert,
+  typeof schema.recurring_instances.$inferInsert,
   "id" | "created_at" | "updated_at"
 >;
 
@@ -1561,13 +1561,13 @@ async function requireUserId(): Promise<string> {
 export async function getRecurringTemplates(activeOnly = true): Promise<RecurringTemplate[]> {
   const userId = await requireUserId();
   const db = getDb();
-  const conditions = [eq(schema.recurringTemplates.user_id, userId)];
-  if (activeOnly) conditions.push(eq(schema.recurringTemplates.is_active, true));
+  const conditions = [eq(schema.recurring_templates.user_id, userId)];
+  if (activeOnly) conditions.push(eq(schema.recurring_templates.is_active, true));
   return db
     .select()
-    .from(schema.recurringTemplates)
+    .from(schema.recurring_templates)
     .where(and(...conditions))
-    .orderBy(asc(schema.recurringTemplates.name));
+    .orderBy(asc(schema.recurring_templates.name));
 }
 
 export async function getRecurringTemplate(id: string): Promise<RecurringTemplate | null> {
@@ -1575,9 +1575,9 @@ export async function getRecurringTemplate(id: string): Promise<RecurringTemplat
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.recurringTemplates)
+    .from(schema.recurring_templates)
     .where(
-      and(eq(schema.recurringTemplates.id, id), eq(schema.recurringTemplates.user_id, userId)),
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
     );
   return row ?? null;
 }
@@ -1589,13 +1589,13 @@ export async function createRecurringTemplate(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.recurringTemplates)
+    .insert(schema.recurring_templates)
     .values({ ...input, user_id: userId })
     .returning();
 
   if (tagIds && tagIds.length > 0) {
     await db
-      .insert(schema.recurringTemplateTags)
+      .insert(schema.recurring_template_tags)
       .values(tagIds.map((tagId) => ({ recurring_template_id: row.id, tag_id: tagId })));
   }
   return row;
@@ -1609,19 +1609,21 @@ export async function updateRecurringTemplate(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.recurringTemplates)
+    .update(schema.recurring_templates)
     .set(input)
-    .where(and(eq(schema.recurringTemplates.id, id), eq(schema.recurringTemplates.user_id, userId)))
+    .where(
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
+    )
     .returning();
   if (!row) throw new Error("Template recorrente não encontrado");
 
   if (tagIds !== undefined) {
     await db
-      .delete(schema.recurringTemplateTags)
-      .where(eq(schema.recurringTemplateTags.recurring_template_id, id));
+      .delete(schema.recurring_template_tags)
+      .where(eq(schema.recurring_template_tags.recurring_template_id, id));
     if (tagIds.length > 0) {
       await db
-        .insert(schema.recurringTemplateTags)
+        .insert(schema.recurring_template_tags)
         .values(tagIds.map((tagId) => ({ recurring_template_id: id, tag_id: tagId })));
     }
   }
@@ -1634,10 +1636,10 @@ export async function deleteRecurringTemplate(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .update(schema.recurringTemplates)
+    .update(schema.recurring_templates)
     .set({ is_active: false })
     .where(
-      and(eq(schema.recurringTemplates.id, id), eq(schema.recurringTemplates.user_id, userId)),
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
     );
 }
 
@@ -1648,19 +1650,19 @@ export async function getRecurringInstances(
   const userId = await requireUserId();
   const db = getDb();
   const conditions = [
-    eq(schema.recurringInstances.recurring_template_id, templateId),
-    eq(schema.recurringInstances.user_id, userId),
+    eq(schema.recurring_instances.recurring_template_id, templateId),
+    eq(schema.recurring_instances.user_id, userId),
   ];
-  if (filters?.status) conditions.push(eq(schema.recurringInstances.status, filters.status));
+  if (filters?.status) conditions.push(eq(schema.recurring_instances.status, filters.status));
   if (filters?.startDate)
-    conditions.push(gte(schema.recurringInstances.expected_date, filters.startDate));
+    conditions.push(gte(schema.recurring_instances.expected_date, filters.startDate));
   if (filters?.endDate)
-    conditions.push(lte(schema.recurringInstances.expected_date, filters.endDate));
+    conditions.push(lte(schema.recurring_instances.expected_date, filters.endDate));
   return db
     .select()
-    .from(schema.recurringInstances)
+    .from(schema.recurring_instances)
     .where(and(...conditions))
-    .orderBy(asc(schema.recurringInstances.expected_date));
+    .orderBy(asc(schema.recurring_instances.expected_date));
 }
 
 export async function updateRecurringInstance(
@@ -1670,9 +1672,11 @@ export async function updateRecurringInstance(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.recurringInstances)
+    .update(schema.recurring_instances)
     .set(input)
-    .where(and(eq(schema.recurringInstances.id, id), eq(schema.recurringInstances.user_id, userId)))
+    .where(
+      and(eq(schema.recurring_instances.id, id), eq(schema.recurring_instances.user_id, userId)),
+    )
     .returning();
   if (!row) throw new Error("Instância recorrente não encontrada");
   return row;
@@ -1694,15 +1698,15 @@ export async function generateRecurringInstances(
   if (!template.is_active) throw new Error("Template inativo");
 
   const [lastInstance] = await db
-    .select({ expected_date: schema.recurringInstances.expected_date })
-    .from(schema.recurringInstances)
+    .select({ expected_date: schema.recurring_instances.expected_date })
+    .from(schema.recurring_instances)
     .where(
       and(
-        eq(schema.recurringInstances.recurring_template_id, templateId),
-        eq(schema.recurringInstances.user_id, userId),
+        eq(schema.recurring_instances.recurring_template_id, templateId),
+        eq(schema.recurring_instances.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.recurringInstances.expected_date))
+    .orderBy(desc(schema.recurring_instances.expected_date))
     .limit(1);
 
   const startFrom = lastInstance
@@ -1731,7 +1735,7 @@ export async function generateRecurringInstances(
   }
 
   if (instances.length > 0) {
-    await db.insert(schema.recurringInstances).values(instances);
+    await db.insert(schema.recurring_instances).values(instances);
   }
   return instances.length;
 }
@@ -1792,7 +1796,7 @@ git commit -m "feat(web): recurring.ts usa Drizzle/Neon com filtro user_id expli
 
 **Interfaces:**
 
-- Consome: `schema.documentTransactions`, `schema.transactions` (Task 1).
+- Consome: `schema.document_transactions`, `schema.transactions` (Task 1).
 
 **Nota:** `listLinkedTransactions` faz join `document_transactions` × `transactions`
 que hoje não filtra por usuário (RLS fazia isso). O Drizzle não tem uma relational
@@ -1840,10 +1844,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-transactions actions",
   afterEach(async () => {
     const db = getDb();
     for (const id of linkIds.splice(0)) {
-      await db.delete(schema.documentTransactions).where(eq(schema.documentTransactions.id, id));
+      await db.delete(schema.document_transactions).where(eq(schema.document_transactions.id, id));
     }
     for (const id of docIds.splice(0)) {
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     }
     for (const id of institutionIds.splice(0)) {
       await cleanupInstitution(id); // CASCADE remove financial_products/transactions/document_transactions
@@ -1853,7 +1857,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-transactions actions",
   async function seedDocAndTx(userId: string) {
     const db = getDb();
     const [doc] = await db
-      .insert(schema.sourceDocuments)
+      .insert(schema.source_documents)
       .values({
         user_id: userId,
         origin_type: "manual_upload",
@@ -1928,7 +1932,7 @@ import { and, asc, count, eq } from "drizzle-orm";
 
 export type DocumentLinkType = "payment" | "refund" | "installment" | "support";
 
-export type DocumentTransactionLink = typeof schema.documentTransactions.$inferSelect;
+export type DocumentTransactionLink = typeof schema.document_transactions.$inferSelect;
 
 export interface DocumentTransactionLinkWithTransaction extends DocumentTransactionLink {
   transaction: typeof schema.transactions.$inferSelect;
@@ -1950,19 +1954,19 @@ export async function listLinkedTransactions(
   const db = getDb();
 
   const rows = await db
-    .select({ link: schema.documentTransactions, transaction: schema.transactions })
-    .from(schema.documentTransactions)
+    .select({ link: schema.document_transactions, transaction: schema.transactions })
+    .from(schema.document_transactions)
     .innerJoin(
       schema.transactions,
-      eq(schema.documentTransactions.transaction_id, schema.transactions.id),
+      eq(schema.document_transactions.transaction_id, schema.transactions.id),
     )
     .where(
       and(
-        eq(schema.documentTransactions.source_document_id, sourceDocumentId),
-        eq(schema.documentTransactions.user_id, userId),
+        eq(schema.document_transactions.source_document_id, sourceDocumentId),
+        eq(schema.document_transactions.user_id, userId),
       ),
     )
-    .orderBy(asc(schema.documentTransactions.created_at));
+    .orderBy(asc(schema.document_transactions.created_at));
 
   return rows.map(({ link, transaction }) => ({ ...link, transaction }));
 }
@@ -1977,7 +1981,7 @@ export async function linkTransactionToDocument(
   const db = getDb();
 
   const [row] = await db
-    .insert(schema.documentTransactions)
+    .insert(schema.document_transactions)
     .values({
       source_document_id: sourceDocumentId,
       transaction_id: transactionId,
@@ -1997,14 +2001,14 @@ export async function unlinkTransactionFromDocument(linkId: string): Promise<voi
   const db = getDb();
 
   const result = await db
-    .delete(schema.documentTransactions)
+    .delete(schema.document_transactions)
     .where(
       and(
-        eq(schema.documentTransactions.id, linkId),
-        eq(schema.documentTransactions.user_id, userId),
+        eq(schema.document_transactions.id, linkId),
+        eq(schema.document_transactions.user_id, userId),
       ),
     )
-    .returning({ id: schema.documentTransactions.id });
+    .returning({ id: schema.document_transactions.id });
 
   if (result.length === 0) throw new Error("Vínculo não encontrado");
 }
@@ -2015,11 +2019,11 @@ export async function getLinkedTransactionCount(sourceDocumentId: string): Promi
 
   const [row] = await db
     .select({ value: count() })
-    .from(schema.documentTransactions)
+    .from(schema.document_transactions)
     .where(
       and(
-        eq(schema.documentTransactions.source_document_id, sourceDocumentId),
-        eq(schema.documentTransactions.user_id, userId),
+        eq(schema.document_transactions.source_document_id, sourceDocumentId),
+        eq(schema.document_transactions.user_id, userId),
       ),
     );
 
@@ -2050,10 +2054,10 @@ git commit -m "feat(web): document-transactions.ts usa Drizzle/Neon com filtro u
 
 **Interfaces:**
 
-- Consome: `schema.sourceDocuments`, `schema.ingestionJobs`, `schema.ingestionRuns`,
-  `schema.ingestionLogs`, `schema.draftBatches`, `schema.draftRecords`,
-  `schema.parsedDocumentVersions`, `schema.extractionResults`,
-  `schema.documentFingerprints`, `schema.patternFeedback` (Task 1).
+- Consome: `schema.source_documents`, `schema.ingestion_jobs`, `schema.ingestion_runs`,
+  `schema.ingestion_logs`, `schema.draft_batches`, `schema.draft_records`,
+  `schema.parsed_document_versions`, `schema.extraction_results`,
+  `schema.document_fingerprints`, `schema.pattern_feedback` (Task 1).
 
 **Notas importantes:**
 
@@ -2106,14 +2110,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ingestion actions — source do
   afterEach(async () => {
     const db = getDb();
     for (const id of docIds.splice(0)) {
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     }
   });
 
   async function seedDoc(userId: string) {
     const db = getDb();
     const [doc] = await db
-      .insert(schema.sourceDocuments)
+      .insert(schema.source_documents)
       .values({
         user_id: userId,
         origin_type: "manual_upload",
@@ -2204,12 +2208,12 @@ async function requireUserId(): Promise<string> {
   return user.id;
 }
 
-type SourceDocument = typeof schema.sourceDocuments.$inferSelect;
-type IngestionJob = typeof schema.ingestionJobs.$inferSelect;
-type IngestionLog = typeof schema.ingestionLogs.$inferSelect;
-type IngestionRun = typeof schema.ingestionRuns.$inferSelect;
-type DraftBatch = typeof schema.draftBatches.$inferSelect;
-type DraftRecord = typeof schema.draftRecords.$inferSelect;
+type SourceDocument = typeof schema.source_documents.$inferSelect;
+type IngestionJob = typeof schema.ingestion_jobs.$inferSelect;
+type IngestionLog = typeof schema.ingestion_logs.$inferSelect;
+type IngestionRun = typeof schema.ingestion_runs.$inferSelect;
+type DraftBatch = typeof schema.draft_batches.$inferSelect;
+type DraftRecord = typeof schema.draft_records.$inferSelect;
 
 // ══════════════════════════════════════════════════════════════
 // Source Documents
@@ -2228,44 +2232,44 @@ export async function getSourceDocuments(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.sourceDocuments.user_id, userId)];
+  const conditions = [eq(schema.source_documents.user_id, userId)];
 
   if (!filters?.status) {
-    conditions.push(ne(schema.sourceDocuments.status, "deleted"));
+    conditions.push(ne(schema.source_documents.status, "deleted"));
   }
   if (filters?.status) {
-    conditions.push(eq(schema.sourceDocuments.status, filters.status));
+    conditions.push(eq(schema.source_documents.status, filters.status));
   }
   if (filters?.originType) {
-    conditions.push(eq(schema.sourceDocuments.origin_type, filters.originType));
+    conditions.push(eq(schema.source_documents.origin_type, filters.originType));
   }
   if (filters?.mimeType) {
-    conditions.push(eq(schema.sourceDocuments.mime_type, filters.mimeType));
+    conditions.push(eq(schema.source_documents.mime_type, filters.mimeType));
   }
   if (filters?.dateFrom) {
-    conditions.push(gte(schema.sourceDocuments.created_at, filters.dateFrom));
+    conditions.push(gte(schema.source_documents.created_at, filters.dateFrom));
   }
   if (filters?.dateTo) {
-    conditions.push(lte(schema.sourceDocuments.created_at, filters.dateTo));
+    conditions.push(lte(schema.source_documents.created_at, filters.dateTo));
   }
   if (filters?.search) {
-    conditions.push(ilike(schema.sourceDocuments.filename, `%${filters.search}%`));
+    conditions.push(ilike(schema.source_documents.filename, `%${filters.search}%`));
   }
 
   const where = and(...conditions);
 
   const [{ value: total }] = await db
     .select({ value: count() })
-    .from(schema.sourceDocuments)
+    .from(schema.source_documents)
     .where(where);
-  const orderBy = desc(schema.sourceDocuments.created_at);
+  const orderBy = desc(schema.source_documents.created_at);
 
   let rows: SourceDocument[];
   if (filters?.offset !== undefined) {
     const pageSize = filters?.limit ?? 20;
     rows = await db
       .select()
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(where)
       .orderBy(orderBy)
       .limit(pageSize)
@@ -2273,12 +2277,12 @@ export async function getSourceDocuments(filters?: {
   } else if (filters?.limit) {
     rows = await db
       .select()
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(where)
       .orderBy(orderBy)
       .limit(filters.limit);
   } else {
-    rows = await db.select().from(schema.sourceDocuments).where(where).orderBy(orderBy);
+    rows = await db.select().from(schema.source_documents).where(where).orderBy(orderBy);
   }
 
   return { data: rows, count: total };
@@ -2289,8 +2293,8 @@ export async function getSourceDocument(id: string): Promise<SourceDocument | nu
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.sourceDocuments)
-    .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId)));
+    .from(schema.source_documents)
+    .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)));
   return row ?? null;
 }
 
@@ -2301,28 +2305,28 @@ export async function getDocumentWithRelations(id: string) {
   const [docRows, jobs, drafts] = await Promise.all([
     db
       .select()
-      .from(schema.sourceDocuments)
-      .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId))),
+      .from(schema.source_documents)
+      .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId))),
     db
       .select()
-      .from(schema.ingestionJobs)
+      .from(schema.ingestion_jobs)
       .where(
         and(
-          eq(schema.ingestionJobs.source_document_id, id),
-          eq(schema.ingestionJobs.user_id, userId),
+          eq(schema.ingestion_jobs.source_document_id, id),
+          eq(schema.ingestion_jobs.user_id, userId),
         ),
       )
-      .orderBy(desc(schema.ingestionJobs.created_at)),
+      .orderBy(desc(schema.ingestion_jobs.created_at)),
     db
       .select()
-      .from(schema.draftRecords)
+      .from(schema.draft_records)
       .where(
         and(
-          eq(schema.draftRecords.source_document_id, id),
-          eq(schema.draftRecords.user_id, userId),
+          eq(schema.draft_records.source_document_id, id),
+          eq(schema.draft_records.user_id, userId),
         ),
       )
-      .orderBy(desc(schema.draftRecords.created_at)),
+      .orderBy(desc(schema.draft_records.created_at)),
   ]);
 
   const document = docRows[0];
@@ -2345,32 +2349,32 @@ export async function reprocessDocument(documentId: string): Promise<void> {
 
   // Bulk: 0 linhas afetadas é normal (nenhum draft para arquivar), sem throw.
   await db
-    .update(schema.draftRecords)
+    .update(schema.draft_records)
     .set({ status: "archived" })
     .where(
       and(
-        eq(schema.draftRecords.source_document_id, documentId),
-        eq(schema.draftRecords.user_id, userId),
-        inArray(schema.draftRecords.status, ["pending_review", "rejected"]),
+        eq(schema.draft_records.source_document_id, documentId),
+        eq(schema.draft_records.user_id, userId),
+        inArray(schema.draft_records.status, ["pending_review", "rejected"]),
       ),
     );
 
   const [latestJob] = await db
-    .select({ id: schema.ingestionJobs.id })
-    .from(schema.ingestionJobs)
+    .select({ id: schema.ingestion_jobs.id })
+    .from(schema.ingestion_jobs)
     .where(
       and(
-        eq(schema.ingestionJobs.source_document_id, documentId),
-        eq(schema.ingestionJobs.user_id, userId),
+        eq(schema.ingestion_jobs.source_document_id, documentId),
+        eq(schema.ingestion_jobs.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.ingestionJobs.created_at))
+    .orderBy(desc(schema.ingestion_jobs.created_at))
     .limit(1);
 
   if (latestJob) {
     // Fire-and-forget igual ao código atual: não checa linhas afetadas.
     await db
-      .update(schema.ingestionJobs)
+      .update(schema.ingestion_jobs)
       .set({
         status: "queued",
         error_message: null,
@@ -2379,7 +2383,7 @@ export async function reprocessDocument(documentId: string): Promise<void> {
         updated_at: new Date().toISOString(),
       })
       .where(
-        and(eq(schema.ingestionJobs.id, latestJob.id), eq(schema.ingestionJobs.user_id, userId)),
+        and(eq(schema.ingestion_jobs.id, latestJob.id), eq(schema.ingestion_jobs.user_id, userId)),
       );
   }
 }
@@ -2396,16 +2400,16 @@ export async function getIngestionJobs(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.ingestionJobs.user_id, userId)];
+  const conditions = [eq(schema.ingestion_jobs.user_id, userId)];
   if (filters?.sourceDocumentId)
-    conditions.push(eq(schema.ingestionJobs.source_document_id, filters.sourceDocumentId));
-  if (filters?.status) conditions.push(eq(schema.ingestionJobs.status, filters.status));
+    conditions.push(eq(schema.ingestion_jobs.source_document_id, filters.sourceDocumentId));
+  if (filters?.status) conditions.push(eq(schema.ingestion_jobs.status, filters.status));
 
   const base = db
     .select()
-    .from(schema.ingestionJobs)
+    .from(schema.ingestion_jobs)
     .where(and(...conditions))
-    .orderBy(desc(schema.ingestionJobs.created_at));
+    .orderBy(desc(schema.ingestion_jobs.created_at));
   return filters?.limit ? base.limit(filters.limit) : base;
 }
 
@@ -2414,8 +2418,8 @@ export async function getIngestionJob(id: string): Promise<IngestionJob | null> 
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.ingestionJobs)
-    .where(and(eq(schema.ingestionJobs.id, id), eq(schema.ingestionJobs.user_id, userId)));
+    .from(schema.ingestion_jobs)
+    .where(and(eq(schema.ingestion_jobs.id, id), eq(schema.ingestion_jobs.user_id, userId)));
   return row ?? null;
 }
 
@@ -2426,14 +2430,14 @@ export async function getLatestIngestionJobByDocumentId(
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.ingestionJobs)
+    .from(schema.ingestion_jobs)
     .where(
       and(
-        eq(schema.ingestionJobs.source_document_id, sourceDocumentId),
-        eq(schema.ingestionJobs.user_id, userId),
+        eq(schema.ingestion_jobs.source_document_id, sourceDocumentId),
+        eq(schema.ingestion_jobs.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.ingestionJobs.created_at))
+    .orderBy(desc(schema.ingestion_jobs.created_at))
     .limit(1);
   return row ?? null;
 }
@@ -2447,9 +2451,9 @@ export async function getIngestionRuns(limit = 20): Promise<IngestionRun[]> {
   const db = getDb();
   return db
     .select()
-    .from(schema.ingestionRuns)
-    .where(eq(schema.ingestionRuns.user_id, userId))
-    .orderBy(desc(schema.ingestionRuns.started_at))
+    .from(schema.ingestion_runs)
+    .where(eq(schema.ingestion_runs.user_id, userId))
+    .orderBy(desc(schema.ingestion_runs.started_at))
     .limit(limit);
 }
 
@@ -2465,16 +2469,16 @@ export async function getDraftBatches(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.draftBatches.user_id, userId)];
-  if (filters?.status) conditions.push(eq(schema.draftBatches.status, filters.status));
+  const conditions = [eq(schema.draft_batches.user_id, userId)];
+  if (filters?.status) conditions.push(eq(schema.draft_batches.status, filters.status));
   if (filters?.source_document_id)
-    conditions.push(eq(schema.draftBatches.source_document_id, filters.source_document_id));
+    conditions.push(eq(schema.draft_batches.source_document_id, filters.source_document_id));
 
   const base = db
     .select()
-    .from(schema.draftBatches)
+    .from(schema.draft_batches)
     .where(and(...conditions))
-    .orderBy(desc(schema.draftBatches.created_at));
+    .orderBy(desc(schema.draft_batches.created_at));
   return filters?.limit ? base.limit(filters.limit) : base;
 }
 
@@ -2488,16 +2492,16 @@ export async function getDraftBatchByDocumentId(
   const userId = await requireUserId();
   const db = getDb();
   const [latestDraft] = await db
-    .select({ batch_id: schema.draftRecords.batch_id })
-    .from(schema.draftRecords)
+    .select({ batch_id: schema.draft_records.batch_id })
+    .from(schema.draft_records)
     .where(
       and(
-        eq(schema.draftRecords.source_document_id, sourceDocumentId),
-        eq(schema.draftRecords.user_id, userId),
-        isNotNull(schema.draftRecords.batch_id),
+        eq(schema.draft_records.source_document_id, sourceDocumentId),
+        eq(schema.draft_records.user_id, userId),
+        isNotNull(schema.draft_records.batch_id),
       ),
     )
-    .orderBy(desc(schema.draftRecords.created_at))
+    .orderBy(desc(schema.draft_records.created_at))
     .limit(1);
 
   if (!latestDraft?.batch_id) return null;
@@ -2509,8 +2513,8 @@ export async function getDraftBatch(id: string): Promise<DraftBatch | null> {
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.draftBatches)
-    .where(and(eq(schema.draftBatches.id, id), eq(schema.draftBatches.user_id, userId)));
+    .from(schema.draft_batches)
+    .where(and(eq(schema.draft_batches.id, id), eq(schema.draft_batches.user_id, userId)));
   return row ?? null;
 }
 
@@ -2526,15 +2530,15 @@ export async function getDraftRecords(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.draftRecords.user_id, userId)];
-  if (filters?.batchId) conditions.push(eq(schema.draftRecords.batch_id, filters.batchId));
-  if (filters?.status) conditions.push(eq(schema.draftRecords.status, filters.status));
+  const conditions = [eq(schema.draft_records.user_id, userId)];
+  if (filters?.batchId) conditions.push(eq(schema.draft_records.batch_id, filters.batchId));
+  if (filters?.status) conditions.push(eq(schema.draft_records.status, filters.status));
 
   const base = db
     .select()
-    .from(schema.draftRecords)
+    .from(schema.draft_records)
     .where(and(...conditions))
-    .orderBy(desc(schema.draftRecords.created_at));
+    .orderBy(desc(schema.draft_records.created_at));
   return filters?.limit ? base.limit(filters.limit) : base;
 }
 
@@ -2544,13 +2548,13 @@ export async function approveDraftRecord(id: string): Promise<DraftRecord> {
   const db = getDb();
 
   const [row] = await db
-    .update(schema.draftRecords)
+    .update(schema.draft_records)
     .set({ status: "approved", approved_at: new Date().toISOString(), approved_by: userId })
     .where(
       and(
-        eq(schema.draftRecords.id, id),
-        eq(schema.draftRecords.user_id, userId),
-        inArray(schema.draftRecords.status, ["pending_review", "corrected"]),
+        eq(schema.draft_records.id, id),
+        eq(schema.draft_records.user_id, userId),
+        inArray(schema.draft_records.status, ["pending_review", "corrected"]),
       ),
     )
     .returning();
@@ -2567,14 +2571,14 @@ export async function updateDraftData(
   const db = getDb();
 
   const [row] = await db
-    .update(schema.draftRecords)
+    .update(schema.draft_records)
     .set({
       draft_data: draftData,
       status: "corrected",
       corrections: { manual_edit: true, edited_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     })
-    .where(and(eq(schema.draftRecords.id, id), eq(schema.draftRecords.user_id, userId)))
+    .where(and(eq(schema.draft_records.id, id), eq(schema.draft_records.user_id, userId)))
     .returning();
 
   if (!row) throw new Error("Draft não encontrado");
@@ -2586,9 +2590,9 @@ export async function rejectDraftRecord(id: string, reason?: string): Promise<Dr
   const db = getDb();
 
   const [row] = await db
-    .update(schema.draftRecords)
+    .update(schema.draft_records)
     .set({ status: "rejected", corrections: reason ? { rejection_reason: reason } : null })
-    .where(and(eq(schema.draftRecords.id, id), eq(schema.draftRecords.user_id, userId)))
+    .where(and(eq(schema.draft_records.id, id), eq(schema.draft_records.user_id, userId)))
     .returning();
 
   if (!row) throw new Error("Draft não encontrado");
@@ -2602,21 +2606,21 @@ export async function approveDraftBatch(batchId: string): Promise<void> {
 
   // Bulk: 0 linhas é normal (nenhum draft pendente), sem throw.
   await db
-    .update(schema.draftRecords)
+    .update(schema.draft_records)
     .set({ status: "approved", approved_at: new Date().toISOString(), approved_by: userId })
     .where(
       and(
-        eq(schema.draftRecords.batch_id, batchId),
-        eq(schema.draftRecords.user_id, userId),
-        eq(schema.draftRecords.status, "pending_review"),
+        eq(schema.draft_records.batch_id, batchId),
+        eq(schema.draft_records.user_id, userId),
+        eq(schema.draft_records.status, "pending_review"),
       ),
     );
 
   const result = await db
-    .update(schema.draftBatches)
+    .update(schema.draft_batches)
     .set({ status: "approved" })
-    .where(and(eq(schema.draftBatches.id, batchId), eq(schema.draftBatches.user_id, userId)))
-    .returning({ id: schema.draftBatches.id });
+    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, userId)))
+    .returning({ id: schema.draft_batches.id });
 
   if (result.length === 0) throw new Error("Batch não encontrado");
 }
@@ -2635,24 +2639,24 @@ export async function getIngestionLogs(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.ingestionLogs.user_id, userId)];
-  if (filters?.level) conditions.push(eq(schema.ingestionLogs.level, filters.level));
-  if (filters?.jobId) conditions.push(eq(schema.ingestionLogs.job_id, filters.jobId));
-  if (filters?.runId) conditions.push(eq(schema.ingestionLogs.run_id, filters.runId));
+  const conditions = [eq(schema.ingestion_logs.user_id, userId)];
+  if (filters?.level) conditions.push(eq(schema.ingestion_logs.level, filters.level));
+  if (filters?.jobId) conditions.push(eq(schema.ingestion_logs.job_id, filters.jobId));
+  if (filters?.runId) conditions.push(eq(schema.ingestion_logs.run_id, filters.runId));
 
   const where = and(...conditions);
   const [{ value: total }] = await db
     .select({ value: count() })
-    .from(schema.ingestionLogs)
+    .from(schema.ingestion_logs)
     .where(where);
-  const orderBy = desc(schema.ingestionLogs.created_at);
+  const orderBy = desc(schema.ingestion_logs.created_at);
 
   let rows: IngestionLog[];
   if (filters?.offset !== undefined) {
     const pageSize = filters?.limit ?? 50;
     rows = await db
       .select()
-      .from(schema.ingestionLogs)
+      .from(schema.ingestion_logs)
       .where(where)
       .orderBy(orderBy)
       .limit(pageSize)
@@ -2660,12 +2664,12 @@ export async function getIngestionLogs(filters?: {
   } else if (filters?.limit) {
     rows = await db
       .select()
-      .from(schema.ingestionLogs)
+      .from(schema.ingestion_logs)
       .where(where)
       .orderBy(orderBy)
       .limit(filters.limit);
   } else {
-    rows = await db.select().from(schema.ingestionLogs).where(where).orderBy(orderBy);
+    rows = await db.select().from(schema.ingestion_logs).where(where).orderBy(orderBy);
   }
 
   return { data: rows, count: total };
@@ -2690,38 +2694,38 @@ export async function getIngestionStats(): Promise<{
   const [[docs], [pendingJobs], [drafts], [pendingDrafts], [errors]] = await Promise.all([
     db
       .select({ value: count() })
-      .from(schema.sourceDocuments)
-      .where(eq(schema.sourceDocuments.user_id, userId)),
+      .from(schema.source_documents)
+      .where(eq(schema.source_documents.user_id, userId)),
     db
       .select({ value: count() })
-      .from(schema.ingestionJobs)
+      .from(schema.ingestion_jobs)
       .where(
         and(
-          eq(schema.ingestionJobs.user_id, userId),
-          eq(schema.ingestionJobs.status, "pending_review"),
+          eq(schema.ingestion_jobs.user_id, userId),
+          eq(schema.ingestion_jobs.status, "pending_review"),
         ),
       ),
     db
       .select({ value: count() })
-      .from(schema.draftRecords)
-      .where(eq(schema.draftRecords.user_id, userId)),
+      .from(schema.draft_records)
+      .where(eq(schema.draft_records.user_id, userId)),
     db
       .select({ value: count() })
-      .from(schema.draftRecords)
+      .from(schema.draft_records)
       .where(
         and(
-          eq(schema.draftRecords.user_id, userId),
-          eq(schema.draftRecords.status, "pending_review"),
+          eq(schema.draft_records.user_id, userId),
+          eq(schema.draft_records.status, "pending_review"),
         ),
       ),
     db
       .select({ value: count() })
-      .from(schema.ingestionLogs)
+      .from(schema.ingestion_logs)
       .where(
         and(
-          eq(schema.ingestionLogs.user_id, userId),
-          eq(schema.ingestionLogs.level, "error"),
-          gte(schema.ingestionLogs.created_at, since),
+          eq(schema.ingestion_logs.user_id, userId),
+          eq(schema.ingestion_logs.level, "error"),
+          gte(schema.ingestion_logs.created_at, since),
         ),
       ),
   ]);
@@ -2751,12 +2755,12 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
   const contentHash = await computeContentHash(fileBytes);
 
   const [duplicateFingerprint] = await db
-    .select({ source_document_id: schema.documentFingerprints.source_document_id })
-    .from(schema.documentFingerprints)
+    .select({ source_document_id: schema.document_fingerprints.source_document_id })
+    .from(schema.document_fingerprints)
     .where(
       and(
-        eq(schema.documentFingerprints.user_id, userId),
-        eq(schema.documentFingerprints.content_hash, contentHash),
+        eq(schema.document_fingerprints.user_id, userId),
+        eq(schema.document_fingerprints.content_hash, contentHash),
       ),
     )
     .limit(1);
@@ -2777,7 +2781,7 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
   const originKey = `manual::${storagePath}`;
   const [srcDoc] = await db
-    .insert(schema.sourceDocuments)
+    .insert(schema.source_documents)
     .values({
       user_id: userId,
       origin_type: "manual_upload",
@@ -2795,7 +2799,7 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
   // Apêndice B: 3 inserts sequenciais sem transação — paridade com hoje.
   const [run] = await db
-    .insert(schema.ingestionRuns)
+    .insert(schema.ingestion_runs)
     .values({
       user_id: userId,
       source_type: "manual_upload",
@@ -2806,7 +2810,7 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
   if (!run) throw new Error("Erro ao criar run");
 
-  await db.insert(schema.ingestionJobs).values({
+  await db.insert(schema.ingestion_jobs).values({
     run_id: run.id,
     user_id: userId,
     source_document_id: srcDoc.id,
@@ -2831,13 +2835,13 @@ export async function deleteSourceDocument(
 
   const [doc] = await db
     .select({
-      id: schema.sourceDocuments.id,
-      storage_path: schema.sourceDocuments.storage_path,
-      metadata: schema.sourceDocuments.metadata,
-      status: schema.sourceDocuments.status,
+      id: schema.source_documents.id,
+      storage_path: schema.source_documents.storage_path,
+      metadata: schema.source_documents.metadata,
+      status: schema.source_documents.status,
     })
-    .from(schema.sourceDocuments)
-    .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId)));
+    .from(schema.source_documents)
+    .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)));
 
   if (!doc) throw new Error("Documento não encontrado ou sem permissão");
 
@@ -2863,10 +2867,10 @@ export async function deleteSourceDocument(
     };
 
     const result = await db
-      .update(schema.sourceDocuments)
+      .update(schema.source_documents)
       .set({ status: "deleted", storage_path: null, updated_at: now, metadata })
-      .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId)))
-      .returning({ id: schema.sourceDocuments.id });
+      .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)))
+      .returning({ id: schema.source_documents.id });
 
     if (result.length === 0) throw new Error("Documento não encontrado ou sem permissão");
     return;
@@ -2874,21 +2878,21 @@ export async function deleteSourceDocument(
 
   const [jobs, parsedVersions] = await Promise.all([
     db
-      .select({ id: schema.ingestionJobs.id })
-      .from(schema.ingestionJobs)
+      .select({ id: schema.ingestion_jobs.id })
+      .from(schema.ingestion_jobs)
       .where(
         and(
-          eq(schema.ingestionJobs.source_document_id, id),
-          eq(schema.ingestionJobs.user_id, userId),
+          eq(schema.ingestion_jobs.source_document_id, id),
+          eq(schema.ingestion_jobs.user_id, userId),
         ),
       ),
     db
-      .select({ id: schema.parsedDocumentVersions.id })
-      .from(schema.parsedDocumentVersions)
+      .select({ id: schema.parsed_document_versions.id })
+      .from(schema.parsed_document_versions)
       .where(
         and(
-          eq(schema.parsedDocumentVersions.source_document_id, id),
-          eq(schema.parsedDocumentVersions.user_id, userId),
+          eq(schema.parsed_document_versions.source_document_id, id),
+          eq(schema.parsed_document_versions.user_id, userId),
         ),
       ),
   ]);
@@ -2897,75 +2901,84 @@ export async function deleteSourceDocument(
   const parsedVersionIds = parsedVersions.map((version) => version.id);
 
   await db
-    .delete(schema.draftRecords)
-    .where(
-      and(eq(schema.draftRecords.source_document_id, id), eq(schema.draftRecords.user_id, userId)),
-    );
-  await db
-    .delete(schema.patternFeedback)
+    .delete(schema.draft_records)
     .where(
       and(
-        eq(schema.patternFeedback.source_document_id, id),
-        eq(schema.patternFeedback.user_id, userId),
+        eq(schema.draft_records.source_document_id, id),
+        eq(schema.draft_records.user_id, userId),
+      ),
+    );
+  await db
+    .delete(schema.pattern_feedback)
+    .where(
+      and(
+        eq(schema.pattern_feedback.source_document_id, id),
+        eq(schema.pattern_feedback.user_id, userId),
       ),
     );
 
   if (parsedVersionIds.length > 0) {
     await db
-      .delete(schema.extractionResults)
+      .delete(schema.extraction_results)
       .where(
         and(
-          inArray(schema.extractionResults.parsed_version_id, parsedVersionIds),
-          eq(schema.extractionResults.user_id, userId),
+          inArray(schema.extraction_results.parsed_version_id, parsedVersionIds),
+          eq(schema.extraction_results.user_id, userId),
         ),
       );
   }
 
   await db
-    .delete(schema.parsedDocumentVersions)
+    .delete(schema.parsed_document_versions)
     .where(
       and(
-        eq(schema.parsedDocumentVersions.source_document_id, id),
-        eq(schema.parsedDocumentVersions.user_id, userId),
+        eq(schema.parsed_document_versions.source_document_id, id),
+        eq(schema.parsed_document_versions.user_id, userId),
       ),
     );
   await db
-    .delete(schema.draftBatches)
-    .where(
-      and(eq(schema.draftBatches.source_document_id, id), eq(schema.draftBatches.user_id, userId)),
-    );
-  await db
-    .delete(schema.documentFingerprints)
+    .delete(schema.draft_batches)
     .where(
       and(
-        eq(schema.documentFingerprints.source_document_id, id),
-        eq(schema.documentFingerprints.user_id, userId),
+        eq(schema.draft_batches.source_document_id, id),
+        eq(schema.draft_batches.user_id, userId),
+      ),
+    );
+  await db
+    .delete(schema.document_fingerprints)
+    .where(
+      and(
+        eq(schema.document_fingerprints.source_document_id, id),
+        eq(schema.document_fingerprints.user_id, userId),
       ),
     );
 
   if (jobIds.length > 0) {
     await db
-      .delete(schema.ingestionLogs)
+      .delete(schema.ingestion_logs)
       .where(
-        and(inArray(schema.ingestionLogs.job_id, jobIds), eq(schema.ingestionLogs.user_id, userId)),
+        and(
+          inArray(schema.ingestion_logs.job_id, jobIds),
+          eq(schema.ingestion_logs.user_id, userId),
+        ),
       );
   }
 
   await db
-    .delete(schema.ingestionJobs)
+    .delete(schema.ingestion_jobs)
     .where(
       and(
-        eq(schema.ingestionJobs.source_document_id, id),
-        eq(schema.ingestionJobs.user_id, userId),
+        eq(schema.ingestion_jobs.source_document_id, id),
+        eq(schema.ingestion_jobs.user_id, userId),
       ),
     );
 
   // Não removemos ingestion_runs aqui (mesma nota do código atual).
 
   const result = await db
-    .delete(schema.sourceDocuments)
-    .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId)))
-    .returning({ id: schema.sourceDocuments.id });
+    .delete(schema.source_documents)
+    .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)))
+    .returning({ id: schema.source_documents.id });
 
   if (result.length === 0) throw new Error("Documento não encontrado ou sem permissão");
 }
@@ -3004,28 +3017,28 @@ export async function getAutopilotStatus(documentId: string): Promise<AutopilotR
   const db = getDb();
 
   const [doc] = await db
-    .select({ id: schema.sourceDocuments.id })
-    .from(schema.sourceDocuments)
+    .select({ id: schema.source_documents.id })
+    .from(schema.source_documents)
     .where(
-      and(eq(schema.sourceDocuments.id, documentId), eq(schema.sourceDocuments.user_id, userId)),
+      and(eq(schema.source_documents.id, documentId), eq(schema.source_documents.user_id, userId)),
     );
   if (!doc) throw new Error("Documento não encontrado");
 
   const [job] = await db
     .select({
-      id: schema.ingestionJobs.id,
-      status: schema.ingestionJobs.status,
-      metadata: schema.ingestionJobs.metadata,
-      needs_full_ai_review: schema.ingestionJobs.needs_full_ai_review,
+      id: schema.ingestion_jobs.id,
+      status: schema.ingestion_jobs.status,
+      metadata: schema.ingestion_jobs.metadata,
+      needs_full_ai_review: schema.ingestion_jobs.needs_full_ai_review,
     })
-    .from(schema.ingestionJobs)
+    .from(schema.ingestion_jobs)
     .where(
       and(
-        eq(schema.ingestionJobs.source_document_id, documentId),
-        eq(schema.ingestionJobs.user_id, userId),
+        eq(schema.ingestion_jobs.source_document_id, documentId),
+        eq(schema.ingestion_jobs.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.ingestionJobs.created_at))
+    .orderBy(desc(schema.ingestion_jobs.created_at))
     .limit(1);
 
   const meta = (job?.metadata ?? {}) as Record<string, unknown>;
@@ -3035,20 +3048,20 @@ export async function getAutopilotStatus(documentId: string): Promise<AutopilotR
   if (extractionResultId) {
     const [er] = await db
       .select({
-        supplier_name_raw: schema.extractionResults.supplier_name_raw,
-        total_amount: schema.extractionResults.total_amount,
-        due_date: schema.extractionResults.due_date,
-        competence_date: schema.extractionResults.competence_date,
-        financial_intent: schema.extractionResults.financial_intent,
-        ai_enrichment_type: schema.extractionResults.ai_enrichment_type,
-        confidence_per_field: schema.extractionResults.confidence_per_field,
-        reasoning: schema.extractionResults.reasoning,
+        supplier_name_raw: schema.extraction_results.supplier_name_raw,
+        total_amount: schema.extraction_results.total_amount,
+        due_date: schema.extraction_results.due_date,
+        competence_date: schema.extraction_results.competence_date,
+        financial_intent: schema.extraction_results.financial_intent,
+        ai_enrichment_type: schema.extraction_results.ai_enrichment_type,
+        confidence_per_field: schema.extraction_results.confidence_per_field,
+        reasoning: schema.extraction_results.reasoning,
       })
-      .from(schema.extractionResults)
+      .from(schema.extraction_results)
       .where(
         and(
-          eq(schema.extractionResults.id, extractionResultId),
-          eq(schema.extractionResults.user_id, userId),
+          eq(schema.extraction_results.id, extractionResultId),
+          eq(schema.extraction_results.user_id, userId),
         ),
       );
 
@@ -3068,12 +3081,12 @@ export async function getAutopilotStatus(documentId: string): Promise<AutopilotR
   }
 
   const [draftBatch] = await db
-    .select({ id: schema.draftBatches.id })
-    .from(schema.draftBatches)
+    .select({ id: schema.draft_batches.id })
+    .from(schema.draft_batches)
     .where(
       and(
-        eq(schema.draftBatches.source_document_id, documentId),
-        eq(schema.draftBatches.user_id, userId),
+        eq(schema.draft_batches.source_document_id, documentId),
+        eq(schema.draft_batches.user_id, userId),
       ),
     )
     .limit(1);
@@ -3084,9 +3097,9 @@ export async function getAutopilotStatus(documentId: string): Promise<AutopilotR
   if (batchId) {
     const [{ value }] = await db
       .select({ value: count() })
-      .from(schema.draftRecords)
+      .from(schema.draft_records)
       .where(
-        and(eq(schema.draftRecords.batch_id, batchId), eq(schema.draftRecords.user_id, userId)),
+        and(eq(schema.draft_records.batch_id, batchId), eq(schema.draft_records.user_id, userId)),
       );
     draftCount = value;
   }
@@ -3130,27 +3143,27 @@ export async function triggerAiFullAnalysis(documentId: string): Promise<{ jobId
   const db = getDb();
 
   const [doc] = await db
-    .select({ id: schema.sourceDocuments.id })
-    .from(schema.sourceDocuments)
+    .select({ id: schema.source_documents.id })
+    .from(schema.source_documents)
     .where(
-      and(eq(schema.sourceDocuments.id, documentId), eq(schema.sourceDocuments.user_id, userId)),
+      and(eq(schema.source_documents.id, documentId), eq(schema.source_documents.user_id, userId)),
     );
   if (!doc) throw new Error("Documento não encontrado");
 
   const [run] = await db
-    .insert(schema.ingestionRuns)
+    .insert(schema.ingestion_runs)
     .values({
       user_id: userId,
       source_type: "manual_upload",
       status: "running",
       metadata: { triggered_by: "ai_full_request", document_id: documentId },
     })
-    .returning({ id: schema.ingestionRuns.id });
+    .returning({ id: schema.ingestion_runs.id });
 
   if (!run) throw new Error("Falha ao criar run para análise full");
 
   const [job] = await db
-    .insert(schema.ingestionJobs)
+    .insert(schema.ingestion_jobs)
     .values({
       run_id: run.id,
       user_id: userId,
@@ -3158,15 +3171,15 @@ export async function triggerAiFullAnalysis(documentId: string): Promise<{ jobId
       status: "queued",
       metadata: { ai_mode: "full", force_reprocess: true, triggered_by: "user_request" },
     })
-    .returning({ id: schema.ingestionJobs.id });
+    .returning({ id: schema.ingestion_jobs.id });
 
   if (!job) throw new Error("Falha ao criar job de análise full");
 
   // Fire-and-forget igual ao código atual: não checa linhas afetadas.
   await db
-    .update(schema.ingestionRuns)
+    .update(schema.ingestion_runs)
     .set({ status: "completed" })
-    .where(and(eq(schema.ingestionRuns.id, run.id), eq(schema.ingestionRuns.user_id, userId)));
+    .where(and(eq(schema.ingestion_runs.id, run.id), eq(schema.ingestion_runs.user_id, userId)));
 
   return { jobId: job.id };
 }
@@ -3195,7 +3208,7 @@ git commit -m "feat(web): ingestion.ts usa Drizzle/Neon com filtro user_id expli
 
 **Interfaces:**
 
-- Consome: `schema.transactions`, `schema.transactionTags`, `schema.vExpensesDeduplicated` (Task 1).
+- Consome: `schema.transactions`, `schema.transaction_tags`, `schema.v_expenses_deduplicated` (Task 1).
 
 **Nota:** `transaction_tags` não tem `user_id` próprio — a posse é validada pelo
 update do registro pai (`transactions`) antes de mexer nas tags.
@@ -3324,7 +3337,7 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 type Transaction = typeof schema.transactions.$inferSelect;
 type TransactionInsert = Omit<typeof schema.transactions.$inferInsert, "user_id" | "id">;
 type TransactionUpdate = Partial<TransactionInsert>;
-type DeduplicatedExpense = typeof schema.vExpensesDeduplicated.$inferSelect;
+type DeduplicatedExpense = typeof schema.v_expenses_deduplicated.$inferSelect;
 
 async function requireUserId(): Promise<string> {
   const supabase = await createClient();
@@ -3390,7 +3403,7 @@ export async function createTransaction(
 
   if (tagIds && tagIds.length > 0) {
     await db
-      .insert(schema.transactionTags)
+      .insert(schema.transaction_tags)
       .values(tagIds.map((tag_id) => ({ transaction_id: row.id, tag_id })));
   }
 
@@ -3414,10 +3427,10 @@ export async function updateTransaction(
   if (!row) throw new Error("Transação não encontrada");
 
   if (tagIds !== undefined) {
-    await db.delete(schema.transactionTags).where(eq(schema.transactionTags.transaction_id, id));
+    await db.delete(schema.transaction_tags).where(eq(schema.transaction_tags.transaction_id, id));
     if (tagIds.length > 0) {
       await db
-        .insert(schema.transactionTags)
+        .insert(schema.transaction_tags)
         .values(tagIds.map((tag_id) => ({ transaction_id: id, tag_id })));
     }
   }
@@ -3446,23 +3459,25 @@ export async function getDeduplicatedExpenses(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.vExpensesDeduplicated.user_id, userId)];
+  const conditions = [eq(schema.v_expenses_deduplicated.user_id, userId)];
   if (filters?.financialPeriodId)
     conditions.push(
-      eq(schema.vExpensesDeduplicated.financial_period_id, filters.financialPeriodId),
+      eq(schema.v_expenses_deduplicated.financial_period_id, filters.financialPeriodId),
     );
   if (filters?.statementCycleId)
-    conditions.push(eq(schema.vExpensesDeduplicated.statement_cycle_id, filters.statementCycleId));
+    conditions.push(
+      eq(schema.v_expenses_deduplicated.statement_cycle_id, filters.statementCycleId),
+    );
   if (filters?.supplierId)
-    conditions.push(eq(schema.vExpensesDeduplicated.supplier_id, filters.supplierId));
+    conditions.push(eq(schema.v_expenses_deduplicated.supplier_id, filters.supplierId));
   if (filters?.categoryId)
-    conditions.push(eq(schema.vExpensesDeduplicated.category_id, filters.categoryId));
+    conditions.push(eq(schema.v_expenses_deduplicated.category_id, filters.categoryId));
 
   return db
     .select()
-    .from(schema.vExpensesDeduplicated)
+    .from(schema.v_expenses_deduplicated)
     .where(and(...conditions))
-    .orderBy(desc(schema.vExpensesDeduplicated.event_date));
+    .orderBy(desc(schema.v_expenses_deduplicated.event_date));
 }
 ```
 
@@ -3489,7 +3504,7 @@ git commit -m "feat(web): transactions.ts usa Drizzle/Neon com filtro user_id ex
 
 **Interfaces:**
 
-- Consome: `schema.liabilities`, `schema.liabilityInstallments`, `schema.liabilityTags` (Task 1).
+- Consome: `schema.liabilities`, `schema.liability_installments`, `schema.liability_tags` (Task 1).
 
 - [ ] **Step 1: Escrever os testes**
 
@@ -3625,8 +3640,8 @@ import { and, asc, eq } from "drizzle-orm";
 type Liability = typeof schema.liabilities.$inferSelect;
 type LiabilityInsert = Omit<typeof schema.liabilities.$inferInsert, "user_id" | "id">;
 type LiabilityUpdate = Partial<LiabilityInsert>;
-type LiabilityInstallment = typeof schema.liabilityInstallments.$inferSelect;
-type InstallmentInsert = Omit<typeof schema.liabilityInstallments.$inferInsert, "user_id" | "id">;
+type LiabilityInstallment = typeof schema.liability_installments.$inferSelect;
+type InstallmentInsert = Omit<typeof schema.liability_installments.$inferInsert, "user_id" | "id">;
 type InstallmentUpdate = Partial<InstallmentInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -3681,7 +3696,7 @@ export async function createLiability(
 
   if (tagIds && tagIds.length > 0) {
     await db
-      .insert(schema.liabilityTags)
+      .insert(schema.liability_tags)
       .values(tagIds.map((tag_id) => ({ liability_id: row.id, tag_id })));
   }
 
@@ -3705,10 +3720,10 @@ export async function updateLiability(
   if (!row) throw new Error("Dívida não encontrada");
 
   if (tagIds !== undefined) {
-    await db.delete(schema.liabilityTags).where(eq(schema.liabilityTags.liability_id, id));
+    await db.delete(schema.liability_tags).where(eq(schema.liability_tags.liability_id, id));
     if (tagIds.length > 0) {
       await db
-        .insert(schema.liabilityTags)
+        .insert(schema.liability_tags)
         .values(tagIds.map((tag_id) => ({ liability_id: id, tag_id })));
     }
   }
@@ -3736,16 +3751,16 @@ export async function getLiabilityInstallments(
   const db = getDb();
 
   const conditions = [
-    eq(schema.liabilityInstallments.liability_id, liabilityId),
-    eq(schema.liabilityInstallments.user_id, userId),
+    eq(schema.liability_installments.liability_id, liabilityId),
+    eq(schema.liability_installments.user_id, userId),
   ];
-  if (filters?.status) conditions.push(eq(schema.liabilityInstallments.status, filters.status));
+  if (filters?.status) conditions.push(eq(schema.liability_installments.status, filters.status));
 
   return db
     .select()
-    .from(schema.liabilityInstallments)
+    .from(schema.liability_installments)
     .where(and(...conditions))
-    .orderBy(asc(schema.liabilityInstallments.installment_number));
+    .orderBy(asc(schema.liability_installments.installment_number));
 }
 
 export async function createLiabilityInstallment(
@@ -3754,7 +3769,7 @@ export async function createLiabilityInstallment(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.liabilityInstallments)
+    .insert(schema.liability_installments)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -3767,12 +3782,12 @@ export async function updateLiabilityInstallment(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.liabilityInstallments)
+    .update(schema.liability_installments)
     .set(input)
     .where(
       and(
-        eq(schema.liabilityInstallments.id, id),
-        eq(schema.liabilityInstallments.user_id, userId),
+        eq(schema.liability_installments.id, id),
+        eq(schema.liability_installments.user_id, userId),
       ),
     )
     .returning();
@@ -3784,14 +3799,14 @@ export async function deleteLiabilityInstallment(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   const result = await db
-    .delete(schema.liabilityInstallments)
+    .delete(schema.liability_installments)
     .where(
       and(
-        eq(schema.liabilityInstallments.id, id),
-        eq(schema.liabilityInstallments.user_id, userId),
+        eq(schema.liability_installments.id, id),
+        eq(schema.liability_installments.user_id, userId),
       ),
     )
-    .returning({ id: schema.liabilityInstallments.id });
+    .returning({ id: schema.liability_installments.id });
   if (result.length === 0) throw new Error("Parcela não encontrada");
 }
 ```
@@ -3819,7 +3834,7 @@ git commit -m "feat(web): liabilities.ts usa Drizzle/Neon com filtro user_id exp
 
 **Interfaces:**
 
-- Consome: `schema.cards`, `schema.financialProducts`, `schema.institutions`, `schema.statementCycles` (Task 1).
+- Consome: `schema.cards`, `schema.financial_products`, `schema.institutions`, `schema.statement_cycles` (Task 1).
 
 **Nota:** `getCards`/`getCard` fazem join (`cards` → `financial_products` →
 `institutions`) que hoje o Supabase resolve via embed do PostgREST. Considerada
@@ -3937,7 +3952,7 @@ import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { createCardSchema, updateCardSchema } from "@sbf/validation";
 
 type Card = typeof schema.cards.$inferSelect;
-type FinancialProduct = typeof schema.financialProducts.$inferSelect;
+type FinancialProduct = typeof schema.financial_products.$inferSelect;
 
 export type CardInput = Omit<typeof schema.cards.$inferInsert, "user_id" | "id">;
 export type CardUpdate = Partial<CardInput>;
@@ -3966,20 +3981,20 @@ function cardWithProductSelect() {
     .select({
       card: schema.cards,
       financialProduct: {
-        id: schema.financialProducts.id,
-        name: schema.financialProducts.name,
-        type: schema.financialProducts.type,
+        id: schema.financial_products.id,
+        name: schema.financial_products.name,
+        type: schema.financial_products.type,
       },
       institution: { name: schema.institutions.name },
     })
     .from(schema.cards)
     .leftJoin(
-      schema.financialProducts,
-      eq(schema.cards.financial_product_id, schema.financialProducts.id),
+      schema.financial_products,
+      eq(schema.cards.financial_product_id, schema.financial_products.id),
     )
     .leftJoin(
       schema.institutions,
-      eq(schema.financialProducts.institution_id, schema.institutions.id),
+      eq(schema.financial_products.institution_id, schema.institutions.id),
     );
 }
 
@@ -4024,14 +4039,14 @@ export async function getProdutosParaCartao(): Promise<FinancialProduct[]> {
   const db = getDb();
   return db
     .select()
-    .from(schema.financialProducts)
+    .from(schema.financial_products)
     .where(
       and(
-        eq(schema.financialProducts.user_id, userId),
-        inArray(schema.financialProducts.type, ["credit_card", "checking_account"]),
+        eq(schema.financial_products.user_id, userId),
+        inArray(schema.financial_products.type, ["credit_card", "checking_account"]),
       ),
     )
-    .orderBy(asc(schema.financialProducts.name));
+    .orderBy(asc(schema.financial_products.name));
 }
 
 export async function createCard(input: CardInput): Promise<Card> {
@@ -4090,8 +4105,10 @@ export async function deleteCard(id: string): Promise<void> {
 
   const [{ value: faturas }] = await db
     .select({ value: count() })
-    .from(schema.statementCycles)
-    .where(and(eq(schema.statementCycles.card_id, id), eq(schema.statementCycles.user_id, userId)));
+    .from(schema.statement_cycles)
+    .where(
+      and(eq(schema.statement_cycles.card_id, id), eq(schema.statement_cycles.user_id, userId)),
+    );
 
   if (faturas > 0) {
     throw new Error(
@@ -4134,7 +4151,7 @@ git commit -m "feat(web): cards.ts usa Drizzle/Neon com join manual e filtro use
 
 **Interfaces:**
 
-- Consome: `schema.sourceDocuments` (Task 1).
+- Consome: `schema.source_documents` (Task 1).
 
 **Nota (mudança de contrato a confirmar — sinalizada pela revisão):** o update
 de hoje não checa linhas afetadas (sem `.single()`); por regra geral 3
@@ -4171,14 +4188,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-metadata actions", () 
   afterEach(async () => {
     const db = getDb();
     for (const id of docIds.splice(0)) {
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     }
   });
 
   async function seedDoc(userId: string) {
     const db = getDb();
     const [doc] = await db
-      .insert(schema.sourceDocuments)
+      .insert(schema.source_documents)
       .values({
         user_id: userId,
         origin_type: "manual_upload",
@@ -4200,8 +4217,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-metadata actions", () 
     const db = getDb();
     const [updated] = await db
       .select()
-      .from(schema.sourceDocuments)
-      .where(eq(schema.sourceDocuments.id, doc.id));
+      .from(schema.source_documents)
+      .where(eq(schema.source_documents.id, doc.id));
     expect(updated.supplier_name_raw).toBe("Fornecedor X");
   });
 
@@ -4246,7 +4263,7 @@ import type { Json } from "@sbf/shared-types";
  */
 type SourceDocumentUpdate = Partial<
   Pick<
-    typeof schema.sourceDocuments.$inferInsert,
+    typeof schema.source_documents.$inferInsert,
     "supplier_name_raw" | "metadata" | "document_type"
   >
 >;
@@ -4282,10 +4299,10 @@ export async function updateDocumentMetadata(
   if (Object.keys(updatePayload).length === 0) return;
 
   const result = await db
-    .update(schema.sourceDocuments)
+    .update(schema.source_documents)
     .set(updatePayload)
-    .where(and(eq(schema.sourceDocuments.id, id), eq(schema.sourceDocuments.user_id, userId)))
-    .returning({ id: schema.sourceDocuments.id });
+    .where(and(eq(schema.source_documents.id, id), eq(schema.source_documents.user_id, userId)))
+    .returning({ id: schema.source_documents.id });
 
   if (result.length === 0) throw new Error("Documento não encontrado");
 }
@@ -4314,7 +4331,7 @@ git commit -m "feat(web): document-metadata.ts usa Drizzle/Neon com filtro user_
 
 **Interfaces:**
 
-- Consome: `schema.draftRecords`, `schema.draftBatches` (Task 1).
+- Consome: `schema.draft_records`, `schema.draft_batches` (Task 1).
 - Chama `fn_materialize_draft_record` via SQL cru (assinatura confirmada em
   `packages/db/schema.sql:405`: `p_user_id, p_draft_id, p_target_table,
 p_insert_payload, p_actor`).
@@ -4350,14 +4367,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("materialization actions", () =>
   afterEach(async () => {
     const db = getDb();
     for (const id of draftIds.splice(0)) {
-      await db.delete(schema.draftRecords).where(eq(schema.draftRecords.id, id));
+      await db.delete(schema.draft_records).where(eq(schema.draft_records.id, id));
     }
   });
 
   async function seedDraft(userId: string, status: string) {
     const db = getDb();
     const [row] = await db
-      .insert(schema.draftRecords)
+      .insert(schema.draft_records)
       .values({
         user_id: userId,
         draft_type: "transaction",
@@ -4486,9 +4503,9 @@ export async function postApprovedDraftRecord(
 
   const [draft] = await db
     .select()
-    .from(schema.draftRecords)
+    .from(schema.draft_records)
     .where(
-      and(eq(schema.draftRecords.id, draftRecordId), eq(schema.draftRecords.user_id, user.id)),
+      and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
     );
 
   if (!draft) {
@@ -4562,10 +4579,10 @@ export async function postApprovedDraftRecord(
     const message = err instanceof Error ? err.message : String(err);
 
     await db
-      .update(schema.draftRecords)
+      .update(schema.draft_records)
       .set({ materialization_error: { message, at: new Date().toISOString() } })
       .where(
-        and(eq(schema.draftRecords.id, draftRecordId), eq(schema.draftRecords.user_id, user.id)),
+        and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
       );
 
     return failure(draftRecordId, `Falha ao lançar: ${message}`);
@@ -4609,13 +4626,13 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
   let drafts: { id: string }[];
   try {
     drafts = await db
-      .select({ id: schema.draftRecords.id })
-      .from(schema.draftRecords)
+      .select({ id: schema.draft_records.id })
+      .from(schema.draft_records)
       .where(
         and(
-          eq(schema.draftRecords.batch_id, batchId),
-          eq(schema.draftRecords.user_id, user.id),
-          inArray(schema.draftRecords.status, POSTABLE_STATUSES),
+          eq(schema.draft_records.batch_id, batchId),
+          eq(schema.draft_records.user_id, user.id),
+          inArray(schema.draft_records.status, POSTABLE_STATUSES),
         ),
       );
   } catch (err) {
@@ -4643,14 +4660,14 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
   const batchStatus = failed === 0 ? "approved" : succeeded === 0 ? "rejected" : "partial";
 
   await db
-    .update(schema.draftBatches)
+    .update(schema.draft_batches)
     .set({
       status: batchStatus,
       approved_count: succeeded,
       rejected_count: failed,
       updated_at: new Date().toISOString(),
     })
-    .where(and(eq(schema.draftBatches.id, batchId), eq(schema.draftBatches.user_id, user.id)));
+    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, user.id)));
 
   return { batchId, totalProcessed: drafts.length, succeeded, failed, results };
 }
@@ -4710,7 +4727,7 @@ git commit -m "feat(web): materialization.ts chama fn_materialize_draft_record v
 
 **Interfaces:**
 
-- Consome: `schema.userSecrets` (Task 1).
+- Consome: `schema.user_secrets` (Task 1).
 
 **Achado (discrepância com o Apêndice A da spec):** este arquivo NÃO chama
 `fn_get_secrets`/`fn_mark_secret_used` (essas só são chamadas em
@@ -4751,14 +4768,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("secrets actions", () => {
   afterEach(async () => {
     const db = getDb();
     for (const id of secretIds.splice(0)) {
-      await db.delete(schema.userSecrets).where(eq(schema.userSecrets.id, id));
+      await db.delete(schema.user_secrets).where(eq(schema.user_secrets.id, id));
     }
   });
 
   async function seedSecret(userId: string) {
     const db = getDb();
     const [row] = await db
-      .insert(schema.userSecrets)
+      .insert(schema.user_secrets)
       .values({
         user_id: userId,
         secret_type: "pdf_password",
@@ -4855,19 +4872,19 @@ export async function listSecrets(): Promise<SecretSummary[]> {
   // versão — fragmento sql`` cru replica "NULLS LAST" de hoje.
   const rows = await db
     .select({
-      id: schema.userSecrets.id,
-      secretType: schema.userSecrets.secret_type,
-      entityType: schema.userSecrets.entity_type,
-      entityId: schema.userSecrets.entity_id,
-      contractIdentifier: schema.userSecrets.contract_identifier,
-      label: schema.userSecrets.label,
-      lastUsedAt: schema.userSecrets.last_used_at,
-      successCount: schema.userSecrets.success_count,
-      createdAt: schema.userSecrets.created_at,
+      id: schema.user_secrets.id,
+      secretType: schema.user_secrets.secret_type,
+      entityType: schema.user_secrets.entity_type,
+      entityId: schema.user_secrets.entity_id,
+      contractIdentifier: schema.user_secrets.contract_identifier,
+      label: schema.user_secrets.label,
+      lastUsedAt: schema.user_secrets.last_used_at,
+      successCount: schema.user_secrets.success_count,
+      createdAt: schema.user_secrets.created_at,
     })
-    .from(schema.userSecrets)
-    .where(eq(schema.userSecrets.user_id, userId))
-    .orderBy(sql`${schema.userSecrets.last_used_at} desc nulls last`);
+    .from(schema.user_secrets)
+    .where(eq(schema.user_secrets.user_id, userId))
+    .orderBy(sql`${schema.user_secrets.last_used_at} desc nulls last`);
 
   return rows.map((s) => ({ ...s, successCount: s.successCount ?? 0 }));
 }
@@ -4917,9 +4934,9 @@ export async function deleteSecret(id: string): Promise<void> {
   const db = getDb();
 
   const result = await db
-    .delete(schema.userSecrets)
-    .where(and(eq(schema.userSecrets.id, id), eq(schema.userSecrets.user_id, userId)))
-    .returning({ id: schema.userSecrets.id });
+    .delete(schema.user_secrets)
+    .where(and(eq(schema.user_secrets.id, id), eq(schema.user_secrets.user_id, userId)))
+    .returning({ id: schema.user_secrets.id });
 
   if (result.length === 0) throw new Error("Senha não encontrada");
 
@@ -4952,7 +4969,7 @@ git commit -m "feat(web): secrets.ts usa Drizzle/Neon (setSecret permanece bloqu
 
 **Interfaces:**
 
-- Consome: `schema.documentPatterns`, `schema.patternFeedback` (Task 1).
+- Consome: `schema.document_patterns`, `schema.pattern_feedback` (Task 1).
 
 **Achado:** `registerPatternFeedback` chama `register_pattern_feedback`, uma
 das 6 funções descartadas por completo na migração (mesma nota de
@@ -5005,10 +5022,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("patterns actions", () => {
   afterEach(async () => {
     const db = getDb();
     for (const id of feedbackIds.splice(0)) {
-      await db.delete(schema.patternFeedback).where(eq(schema.patternFeedback.id, id));
+      await db.delete(schema.pattern_feedback).where(eq(schema.pattern_feedback.id, id));
     }
     for (const id of patternIds.splice(0)) {
-      await db.delete(schema.documentPatterns).where(eq(schema.documentPatterns.id, id));
+      await db.delete(schema.document_patterns).where(eq(schema.document_patterns.id, id));
     }
   });
 
@@ -5041,7 +5058,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("patterns actions", () => {
 
     const db = getDb();
     const [feedback] = await db
-      .insert(schema.patternFeedback)
+      .insert(schema.pattern_feedback)
       .values({
         user_id: USER_A,
         pattern_id: created.id,
@@ -5106,13 +5123,13 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@sbf/db";
 import { and, desc, eq, ilike, sql } from "drizzle-orm";
 
-type DocumentPatternRow = typeof schema.documentPatterns.$inferSelect;
+type DocumentPatternRow = typeof schema.document_patterns.$inferSelect;
 export type DocumentPattern = Omit<DocumentPatternRow, "extraction_rules" | "field_mappings"> & {
   extraction_rules: Record<string, unknown>;
   field_mappings: Record<string, unknown>;
 };
 
-type PatternFeedbackRow = typeof schema.patternFeedback.$inferSelect;
+type PatternFeedbackRow = typeof schema.pattern_feedback.$inferSelect;
 export type PatternFeedback = Omit<PatternFeedbackRow, "corrections"> & {
   corrections: Record<string, unknown>;
 };
@@ -5162,27 +5179,27 @@ export async function listPatterns(filters?: {
   const userId = await requireUserId();
   const db = getDb();
 
-  const conditions = [eq(schema.documentPatterns.user_id, userId)];
+  const conditions = [eq(schema.document_patterns.user_id, userId)];
   if (filters?.document_type)
-    conditions.push(eq(schema.documentPatterns.document_type, filters.document_type));
+    conditions.push(eq(schema.document_patterns.document_type, filters.document_type));
   if (filters?.supplier_id)
-    conditions.push(eq(schema.documentPatterns.supplier_id, filters.supplier_id));
+    conditions.push(eq(schema.document_patterns.supplier_id, filters.supplier_id));
   if (filters?.institution_id)
-    conditions.push(eq(schema.documentPatterns.institution_id, filters.institution_id));
+    conditions.push(eq(schema.document_patterns.institution_id, filters.institution_id));
   if (filters?.is_active !== undefined)
-    conditions.push(eq(schema.documentPatterns.is_active, filters.is_active));
-  if (filters?.search) conditions.push(ilike(schema.documentPatterns.name, `%${filters.search}%`));
+    conditions.push(eq(schema.document_patterns.is_active, filters.is_active));
+  if (filters?.search) conditions.push(ilike(schema.document_patterns.name, `%${filters.search}%`));
 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.documentPatterns)
+    .from(schema.document_patterns)
     .where(and(...conditions));
 
   const base = db
     .select()
-    .from(schema.documentPatterns)
+    .from(schema.document_patterns)
     .where(and(...conditions))
-    .orderBy(desc(schema.documentPatterns.updated_at));
+    .orderBy(desc(schema.document_patterns.updated_at));
 
   const data =
     filters?.offset !== undefined
@@ -5204,15 +5221,20 @@ export async function getPattern(id: string): Promise<{
   const [pattern, feedback] = await Promise.all([
     db
       .select()
-      .from(schema.documentPatterns)
-      .where(and(eq(schema.documentPatterns.id, id), eq(schema.documentPatterns.user_id, userId))),
+      .from(schema.document_patterns)
+      .where(
+        and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)),
+      ),
     db
       .select()
-      .from(schema.patternFeedback)
+      .from(schema.pattern_feedback)
       .where(
-        and(eq(schema.patternFeedback.pattern_id, id), eq(schema.patternFeedback.user_id, userId)),
+        and(
+          eq(schema.pattern_feedback.pattern_id, id),
+          eq(schema.pattern_feedback.user_id, userId),
+        ),
       )
-      .orderBy(desc(schema.patternFeedback.created_at))
+      .orderBy(desc(schema.pattern_feedback.created_at))
       .limit(50),
   ]);
 
@@ -5226,7 +5248,7 @@ export async function createPattern(input: CreatePatternInput): Promise<Document
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.documentPatterns)
+    .insert(schema.document_patterns)
     .values({
       user_id: userId,
       name: input.name,
@@ -5251,9 +5273,9 @@ export async function updatePattern(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.documentPatterns)
+    .update(schema.document_patterns)
     .set({ ...input, updated_at: new Date().toISOString() })
-    .where(and(eq(schema.documentPatterns.id, id), eq(schema.documentPatterns.user_id, userId)))
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)))
     .returning();
 
   if (!row) throw new Error("Padrão não encontrado");
@@ -5279,19 +5301,19 @@ export async function createPatternVersion(
   // assim pra não perder a distinção entre "não encontrado" e "de outro usuário".
   const [current] = await db
     .select()
-    .from(schema.documentPatterns)
-    .where(eq(schema.documentPatterns.id, id));
+    .from(schema.document_patterns)
+    .where(eq(schema.document_patterns.id, id));
   if (!current) throw new Error("Padrão não encontrado");
   if (current.user_id !== userId) throw new Error("Access denied");
 
   // Nota: sem `.select().single()` hoje — comportamento preservado (exceção documentada).
   await db
-    .update(schema.documentPatterns)
+    .update(schema.document_patterns)
     .set({ is_active: false })
-    .where(and(eq(schema.documentPatterns.id, id), eq(schema.documentPatterns.user_id, userId)));
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
 
   const [newVersion] = await db
-    .insert(schema.documentPatterns)
+    .insert(schema.document_patterns)
     .values({
       user_id: userId,
       name: current.name,
@@ -5320,9 +5342,9 @@ export async function deactivatePattern(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .update(schema.documentPatterns)
+    .update(schema.document_patterns)
     .set({ is_active: false, updated_at: new Date().toISOString() })
-    .where(and(eq(schema.documentPatterns.id, id), eq(schema.documentPatterns.user_id, userId)));
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
   revalidatePath("/dashboard/ingestion/patterns");
 }
 
@@ -5330,9 +5352,9 @@ export async function reactivatePattern(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .update(schema.documentPatterns)
+    .update(schema.document_patterns)
     .set({ is_active: true, updated_at: new Date().toISOString() })
-    .where(and(eq(schema.documentPatterns.id, id), eq(schema.documentPatterns.user_id, userId)));
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
   revalidatePath("/dashboard/ingestion/patterns");
 }
 
@@ -5384,7 +5406,7 @@ git commit -m "feat(web): patterns.ts usa Drizzle/Neon (registerPatternFeedback 
 
 **Interfaces:**
 
-- Consome: `schema.documentSplits`, `schema.sourceDocuments` (Task 1).
+- Consome: `schema.document_splits`, `schema.source_documents` (Task 1).
 
 **Nota:** `document_splits_source_document_id_fkey` é `ON DELETE CASCADE` —
 apagar o `source_document` de teste já limpa os splits associados.
@@ -5417,7 +5439,7 @@ const USER_B = "00000000-0000-0000-0000-0000000000b2";
 async function seedSourceDocument(userId: string, amount?: number) {
   const db = getDb();
   const [row] = await db
-    .insert(schema.sourceDocuments)
+    .insert(schema.source_documents)
     .values({
       user_id: userId,
       origin_type: "manual_upload",
@@ -5435,7 +5457,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-splits actions", () =>
   afterEach(async () => {
     const db = getDb();
     for (const id of sourceDocumentIds.splice(0)) {
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     }
   });
 
@@ -5495,8 +5517,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("document-splits actions", () =>
     const db = getDb();
     const [stillThere] = await db
       .select()
-      .from(schema.documentSplits)
-      .where(eq(schema.documentSplits.id, splitB.id));
+      .from(schema.document_splits)
+      .where(eq(schema.document_splits.id, splitB.id));
     expect(stillThere).toBeDefined();
   });
 });
@@ -5516,7 +5538,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, eq } from "drizzle-orm";
 
-export type DocumentSplit = typeof schema.documentSplits.$inferSelect;
+export type DocumentSplit = typeof schema.document_splits.$inferSelect;
 
 export interface DocumentSplitInsert {
   source_document_id: string;
@@ -5540,14 +5562,14 @@ export async function listDocumentSplits(sourceDocumentId: string): Promise<Docu
   const db = getDb();
   return db
     .select()
-    .from(schema.documentSplits)
+    .from(schema.document_splits)
     .where(
       and(
-        eq(schema.documentSplits.source_document_id, sourceDocumentId),
-        eq(schema.documentSplits.user_id, userId),
+        eq(schema.document_splits.source_document_id, sourceDocumentId),
+        eq(schema.document_splits.user_id, userId),
       ),
     )
-    .orderBy(asc(schema.documentSplits.created_at));
+    .orderBy(asc(schema.document_splits.created_at));
 }
 
 export async function createDocumentSplit(input: DocumentSplitInsert): Promise<DocumentSplit> {
@@ -5556,12 +5578,12 @@ export async function createDocumentSplit(input: DocumentSplitInsert): Promise<D
 
   // Validação de soma server-side (além do trigger DB fn_validate_splits_sum).
   const existing = await db
-    .select({ amount: schema.documentSplits.amount })
-    .from(schema.documentSplits)
+    .select({ amount: schema.document_splits.amount })
+    .from(schema.document_splits)
     .where(
       and(
-        eq(schema.documentSplits.source_document_id, input.source_document_id),
-        eq(schema.documentSplits.user_id, userId),
+        eq(schema.document_splits.source_document_id, input.source_document_id),
+        eq(schema.document_splits.user_id, userId),
       ),
     );
   const currentSum = existing.reduce((acc, s) => acc + s.amount, 0);
@@ -5570,12 +5592,12 @@ export async function createDocumentSplit(input: DocumentSplitInsert): Promise<D
   // pertencer ao usuário, a validação de soma é pulada em vez de lançar erro.
   // Comportamento preservado (exceção documentada).
   const [doc] = await db
-    .select({ metadata: schema.sourceDocuments.metadata })
-    .from(schema.sourceDocuments)
+    .select({ metadata: schema.source_documents.metadata })
+    .from(schema.source_documents)
     .where(
       and(
-        eq(schema.sourceDocuments.id, input.source_document_id),
-        eq(schema.sourceDocuments.user_id, userId),
+        eq(schema.source_documents.id, input.source_document_id),
+        eq(schema.source_documents.user_id, userId),
       ),
     );
 
@@ -5591,7 +5613,7 @@ export async function createDocumentSplit(input: DocumentSplitInsert): Promise<D
   }
 
   const [row] = await db
-    .insert(schema.documentSplits)
+    .insert(schema.document_splits)
     .values({ ...input, user_id: userId, tags: input.tags ?? [] })
     .returning();
 
@@ -5603,20 +5625,20 @@ export async function deleteDocumentSplit(splitId: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.documentSplits)
-    .where(and(eq(schema.documentSplits.id, splitId), eq(schema.documentSplits.user_id, userId)));
+    .delete(schema.document_splits)
+    .where(and(eq(schema.document_splits.id, splitId), eq(schema.document_splits.user_id, userId)));
 }
 
 export async function getDocumentSplitsTotal(sourceDocumentId: string): Promise<number> {
   const userId = await requireUserId();
   const db = getDb();
   const rows = await db
-    .select({ amount: schema.documentSplits.amount })
-    .from(schema.documentSplits)
+    .select({ amount: schema.document_splits.amount })
+    .from(schema.document_splits)
     .where(
       and(
-        eq(schema.documentSplits.source_document_id, sourceDocumentId),
-        eq(schema.documentSplits.user_id, userId),
+        eq(schema.document_splits.source_document_id, sourceDocumentId),
+        eq(schema.document_splits.user_id, userId),
       ),
     );
   return rows.reduce((acc, s) => acc + s.amount, 0);
@@ -5646,7 +5668,7 @@ git commit -m "feat(web): document-splits.ts usa Drizzle/Neon com filtro user_id
 
 **Interfaces:**
 
-- Consome: `schema.financialProducts` (Task 1).
+- Consome: `schema.financial_products` (Task 1).
 
 - [ ] **Step 1: Escrever os testes**
 
@@ -5756,8 +5778,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("financial-products actions", ()
     const db = getDb();
     const [row] = await db
       .select()
-      .from(schema.financialProducts)
-      .where(eq(schema.financialProducts.id, product.id));
+      .from(schema.financial_products)
+      .where(eq(schema.financial_products.id, product.id));
     expect(row).toBeDefined();
   });
 });
@@ -5777,8 +5799,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, eq } from "drizzle-orm";
 
-type FinancialProduct = typeof schema.financialProducts.$inferSelect;
-type FinancialProductInsert = Omit<typeof schema.financialProducts.$inferInsert, "user_id" | "id">;
+type FinancialProduct = typeof schema.financial_products.$inferSelect;
+type FinancialProductInsert = Omit<typeof schema.financial_products.$inferInsert, "user_id" | "id">;
 type FinancialProductUpdate = Partial<FinancialProductInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -5793,13 +5815,13 @@ async function requireUserId(): Promise<string> {
 export async function getFinancialProducts(institutionId?: string): Promise<FinancialProduct[]> {
   const userId = await requireUserId();
   const db = getDb();
-  const conditions = [eq(schema.financialProducts.user_id, userId)];
-  if (institutionId) conditions.push(eq(schema.financialProducts.institution_id, institutionId));
+  const conditions = [eq(schema.financial_products.user_id, userId)];
+  if (institutionId) conditions.push(eq(schema.financial_products.institution_id, institutionId));
   return db
     .select()
-    .from(schema.financialProducts)
+    .from(schema.financial_products)
     .where(and(...conditions))
-    .orderBy(asc(schema.financialProducts.display_order), asc(schema.financialProducts.name));
+    .orderBy(asc(schema.financial_products.display_order), asc(schema.financial_products.name));
 }
 
 export async function getFinancialProduct(id: string): Promise<FinancialProduct | null> {
@@ -5807,8 +5829,10 @@ export async function getFinancialProduct(id: string): Promise<FinancialProduct 
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.financialProducts)
-    .where(and(eq(schema.financialProducts.id, id), eq(schema.financialProducts.user_id, userId)));
+    .from(schema.financial_products)
+    .where(
+      and(eq(schema.financial_products.id, id), eq(schema.financial_products.user_id, userId)),
+    );
   return row ?? null;
 }
 
@@ -5818,7 +5842,7 @@ export async function createFinancialProduct(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.financialProducts)
+    .insert(schema.financial_products)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -5831,9 +5855,9 @@ export async function updateFinancialProduct(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.financialProducts)
+    .update(schema.financial_products)
     .set(input)
-    .where(and(eq(schema.financialProducts.id, id), eq(schema.financialProducts.user_id, userId)))
+    .where(and(eq(schema.financial_products.id, id), eq(schema.financial_products.user_id, userId)))
     .returning();
   if (!row) throw new Error("Produto financeiro não encontrado");
   return row;
@@ -5844,8 +5868,10 @@ export async function deleteFinancialProduct(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.financialProducts)
-    .where(and(eq(schema.financialProducts.id, id), eq(schema.financialProducts.user_id, userId)));
+    .delete(schema.financial_products)
+    .where(
+      and(eq(schema.financial_products.id, id), eq(schema.financial_products.user_id, userId)),
+    );
 }
 ```
 
@@ -5873,7 +5899,7 @@ git commit -m "feat(web): financial-products.ts usa Drizzle/Neon com filtro user
 
 **Interfaces:**
 
-- Consome: `schema.suppliers`, `schema.supplierAliases`, `schema.supplierContracts`, `schema.sourceDocuments` (Task 1).
+- Consome: `schema.suppliers`, `schema.supplier_aliases`, `schema.supplier_contracts`, `schema.source_documents` (Task 1).
 - Produz: `getSupplierDetail(id)`, `updateSupplierActive(id, isActive)` — novas, consumidas pelo componente client-side migrado.
 
 **Achado:** `searchSuppliers` chama `search_suppliers`, descartada por inteiro
@@ -5929,7 +5955,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
   afterEach(async () => {
     const db = getDb();
     for (const id of sourceDocumentIds.splice(0)) {
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     }
     for (const id of supplierIds.splice(0)) {
       await db.delete(schema.suppliers).where(eq(schema.suppliers.id, id));
@@ -5969,7 +5995,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
 
     const db = getDb();
     const [doc] = await db
-      .insert(schema.sourceDocuments)
+      .insert(schema.source_documents)
       .values({
         user_id: USER_A,
         origin_type: "manual_upload",
@@ -6039,8 +6065,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
     const db = getDb();
     const [goneA] = await db
       .select()
-      .from(schema.supplierAliases)
-      .where(eq(schema.supplierAliases.id, aliasA.id));
+      .from(schema.supplier_aliases)
+      .where(eq(schema.supplier_aliases.id, aliasA.id));
     expect(goneA).toBeUndefined();
 
     currentUserId = USER_B;
@@ -6056,8 +6082,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
     await deleteSupplierAlias(aliasB.id); // não deve lançar
     const [stillThereB] = await db
       .select()
-      .from(schema.supplierAliases)
-      .where(eq(schema.supplierAliases.id, aliasB.id));
+      .from(schema.supplier_aliases)
+      .where(eq(schema.supplier_aliases.id, aliasB.id));
     expect(stillThereB).toBeDefined();
   });
 
@@ -6075,8 +6101,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
     const db = getDb();
     const [goneA] = await db
       .select()
-      .from(schema.supplierContracts)
-      .where(eq(schema.supplierContracts.id, contractA.id));
+      .from(schema.supplier_contracts)
+      .where(eq(schema.supplier_contracts.id, contractA.id));
     expect(goneA).toBeUndefined();
 
     currentUserId = USER_B;
@@ -6092,8 +6118,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
     await deleteSupplierContract(contractB.id); // não deve lançar
     const [stillThereB] = await db
       .select()
-      .from(schema.supplierContracts)
-      .where(eq(schema.supplierContracts.id, contractB.id));
+      .from(schema.supplier_contracts)
+      .where(eq(schema.supplier_contracts.id, contractB.id));
     expect(stillThereB).toBeDefined();
   });
 });
@@ -6117,12 +6143,12 @@ export type Supplier = typeof schema.suppliers.$inferSelect;
 type SupplierInsert = Omit<typeof schema.suppliers.$inferInsert, "user_id" | "id">;
 type SupplierUpdate = Partial<SupplierInsert>;
 
-export type SupplierAlias = typeof schema.supplierAliases.$inferSelect;
-type AliasInsert = Omit<typeof schema.supplierAliases.$inferInsert, "user_id" | "id">;
+export type SupplierAlias = typeof schema.supplier_aliases.$inferSelect;
+type AliasInsert = Omit<typeof schema.supplier_aliases.$inferInsert, "user_id" | "id">;
 type AliasUpdate = Partial<AliasInsert>;
 
-export type SupplierContract = typeof schema.supplierContracts.$inferSelect;
-type ContractInsert = Omit<typeof schema.supplierContracts.$inferInsert, "user_id" | "id">;
+export type SupplierContract = typeof schema.supplier_contracts.$inferSelect;
+type ContractInsert = Omit<typeof schema.supplier_contracts.$inferInsert, "user_id" | "id">;
 type ContractUpdate = Partial<ContractInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -6249,35 +6275,41 @@ export async function getSupplierDetail(id: string): Promise<SupplierDetail> {
       .where(and(eq(schema.suppliers.id, id), eq(schema.suppliers.user_id, userId))),
     db
       .select()
-      .from(schema.supplierAliases)
-      .where(
-        and(eq(schema.supplierAliases.supplier_id, id), eq(schema.supplierAliases.user_id, userId)),
-      )
-      .orderBy(desc(schema.supplierAliases.created_at)),
-    db
-      .select()
-      .from(schema.supplierContracts)
+      .from(schema.supplier_aliases)
       .where(
         and(
-          eq(schema.supplierContracts.supplier_id, id),
-          eq(schema.supplierContracts.user_id, userId),
+          eq(schema.supplier_aliases.supplier_id, id),
+          eq(schema.supplier_aliases.user_id, userId),
         ),
       )
-      .orderBy(desc(schema.supplierContracts.start_date)),
+      .orderBy(desc(schema.supplier_aliases.created_at)),
+    db
+      .select()
+      .from(schema.supplier_contracts)
+      .where(
+        and(
+          eq(schema.supplier_contracts.supplier_id, id),
+          eq(schema.supplier_contracts.user_id, userId),
+        ),
+      )
+      .orderBy(desc(schema.supplier_contracts.start_date)),
     db
       .select({
-        id: schema.sourceDocuments.id,
-        filename: schema.sourceDocuments.filename,
-        origin_type: schema.sourceDocuments.origin_type,
-        status: schema.sourceDocuments.status,
-        created_at: schema.sourceDocuments.created_at,
-        metadata: schema.sourceDocuments.metadata,
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        origin_type: schema.source_documents.origin_type,
+        status: schema.source_documents.status,
+        created_at: schema.source_documents.created_at,
+        metadata: schema.source_documents.metadata,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(
-        and(eq(schema.sourceDocuments.supplier_id, id), eq(schema.sourceDocuments.user_id, userId)),
+        and(
+          eq(schema.source_documents.supplier_id, id),
+          eq(schema.source_documents.user_id, userId),
+        ),
       )
-      .orderBy(desc(schema.sourceDocuments.created_at))
+      .orderBy(desc(schema.source_documents.created_at))
       .limit(50),
   ]);
 
@@ -6289,21 +6321,21 @@ export async function getSupplierAliases(supplierId: string): Promise<SupplierAl
   const db = getDb();
   return db
     .select()
-    .from(schema.supplierAliases)
+    .from(schema.supplier_aliases)
     .where(
       and(
-        eq(schema.supplierAliases.supplier_id, supplierId),
-        eq(schema.supplierAliases.user_id, userId),
+        eq(schema.supplier_aliases.supplier_id, supplierId),
+        eq(schema.supplier_aliases.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.supplierAliases.created_at));
+    .orderBy(desc(schema.supplier_aliases.created_at));
 }
 
 export async function createSupplierAlias(input: AliasInsert): Promise<SupplierAlias> {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.supplierAliases)
+    .insert(schema.supplier_aliases)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -6313,9 +6345,9 @@ export async function updateSupplierAlias(id: string, input: AliasUpdate): Promi
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.supplierAliases)
+    .update(schema.supplier_aliases)
     .set(input)
-    .where(and(eq(schema.supplierAliases.id, id), eq(schema.supplierAliases.user_id, userId)))
+    .where(and(eq(schema.supplier_aliases.id, id), eq(schema.supplier_aliases.user_id, userId)))
     .returning();
   if (!row) throw new Error("Alias não encontrado");
   return row;
@@ -6326,8 +6358,8 @@ export async function deleteSupplierAlias(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.supplierAliases)
-    .where(and(eq(schema.supplierAliases.id, id), eq(schema.supplierAliases.user_id, userId)));
+    .delete(schema.supplier_aliases)
+    .where(and(eq(schema.supplier_aliases.id, id), eq(schema.supplier_aliases.user_id, userId)));
 }
 
 export async function getSupplierContracts(supplierId: string): Promise<SupplierContract[]> {
@@ -6335,21 +6367,21 @@ export async function getSupplierContracts(supplierId: string): Promise<Supplier
   const db = getDb();
   return db
     .select()
-    .from(schema.supplierContracts)
+    .from(schema.supplier_contracts)
     .where(
       and(
-        eq(schema.supplierContracts.supplier_id, supplierId),
-        eq(schema.supplierContracts.user_id, userId),
+        eq(schema.supplier_contracts.supplier_id, supplierId),
+        eq(schema.supplier_contracts.user_id, userId),
       ),
     )
-    .orderBy(desc(schema.supplierContracts.start_date));
+    .orderBy(desc(schema.supplier_contracts.start_date));
 }
 
 export async function createSupplierContract(input: ContractInsert): Promise<SupplierContract> {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.supplierContracts)
+    .insert(schema.supplier_contracts)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -6362,9 +6394,9 @@ export async function updateSupplierContract(
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .update(schema.supplierContracts)
+    .update(schema.supplier_contracts)
     .set(input)
-    .where(and(eq(schema.supplierContracts.id, id), eq(schema.supplierContracts.user_id, userId)))
+    .where(and(eq(schema.supplier_contracts.id, id), eq(schema.supplier_contracts.user_id, userId)))
     .returning();
   if (!row) throw new Error("Contrato não encontrado");
   return row;
@@ -6375,8 +6407,10 @@ export async function deleteSupplierContract(id: string): Promise<void> {
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .delete(schema.supplierContracts)
-    .where(and(eq(schema.supplierContracts.id, id), eq(schema.supplierContracts.user_id, userId)));
+    .delete(schema.supplier_contracts)
+    .where(
+      and(eq(schema.supplier_contracts.id, id), eq(schema.supplier_contracts.user_id, userId)),
+    );
 }
 ```
 
@@ -6423,7 +6457,7 @@ git commit -m "feat(web): suppliers.ts usa Drizzle/Neon; migra page.tsx pras nov
 
 **Interfaces:**
 
-- Consome: `schema.importJobs`, `schema.financialProducts`, `schema.transactions` (Task 1).
+- Consome: `schema.import_jobs`, `schema.financial_products`, `schema.transactions` (Task 1).
 
 **Nota:** o upload físico do CSV (`supabase.storage.from("user-files").upload(...)`)
 **não muda** nesta fase — Storage é Fase 3. Só as 4 operações de dados
@@ -6475,7 +6509,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("import actions", () => {
       await db.delete(schema.transactions).where(eq(schema.transactions.id, id));
     }
     for (const id of importJobIds.splice(0)) {
-      await db.delete(schema.importJobs).where(eq(schema.importJobs.id, id));
+      await db.delete(schema.import_jobs).where(eq(schema.import_jobs.id, id));
     }
     for (const id of institutionIds.splice(0)) {
       await cleanupInstitution(id);
@@ -6570,9 +6604,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, eq } from "drizzle-orm";
 
-type ImportJob = typeof schema.importJobs.$inferSelect;
-type ImportJobInsert = Omit<typeof schema.importJobs.$inferInsert, "user_id" | "id">;
-type ImportJobUpdate = Partial<Omit<typeof schema.importJobs.$inferInsert, "user_id" | "id">>;
+type ImportJob = typeof schema.import_jobs.$inferSelect;
+type ImportJobInsert = Omit<typeof schema.import_jobs.$inferInsert, "user_id" | "id">;
+type ImportJobUpdate = Partial<Omit<typeof schema.import_jobs.$inferInsert, "user_id" | "id">>;
 type Transaction = typeof schema.transactions.$inferSelect;
 type TransactionInsert = Omit<typeof schema.transactions.$inferInsert, "user_id" | "id">;
 
@@ -6589,7 +6623,7 @@ export async function createImportJob(input: ImportJobInsert): Promise<ImportJob
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.importJobs)
+    .insert(schema.import_jobs)
     .values({ ...input, user_id: userId })
     .returning();
   return row;
@@ -6600,8 +6634,8 @@ export async function getImportJobStatus(id: string): Promise<ImportJob | null> 
   const db = getDb();
   const [row] = await db
     .select()
-    .from(schema.importJobs)
-    .where(and(eq(schema.importJobs.id, id), eq(schema.importJobs.user_id, userId)));
+    .from(schema.import_jobs)
+    .where(and(eq(schema.import_jobs.id, id), eq(schema.import_jobs.user_id, userId)));
   return row ?? null;
 }
 
@@ -6614,9 +6648,9 @@ export async function getDefaultFinancialProductId(): Promise<string | null> {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .select({ id: schema.financialProducts.id })
-    .from(schema.financialProducts)
-    .where(eq(schema.financialProducts.user_id, userId))
+    .select({ id: schema.financial_products.id })
+    .from(schema.financial_products)
+    .where(eq(schema.financial_products.user_id, userId))
     .limit(1);
   return row?.id ?? null;
 }
@@ -6636,9 +6670,9 @@ export async function updateImportJob(id: string, input: ImportJobUpdate): Promi
   const userId = await requireUserId();
   const db = getDb();
   await db
-    .update(schema.importJobs)
+    .update(schema.import_jobs)
     .set(input)
-    .where(and(eq(schema.importJobs.id, id), eq(schema.importJobs.user_id, userId)));
+    .where(and(eq(schema.import_jobs.id, id), eq(schema.import_jobs.user_id, userId)));
 }
 ```
 
@@ -6723,7 +6757,7 @@ git commit -m "feat(web): cria actions/import.ts e migra import/page.tsx para Dr
 
 **Interfaces:**
 
-- Consome: `schema.aiChatSessions` (Task 1).
+- Consome: `schema.ai_chat_sessions` (Task 1).
 
 **Nota:** Storage (`ingestion-originals`) e `functions.invoke("trigger-ingestion")`
 no mesmo componente **não mudam** nesta fase (Fase 2/Fase 3).
@@ -6766,7 +6800,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("chat-sessions actions", () => {
   afterEach(async () => {
     const db = getDb();
     for (const id of sessionIds.splice(0)) {
-      await db.delete(schema.aiChatSessions).where(eq(schema.aiChatSessions.id, id));
+      await db.delete(schema.ai_chat_sessions).where(eq(schema.ai_chat_sessions.id, id));
     }
   });
 
@@ -6782,8 +6816,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("chat-sessions actions", () => {
     const db = getDb();
     const rowsForA = await db
       .select()
-      .from(schema.aiChatSessions)
-      .where(eq(schema.aiChatSessions.user_id, USER_A));
+      .from(schema.ai_chat_sessions)
+      .where(eq(schema.ai_chat_sessions.user_id, USER_A));
     expect(rowsForA.map((r) => r.id)).toContain(sessionA.id);
     expect(rowsForA.map((r) => r.id)).not.toContain(sessionB.id);
   });
@@ -6818,7 +6852,7 @@ Expected: FAIL.
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 
-type ChatSession = typeof schema.aiChatSessions.$inferSelect;
+type ChatSession = typeof schema.ai_chat_sessions.$inferSelect;
 
 async function requireUserId(): Promise<string> {
   const supabase = await createClient();
@@ -6833,7 +6867,7 @@ export async function getOrCreateChatSession(): Promise<ChatSession> {
   const userId = await requireUserId();
   const db = getDb();
   const [row] = await db
-    .insert(schema.aiChatSessions)
+    .insert(schema.ai_chat_sessions)
     .values({ user_id: userId, title: "Nova conversa", context_type: "general" })
     .returning();
   return row;
@@ -6879,7 +6913,7 @@ git commit -m "feat(web): cria actions/chat-sessions.ts e migra ai-chat-drawer.t
 
 **Interfaces:**
 
-- Consome: `schema.sourceDocuments`, `schema.ingestionJobs`, `schema.draftRecords`, `schema.transactions`, `schema.categories`, `schema.suppliers`, `schema.documentPatterns` (Task 1).
+- Consome: `schema.source_documents`, `schema.ingestion_jobs`, `schema.draft_records`, `schema.transactions`, `schema.categories`, `schema.suppliers`, `schema.document_patterns` (Task 1).
 
 **Nota — convenção diferente do resto da fase:** aqui `getUser()` ausente
 devolve `{ error: "Não autenticado" }` (não lança) — é o contrato que o SDK
@@ -6937,7 +6971,7 @@ const toolOpts = { toolCallId: "test", messages: [] } as const;
 async function seedSourceDocument(userId: string) {
   const db = getDb();
   const [row] = await db
-    .insert(schema.sourceDocuments)
+    .insert(schema.source_documents)
     .values({
       user_id: userId,
       origin_type: "manual_upload",
@@ -6952,7 +6986,7 @@ async function seedSourceDocument(userId: string) {
 async function seedDraft(userId: string) {
   const db = getDb();
   const [row] = await db
-    .insert(schema.draftRecords)
+    .insert(schema.draft_records)
     .values({
       user_id: userId,
       draft_type: "transaction",
@@ -6974,9 +7008,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
   afterEach(async () => {
     const db = getDb();
     for (const id of draftIds.splice(0))
-      await db.delete(schema.draftRecords).where(eq(schema.draftRecords.id, id));
+      await db.delete(schema.draft_records).where(eq(schema.draft_records.id, id));
     for (const id of docIds.splice(0))
-      await db.delete(schema.sourceDocuments).where(eq(schema.sourceDocuments.id, id));
+      await db.delete(schema.source_documents).where(eq(schema.source_documents.id, id));
     for (const id of categoryIds.splice(0))
       await db.delete(schema.categories).where(eq(schema.categories.id, id));
     for (const id of supplierIds.splice(0))
@@ -7011,8 +7045,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     const db = getDb();
     const [updated] = await db
       .select()
-      .from(schema.draftRecords)
-      .where(eq(schema.draftRecords.id, draft.id));
+      .from(schema.draft_records)
+      .where(eq(schema.draft_records.id, draft.id));
     expect(updated?.status).toBe("approved");
   });
 
@@ -7027,8 +7061,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     const db = getDb();
     const [stillPending] = await db
       .select()
-      .from(schema.draftRecords)
-      .where(eq(schema.draftRecords.id, draftB.id));
+      .from(schema.draft_records)
+      .where(eq(schema.draft_records.id, draftB.id));
     expect(stillPending?.status).toBe("pending_review"); // linha de outro usuário não foi tocada
   });
 
@@ -7115,21 +7149,21 @@ export const listPendingDocuments = tool({
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
-    const conditions = [eq(schema.sourceDocuments.user_id, user.id)];
-    if (status) conditions.push(eq(schema.sourceDocuments.status, status));
+    const conditions = [eq(schema.source_documents.user_id, user.id)];
+    if (status) conditions.push(eq(schema.source_documents.status, status));
 
     const documents = await db
       .select({
-        id: schema.sourceDocuments.id,
-        filename: schema.sourceDocuments.filename,
-        mime_type: schema.sourceDocuments.mime_type,
-        origin_type: schema.sourceDocuments.origin_type,
-        status: schema.sourceDocuments.status,
-        created_at: schema.sourceDocuments.created_at,
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        mime_type: schema.source_documents.mime_type,
+        origin_type: schema.source_documents.origin_type,
+        status: schema.source_documents.status,
+        created_at: schema.source_documents.created_at,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(and(...conditions))
-      .orderBy(desc(schema.sourceDocuments.created_at))
+      .orderBy(desc(schema.source_documents.created_at))
       .limit(limit);
 
     return { documents, count: documents.length };
@@ -7154,46 +7188,46 @@ export const getDocumentDetails = tool({
     const [docRows, jobs, drafts] = await Promise.all([
       db
         .select()
-        .from(schema.sourceDocuments)
+        .from(schema.source_documents)
         .where(
           and(
-            eq(schema.sourceDocuments.id, documentId),
-            eq(schema.sourceDocuments.user_id, user.id),
+            eq(schema.source_documents.id, documentId),
+            eq(schema.source_documents.user_id, user.id),
           ),
         ),
       db
         .select({
-          id: schema.ingestionJobs.id,
-          status: schema.ingestionJobs.status,
-          error_message: schema.ingestionJobs.error_message,
-          created_at: schema.ingestionJobs.created_at,
-          updated_at: schema.ingestionJobs.updated_at,
+          id: schema.ingestion_jobs.id,
+          status: schema.ingestion_jobs.status,
+          error_message: schema.ingestion_jobs.error_message,
+          created_at: schema.ingestion_jobs.created_at,
+          updated_at: schema.ingestion_jobs.updated_at,
         })
-        .from(schema.ingestionJobs)
+        .from(schema.ingestion_jobs)
         .where(
           and(
-            eq(schema.ingestionJobs.source_document_id, documentId),
-            eq(schema.ingestionJobs.user_id, user.id),
+            eq(schema.ingestion_jobs.source_document_id, documentId),
+            eq(schema.ingestion_jobs.user_id, user.id),
           ),
         )
-        .orderBy(desc(schema.ingestionJobs.created_at)),
+        .orderBy(desc(schema.ingestion_jobs.created_at)),
       db
         .select({
-          id: schema.draftRecords.id,
-          status: schema.draftRecords.status,
-          draft_type: schema.draftRecords.draft_type,
-          draft_data: schema.draftRecords.draft_data,
-          confidence_score: schema.draftRecords.confidence_score,
-          created_at: schema.draftRecords.created_at,
+          id: schema.draft_records.id,
+          status: schema.draft_records.status,
+          draft_type: schema.draft_records.draft_type,
+          draft_data: schema.draft_records.draft_data,
+          confidence_score: schema.draft_records.confidence_score,
+          created_at: schema.draft_records.created_at,
         })
-        .from(schema.draftRecords)
+        .from(schema.draft_records)
         .where(
           and(
-            eq(schema.draftRecords.source_document_id, documentId),
-            eq(schema.draftRecords.user_id, user.id),
+            eq(schema.draft_records.source_document_id, documentId),
+            eq(schema.draft_records.user_id, user.id),
           ),
         )
-        .orderBy(desc(schema.draftRecords.created_at)),
+        .orderBy(desc(schema.draft_records.created_at)),
     ]);
 
     const document = docRows[0];
@@ -7223,17 +7257,19 @@ export const listDrafts = tool({
     const db = getDb();
     const drafts = await db
       .select({
-        id: schema.draftRecords.id,
-        status: schema.draftRecords.status,
-        draft_type: schema.draftRecords.draft_type,
-        draft_data: schema.draftRecords.draft_data,
-        confidence_score: schema.draftRecords.confidence_score,
-        source_document_id: schema.draftRecords.source_document_id,
-        created_at: schema.draftRecords.created_at,
+        id: schema.draft_records.id,
+        status: schema.draft_records.status,
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        source_document_id: schema.draft_records.source_document_id,
+        created_at: schema.draft_records.created_at,
       })
-      .from(schema.draftRecords)
-      .where(and(eq(schema.draftRecords.user_id, user.id), eq(schema.draftRecords.status, status)))
-      .orderBy(desc(schema.draftRecords.created_at))
+      .from(schema.draft_records)
+      .where(
+        and(eq(schema.draft_records.user_id, user.id), eq(schema.draft_records.status, status)),
+      )
+      .orderBy(desc(schema.draft_records.created_at))
       .limit(limit);
 
     return { drafts, count: drafts.length };
@@ -7256,18 +7292,18 @@ export const getDraftDetails = tool({
     const db = getDb();
     const [draft] = await db
       .select({
-        id: schema.draftRecords.id,
-        status: schema.draftRecords.status,
-        draft_type: schema.draftRecords.draft_type,
-        draft_data: schema.draftRecords.draft_data,
-        confidence_score: schema.draftRecords.confidence_score,
-        corrections: schema.draftRecords.corrections,
-        source_document_id: schema.draftRecords.source_document_id,
-        created_at: schema.draftRecords.created_at,
-        updated_at: schema.draftRecords.updated_at,
+        id: schema.draft_records.id,
+        status: schema.draft_records.status,
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        corrections: schema.draft_records.corrections,
+        source_document_id: schema.draft_records.source_document_id,
+        created_at: schema.draft_records.created_at,
+        updated_at: schema.draft_records.updated_at,
       })
-      .from(schema.draftRecords)
-      .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -7275,15 +7311,15 @@ export const getDraftDetails = tool({
     if (draft.source_document_id) {
       const [doc] = await db
         .select({
-          filename: schema.sourceDocuments.filename,
-          mime_type: schema.sourceDocuments.mime_type,
-          origin_type: schema.sourceDocuments.origin_type,
+          filename: schema.source_documents.filename,
+          mime_type: schema.source_documents.mime_type,
+          origin_type: schema.source_documents.origin_type,
         })
-        .from(schema.sourceDocuments)
+        .from(schema.source_documents)
         .where(
           and(
-            eq(schema.sourceDocuments.id, draft.source_document_id),
-            eq(schema.sourceDocuments.user_id, user.id),
+            eq(schema.source_documents.id, draft.source_document_id),
+            eq(schema.source_documents.user_id, user.id),
           ),
         );
       sourceDoc = doc ?? null;
@@ -7395,9 +7431,11 @@ export const approveDraft = tool({
 
     if (corrections && Object.keys(corrections).length > 0) {
       const [draft] = await db
-        .select({ draft_data: schema.draftRecords.draft_data })
-        .from(schema.draftRecords)
-        .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+        .select({ draft_data: schema.draft_records.draft_data })
+        .from(schema.draft_records)
+        .where(
+          and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
+        );
 
       if (draft) {
         const updatedData = {
@@ -7405,10 +7443,10 @@ export const approveDraft = tool({
           ...corrections,
         };
         await db
-          .update(schema.draftRecords)
+          .update(schema.draft_records)
           .set({ draft_data: updatedData, corrections, status: "corrected" })
           .where(
-            and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)),
+            and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
           );
       }
     }
@@ -7420,9 +7458,9 @@ export const approveDraft = tool({
     // (exceção documentada à regra geral desta fase) — isolamento de DADOS
     // continua garantido, só a mensagem de retorno é otimista.
     await db
-      .update(schema.draftRecords)
+      .update(schema.draft_records)
       .set({ status: "approved" })
-      .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
     return {
       success: true,
@@ -7478,9 +7516,9 @@ export const rejectDraft = tool({
     // Mesma exceção documentada de approveDraft: sem check de linhas
     // afetadas, paridade com o código atual.
     await db
-      .update(schema.draftRecords)
+      .update(schema.draft_records)
       .set({ status: "rejected", corrections: { rejection_reason: reason } })
-      .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
     return { success: true, message: `Draft ${draftId} rejeitado: ${reason}` };
   },
@@ -7504,34 +7542,37 @@ export const reprocessDocumentTool = tool({
     // Bulk: 0 linhas é normal (nenhum draft pendente/rejeitado) — sem throw,
     // mesmo comportamento de hoje.
     await db
-      .update(schema.draftRecords)
+      .update(schema.draft_records)
       .set({ status: "archived" })
       .where(
         and(
-          eq(schema.draftRecords.source_document_id, documentId),
-          eq(schema.draftRecords.user_id, user.id),
-          inArray(schema.draftRecords.status, ["pending_review", "rejected"]),
+          eq(schema.draft_records.source_document_id, documentId),
+          eq(schema.draft_records.user_id, user.id),
+          inArray(schema.draft_records.status, ["pending_review", "rejected"]),
         ),
       );
 
     const [latestJob] = await db
-      .select({ id: schema.ingestionJobs.id })
-      .from(schema.ingestionJobs)
+      .select({ id: schema.ingestion_jobs.id })
+      .from(schema.ingestion_jobs)
       .where(
         and(
-          eq(schema.ingestionJobs.source_document_id, documentId),
-          eq(schema.ingestionJobs.user_id, user.id),
+          eq(schema.ingestion_jobs.source_document_id, documentId),
+          eq(schema.ingestion_jobs.user_id, user.id),
         ),
       )
-      .orderBy(desc(schema.ingestionJobs.created_at))
+      .orderBy(desc(schema.ingestion_jobs.created_at))
       .limit(1);
 
     if (latestJob) {
       await db
-        .update(schema.ingestionJobs)
+        .update(schema.ingestion_jobs)
         .set({ status: "queued" })
         .where(
-          and(eq(schema.ingestionJobs.id, latestJob.id), eq(schema.ingestionJobs.user_id, user.id)),
+          and(
+            eq(schema.ingestion_jobs.id, latestJob.id),
+            eq(schema.ingestion_jobs.user_id, user.id),
+          ),
         );
     }
 
@@ -7565,25 +7606,25 @@ export const listDocumentPatterns = tool({
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
-    const conditions = [eq(schema.documentPatterns.user_id, user.id)];
-    if (activeOnly) conditions.push(eq(schema.documentPatterns.is_active, true));
-    if (documentType) conditions.push(eq(schema.documentPatterns.document_type, documentType));
+    const conditions = [eq(schema.document_patterns.user_id, user.id)];
+    if (activeOnly) conditions.push(eq(schema.document_patterns.is_active, true));
+    if (documentType) conditions.push(eq(schema.document_patterns.document_type, documentType));
 
     const rows = await db
       .select({
-        id: schema.documentPatterns.id,
-        name: schema.documentPatterns.name,
-        document_type: schema.documentPatterns.document_type,
-        version: schema.documentPatterns.version,
-        is_active: schema.documentPatterns.is_active,
-        feedback_count: schema.documentPatterns.feedback_count,
-        success_count: schema.documentPatterns.success_count,
-        confidence_threshold: schema.documentPatterns.confidence_threshold,
-        updated_at: schema.documentPatterns.updated_at,
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
+        is_active: schema.document_patterns.is_active,
+        feedback_count: schema.document_patterns.feedback_count,
+        success_count: schema.document_patterns.success_count,
+        confidence_threshold: schema.document_patterns.confidence_threshold,
+        updated_at: schema.document_patterns.updated_at,
       })
-      .from(schema.documentPatterns)
+      .from(schema.document_patterns)
       .where(and(...conditions))
-      .orderBy(desc(schema.documentPatterns.version))
+      .orderBy(desc(schema.document_patterns.version))
       .limit(limit);
 
     const patterns = rows.map((p) => ({
@@ -7651,7 +7692,7 @@ export const registerDocumentPattern = tool({
 
     const db = getDb();
     const [pattern] = await db
-      .insert(schema.documentPatterns)
+      .insert(schema.document_patterns)
       .values({
         user_id: user.id,
         name,
@@ -7667,10 +7708,10 @@ export const registerDocumentPattern = tool({
         success_count: 0,
       })
       .returning({
-        id: schema.documentPatterns.id,
-        name: schema.documentPatterns.name,
-        document_type: schema.documentPatterns.document_type,
-        version: schema.documentPatterns.version,
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
       });
 
     return {
@@ -7719,18 +7760,18 @@ export const updateDocumentPattern = tool({
 
     const db = getDb();
     const [existing] = await db
-      .select({ id: schema.documentPatterns.id, name: schema.documentPatterns.name })
-      .from(schema.documentPatterns)
+      .select({ id: schema.document_patterns.id, name: schema.document_patterns.name })
+      .from(schema.document_patterns)
       .where(
         and(
-          eq(schema.documentPatterns.id, patternId),
-          eq(schema.documentPatterns.user_id, user.id),
+          eq(schema.document_patterns.id, patternId),
+          eq(schema.document_patterns.user_id, user.id),
         ),
       );
 
     if (!existing) return { error: "Padrão não encontrado" };
 
-    const updates: Partial<typeof schema.documentPatterns.$inferInsert> = {};
+    const updates: Partial<typeof schema.document_patterns.$inferInsert> = {};
     if (extractionRules !== undefined) updates.extraction_rules = extractionRules;
     if (fieldMappings !== undefined) updates.field_mappings = fieldMappings;
     if (confidenceThreshold !== undefined) updates.confidence_threshold = confidenceThreshold;
@@ -7744,20 +7785,20 @@ export const updateDocumentPattern = tool({
     // approveDraft/rejectDraft) — 0 linhas afetadas já produz erro hoje.
     // Preservado com `.returning()` + checagem de nulo.
     const [updated] = await db
-      .update(schema.documentPatterns)
+      .update(schema.document_patterns)
       .set(updates)
       .where(
         and(
-          eq(schema.documentPatterns.id, patternId),
-          eq(schema.documentPatterns.user_id, user.id),
+          eq(schema.document_patterns.id, patternId),
+          eq(schema.document_patterns.user_id, user.id),
         ),
       )
       .returning({
-        id: schema.documentPatterns.id,
-        name: schema.documentPatterns.name,
-        document_type: schema.documentPatterns.document_type,
-        version: schema.documentPatterns.version,
-        is_active: schema.documentPatterns.is_active,
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
+        is_active: schema.document_patterns.is_active,
       });
 
     if (!updated) return { error: "Padrão não encontrado" };
@@ -7784,9 +7825,9 @@ export const suggestReconciliation = tool({
 
     const db = getDb();
     const [draft] = await db
-      .select({ draft_data: schema.draftRecords.draft_data })
-      .from(schema.draftRecords)
-      .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+      .select({ draft_data: schema.draft_records.draft_data })
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -7877,14 +7918,14 @@ export const explainClassification = tool({
     const db = getDb();
     const [draft] = await db
       .select({
-        draft_type: schema.draftRecords.draft_type,
-        draft_data: schema.draftRecords.draft_data,
-        confidence_score: schema.draftRecords.confidence_score,
-        corrections: schema.draftRecords.corrections,
-        source_document_id: schema.draftRecords.source_document_id,
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        corrections: schema.draft_records.corrections,
+        source_document_id: schema.draft_records.source_document_id,
       })
-      .from(schema.draftRecords)
-      .where(and(eq(schema.draftRecords.id, draftId), eq(schema.draftRecords.user_id, user.id)));
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -7892,16 +7933,16 @@ export const explainClassification = tool({
     if (draft.source_document_id) {
       const [doc] = await db
         .select({
-          filename: schema.sourceDocuments.filename,
-          mime_type: schema.sourceDocuments.mime_type,
-          origin_type: schema.sourceDocuments.origin_type,
-          metadata: schema.sourceDocuments.metadata,
+          filename: schema.source_documents.filename,
+          mime_type: schema.source_documents.mime_type,
+          origin_type: schema.source_documents.origin_type,
+          metadata: schema.source_documents.metadata,
         })
-        .from(schema.sourceDocuments)
+        .from(schema.source_documents)
         .where(
           and(
-            eq(schema.sourceDocuments.id, draft.source_document_id),
-            eq(schema.sourceDocuments.user_id, user.id),
+            eq(schema.source_documents.id, draft.source_document_id),
+            eq(schema.source_documents.user_id, user.id),
           ),
         );
       sourceInfo = doc ?? null;
@@ -7940,19 +7981,19 @@ export const listErrorDocuments = tool({
     const db = getDb();
     const documents = await db
       .select({
-        id: schema.sourceDocuments.id,
-        filename: schema.sourceDocuments.filename,
-        status: schema.sourceDocuments.status,
-        created_at: schema.sourceDocuments.created_at,
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        status: schema.source_documents.status,
+        created_at: schema.source_documents.created_at,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(
         and(
-          eq(schema.sourceDocuments.user_id, user.id),
-          eq(schema.sourceDocuments.status, "error"),
+          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.status, "error"),
         ),
       )
-      .orderBy(desc(schema.sourceDocuments.created_at))
+      .orderBy(desc(schema.source_documents.created_at))
       .limit(limit);
 
     return { documents, count: documents.length };
@@ -7975,29 +8016,29 @@ export const listMissingPasswordDocuments = tool({
     const db = getDb();
     const rows = await db
       .select({
-        id: schema.ingestionJobs.id,
-        source_document_id: schema.ingestionJobs.source_document_id,
-        status: schema.ingestionJobs.status,
-        error_message: schema.ingestionJobs.error_message,
-        filename: schema.sourceDocuments.filename,
+        id: schema.ingestion_jobs.id,
+        source_document_id: schema.ingestion_jobs.source_document_id,
+        status: schema.ingestion_jobs.status,
+        error_message: schema.ingestion_jobs.error_message,
+        filename: schema.source_documents.filename,
       })
-      .from(schema.ingestionJobs)
+      .from(schema.ingestion_jobs)
       .innerJoin(
-        schema.sourceDocuments,
-        eq(schema.ingestionJobs.source_document_id, schema.sourceDocuments.id),
+        schema.source_documents,
+        eq(schema.ingestion_jobs.source_document_id, schema.source_documents.id),
       )
       .where(
         and(
-          eq(schema.ingestionJobs.user_id, user.id),
-          eq(schema.sourceDocuments.user_id, user.id),
-          eq(schema.ingestionJobs.status, "failed"),
+          eq(schema.ingestion_jobs.user_id, user.id),
+          eq(schema.source_documents.user_id, user.id),
+          eq(schema.ingestion_jobs.status, "failed"),
           or(
-            ilike(schema.ingestionJobs.error_message, "%password%"),
-            ilike(schema.ingestionJobs.error_message, "%senha%"),
+            ilike(schema.ingestion_jobs.error_message, "%password%"),
+            ilike(schema.ingestion_jobs.error_message, "%senha%"),
           ),
         ),
       )
-      .orderBy(desc(schema.ingestionJobs.created_at))
+      .orderBy(desc(schema.ingestion_jobs.created_at))
       .limit(limit);
 
     return { documents: rows, count: rows.length };
@@ -8035,13 +8076,13 @@ export const batchApproveDrafts = tool({
         // Mesma exceção documentada de approveDraft/rejectDraft: sem check
         // de linhas afetadas.
         await db
-          .update(schema.draftRecords)
+          .update(schema.draft_records)
           .set({ status: "approved" })
           .where(
             and(
-              eq(schema.draftRecords.id, draftId),
-              eq(schema.draftRecords.user_id, user.id),
-              eq(schema.draftRecords.status, "pending_review"),
+              eq(schema.draft_records.id, draftId),
+              eq(schema.draft_records.user_id, user.id),
+              eq(schema.draft_records.status, "pending_review"),
             ),
           );
         results.push({ id: draftId, success: true });
@@ -8117,17 +8158,17 @@ export const suggestSplits = tool({
     const db = getDb();
     const [doc] = await db
       .select({
-        id: schema.sourceDocuments.id,
-        filename: schema.sourceDocuments.filename,
-        document_type: schema.sourceDocuments.document_type,
-        supplier_name_raw: schema.sourceDocuments.supplier_name_raw,
-        metadata: schema.sourceDocuments.metadata,
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        document_type: schema.source_documents.document_type,
+        supplier_name_raw: schema.source_documents.supplier_name_raw,
+        metadata: schema.source_documents.metadata,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(
         and(
-          eq(schema.sourceDocuments.id, document_id),
-          eq(schema.sourceDocuments.user_id, user.id),
+          eq(schema.source_documents.id, document_id),
+          eq(schema.source_documents.user_id, user.id),
         ),
       );
 
@@ -8201,14 +8242,14 @@ export const suggestSupplierName = tool({
 
     const docs = await db
       .select({
-        supplier_name_raw: schema.sourceDocuments.supplier_name_raw,
-        metadata: schema.sourceDocuments.metadata,
+        supplier_name_raw: schema.source_documents.supplier_name_raw,
+        metadata: schema.source_documents.metadata,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(
         and(
-          eq(schema.sourceDocuments.user_id, user.id),
-          isNotNull(schema.sourceDocuments.supplier_name_raw),
+          eq(schema.source_documents.user_id, user.id),
+          isNotNull(schema.source_documents.supplier_name_raw),
         ),
       )
       .limit(20);
@@ -8258,17 +8299,17 @@ export const explainExtraction = tool({
     const db = getDb();
     const [doc] = await db
       .select({
-        id: schema.sourceDocuments.id,
-        filename: schema.sourceDocuments.filename,
-        document_type: schema.sourceDocuments.document_type,
-        metadata: schema.sourceDocuments.metadata,
-        status: schema.sourceDocuments.status,
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        document_type: schema.source_documents.document_type,
+        metadata: schema.source_documents.metadata,
+        status: schema.source_documents.status,
       })
-      .from(schema.sourceDocuments)
+      .from(schema.source_documents)
       .where(
         and(
-          eq(schema.sourceDocuments.id, document_id),
-          eq(schema.sourceDocuments.user_id, user.id),
+          eq(schema.source_documents.id, document_id),
+          eq(schema.source_documents.user_id, user.id),
         ),
       );
 
@@ -8359,12 +8400,18 @@ reimplementar em TypeScript; (c) aceitar perda da feature, com aval do CEO. O
 critério de aceite do cutover inclui "zero chamadas `supabase.rpc()`/
 `supabase.from()`/`supabase.auth` em código ativo", verificado por grep.
 
-| Função                          | Onde é chamada                                                                                       | Motivo do bloqueio                                                                                                                                     | Task que encontrou |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
-| `generate_financial_periods`    | `actions/financial-periods.ts`, `apps/mcp-server/src/tools/recompute-financial-periods.ts` (Fase 4b) | Descartada por completo na migração — decidia o usuário via `auth.uid()` interno, sem `p_user_id`                                                      | Task 3             |
-| `get_financial_period_for_date` | `actions/financial-periods.ts`                                                                       | Idem acima                                                                                                                                             | Task 3             |
-| `fn_set_secret`                 | `actions/secrets.ts` (`setSecret`)                                                                   | Idem acima — **e mesmo recriada com `p_user_id`, depende de `private.get_crypto_key()`, também não portado ao Neon** (segundo bloqueador independente) | Task 14            |
-| `register_pattern_feedback`     | `actions/patterns.ts` (`registerPatternFeedback`)                                                    | Idem acima                                                                                                                                             | Task 15            |
-| `search_suppliers`              | `actions/suppliers.ts` (`searchSuppliers`)                                                           | Idem acima                                                                                                                                             | Task 18            |
+| Função                          | Onde é chamada                                                                                       | Motivo do bloqueio                                                                                                                                                                                                                                                                                                                                                                                                         | Task que encontrou |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `generate_financial_periods`    | `actions/financial-periods.ts`, `apps/mcp-server/src/tools/recompute-financial-periods.ts` (Fase 4b) | Descartada por completo na migração — decidia o usuário via `auth.uid()` interno, sem `p_user_id`                                                                                                                                                                                                                                                                                                                          | Task 3             |
+| `get_financial_period_for_date` | `actions/financial-periods.ts`                                                                       | Idem acima                                                                                                                                                                                                                                                                                                                                                                                                                 | Task 3             |
+| `fn_set_secret`                 | `actions/secrets.ts` (`setSecret`)                                                                   | Idem acima — **e mesmo recriada com `p_user_id`, depende de `private.get_crypto_key()`, também não portado ao Neon** (segundo bloqueador independente). **Achado adicional (Task 14):** a função grava `entity_id` recebido do cliente sem validar posse — mesma família dos 6 IDORs já fechados nas Server Actions, mas do lado SQL; quem recriar esta RPC precisa incluir essa validação, não só resolver o `p_user_id`. | Task 14            |
+| `register_pattern_feedback`     | `actions/patterns.ts` (`registerPatternFeedback`)                                                    | Idem acima                                                                                                                                                                                                                                                                                                                                                                                                                 | Task 15            |
+| `search_suppliers`              | `actions/suppliers.ts` (`searchSuppliers`)                                                           | Idem acima                                                                                                                                                                                                                                                                                                                                                                                                                 | Task 18            |
 
 (Tasks 15-20, ainda não escritas neste plano, podem adicionar linhas aqui.)
+
+### Backlog de produto (não são RPCs bloqueadas — não bloqueiam a Fase 4a)
+
+| Item                                                                                               | Onde                            | Nota técnica                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Ruling                                                                                                                      |
+| -------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `completePluggyConnection(externalItemId)` usa um id de sistema externo (Pluggy) sem validar posse | `actions/pluggy-connections.ts` | Gap pré-existente de produto, não regressão da migração — no código Supabase antigo a RLS só escopava o `INSERT` ao próprio `user_id`; vincular um `itemId` alheio já era igualmente possível antes. Quando a premissa de usuário único (ADR-007) cair, a validação correta é conferir via API da Pluggy que o item foi criado por um connect token emitido para o `clientUserId` da sessão (`createConnectToken` já passa `clientUserId` — é fechar o loop na volta). | Verônica-Bolso (varredura retroativa de IDOR, 2026-08-27): não bloqueia a 4a, não exige fix agora (regra da menor mudança). |

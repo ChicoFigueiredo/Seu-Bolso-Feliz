@@ -359,6 +359,32 @@ Fase 4:
    `@vercel/blob`, tornando o meio-termo via Supabase Storage desnecessário) — não
    reescrever essa seção agora.
 
+**Adendo — 2026-08-27: levantamento de impacto da Fase 4 subestimou a superfície (transparência histórica).**
+
+O gate de fechamento da Fase 4a (21 tasks: 17 Server Actions + 3 componentes
+client-side + `lib/ai/tools.ts`, todas revisadas, testadas contra Postgres real e
+com 14 IDORs fechados) passou — mas a enumeração completa de `apps/web/src`
+feita nesse gate (Verônica-Bolso, 2026-08-27) revelou que o levantamento de
+impacto original desta ADR (linha 243 acima) só contou as 17 Server Actions e os
+3 componentes client-side já conhecidos — não capturou:
+
+1. ~50 usos diretos de `supabase.from()` em **páginas do dashboard** fora das
+   Server Actions migradas (`dashboard/page.tsx`, `settings/page.tsx`, `reports`,
+   `products/[id]`, `transactions/[id]`, `recurring/[id]`, `institutions/[id]`, e
+   ~15 arquivos de páginas `new`/lista adicionais).
+2. **2 rotas de API** de reconciliação (`api/reconciliation/[draftId]/route.ts`,
+   9 chamadas `.from()`, e `.../progress/route.ts`) — esta última chama
+   `fn_reconciliation_progress`, uma **6ª RPC não listada** no apêndice de RPCs
+   bloqueadas do plano da Fase 4a.
+3. `lib/supabase/untyped.ts` (wrapper genérico de `.rpc()`), candidato a deleção
+   quando a última RPC sair.
+
+Consequência: a Fase 4a fecha como PASS para o que ela cobriu, mas o critério
+"web pronto para cutover" ainda não está satisfeito — falta uma Fase 4a-bis
+cobrindo essa superfície residual, com a mesma técnica já validada (spec
+enxuta → plano → SDD com a lente de posse-de-FK). Pode rodar em paralelo à
+Fase 4b (workers+MCP), superfícies disjuntas.
+
 ## Alvo ainda não construído
 
 ### Fila durável com lease (`worker_jobs`)
