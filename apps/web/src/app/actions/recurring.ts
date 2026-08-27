@@ -187,6 +187,44 @@ export async function deleteRecurringTemplate(id: string): Promise<void> {
     );
 }
 
+// Fecha IDOR (achado Important da revisão final de branch, mesma classe já
+// corrigida acima para os templates): updateRecurringInstance aceitava
+// recurring_template_id/transaction_id vindos do cliente sem checar que
+// pertencem ao usuário chamador — ficou de fora do fix anterior por ser uma
+// função separada (recurring_instances, não recurring_templates). Mesmo
+// padrão: SELECT id WHERE id = fk AND user_id = userId, lança erro se vazio.
+async function assertOwnsRecurringInstanceForeignKeys(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  input: Pick<RecurringInstanceUpdate, "recurring_template_id" | "transaction_id">,
+): Promise<void> {
+  if (input.recurring_template_id) {
+    const [template] = await db
+      .select({ id: schema.recurring_templates.id })
+      .from(schema.recurring_templates)
+      .where(
+        and(
+          eq(schema.recurring_templates.id, input.recurring_template_id),
+          eq(schema.recurring_templates.user_id, userId),
+        ),
+      );
+    if (!template) throw new Error("Template recorrente não encontrado");
+  }
+
+  if (input.transaction_id) {
+    const [transaction] = await db
+      .select({ id: schema.transactions.id })
+      .from(schema.transactions)
+      .where(
+        and(
+          eq(schema.transactions.id, input.transaction_id),
+          eq(schema.transactions.user_id, userId),
+        ),
+      );
+    if (!transaction) throw new Error("Transação não encontrada");
+  }
+}
+
 export async function getRecurringInstances(
   templateId: string,
   filters?: { status?: string; startDate?: string; endDate?: string },
@@ -215,6 +253,8 @@ export async function updateRecurringInstance(
 ): Promise<RecurringInstance> {
   const userId = await requireUserId();
   const db = getDb();
+  await assertOwnsRecurringInstanceForeignKeys(db, userId, input);
+
   const [row] = await db
     .update(schema.recurring_instances)
     .set(input)

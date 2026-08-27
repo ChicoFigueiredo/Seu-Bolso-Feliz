@@ -8,6 +8,7 @@ import {
   deleteRecurringTemplate,
   getRecurringTemplate,
   getRecurringTemplates,
+  updateRecurringInstance,
   updateRecurringTemplate,
 } from "./recurring";
 
@@ -54,6 +55,43 @@ async function seedTag(userId: string) {
     .values({ user_id: userId, name: `Tag de teste ${crypto.randomUUID()}` })
     .returning();
   return required(row, "Falha ao semear tag de teste");
+}
+
+// Institution + financial_product + transaction, mesmo padrão de
+// document-transactions.test.ts (seedDocAndTx) sem a parte de source_document.
+async function seedTransaction(userId: string) {
+  const db = getDb();
+  const institution = await seedInstitution(userId);
+  const product = await seedFinancialProduct(userId, institution.id);
+  const [row] = await db
+    .insert(schema.transactions)
+    .values({
+      user_id: userId,
+      financial_product_id: product.id,
+      type: "expense",
+      event_date: "2026-01-01",
+      amount: 100,
+    })
+    .returning();
+  return {
+    institutionId: institution.id,
+    transaction: required(row, "Falha ao semear transaction de teste"),
+  };
+}
+
+async function seedRecurringInstance(userId: string, templateId: string) {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.recurring_instances)
+    .values({
+      user_id: userId,
+      recurring_template_id: templateId,
+      expected_date: "2026-01-01",
+      expected_amount: 100,
+      status: "pending",
+    })
+    .returning();
+  return required(row, "Falha ao semear recurring_instance de teste");
 }
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)("recurring actions", () => {
@@ -237,6 +275,57 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("recurring actions", () => {
         },
         [tag.id],
       ),
+    ).rejects.toThrow();
+  });
+
+  // Achado Important da revisão final de branch: updateRecurringInstance
+  // ficou de fora do fix de IDOR acima (validação de FK só cobria
+  // recurring_templates, não recurring_instances). Mesma classe de bug:
+  // recurring_template_id/transaction_id vindos do cliente sem checar posse.
+  it("lança erro ao atualizar instância apontando para recurring_template_id de outro usuário", async () => {
+    currentUserId = USER_A;
+    const ownTemplate = await createRecurringTemplate({
+      name: "Academia",
+      type: "expense",
+      frequency: "monthly",
+      amount: 90,
+    });
+    createdIds.push(ownTemplate.id);
+    const instance = await seedRecurringInstance(USER_A, ownTemplate.id);
+
+    currentUserId = USER_B;
+    const otherTemplate = await createRecurringTemplate({
+      name: "Academia B",
+      type: "expense",
+      frequency: "monthly",
+      amount: 90,
+    });
+    createdIds.push(otherTemplate.id);
+
+    currentUserId = USER_A;
+    await expect(
+      updateRecurringInstance(instance.id, { recurring_template_id: otherTemplate.id }),
+    ).rejects.toThrow();
+  });
+
+  it("lança erro ao atualizar instância apontando para transaction_id de outro usuário", async () => {
+    currentUserId = USER_A;
+    const ownTemplate = await createRecurringTemplate({
+      name: "Streaming 2",
+      type: "expense",
+      frequency: "monthly",
+      amount: 45,
+    });
+    createdIds.push(ownTemplate.id);
+    const instance = await seedRecurringInstance(USER_A, ownTemplate.id);
+
+    currentUserId = USER_B;
+    const seedB = await seedTransaction(USER_B);
+    institutionIds.push(seedB.institutionId);
+
+    currentUserId = USER_A;
+    await expect(
+      updateRecurringInstance(instance.id, { transaction_id: seedB.transaction.id }),
     ).rejects.toThrow();
   });
 });
