@@ -12,11 +12,15 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { createCardSchema, updateCardSchema } from "@sbf/validation";
-import type { Card, FinancialProduct, Insert, Update } from "@sbf/shared-types";
 
-export type CardInput = Omit<Insert<"cards">, "user_id" | "id">;
-export type CardUpdate = Update<"cards">;
+type Card = typeof schema.cards.$inferSelect;
+type FinancialProduct = typeof schema.financial_products.$inferSelect;
+
+export type CardInput = Omit<typeof schema.cards.$inferInsert, "user_id" | "id">;
+export type CardUpdate = Partial<CardInput>;
 
 /** Cartão com o produto financeiro e a instituição já resolvidos. */
 export interface CardComProduto extends Card {
@@ -27,33 +31,101 @@ export interface CardComProduto extends Card {
     | null;
 }
 
-export async function getCards(): Promise<CardComProduto[]> {
+async function requireUserId(): Promise<string> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+  return user.id;
+}
 
-  const { data, error } = await supabase
-    .from("cards")
-    .select("*, financial_products(id, name, type, institutions(name))")
-    .order("is_primary", { ascending: false })
-    .order("created_at");
+/**
+ * Valida que `financial_product_id` pertence ao usuário antes de gravá-lo em
+ * `cards` — sem isso, o usuário A poderia criar (ou atualizar) um cartão em
+ * seu próprio `user_id` apontando `financial_product_id` para um produto de
+ * outro usuário. O RLS antigo em `financial_products` cobria esse gap de
+ * graça; sem RLS, a checagem precisa ser explícita aqui. Mesmo padrão do fix
+ * de `document-transactions.ts` (commit b5995eb).
+ */
+async function requireOwnedFinancialProduct(
+  financialProductId: string,
+  userId: string,
+): Promise<void> {
+  const db = getDb();
+  const [product] = await db
+    .select({ id: schema.financial_products.id })
+    .from(schema.financial_products)
+    .where(
+      and(
+        eq(schema.financial_products.id, financialProductId),
+        eq(schema.financial_products.user_id, userId),
+      ),
+    );
+  if (!product) throw new Error("Produto financeiro não encontrado");
+}
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as CardComProduto[];
+function cardWithProductSelect(userId: string) {
+  const db = getDb();
+  return db
+    .select({
+      card: schema.cards,
+      financialProduct: {
+        id: schema.financial_products.id,
+        name: schema.financial_products.name,
+        type: schema.financial_products.type,
+      },
+      institution: { name: schema.institutions.name },
+    })
+    .from(schema.cards)
+    .leftJoin(
+      schema.financial_products,
+      and(
+        eq(schema.cards.financial_product_id, schema.financial_products.id),
+        // Defesa em profundidade: mesmo que `financial_product_id` aponte
+        // para um produto de outro usuário (dado legado ou bug de escrita
+        // anterior a `requireOwnedFinancialProduct`), nunca devolver os dados
+        // desse produto. O LEFT JOIN garante que o cartão continua aparecendo
+        // — só a informação do produto de terceiro é suprimida.
+        eq(schema.financial_products.user_id, userId),
+      ),
+    )
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.financial_products.institution_id, schema.institutions.id),
+        eq(schema.institutions.user_id, userId),
+      ),
+    );
+}
+
+function toCardComProduto(row: {
+  card: Card;
+  financialProduct: Pick<FinancialProduct, "id" | "name" | "type"> | null;
+  institution: { name: string } | null;
+}): CardComProduto {
+  return {
+    ...row.card,
+    financial_products: row.financialProduct
+      ? { ...row.financialProduct, institutions: row.institution }
+      : null,
+  };
+}
+
+export async function getCards(): Promise<CardComProduto[]> {
+  const userId = await requireUserId();
+  const rows = await cardWithProductSelect(userId)
+    .where(eq(schema.cards.user_id, userId))
+    .orderBy(desc(schema.cards.is_primary), asc(schema.cards.created_at));
+  return rows.map(toCardComProduto);
 }
 
 export async function getCard(id: string): Promise<CardComProduto | null> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("cards")
-    .select("*, financial_products(id, name, type, institutions(name))")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null;
-    throw new Error(error.message);
-  }
-  return data as unknown as CardComProduto;
+  const userId = await requireUserId();
+  const [row] = await cardWithProductSelect(userId).where(
+    and(eq(schema.cards.id, id), eq(schema.cards.user_id, userId)),
+  );
+  return row ? toCardComProduto(row) : null;
 }
 
 /**
@@ -64,70 +136,73 @@ export async function getCard(id: string): Promise<CardComProduto | null> {
  * produto como conta corrente.
  */
 export async function getProdutosParaCartao(): Promise<FinancialProduct[]> {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .from("financial_products")
-    .select("*")
-    .in("type", ["credit_card", "checking_account"])
-    .order("name");
-
-  if (error) throw new Error(error.message);
-  return data ?? [];
+  const userId = await requireUserId();
+  const db = getDb();
+  return db
+    .select()
+    .from(schema.financial_products)
+    .where(
+      and(
+        eq(schema.financial_products.user_id, userId),
+        inArray(schema.financial_products.type, ["credit_card", "checking_account"]),
+      ),
+    )
+    .orderBy(asc(schema.financial_products.name));
 }
 
 export async function createCard(input: CardInput): Promise<Card> {
   const parsed = createCardSchema.parse(input);
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  await requireOwnedFinancialProduct(parsed.financial_product_id, userId);
 
-  // Só um cartão principal por vez: marcar um novo como principal rebaixa o
-  // anterior. Sem isto, dois cartões "principais" fariam a home escolher um
-  // deles por ordem de criação — silenciosamente, e mudando com o tempo.
+  // Só um cartão principal por vez. Fire-and-forget, igual ao código atual
+  // (o Antes também não desestrutura `error` desta chamada).
   if (parsed.is_primary) {
-    await supabase.from("cards").update({ is_primary: false }).eq("user_id", user.id);
+    await db
+      .update(schema.cards)
+      .set({ is_primary: false })
+      .where(eq(schema.cards.user_id, userId));
   }
 
-  const { data, error } = await supabase
-    .from("cards")
-    .insert({ ...parsed, user_id: user.id })
-    .select()
-    .single();
+  const [row] = await db
+    .insert(schema.cards)
+    .values({ ...parsed, user_id: userId })
+    .returning();
 
-  if (error) throw new Error(error.message);
+  if (!row) throw new Error("Falha ao criar cartão");
 
   revalidatePath("/dashboard/cards");
-  return data;
+  return row;
 }
 
 export async function updateCard(id: string, input: CardUpdate): Promise<Card> {
   const parsed = updateCardSchema.parse(input);
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-
-  if (parsed.is_primary) {
-    await supabase.from("cards").update({ is_primary: false }).eq("user_id", user.id).neq("id", id);
+  if (parsed.financial_product_id) {
+    await requireOwnedFinancialProduct(parsed.financial_product_id, userId);
   }
 
-  const { data, error } = await supabase
-    .from("cards")
-    .update(parsed)
-    .eq("id", id)
-    .select()
-    .single();
+  if (parsed.is_primary) {
+    await db
+      .update(schema.cards)
+      .set({ is_primary: false })
+      .where(and(eq(schema.cards.user_id, userId), ne(schema.cards.id, id)));
+  }
 
-  if (error) throw new Error(error.message);
+  const [row] = await db
+    .update(schema.cards)
+    .set(parsed)
+    .where(and(eq(schema.cards.id, id), eq(schema.cards.user_id, userId)))
+    .returning();
+
+  if (!row) throw new Error("Cartão não encontrado");
 
   revalidatePath("/dashboard/cards");
-  return data;
+  return row;
 }
 
 /**
@@ -139,24 +214,31 @@ export async function updateCard(id: string, input: CardUpdate): Promise<Card> {
  * que é o que quase sempre se quer com um cartão que foi cancelado.
  */
 export async function deleteCard(id: string): Promise<void> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const { count, error: countError } = await supabase
-    .from("statement_cycles")
-    .select("id", { count: "exact", head: true })
-    .eq("card_id", id);
+  const [row] = await db
+    .select({ value: count() })
+    .from(schema.statement_cycles)
+    .where(
+      and(eq(schema.statement_cycles.card_id, id), eq(schema.statement_cycles.user_id, userId)),
+    );
 
-  if (countError) throw new Error(countError.message);
+  const faturas = row?.value ?? 0;
 
-  if (count && count > 0) {
+  if (faturas > 0) {
     throw new Error(
-      `Este cartão tem ${count} fatura(s) registrada(s) e não pode ser excluído. ` +
+      `Este cartão tem ${faturas} fatura(s) registrada(s) e não pode ser excluído. ` +
         "Desative-o para parar de usá-lo sem perder o histórico.",
     );
   }
 
-  const { error } = await supabase.from("cards").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+  const result = await db
+    .delete(schema.cards)
+    .where(and(eq(schema.cards.id, id), eq(schema.cards.user_id, userId)))
+    .returning({ id: schema.cards.id });
+
+  if (result.length === 0) throw new Error("Cartão não encontrado");
 
   revalidatePath("/dashboard/cards");
 }
