@@ -38,6 +38,13 @@ export async function listLinkedTransactions(
       and(
         eq(schema.document_transactions.source_document_id, sourceDocumentId),
         eq(schema.document_transactions.user_id, userId),
+        // Defesa em profundidade: mesmo que já exista uma linha em
+        // document_transactions cujas FKs não pertencem ao mesmo usuário
+        // (dado inconsistente, ou pré-existente de antes desta correção),
+        // nunca devolver o objeto `transaction` de outro usuário. O RLS
+        // antigo cobria isso de graça em `transactions`; sem RLS, precisa
+        // ser explícito aqui.
+        eq(schema.transactions.user_id, userId),
       ),
     )
     .orderBy(asc(schema.document_transactions.created_at));
@@ -53,6 +60,28 @@ export async function linkTransactionToDocument(
 ): Promise<DocumentTransactionLink> {
   const userId = await requireUserId();
   const db = getDb();
+
+  // Valida posse das duas FKs antes de gravar o vínculo — sem isso, o
+  // usuário A poderia vincular (com o próprio user_id na linha de
+  // document_transactions) um documento ou uma transação que pertence a
+  // outro usuário. O RLS antigo em `transactions`/`source_documents` cobria
+  // esse gap de graça; sem RLS, a checagem precisa ser explícita aqui.
+  const [doc] = await db
+    .select({ id: schema.source_documents.id })
+    .from(schema.source_documents)
+    .where(
+      and(
+        eq(schema.source_documents.id, sourceDocumentId),
+        eq(schema.source_documents.user_id, userId),
+      ),
+    );
+  if (!doc) throw new Error("Documento não encontrado");
+
+  const [transaction] = await db
+    .select({ id: schema.transactions.id })
+    .from(schema.transactions)
+    .where(and(eq(schema.transactions.id, transactionId), eq(schema.transactions.user_id, userId)));
+  if (!transaction) throw new Error("Transação não encontrada");
 
   const [row] = await db
     .insert(schema.document_transactions)
