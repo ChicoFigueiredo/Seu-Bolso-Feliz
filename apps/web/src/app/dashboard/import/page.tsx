@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  createImportJob,
+  createTransactionFromImport,
+  getDefaultFinancialProductId,
+  updateImportJob,
+} from "@/app/actions/import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,39 +122,23 @@ export default function ImportPage() {
       const text = ev.target?.result as string;
       const parsed = parseCSV(text);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setImporting(false);
-        return;
-      }
+      const job = await createImportJob({
+        source_type: "csv",
+        file_path: filePath,
+        status: "processing",
+        total_rows: parsed.length,
+      });
 
-      const { data: job } = await supabase
-        .from("import_jobs")
-        .insert({
-          user_id: user.id,
-          source_type: "csv",
-          file_path: filePath,
-          status: "processing",
-          total_rows: parsed.length,
-        })
-        .select()
-        .single();
-
-      let imported = 0;
-      let skipped = 0;
-      const errors: string[] = [];
-
-      // Get first financial product as default
-      const { data: products } = await supabase.from("financial_products").select("id").limit(1);
-      const defaultProductId = products?.[0]?.id;
-
+      const defaultProductId = await getDefaultFinancialProductId();
       if (!defaultProductId) {
         toast.error("Cadastre ao menos um produto financeiro antes de importar.");
         setImporting(false);
         return;
       }
+
+      let imported = 0;
+      let skipped = 0;
+      const errors: string[] = [];
 
       for (let i = 0; i < parsed.length; i++) {
         const row = parsed[i]!;
@@ -161,39 +151,32 @@ export default function ImportPage() {
           }
         }
 
-        const { error } = await supabase.from("transactions").insert({
-          user_id: user.id,
-          description: row.description,
-          amount: row.amount,
-          type: row.type,
-          event_date: eventDate,
-          financial_product_id: defaultProductId,
-          origin_type: "import",
-          is_confirmed: true,
-        });
-
-        if (error) {
-          errors.push(`Linha ${i + 1}: ${error.message}`);
-          skipped++;
-        } else {
+        try {
+          await createTransactionFromImport({
+            description: row.description,
+            amount: row.amount,
+            type: row.type,
+            event_date: eventDate,
+            financial_product_id: defaultProductId,
+            origin_type: "import",
+            is_confirmed: true,
+          });
           imported++;
+        } catch (err) {
+          errors.push(`Linha ${i + 1}: ${(err as Error).message}`);
+          skipped++;
         }
       }
 
       // Update import job
-      if (job) {
-        await supabase
-          .from("import_jobs")
-          .update({
-            status: errors.length === 0 ? "completed" : "partial",
-            imported_rows: imported,
-            skipped_rows: skipped,
-            error_rows: errors.length,
-            error_details: errors.length > 0 ? { errors: errors.slice(0, 50) } : null,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
-      }
+      await updateImportJob(job.id, {
+        status: errors.length === 0 ? "completed" : "partial",
+        imported_rows: imported,
+        skipped_rows: skipped,
+        error_rows: errors.length,
+        error_details: errors.length > 0 ? { errors: errors.slice(0, 50) } : null,
+        completed_at: new Date().toISOString(),
+      });
 
       setResult({ total: parsed.length, imported, skipped, errors });
       setImporting(false);
