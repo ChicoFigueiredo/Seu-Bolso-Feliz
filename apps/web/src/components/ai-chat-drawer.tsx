@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useChatContext } from "@/contexts/chat-context";
 import { ACCEPT_UPLOAD } from "@sbf/contracts";
+import { getOrCreateChatSession } from "@/app/actions/chat-sessions";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -68,24 +69,12 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
   }, [open, pendingMessage, append, setPendingMessage]);
 
   async function createSession() {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (supabase as any)
-      .from("ai_chat_sessions")
-      .insert({
-        user_id: user.id,
-        title: "Nova conversa",
-        context_type: "general",
-      })
-      .select("id")
-      .single();
-
-    if (data) setSessionId(data.id);
+    try {
+      const session = await getOrCreateChatSession();
+      setSessionId(session.id);
+    } catch (err) {
+      console.error("Falha ao criar sessão de chat:", err);
+    }
   }
 
   const handleNewSession = useCallback(() => {
