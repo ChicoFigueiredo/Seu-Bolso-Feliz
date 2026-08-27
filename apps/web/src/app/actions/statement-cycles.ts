@@ -20,6 +20,57 @@ async function requireUserId(): Promise<string> {
   return user.id;
 }
 
+// Valida posse das FKs recebidas do cliente antes de gravar — sem isso, o
+// usuário A poderia apontar um statement_cycle/statement_item para um
+// card/statement_cycle/supplier/transaction que pertence a outro usuário. O
+// RLS antigo cobria esse gap de graça; sem RLS, a checagem precisa ser
+// explícita aqui (mesmo padrão do fix de document-transactions.ts, achado
+// CRITICAL da revisão de segurança).
+
+async function assertCardOwnership(cardId: string, userId: string): Promise<void> {
+  const db = getDb();
+  const [card] = await db
+    .select({ id: schema.cards.id })
+    .from(schema.cards)
+    .where(and(eq(schema.cards.id, cardId), eq(schema.cards.user_id, userId)));
+  if (!card) throw new Error("Cartão não encontrado");
+}
+
+async function assertStatementCycleOwnership(
+  statementCycleId: string,
+  userId: string,
+): Promise<void> {
+  const db = getDb();
+  const [cycle] = await db
+    .select({ id: schema.statement_cycles.id })
+    .from(schema.statement_cycles)
+    .where(
+      and(
+        eq(schema.statement_cycles.id, statementCycleId),
+        eq(schema.statement_cycles.user_id, userId),
+      ),
+    );
+  if (!cycle) throw new Error("Ciclo de fatura não encontrado");
+}
+
+async function assertSupplierOwnership(supplierId: string, userId: string): Promise<void> {
+  const db = getDb();
+  const [supplier] = await db
+    .select({ id: schema.suppliers.id })
+    .from(schema.suppliers)
+    .where(and(eq(schema.suppliers.id, supplierId), eq(schema.suppliers.user_id, userId)));
+  if (!supplier) throw new Error("Fornecedor não encontrado");
+}
+
+async function assertTransactionOwnership(transactionId: string, userId: string): Promise<void> {
+  const db = getDb();
+  const [transaction] = await db
+    .select({ id: schema.transactions.id })
+    .from(schema.transactions)
+    .where(and(eq(schema.transactions.id, transactionId), eq(schema.transactions.user_id, userId)));
+  if (!transaction) throw new Error("Transação não encontrada");
+}
+
 // ══════════════════════════════════════════════════════════════
 // Statement Cycles (Faturas)
 // ══════════════════════════════════════════════════════════════
@@ -48,6 +99,7 @@ export async function getStatementCycle(id: string): Promise<StatementCycle | nu
 
 export async function createStatementCycle(input: StatementCycleInsert): Promise<StatementCycle> {
   const userId = await requireUserId();
+  await assertCardOwnership(input.card_id, userId);
   const db = getDb();
   const [row] = await db
     .insert(schema.statement_cycles)
@@ -62,6 +114,7 @@ export async function updateStatementCycle(
   input: StatementCycleUpdate,
 ): Promise<StatementCycle> {
   const userId = await requireUserId();
+  if (input.card_id !== undefined) await assertCardOwnership(input.card_id, userId);
   const db = getDb();
   const [row] = await db
     .update(schema.statement_cycles)
@@ -102,6 +155,9 @@ export async function getStatementItems(statementCycleId: string): Promise<State
 
 export async function createStatementItem(input: StatementItemInsert): Promise<StatementItem> {
   const userId = await requireUserId();
+  await assertStatementCycleOwnership(input.statement_cycle_id, userId);
+  if (input.supplier_id) await assertSupplierOwnership(input.supplier_id, userId);
+  if (input.transaction_id) await assertTransactionOwnership(input.transaction_id, userId);
   const db = getDb();
   const [row] = await db
     .insert(schema.statement_items)
@@ -116,6 +172,11 @@ export async function updateStatementItem(
   input: StatementItemUpdate,
 ): Promise<StatementItem> {
   const userId = await requireUserId();
+  if (input.statement_cycle_id !== undefined) {
+    await assertStatementCycleOwnership(input.statement_cycle_id, userId);
+  }
+  if (input.supplier_id) await assertSupplierOwnership(input.supplier_id, userId);
+  if (input.transaction_id) await assertTransactionOwnership(input.transaction_id, userId);
   const db = getDb();
   const [row] = await db
     .update(schema.statement_items)
