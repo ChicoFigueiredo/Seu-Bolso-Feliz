@@ -279,6 +279,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("liabilities actions", () => {
       status: "active",
     });
 
-    await expect(updateLiability(liabilityA.id, {}, [tagB.id])).rejects.toThrow();
+    // input não pode ser vazio: um `.update(...).set({})` já rejeitaria por
+    // conta própria ("No values to set"), mascarando se a checagem de posse
+    // de tags está de fato rodando no path de update.
+    await expect(updateLiability(liabilityA.id, { status: "active" }, [tagB.id])).rejects.toThrow();
   });
 });
