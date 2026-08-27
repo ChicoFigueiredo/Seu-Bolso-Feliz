@@ -72,4 +72,65 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("cards actions", () => {
     currentUserId = USER_A;
     await expect(updateCard(b.id, { holder_name: "Hackeado" })).rejects.toThrow();
   });
+
+  // IDOR fechado (mesma classe do achado CRITICAL da Task 7 em
+  // document-transactions.ts, commit b5995eb): createCard não validava que
+  // financial_product_id pertence ao usuário autenticado antes de gravar. Um
+  // usuário A conseguia criar um cartão próprio (user_id correto) apontando
+  // para o produto financeiro de B.
+  it("lança erro ao criar cartão apontando para produto financeiro de outro usuário", async () => {
+    currentUserId = USER_B;
+    const seedB = await seedProductFor(USER_B);
+    institutionIds.push(seedB.institutionId);
+
+    currentUserId = USER_A;
+    await expect(createCard({ financial_product_id: seedB.productId })).rejects.toThrow();
+  });
+
+  // Mesma classe de IDOR, caminho de updateCard: reapontar um cartão já
+  // próprio para o produto financeiro de outro usuário também não validava
+  // posse.
+  it("lança erro ao atualizar cartão apontando para produto financeiro de outro usuário", async () => {
+    currentUserId = USER_A;
+    const seedA = await seedProductFor(USER_A);
+    institutionIds.push(seedA.institutionId);
+    const card = await createCard({ financial_product_id: seedA.productId });
+
+    currentUserId = USER_B;
+    const seedB = await seedProductFor(USER_B);
+    institutionIds.push(seedB.institutionId);
+
+    currentUserId = USER_A;
+    await expect(updateCard(card.id, { financial_product_id: seedB.productId })).rejects.toThrow();
+  });
+
+  // Defesa em profundidade (mesmo padrão do achado CRITICAL em
+  // listLinkedTransactions/document-transactions.ts): mesmo que uma linha já
+  // exista com FK inconsistente — aqui, um financial_product que pertence ao
+  // usuário certo mas cuja institution_id aponta para uma instituição de
+  // outro usuário (dado legado, ou gravado por um caminho que não passa por
+  // este arquivo) — getCard/getCards não podem vazar o nome dessa
+  // instituição de terceiro. O segundo leftJoin (institutions) filtra
+  // user_id no próprio ON, então a linha do cartão continua aparecendo, só
+  // que com institutions: null.
+  it("não expõe a instituição de outro usuário quando o FK de institution_id está inconsistente", async () => {
+    currentUserId = USER_B;
+    const instB = await seedInstitution(USER_B);
+    institutionIds.push(instB.id);
+
+    currentUserId = USER_A;
+    // Dado inconsistente: produto pertence a A, mas a instituição referenciada
+    // pertence a B. `seedFinancialProduct` não valida posse — simula o bug de
+    // escrita anterior que a defesa em profundidade precisa cobrir.
+    const productA = await seedFinancialProduct(USER_A, instB.id, "credit_card");
+    const card = await createCard({ financial_product_id: productA.id });
+
+    const found = await getCard(card.id);
+    expect(found?.financial_products?.id).toBe(productA.id);
+    expect(found?.financial_products?.institutions).toBeNull();
+
+    const list = await getCards();
+    const cardInList = list.find((c) => c.id === card.id);
+    expect(cardInList?.financial_products?.institutions).toBeNull();
+  });
 });
