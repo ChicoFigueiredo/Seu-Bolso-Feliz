@@ -198,19 +198,31 @@ escrito nos "Run" de cada task) **não redireciona nada** — os testes escrevem
 `DATABASE_URL` do ambiente, que pode ser o Neon de **produção**. É exatamente
 o acidente que a condição 1 da spec proíbe.
 
+**Correção (2ª rodada de revisão da Verônica-Bolso — achado real):** um
+`throw` direto neste arquivo aconteceria em tempo de **import** (carga do
+módulo), antes de `describe.skipIf` conseguir pular a suíte — o Vitest
+executa todo o código de topo de nível de um arquivo de teste durante a
+coleta, independente do `skipIf`. Isso quebraria `bun run test` (e o CI, e
+os 319 testes já existentes) em qualquer ambiente sem `TEST_DATABASE_URL`,
+contradizendo a própria regra de "pular, não falhar" da spec. Correção que
+preserva o skip E o bloqueio de produção: sem `TEST_DATABASE_URL`, **apaga**
+`DATABASE_URL` do ambiente (em vez de lançar) — o `skipIf` pula o corpo dos
+testes normalmente, e se algum teste _escapasse_ do skip por engano, `getDb()`
+(`packages/db/src/client.ts:8`) já lança sozinho ("DATABASE_URL é obrigatório
+para @sbf/db") em vez de escrever em produção.
+
 Cada arquivo de teste desta fase precisa importar este arquivo **como a
 primeira linha**, antes de qualquer outro import:
 
 ```ts
 // apps/web/src/app/actions/test-db-setup.ts
-if (!process.env.TEST_DATABASE_URL) {
-  throw new Error(
-    "TEST_DATABASE_URL é obrigatório para rodar estes testes — nunca aponte " +
-      "para o DATABASE_URL de produção. Use um branch Neon dedicado a teste " +
-      "ou um Postgres local (ver .env.example).",
-  );
+if (process.env.TEST_DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+} else {
+  // Sem banco de teste: describe.skipIf pula as suítes; apagar DATABASE_URL
+  // garante que nenhum teste que escape do skip consiga tocar o banco real.
+  delete process.env.DATABASE_URL;
 }
-process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 ```
 
 Uso em cada teste (primeira linha do arquivo, antes de `@sbf/db` ou de
