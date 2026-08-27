@@ -316,6 +316,49 @@ OAuth). Preservar os 3 métodos de auth teria levado a estimativa a 2-3 semanas.
   ser revisada (regra da Verônica: spec antes de código, dado que a mudança toca
   autenticação e autorização de dados financeiros).
 
+**Adendo — 2026-08-26: reordenação das fases 2, 3 e 4.**
+
+Durante o brainstorming da spec da Fase 2 (auth mínima), medição real do código
+mostrou que a ordem original (Fase 2 Auth → Fase 3 Storage → Fase 4 Server Actions)
+não se sustenta: das ~172 chamadas `.from()` nas 17 Server Actions, só ~63 filtram
+`user_id` explicitamente — o resto depende inteiramente de RLS (`auth.uid() = user_id`),
+que só resolve a partir de uma sessão Supabase Auth real. Pelo menos 3 componentes
+client-side (`ai-chat-drawer.tsx`, `dashboard/import/page.tsx`,
+`suppliers/[id]/page.tsx`) chamam `supabase.from()` direto do browser com a chave
+publicável, mesma dependência. Trocar a sessão (Fase 2) antes de remover essa
+dependência (Fase 4) faria RLS devolver silenciosamente zero linhas em quase todo
+acesso a dado — não um erro, o app inteiro parecendo vazio em produção.
+
+**Nova ordem: Fase 4 → Fase 3 → Fase 2** (Fase 3 pode rodar em paralelo com a 4 se
+tiver dono separado por superfície de arquivo — os 12 pontos de Storage são quase
+disjuntos das Server Actions; senão, serializa). Depois da Fase 4, nada mais depende
+de RLS/sessão Supabase pra acessar dado, e a troca de Auth (Fase 2) fica exatamente
+tão simples quanto a decisão original desta ADR já descrevia — sem sessão-ponte, sem
+gambiarra.
+
+Condições vinculantes registradas pela Verônica-Bolso (supervisora) para a spec da
+Fase 4:
+
+1. **Cutover de dados é o risco nº1.** Se o web passar a ler/escrever no Neon enquanto
+   os 4 workers (`ingestion`, `gmail-scanner`, `local-scanner`, `pluggy-sync`) e o MCP
+   server continuam no Supabase Postgres, vira split-brain. A spec da Fase 4 precisa
+   definir a estratégia (cutover único coordenado — o que na prática puxa a antiga
+   Fase 5, workers+MCP, pra dentro do mesmo cutover — ou dual-write com janela de
+   sincronização final). Sem isso definido, o plano não é aprovado.
+2. Na Fase 4, **Auth continua Supabase intocado** — `getUser()` permanece; só a
+   _origem_ de `user.id` não muda nesta fase. Todo acesso Drizzle/Neon usa
+   `WHERE user_id = $1` explícito, vindo da sessão Supabase existente.
+3. Os 3 componentes client-side com `.from()` direto migram suas queries para Server
+   Actions (Drizzle não é acessível do browser).
+4. A obrigação das 4 funções `SECURITY DEFINER` (amarrar `p_user_id` à sessão real,
+   documentada em `packages/db/schema.sql`) entra na spec da Fase 4 — é onde elas
+   passam a ser chamadas via Neon.
+5. A spec da Fase 2 (`docs/superpowers/specs/2026-08-26-adr-009-fase2-auth-minima-design.md`)
+   fica válida como está, só muda de posição na fila. A seção do signed upload URL
+   nela fica supersedida pela Fase 3 quando esta aterrissar (Storage migra pra
+   `@vercel/blob`, tornando o meio-termo via Supabase Storage desnecessário) — não
+   reescrever essa seção agora.
+
 ## Alvo ainda não construído
 
 ### Fila durável com lease (`worker_jobs`)
