@@ -3,17 +3,24 @@
 /**
  * Gestão de senhas de documentos protegidos.
  *
- * Existe porque, até aqui, NENHUM caminho de escrita de segredo existia: nem
- * UI, nem action, nem RPC. A tabela `user_secrets` só podia ser populada à mão
- * via SQL, e o pipeline de PDFs protegidos portanto nunca tinha o que ler.
- *
  * O valor em claro nunca volta para o cliente. A listagem devolve apenas
- * escopo e rótulo — quem precisa da senha é o worker, via `fn_get_secrets`,
- * que é concedida somente a service_role.
+ * escopo e rótulo — quem precisa da senha é o worker, via `fn_get_secrets`
+ * (Fase 4b, fora deste arquivo), concedida somente a service_role.
+ *
+ * ATENÇÃO: `setSecret` abaixo chama `fn_set_secret`, que NÃO existe hoje em
+ * packages/db/schema.sql — uma das seis funções descartadas por inteiro na
+ * migração Supabase → Neon (NOTA no topo daquele arquivo), por depender de
+ * auth.uid() sem receber user_id como parâmetro. Mesmo recriada com
+ * p_user_id explícito, a criptografia (encrypt_secret/decrypt_secret) depende
+ * de private.get_crypto_key(), também não portado. Ver Apêndice "RPCs
+ * bloqueadas" do plano de implementação desta fase — setSecret permanece
+ * intocada (ainda supabase.rpc()) até essa migração separada acontecer.
  */
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getDb, schema } from "@sbf/db";
+import { and, eq, sql } from "drizzle-orm";
 
 export interface SecretSummary {
   id: string;
@@ -27,35 +34,39 @@ export interface SecretSummary {
   createdAt: string | null;
 }
 
-/** Lista os segredos do usuário SEM os valores. */
-export async function listSecrets(): Promise<SecretSummary[]> {
+async function requireUserId(): Promise<string> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Não autenticado");
+  return user.id;
+}
 
-  const { data, error } = await supabase
-    .from("user_secrets")
-    .select(
-      "id, secret_type, entity_type, entity_id, contract_identifier, label, last_used_at, success_count, created_at",
-    )
-    .eq("user_id", user.id)
-    .order("last_used_at", { ascending: false, nullsFirst: false });
+/** Lista os segredos do usuário SEM os valores. */
+export async function listSecrets(): Promise<SecretSummary[]> {
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
+  // asc()/desc() do drizzle-orm não encadeiam .nullsLast() em orderBy() nesta
+  // versão — fragmento sql`` cru replica "NULLS LAST" de hoje.
+  const rows = await db
+    .select({
+      id: schema.user_secrets.id,
+      secretType: schema.user_secrets.secret_type,
+      entityType: schema.user_secrets.entity_type,
+      entityId: schema.user_secrets.entity_id,
+      contractIdentifier: schema.user_secrets.contract_identifier,
+      label: schema.user_secrets.label,
+      lastUsedAt: schema.user_secrets.last_used_at,
+      successCount: schema.user_secrets.success_count,
+      createdAt: schema.user_secrets.created_at,
+    })
+    .from(schema.user_secrets)
+    .where(eq(schema.user_secrets.user_id, userId))
+    .orderBy(sql`${schema.user_secrets.last_used_at} desc nulls last`);
 
-  return (data ?? []).map((s) => ({
-    id: s.id,
-    secretType: s.secret_type,
-    entityType: s.entity_type,
-    entityId: s.entity_id,
-    contractIdentifier: s.contract_identifier,
-    label: s.label,
-    lastUsedAt: s.last_used_at,
-    successCount: s.success_count ?? 0,
-    createdAt: s.created_at,
-  }));
+  return rows.map((s) => ({ ...s, successCount: s.successCount ?? 0 }));
 }
 
 export interface SetSecretInput {
@@ -69,10 +80,8 @@ export interface SetSecretInput {
 }
 
 /**
- * Grava (ou substitui) a senha de um escopo.
- *
- * Delega a `fn_set_secret`, que criptografa dentro do banco e usa `auth.uid()`
- * diretamente — não há parâmetro de usuário para forjar.
+ * BLOQUEADA — NÃO CONVERTIDA. Ver comentário de cabeçalho do arquivo e o
+ * Apêndice "RPCs bloqueadas" do plano. Permanece com o código Supabase atual.
  */
 export async function setSecret(input: SetSecretInput): Promise<{ id: string }> {
   const supabase = await createClient();
@@ -101,18 +110,15 @@ export async function setSecret(input: SetSecretInput): Promise<{ id: string }> 
 }
 
 export async function deleteSecret(id: string): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const { error } = await supabase
-    .from("user_secrets")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
+  const result = await db
+    .delete(schema.user_secrets)
+    .where(and(eq(schema.user_secrets.id, id), eq(schema.user_secrets.user_id, userId)))
+    .returning({ id: schema.user_secrets.id });
 
-  if (error) throw new Error(error.message);
+  if (result.length === 0) throw new Error("Senha não encontrada");
+
   revalidatePath("/dashboard/settings/passwords");
 }
