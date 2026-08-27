@@ -1,0 +1,30 @@
+# Contexto usado pelo build de workers/pluggy-sync/Dockerfile (rodado a
+# partir da raiz do monorepo). Bun workspaces com "workspace:*" precisam do
+# package.json de cada workspace, então não cortamos apps/ ou packages/
+# inteiros — só artefato pesado/irrelevante pro build.
+node_modules
+**/node_modules
+.git
+
+# Build output — apps/web/.next sozinho passa de 600MB
+**/.next
+**/.turbo
+**/dist
+**/coverage
+**/*.tsbuildinfo
+
+# Não usado pelo build do worker
+docs
+__tests__
+**/__tests__
+supabase/.branches
+supabase/.temp
+
+# Segredos e ambiente local
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+*.log
+.DS_Store

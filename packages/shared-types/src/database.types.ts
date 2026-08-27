@@ -319,7 +319,7 @@ export type Database = {
             foreignKeyName: "consumption_metrics_document_id_fkey";
             columns: ["document_id"];
             isOneToOne: false;
-            referencedRelation: "documents";
+            referencedRelation: "documents_legacy";
             referencedColumns: ["id"];
           },
           {
@@ -571,7 +571,7 @@ export type Database = {
           },
         ];
       };
-      documents: {
+      documents_legacy: {
         Row: {
           created_at: string;
           description: string | null;
@@ -699,12 +699,6 @@ export type Database = {
       };
       draft_records: {
         Row: {
-          draft_data_legacy: Json | null;
-          draft_schema_version: number;
-          materialization_error: Json | null;
-          materialization_key: string;
-          obligation_id: string | null;
-          posted_at: string | null;
           approved_at: string | null;
           approved_by: string | null;
           batch_id: string | null;
@@ -712,9 +706,16 @@ export type Database = {
           corrections: Json | null;
           created_at: string | null;
           draft_data: Json;
+          draft_data_legacy: Json | null;
+          draft_schema_version: number;
           draft_type: string;
+          external_ref: string | null;
           extraction_result_id: string | null;
           id: string;
+          materialization_error: Json | null;
+          materialization_key: string;
+          obligation_id: string | null;
+          posted_at: string | null;
           posted_record_id: string | null;
           posted_record_type: string | null;
           reconciled_at: string | null;
@@ -728,12 +729,6 @@ export type Database = {
           user_id: string;
         };
         Insert: {
-          draft_data_legacy?: Json | null;
-          draft_schema_version?: number;
-          materialization_error?: Json | null;
-          materialization_key?: string;
-          obligation_id?: string | null;
-          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -741,9 +736,16 @@ export type Database = {
           corrections?: Json | null;
           created_at?: string | null;
           draft_data: Json;
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
           draft_type: string;
+          external_ref?: string | null;
           extraction_result_id?: string | null;
           id?: string;
+          materialization_error?: Json | null;
+          materialization_key: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           posted_record_id?: string | null;
           posted_record_type?: string | null;
           reconciled_at?: string | null;
@@ -757,12 +759,6 @@ export type Database = {
           user_id: string;
         };
         Update: {
-          draft_data_legacy?: Json | null;
-          draft_schema_version?: number;
-          materialization_error?: Json | null;
-          materialization_key?: string;
-          obligation_id?: string | null;
-          posted_at?: string | null;
           approved_at?: string | null;
           approved_by?: string | null;
           batch_id?: string | null;
@@ -770,9 +766,16 @@ export type Database = {
           corrections?: Json | null;
           created_at?: string | null;
           draft_data?: Json;
+          draft_data_legacy?: Json | null;
+          draft_schema_version?: number;
           draft_type?: string;
+          external_ref?: string | null;
           extraction_result_id?: string | null;
           id?: string;
+          materialization_error?: Json | null;
+          materialization_key?: string;
+          obligation_id?: string | null;
+          posted_at?: string | null;
           posted_record_id?: string | null;
           posted_record_type?: string | null;
           reconciled_at?: string | null;
@@ -801,6 +804,13 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "draft_records_obligation_id_fkey";
+            columns: ["obligation_id"];
+            isOneToOne: false;
+            referencedRelation: "financial_obligations";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "draft_records_reconciled_template_id_fkey";
             columns: ["reconciled_template_id"];
             isOneToOne: false;
@@ -819,6 +829,60 @@ export type Database = {
             columns: ["source_document_id"];
             isOneToOne: false;
             referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      external_account_mappings: {
+        Row: {
+          created_at: string | null;
+          external_account_id: string;
+          external_account_name: string | null;
+          external_account_type: string | null;
+          financial_product_id: string | null;
+          id: string;
+          provider_connection_id: string;
+          status: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          external_account_id: string;
+          external_account_name?: string | null;
+          external_account_type?: string | null;
+          financial_product_id?: string | null;
+          id?: string;
+          provider_connection_id: string;
+          status?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          external_account_id?: string;
+          external_account_name?: string | null;
+          external_account_type?: string | null;
+          financial_product_id?: string | null;
+          id?: string;
+          provider_connection_id?: string;
+          status?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "external_account_mappings_financial_product_id_fkey";
+            columns: ["financial_product_id"];
+            isOneToOne: false;
+            referencedRelation: "financial_products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "external_account_mappings_provider_connection_id_fkey";
+            columns: ["provider_connection_id"];
+            isOneToOne: false;
+            referencedRelation: "provider_connections";
             referencedColumns: ["id"];
           },
         ];
@@ -922,6 +986,180 @@ export type Database = {
           },
           {
             foreignKeyName: "extraction_results_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      financial_obligation_evidences: {
+        Row: {
+          confidence_score: number | null;
+          created_at: string;
+          evidence_role: string;
+          id: string;
+          obligation_id: string;
+          reasons: Json | null;
+          source_document_id: string;
+          user_id: string;
+        };
+        Insert: {
+          confidence_score?: number | null;
+          created_at?: string;
+          evidence_role?: string;
+          id?: string;
+          obligation_id: string;
+          reasons?: Json | null;
+          source_document_id: string;
+          user_id: string;
+        };
+        Update: {
+          confidence_score?: number | null;
+          created_at?: string;
+          evidence_role?: string;
+          id?: string;
+          obligation_id?: string;
+          reasons?: Json | null;
+          source_document_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "financial_obligation_evidences_obligation_id_fkey";
+            columns: ["obligation_id"];
+            isOneToOne: false;
+            referencedRelation: "financial_obligations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "financial_obligation_evidences_source_document_id_fkey";
+            columns: ["source_document_id"];
+            isOneToOne: false;
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      financial_obligation_identity_keys: {
+        Row: {
+          created_at: string;
+          id: string;
+          key: string;
+          key_kind: string;
+          obligation_id: string;
+          strength: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          key: string;
+          key_kind: string;
+          obligation_id: string;
+          strength: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          key?: string;
+          key_kind?: string;
+          obligation_id?: string;
+          strength?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "financial_obligation_identity_keys_obligation_id_fkey";
+            columns: ["obligation_id"];
+            isOneToOne: false;
+            referencedRelation: "financial_obligations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      financial_obligations: {
+        Row: {
+          amount: number | null;
+          barcode_digitable_line: string | null;
+          competence_date: string | null;
+          confidence_score: number | null;
+          created_at: string;
+          cycle_end_date: string | null;
+          cycle_start_date: string | null;
+          document_number: string | null;
+          due_date: string | null;
+          financial_identity_key: string | null;
+          financial_product_id: string | null;
+          id: string;
+          metadata: Json | null;
+          obligation_type: string;
+          status: string;
+          supplier_id: string | null;
+          supplier_name_raw: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount?: number | null;
+          barcode_digitable_line?: string | null;
+          competence_date?: string | null;
+          confidence_score?: number | null;
+          created_at?: string;
+          cycle_end_date?: string | null;
+          cycle_start_date?: string | null;
+          document_number?: string | null;
+          due_date?: string | null;
+          financial_identity_key?: string | null;
+          financial_product_id?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          obligation_type: string;
+          status?: string;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          amount?: number | null;
+          barcode_digitable_line?: string | null;
+          competence_date?: string | null;
+          confidence_score?: number | null;
+          created_at?: string;
+          cycle_end_date?: string | null;
+          cycle_start_date?: string | null;
+          document_number?: string | null;
+          due_date?: string | null;
+          financial_identity_key?: string | null;
+          financial_product_id?: string | null;
+          id?: string;
+          metadata?: Json | null;
+          obligation_type?: string;
+          status?: string;
+          supplier_id?: string | null;
+          supplier_name_raw?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "financial_obligations_financial_product_id_fkey";
+            columns: ["financial_product_id"];
+            isOneToOne: false;
+            referencedRelation: "financial_products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "financial_obligations_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "mv_supplier_spending";
+            referencedColumns: ["supplier_id"];
+          },
+          {
+            foreignKeyName: "financial_obligations_supplier_id_fkey";
             columns: ["supplier_id"];
             isOneToOne: false;
             referencedRelation: "suppliers";
@@ -1063,6 +1301,63 @@ export type Database = {
           total_rows?: number | null;
           updated_at?: string;
           user_id?: string;
+        };
+        Relationships: [];
+      };
+      ingestion_checkpoints: {
+        Row: {
+          created_at: string;
+          cursor_kind: string;
+          cursor_value: string | null;
+          documents_created: number;
+          duplicates_skipped: number;
+          errors: number;
+          id: string;
+          last_message_id: string | null;
+          messages_seen: number;
+          scope_key: string;
+          source_type: string;
+          status: string;
+          updated_at: string;
+          user_id: string;
+          window_end: string | null;
+          window_start: string | null;
+        };
+        Insert: {
+          created_at?: string;
+          cursor_kind: string;
+          cursor_value?: string | null;
+          documents_created?: number;
+          duplicates_skipped?: number;
+          errors?: number;
+          id?: string;
+          last_message_id?: string | null;
+          messages_seen?: number;
+          scope_key: string;
+          source_type: string;
+          status?: string;
+          updated_at?: string;
+          user_id: string;
+          window_end?: string | null;
+          window_start?: string | null;
+        };
+        Update: {
+          created_at?: string;
+          cursor_kind?: string;
+          cursor_value?: string | null;
+          documents_created?: number;
+          duplicates_skipped?: number;
+          errors?: number;
+          id?: string;
+          last_message_id?: string | null;
+          messages_seen?: number;
+          scope_key?: string;
+          source_type?: string;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+          window_end?: string | null;
+          window_start?: string | null;
         };
         Relationships: [];
       };
@@ -1532,6 +1827,45 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      provider_connections: {
+        Row: {
+          created_at: string | null;
+          external_item_id: string;
+          id: string;
+          institution_name: string | null;
+          last_synced_at: string | null;
+          metadata: Json;
+          provider: string;
+          status: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          external_item_id: string;
+          id?: string;
+          institution_name?: string | null;
+          last_synced_at?: string | null;
+          metadata?: Json;
+          provider: string;
+          status?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          external_item_id?: string;
+          id?: string;
+          institution_name?: string | null;
+          last_synced_at?: string | null;
+          metadata?: Json;
+          provider?: string;
+          status?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
       };
       recurring_instances: {
         Row: {
@@ -2477,46 +2811,46 @@ export type Database = {
       user_secrets: {
         Row: {
           contract_identifier: string | null;
-          label: string | null;
-          last_used_at: string | null;
-          success_count: number;
           created_at: string;
           encrypted_value: string;
           encryption_version: number;
           entity_id: string | null;
           entity_type: string | null;
           id: string;
+          label: string | null;
+          last_used_at: string | null;
           secret_type: string;
+          success_count: number;
           updated_at: string;
           user_id: string;
         };
         Insert: {
           contract_identifier?: string | null;
-          label?: string | null;
-          last_used_at?: string | null;
-          success_count?: number;
           created_at?: string;
           encrypted_value: string;
           encryption_version?: number;
           entity_id?: string | null;
           entity_type?: string | null;
           id?: string;
+          label?: string | null;
+          last_used_at?: string | null;
           secret_type: string;
+          success_count?: number;
           updated_at?: string;
           user_id: string;
         };
         Update: {
           contract_identifier?: string | null;
-          label?: string | null;
-          last_used_at?: string | null;
-          success_count?: number;
           created_at?: string;
           encrypted_value?: string;
           encryption_version?: number;
           entity_id?: string | null;
           entity_type?: string | null;
           id?: string;
+          label?: string | null;
+          last_used_at?: string | null;
           secret_type?: string;
+          success_count?: number;
           updated_at?: string;
           user_id?: string;
         };
@@ -2561,38 +2895,24 @@ export type Database = {
         Args: { p_confirmations: Json; p_user_id: string };
         Returns: Json;
       };
-      decrypt_secret: { Args: { ciphertext: string }; Returns: string };
-      encrypt_secret: { Args: { plaintext: string }; Returns: string };
-      fn_upsert_financial_obligation: {
-        Args: {
-          p_evidence: Json;
-          p_keys: Json;
-          p_payload: Json;
-          p_user_id: string;
-        };
-        Returns: Json;
+      decrypt_secret: {
+        Args: { ciphertext: string; p_version?: number };
+        Returns: string;
+      };
+      encrypt_secret: {
+        Args: { p_version?: number; plaintext: string };
+        Returns: string;
       };
       fn_get_secrets: {
         Args: { p_limit?: number; p_secret_type: string; p_user_id: string };
         Returns: {
-          contract_identifier: string | null;
-          entity_id: string | null;
-          entity_type: string | null;
-          label: string | null;
+          contract_identifier: string;
+          entity_id: string;
+          entity_type: string;
+          label: string;
           secret_id: string;
           value: string;
         }[];
-      };
-      fn_set_secret: {
-        Args: {
-          p_contract_identifier?: string | null;
-          p_entity_id?: string | null;
-          p_entity_type?: string | null;
-          p_label?: string | null;
-          p_plaintext: string;
-          p_secret_type: string;
-        };
-        Returns: string;
       };
       fn_mark_secret_used: {
         Args: { p_secret_id: string; p_user_id: string };
@@ -2615,6 +2935,26 @@ export type Database = {
           reconciled_count: number;
           total_count: number;
         }[];
+      };
+      fn_set_secret: {
+        Args: {
+          p_contract_identifier?: string;
+          p_entity_id?: string;
+          p_entity_type?: string;
+          p_label?: string;
+          p_plaintext: string;
+          p_secret_type: string;
+        };
+        Returns: string;
+      };
+      fn_upsert_financial_obligation: {
+        Args: {
+          p_evidence: Json;
+          p_keys: Json;
+          p_payload: Json;
+          p_user_id: string;
+        };
+        Returns: Json;
       };
       generate_financial_periods: {
         Args: {

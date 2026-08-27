@@ -88,10 +88,10 @@ export async function setSecret(input: SetSecretInput): Promise<{ id: string }> 
   const { data, error } = await supabase.rpc("fn_set_secret", {
     p_secret_type: input.secretType ?? "pdf_password",
     p_plaintext: input.plaintext,
-    p_entity_type: input.entityType ?? null,
-    p_entity_id: input.entityId ?? null,
-    p_contract_identifier: input.contractIdentifier ?? null,
-    p_label: input.label ?? null,
+    p_entity_type: input.entityType ?? undefined,
+    p_entity_id: input.entityId ?? undefined,
+    p_contract_identifier: input.contractIdentifier ?? undefined,
+    p_label: input.label ?? undefined,
   });
 
   if (error) throw new Error(error.message);

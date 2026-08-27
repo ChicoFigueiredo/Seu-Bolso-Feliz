@@ -13,8 +13,9 @@ import type { Database } from "@sbf/shared-types";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@sbf/shared-types";
 
-// Engine de reconciliação reutilizada do worker (lógica pura, sem dependências de runtime)
-// Importamos diretamente as heurísticas para evitar duplicação
+// Cópia independente das regras de workers/ingestion/src/reconciliation/reconciliation.ts
+// (duplicação catalogada em docs/specs/00-estado-real.md item 6) — as duas precisam ficar
+// em sincronia manualmente até serem extraídas para um módulo compartilhado.
 
 type ReconciliationStatus =
   | "not_checked"
@@ -134,18 +135,22 @@ async function runReconciliation(
       .toISOString()
       .split("T")[0];
 
-    const { data: txns } = await supabase
+    const { data: txns, error: txnsError } = await supabase
       .from("transactions")
-      .select("id, amount, transaction_date, supplier_name, category")
+      .select("id, amount, event_date, category_id")
       .eq("user_id", userId)
       .eq("supplier_id", supplierId)
-      .gte("transaction_date", fromDate)
-      .lte("transaction_date", toDate)
+      .gte("event_date", fromDate)
+      .lte("event_date", toDate)
       .limit(10);
+
+    if (txnsError) {
+      throw new Error(`runReconciliation (regra 2): ${txnsError.message}`);
+    }
 
     for (const txn of txns ?? []) {
       if (!amountWithinPct(amount, txn.amount)) continue;
-      const isExact = dateWithinDays(dueDate, txn.transaction_date, 7);
+      const isExact = dateWithinDays(dueDate, txn.event_date, 7);
       candidates.push({
         transactionId: txn.id,
         recurringTemplateId: null,
@@ -156,9 +161,9 @@ async function runReconciliation(
           : "Transação com mesmo fornecedor e valor semelhante (data difere).",
         candidateData: {
           amount: txn.amount,
-          date: txn.transaction_date,
-          supplierName: txn.supplier_name,
-          category: txn.category,
+          date: txn.event_date,
+          supplierName: supplierName,
+          category: txn.category_id,
         },
       });
     }
@@ -178,14 +183,18 @@ async function runReconciliation(
     for (const tpl of templates ?? []) {
       if (amount !== null && !amountWithinPct(amount, tpl.amount, 0.15)) continue;
       const compKey = competenceKey(competenceDate);
-      const { data: instances } = await supabase
+      const { data: instances, error: instancesError } = await supabase
         .from("recurring_instances")
-        .select("id, due_date, status")
+        .select("id, expected_date, status")
         .eq("user_id", userId)
-        .eq("template_id", tpl.id)
-        .gte("due_date", `${compKey}-01`)
-        .lte("due_date", `${compKey}-31`)
+        .eq("recurring_template_id", tpl.id)
+        .gte("expected_date", `${compKey}-01`)
+        .lte("expected_date", `${compKey}-31`)
         .limit(1);
+
+      if (instancesError) {
+        throw new Error(`runReconciliation (regra 3): ${instancesError.message}`);
+      }
 
       const hasInstance = instances && instances.length > 0;
       candidates.push({
@@ -198,7 +207,7 @@ async function runReconciliation(
           : `Template recorrente "${tpl.name}" corresponde ao fornecedor.`,
         candidateData: {
           amount: tpl.amount,
-          date: hasInstance ? instances[0].due_date : null,
+          date: hasInstance ? instances[0].expected_date : null,
           supplierName,
           category: null,
         },
