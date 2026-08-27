@@ -6,7 +6,50 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { Json } from "@/../../packages/shared-types/src/database.types";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or } from "drizzle-orm";
+import type { Json } from "@sbf/shared-types";
+
+// ══════════════════════════════════════════════════════════════
+// Helpers
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Valida posse das FKs opcionais (supplierId/institutionId) recebidas do
+ * cliente antes de gravar em `document_patterns` — sem isso, o usuário A
+ * poderia apontar o próprio padrão para um supplier ou institution que
+ * pertence a outro usuário (IDOR). Mesmo padrão de
+ * `app/actions/patterns.ts` (`assertOwnsOptionalFks`), adaptado para o
+ * contrato de retorno de erro (não-throw) que as tools de IA usam.
+ * Achado registrado no ledger da Task 15 (patterns.ts) e reservado para
+ * correção nesta task, quando este arquivo foi finalmente convertido.
+ */
+async function findUnownedFkError(
+  userId: string,
+  fks: { supplierId?: string | null; institutionId?: string | null },
+): Promise<string | null> {
+  const db = getDb();
+
+  if (fks.supplierId) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, fks.supplierId), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) return "Fornecedor não encontrado";
+  }
+
+  if (fks.institutionId) {
+    const [institution] = await db
+      .select({ id: schema.institutions.id })
+      .from(schema.institutions)
+      .where(
+        and(eq(schema.institutions.id, fks.institutionId), eq(schema.institutions.user_id, userId)),
+      );
+    if (!institution) return "Instituição não encontrada";
+  }
+
+  return null;
+}
 
 // ══════════════════════════════════════════════════════════════
 // Group 1: Read Tools
@@ -29,18 +72,25 @@ export const listPendingDocuments = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    let query = supabase
-      .from("source_documents")
-      .select("id, filename, mime_type, origin_type, status, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
+    const db = getDb();
+    const conditions = [eq(schema.source_documents.user_id, user.id)];
+    if (status) conditions.push(eq(schema.source_documents.status, status));
+
+    const documents = await db
+      .select({
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        mime_type: schema.source_documents.mime_type,
+        origin_type: schema.source_documents.origin_type,
+        status: schema.source_documents.status,
+        created_at: schema.source_documents.created_at,
+      })
+      .from(schema.source_documents)
+      .where(and(...conditions))
+      .orderBy(desc(schema.source_documents.created_at))
       .limit(limit);
 
-    if (status) query = query.eq("status", status);
-
-    const { data, error } = await query;
-    if (error) return { error: error.message };
-    return { documents: data, count: data?.length ?? 0 };
+    return { documents, count: documents.length };
   },
 });
 
@@ -57,34 +107,57 @@ export const getDocumentDetails = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const [docResult, jobsResult, draftsResult] = await Promise.all([
-      supabase
-        .from("source_documents")
-        .select("*")
-        .eq("id", documentId)
-        .eq("user_id", user.id)
-        .single(),
-      supabase
-        .from("ingestion_jobs")
-        // Sem `step`: a coluna não existe em `ingestion_jobs` — a etapa é o
-        // próprio `status`. O typecheck não pega string de `.select()`, então
-        // isto falharia só em runtime.
-        .select("id, status, error_message, created_at, updated_at")
-        .eq("source_document_id", documentId)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("draft_records")
-        .select("id, status, draft_type, draft_data, confidence_score, created_at")
-        .eq("source_document_id", documentId)
-        .order("created_at", { ascending: false }),
+    const db = getDb();
+
+    const [docRows, jobs, drafts] = await Promise.all([
+      db
+        .select()
+        .from(schema.source_documents)
+        .where(
+          and(
+            eq(schema.source_documents.id, documentId),
+            eq(schema.source_documents.user_id, user.id),
+          ),
+        ),
+      db
+        .select({
+          id: schema.ingestion_jobs.id,
+          status: schema.ingestion_jobs.status,
+          error_message: schema.ingestion_jobs.error_message,
+          created_at: schema.ingestion_jobs.created_at,
+          updated_at: schema.ingestion_jobs.updated_at,
+        })
+        .from(schema.ingestion_jobs)
+        .where(
+          and(
+            eq(schema.ingestion_jobs.source_document_id, documentId),
+            eq(schema.ingestion_jobs.user_id, user.id),
+          ),
+        )
+        .orderBy(desc(schema.ingestion_jobs.created_at)),
+      db
+        .select({
+          id: schema.draft_records.id,
+          status: schema.draft_records.status,
+          draft_type: schema.draft_records.draft_type,
+          draft_data: schema.draft_records.draft_data,
+          confidence_score: schema.draft_records.confidence_score,
+          created_at: schema.draft_records.created_at,
+        })
+        .from(schema.draft_records)
+        .where(
+          and(
+            eq(schema.draft_records.source_document_id, documentId),
+            eq(schema.draft_records.user_id, user.id),
+          ),
+        )
+        .orderBy(desc(schema.draft_records.created_at)),
     ]);
 
-    if (docResult.error) return { error: docResult.error.message };
-    return {
-      document: docResult.data,
-      jobs: jobsResult.data ?? [],
-      drafts: draftsResult.data ?? [],
-    };
+    const document = docRows[0];
+    if (!document) return { error: "Documento não encontrado" };
+
+    return { document, jobs, drafts };
   },
 });
 
@@ -105,18 +178,25 @@ export const listDrafts = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data, error } = await supabase
-      .from("draft_records")
-      .select(
-        "id, status, draft_type, draft_data, confidence_score, source_document_id, created_at",
+    const db = getDb();
+    const drafts = await db
+      .select({
+        id: schema.draft_records.id,
+        status: schema.draft_records.status,
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        source_document_id: schema.draft_records.source_document_id,
+        created_at: schema.draft_records.created_at,
+      })
+      .from(schema.draft_records)
+      .where(
+        and(eq(schema.draft_records.user_id, user.id), eq(schema.draft_records.status, status)),
       )
-      .eq("user_id", user.id)
-      .eq("status", status)
-      .order("created_at", { ascending: false })
+      .orderBy(desc(schema.draft_records.created_at))
       .limit(limit);
 
-    if (error) return { error: error.message };
-    return { drafts: data, count: data?.length ?? 0 };
+    return { drafts, count: drafts.length };
   },
 });
 
@@ -133,29 +213,43 @@ export const getDraftDetails = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data, error } = await supabase
-      .from("draft_records")
-      .select(
-        "id, status, draft_type, draft_data, confidence_score, corrections, source_document_id, created_at, updated_at",
-      )
-      .eq("id", draftId)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [draft] = await db
+      .select({
+        id: schema.draft_records.id,
+        status: schema.draft_records.status,
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        corrections: schema.draft_records.corrections,
+        source_document_id: schema.draft_records.source_document_id,
+        created_at: schema.draft_records.created_at,
+        updated_at: schema.draft_records.updated_at,
+      })
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
-    if (error) return { error: error.message };
+    if (!draft) return { error: "Draft não encontrado" };
 
-    // Fetch source document info separately
     let sourceDoc = null;
-    if (data?.source_document_id) {
-      const { data: doc } = await supabase
-        .from("source_documents")
-        .select("filename, mime_type, origin_type")
-        .eq("id", data.source_document_id)
-        .single();
-      sourceDoc = doc;
+    if (draft.source_document_id) {
+      const [doc] = await db
+        .select({
+          filename: schema.source_documents.filename,
+          mime_type: schema.source_documents.mime_type,
+          origin_type: schema.source_documents.origin_type,
+        })
+        .from(schema.source_documents)
+        .where(
+          and(
+            eq(schema.source_documents.id, draft.source_document_id),
+            eq(schema.source_documents.user_id, user.id),
+          ),
+        );
+      sourceDoc = doc ?? null;
     }
 
-    return { draft: { ...data, source_document: sourceDoc } };
+    return { draft: { ...draft, source_document: sourceDoc } };
   },
 });
 
@@ -172,27 +266,33 @@ export const listRecentTransactions = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // As colunas corretas são `event_date`, `category_id` e `supplier_id`.
-    // Esta query pedia `transaction_date`, `category` e `supplier_name`, que
-    // NÃO EXISTEM em `transactions` — a tool falhava em toda execução contra o
-    // schema real. Nomes legíveis vêm por join.
-    let query = supabase
-      .from("transactions")
-      .select("id, description, amount, event_date, created_at, categories(name), suppliers(name)")
-      .eq("user_id", user.id)
-      .order("event_date", { ascending: false })
+    const db = getDb();
+    const conditions = [eq(schema.transactions.user_id, user.id)];
+    if (category) conditions.push(eq(schema.categories.name, category));
+
+    const transactions = await db
+      .select({
+        id: schema.transactions.id,
+        description: schema.transactions.description,
+        amount: schema.transactions.amount,
+        event_date: schema.transactions.event_date,
+        created_at: schema.transactions.created_at,
+        category_name: schema.categories.name,
+        supplier_name: schema.suppliers.name,
+      })
+      .from(schema.transactions)
+      .leftJoin(schema.categories, eq(schema.transactions.category_id, schema.categories.id))
+      .leftJoin(schema.suppliers, eq(schema.transactions.supplier_id, schema.suppliers.id))
+      .where(and(...conditions))
+      .orderBy(desc(schema.transactions.event_date))
       .limit(limit);
 
-    if (category) query = query.eq("categories.name", category);
-
-    const { data, error } = await query;
-    if (error) return { error: error.message };
-    return { transactions: data, count: data?.length ?? 0 };
+    return { transactions, count: transactions.length };
   },
 });
 
 // ══════════════════════════════════════════════════════════════
-// Group 2: Analysis Tools
+// Group 2: Analysis Tools (sem acesso a dados — inalteradas)
 // ══════════════════════════════════════════════════════════════
 
 export const suggestSupplier = tool({
@@ -202,8 +302,6 @@ export const suggestSupplier = tool({
     documentType: z.string().optional().describe("Tipo do documento (boleto, fatura, recibo)"),
   }),
   execute: async ({ extractedText, documentType }) => {
-    // This tool returns suggestions for the AI to use in its response
-    // The AI model itself does the analysis based on the text
     return {
       instruction:
         "Analise o texto e sugira o fornecedor mais provável. Considere: razão social, CNPJ, nome fantasia, padrões conhecidos de faturas.",
@@ -253,39 +351,41 @@ export const approveDraft = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Apply corrections if any
+    const db = getDb();
+
     if (corrections && Object.keys(corrections).length > 0) {
-      const { data: draft } = await supabase
-        .from("draft_records")
-        .select("draft_data")
-        .eq("id", draftId)
-        .eq("user_id", user.id)
-        .single();
+      const [draft] = await db
+        .select({ draft_data: schema.draft_records.draft_data })
+        .from(schema.draft_records)
+        .where(
+          and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
+        );
 
       if (draft) {
         const updatedData = {
           ...(draft.draft_data as Record<string, unknown>),
           ...corrections,
         };
-        await supabase
-          .from("draft_records")
-          .update({
-            draft_data: updatedData as Json,
-            corrections: corrections,
-            status: "corrected" as const,
-          })
-          .eq("id", draftId)
-          .eq("user_id", user.id);
+        await db
+          .update(schema.draft_records)
+          .set({ draft_data: updatedData as Json, corrections, status: "corrected" })
+          .where(
+            and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
+          );
       }
     }
 
-    const { error } = await supabase
-      .from("draft_records")
-      .update({ status: "approved" as const })
-      .eq("id", draftId)
-      .eq("user_id", user.id);
+    // Nota: o código atual não usa `.select().single()` neste update — só
+    // checa `error`, nunca linhas afetadas. 0 linhas (draft inexistente ou
+    // de outro usuário) hoje AINDA retorna `{success: true, message: "...
+    // aprovado"}`. Comportamento pré-existente preservado por paridade
+    // (exceção documentada à regra geral desta fase) — isolamento de DADOS
+    // continua garantido, só a mensagem de retorno é otimista.
+    await db
+      .update(schema.draft_records)
+      .set({ status: "approved" })
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
-    if (error) return { error: error.message };
     return {
       success: true,
       message: `Draft ${draftId} aprovado. Ainda NÃO foi lançado — use postDraft para criar o registro financeiro.`,
@@ -294,9 +394,8 @@ export const approveDraft = tool({
 });
 
 /**
- * Lançamento é uma tool separada de propósito: a IA não deve conseguir criar
- * um registro financeiro numa única chamada. Aprovar e lançar continuam sendo
- * dois atos observáveis, mesmo quando quem os executa é o assistente.
+ * Sem alteração — delega para materialization.ts (já reescrito na Task 13
+ * do plano), sem chamada direta a supabase/Drizzle aqui.
  */
 export const postDraft = tool({
   description:
@@ -337,16 +436,14 @@ export const rejectDraft = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { error } = await supabase
-      .from("draft_records")
-      .update({
-        status: "rejected" as const,
-        corrections: { rejection_reason: reason },
-      })
-      .eq("id", draftId)
-      .eq("user_id", user.id);
+    const db = getDb();
+    // Mesma exceção documentada de approveDraft: sem check de linhas
+    // afetadas, paridade com o código atual.
+    await db
+      .update(schema.draft_records)
+      .set({ status: "rejected", corrections: { rejection_reason: reason } })
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
-    if (error) return { error: error.message };
     return { success: true, message: `Draft ${draftId} rejeitado: ${reason}` };
   },
 });
@@ -364,29 +461,43 @@ export const reprocessDocumentTool = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Archive pending/rejected drafts
-    await supabase
-      .from("draft_records")
-      .update({ status: "archived" as const })
-      .eq("source_document_id", documentId)
-      .eq("user_id", user.id)
-      .in("status", ["pending_review", "rejected"]);
+    const db = getDb();
 
-    // Reset latest job to queued
-    const { data: jobs } = await supabase
-      .from("ingestion_jobs")
-      .select("id")
-      .eq("source_document_id", documentId)
-      .order("created_at", { ascending: false })
+    // Bulk: 0 linhas é normal (nenhum draft pendente/rejeitado) — sem throw,
+    // mesmo comportamento de hoje.
+    await db
+      .update(schema.draft_records)
+      .set({ status: "archived" })
+      .where(
+        and(
+          eq(schema.draft_records.source_document_id, documentId),
+          eq(schema.draft_records.user_id, user.id),
+          inArray(schema.draft_records.status, ["pending_review", "rejected"]),
+        ),
+      );
+
+    const [latestJob] = await db
+      .select({ id: schema.ingestion_jobs.id })
+      .from(schema.ingestion_jobs)
+      .where(
+        and(
+          eq(schema.ingestion_jobs.source_document_id, documentId),
+          eq(schema.ingestion_jobs.user_id, user.id),
+        ),
+      )
+      .orderBy(desc(schema.ingestion_jobs.created_at))
       .limit(1);
 
-    if (jobs && jobs.length > 0 && jobs[0]) {
-      // `ingestion_jobs` não tem coluna `step` — a etapa é o próprio `status`.
-      // Gravar `step: "hash"` fazia o update falhar silenciosamente.
-      await supabase
-        .from("ingestion_jobs")
-        .update({ status: "queued" as const })
-        .eq("id", jobs[0].id);
+    if (latestJob) {
+      await db
+        .update(schema.ingestion_jobs)
+        .set({ status: "queued" })
+        .where(
+          and(
+            eq(schema.ingestion_jobs.id, latestJob.id),
+            eq(schema.ingestion_jobs.user_id, user.id),
+          ),
+        );
     }
 
     return {
@@ -418,28 +529,32 @@ export const listDocumentPatterns = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let q: any = (supabase as any)
-      .from("document_patterns")
-      .select(
-        "id, name, document_type, version, is_active, feedback_count, success_count, confidence_threshold, updated_at",
-      )
-      .eq("user_id", user.id)
-      .order("version", { ascending: false })
+    const db = getDb();
+    const conditions = [eq(schema.document_patterns.user_id, user.id)];
+    if (activeOnly) conditions.push(eq(schema.document_patterns.is_active, true));
+    if (documentType) conditions.push(eq(schema.document_patterns.document_type, documentType));
+
+    const rows = await db
+      .select({
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
+        is_active: schema.document_patterns.is_active,
+        feedback_count: schema.document_patterns.feedback_count,
+        success_count: schema.document_patterns.success_count,
+        confidence_threshold: schema.document_patterns.confidence_threshold,
+        updated_at: schema.document_patterns.updated_at,
+      })
+      .from(schema.document_patterns)
+      .where(and(...conditions))
+      .orderBy(desc(schema.document_patterns.version))
       .limit(limit);
 
-    if (activeOnly) q = q.eq("is_active", true);
-    if (documentType) q = q.eq("document_type", documentType);
-
-    const { data, error } = await q;
-    if (error) return { error: error.message };
-
-    const patterns = (data ?? []).map((p: Record<string, unknown>) => ({
+    const patterns = rows.map((p) => ({
       ...p,
       successRate:
-        (p.feedback_count as number) > 0
-          ? Math.round(((p.success_count as number) / (p.feedback_count as number)) * 100)
-          : null,
+        p.feedback_count > 0 ? Math.round((p.success_count / p.feedback_count) * 100) : null,
     }));
 
     return { patterns, count: patterns.length };
@@ -499,10 +614,18 @@ export const registerDocumentPattern = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any)
-      .from("document_patterns")
-      .insert({
+    // IDOR fechado nesta task: supplierId/institutionId vêm do cliente (a IA
+    // repassa o que o usuário pediu) e, sem esta checagem, o padrão poderia
+    // ser vinculado a um fornecedor/instituição de outro usuário. Mesmo
+    // achado já corrigido em `app/actions/patterns.ts`
+    // (`assertOwnsOptionalFks`), agora aplicado aqui também.
+    const fkError = await findUnownedFkError(user.id, { supplierId, institutionId });
+    if (fkError) return { error: fkError };
+
+    const db = getDb();
+    const [pattern] = await db
+      .insert(schema.document_patterns)
+      .values({
         user_id: user.id,
         name,
         document_type: documentType,
@@ -516,14 +639,17 @@ export const registerDocumentPattern = tool({
         feedback_count: 0,
         success_count: 0,
       })
-      .select("id, name, document_type, version")
-      .single();
+      .returning({
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
+      });
 
-    if (error) return { error: error.message };
     return {
       success: true,
-      pattern: data,
-      message: `Padrão "${name}" criado com sucesso. ID: ${data?.id}`,
+      pattern,
+      message: `Padrão "${name}" criado com sucesso. ID: ${pattern?.id}`,
     };
   },
 });
@@ -564,20 +690,20 @@ export const updateDocumentPattern = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Busca padrão atual
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: existing, error: fetchError } = await (supabase as any)
-      .from("document_patterns")
-      .select(
-        "id, name, document_type, extraction_rules, field_mappings, confidence_threshold, supplier_id, institution_id, version",
-      )
-      .eq("id", patternId)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [existing] = await db
+      .select({ id: schema.document_patterns.id, name: schema.document_patterns.name })
+      .from(schema.document_patterns)
+      .where(
+        and(
+          eq(schema.document_patterns.id, patternId),
+          eq(schema.document_patterns.user_id, user.id),
+        ),
+      );
 
-    if (fetchError || !existing) return { error: fetchError?.message ?? "Padrão não encontrado" };
+    if (!existing) return { error: "Padrão não encontrado" };
 
-    const updates: Record<string, unknown> = {};
+    const updates: Partial<typeof schema.document_patterns.$inferInsert> = {};
     if (extractionRules !== undefined) updates.extraction_rules = extractionRules;
     if (fieldMappings !== undefined) updates.field_mappings = fieldMappings;
     if (confidenceThreshold !== undefined) updates.confidence_threshold = confidenceThreshold;
@@ -587,16 +713,27 @@ export const updateDocumentPattern = tool({
       return { error: "Nenhum campo para atualizar fornecido" };
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: updated, error: updateError } = await (supabase as any)
-      .from("document_patterns")
-      .update(updates)
-      .eq("id", patternId)
-      .eq("user_id", user.id)
-      .select("id, name, document_type, version, is_active")
-      .single();
+    // Este update DO CÓDIGO ATUAL usa `.select().single()` (diferente de
+    // approveDraft/rejectDraft) — 0 linhas afetadas já produz erro hoje.
+    // Preservado com `.returning()` + checagem de nulo.
+    const [updated] = await db
+      .update(schema.document_patterns)
+      .set(updates)
+      .where(
+        and(
+          eq(schema.document_patterns.id, patternId),
+          eq(schema.document_patterns.user_id, user.id),
+        ),
+      )
+      .returning({
+        id: schema.document_patterns.id,
+        name: schema.document_patterns.name,
+        document_type: schema.document_patterns.document_type,
+        version: schema.document_patterns.version,
+        is_active: schema.document_patterns.is_active,
+      });
 
-    if (updateError) return { error: updateError.message };
+    if (!updated) return { error: "Padrão não encontrado" };
     return {
       success: true,
       pattern: updated,
@@ -618,52 +755,61 @@ export const suggestReconciliation = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data: draft, error: draftError } = await supabase
-      .from("draft_records")
-      .select("draft_data")
-      .eq("id", draftId)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [draft] = await db
+      .select({ draft_data: schema.draft_records.draft_data })
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
-    if (draftError || !draft) return { error: draftError?.message ?? "Draft não encontrado" };
+    if (!draft) return { error: "Draft não encontrado" };
 
     const draftData = draft.draft_data as Record<string, unknown> | null;
     const amount = draftData?.amount ?? draftData?.valor;
     const date = draftData?.date ?? draftData?.data;
 
-    if (!amount)
-      return {
-        candidates: [],
-        message: "Valor não encontrado no draft para reconciliação.",
-      };
+    if (!amount) {
+      return { candidates: [], message: "Valor não encontrado no draft para reconciliação." };
+    }
 
-    // Search for transactions with similar amount (±5%)
+    // BUG CORRIGIDO nesta reescrita: o código atual pedia as colunas
+    // `transaction_date` e `supplier_name`, que NÃO EXISTEM em `transactions`
+    // (as reais são `event_date` e `supplier_id`, com nome vindo por join em
+    // `suppliers`) — mesma classe de bug já corrigida em `listRecentTransactions`
+    // dentro deste mesmo arquivo.
     const numAmount = Number(amount);
     const margin = numAmount * 0.05;
 
-    let query = supabase
-      .from("transactions")
-      .select("id, description, amount, transaction_date, supplier_name")
-      .eq("user_id", user.id)
-      .gte("amount", numAmount - margin)
-      .lte("amount", numAmount + margin)
-      .order("transaction_date", { ascending: false })
-      .limit(5);
+    const conditions = [
+      eq(schema.transactions.user_id, user.id),
+      gte(schema.transactions.amount, numAmount - margin),
+      lte(schema.transactions.amount, numAmount + margin),
+    ];
 
     if (date) {
-      const dateStr = String(date);
-      const dateMs = new Date(dateStr).getTime();
+      const dateMs = new Date(String(date)).getTime();
       if (!isNaN(dateMs)) {
-        query = query.gte(
-          "transaction_date",
-          new Date(dateMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
-        );
+        const sevenDaysBefore = new Date(dateMs - 7 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .split("T")[0]!;
+        conditions.push(gte(schema.transactions.event_date, sevenDaysBefore));
       }
     }
 
-    const { data: candidates, error } = await query;
-    if (error) return { error: error.message };
-    return { candidates: candidates ?? [], draftAmount: numAmount };
+    const candidates = await db
+      .select({
+        id: schema.transactions.id,
+        description: schema.transactions.description,
+        amount: schema.transactions.amount,
+        event_date: schema.transactions.event_date,
+        supplier_name: schema.suppliers.name,
+      })
+      .from(schema.transactions)
+      .leftJoin(schema.suppliers, eq(schema.transactions.supplier_id, schema.suppliers.id))
+      .where(and(...conditions))
+      .orderBy(desc(schema.transactions.event_date))
+      .limit(5);
+
+    return { candidates, draftAmount: numAmount };
   },
 });
 
@@ -701,24 +847,37 @@ export const explainClassification = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data: draft, error } = await supabase
-      .from("draft_records")
-      .select("draft_type, draft_data, confidence_score, corrections, source_document_id")
-      .eq("id", draftId)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [draft] = await db
+      .select({
+        draft_type: schema.draft_records.draft_type,
+        draft_data: schema.draft_records.draft_data,
+        confidence_score: schema.draft_records.confidence_score,
+        corrections: schema.draft_records.corrections,
+        source_document_id: schema.draft_records.source_document_id,
+      })
+      .from(schema.draft_records)
+      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
 
-    if (error || !draft) return { error: error?.message ?? "Draft não encontrado" };
+    if (!draft) return { error: "Draft não encontrado" };
 
-    // Get source document for context
     let sourceInfo = null;
     if (draft.source_document_id) {
-      const { data: doc } = await supabase
-        .from("source_documents")
-        .select("filename, mime_type, origin_type, metadata")
-        .eq("id", draft.source_document_id)
-        .single();
-      sourceInfo = doc;
+      const [doc] = await db
+        .select({
+          filename: schema.source_documents.filename,
+          mime_type: schema.source_documents.mime_type,
+          origin_type: schema.source_documents.origin_type,
+          metadata: schema.source_documents.metadata,
+        })
+        .from(schema.source_documents)
+        .where(
+          and(
+            eq(schema.source_documents.id, draft.source_document_id),
+            eq(schema.source_documents.user_id, user.id),
+          ),
+        );
+      sourceInfo = doc ?? null;
     }
 
     return {
@@ -751,16 +910,25 @@ export const listErrorDocuments = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data, error } = await supabase
-      .from("source_documents")
-      .select("id, filename, status, created_at")
-      .eq("user_id", user.id)
-      .eq("status", "error")
-      .order("created_at", { ascending: false })
+    const db = getDb();
+    const documents = await db
+      .select({
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        status: schema.source_documents.status,
+        created_at: schema.source_documents.created_at,
+      })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.status, "error"),
+        ),
+      )
+      .orderBy(desc(schema.source_documents.created_at))
       .limit(limit);
 
-    if (error) return { error: error.message };
-    return { documents: data, count: data?.length ?? 0 };
+    return { documents, count: documents.length };
   },
 });
 
@@ -777,24 +945,35 @@ export const listMissingPasswordDocuments = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Jobs que falharam por senha ausente.
-    //
-    // A versão anterior filtrava por uma coluna `step` que não existe em
-    // `ingestion_jobs` — a etapa é o próprio `status`. O filtro real é o texto
-    // do erro, que é o que distingue falha de senha de qualquer outra.
-    const { data, error } = await supabase
-      .from("ingestion_jobs")
-      .select(
-        "id, source_document_id, status, error_message, source_documents!inner(filename, user_id)",
+    const db = getDb();
+    const rows = await db
+      .select({
+        id: schema.ingestion_jobs.id,
+        source_document_id: schema.ingestion_jobs.source_document_id,
+        status: schema.ingestion_jobs.status,
+        error_message: schema.ingestion_jobs.error_message,
+        filename: schema.source_documents.filename,
+      })
+      .from(schema.ingestion_jobs)
+      .innerJoin(
+        schema.source_documents,
+        eq(schema.ingestion_jobs.source_document_id, schema.source_documents.id),
       )
-      .eq("source_documents.user_id", user.id)
-      .eq("status", "failed")
-      .or("error_message.ilike.%password%,error_message.ilike.%senha%")
-      .order("created_at", { ascending: false })
+      .where(
+        and(
+          eq(schema.ingestion_jobs.user_id, user.id),
+          eq(schema.source_documents.user_id, user.id),
+          eq(schema.ingestion_jobs.status, "failed"),
+          or(
+            ilike(schema.ingestion_jobs.error_message, "%password%"),
+            ilike(schema.ingestion_jobs.error_message, "%senha%"),
+          ),
+        ),
+      )
+      .orderBy(desc(schema.ingestion_jobs.created_at))
       .limit(limit);
 
-    if (error) return { error: error.message };
-    return { documents: data, count: data?.length ?? 0 };
+    return { documents: rows, count: rows.length };
   },
 });
 
@@ -819,21 +998,29 @@ export const batchApproveDrafts = tool({
       return { error: "Máximo de 50 drafts por batch." };
     }
 
+    const db = getDb();
     const results: { id: string; success: boolean; error?: string }[] = [];
 
+    // Loop sequencial de updates independentes, sem transação — paridade
+    // com o código atual (candidato a Apêndice B, não decidido aqui).
     for (const draftId of draftIds) {
-      const { error } = await supabase
-        .from("draft_records")
-        .update({ status: "approved" as const })
-        .eq("id", draftId)
-        .eq("user_id", user.id)
-        .eq("status", "pending_review");
-
-      results.push({
-        id: draftId,
-        success: !error,
-        error: error?.message,
-      });
+      try {
+        // Mesma exceção documentada de approveDraft/rejectDraft: sem check
+        // de linhas afetadas.
+        await db
+          .update(schema.draft_records)
+          .set({ status: "approved" })
+          .where(
+            and(
+              eq(schema.draft_records.id, draftId),
+              eq(schema.draft_records.user_id, user.id),
+              eq(schema.draft_records.status, "pending_review"),
+            ),
+          );
+        results.push({ id: draftId, success: true });
+      } catch (err) {
+        results.push({ id: draftId, success: false, error: (err as Error).message });
+      }
     }
 
     const approved = results.filter((r) => r.success).length;
@@ -847,6 +1034,10 @@ export const batchApproveDrafts = tool({
   },
 });
 
+/**
+ * Sem alteração — delega para materialization.ts (Task 13), sem chamada
+ * direta a supabase/Drizzle aqui.
+ */
 export const postDraftBatch = tool({
   description:
     "Lança todos os drafts JÁ APROVADOS de um batch, criando os registros financeiros definitivos. IMPORTANTE: sempre confirme com o usuário antes de executar.",
@@ -874,10 +1065,6 @@ export const postDraftBatch = tool({
 // Sprint 4 Tools: suggest_splits, suggest_supplier_name, explain_extraction
 // ══════════════════════════════════════════════════════════════
 
-/**
- * suggest_splits — S4-005
- * Sugere como desdobrar um documento em múltiplas linhas de rateio.
- */
 export const suggestSplits = tool({
   description:
     "Sugere como dividir (ratear) um documento de custo em múltiplas linhas de despesa. " +
@@ -900,13 +1087,22 @@ export const suggestSplits = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Buscar detalhes do documento
-    const { data: doc } = await supabase
-      .from("source_documents")
-      .select("id, filename, document_type, supplier_name_raw, metadata")
-      .eq("id", document_id)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [doc] = await db
+      .select({
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        document_type: schema.source_documents.document_type,
+        supplier_name_raw: schema.source_documents.supplier_name_raw,
+        metadata: schema.source_documents.metadata,
+      })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.id, document_id),
+          eq(schema.source_documents.user_id, user.id),
+        ),
+      );
 
     if (!doc) return { error: "Documento não encontrado" };
 
@@ -930,10 +1126,6 @@ export const suggestSplits = tool({
   },
 });
 
-/**
- * suggest_supplier_name — S4-008
- * Dado um CNPJ, retorna razão social e aliases inferidos.
- */
 export const suggestSupplierName = tool({
   description:
     "Dado um CNPJ, sugere a razão social e possíveis aliases/nomes alternativos do fornecedor " +
@@ -948,18 +1140,26 @@ export const suggestSupplierName = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    // Normaliza CNPJ para apenas dígitos
+    const db = getDb();
     const digits = document_number.replace(/\D/g, "");
 
-    // Buscar fornecedores com esse documento no histórico
-    const { data: existing } = await supabase
-      .from("suppliers")
-      .select("id, name, trade_name, document_number")
-      .eq("user_id", user.id)
-      .eq("document_number", document_number)
+    const existing = await db
+      .select({
+        id: schema.suppliers.id,
+        name: schema.suppliers.name,
+        trade_name: schema.suppliers.trade_name,
+        document_number: schema.suppliers.document_number,
+      })
+      .from(schema.suppliers)
+      .where(
+        and(
+          eq(schema.suppliers.user_id, user.id),
+          eq(schema.suppliers.document_number, document_number),
+        ),
+      )
       .limit(1);
 
-    if (existing && existing.length > 0) {
+    if (existing.length > 0) {
       const s = existing[0]!;
       return {
         found: true,
@@ -972,27 +1172,33 @@ export const suggestSupplierName = tool({
       };
     }
 
-    // Buscar em documentos ingeridos com esse CNPJ nos metadados
-    const { data: docs } = await supabase
-      .from("source_documents")
-      .select("supplier_name_raw, metadata")
-      .eq("user_id", user.id)
-      .not("supplier_name_raw", "is", null)
+    const docs = await db
+      .select({
+        supplier_name_raw: schema.source_documents.supplier_name_raw,
+        metadata: schema.source_documents.metadata,
+      })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.user_id, user.id),
+          isNotNull(schema.source_documents.supplier_name_raw),
+        ),
+      )
       .limit(20);
 
-    const found = docs?.filter((d) => {
+    const found = docs.filter((d) => {
       const meta = d.metadata as Record<string, unknown> | null;
       const cnpj = (meta?.cnpj as string | null)?.replace(/\D/g, "");
       return cnpj === digits;
     });
 
     const namesFound = [
-      ...new Set(found?.map((d) => d.supplier_name_raw).filter(Boolean) ?? []),
+      ...new Set(found.map((d) => d.supplier_name_raw).filter(Boolean)),
     ] as string[];
 
     return {
       found: false,
-      document_number: document_number,
+      document_number,
       digits,
       suggested_names: namesFound,
       aliases: namesFound,
@@ -1004,10 +1210,6 @@ export const suggestSupplierName = tool({
   },
 });
 
-/**
- * explain_extraction — S4-002/003
- * Explica por que um campo foi extraído com determinada confiança.
- */
 export const explainExtraction = tool({
   description:
     "Explica por que um campo específico foi extraído com determinada confiança por OCR ou IA. " +
@@ -1026,12 +1228,22 @@ export const explainExtraction = tool({
     } = await supabase.auth.getUser();
     if (!user) return { error: "Não autenticado" };
 
-    const { data: doc } = await supabase
-      .from("source_documents")
-      .select("id, filename, document_type, metadata, status")
-      .eq("id", document_id)
-      .eq("user_id", user.id)
-      .single();
+    const db = getDb();
+    const [doc] = await db
+      .select({
+        id: schema.source_documents.id,
+        filename: schema.source_documents.filename,
+        document_type: schema.source_documents.document_type,
+        metadata: schema.source_documents.metadata,
+        status: schema.source_documents.status,
+      })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.id, document_id),
+          eq(schema.source_documents.user_id, user.id),
+        ),
+      );
 
     if (!doc) return { error: "Documento não encontrado" };
 
