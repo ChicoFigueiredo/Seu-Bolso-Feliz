@@ -50,7 +50,11 @@ export default defineConfig({
         test: {
           ...sharedTestConfig,
           name: "integration",
-          include: ["__tests__/integration/**/*.test.ts"],
+          include: [
+            "__tests__/integration/**/*.test.ts",
+            "apps/web/src/app/actions/**/*.test.ts",
+            "apps/web/src/lib/ai/**/*.test.ts",
+          ],
           testTimeout: 30_000,
         },
       },
