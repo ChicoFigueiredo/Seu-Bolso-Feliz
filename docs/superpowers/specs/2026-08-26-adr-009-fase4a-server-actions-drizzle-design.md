@@ -100,6 +100,64 @@ Nenhum teste desta fase pode deixar linha órfã que contamine o teste seguinte 
 isso é crítico porque o teste de isolamento (ver próxima seção) verifica
 precisamente que nenhuma linha "vaza" entre usuários.
 
+## Pré-requisito: corrigir casing e tipo numérico de `packages/db/src/schema.ts`
+
+**Achado na revisão da Verônica-Bolso, verificado contra o código** (2 FAILs na
+regra "contrato idêntico" — corrigidos aqui antes de qualquer Server Action ser
+reescrita):
+
+**FAIL 1 — casing.** `schema.ts` foi introspectado sem opção de casing, então as
+propriedades TypeScript viraram camelCase (`userId`, `iconUrl`, `isActive`,
+`displayOrder`, `createdAt` — ver `schema.ts:834-843`) enquanto a coluna real no
+Postgres é `snake_case` e o contrato de hoje (via PostgREST/`@sbf/shared-types`) é
+`snake_case`. `$inferSelect` devolveria objetos com chaves camelCase — quebraria
+todo componente/JSON que espera `display_order`, `user_id` etc.
+
+**Correção escolhida:** regenerar `schema.ts`/`relations.ts` com
+`introspect: { casing: "preserve" }` em `packages/db/drizzle.config.ts` (opção real
+do `drizzle-kit@0.31.10`, confirmada em
+`node_modules/drizzle-kit/index.d.mts`) — as propriedades TS passam a ser
+idênticas ao nome da coluna (`user_id`, `display_order`, sem precisar do segundo
+argumento string de override que existe hoje). Escolhida em vez de uma camada de
+mapeamento por action porque (a) é uma correção só, não 17+ repetições, e (b) a
+Fase 4b (workers/MCP, hoje 100% `snake_case`) herda o mesmo contrato de graça.
+
+**FAIL 2 — numeric vira string.** Colunas `numeric` (`confidence_threshold`,
+`credit_limit`, `quantity`, `unit_price`, `subtotal` e outras — ver
+`schema.ts:119,253,325-327,381,473,692` e qualquer outra encontrada por
+`grep -n "numeric(" packages/db/src/schema.ts`) estão sem `mode`, e o padrão do
+Drizzle pra `numeric` sem `mode` é devolver `string`. O contrato de hoje (via
+PostgREST/`database.types.ts`) é `number`. `amount` virando `"123.45"` quebra
+aritmética silenciosamente.
+
+**Correção escolhida:** adicionar `mode: "number"` em toda coluna `numeric(...)`
+do schema (precisão máxima usada no schema é 15 dígitos com escala até 6 — cabe em
+`double precision`/JS `number` sem perda para os valores deste app).
+**Timestamps não mudam** — já estão com `mode: "string"`, que já bate com o
+contrato atual; não mexer neles.
+
+**Passos (primeira tarefa do plano de implementação, antes de qualquer Server
+Action):**
+
+1. Editar `packages/db/drizzle.config.ts`: adicionar `introspect: { casing:
+"preserve" }`.
+2. Rodar `bun run db:introspect` (dentro de `packages/db`) contra o Neon real.
+3. Mover a saída (`drizzle/schema.ts` → `src/schema.ts`,
+   `drizzle/relations.ts` → `src/relations.ts` — mesmo processo documentado no
+   cabeçalho de `schema.ts` hoje).
+4. Reaplicar as 2 edições manuais da Fase 1 (documentadas no cabeçalho de
+   `schema.ts`: quebra de ciclo `AnyPgColumn` em `transactions`/
+   `recurringInstances`, `table`→`_table` em `user_secrets`) — os nomes de
+   propriedade dessas edições também mudam de camelCase pra snake_case.
+5. Adicionar `mode: "number"` em toda coluna `numeric(...)` (usar
+   `grep -c "numeric(" src/schema.ts` antes e depois de editar pra confirmar que
+   nenhuma ficou de fora).
+6. `bun run typecheck` — os dois arquivos que já consomem `@sbf/db` hoje
+   (`packages/db/src/client.test.ts`, `__tests__/integration/db-neon-smoke.test.ts`)
+   não deveriam quebrar (não acessam propriedades específicas de tabela que mudam
+   de nome); se algum acessar, corrigir o nome da propriedade ali também.
+7. Commit isolado (não misturar com as Server Actions).
+
 ## Padrão de query — exemplo completo (`institutions.ts`)
 
 Arquivo mais simples do conjunto (5 funções, sem lógica extra) — serve de
@@ -185,7 +243,7 @@ import { getDb, schema } from "@sbf/db";
 import { and, asc, eq } from "drizzle-orm";
 
 type Institution = typeof schema.institutions.$inferSelect;
-type InstitutionInsert = Omit<typeof schema.institutions.$inferInsert, "userId" | "id">;
+type InstitutionInsert = Omit<typeof schema.institutions.$inferInsert, "user_id" | "id">;
 type InstitutionUpdate = Partial<InstitutionInsert>;
 
 async function requireUserId(): Promise<string> {
@@ -203,8 +261,8 @@ export async function getInstitutions(): Promise<Institution[]> {
   return db
     .select()
     .from(schema.institutions)
-    .where(eq(schema.institutions.userId, userId))
-    .orderBy(asc(schema.institutions.displayOrder), asc(schema.institutions.name));
+    .where(eq(schema.institutions.user_id, userId))
+    .orderBy(asc(schema.institutions.display_order), asc(schema.institutions.name));
 }
 
 export async function getInstitution(id: string): Promise<Institution | null> {
@@ -213,7 +271,7 @@ export async function getInstitution(id: string): Promise<Institution | null> {
   const [row] = await db
     .select()
     .from(schema.institutions)
-    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.userId, userId)));
+    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.user_id, userId)));
   return row ?? null;
 }
 
@@ -222,7 +280,7 @@ export async function createInstitution(input: InstitutionInsert): Promise<Insti
   const db = getDb();
   const [row] = await db
     .insert(schema.institutions)
-    .values({ ...input, userId })
+    .values({ ...input, user_id: userId })
     .returning();
   return row;
 }
@@ -236,7 +294,7 @@ export async function updateInstitution(
   const [row] = await db
     .update(schema.institutions)
     .set(input)
-    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.userId, userId)))
+    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.user_id, userId)))
     .returning();
   if (!row) throw new Error("Instituição não encontrada");
   return row;
@@ -247,7 +305,7 @@ export async function deleteInstitution(id: string): Promise<void> {
   const db = getDb();
   const result = await db
     .delete(schema.institutions)
-    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.userId, userId)))
+    .where(and(eq(schema.institutions.id, id), eq(schema.institutions.user_id, userId)))
     .returning({ id: schema.institutions.id });
   if (result.length === 0) throw new Error("Instituição não encontrada");
 }
@@ -259,7 +317,7 @@ export async function deleteInstitution(id: string): Promise<void> {
    função `requireUserId()` local reaproveitada dentro do arquivo (não vira um
    helper compartilhado nesta fase; isso é trabalho da Fase 2, que substitui
    `requireUserId`/`getUser()` de vez).
-2. Todo `select`/`update`/`delete` ganha `eq(<tabela>.userId, userId)` no `where` —
+2. Todo `select`/`update`/`delete` ganha `eq(<tabela>.user_id, userId)` no `where` —
    inclusive os que hoje não filtram nada.
 3. Update/delete que afetam 0 linhas (id inexistente OU pertence a outro usuário)
    lançam erro — replica o comportamento atual (`.single()` do supabase-js falha
@@ -275,8 +333,11 @@ export async function deleteInstitution(id: string): Promise<void> {
 
 Os 17 arquivos reescritos usam tipos inferidos do Drizzle
 (`typeof schema.<tabela>.$inferSelect` / `$inferInsert`, de
-`packages/db/src/schema.ts`) em vez de `Insert<T>`/`Update<T>`/tipos de tabela de
-`@sbf/shared-types`. `@sbf/shared-types` e `database.types.ts` continuam existindo
+`packages/db/src/schema.ts`, regenerado com `introspect.casing: "preserve"` — ver
+seção de pré-requisito acima) em vez de `Insert<T>`/`Update<T>`/tipos de tabela de
+`@sbf/shared-types`. Com o casing corrigido, as chaves desses tipos batem
+byte-a-byte com as de `@sbf/shared-types` hoje (`snake_case`) — só a origem do tipo
+muda, não o formato. `@sbf/shared-types` e `database.types.ts` continuam existindo
 sem alteração — servem workers/MCP até a Fase 4b.
 
 ## Componentes client-side → Server Action
@@ -341,6 +402,14 @@ Por arquivo reescrito, no mínimo:
 - Os testes de caminho feliz normais (criar, buscar, atualizar, excluir).
 - Um teste do caso de erro (update/delete de id inexistente ou de outro usuário
   lança o erro esperado).
+
+Além disso, para as tabelas críticas (`transactions`, `financial_obligations`,
+`ingestion_runs`, `ingestion_jobs`, `source_documents`, e a própria
+`institutions`): um **teste de contrato de forma**, comparando as chaves e os
+tipos (`typeof valor`) do objeto retornado pela função reescrita com o shape
+esperado hoje (`snake_case` + `number` em campo numérico, não `string`) — é o
+teste que teria pego os 2 FAILs desta revisão (casing e numeric-vira-string) antes
+de chegar em produção.
 
 Ver "Segurança do banco de testes" acima para a variável de ambiente e limpeza
 obrigatórias.
