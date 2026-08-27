@@ -197,33 +197,65 @@ comentário em `supabase/config.toml:401-402` ("Quebrada contra o schema real...
 Prevista para deleção") está correto, não estale. Upload-via-chat
 (`ai-chat-drawer.tsx:138`, `upload-documents.tsx:61`) está quebrado em produção hoje.
 
-**Escopo do que muda:** só a etapa de _registrar_ o job de ingestão (criar as linhas
-em `ingestion_runs`/`source_documents`/`ingestion_jobs`). O upload físico do arquivo
-pro bucket `ingestion-originals` continua igual — Storage só migra pra
-`@vercel/blob` na Fase 3, e isso não muda nesta fase. O cliente ainda faz
-`supabase.storage.from("ingestion-originals").upload(...)` primeiro (usando a chave
-publicável, sem depender de RLS — já é assim hoje); só a chamada seguinte, que hoje
-vai pra `trigger-ingestion`, passa a ir pra rota nova.
+**Correção (achado na revisão da Verônica-Bolso, verificado contra
+`supabase/migrations/20260323120500_create_storage_bucket_ingestion.sql`):** o
+parágrafo original desta seção dizia que o upload do arquivo pro bucket
+`ingestion-originals` "não depende de RLS — já é assim hoje". Isso é **falso**. O
+bucket é privado (`public=false`) e tem a policy `"Users manage own ingestion
+files"` exigindo `auth.uid()::text = (storage.foldername(name))[1]` — o upload de
+hoje só funciona porque o `supabase-js` do browser carrega o JWT da sessão Supabase
+Auth real. Assim que a Fase 2 tirar essa sessão do browser, `auth.uid()` vira NULL e
+o upload em si passa a ser rejeitado pela policy — quebrando de novo, agora um passo
+antes do que o achado original cobria.
 
-**Solução:** nova Route Handler `apps/web/src/app/api/ingestion/trigger/route.ts`
-(POST), chamada pelos 2 componentes de browser no lugar de
-`supabase.functions.invoke("trigger-ingestion", ...)`. A rota:
+**Escopo do que muda (revisado):** tanto o _upload do arquivo_ quanto o _registro do
+job_ mudam nesta fase — não só o registro, como a versão anterior desta spec dizia.
+
+**Solução — signed upload URL:** nova Route Handler
+`apps/web/src/app/api/ingestion/upload-url/route.ts` (POST):
 
 1. Chama `requireUser()` — 401 se não autenticado.
-2. Recebe `{ source_type: "manual_upload", file_paths: string[] }` no corpo.
+2. Recebe `{ filename: string }` no corpo.
+3. Monta o path `${user.id}/${crypto.randomUUID()}/${filename}` (mesma convenção
+   de path que a policy já exige e que `workers/local-scanner` já usa).
+4. Chama, com o client Supabase de **service role** (nunca exposto ao browser):
+   `supabase.storage.from("ingestion-originals").createSignedUploadUrl(path)`.
+5. Retorna `{ signedUrl, token, path }` ao browser.
+
+Os 2 componentes de browser (`ai-chat-drawer.tsx`, `upload-documents.tsx`) passam a:
+chamar essa rota primeiro para cada arquivo → usar
+`supabase.storage.from("ingestion-originals").uploadToSignedUrl(path, token, file)`
+(chave publicável, sem RLS envolvida — o token assinado já autoriza aquele path
+específico) → só então chamar a rota de registro do job (abaixo) passando o `path`
+retornado.
+
+Essa é a menor mudança que resolve o problema nesta fase — mantém upload direto
+browser→Storage (sem o arquivo trafegar pela rota Next.js). A Fase 3
+(`@vercel/blob`) decide o modelo definitivo de upload; isso aqui é só o suficiente
+pra não quebrar em produção entre as duas fases.
+
+**Solução — registro do job:** nova Route Handler
+`apps/web/src/app/api/ingestion/trigger/route.ts` (POST), chamada pelos mesmos 2
+componentes no lugar de `supabase.functions.invoke("trigger-ingestion", ...)`, depois
+que o upload via signed URL terminar. A rota:
+
+1. Chama `requireUser()` — 401 se não autenticado.
+2. Recebe `{ source_type: "manual_upload", uploaded_paths: string[] }` no corpo
+   (os `path`s retornados pela rota de signed URL — nunca um `user_id`; se o corpo
+   incluir um campo `user_id`, a rota ignora e usa só o da sessão).
 3. Cria `ingestion_runs` (`user_id` da sessão, `source_type: "manual_upload"`,
    `status: "running"`).
-4. Para cada `file_path`: cria `source_documents` com as colunas reais —
-   `user_id`, `origin_type: "manual_upload"`, `origin_key` (usar o próprio
-   `storage_path`, que já é único por upload), `filename`, `storage_path`,
+4. Para cada `path`: cria `source_documents` com as colunas reais —
+   `user_id`, `origin_type: "manual_upload"`, `origin_key` (o próprio `path`, que já
+   é único por upload), `filename` (derivado do `path`), `storage_path: path`,
    `status: "new"` — seguindo exatamente o padrão de
    `workers/local-scanner/src/scanner.ts:180-196`.
 5. Para cada `source_document` criado: cria `ingestion_jobs`
    (`run_id`, `user_id`, `source_document_id`, `status: "discovered"` — sem
    `current_step`, que não existe).
-6. Nenhuma chave de serviço chega ao browser — a rota roda inteiramente no
-   servidor, com `user_id` vindo da sessão validada, nunca de um parâmetro do
-   cliente.
+6. A chave de serviço só é usada dentro da rota de signed URL (passo anterior),
+   nunca chega ao browser; esta rota de registro nem precisa dela, já que só grava
+   metadados, não acessa Storage.
 
 A Edge Function `trigger-ingestion` é removida (`supabase/functions/trigger-ingestion/`
 deletada, entrada correspondente tirada de `supabase/config.toml`) só depois de a
@@ -267,6 +299,10 @@ depende dele).
   cookie válido, expirado, ausente, assinado com segredo errado.
 - `apps/web/src/lib/auth/middleware.test.ts`: renovação de cookie perto de expirar,
   redirecionamento em rota protegida sem sessão, passagem livre em `/login`/`/auth/*`.
+- `apps/web/src/app/api/ingestion/upload-url/route.test.ts`: rejeição sem sessão
+  (401), happy path emitindo `signedUrl`/`token`/`path` (mockando o client de service
+  role do Storage), path sempre prefixado por `${user.id}/` vindo da sessão — nunca
+  de um campo do corpo.
 - `apps/web/src/app/api/ingestion/trigger/route.test.ts`: rejeição sem sessão (401),
   happy path criando `ingestion_runs` + `source_documents` + `ingestion_jobs` com as
   colunas reais, verificação de que `user_id` do corpo da requisição (se enviado) é
