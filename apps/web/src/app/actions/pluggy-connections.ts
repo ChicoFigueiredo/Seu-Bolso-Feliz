@@ -138,14 +138,20 @@ export async function updateExternalAccountMapping(
 }
 
 export async function revokeProviderConnection(id: string): Promise<void> {
-  // Nota: sem `.select().single()` hoje — 0 linhas afetadas não lança erro,
-  // comportamento preservado (exceção documentada).
+  // Divergência deliberada do brief original (que preservava o silêncio do
+  // supabase-js em 0 linhas afetadas): por consistência com a decisão já
+  // ratificada em institutions.ts (Task 2, deleteInstitution) — lançar erro é
+  // mais seguro que falhar em silêncio numa ação que não pertence ao usuário,
+  // e hoje não há call site que dependa do silêncio antigo (a UI de conexões
+  // ainda chama Supabase direto, fora do escopo desta fase).
   const userId = await requireUserId();
   const db = getDb();
-  await db
+  const result = await db
     .update(schema.provider_connections)
     .set({ status: "revoked" })
     .where(
       and(eq(schema.provider_connections.id, id), eq(schema.provider_connections.user_id, userId)),
-    );
+    )
+    .returning({ id: schema.provider_connections.id });
+  if (result.length === 0) throw new Error("Conexão não encontrada");
 }

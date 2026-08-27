@@ -63,10 +63,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("pluggy-connections actions", ()
     createdConnectionIds.push(connB.id);
 
     currentUserId = USER_A;
-    // Nota: revokeProviderConnection não checa linhas afetadas hoje (preservado) —
-    // este teste confirma que a linha do outro usuário não é revogada, não que
-    // a chamada lance erro.
-    await revokeProviderConnection(connB.id);
+    // Divergência deliberada do brief (ver ruling da revisão da Task 4,
+    // consistente com deleteInstitution na Task 2): 0 linhas afetadas agora
+    // lança erro, em vez de falhar em silêncio.
+    await expect(revokeProviderConnection(connB.id)).rejects.toThrow();
     const [stillActive] = await db
       .select()
       .from(schema.provider_connections)
