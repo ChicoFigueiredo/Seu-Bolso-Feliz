@@ -1,10 +1,21 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { FinancialPeriod, Insert, Update } from "@sbf/shared-types";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 
-type PeriodInsert = Omit<Insert<"financial_periods">, "user_id">;
-type PeriodUpdate = Update<"financial_periods">;
+type FinancialPeriod = typeof schema.financial_periods.$inferSelect;
+type FinancialPeriodInsert = Omit<typeof schema.financial_periods.$inferInsert, "user_id" | "id">;
+type FinancialPeriodUpdate = Partial<FinancialPeriodInsert>;
+
+async function requireUserId(): Promise<string> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+  return user.id;
+}
 
 // ══════════════════════════════════════════════════════════════
 // Financial Periods
@@ -15,85 +26,90 @@ export async function getFinancialPeriods(filters?: {
   startDate?: string;
   endDate?: string;
 }): Promise<FinancialPeriod[]> {
-  const supabase = await createClient();
-  let query = supabase
-    .from("financial_periods")
-    .select("*")
-    .order("start_date", { ascending: true });
+  const userId = await requireUserId();
+  const db = getDb();
 
+  const conditions = [eq(schema.financial_periods.user_id, userId)];
   if (filters?.isCurrent !== undefined) {
-    query = query.eq("is_current", filters.isCurrent);
+    conditions.push(eq(schema.financial_periods.is_current, filters.isCurrent));
   }
   if (filters?.startDate) {
-    query = query.gte("start_date", filters.startDate);
+    conditions.push(gte(schema.financial_periods.start_date, filters.startDate));
   }
   if (filters?.endDate) {
-    query = query.lte("end_date", filters.endDate);
+    conditions.push(lte(schema.financial_periods.end_date, filters.endDate));
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data;
+  return db
+    .select()
+    .from(schema.financial_periods)
+    .where(and(...conditions))
+    .orderBy(asc(schema.financial_periods.start_date));
 }
 
 export async function getCurrentFinancialPeriod(): Promise<FinancialPeriod | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("financial_periods")
-    .select("*")
-    .eq("is_current", true)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null;
-    throw new Error(error.message);
-  }
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.financial_periods)
+    .where(
+      and(
+        eq(schema.financial_periods.is_current, true),
+        eq(schema.financial_periods.user_id, userId),
+      ),
+    );
+  return row ?? null;
 }
 
-export async function createFinancialPeriod(input: PeriodInsert): Promise<FinancialPeriod> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-
-  const { data, error } = await supabase
-    .from("financial_periods")
-    .insert({ ...input, user_id: user.id })
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
+export async function createFinancialPeriod(
+  input: FinancialPeriodInsert,
+): Promise<FinancialPeriod> {
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.financial_periods)
+    .values({ ...input, user_id: userId })
+    .returning();
+  if (!row) throw new Error("Falha ao criar período financeiro");
+  return row;
 }
 
 export async function updateFinancialPeriod(
   id: string,
-  input: PeriodUpdate,
+  input: FinancialPeriodUpdate,
 ): Promise<FinancialPeriod> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("financial_periods")
-    .update(input)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .update(schema.financial_periods)
+    .set(input)
+    .where(and(eq(schema.financial_periods.id, id), eq(schema.financial_periods.user_id, userId)))
+    .returning();
+  if (!row) throw new Error("Período financeiro não encontrado");
+  return row;
 }
 
 export async function deleteFinancialPeriod(id: string): Promise<void> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("financial_periods").delete().eq("id", id);
-
-  if (error) throw new Error(error.message);
+  // Nota: o código Supabase original não faz `.select().single()` aqui — só
+  // verifica `error`. 0 linhas afetadas (id inexistente ou de outro usuário)
+  // não lança erro hoje; esta reescrita preserva esse comportamento (exceção
+  // documentada à regra geral de "lança erro em 0 linhas").
+  const userId = await requireUserId();
+  const db = getDb();
+  await db
+    .delete(schema.financial_periods)
+    .where(and(eq(schema.financial_periods.id, id), eq(schema.financial_periods.user_id, userId)));
 }
 
 // ══════════════════════════════════════════════════════════════
-// RPC: Gerar Períodos Financeiros
+// RPC: Gerar Períodos Financeiros — BLOQUEADA, NÃO REESCRITA NESTA TASK
 // ══════════════════════════════════════════════════════════════
+//
+// generate_financial_periods foi descartada por completo na migração pro Neon
+// (packages/db/schema.sql, nota de gaps item 4). Decisão de recriar com
+// p_user_id explícito ou reimplementar em TypeScript é separada desta fase.
+// Permanece EXATAMENTE como está hoje:
 
 export async function generateFinancialPeriods(
   startDay: number,
@@ -111,8 +127,11 @@ export async function generateFinancialPeriods(
 }
 
 // ══════════════════════════════════════════════════════════════
-// RPC: Encontrar Período para Data
+// RPC: Encontrar Período para Data — BLOQUEADA, NÃO REESCRITA NESTA TASK
 // ══════════════════════════════════════════════════════════════
+//
+// get_financial_period_for_date também está na lista de "SEIS funções
+// descartadas por inteiro". Mesma decisão pendente. Permanece como está hoje:
 
 export async function getFinancialPeriodForDate(date: string): Promise<FinancialPeriod | null> {
   const supabase = await createClient();
@@ -138,14 +157,13 @@ export async function getFinancialPeriodForDate(date: string): Promise<Financial
 // ══════════════════════════════════════════════════════════════
 
 export async function getFinancialPreferences() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("user_financial_preferences").select("*").single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null;
-    throw new Error(error.message);
-  }
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.user_financial_preferences)
+    .where(eq(schema.user_financial_preferences.user_id, userId));
+  return row ?? null;
 }
 
 export async function upsertFinancialPreferences(input: {
@@ -153,18 +171,15 @@ export async function upsertFinancialPreferences(input: {
   financial_cycle_anchor_date?: string | null;
   default_currency?: string;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-
-  const { data, error } = await supabase
-    .from("user_financial_preferences")
-    .upsert({ ...input, user_id: user.id }, { onConflict: "user_id" })
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.user_financial_preferences)
+    .values({ ...input, user_id: userId })
+    .onConflictDoUpdate({
+      target: schema.user_financial_preferences.user_id,
+      set: input,
+    })
+    .returning();
+  return row;
 }
