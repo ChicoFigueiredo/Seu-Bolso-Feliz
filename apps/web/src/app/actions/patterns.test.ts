@@ -152,13 +152,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("patterns actions", () => {
     supplierIds.push(supplierB.id);
 
     currentUserId = USER_A;
-    await expect(
-      createPattern({
-        name: "Tentativa cross-user",
-        document_type: "boleto",
-        supplier_id: supplierB.id,
-      }),
-    ).rejects.toThrow();
+    // Nome único por execução (não fixo) e captura do id fora do `rejects` —
+    // se a guarda de posse algum dia regredir, o insert chega a acontecer;
+    // sem isso, a linha ficaria órfã no banco de teste e o 2º teste (mesmo
+    // nome fixo, mesmo user_id, version 1) falharia por violação de
+    // constraint única em vez de pela checagem de posse, mascarando a
+    // regressão real. Ver `document_patterns_user_id_name_version_key`.
+    let createdId: string | undefined;
+    try {
+      await expect(
+        (async () => {
+          const row = await createPattern({
+            name: `Tentativa cross-user ${crypto.randomUUID()}`,
+            document_type: "boleto",
+            supplier_id: supplierB.id,
+          });
+          createdId = row.id;
+          return row;
+        })(),
+      ).rejects.toThrow();
+    } finally {
+      if (createdId) patternIds.push(createdId);
+    }
   });
 
   it("lança erro ao criar padrão com institution_id de outro usuário", async () => {
@@ -167,13 +182,22 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("patterns actions", () => {
     institutionIds.push(institutionB.id);
 
     currentUserId = USER_A;
-    await expect(
-      createPattern({
-        name: "Tentativa cross-user",
-        document_type: "boleto",
-        institution_id: institutionB.id,
-      }),
-    ).rejects.toThrow();
+    let createdId: string | undefined;
+    try {
+      await expect(
+        (async () => {
+          const row = await createPattern({
+            name: `Tentativa cross-user ${crypto.randomUUID()}`,
+            document_type: "boleto",
+            institution_id: institutionB.id,
+          });
+          createdId = row.id;
+          return row;
+        })(),
+      ).rejects.toThrow();
+    } finally {
+      if (createdId) patternIds.push(createdId);
+    }
   });
 
   it("lança erro ao atualizar padrão apontando supplier_id de outro usuário", async () => {
