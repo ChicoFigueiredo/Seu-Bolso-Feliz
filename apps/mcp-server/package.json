@@ -14,6 +14,7 @@
     "@sbf/domain": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
     "@sbf/operations": "workspace:*",
-    "@sbf/storage": "workspace:*"
+    "@sbf/storage": "workspace:*",
+    "zod": "^4.3.6"
   }
 }

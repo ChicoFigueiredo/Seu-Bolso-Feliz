@@ -6,10 +6,18 @@
 /**
  * SHA-256 dos bytes brutos do arquivo.
  * Detecta arquivo exatamente igual.
+ *
+ * `ArrayBufferView<ArrayBuffer>` (em vez do `ArrayBufferView` genérico) é de
+ * propósito, mesmo motivo de `UploadBody` em `@sbf/storage`: a partir do TS 5.7
+ * o `BufferSource` que a Web Crypto aceita exclui views sobre
+ * `SharedArrayBuffer` — `crypto.subtle.digest` de fato recusa memória
+ * compartilhada. `Uint8Array`/`Buffer` vindos de `readFile`, `Buffer.from`,
+ * `TextEncoder.encode` ou `new Uint8Array(...)` sempre se qualificam.
  */
-export async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<string> {
-  const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+export async function computeContentHash(
+  data: ArrayBuffer | ArrayBufferView<ArrayBuffer>,
+): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");

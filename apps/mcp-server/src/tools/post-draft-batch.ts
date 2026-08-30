@@ -15,12 +15,17 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Database } from "@sbf/db";
 import {
+  DRAFT_TYPES,
   POSTABLE_SCHEMAS,
   TARGET_TABLES,
   TO_INSERT,
   formatIssues,
   parseDraftPayload,
+  type ConsumptionMetricInsert,
   type DraftType,
+  type LiabilityInsert,
+  type RecurringTemplateInsert,
+  type TransactionInsert,
 } from "@sbf/contracts";
 
 export interface PostDraftResult {
@@ -42,6 +47,63 @@ export interface PostBatchResult {
 
 /** Status a partir dos quais lançar é permitido. `pending_review` NÃO está aqui. */
 const POSTABLE_STATUSES = ["approved", "corrected"];
+
+/** `draft_records.draft_type` é `text` no banco: confirma que o valor é conhecido. */
+function isDraftType(value: string): value is DraftType {
+  return (DRAFT_TYPES as readonly string[]).includes(value);
+}
+
+type DraftInsert =
+  TransactionInsert | ConsumptionMetricInsert | LiabilityInsert | RecurringTemplateInsert;
+
+/**
+ * Valida o payload contra o schema de lançamento do tipo e o converte no
+ * registro de INSERT correspondente.
+ *
+ * O `switch` com acesso literal (`POSTABLE_SCHEMAS.transaction`,
+ * `TO_INSERT.transaction`) não é preciosismo. Indexar as duas tabelas pela
+ * mesma variável produz, de um lado, uma união de schemas Zod e, do outro, uma
+ * união de funções com parâmetros incompatíveis entre si — o TypeScript não
+ * correlaciona os dois lados, e a chamada só passava com um `as` que apagava a
+ * checagem inteira. Ramificando por tipo, cada par schema/conversor é
+ * estreitado junto e a conversão volta a ser verificada de verdade.
+ *
+ * O resultado é a união dos quatro `*Insert`, não `Record<string, unknown>`:
+ * eles são `interface`, portanto sem index signature, e forçá-los naquele
+ * formato exigiria justamente o cast que este desenho elimina. O payload segue
+ * para a função SQL como jsonb, que aceita a união sem conversão.
+ */
+function buildInsertPayload(
+  draftType: DraftType,
+  payload: unknown,
+): { ok: true; value: DraftInsert } | { ok: false; errors: string[] } {
+  switch (draftType) {
+    case "transaction": {
+      const parsed = POSTABLE_SCHEMAS.transaction.safeParse(payload);
+      return parsed.success
+        ? { ok: true, value: TO_INSERT.transaction(parsed.data) }
+        : { ok: false, errors: formatIssues(parsed.error) };
+    }
+    case "consumption_metric": {
+      const parsed = POSTABLE_SCHEMAS.consumption_metric.safeParse(payload);
+      return parsed.success
+        ? { ok: true, value: TO_INSERT.consumption_metric(parsed.data) }
+        : { ok: false, errors: formatIssues(parsed.error) };
+    }
+    case "liability": {
+      const parsed = POSTABLE_SCHEMAS.liability.safeParse(payload);
+      return parsed.success
+        ? { ok: true, value: TO_INSERT.liability(parsed.data) }
+        : { ok: false, errors: formatIssues(parsed.error) };
+    }
+    case "recurring_template": {
+      const parsed = POSTABLE_SCHEMAS.recurring_template.safeParse(payload);
+      return parsed.success
+        ? { ok: true, value: TO_INSERT.recurring_template(parsed.data) }
+        : { ok: false, errors: formatIssues(parsed.error) };
+    }
+  }
+}
 
 export async function postDraftBatch(
   db: Database,
@@ -89,9 +151,7 @@ export async function postDraftBatch(
       continue;
     }
 
-    const draftType = draft.draft_type as DraftType;
-    const postableSchema = POSTABLE_SCHEMAS[draftType];
-    if (!postableSchema) {
+    if (!isDraftType(draft.draft_type)) {
       results.push({
         draftId: draft.id,
         success: false,
@@ -102,6 +162,7 @@ export async function postDraftBatch(
       });
       continue;
     }
+    const draftType = draft.draft_type;
 
     const parsed = parseDraftPayload({
       draft_type: draft.draft_type,
@@ -120,22 +181,21 @@ export async function postDraftBatch(
       continue;
     }
 
-    const postable = postableSchema.safeParse(parsed.payload);
-    if (!postable.success) {
+    const built = buildInsertPayload(draftType, parsed.payload);
+    if (!built.ok) {
       results.push({
         draftId: draft.id,
         success: false,
         postedRecordId: null,
         postedRecordType: null,
         message: "Faltam dados obrigatórios para lançar",
-        validationErrors: formatIssues(postable.error),
+        validationErrors: built.errors,
       });
       continue;
     }
 
     const targetTable = TARGET_TABLES[draftType];
-    const buildInsert = TO_INSERT[draftType] as (p: unknown) => Record<string, unknown>;
-    const insertPayload = buildInsert(postable.data);
+    const insertPayload = built.value;
 
     try {
       // RETURNS jsonb (escalar, não tabela): "SELECT fn(...) AS result" é a

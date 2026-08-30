@@ -28,7 +28,20 @@
  * destruiria a estrutura de que os parsers dependem. Por isso os fragmentos são
  * agrupados pela coordenada Y e ordenados por X dentro de cada linha.
  */
-import { getDocument, PasswordResponses, type TextItem } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, PasswordResponses, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+/**
+ * O `TextItem` do pdf.js existe (`types/src/display/api.d.ts`), mas não é
+ * reexportado pelo barrel público (`types/src/pdf.d.ts`) da v5 — só
+ * `PDFPageProxy` e companhia são. Em vez de importar o caminho interno do
+ * pacote (que muda entre versões) ou redeclarar o formato à mão, o tipo é
+ * derivado da própria assinatura pública de `getTextContent`: `items` é
+ * `Array<TextItem | TextMarkedContent>`, e `TextMarkedContent` não tem `str`.
+ */
+type TextItem = Extract<
+  Awaited<ReturnType<PDFPageProxy["getTextContent"]>>["items"][number],
+  { str: string }
+>;
 
 export interface PdfTextResult {
   text: string;

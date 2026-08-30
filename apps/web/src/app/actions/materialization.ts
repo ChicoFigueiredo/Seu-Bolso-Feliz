@@ -38,7 +38,6 @@ import {
   parseDraftPayload,
   type DraftType,
 } from "@sbf/contracts";
-import type { Json } from "@sbf/shared-types";
 
 // ── Tipos de resultado (superfície pública inalterada para a UI) ────────────
 
@@ -60,6 +59,57 @@ export interface MaterializationBatchResult {
 }
 
 /** Status a partir dos quais lançar é permitido. `pending_review` NÃO está aqui. */
+function ehTipoDeDraft(valor: string): valor is DraftType {
+  return valor in POSTABLE_SCHEMAS;
+}
+
+/**
+ * Valida o payload e monta a linha a ser inserida, num passo só.
+ *
+ * O `switch` com acesso literal (`TO_INSERT.transaction`) não é verbosidade:
+ * `POSTABLE_SCHEMAS[t]` e `TO_INSERT[t]` indexados pela mesma variável
+ * produzem duas uniões que o TypeScript não correlaciona entre si, e a única
+ * saída era um cast duplo — que apagava justamente a checagem de que o schema
+ * e o construtor são do mesmo tipo de draft. Aqui os dois lados estreitam
+ * juntos, sem nenhum cast no caminho.
+ *
+ * O retorno é a união dos `*Insert`, não `Record<string, unknown>`: eles são
+ * `interface` e não têm index signature. O payload vira jsonb logo em seguida,
+ * que aceita a união sem conversão.
+ */
+function construirPayloadDeInsert(
+  draftType: DraftType,
+  payload: unknown,
+):
+  { ok: true; value: ReturnType<(typeof TO_INSERT)[DraftType]> } | { ok: false; errors: string[] } {
+  switch (draftType) {
+    case "transaction": {
+      const r = POSTABLE_SCHEMAS.transaction.safeParse(payload);
+      return r.success
+        ? { ok: true, value: TO_INSERT.transaction(r.data) }
+        : { ok: false, errors: formatIssues(r.error) };
+    }
+    case "consumption_metric": {
+      const r = POSTABLE_SCHEMAS.consumption_metric.safeParse(payload);
+      return r.success
+        ? { ok: true, value: TO_INSERT.consumption_metric(r.data) }
+        : { ok: false, errors: formatIssues(r.error) };
+    }
+    case "liability": {
+      const r = POSTABLE_SCHEMAS.liability.safeParse(payload);
+      return r.success
+        ? { ok: true, value: TO_INSERT.liability(r.data) }
+        : { ok: false, errors: formatIssues(r.error) };
+    }
+    case "recurring_template": {
+      const r = POSTABLE_SCHEMAS.recurring_template.safeParse(payload);
+      return r.success
+        ? { ok: true, value: TO_INSERT.recurring_template(r.data) }
+        : { ok: false, errors: formatIssues(r.error) };
+    }
+  }
+}
+
 const POSTABLE_STATUSES = ["approved", "corrected"] as const;
 
 function failure(
@@ -127,11 +177,10 @@ export async function postApprovedDraftRecord(
     );
   }
 
-  const draftType = draft.draft_type as DraftType;
-  const postableSchema = POSTABLE_SCHEMAS[draftType];
-  if (!postableSchema) {
+  if (!ehTipoDeDraft(draft.draft_type)) {
     return failure(draftRecordId, `Tipo de draft desconhecido: ${draft.draft_type}`);
   }
+  const draftType = draft.draft_type;
 
   // Tolera payloads v0 convertendo-os em memória, para que um backfill
   // incompleto não bloqueie o lançamento.
@@ -144,22 +193,13 @@ export async function postApprovedDraftRecord(
     return failure(draftRecordId, "Draft com dados inconsistentes", parsed.errors);
   }
 
-  const postable = postableSchema.safeParse(parsed.payload);
-  if (!postable.success) {
-    return failure(
-      draftRecordId,
-      "Faltam dados obrigatórios para lançar",
-      formatIssues(postable.error),
-    );
+  const construido = construirPayloadDeInsert(draftType, parsed.payload);
+  if (!construido.ok) {
+    return failure(draftRecordId, "Faltam dados obrigatórios para lançar", construido.errors);
   }
 
   const targetTable = TARGET_TABLES[draftType];
-  // TO_INSERT é uma união de funções com parâmetros distintos por tipo de
-  // draft; o despacho por `draftType` já garante o par correto, mas o
-  // TypeScript não consegue estreitar os dois lados juntos. O payload segue
-  // para a função SQL como jsonb, então o tipo de saída é Json.
-  const buildInsert = TO_INSERT[draftType] as unknown as (p: unknown) => Json;
-  const insertPayload = buildInsert(postable.data);
+  const insertPayload = construido.value;
 
   let rpcResult:
     { status: string; posted_record_id: string; posted_record_type: string } | undefined;

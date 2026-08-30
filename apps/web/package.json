@@ -15,6 +15,7 @@
     "@sbf/design-system": "workspace:*",
     "@sbf/domain": "workspace:*",
     "@sbf/financial-connectors": "workspace:*",
+    "@sbf/operations": "workspace:*",
     "@sbf/shared-types": "workspace:*",
     "@sbf/storage": "workspace:*",
     "ai": "4.3.19",

@@ -2,18 +2,11 @@
 
 import { requireUser } from "@/lib/auth";
 import { uploadAceito, descricaoDosFormatos } from "@sbf/contracts";
+import { computeContentHash } from "@sbf/operations";
 import { getDb, schema } from "@sbf/db";
 import { createStorageClientFromEnv } from "@sbf/storage";
 import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import type { Json } from "@sbf/shared-types";
-
-async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<string> {
-  const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer as unknown as BufferSource);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 export type DeleteSourceDocumentMode = "document_only" | "document_and_ingestion";
 

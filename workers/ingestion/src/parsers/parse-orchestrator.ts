@@ -9,7 +9,7 @@ import { extraction_results, parsed_document_versions, type Database } from "@sb
 /** O tipo que o schema declara para as colunas jsonb tocadas aqui. */
 type JsonColumn = (typeof parsed_document_versions.$inferInsert)["metadata"];
 import { IngestionLogLevel, ParserType } from "@sbf/ingestion-types";
-import { extractText, PdfPasswordRequiredError } from "./text-extractor";
+import { extractText, PdfPasswordRequiredError, type TextExtractResult } from "./text-extractor";
 import { listPdfPasswordCandidates, markSecretUsed } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
@@ -161,6 +161,78 @@ function evaluateDetectionConfidence(
 }
 
 /**
+ * Extrai o texto do documento, tentando as senhas cadastradas quando o PDF é
+ * protegido. Devolve `null` quando o documento não pôde ser aberto — cabe ao
+ * chamador gravar a versão "somente texto bruto" nesse caso.
+ *
+ * Estar numa função à parte não é só arrumação: com o `try`/`catch` embutido em
+ * `parseDocument`, o TypeScript não conseguia provar que as cinco saídas
+ * (`text`, `pages`, `wasProtected`, `extractionMethod`, `ocrApplied`) estavam
+ * atribuídas em todo caminho que chega ao fim do bloco — ele não correlaciona o
+ * `opened` do laço com as atribuições feitas dentro dele — e acusava TS2454 em
+ * cada uso. Devolvendo um objeto, essa garantia passa a ser parte do tipo.
+ */
+async function extractTextWithStoredPasswords(
+  pctx: ParseContext,
+  fileData: ArrayBuffer,
+): Promise<TextExtractResult | null> {
+  const { db, ctx, userId, mimeType } = pctx;
+
+  try {
+    return await extractText(fileData, mimeType);
+  } catch (err) {
+    if (!(err instanceof PdfPasswordRequiredError)) throw err;
+
+    await writeLog(db, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
+
+    const candidates = await listPdfPasswordCandidates(db, userId);
+    if (candidates.length === 0) {
+      await writeLog(db, ctx, IngestionLogLevel.WARN, "Sem senha encontrada para PDF protegido");
+      return null;
+    }
+
+    // Neste ponto o fornecedor ainda é desconhecido — estamos ANTES de
+    // conseguir ler o documento — então tentamos as candidatas em ordem de
+    // uso recente. A anterior desistia após a primeira, o que fazia com que
+    // um usuário com mais de uma senha nunca abrisse a segunda fatura.
+    for (const candidate of candidates) {
+      let retryResult: TextExtractResult;
+      try {
+        retryResult = await extractText(fileData, mimeType, candidate.value);
+      } catch {
+        // Senha errada: seguir para a próxima. O valor nunca é registrado.
+        continue;
+      }
+
+      // Sobe na ordem para o próximo documento resolver na 1ª tentativa.
+      // Falhar aqui não invalida a extração — o documento já foi aberto —,
+      // então o erro vira aviso e o fluxo segue com o texto obtido.
+      try {
+        await markSecretUsed(db, userId, candidate.secretId);
+      } catch (markErr) {
+        const msg = markErr instanceof Error ? markErr.message : String(markErr);
+        await writeLog(
+          db,
+          ctx,
+          IngestionLogLevel.WARN,
+          `Não foi possível registrar o uso da senha do PDF: ${msg}`,
+        );
+      }
+
+      return { ...retryResult, wasProtected: true };
+    }
+
+    await writeLog(
+      db,
+      ctx,
+      IngestionLogLevel.WARN,
+      `Nenhuma das ${candidates.length} senha(s) cadastrada(s) abriu o documento`,
+    );
+    return null;
+  }
+}
+
+/**
  * Pipeline completo de parsing para um documento.
  * 1. Download do storage
  * 2. Tentativa de extração de texto (com retry + senha se necessário)
@@ -172,72 +244,19 @@ export async function parseDocument(
   pctx: ParseContext,
   fileData: ArrayBuffer,
 ): Promise<ParseResult> {
-  const { db, ctx, userId, sourceDocumentId, mimeType } = pctx;
+  const { db, ctx, userId, sourceDocumentId } = pctx;
 
   // ── 1. Extração de texto ──
-  let text: string;
-  let pages: number;
-  let wasProtected: boolean;
-  let extractionMethod: string;
-  let ocrApplied: boolean;
-
-  try {
-    const result = await extractText(fileData, mimeType);
-    text = result.text;
-    pages = result.pages;
-    wasProtected = result.wasProtected;
-    extractionMethod = result.extractionMethod;
-    ocrApplied = result.ocrApplied;
-  } catch (err) {
-    if (err instanceof PdfPasswordRequiredError) {
-      await writeLog(db, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
-
-      const candidates = await listPdfPasswordCandidates(db, userId);
-      if (candidates.length === 0) {
-        await writeLog(db, ctx, IngestionLogLevel.WARN, "Sem senha encontrada para PDF protegido");
-        return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
-      }
-
-      // Neste ponto o fornecedor ainda é desconhecido — estamos ANTES de
-      // conseguir ler o documento — então tentamos as candidatas em ordem de
-      // uso recente. A anterior desistia após a primeira, o que fazia com que
-      // um usuário com mais de uma senha nunca abrisse a segunda fatura.
-      let opened = false;
-      for (const candidate of candidates) {
-        try {
-          const retryResult = await extractText(fileData, mimeType, candidate.value);
-          text = retryResult.text;
-          pages = retryResult.pages;
-          wasProtected = true;
-          extractionMethod = retryResult.extractionMethod;
-          ocrApplied = retryResult.ocrApplied;
-          opened = true;
-          // Sobe na ordem para o próximo documento resolver na 1ª tentativa.
-          await markSecretUsed(db, userId, candidate.secretId);
-          break;
-        } catch {
-          // Senha errada: seguir para a próxima. O valor nunca é registrado.
-          continue;
-        }
-      }
-
-      if (!opened) {
-        await writeLog(
-          db,
-          ctx,
-          IngestionLogLevel.WARN,
-          `Nenhuma das ${candidates.length} senha(s) cadastrada(s) abriu o documento`,
-        );
-        return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
-      }
-    } else {
-      throw err;
-    }
+  const extraction = await extractTextWithStoredPasswords(pctx, fileData);
+  if (extraction === null) {
+    return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
   }
 
-  if (!text || text.trim().length === 0) {
+  const { text, pages, wasProtected, extractionMethod, ocrApplied } = extraction;
+
+  if (text.trim().length === 0) {
     await writeLog(db, ctx, IngestionLogLevel.WARN, "Texto vazio após extração");
-    return saveRawOnlyVersion(pctx, "", pages ?? 0, ParserType.LOCAL_TEXT, 0);
+    return saveRawOnlyVersion(pctx, "", pages, ParserType.LOCAL_TEXT, 0);
   }
 
   await writeLog(

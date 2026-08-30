@@ -41,6 +41,7 @@
         "@sbf/ingestion-types": "workspace:*",
         "@sbf/operations": "workspace:*",
         "@sbf/storage": "workspace:*",
+        "zod": "^4.3.6",
       },
     },
     "apps/mobile": {
@@ -66,6 +67,7 @@
         "@sbf/design-system": "workspace:*",
         "@sbf/domain": "workspace:*",
         "@sbf/financial-connectors": "workspace:*",
+        "@sbf/operations": "workspace:*",
         "@sbf/shared-types": "workspace:*",
         "@sbf/storage": "workspace:*",
         "ai": "4.3.19",
@@ -3186,6 +3188,8 @@
     "@react-native/babel-preset/babel-plugin-syntax-hermes-parser": ["babel-plugin-syntax-hermes-parser@0.25.1", "", { "dependencies": { "hermes-parser": "0.25.1" } }, "sha512-IVNpGzboFLfXZUAwkLFcI/bnqVbwky0jP3eBno4HKtqvQJAHBLdgxiG6lQ4to0+Q/YCN3PO0od5NZwIKyY4REQ=="],
 
     "@react-native/dev-middleware/debug": ["debug@2.6.9", "", { "dependencies": { "ms": "2.0.0" } }, "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA=="],
+
+    "@sbf/mcp-server/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@emnapi/core": ["@emnapi/core@1.9.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.0", "tslib": "^2.4.0" }, "bundled": true }, "sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA=="],
 
