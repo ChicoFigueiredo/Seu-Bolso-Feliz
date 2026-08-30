@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, count, eq } from "drizzle-orm";
 
@@ -13,12 +13,10 @@ export interface DocumentTransactionLinkWithTransaction extends DocumentTransact
 }
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 export async function listLinkedTransactions(

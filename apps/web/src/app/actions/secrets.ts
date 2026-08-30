@@ -17,6 +17,7 @@
  * intocada (ainda supabase.rpc()) até essa migração separada acontecer.
  */
 
+import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@sbf/db";
@@ -35,12 +36,10 @@ export interface SecretSummary {
 }
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 /** Lista os segredos do usuário SEM os valores. */

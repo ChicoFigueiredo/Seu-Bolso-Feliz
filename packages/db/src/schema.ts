@@ -899,6 +899,15 @@ export const ingestion_jobs = pgTable(
     created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
     updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow(),
     needs_full_ai_review: boolean().default(false),
+    // Fila (migration 0001): a Vercel grava, os workers puxam com
+    // FOR UPDATE SKIP LOCKED e acordam por NOTIFY. Nada é exposto na rede.
+    locked_by: text(),
+    locked_at: timestamp({ withTimezone: true, mode: "string" }),
+    // Capacidades que o job exige do worker: 'ocr', 'pasta-local', 'senha-pdf'.
+    // Um worker só reivindica job cujo `requires` cabe no que ele oferece.
+    requires: text().array().default([]).notNull(),
+    // Backoff: o job só volta a ser elegível a partir daqui.
+    available_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_ingestion_jobs_needs_full_ai_review")
@@ -2252,4 +2261,131 @@ export const mv_supplier_spending = pgMaterializedView("mv_supplier_spending", {
   periods_active: bigint({ mode: "number" }),
 }).as(
   sql`SELECT s.user_id, s.id AS supplier_id, s.name AS supplier_name, s.type AS supplier_type, count(DISTINCT t.id) AS transaction_count, COALESCE(sum(t.amount), 0::numeric) AS total_spent, min(t.event_date) AS first_transaction_date, max(t.event_date) AS last_transaction_date, count(DISTINCT t.financial_period_id) AS periods_active FROM suppliers s LEFT JOIN transactions t ON t.supplier_id = s.id AND t.user_id = s.user_id AND (t.type = ANY (ARRAY['expense'::text, 'fee'::text, 'interest_charge'::text])) WHERE s.is_active = true GROUP BY s.user_id, s.id, s.name, s.type`,
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tabelas criadas fora da introspecção original (migrations 0001 e 0002).
+// Escritas à mão, no mesmo estilo do resto do arquivo. Se você reintrospectar,
+// elas voltam sozinhas — mas os comentários abaixo, não.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Identidade própria, no lugar de `auth.users` do Supabase.
+ *
+ * `role` e `owner_id` separam duas coisas que costumam ser confundidas: **quem
+ * você é** e **de quem são os dados que você opera**. O dono entra pelo Google
+ * e opera sobre si mesmo (`owner_id` nulo). O administrador de emergência entra
+ * por e-mail/senha e opera sobre os dados do dono (`owner_id` aponta pra ele) —
+ * é chave reserva para o dia em que a conta Google falhar. Toda query de dados
+ * filtra pelo **dono**, nunca pelo ator; o `audit_logs` grava o ator.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    email: text().notNull(),
+    name: text(),
+    google_sub: text(),
+    password_hash: text(),
+    role: text().default("owner").notNull(),
+    owner_id: uuid(),
+    failed_login_count: integer().default(0).notNull(),
+    locked_until: timestamp({ withTimezone: true, mode: "string" }),
+    last_login_at: timestamp({ withTimezone: true, mode: "string" }),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("users_email_key").on(table.email),
+    unique("users_google_sub_key").on(table.google_sub),
+    foreignKey({
+      columns: [table.owner_id],
+      foreignColumns: [table.id],
+      name: "users_owner_id_fkey",
+    }).onDelete("restrict"),
+    check("users_role_check", sql`role = ANY (ARRAY['owner'::text, 'admin'::text])`),
+    check("users_admin_tem_dono", sql`(role <> 'admin'::text) OR (owner_id IS NOT NULL)`),
+  ],
+);
+
+/**
+ * Centro: *para quem* ou *para qual projeto* o dinheiro foi (Edulingo, Imob Max,
+ * Daiane). Diferente de Categoria (a natureza do gasto) e de Tag (rótulo livre,
+ * sem valor). É a única das três que aceita rateio e tem saldo — comporta-se
+ * como uma conta corrente virtual. Ver CONTEXT.md.
+ */
+export const financial_centers = pgTable(
+  "financial_centers",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    user_id: uuid().notNull(),
+    name: text().notNull(),
+    type: text().default("projeto").notNull(),
+    description: text(),
+    status: text().default("active").notNull(),
+    icon: text(),
+    color: text(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("financial_centers_nome_unico").on(table.user_id, table.name),
+    check(
+      "financial_centers_type_check",
+      sql`type = ANY (ARRAY['projeto'::text, 'pessoa'::text, 'negocio'::text])`,
+    ),
+    check(
+      "financial_centers_status_check",
+      sql`status = ANY (ARRAY['active'::text, 'archived'::text])`,
+    ),
+  ],
+);
+
+/**
+ * Rateio: a divisão do valor de uma movimentação entre Centros.
+ *
+ * Guarda **valor**, nunca percentual — o percentual é derivado na exibição.
+ * Guardar os dois faz um divergir do outro na primeira vez que o valor da
+ * movimentação mudar. A soma dos rateios **pode ser menor** que a movimentação
+ * (o resto é "não alocado", um estado legítimo e visível) e **nunca maior** —
+ * isso é garantido pelo trigger `transaction_allocations_valida`, que também
+ * recusa rateio em pagamento de fatura, já que as compras dentro dela já foram
+ * rateadas.
+ */
+export const transaction_allocations = pgTable(
+  "transaction_allocations",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    user_id: uuid().notNull(),
+    transaction_id: uuid().notNull(),
+    financial_center_id: uuid().notNull(),
+    amount: numeric({ precision: 14, scale: 2, mode: "number" }).notNull(),
+    note: text(),
+    created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("ix_transaction_allocations_centro").using(
+      "btree",
+      table.financial_center_id.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("ix_transaction_allocations_transacao").using(
+      "btree",
+      table.transaction_id.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.transaction_id],
+      foreignColumns: [transactions.id],
+      name: "transaction_allocations_transaction_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.financial_center_id],
+      foreignColumns: [financial_centers.id],
+      name: "transaction_allocations_financial_center_id_fkey",
+    }).onDelete("restrict"),
+    unique("transaction_allocations_um_por_centro").on(
+      table.transaction_id,
+      table.financial_center_id,
+    ),
+    check("transaction_allocations_amount_positivo", sql`amount > (0)::numeric`),
+  ],
 );

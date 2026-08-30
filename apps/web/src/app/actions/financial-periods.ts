@@ -1,5 +1,6 @@
 "use server";
 
+import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
@@ -9,12 +10,10 @@ type FinancialPeriodInsert = Omit<typeof schema.financial_periods.$inferInsert, 
 type FinancialPeriodUpdate = Partial<FinancialPeriodInsert>;
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 // ══════════════════════════════════════════════════════════════

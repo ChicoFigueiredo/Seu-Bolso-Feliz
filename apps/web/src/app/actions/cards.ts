@@ -11,7 +11,7 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { createCardSchema, updateCardSchema } from "@sbf/validation";
@@ -32,12 +32,10 @@ export interface CardComProduto extends Card {
 }
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 /**

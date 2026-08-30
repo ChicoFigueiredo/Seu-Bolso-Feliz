@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@sbf/db";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { requireTransactionForeignKeysOwned } from "./_shared/transaction-fk-ownership";
@@ -11,12 +11,10 @@ type TransactionUpdate = Partial<TransactionInsert>;
 type DeduplicatedExpense = typeof schema.v_expenses_deduplicated.$inferSelect;
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 // A validação de posse das 8 FKs de `transactions` (achado CRITICAL da

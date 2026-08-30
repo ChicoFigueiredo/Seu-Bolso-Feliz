@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -12,12 +12,10 @@ type ExternalAccountMappingUpdate = Partial<
 >;
 
 async function requireUserId(): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
-  return user.id;
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
 }
 
 export async function getProviderConnections(): Promise<ProviderConnection[]> {
