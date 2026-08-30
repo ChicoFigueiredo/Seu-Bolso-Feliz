@@ -67,3 +67,8 @@ inbox/
 # cabeçalho de packages/db/src/schema.ts); esta pasta é artefato de
 # reexportação (snapshot SQL + meta/_journal.json) e nunca deve ser commitada.
 packages/db/drizzle/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
