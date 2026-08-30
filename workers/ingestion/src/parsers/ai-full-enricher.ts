@@ -10,7 +10,9 @@
  *
  * Custo estimado: ~1.500–4.000 tokens com imagem (≈ $0.02–0.06 / doc).
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import { extraction_results, ingestion_jobs, type Database } from "@sbf/db";
+import { getIngestionBucket } from "../storage";
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 import { writeLog, type LogContext } from "../logger";
 import { chamarChatCompletions } from "./llm-endpoint";
@@ -168,12 +170,12 @@ async function callOpenAiText(rawText: string): Promise<Record<string, unknown>>
  * Para PDFs com texto disponível usa análise de texto (mais barato).
  */
 export async function enrichWithAiFull(
-  supabase: SupabaseClient,
+  db: Database,
   ctx: LogContext,
   input: AiFullInput,
 ): Promise<AiFullOutput> {
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `IA full: iniciando análise via visão para ${input.mimeType}`,
@@ -187,16 +189,19 @@ export async function enrichWithAiFull(
   try {
     if (isImage || !hasText) {
       // Baixar arquivo do Storage para análise de visão
-      const { data: blob, error: dlError } = await supabase.storage
-        .from("ingestion-originals")
-        .download(input.storagePath);
-
-      if (dlError || !blob) {
-        throw new Error(`Falha ao baixar arquivo para análise full: ${dlError?.message}`);
+      let bytes: Uint8Array;
+      try {
+        bytes = await getIngestionBucket().download(input.storagePath);
+      } catch (dlError) {
+        throw new Error(
+          `Falha ao baixar arquivo para análise full: ${
+            dlError instanceof Error ? dlError.message : String(dlError)
+          }`,
+          { cause: dlError },
+        );
       }
 
-      const arrayBuffer = await blob.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      const base64 = Buffer.from(bytes).toString("base64");
       parsed = await callOpenAiVision(base64, input.mimeType);
     } else {
       // PDF com texto extraído — usar análise de texto (mais barato)
@@ -204,7 +209,7 @@ export async function enrichWithAiFull(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await writeLog(supabase, ctx, IngestionLogLevel.WARN, `IA full falhou: ${msg}`);
+    await writeLog(db, ctx, IngestionLogLevel.WARN, `IA full falhou: ${msg}`);
     return {
       enriched: false,
       fields: {
@@ -252,9 +257,9 @@ export async function enrichWithAiFull(
 
   // Persistir no banco — atualiza ou cria extraction_result
   if (input.extractionResultId) {
-    await supabase
-      .from("extraction_results")
-      .update({
+    await db
+      .update(extraction_results)
+      .set({
         supplier_name_raw: fields.supplier_name_raw,
         due_date: fields.due_date,
         total_amount: fields.total_amount,
@@ -266,18 +271,22 @@ export async function enrichWithAiFull(
         reasoning,
         financial_intent: fields.financial_intent,
       })
-      .eq("id", input.extractionResultId);
+      .where(eq(extraction_results.id, input.extractionResultId));
   }
 
   // Resetar flag needs_full_ai_review
-  await supabase
-    .from("ingestion_jobs")
-    .update({ needs_full_ai_review: false })
-    .eq("source_document_id", input.sourceDocumentId)
-    .eq("needs_full_ai_review", true);
+  await db
+    .update(ingestion_jobs)
+    .set({ needs_full_ai_review: false })
+    .where(
+      and(
+        eq(ingestion_jobs.source_document_id, input.sourceDocumentId),
+        eq(ingestion_jobs.needs_full_ai_review, true),
+      ),
+    );
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `IA full concluída: intent=${fields.financial_intent}, confiança=${(overallConfidence * 100).toFixed(0)}%`,

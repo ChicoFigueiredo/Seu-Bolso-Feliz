@@ -9,7 +9,8 @@
  *   4. Retorna campos enriquecidos ou null se nenhum match
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, desc, eq } from "drizzle-orm";
+import { document_patterns, type Database } from "@sbf/db";
 
 export interface PatternMatch {
   patternId: string;
@@ -34,7 +35,7 @@ interface DocumentPattern {
 /**
  * Busca padrões compatíveis para o documento e aplica mapeamentos.
  *
- * @param supabase - Client autenticado do usuário
+ * @param db - Instância Drizzle
  * @param userId   - ID do usuário
  * @param documentType - Tipo do documento (ex: "utility_bill", "credit_card_statement")
  * @param supplierId   - ID do fornecedor (nullable)
@@ -42,7 +43,7 @@ interface DocumentPattern {
  * @param currentConfidence - Confiança atual da extração
  */
 export async function findMatchingPattern(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   documentType: string | null,
   supplierId: string | null,
@@ -52,29 +53,47 @@ export async function findMatchingPattern(
   if (!documentType) return null;
 
   // Busca padrões ativos do usuário — preferência: supplier_id match primeiro
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: patterns, error } = await (supabase as any)
-    .from("document_patterns")
-    .select(
-      "id, name, version, document_type, supplier_id, extraction_rules, field_mappings, confidence_threshold",
-    )
-    .eq("user_id", userId)
-    .eq("is_active", true)
-    .eq("document_type", documentType)
-    .order("version", { ascending: false })
-    .limit(10);
+  let patterns: DocumentPattern[];
+  try {
+    const rows = await db
+      .select({
+        id: document_patterns.id,
+        name: document_patterns.name,
+        version: document_patterns.version,
+        document_type: document_patterns.document_type,
+        supplier_id: document_patterns.supplier_id,
+        extraction_rules: document_patterns.extraction_rules,
+        field_mappings: document_patterns.field_mappings,
+        confidence_threshold: document_patterns.confidence_threshold,
+      })
+      .from(document_patterns)
+      .where(
+        and(
+          eq(document_patterns.user_id, userId),
+          eq(document_patterns.is_active, true),
+          eq(document_patterns.document_type, documentType),
+        ),
+      )
+      .orderBy(desc(document_patterns.version))
+      .limit(10);
+    patterns = rows as unknown as DocumentPattern[];
+  } catch {
+    // Padrão é enriquecimento opcional: não achar (ou falhar ao buscar) só
+    // significa seguir com o que o parser determinístico já extraiu.
+    return null;
+  }
 
-  if (error || !patterns || patterns.length === 0) return null;
+  if (patterns.length === 0) return null;
 
   // Prioriza padrões com supplier_id correspondente, depois os globais (supplier_id = null)
   const ranked: DocumentPattern[] = [
-    ...patterns.filter((p: DocumentPattern) => supplierId && p.supplier_id === supplierId),
-    ...patterns.filter((p: DocumentPattern) => p.supplier_id === null),
+    ...patterns.filter((p) => supplierId !== null && p.supplier_id === supplierId),
+    ...patterns.filter((p) => p.supplier_id === null),
   ];
 
   if (ranked.length === 0) return null;
 
-  const best = ranked[0] as DocumentPattern;
+  const best = ranked[0]!;
 
   // Aplica field_mappings: mapeia campos extraídos para nomes padronizados
   const mappedFields = applyFieldMappings(extractedFields, best.field_mappings);

@@ -1,86 +1,68 @@
 /**
  * @sbf/worker-ingestion — Entry point
- * Poll loop: busca jobs pendentes e processa sequencialmente.
- * Roda como processo Bun standalone.
+ *
+ * Consome a fila de jobs do próprio Postgres: reivindica um job com
+ * `FOR UPDATE SKIP LOCKED`, processa, e volta a dormir escutando
+ * `NOTIFY sbf_jobs` (com polling de reserva). Não há porta aberta, nem
+ * chamada HTTP, nem SSH — a Vercel grava a linha, este processo a pega.
+ *
+ * O que mudou em relação ao poll loop anterior:
+ *
+ * - **Concorrência real.** Antes, dois processos deste worker liam os mesmos
+ *   jobs do mesmo `SELECT ... LIMIT 10` e processavam tudo em duplicidade.
+ *   Agora o claim é atômico e um job pertence a um worker de cada vez.
+ * - **Retentativa de verdade.** `retry_count`/`max_retries` existiam sem
+ *   ninguém os consultar: qualquer erro transitório aposentava o documento.
+ *   Agora a fila devolve o job com backoff exponencial até esgotar.
+ * - **Latência.** O poll de 5 s era o piso do tempo de resposta mesmo com a
+ *   fila vazia e um job recém-criado; o `NOTIFY` derruba isso para o tempo
+ *   de ida e volta ao banco.
+ *
+ * Capacidades: este worker roda na VPS, onde o `ocrmypdf` está instalado, e
+ * por isso anuncia `ocr` por padrão. `WORKER_CAPABILITIES` sobrescreve —
+ * numa máquina sem OCR, rodar com `WORKER_CAPABILITIES=` faz o worker
+ * simplesmente não reivindicar os jobs que exigem OCR, em vez de falhar neles.
  */
-import { IngestionJobStatus } from "@sbf/ingestion-types";
-import { getSupabaseClient } from "./supabase";
+import { createShutdownSignal, getDb, resolveCapabilities, runWorkerLoop } from "@sbf/db";
 import { processJob } from "./processor";
 
 export { isValidTransition, getValidNextStates } from "./state-machine";
 export { processJob } from "./processor";
+export { getIngestionBucket, INGESTION_BUCKET } from "./storage";
+
+/** Capacidades padrão do worker de ingestão na VPS. */
+export const DEFAULT_CAPABILITIES = ["ocr"] as const;
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
-const BATCH_SIZE = Number(process.env.BATCH_SIZE ?? 10);
-
-let running = true;
-
-async function pollAndProcess(): Promise<number> {
-  const supabase = getSupabaseClient();
-
-  // Buscar jobs que precisam de processamento
-  const { data: jobs, error } = await supabase
-    .from("ingestion_jobs")
-    .select("id, run_id, user_id, source_document_id, status, retry_count, max_retries, metadata")
-    .in("status", [
-      IngestionJobStatus.DISCOVERED,
-      IngestionJobStatus.DOWNLOADED,
-      IngestionJobStatus.HASHED,
-      IngestionJobStatus.QUEUED,
-      IngestionJobStatus.PARSED,
-    ])
-    .order("created_at", { ascending: true })
-    .limit(BATCH_SIZE);
-
-  if (error) {
-    console.error("[WORKER] Poll error:", error.message);
-    return 0;
-  }
-
-  if (!jobs || jobs.length === 0) return 0;
-
-  console.log(`[WORKER] Processing ${jobs.length} jobs...`);
-
-  let processed = 0;
-  for (const job of jobs) {
-    if (!running) break;
-    await processJob(supabase, job);
-    processed++;
-  }
-
-  return processed;
-}
+/**
+ * Um documento pode passar por OCR e duas chamadas de IA — minutos, não
+ * segundos. O reap precisa de folga bem acima disso, senão devolve à fila
+ * trabalho que ainda está em andamento e o documento é processado duas vezes.
+ */
+const STALE_AFTER_MS = Number(process.env.JOB_STALE_AFTER_MS ?? 30 * 60_000);
 
 async function main(): Promise<void> {
-  console.log("[WORKER] Ingestion worker starting...");
-  console.log(`[WORKER] Poll interval: ${POLL_INTERVAL_MS}ms, batch size: ${BATCH_SIZE}`);
+  const db = getDb();
 
-  // Graceful shutdown
-  process.on("SIGTERM", () => {
-    console.log("[WORKER] SIGTERM received, shutting down...");
-    running = false;
+  await runWorkerLoop({
+    name: "ingestion",
+    capabilities: resolveCapabilities(DEFAULT_CAPABILITIES),
+    signal: createShutdownSignal(),
+    pollIntervalMs: POLL_INTERVAL_MS,
+    staleAfterMs: STALE_AFTER_MS,
+    db,
+    handle: async (job) => {
+      await processJob(db, job);
+      // O processador já avançou a máquina de estados até onde deu; a fila só
+      // solta o lock. Sobrescrever o status aqui apagaria essa informação.
+    },
   });
-  process.on("SIGINT", () => {
-    console.log("[WORKER] SIGINT received, shutting down...");
-    running = false;
-  });
-
-  while (running) {
-    try {
-      const count = await pollAndProcess();
-      if (count === 0) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-      }
-    } catch (err) {
-      console.error("[WORKER] Unexpected error:", err);
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    }
-  }
-
-  console.log("[WORKER] Worker stopped.");
 }
 
 // Só executa o loop se este arquivo for o entry point
 if (import.meta.main) {
-  main();
+  main().catch((err: unknown) => {
+    console.error("[WORKER] Falha fatal:", err);
+    process.exit(1);
+  });
 }

@@ -1,8 +1,8 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
+import { createStorageClientFromEnv } from "@sbf/storage";
 import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import type { Json } from "@sbf/shared-types";
 
@@ -15,12 +15,6 @@ async function computeContentHash(data: ArrayBuffer | Uint8Array): Promise<strin
 }
 
 export type DeleteSourceDocumentMode = "document_only" | "document_and_ingestion";
-
-function throwIfError(error: { message: string } | null, context: string): void {
-  if (error) {
-    throw new Error(`Erro ao ${context}: ${error.message}`);
-  }
-}
 
 async function requireUserId(): Promise<string> {
   // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
@@ -153,13 +147,30 @@ export async function getDocumentWithRelations(id: string) {
   return { document, jobs, drafts };
 }
 
-// Storage — inalterado nesta fase (Fase 3), continua via supabase-js.
+/**
+ * URL temporária para o navegador exibir o arquivo original sem que a
+ * credencial do storage saia do servidor. Uma hora é o suficiente para ler um
+ * boleto e curto o bastante para o link não virar acesso permanente se vazar
+ * num histórico.
+ */
+/**
+ * O balde dos arquivos originais — boletos, faturas e comprovantes, exatamente
+ * como chegaram. Singleton preguiçoso pelo mesmo motivo de `getDb()`: montar o
+ * assinador SigV4 lê variáveis de ambiente e não é de graça, e uma instância
+ * serverless atende muitas requisições antes de morrer.
+ */
+let _originais: ReturnType<ReturnType<typeof createStorageClientFromEnv>["from"]> | null = null;
+function originais() {
+  _originais ??= createStorageClientFromEnv().from("ingestion-originals");
+  return _originais;
+}
+
 export async function getDocumentStorageUrl(storagePath: string): Promise<string | null> {
-  const supabase = await createClient();
-  const { data } = await supabase.storage
-    .from("ingestion-originals")
-    .createSignedUrl(storagePath, 3600);
-  return data?.signedUrl ?? null;
+  try {
+    return await originais().getSignedUrl(storagePath, 3600);
+  } catch {
+    return null;
+  }
 }
 
 export async function reprocessDocument(documentId: string): Promise<void> {
@@ -561,7 +572,6 @@ export async function getIngestionStats(): Promise<{
 // ══════════════════════════════════════════════════════════════
 
 export async function uploadDocument(formData: FormData): Promise<SourceDocument> {
-  const supabase = await createClient();
   const userId = await requireUserId();
   const db = getDb();
 
@@ -588,13 +598,9 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
     );
   }
 
-  // Storage — inalterado nesta fase.
   const ext = file.name.split(".").pop() ?? "bin";
   const storagePath = `${userId}/manual/${crypto.randomUUID()}.${ext}`;
-  const { error: uploadError } = await supabase.storage
-    .from("ingestion-originals")
-    .upload(storagePath, file, { contentType: file.type, upsert: false });
-  if (uploadError) throw new Error(`Erro no upload: ${uploadError.message}`);
+  await originais().upload(storagePath, file, { contentType: file.type, upsert: false });
 
   const originKey = `manual::${storagePath}`;
   const [srcDoc] = await db
@@ -646,7 +652,6 @@ export async function deleteSourceDocument(
   id: string,
   mode: DeleteSourceDocumentMode = "document_and_ingestion",
 ): Promise<void> {
-  const supabase = await createClient();
   const userId = await requireUserId();
   const db = getDb();
 
@@ -665,10 +670,7 @@ export async function deleteSourceDocument(
   const now = new Date().toISOString();
 
   if (doc.storage_path) {
-    const { error: storageError } = await supabase.storage
-      .from("ingestion-originals")
-      .remove([doc.storage_path]);
-    throwIfError(storageError, "remover arquivo do storage");
+    await originais().remove([doc.storage_path]);
   }
 
   if (mode === "document_only") {

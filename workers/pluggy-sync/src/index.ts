@@ -19,8 +19,9 @@
  *   bun run workers/pluggy-sync/src/index.ts --backfill
  *   bun run workers/pluggy-sync/src/index.ts --backfill --from 2025-08-24
  */
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
-import { getSupabaseClient } from "./supabase";
 import { syncProviderConnection, type AccountMapping } from "./sync-runner";
 
 export { syncProviderConnection } from "./sync-runner";
@@ -51,6 +52,10 @@ function isoDaysAgo(days: number): string {
   return d.toISOString().split("T")[0]!;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 async function main(): Promise<void> {
   const userId = process.env.LOCAL_USER_ID;
   if (!userId) {
@@ -59,35 +64,60 @@ async function main(): Promise<void> {
 
   const opts = parseArgs();
   const provider = PluggyProvider.fromEnv();
-  const supabase = getSupabaseClient();
+  const db = getDb();
 
-  const { data: connections, error } = await supabase
-    .from("provider_connections")
-    .select("id, external_item_id, last_synced_at")
-    .eq("user_id", userId)
-    .eq("provider", "pluggy")
-    .eq("status", "active");
+  let connections: {
+    id: string;
+    external_item_id: string;
+    last_synced_at: string | null;
+  }[];
+  try {
+    connections = await db
+      .select({
+        id: schema.provider_connections.id,
+        external_item_id: schema.provider_connections.external_item_id,
+        last_synced_at: schema.provider_connections.last_synced_at,
+      })
+      .from(schema.provider_connections)
+      .where(
+        and(
+          eq(schema.provider_connections.user_id, userId),
+          eq(schema.provider_connections.provider, "pluggy"),
+          eq(schema.provider_connections.status, "active"),
+        ),
+      );
+  } catch (err) {
+    throw new Error(`Falha ao listar provider_connections: ${errorMessage(err)}`, { cause: err });
+  }
 
-  if (error) throw new Error(`Falha ao listar provider_connections: ${error.message}`);
-  if (!connections || connections.length === 0) {
+  if (connections.length === 0) {
     console.log("Nenhuma conexão Pluggy ativa.");
     return;
   }
 
   for (const connection of connections) {
-    const { data: mappingRows, error: mappingError } = await supabase
-      .from("external_account_mappings")
-      .select("external_account_id, financial_product_id, status")
-      .eq("provider_connection_id", connection.id as string);
-
-    if (mappingError) {
-      console.error(`Falha ao listar contas de ${connection.id}: ${mappingError.message}`);
+    let mappingRows: {
+      external_account_id: string;
+      financial_product_id: string | null;
+      status: string;
+    }[];
+    try {
+      mappingRows = await db
+        .select({
+          external_account_id: schema.external_account_mappings.external_account_id,
+          financial_product_id: schema.external_account_mappings.financial_product_id,
+          status: schema.external_account_mappings.status,
+        })
+        .from(schema.external_account_mappings)
+        .where(eq(schema.external_account_mappings.provider_connection_id, connection.id));
+    } catch (err) {
+      console.error(`Falha ao listar contas de ${connection.id}: ${errorMessage(err)}`);
       continue;
     }
 
-    const mappings: AccountMapping[] = (mappingRows ?? []).map((m) => ({
-      externalAccountId: m.external_account_id as string,
-      financialProductId: m.financial_product_id as string | null,
+    const mappings: AccountMapping[] = mappingRows.map((m) => ({
+      externalAccountId: m.external_account_id,
+      financialProductId: m.financial_product_id,
       status: m.status as AccountMapping["status"],
     }));
 
@@ -95,15 +125,14 @@ async function main(): Promise<void> {
       opts.from ??
       (opts.backfill
         ? isoDaysAgo(BACKFILL_LOOKBACK_DAYS)
-        : ((connection.last_synced_at as string | null)?.split("T")[0] ??
-          isoDaysAgo(DEFAULT_LOOKBACK_DAYS)));
+        : (connection.last_synced_at?.split("T")[0] ?? isoDaysAgo(DEFAULT_LOOKBACK_DAYS)));
     const to = opts.to ?? new Date().toISOString().split("T")[0]!;
 
     const result = await syncProviderConnection({
-      supabase,
+      db,
       userId,
       provider,
-      externalItemId: connection.external_item_id as string,
+      externalItemId: connection.external_item_id,
       mappings,
       from,
       to,
@@ -116,14 +145,14 @@ async function main(): Promise<void> {
         `${result.itemErrors} erro(s).`,
     );
 
-    await supabase
-      .from("provider_connections")
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq("id", connection.id as string);
+    await db
+      .update(schema.provider_connections)
+      .set({ last_synced_at: new Date().toISOString() })
+      .where(eq(schema.provider_connections.id, connection.id));
   }
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
+  console.error(errorMessage(err));
   process.exit(1);
 });

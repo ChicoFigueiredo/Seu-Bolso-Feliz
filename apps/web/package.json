@@ -16,6 +16,7 @@
     "@sbf/domain": "workspace:*",
     "@sbf/financial-connectors": "workspace:*",
     "@sbf/shared-types": "workspace:*",
+    "@sbf/storage": "workspace:*",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.110.9",
     "ai": "4.3.19",

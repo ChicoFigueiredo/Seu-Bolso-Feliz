@@ -17,7 +17,8 @@
  * resolver o fornecedor a associação é gravada para o próximo documento
  * acertar de primeira. Operação local e limitada, sem oráculo, auto-corretiva.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { sql } from "drizzle-orm";
+import type { Database } from "@sbf/db";
 
 export interface SecretMatch {
   secretId: string;
@@ -37,22 +38,25 @@ const MAX_CANDIDATES = 20;
  * primeiro. A ordenação por uso recente vem da própria RPC.
  */
 export async function listPdfPasswordCandidates(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   limit = MAX_CANDIDATES,
 ): Promise<SecretMatch[]> {
-  const { data, error } = await supabase.rpc("fn_get_secrets", {
-    p_user_id: userId,
-    p_secret_type: "pdf_password",
-    p_limit: limit,
-  });
-
-  if (error) {
+  let rows: Array<Record<string, unknown>>;
+  try {
+    const result = await db.execute(
+      sql`select * from public.fn_get_secrets(${userId}::uuid, 'pdf_password', ${limit}::int)`,
+    );
+    rows = (result.rows ?? []) as Array<Record<string, unknown>>;
+  } catch (err) {
     // Nunca propagar detalhe de segredo para o log do pipeline.
-    throw new Error(`Falha ao resolver senhas: ${error.message}`);
+    throw new Error(
+      `Falha ao resolver senhas: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
 
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+  return rows.map((row) => ({
     secretId: row.secret_id as string,
     value: row.value as string,
     entityType: (row.entity_type as string | null) ?? null,
@@ -70,12 +74,12 @@ export async function listPdfPasswordCandidates(
  * correspondente é priorizada.
  */
 export async function findPdfPassword(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   supplierId?: string,
   contractIdentifier?: string,
 ): Promise<SecretMatch | null> {
-  const candidates = await listPdfPasswordCandidates(supabase, userId);
+  const candidates = await listPdfPasswordCandidates(db, userId);
   if (candidates.length === 0) return null;
 
   const scoped =
@@ -88,16 +92,15 @@ export async function findPdfPassword(
 
 /** Registra que esta senha funcionou, para que suba na ordem da próxima vez. */
 export async function markSecretUsed(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   secretId: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc("fn_mark_secret_used", {
-    p_user_id: userId,
-    p_secret_id: secretId,
-  });
-  // Falhar aqui é irrelevante para o resultado do parse; não vale derrubar o job.
-  if (error) return;
+  try {
+    await db.execute(sql`select public.fn_mark_secret_used(${userId}::uuid, ${secretId}::uuid)`);
+  } catch {
+    // Falhar aqui é irrelevante para o resultado do parse; não vale derrubar o job.
+  }
 }
 
 /**
@@ -105,20 +108,35 @@ export async function markSecretUsed(
  * próximo documento do mesmo emissor resolva na primeira tentativa.
  *
  * Usa a RPC de escrita, que criptografa. Nunca grava texto puro.
+ *
+ * ⚠️ PENDÊNCIA DE SCHEMA (não de código): `fn_set_secret` está entre as seis
+ * funções que NÃO foram portadas para o Neon — ela sabia quem era o usuário
+ * só por `auth.uid()`, que não existe fora do Supabase (ver a NOTA no topo de
+ * packages/db/schema.sql, item 4). Enquanto ela não for recriada com
+ * `p_user_id` explícito, esta chamada falha em runtime e a associação é
+ * silenciosamente perdida — que é exatamente o que já acontecia antes, já que
+ * o erro sempre foi engolido aqui. O parse continua funcionando: só o atalho
+ * "próximo documento deste fornecedor acerta de primeira" deixa de valer.
  */
 export async function associateSecretToSupplier(
-  supabase: SupabaseClient,
+  db: Database,
   plaintext: string,
   supplierId: string,
   label?: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc("fn_set_secret", {
-    p_secret_type: "pdf_password",
-    p_plaintext: plaintext,
-    p_entity_type: "supplier",
-    p_entity_id: supplierId,
-    p_contract_identifier: null,
-    p_label: label ?? null,
-  });
-  if (error) return;
+  try {
+    await db.execute(
+      sql`select public.fn_set_secret(
+        'pdf_password',
+        ${plaintext},
+        'supplier',
+        ${supplierId}::uuid,
+        null,
+        ${label ?? null}::text
+      )`,
+    );
+  } catch {
+    // Ver a pendência de schema acima: sem a função recriada no Neon, falhar
+    // aqui é o caminho esperado e não deve derrubar o parse.
+  }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { uploadDocument } from "@/app/actions/ingestion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -29,49 +29,40 @@ export function UploadDocuments({ onUploadComplete }: { onUploadComplete?: () =>
     }
 
     setUploading(true);
-    const supabase = createClient();
-    const uploadedPaths: string[] = [];
+
+    // O upload passa pelo servidor em vez de ir do navegador direto ao storage.
+    // Não é rodeio: é a Server Action que faz a deduplicação por hash de
+    // conteúdo, registra o documento e enfileira o job — o caminho antigo subia
+    // o arquivo primeiro e só depois descobria que era duplicado, deixando lixo
+    // no bucket. E nenhuma credencial de storage precisa existir no navegador.
+    let enviados = 0;
+    const falhas: string[] = [];
 
     try {
-      // Upload cada arquivo para o storage
       for (const file of fileArray) {
-        const docId = crypto.randomUUID();
-        const storagePath = `uploads/${docId}/${file.name}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("ingestion-originals")
-          .upload(storagePath, file, { contentType: file.type });
-
-        if (uploadError) {
-          toast.error(`Erro no upload de ${file.name}`, {
-            description: uploadError.message,
-          });
-          continue;
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          await uploadDocument(formData);
+          enviados += 1;
+        } catch (e) {
+          const motivo = e instanceof Error ? e.message : "erro desconhecido";
+          falhas.push(`${file.name}: ${motivo}`);
         }
-
-        uploadedPaths.push(storagePath);
       }
 
-      if (uploadedPaths.length === 0) {
-        toast.error("Nenhum arquivo enviado com sucesso");
+      if (enviados === 0) {
+        toast.error("Nenhum arquivo foi enviado", {
+          description: falhas.join(" · ") || undefined,
+        });
         return;
       }
 
-      // Chamar edge function trigger-ingestion
-      const { data, error } = await supabase.functions.invoke("trigger-ingestion", {
-        body: {
-          source_type: "manual",
-          file_paths: uploadedPaths,
-        },
-      });
-
-      if (error) {
-        toast.error("Erro ao iniciar ingestão", { description: error.message });
-        return;
-      }
-
-      toast.success(`${uploadedPaths.length} arquivo(s) enviado(s)`, {
-        description: `${data?.jobs_created ?? 0} job(s) de ingestão criado(s)`,
+      toast.success(`${enviados} arquivo(s) enviado(s)`, {
+        description:
+          falhas.length > 0
+            ? `${falhas.length} não entrou: ${falhas.join(" · ")}`
+            : "Já estão na fila de processamento.",
       });
 
       onUploadComplete?.();

@@ -4,7 +4,7 @@
 # aponta o context certo):
 #   docker build -f workers/pluggy-sync/Dockerfile -t sbf/pluggy-sync .
 #
-# Sem segredo embutido: PLUGGY_CLIENT_ID/SECRET, SUPABASE_SECRET_KEY e
+# Sem segredo embutido: PLUGGY_CLIENT_ID/SECRET, DATABASE_URL e
 # LOCAL_USER_ID entram só em runtime (env do container), nunca como
 # build arg nem COPY.
 FROM oven/bun:1-slim

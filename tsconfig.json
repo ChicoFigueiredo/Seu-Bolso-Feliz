@@ -8,6 +8,7 @@
     { "path": "packages/db" },
     { "path": "packages/domain" },
     { "path": "packages/financial-connectors" },
+    { "path": "packages/storage" },
     { "path": "packages/ui-tokens" }
   ]
 }

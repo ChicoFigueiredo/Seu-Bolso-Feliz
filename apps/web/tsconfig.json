@@ -22,7 +22,8 @@
       "@sbf/shared-types": ["../../packages/shared-types/src/index.ts"],
       "@sbf/domain": ["../../packages/domain/src/index.ts"],
       "@sbf/domain/*": ["../../packages/domain/src/*"],
-      "@sbf/contracts": ["../../packages/contracts/src/index.ts"]
+      "@sbf/contracts": ["../../packages/contracts/src/index.ts"],
+      "@sbf/storage": ["../../packages/storage/src/index.ts"]
     }
   },
   "include": [

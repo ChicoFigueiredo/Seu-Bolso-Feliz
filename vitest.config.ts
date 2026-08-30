@@ -2,11 +2,17 @@ import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 const aliases = {
+  // O prefixo "@/" de apps/web só era resolvido pelo TypeScript, nunca pelo
+  // Vite. Qualquer teste que importasse um módulo "@/..." sem mocká-lo
+  // quebrava na resolução — e a saída de erro não deixa óbvio que a causa é
+  // configuração, então o reflexo é mockar mais em vez de consertar isto.
+  "@/": resolve(__dirname, "apps/web/src") + "/",
   "@sbf/domain": resolve(__dirname, "packages/domain/src/index.ts"),
   "@sbf/validation": resolve(__dirname, "packages/validation/src/index.ts"),
   "@sbf/shared-types": resolve(__dirname, "packages/shared-types/src/index.ts"),
   "@sbf/operations": resolve(__dirname, "packages/operations/src/index.ts"),
   "@sbf/ingestion-types": resolve(__dirname, "packages/ingestion-types/src/index.ts"),
+  "@sbf/storage": resolve(__dirname, "packages/storage/src/index.ts"),
   "@sbf/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
   "@sbf/db": resolve(__dirname, "packages/db/src/index.ts"),
   "@sbf/cli": resolve(__dirname, "workers/cli/src/index.ts"),
@@ -53,6 +59,7 @@ export default defineConfig({
           include: [
             "__tests__/integration/**/*.test.ts",
             "apps/web/src/app/actions/**/*.test.ts",
+            "apps/web/src/app/api/**/*.test.ts",
             "apps/web/src/lib/ai/**/*.test.ts",
           ],
           testTimeout: 30_000,
