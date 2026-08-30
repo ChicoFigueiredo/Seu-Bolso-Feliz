@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
+import {
+  getFinancialPreferences,
+  upsertFinancialPreferences,
+} from "@/app/actions/financial-periods";
+import {
+  getCategories,
+  createCategory,
+  deleteCategory as deleteCategoryAction,
+} from "@/app/actions/categories";
+import { getTags, createTag, deleteTag as deleteTagAction } from "@/app/actions/tags";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,13 +56,11 @@ interface Tag {
 }
 
 export default function SettingsPage() {
-  const supabase = createClient();
   const [prefs, setPrefs] = useState({
     financial_cycle_start_day: "",
     financial_cycle_anchor_date: "",
     default_currency: "BRL",
   });
-  const [prefsExist, setPrefsExist] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newCat, setNewCat] = useState("");
@@ -62,13 +69,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("user_financial_preferences").select("*").maybeSingle(),
-      supabase.from("categories").select("*").order("name"),
-      supabase.from("tags").select("*").order("name"),
-    ]).then(([{ data: p }, { data: cats }, { data: ts }]) => {
+    Promise.all([getFinancialPreferences(), getCategories(), getTags()]).then(([p, cats, ts]) => {
       if (p) {
-        setPrefsExist(true);
         setPrefs({
           financial_cycle_start_day: p.financial_cycle_start_day
             ? String(p.financial_cycle_start_day)
@@ -77,101 +79,74 @@ export default function SettingsPage() {
           default_currency: p.default_currency ?? "BRL",
         });
       }
-      setCategories(cats ?? []);
-      setTags(ts ?? []);
+      setCategories(cats);
+      setTags(ts);
     });
-  }, [supabase]);
+  }, []);
 
   async function savePrefs() {
     setSaving(true);
-    const payload = {
-      financial_cycle_start_day: prefs.financial_cycle_start_day
-        ? Number(prefs.financial_cycle_start_day)
-        : null,
-      financial_cycle_anchor_date: prefs.financial_cycle_anchor_date || null,
-      default_currency: prefs.default_currency,
-    };
-    if (prefsExist) {
-      const { error } = await supabase
-        .from("user_financial_preferences")
-        .update(payload)
-        .not("id", "is", null);
-      if (error) toast.error("Erro", { description: error.message });
-      else toast.success("Preferências salvas");
-    } else {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setSaving(false);
-        return;
-      }
-      const { error } = await supabase
-        .from("user_financial_preferences")
-        .insert({ ...payload, user_id: user.id });
-      if (error) toast.error("Erro", { description: error.message });
-      else {
-        toast.success("Preferências salvas");
-        setPrefsExist(true);
-      }
+    try {
+      await upsertFinancialPreferences({
+        financial_cycle_start_day: prefs.financial_cycle_start_day
+          ? Number(prefs.financial_cycle_start_day)
+          : null,
+        financial_cycle_anchor_date: prefs.financial_cycle_anchor_date || null,
+        default_currency: prefs.default_currency,
+      });
+      toast.success("Preferências salvas");
+    } catch (error) {
+      toast.error("Erro", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   async function addCategory() {
     if (!newCat.trim()) return;
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("categories")
-      .insert({ name: newCat.trim(), user_id: user.id })
-      .select()
-      .single();
-    if (error) toast.error("Erro", { description: error.message });
-    else {
+    try {
+      const data = await createCategory({ name: newCat.trim() });
       setCategories([...categories, data]);
       setNewCat("");
       toast.success("Categoria criada");
+    } catch (error) {
+      toast.error("Erro", { description: error instanceof Error ? error.message : String(error) });
     }
   }
 
   async function deleteCategory(id: string) {
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) toast.error("Erro", { description: error.message });
-    else setCategories(categories.filter((c) => c.id !== id));
+    try {
+      await deleteCategoryAction(id);
+      setCategories(categories.filter((c) => c.id !== id));
+    } catch (error) {
+      toast.error("Erro", { description: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   async function addTag() {
     if (!newTag.trim()) return;
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("tags")
-      .insert({
+    try {
+      const data = await createTag({
         name: newTag.trim(),
-        user_id: user.id,
         influences_priority: !!newTagPriority,
         suggested_priority: newTagPriority || null,
-      })
-      .select()
-      .single();
-    if (error) toast.error("Erro", { description: error.message });
-    else {
+      });
       setTags([...tags, data]);
       setNewTag("");
       setNewTagPriority("");
       toast.success("Tag criada");
+    } catch (error) {
+      toast.error("Erro", { description: error instanceof Error ? error.message : String(error) });
     }
   }
 
   async function deleteTag(id: string) {
-    const { error } = await supabase.from("tags").delete().eq("id", id);
-    if (error) toast.error("Erro", { description: error.message });
-    else setTags(tags.filter((t) => t.id !== id));
+    try {
+      await deleteTagAction(id);
+      setTags(tags.filter((t) => t.id !== id));
+    } catch (error) {
+      toast.error("Erro", { description: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   return (

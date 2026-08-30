@@ -5,13 +5,31 @@ import { getDb, schema } from "@sbf/db";
 import { getOrCreateChatSession } from "./chat-sessions";
 
 let currentUserId = "";
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    auth: {
-      getUser: async () => ({ data: { user: currentUserId ? { id: currentUserId } : null } }),
+// A identidade vem do nosso próprio `requireUser()` desde a saída do Supabase.
+// Este mock devolve `ownerId === id` porque estes testes exercitam o dono; a
+// distinção ator/dono (o admin de emergência operando sobre a base do dono)
+// tem cobertura própria em apps/web/src/app/api/**.
+vi.mock("@/lib/auth", () => {
+  const sessao = () =>
+    currentUserId
+      ? {
+          id: currentUserId,
+          ownerId: currentUserId,
+          email: "teste@exemplo.com",
+          role: "owner" as const,
+          name: "Teste",
+        }
+      : null;
+  return {
+    requireUser: async () => {
+      const s = sessao();
+      if (!s) throw new Error("Não autenticado");
+      return s;
     },
-  }),
-}));
+    getUser: async () => sessao(),
+    getUserOrNull: async () => sessao(),
+  };
+});
 
 const USER_A = "00000000-0000-0000-0000-0000000000a1";
 const USER_B = "00000000-0000-0000-0000-0000000000b2";

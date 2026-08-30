@@ -22,6 +22,7 @@ import {
   extensaoAceita,
   extensaoDe,
   formatoDe,
+  uploadAceito,
 } from "./formats";
 
 const RAIZ = join(import.meta.dirname, "../../..");
@@ -130,25 +131,39 @@ describe("equivalência com os scanners", () => {
   });
 });
 
-describe("equivalência com o bucket de Storage", () => {
+describe("a porta de entrada do upload", () => {
   /**
-   * O bucket recusa upload com MIME fora de `allowed_mime_types` — e a recusa
-   * acontece DEPOIS de o documento já ter sido registrado, o que deixa uma
-   * linha órfã em `source_documents`. Por isso o bucket precisa ser um
-   * superconjunto do que os scanners aceitam.
+   * Este bloco existia como "equivalência com o bucket de Storage": o bucket
+   * do Supabase tinha uma allowlist de MIME e recusava o que estivesse fora —
+   * mas recusava DEPOIS de o documento já estar registrado, deixando linha
+   * órfã em `source_documents`.
+   *
+   * Com o S3 não existe allowlist no bucket: ele aceita qualquer coisa. O
+   * invariante não sumiu, mudou de lugar — quem recusa agora é
+   * `uploadAceito`, chamado ANTES de qualquer escrita. Estes testes seguem o
+   * invariante até o novo dono dele.
    */
-  it("a migration permite todo MIME que o pipeline aceita", () => {
-    const sql = ler("supabase/migrations/20260804230000_bucket_mime_types_do_registro.sql");
-    const faltando = [...MIME_TYPES_ACEITOS].filter((m) => !sql.includes(`'${m}'`));
-
-    expect(faltando).toEqual([]);
+  it("aceita todo MIME que o pipeline sabe processar", () => {
+    const recusados = [...MIME_TYPES_ACEITOS].filter(
+      (m) => !uploadAceito("arquivo.desconhecido", m),
+    );
+    expect(recusados).toEqual([]);
   });
 
-  it("a migration não permite MIME de formato sem parser", () => {
-    const sql = ler("supabase/migrations/20260804230000_bucket_mime_types_do_registro.sql");
+  it("aceita toda extensão do registro, mesmo sem o navegador informar o MIME", () => {
+    const recusadas = [...EXTENSOES_ACEITAS].filter((ext) => !uploadAceito(`documento${ext}`, ""));
+    expect(recusadas).toEqual([]);
+  });
 
-    expect(sql).not.toContain("msword");
-    expect(sql).not.toContain("wordprocessingml");
+  it("recusa formato sem parser", () => {
+    expect(
+      uploadAceito(
+        "contrato.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+    ).toBe(false);
+    expect(uploadAceito("contrato.doc", "application/msword")).toBe(false);
+    expect(uploadAceito("arquivo.exe", "application/x-msdownload")).toBe(false);
   });
 
   it("todo MIME canônico está entre os aceitos", () => {

@@ -23,8 +23,7 @@
     "test:integration": "vitest run --project integration",
     "test:coverage": "vitest run --coverage",
     "generate-types": "bash scripts/generate-types.sh",
-    "db:migrate": "npx supabase db push",
-    "db:reset": "npx supabase db reset",
+    "db:migrate": "bash scripts/aplicar-migrations.sh",
     "html:docs": "html-gen-docs --input docs/ --output docs-html/ --port 12468 --clean --theme catppuccin",
     "get:gmail-token": "bun run workers/gmail-scanner/get-token.ts",
     "prepare": "command -v git >/dev/null 2>&1 && husky || true",
@@ -33,9 +32,6 @@
     "worker:gmail": "bun run workers/gmail-scanner/src/index.ts",
     "worker:local": "bun run workers/local-scanner/src/index.ts",
     "--- PIPELINE: Passo-a-Passo para dados no Dashboard ---": "",
-    "pipeline:passo00:db-reset": "npx supabase db reset",
-    "pipeline:passo00:db-start": "npx supabase start",
-    "pipeline:passo00:db-status": "npx supabase status",
     "pipeline:passo01:scan-gmail": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50",
     "pipeline:passo01:scan-gmail:dry": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50 --dry-run",
     "pipeline:passo01:scan-gmail:10": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 10",
@@ -57,7 +53,6 @@
     "@sbf/domain": "workspace:*",
     "@sbf/validation": "workspace:*",
     "@sbf/worker-ingestion": "workspace:*",
-    "@supabase/supabase-js": "^2.110.9",
     "@types/bun": "latest",
     "@vitest/coverage-v8": "^4.1.10",
     "drizzle-orm": "^0.45.2",
@@ -73,7 +68,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "supabase": "^2.110.0",
     "zod": "~3.24.3"
   },
   "overrides": {

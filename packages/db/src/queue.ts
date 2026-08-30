@@ -78,6 +78,16 @@ export const JOB_CHANNEL = "sbf_jobs";
  * Espelha o poll original do worker de ingestão: os estados intermediários
  * (`parsing`, `classified`, …) são de posse de quem já está processando, e
  * `posted`/`failed` são terminais.
+ *
+ * LACUNA CONHECIDA (herdada do poll antigo, não introduzida aqui): um worker
+ * que morra no meio de um passo deixa o job parado num estado intermediário.
+ * `reapStaleJobs` devolve o lock, mas o status continua fora desta lista e
+ * nenhum claim volta a enxergá-lo. Fechar isso exige o reap saber para onde
+ * cada estado intermediário deve retroceder (`parsing` → `queued`,
+ * `ai_lite_enriching` → `parsed`, …) — conhecimento da máquina de estados do
+ * worker de ingestão, não da fila. Enquanto não existir, esses jobs precisam
+ * de reset manual, e o sintoma é um job com `locked_by` nulo e status
+ * intermediário parado há horas.
  */
 export const CLAIMABLE_STATUSES: readonly string[] = [
   "discovered",

@@ -10,11 +10,31 @@ import {
 } from "./pluggy-connections";
 
 let currentUserId = "";
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) },
-  }),
-}));
+// A identidade vem do nosso próprio `requireUser()` desde a saída do Supabase.
+// Este mock devolve `ownerId === id` porque estes testes exercitam o dono; a
+// distinção ator/dono (o admin de emergência operando sobre a base do dono)
+// tem cobertura própria em apps/web/src/app/api/**.
+vi.mock("@/lib/auth", () => {
+  const sessao = () =>
+    currentUserId
+      ? {
+          id: currentUserId,
+          ownerId: currentUserId,
+          email: "teste@exemplo.com",
+          role: "owner" as const,
+          name: "Teste",
+        }
+      : null;
+  return {
+    requireUser: async () => {
+      const s = sessao();
+      if (!s) throw new Error("Não autenticado");
+      return s;
+    },
+    getUser: async () => sessao(),
+    getUserOrNull: async () => sessao(),
+  };
+});
 vi.mock("@sbf/financial-connectors/pluggy", () => ({ PluggyProvider: { fromEnv: () => ({}) } }));
 
 const USER_A = "00000000-0000-0000-0000-0000000000a1";

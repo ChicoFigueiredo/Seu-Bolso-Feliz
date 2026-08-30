@@ -1,6 +1,7 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
+import { uploadAceito, descricaoDosFormatos } from "@sbf/contracts";
 import { getDb, schema } from "@sbf/db";
 import { createStorageClientFromEnv } from "@sbf/storage";
 import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne } from "drizzle-orm";
@@ -577,6 +578,14 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
 
   const file = formData.get("file") as File | null;
   if (!file) throw new Error("Arquivo não informado");
+
+  // Antes de gravar qualquer coisa. O bucket do Supabase recusava formato
+  // desconhecido; o S3 não recusa nada. Validar depois da escrita deixaria uma
+  // linha em `source_documents` apontando para um arquivo que o pipeline nunca
+  // vai conseguir ler.
+  if (!uploadAceito(file.name, file.type)) {
+    throw new Error(`Formato não suportado. Aceitamos ${descricaoDosFormatos()}.`);
+  }
 
   const fileBytes = new Uint8Array(await file.arrayBuffer());
   const contentHash = await computeContentHash(fileBytes);

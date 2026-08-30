@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import {
   createImportJob,
   createTransactionFromImport,
   getDefaultFinancialProductId,
   updateImportJob,
+  arquivarCsvImportado,
 } from "@/app/actions/import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +42,6 @@ interface ImportResult {
 }
 
 export default function ImportPage() {
-  const supabase = createClient();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ParsedRow[]>([]);
   const [importing, setImporting] = useState(false);
@@ -112,10 +111,6 @@ export default function ImportPage() {
     if (!file) return;
     setImporting(true);
 
-    // Upload CSV to storage
-    const filePath = `imports/${crypto.randomUUID()}.csv`;
-    await supabase.storage.from("user-files").upload(filePath, file, { contentType: "text/csv" });
-
     // Create import job
     const reader = new FileReader();
     reader.onload = async (ev) => {
@@ -124,7 +119,9 @@ export default function ImportPage() {
 
       const job = await createImportJob({
         source_type: "csv",
-        file_path: filePath,
+        // O original vai para o storage antes de qualquer parsing: é a única
+        // prova do que foi importado quando um número não bater meses depois.
+        file_path: await arquivarCsvImportado(file),
         status: "processing",
         total_rows: parsed.length,
       });

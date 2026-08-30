@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq, sql } from "drizzle-orm";
 import Link from "next/link";
 import { Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,11 +31,27 @@ const statusLabels: Record<string, string> = {
 };
 
 export default async function ConnectionsPage() {
-  const supabase = await createClient();
-  const { data: connections } = await supabase
-    .from("provider_connections")
-    .select("*, external_account_mappings(count)")
-    .order("created_at", { ascending: false });
+  const { ownerId } = await requireUser();
+  const db = getDb();
+  const connections = await db
+    .select({
+      id: schema.provider_connections.id,
+      institution_name: schema.provider_connections.institution_name,
+      status: schema.provider_connections.status,
+      last_synced_at: schema.provider_connections.last_synced_at,
+      account_count: sql<number>`count(${schema.external_account_mappings.id})`,
+    })
+    .from(schema.provider_connections)
+    .leftJoin(
+      schema.external_account_mappings,
+      and(
+        eq(schema.external_account_mappings.provider_connection_id, schema.provider_connections.id),
+        eq(schema.external_account_mappings.user_id, ownerId),
+      ),
+    )
+    .where(eq(schema.provider_connections.user_id, ownerId))
+    .groupBy(schema.provider_connections.id)
+    .orderBy(desc(schema.provider_connections.created_at));
 
   return (
     <div className="space-y-6">
@@ -47,7 +65,7 @@ export default async function ConnectionsPage() {
         <PluggyConnectButton />
       </div>
 
-      {(connections ?? []).length === 0 ? (
+      {connections.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Plug className="mb-4 size-12 text-muted-foreground" />
@@ -72,7 +90,7 @@ export default async function ConnectionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(connections ?? []).map((conn) => (
+                {connections.map((conn) => (
                   <TableRow key={conn.id}>
                     <TableCell className="font-medium">
                       {conn.institution_name ?? "Instituição desconhecida"}
@@ -82,9 +100,7 @@ export default async function ConnectionsPage() {
                         {statusLabels[conn.status] ?? conn.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center">
-                      {(conn.external_account_mappings as { count: number }[])?.[0]?.count ?? 0}
-                    </TableCell>
+                    <TableCell className="text-center">{Number(conn.account_count)}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {conn.last_synced_at
                         ? new Date(conn.last_synced_at).toLocaleString("pt-BR")

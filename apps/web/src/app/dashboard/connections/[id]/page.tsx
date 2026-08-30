@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,9 +25,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  getProviderConnections,
   getExternalAccountMappings,
   updateExternalAccountMapping,
 } from "@/app/actions/pluggy-connections";
+import { getFinancialProducts } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
 
 const IGNORE_VALUE = "__ignore__";
 
@@ -136,12 +138,13 @@ export default function ConnectionMappingPage() {
   const [products, setProducts] = useState<FinancialProductOption[]>([]);
 
   const load = useCallback(async () => {
-    const supabase = createClient();
-    const [{ data: connection }, mappingRows, { data: productRows }] = await Promise.all([
-      supabase.from("provider_connections").select("institution_name").eq("id", id).single(),
+    const [connections, mappingRows, productRows, institutions] = await Promise.all([
+      getProviderConnections(),
       getExternalAccountMappings(id),
-      supabase.from("financial_products").select("id, name, institutions(name)"),
+      getFinancialProducts(),
+      getInstitutions(),
     ]);
+    const connection = connections.find((c) => c.id === id);
 
     setInstitutionName(connection?.institution_name ?? "Instituição desconhecida");
     setMappings(
@@ -153,11 +156,12 @@ export default function ConnectionMappingPage() {
         status: m.status,
       })),
     );
+    const institutionNameById = new Map(institutions.map((i) => [i.id, i.name]));
     setProducts(
-      (productRows ?? []).map((p) => ({
+      productRows.map((p) => ({
         id: p.id,
         name: p.name,
-        institutionName: (p.institutions as { name: string } | null)?.name ?? "",
+        institutionName: institutionNameById.get(p.institution_id) ?? "",
       })),
     );
     setFetching(false);
