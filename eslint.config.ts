@@ -25,6 +25,12 @@ export default tseslint.config(
       "supabase/functions/**",
       "supabase/.temp/**", // artefato gitignorado do `supabase start`, não é código do projeto
       "docs-html/",
+      // Ferramental e saída do sync do design system (claude.ai/design). São
+      // gitignorados e contêm bundle vendorizado do React — ~2400 erros que
+      // afogam qualquer erro real do projeto.
+      ".ds-sync/",
+      "ds-bundle/",
+      ".design-sync/previews/",
       "**/*.d.ts",
       "**/database.types.ts", // auto-gerado pelo Supabase CLI
       // Gerados por drizzle-kit introspect. schema.ts tem 2 edições MANUAIS

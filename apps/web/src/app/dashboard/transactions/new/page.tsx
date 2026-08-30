@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createTransaction } from "@/app/actions/transactions";
+import { getFinancialProducts } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,55 +23,47 @@ import Link from "next/link";
 
 export default function NewTransactionPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<
     { id: string; name: string; institution_name: string }[]
   >([]);
 
   useEffect(() => {
-    supabase
-      .from("financial_products")
-      .select("id, name, institutions(name)")
-      .then(({ data }) => {
-        setProducts(
-          (data ?? []).map((p) => ({
-            id: p.id,
-            name: p.name,
-            institution_name: (p.institutions as { name: string } | null)?.name ?? "",
-          })),
-        );
-      });
-  }, [supabase]);
+    Promise.all([getFinancialProducts(), getInstitutions()]).then(([prods, institutions]) => {
+      const institutionName = new Map(institutions.map((i) => [i.id, i.name]));
+      setProducts(
+        prods.map((p) => ({
+          id: p.id,
+          name: p.name,
+          institution_name: institutionName.get(p.institution_id) ?? "",
+        })),
+      );
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
     const fd = new FormData(e.currentTarget);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setSaving(false);
-      return;
-    }
-    const { error } = await supabase.from("transactions").insert({
-      user_id: user.id,
-      description: fd.get("description") as string,
-      amount: Number(fd.get("amount")),
-      type: fd.get("type") as string,
-      event_date: fd.get("event_date") as string,
-      competence_date: (fd.get("competence_date") as string) || undefined,
-      financial_product_id: fd.get("product") as string,
-      notes: (fd.get("notes") as string) || undefined,
-      priority: (fd.get("priority") as string) || undefined,
-    });
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao salvar transação", { description: error.message });
-    } else {
+    try {
+      await createTransaction({
+        description: fd.get("description") as string,
+        amount: Number(fd.get("amount")),
+        type: fd.get("type") as string,
+        event_date: fd.get("event_date") as string,
+        competence_date: (fd.get("competence_date") as string) || undefined,
+        financial_product_id: fd.get("product") as string,
+        notes: (fd.get("notes") as string) || undefined,
+        priority: (fd.get("priority") as string) || undefined,
+      });
       toast.success("Transação criada com sucesso");
       router.push("/dashboard/transactions");
+    } catch (err) {
+      toast.error("Erro ao salvar transação", {
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setSaving(false);
     }
   }
 

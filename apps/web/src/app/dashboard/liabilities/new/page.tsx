@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { getFinancialProducts } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
+import { createLiability } from "@/app/actions/liabilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,60 +22,52 @@ import Link from "next/link";
 
 export default function NewLiabilityPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<
     { id: string; name: string; institution_name: string }[]
   >([]);
 
   useEffect(() => {
-    supabase
-      .from("financial_products")
-      .select("id, name, institutions(name)")
-      .then(({ data }) => {
-        setProducts(
-          (data ?? []).map((p) => ({
-            id: p.id,
-            name: p.name,
-            institution_name: (p.institutions as { name: string } | null)?.name ?? "",
-          })),
-        );
-      });
-  }, [supabase]);
+    Promise.all([getFinancialProducts(), getInstitutions()]).then(([prods, institutions]) => {
+      const institutionNameById = new Map(institutions.map((i) => [i.id, i.name]));
+      setProducts(
+        prods.map((p) => ({
+          id: p.id,
+          name: p.name,
+          institution_name: institutionNameById.get(p.institution_id) ?? "",
+        })),
+      );
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
     const fd = new FormData(e.currentTarget);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setSaving(false);
-      return;
-    }
-    const { error } = await supabase.from("liabilities").insert({
-      user_id: user.id,
-      name: fd.get("name") as string,
-      type: fd.get("type") as string,
-      financial_product_id: fd.get("product") as string,
-      original_amount: Number(fd.get("original_amount")),
-      outstanding_balance: Number(fd.get("outstanding_balance")),
-      interest_rate: fd.get("interest_rate") ? Number(fd.get("interest_rate")) / 100 : null,
-      rate_type: (fd.get("rate_type") as string) || null,
-      amortization_system: (fd.get("amortization") as string) || null,
-      total_installments: fd.get("total_installments")
-        ? Number(fd.get("total_installments"))
-        : null,
-      start_date: (fd.get("start_date") as string) || null,
-      end_date: (fd.get("end_date") as string) || null,
-    });
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao salvar", { description: error.message });
-    } else {
+    try {
+      await createLiability({
+        name: fd.get("name") as string,
+        type: fd.get("type") as string,
+        financial_product_id: fd.get("product") as string,
+        original_amount: Number(fd.get("original_amount")),
+        outstanding_balance: Number(fd.get("outstanding_balance")),
+        interest_rate: fd.get("interest_rate") ? Number(fd.get("interest_rate")) / 100 : null,
+        rate_type: (fd.get("rate_type") as string) || null,
+        amortization_system: (fd.get("amortization") as string) || null,
+        total_installments: fd.get("total_installments")
+          ? Number(fd.get("total_installments"))
+          : null,
+        start_date: (fd.get("start_date") as string) || null,
+        end_date: (fd.get("end_date") as string) || null,
+      });
       toast.success("Dívida cadastrada com sucesso");
       router.push("/dashboard/liabilities");
+    } catch (error) {
+      toast.error("Erro ao salvar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
     }
   }
 

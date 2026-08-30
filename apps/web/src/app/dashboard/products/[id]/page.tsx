@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import {
+  deleteFinancialProduct,
+  getFinancialProduct,
+  updateFinancialProduct,
+} from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,18 +60,23 @@ export default function EditProductPage() {
 
   useEffect(() => {
     async function load() {
-      const supabase = createClient();
-      const [productRes, instRes] = await Promise.all([
-        supabase.from("financial_products").select("*").eq("id", id).single(),
-        supabase.from("institutions").select("id, name").order("name"),
+      const [product, institutionRows] = await Promise.all([
+        getFinancialProduct(id),
+        getInstitutions(),
       ]);
-      if (productRes.data) {
-        setName(productRes.data.name);
-        setType(productRes.data.type);
-        setInstitutionId(productRes.data.institution_id);
-        setBalance(productRes.data.current_balance?.toString() ?? "");
+      if (product) {
+        setName(product.name);
+        setType(product.type);
+        setInstitutionId(product.institution_id);
+        setBalance(product.current_balance?.toString() ?? "");
       }
-      setInstitutions(instRes.data ?? []);
+      // A action ordena por display_order+name; mantém-se aqui a ordem
+      // alfabética que a tela já tinha.
+      setInstitutions(
+        institutionRows
+          .map((r) => ({ id: r.id, name: r.name }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
       setFetching(false);
     }
     load();
@@ -75,18 +85,17 @@ export default function EditProductPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("financial_products")
-      .update({
+    try {
+      await updateFinancialProduct(id, {
         name,
         type,
         institution_id: institutionId,
         current_balance: balance ? Number(balance) : null,
-      })
-      .eq("id", id);
-    if (error) {
-      toast.error("Erro ao atualizar", { description: error.message });
+      });
+    } catch (error) {
+      toast.error("Erro ao atualizar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }
@@ -97,10 +106,12 @@ export default function EditProductPage() {
 
   async function handleDelete() {
     setDeleting(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("financial_products").delete().eq("id", id);
-    if (error) {
-      toast.error("Erro ao excluir", { description: error.message });
+    try {
+      await deleteFinancialProduct(id);
+    } catch (error) {
+      toast.error("Erro ao excluir", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setDeleting(false);
       return;
     }

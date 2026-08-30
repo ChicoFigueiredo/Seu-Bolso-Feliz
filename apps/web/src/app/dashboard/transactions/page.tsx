@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Plus, Receipt, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,35 +42,63 @@ export default async function TransactionsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const supabase = await createClient();
+  const { ownerId } = await requireUser();
+  const db = getDb();
 
-  let query = supabase
-    .from("transactions")
-    .select(
-      "id, description, amount, event_date, type, is_confirmed, priority, supplier_id, source_document_id, suppliers(name)",
-      { count: "exact" },
-    )
-    .order("event_date", { ascending: false });
-
-  if (params.type) query = query.eq("type", params.type);
-  if (params.confirmed === "true") query = query.eq("is_confirmed", true);
-  if (params.confirmed === "false") query = query.eq("is_confirmed", false);
-  if (params.from) query = query.gte("event_date", params.from);
-  if (params.to) query = query.lte("event_date", params.to);
+  // Sem RLS, o filtro por dono precisa estar explícito nesta consulta e no
+  // JOIN abaixo (defesa em profundidade — ver apps/web/src/app/actions/painel-hoje.ts).
+  const conditions: SQL[] = [eq(schema.transactions.user_id, ownerId)];
+  if (params.type) conditions.push(eq(schema.transactions.type, params.type));
+  if (params.confirmed === "true") conditions.push(eq(schema.transactions.is_confirmed, true));
+  if (params.confirmed === "false") conditions.push(eq(schema.transactions.is_confirmed, false));
+  if (params.from) conditions.push(gte(schema.transactions.event_date, params.from));
+  if (params.to) conditions.push(lte(schema.transactions.event_date, params.to));
+  const where = and(...conditions);
 
   const page = Number(params.page ?? "1");
   const perPage = 25;
-  query = query.range((page - 1) * perPage, page * perPage - 1);
 
-  const { data: transactions, count } = await query;
-  const totalPages = Math.ceil((count ?? 0) / perPage);
+  const [transactions, [countRow]] = await Promise.all([
+    db
+      .select({
+        id: schema.transactions.id,
+        description: schema.transactions.description,
+        amount: schema.transactions.amount,
+        event_date: schema.transactions.event_date,
+        type: schema.transactions.type,
+        is_confirmed: schema.transactions.is_confirmed,
+        priority: schema.transactions.priority,
+        supplier_id: schema.transactions.supplier_id,
+        source_document_id: schema.transactions.source_document_id,
+        supplier_name: schema.suppliers.name,
+      })
+      .from(schema.transactions)
+      .leftJoin(
+        schema.suppliers,
+        and(
+          eq(schema.suppliers.id, schema.transactions.supplier_id),
+          eq(schema.suppliers.user_id, ownerId),
+        ),
+      )
+      .where(where)
+      .orderBy(desc(schema.transactions.event_date))
+      .limit(perPage)
+      .offset((page - 1) * perPage),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.transactions)
+      .where(where),
+  ]);
+
+  const count = Number(countRow?.count ?? 0);
+  const totalPages = Math.ceil(count / perPage);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Transações</h1>
-          <p className="text-muted-foreground">{count ?? 0} transações registradas</p>
+          <p className="text-muted-foreground">{count} transações registradas</p>
         </div>
         <Button asChild>
           <Link href="/dashboard/transactions/new">
@@ -80,7 +110,7 @@ export default async function TransactionsPage({
 
       <TransactionFilters current={params} />
 
-      {(transactions ?? []).length === 0 ? (
+      {transactions.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Receipt className="mb-4 size-12 text-muted-foreground" />
@@ -118,14 +148,14 @@ export default async function TransactionsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(transactions ?? []).map((t) => (
+                  {transactions.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="text-sm">{formatDate(t.event_date)}</TableCell>
                       <TableCell className="max-w-[200px] truncate font-medium">
                         {t.description ?? "—"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {(t.suppliers as { name: string } | null)?.name ?? "—"}
+                        {t.supplier_name ?? "—"}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">
@@ -151,11 +181,9 @@ export default async function TransactionsPage({
                         {formatCurrency(Math.abs(t.amount))}
                       </TableCell>
                       <TableCell>
-                        {(t as { source_document_id?: string | null }).source_document_id ? (
+                        {t.source_document_id ? (
                           <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
-                            <Link
-                              href={`/dashboard/documents/${(t as { source_document_id: string }).source_document_id}`}
-                            >
+                            <Link href={`/dashboard/documents/${t.source_document_id}`}>
                               <FileText className="size-3.5" />
                               Ver
                             </Link>

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { createSupplier } from "@/app/actions/suppliers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -76,26 +76,18 @@ export default function NewSupplierPage() {
     const type = formData.get("type") as string;
     const notes = (formData.get("notes") as string) || null;
 
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    const { error } = await supabase.from("suppliers").insert({
-      name,
-      type,
-      document_number: documentNumber || null,
-      trade_name: tradeName || null,
-      notes,
-      user_id: user.id,
-    });
-
-    if (error) {
-      toast.error("Erro ao criar fornecedor", { description: error.message });
+    try {
+      await createSupplier({
+        name,
+        type,
+        document_number: documentNumber || null,
+        trade_name: tradeName || null,
+        notes,
+      });
+    } catch (error) {
+      toast.error("Erro ao criar fornecedor", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }

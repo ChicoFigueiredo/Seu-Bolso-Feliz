@@ -39,6 +39,51 @@ const nextConfig: NextConfig = {
         destination: "/dashboard/settings#avancado",
         permanent: true,
       },
+
+      // Redesign da arquitetura de informação (shell novo em components/shell/):
+      // rotas antigas em inglês → rotas novas em português. Só os caminhos que
+      // ganharam página nova entram aqui; o resto (documents, suppliers,
+      // reports, settings, import) continua no ar sem redirect por enquanto.
+      {
+        source: "/dashboard/transactions",
+        destination: "/dashboard/movimentacoes",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/cards",
+        destination: "/dashboard/contas",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/products",
+        destination: "/dashboard/contas",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/institutions",
+        destination: "/dashboard/contas",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/statements",
+        destination: "/dashboard/contas",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/liabilities",
+        destination: "/dashboard/dividas",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/recurring",
+        destination: "/dashboard/recorrentes",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/connections",
+        destination: "/dashboard/conexoes",
+        permanent: true,
+      },
     ];
   },
 };

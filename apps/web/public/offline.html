@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#245C4A" />
+    <title>Você está offline · Seu Bolso Feliz</title>
+    <style>
+      /* Página estática, servida direto pelo service worker (ver public/sw.js)
+       * quando a rede falha numa navegação — por isso as cores do tema salvia
+       * estão copiadas à mão aqui (hex de packages/design-system/src/tokens.css)
+       * em vez de importadas: este arquivo não passa pelo bundle do Next. */
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        padding-bottom: max(24px, env(safe-area-inset-bottom));
+        padding-top: max(24px, env(safe-area-inset-top));
+        background: #f6f7f2;
+        color: #18231f;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Manrope, Helvetica, Arial,
+          sans-serif;
+      }
+      .card {
+        max-width: 380px;
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #dde4df;
+        border-radius: 22px;
+        box-shadow: 0 10px 30px rgba(24, 35, 31, 0.1);
+        padding: 32px 28px;
+        text-align: center;
+      }
+      .mark {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 18px;
+        border-radius: 16px;
+        background: #245c4a;
+        color: #f5efd9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 22px;
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 800;
+        margin: 0 0 8px;
+        letter-spacing: -0.01em;
+      }
+      p {
+        font-size: 13.5px;
+        line-height: 1.55;
+        color: #66736d;
+        margin: 0 0 22px;
+      }
+      button {
+        font: inherit;
+        font-weight: 700;
+        font-size: 13.5px;
+        color: #ffffff;
+        background: #245c4a;
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 22px;
+        cursor: pointer;
+      }
+      button:active {
+        background: #1b4638;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="mark" aria-hidden="true">sb</div>
+      <h1>Você está offline</h1>
+      <p>
+        Sem conexão agora não dá para buscar seus números atualizados — e, num app financeiro, é
+        melhor esperar do que mostrar algo que pode já ter mudado. Assim que a rede voltar, tente de
+        novo.
+      </p>
+      <button type="button" onclick="location.reload()">Tentar novamente</button>
+    </main>
+  </body>
+</html>

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { deleteInstitution, getInstitution, updateInstitution } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -47,11 +47,10 @@ export default function EditInstitutionPage() {
 
   useEffect(() => {
     async function load() {
-      const supabase = createClient();
-      const { data } = await supabase.from("institutions").select("*").eq("id", id).single();
-      if (data) {
-        setName(data.name);
-        setType(data.type);
+      const institution = await getInstitution(id);
+      if (institution) {
+        setName(institution.name);
+        setType(institution.type);
       }
       setFetching(false);
     }
@@ -61,10 +60,12 @@ export default function EditInstitutionPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("institutions").update({ name, type }).eq("id", id);
-    if (error) {
-      toast.error("Erro ao atualizar", { description: error.message });
+    try {
+      await updateInstitution(id, { name, type });
+    } catch (error) {
+      toast.error("Erro ao atualizar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }
@@ -75,10 +76,12 @@ export default function EditInstitutionPage() {
 
   async function handleDelete() {
     setDeleting(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("institutions").delete().eq("id", id);
-    if (error) {
-      toast.error("Erro ao excluir", { description: error.message });
+    try {
+      await deleteInstitution(id);
+    } catch (error) {
+      toast.error("Erro ao excluir", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setDeleting(false);
       return;
     }

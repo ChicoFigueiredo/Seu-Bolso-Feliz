@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,13 +33,47 @@ const statusVariants: Record<string, "default" | "secondary" | "destructive" | "
 };
 
 export default async function StatementsPage() {
-  const supabase = await createClient();
-  const { data: statements } = await supabase
-    .from("statement_cycles")
-    .select(
-      "id, reference_month, cycle_start_date, cycle_end_date, due_date, total_amount, paid_amount, status, cards(last_four_digits, card_brand, financial_products(name, institutions(name)))",
+  const { ownerId } = await requireUser();
+  const db = getDb();
+
+  // Sem RLS, o filtro por dono precisa estar explícito nesta consulta e em
+  // cada JOIN abaixo (defesa em profundidade — ver apps/web/src/app/actions/painel-hoje.ts).
+  const statements = await db
+    .select({
+      id: schema.statement_cycles.id,
+      reference_month: schema.statement_cycles.reference_month,
+      cycle_start_date: schema.statement_cycles.cycle_start_date,
+      cycle_end_date: schema.statement_cycles.cycle_end_date,
+      due_date: schema.statement_cycles.due_date,
+      total_amount: schema.statement_cycles.total_amount,
+      paid_amount: schema.statement_cycles.paid_amount,
+      status: schema.statement_cycles.status,
+      last_four_digits: schema.cards.last_four_digits,
+      card_brand: schema.cards.card_brand,
+      product_name: schema.financial_products.name,
+      institution_name: schema.institutions.name,
+    })
+    .from(schema.statement_cycles)
+    .leftJoin(
+      schema.cards,
+      and(eq(schema.cards.id, schema.statement_cycles.card_id), eq(schema.cards.user_id, ownerId)),
     )
-    .order("due_date", { ascending: false });
+    .leftJoin(
+      schema.financial_products,
+      and(
+        eq(schema.financial_products.id, schema.cards.financial_product_id),
+        eq(schema.financial_products.user_id, ownerId),
+      ),
+    )
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.institutions.id, schema.financial_products.institution_id),
+        eq(schema.institutions.user_id, ownerId),
+      ),
+    )
+    .where(eq(schema.statement_cycles.user_id, ownerId))
+    .orderBy(desc(schema.statement_cycles.due_date));
 
   return (
     <div className="space-y-6">
@@ -46,7 +82,7 @@ export default async function StatementsPage() {
         <p className="text-muted-foreground">Ciclos de fatura dos seus cartões de crédito</p>
       </div>
 
-      {(statements ?? []).length === 0 ? (
+      {statements.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <CreditCard className="mb-4 size-12 text-muted-foreground" />
@@ -73,18 +109,9 @@ export default async function StatementsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(statements ?? []).map((s) => {
-                  const card = s.cards as {
-                    last_four_digits: string;
-                    card_brand: string | null;
-                    financial_products: {
-                      name: string;
-                      institutions: { name: string } | null;
-                    } | null;
-                  } | null;
-                  const inst = card?.financial_products?.institutions?.name ?? "";
-                  const prod = card?.financial_products?.name ?? "";
-                  const cardLabel = `${inst} ${prod} •${card?.last_four_digits ?? ""}`.trim();
+                {statements.map((s) => {
+                  const cardLabel =
+                    `${s.institution_name ?? ""} ${s.product_name ?? ""} •${s.last_four_digits ?? ""}`.trim();
                   const overdue = isOverdue(s.due_date) && s.status !== "paid";
 
                   return (

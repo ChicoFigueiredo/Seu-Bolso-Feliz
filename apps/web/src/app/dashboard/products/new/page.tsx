@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { createFinancialProduct } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,9 +37,12 @@ export default function NewProductPage() {
 
   useEffect(() => {
     async function loadInstitutions() {
-      const supabase = createClient();
-      const { data } = await supabase.from("institutions").select("id, name").order("name");
-      setInstitutions(data ?? []);
+      const rows = await getInstitutions();
+      // A action ordena por display_order+name; a lista aqui é só um combo
+      // de escolha, então mantém-se a ordem alfabética que a tela já tinha.
+      setInstitutions(
+        rows.map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name)),
+      );
     }
     loadInstitutions();
   }, []);
@@ -48,24 +52,18 @@ export default function NewProductPage() {
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    const { error } = await supabase.from("financial_products").insert({
-      user_id: user.id,
-      name: formData.get("name") as string,
-      type: formData.get("type") as string,
-      institution_id: formData.get("institution_id") as string,
-      current_balance: formData.get("balance") ? Number(formData.get("balance")) : null,
-    });
 
-    if (error) {
-      toast.error("Erro ao criar produto", { description: error.message });
+    try {
+      await createFinancialProduct({
+        name: formData.get("name") as string,
+        type: formData.get("type") as string,
+        institution_id: formData.get("institution_id") as string,
+        current_balance: formData.get("balance") ? Number(formData.get("balance")) : null,
+      });
+    } catch (error) {
+      toast.error("Erro ao criar produto", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }
