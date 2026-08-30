@@ -5,8 +5,15 @@
  * definitivos. Separada de `approve_draft_batch` de propósito: aprovar e
  * lançar são atos distintos (§9 do plano mestre), e nem o agente de IA nem o
  * MCP devem conseguir transformar um documento em dinheiro numa chamada só.
+ *
+ * `fn_materialize_draft_record` continua existindo no Neon (SECURITY
+ * DEFINER), mas perdeu a amarração a `auth.uid()` que o RLS/JWT do Supabase
+ * garantia. Por isso o draft é lido e confirmado como dono de `userId`
+ * *antes* de chamar a função — a autorização é deste call site, não da
+ * função (mesmo desenho de apps/web/src/app/actions/materialization.ts).
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { schema, type Database } from "@sbf/db";
 import {
   POSTABLE_SCHEMAS,
   TARGET_TABLES,
@@ -37,40 +44,44 @@ export interface PostBatchResult {
 const POSTABLE_STATUSES = ["approved", "corrected"];
 
 export async function postDraftBatch(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   batchId: string,
 ): Promise<PostBatchResult> {
-  const { data: batch, error: batchError } = await supabase
-    .from("draft_batches")
-    .select("id")
-    .eq("id", batchId)
-    .eq("user_id", userId)
-    .single();
+  const [batch] = await db
+    .select({ id: schema.draft_batches.id })
+    .from(schema.draft_batches)
+    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, userId)));
 
-  if (batchError || !batch) {
+  if (!batch) {
     throw new Error(`Batch not found or not owned by user: ${batchId}`);
   }
 
-  const { data: drafts, error } = await supabase
-    .from("draft_records")
-    .select("id, draft_type, status, draft_data, draft_schema_version, posted_record_id")
-    .eq("batch_id", batchId)
-    .eq("user_id", userId)
-    .in("status", POSTABLE_STATUSES);
-
-  if (error) throw new Error(`Failed to read drafts: ${error.message}`);
+  const drafts = await db
+    .select({
+      id: schema.draft_records.id,
+      draft_type: schema.draft_records.draft_type,
+      draft_data: schema.draft_records.draft_data,
+      draft_schema_version: schema.draft_records.draft_schema_version,
+      posted_record_id: schema.draft_records.posted_record_id,
+    })
+    .from(schema.draft_records)
+    .where(
+      and(
+        eq(schema.draft_records.batch_id, batchId),
+        eq(schema.draft_records.user_id, userId),
+        inArray(schema.draft_records.status, POSTABLE_STATUSES),
+      ),
+    );
 
   const results: PostDraftResult[] = [];
 
-  for (const draft of drafts ?? []) {
-    const draftId = draft.id as string;
-
+  for (const draft of drafts) {
     if (draft.posted_record_id) {
       results.push({
-        draftId,
+        draftId: draft.id,
         success: true,
-        postedRecordId: draft.posted_record_id as string,
+        postedRecordId: draft.posted_record_id,
         postedRecordType: null,
         message: "Já materializado anteriormente",
         validationErrors: [],
@@ -79,10 +90,10 @@ export async function postDraftBatch(
     }
 
     const draftType = draft.draft_type as DraftType;
-    const schema = POSTABLE_SCHEMAS[draftType];
-    if (!schema) {
+    const postableSchema = POSTABLE_SCHEMAS[draftType];
+    if (!postableSchema) {
       results.push({
-        draftId,
+        draftId: draft.id,
         success: false,
         postedRecordId: null,
         postedRecordType: null,
@@ -93,13 +104,13 @@ export async function postDraftBatch(
     }
 
     const parsed = parseDraftPayload({
-      draft_type: draft.draft_type as string,
+      draft_type: draft.draft_type,
       draft_data: draft.draft_data,
-      draft_schema_version: draft.draft_schema_version as number | null,
+      draft_schema_version: draft.draft_schema_version,
     });
     if (!parsed.ok) {
       results.push({
-        draftId,
+        draftId: draft.id,
         success: false,
         postedRecordId: null,
         postedRecordType: null,
@@ -109,10 +120,10 @@ export async function postDraftBatch(
       continue;
     }
 
-    const postable = schema.safeParse(parsed.payload);
+    const postable = postableSchema.safeParse(parsed.payload);
     if (!postable.success) {
       results.push({
-        draftId,
+        draftId: draft.id,
         success: false,
         postedRecordId: null,
         postedRecordType: null,
@@ -122,37 +133,59 @@ export async function postDraftBatch(
       continue;
     }
 
+    const targetTable = TARGET_TABLES[draftType];
     const buildInsert = TO_INSERT[draftType] as (p: unknown) => Record<string, unknown>;
+    const insertPayload = buildInsert(postable.data);
 
-    const { data: rpcResult, error: rpcError } = await supabase.rpc("fn_materialize_draft_record", {
-      p_user_id: userId,
-      p_draft_id: draftId,
-      p_target_table: TARGET_TABLES[draftType],
-      p_insert_payload: buildInsert(postable.data),
-      p_actor: "mcp",
-    });
+    try {
+      // RETURNS jsonb (escalar, não tabela): "SELECT fn(...) AS result" é a
+      // forma correta — ver o comentário equivalente em
+      // apps/web/src/app/actions/materialization.ts, confirmado
+      // empiricamente contra o Postgres local.
+      const result = await db.execute<{
+        result: { status: string; posted_record_id: string; posted_record_type: string };
+      }>(
+        sql`SELECT fn_materialize_draft_record(
+          ${userId}::uuid,
+          ${draft.id}::uuid,
+          ${targetTable}::text,
+          ${JSON.stringify(insertPayload)}::jsonb,
+          ${"mcp"}::text
+        ) AS result`,
+      );
+      const rpcResult = result.rows[0]?.result;
 
-    if (rpcError) {
+      if (!rpcResult) {
+        results.push({
+          draftId: draft.id,
+          success: false,
+          postedRecordId: null,
+          postedRecordType: null,
+          message: "Falha ao lançar: função não retornou resultado",
+          validationErrors: [],
+        });
+        continue;
+      }
+
       results.push({
-        draftId,
+        draftId: draft.id,
+        success: true,
+        postedRecordId: rpcResult.posted_record_id,
+        postedRecordType: rpcResult.posted_record_type,
+        message:
+          rpcResult.status === "already_posted" ? "Já materializado anteriormente" : "Lançado",
+        validationErrors: [],
+      });
+    } catch (err) {
+      results.push({
+        draftId: draft.id,
         success: false,
         postedRecordId: null,
         postedRecordType: null,
-        message: rpcError.message,
+        message: `Falha ao lançar: ${err instanceof Error ? err.message : String(err)}`,
         validationErrors: [],
       });
-      continue;
     }
-
-    const r = rpcResult as { status: string; posted_record_id: string; posted_record_type: string };
-    results.push({
-      draftId,
-      success: true,
-      postedRecordId: r.posted_record_id,
-      postedRecordType: r.posted_record_type,
-      message: r.status === "already_posted" ? "Já materializado anteriormente" : "Lançado",
-      validationErrors: [],
-    });
   }
 
   const succeeded = results.filter((r) => r.success).length;

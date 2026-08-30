@@ -65,6 +65,35 @@ jobs:
   test:
     name: Testes (unit, integração, e2e)
     runs-on: ubuntu-latest
+
+    # Postgres de verdade, não dublê. Os testes de integração exercitam
+    # trigger, constraint, SKIP LOCKED e LISTEN/NOTIFY — nada disso existe num
+    # mock, e é justamente onde os defeitos moram.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sbf
+          POSTGRES_PASSWORD: sbf
+          POSTGRES_DB: sbf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sbf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Três variáveis distintas de propósito: cada suíte semeia e apaga dados,
+      # e nenhuma delas pode cair na DATABASE_URL de alguém por engano. Sem a
+      # variável, a suíte correspondente se pula — foi assim que 14 arquivos de
+      # teste ficaram quebrados por semanas sem ninguém ver.
+      INTEGRATION_TEST_DATABASE_URL: postgresql://sbf:sbf@127.0.0.1:5432/sbf
+      TEST_DATABASE_URL: postgresql://sbf:sbf@127.0.0.1:5432/sbf
+      QUEUE_TEST_DATABASE_URL: postgresql://sbf:sbf@127.0.0.1:5432/sbf
+      DATABASE_URL: postgresql://sbf:sbf@127.0.0.1:5432/sbf
+
     steps:
       - uses: actions/checkout@v4
 
@@ -72,35 +101,27 @@ jobs:
         with:
           bun-version: 1.3.11
 
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
       - run: bun install --frozen-lockfile
 
-      # `db reset` aplica TODAS as migrations do zero. Isso é o que valida que
-      # elas reconstroem o schema — verificação que nunca existiu, porque o
-      # job antigo gerava tipos a partir de um projeto remoto já migrado.
-      - name: Subir Supabase local e aplicar migrations
+      # schema.sql é o DDL canônico; as migrations por cima são o delta desde
+      # o snapshot. Aplicar as duas coisas do zero a cada run é o que garante
+      # que elas realmente reconstroem o banco.
+      - name: Aplicar schema e migrations
         run: |
-          supabase start
-          supabase db reset --no-seed
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f packages/db/schema.sql
+          for m in packages/db/migrations/*.sql; do
+            echo "→ $(basename "$m")"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$m"
+          done
 
-      # A chave secreta local é fixa (mesmo valor em qualquer máquina), mas
-      # não pode ficar hardcoded em código: o padrão `sb_secret_...` aciona o
-      # secret scanning do GitHub mesmo sendo uma credencial só de localhost.
-      # Lida em runtime a partir do `supabase start` desta run.
-      - name: Exportar chave secreta local do Supabase
+      # Falha alto se alguém adicionar uma suíte que se pula em silêncio: um
+      # teste pulado passa no CI e não protege nada.
+      - name: Conferir que nenhuma suíte de integração está sendo pulada
         run: |
-          SECRET_KEY=$(supabase status -o env | grep '^SECRET_KEY=' | cut -d'"' -f2)
-          echo "SUPABASE_SECRET_KEY=$SECRET_KEY" >> "$GITHUB_ENV"
-
-      - name: Validar tipos gerados contra o schema
-        run: |
-          supabase gen types typescript --local > /tmp/generated.ts
-          if ! diff -q packages/shared-types/src/database.types.ts /tmp/generated.ts; then
-            echo "::warning::database.types.ts diverge do schema. Rode 'bun run generate-types'."
-            diff packages/shared-types/src/database.types.ts /tmp/generated.ts || true
+          if bunx vitest run --project integration --reporter=json 2>/dev/null \
+             | grep -q '"status":"skipped"'; then
+            echo "::error::Há teste de integração sendo pulado — provavelmente falta variável de banco."
+            exit 1
           fi
 
       - name: Testes unitários
@@ -112,10 +133,6 @@ jobs:
       - name: Testes E2E
         run: bunx vitest run --project e2e
 
-      - name: Parar Supabase
-        if: always()
-        run: supabase stop || true
-
   build:
     name: Build web
     runs-on: ubuntu-latest
@@ -126,9 +143,8 @@ jobs:
           bun-version: 1.3.11
       - run: bun install --frozen-lockfile
       - run: bun run build
-        # Valores de fachada: o build não fala com o Supabase, mas o cliente é
-        # construído em tempo de import. `NEXT_PUBLIC_SUPABASE_ANON_KEY` ficava
-        # aqui e não era lida por ninguém — o código lê a variável abaixo.
+        # Valores de fachada: o build não abre conexão nem assina nada, mas
+        # AUTH_SECRET tem validação de tamanho e o build reclama sem ele.
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
+          AUTH_SECRET: apenas-para-o-build-nao-vale-em-lugar-nenhum-000
+          DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
