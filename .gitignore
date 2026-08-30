@@ -58,3 +58,8 @@ tmp/
 # artefato de código. `bun run pipeline:scan-local` e `--dir ./inbox` apontam
 # para cá por padrão.
 inbox/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

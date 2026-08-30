@@ -1,0 +1,580 @@
+/* -----------------------------------------------------------------------------
+ * Seu Bolso Feliz — design tokens
+ *
+ * Extraidos verbatim do canvas "Seu Bolso Feliz — Redesign" (Claude Design).
+ * Sete temas: cinco claros (salvia, ocre, azul, linho, menta) e dois escuros
+ * (noite, grafite). `salvia` e o tema canonico e serve de padrao em :root.
+ *
+ * Trocar de tema = trocar o atributo data-sbf-theme no elemento raiz do app
+ * (o componente <SbfTheme> faz isso). Nenhum componente le cor direta: tudo
+ * passa por var(--token), entao um tema novo nao exige tocar em componente.
+ * --------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Instrument+Serif&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=swap');
+
+/* Tema padrao (salvia) — aplicado mesmo sem data-sbf-theme, para que um
+ * componente isolado (preview, card do design system) nunca renderize sem cor. */
+:root {
+  --bg:#F6F7F2;
+  --surface:#FFFFFF;
+  --surface-2:#FBFCFA;
+  --hover:#FAFBF9;
+  --hover-2:#EDF2EE;
+  --muted:#F1F4F0;
+  --line:#DDE4DF;
+  --line-soft:#EDF1EE;
+  --text:#18231F;
+  --text-2:#3A4A43;
+  --text-3:#66736D;
+  --text-4:#8A968F;
+  --text-5:#9AA8A2;
+  --primary:#245C4A;
+  --primary-dark:#1B4638;
+  --primary-ink:#1F5240;
+  --primary-soft:#E5F0E9;
+  --primary-line:#B7CFC2;
+  --primary-soft-2:#D6E8DD;
+  --primary-tint:#CFE2D6;
+  --paid-bg:#F4F8F5;
+  --on-primary:#FFFFFF;
+  --hero-bg:#245C4A;
+  --hero-text:#FFFFFF;
+  --hero-sub:#BFD8CC;
+  --hero-accent:#F5EFD9;
+  --hero-soft:#EAF3EC;
+  --secondary:#496A7A;
+  --secondary-ink:#35566A;
+  --secondary-soft:#EAF0F3;
+  --secondary-line:#C9D8DE;
+  --secondary-hover:#DDE8EE;
+  --secondary-text:#3E5A67;
+  --secondary-text-2:#2C4A5A;
+  --accent:#C7A85A;
+  --accent-soft:#F5EFD9;
+  --accent-ink:#7A6320;
+  --accent-ink-2:#4A3F17;
+  --warn:#975E1C;
+  --warn-soft:#FBF0E2;
+  --warn-bg:#FDF7EE;
+  --warn-line:#F0DFC4;
+  --success:#2F7D5A;
+  --danger:#A33A3A;
+  --toast-bg:#18231F;
+  --toast-text:#F3F6F2;
+  --header-bg:rgba(246,247,242,.9);
+  --nav-bg:rgba(255,255,255,.96);
+  --toast-icon:#C7A85A;
+
+  /* Escalas nao-cromaticas, comuns a todos os temas */
+  --sbf-font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --sbf-font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --sbf-font-icon: 'Material Symbols Rounded';
+
+  --sbf-radius-sm: 8px;
+  --sbf-radius-md: 12px;
+  --sbf-radius-lg: 16px;
+  --sbf-radius-xl: 22px;
+  --sbf-radius-pill: 999px;
+
+  --sbf-space-1: 4px;
+  --sbf-space-2: 8px;
+  --sbf-space-3: 12px;
+  --sbf-space-4: 16px;
+  --sbf-space-5: 20px;
+  --sbf-space-6: 24px;
+  --sbf-space-7: 32px;
+  --sbf-space-8: 44px;
+
+  --sbf-shadow-card: 0 1px 2px rgba(24, 35, 31, .04);
+  --sbf-shadow-raised: 0 10px 30px rgba(24, 35, 31, .10);
+  --sbf-shadow-sheet: 0 -12px 40px rgba(24, 35, 31, .18);
+
+  --sbf-motion-fast: .18s;
+  --sbf-motion-base: .3s;
+  --sbf-motion-slow: .35s;
+  --sbf-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+/* Salvia — claro canonico. Verde profundo + fundo quente. */
+[data-sbf-theme="salvia"] {
+  --bg:#F6F7F2;
+  --surface:#FFFFFF;
+  --surface-2:#FBFCFA;
+  --hover:#FAFBF9;
+  --hover-2:#EDF2EE;
+  --muted:#F1F4F0;
+  --line:#DDE4DF;
+  --line-soft:#EDF1EE;
+  --text:#18231F;
+  --text-2:#3A4A43;
+  --text-3:#66736D;
+  --text-4:#8A968F;
+  --text-5:#9AA8A2;
+  --primary:#245C4A;
+  --primary-dark:#1B4638;
+  --primary-ink:#1F5240;
+  --primary-soft:#E5F0E9;
+  --primary-line:#B7CFC2;
+  --primary-soft-2:#D6E8DD;
+  --primary-tint:#CFE2D6;
+  --paid-bg:#F4F8F5;
+  --on-primary:#FFFFFF;
+  --hero-bg:#245C4A;
+  --hero-text:#FFFFFF;
+  --hero-sub:#BFD8CC;
+  --hero-accent:#F5EFD9;
+  --hero-soft:#EAF3EC;
+  --secondary:#496A7A;
+  --secondary-ink:#35566A;
+  --secondary-soft:#EAF0F3;
+  --secondary-line:#C9D8DE;
+  --secondary-hover:#DDE8EE;
+  --secondary-text:#3E5A67;
+  --secondary-text-2:#2C4A5A;
+  --accent:#C7A85A;
+  --accent-soft:#F5EFD9;
+  --accent-ink:#7A6320;
+  --accent-ink-2:#4A3F17;
+  --warn:#975E1C;
+  --warn-soft:#FBF0E2;
+  --warn-bg:#FDF7EE;
+  --warn-line:#F0DFC4;
+  --success:#2F7D5A;
+  --danger:#A33A3A;
+  --toast-bg:#18231F;
+  --toast-text:#F3F6F2;
+  --header-bg:rgba(246,247,242,.9);
+  --nav-bg:rgba(255,255,255,.96);
+  --toast-icon:#C7A85A;
+}
+
+/* Ocre — claro, fundo pergaminho, verde mais suave. */
+[data-sbf-theme="ocre"] {
+  --bg:#F7F2E8;
+  --surface:#FFFDF7;
+  --surface-2:#FBF7EE;
+  --hover:#FBF6EC;
+  --hover-2:#F3EBDA;
+  --muted:#F3EDE1;
+  --line:#E3D9C6;
+  --line-soft:#EFE7D8;
+  --text:#23201A;
+  --text-2:#4A4437;
+  --text-3:#746B5A;
+  --text-4:#9A9080;
+  --text-5:#ABA294;
+  --primary:#3F6B4E;
+  --primary-dark:#2F5540;
+  --primary-ink:#34573F;
+  --primary-soft:#E4EEE3;
+  --primary-line:#BFD4BE;
+  --primary-soft-2:#D6E7D5;
+  --primary-tint:#CFE1CD;
+  --paid-bg:#F2F7F1;
+  --on-primary:#FFFDF7;
+  --hero-bg:#3F6B4E;
+  --hero-text:#FFFDF7;
+  --hero-sub:#D9E7D8;
+  --hero-accent:#F6E9C9;
+  --hero-soft:#E8F1E7;
+  --secondary:#6A7C8A;
+  --secondary-ink:#4A5A66;
+  --secondary-soft:#EBEFF2;
+  --secondary-line:#D2DBE1;
+  --secondary-hover:#DFE6EA;
+  --secondary-text:#52626E;
+  --secondary-text-2:#3E4D58;
+  --accent:#C08A3E;
+  --accent-soft:#F7EBD3;
+  --accent-ink:#7A5A22;
+  --accent-ink-2:#4E3A16;
+  --warn:#93601F;
+  --warn-soft:#F7EAD6;
+  --warn-bg:#FCF5E9;
+  --warn-line:#EBDCC0;
+  --success:#367D57;
+  --danger:#A03A32;
+  --toast-bg:#23201A;
+  --toast-text:#F7F2E8;
+  --header-bg:rgba(247,242,232,.9);
+  --nav-bg:rgba(255,253,247,.96);
+  --toast-icon:#C08A3E;
+}
+
+/* Azul — claro, primario azul ardosia; o mais frio dos claros. */
+[data-sbf-theme="azul"] {
+  --bg:#F2F5F7;
+  --surface:#FFFFFF;
+  --surface-2:#FAFCFD;
+  --hover:#F7FAFB;
+  --hover-2:#E9F0F4;
+  --muted:#EDF2F5;
+  --line:#D6E0E6;
+  --line-soft:#E7EDF1;
+  --text:#16222A;
+  --text-2:#384A55;
+  --text-3:#63737E;
+  --text-4:#8A98A1;
+  --text-5:#9AA7AF;
+  --primary:#2C5468;
+  --primary-dark:#1F3F4F;
+  --primary-ink:#24485A;
+  --primary-soft:#E1EDF2;
+  --primary-line:#B4CFDA;
+  --primary-soft-2:#D2E4EC;
+  --primary-tint:#C9DEE7;
+  --paid-bg:#F1F7F4;
+  --on-primary:#FFFFFF;
+  --hero-bg:#2C5468;
+  --hero-text:#FFFFFF;
+  --hero-sub:#C4DCE6;
+  --hero-accent:#F1E7CC;
+  --hero-soft:#E3EEF3;
+  --secondary:#3E6B58;
+  --secondary-ink:#2F5544;
+  --secondary-soft:#E6F0EA;
+  --secondary-line:#C3DACD;
+  --secondary-hover:#D8E8DF;
+  --secondary-text:#37604D;
+  --secondary-text-2:#2A4C3C;
+  --accent:#C7A85A;
+  --accent-soft:#F4EDD8;
+  --accent-ink:#7A6320;
+  --accent-ink-2:#4A3F17;
+  --warn:#92601F;
+  --warn-soft:#F7EBD8;
+  --warn-bg:#FCF6EC;
+  --warn-line:#EBDCC2;
+  --success:#2F7D5A;
+  --danger:#A33A3A;
+  --toast-bg:#16222A;
+  --toast-text:#F2F5F7;
+  --header-bg:rgba(242,245,247,.9);
+  --nav-bg:rgba(255,255,255,.96);
+  --toast-icon:#C7A85A;
+}
+
+/* Linho — claro neutro quente, verde dessaturado. */
+[data-sbf-theme="linho"] {
+  --bg:#F4F3EF;
+  --surface:#FFFFFF;
+  --surface-2:#FAF9F6;
+  --hover:#F8F7F3;
+  --hover-2:#EEECE5;
+  --muted:#F0EFE9;
+  --line:#DFDCD3;
+  --line-soft:#EBE9E2;
+  --text:#1E1F1B;
+  --text-2:#45463F;
+  --text-3:#6E6F66;
+  --text-4:#96978D;
+  --text-5:#A6A79D;
+  --primary:#3D5A4C;
+  --primary-dark:#2E463A;
+  --primary-ink:#334C40;
+  --primary-soft:#E6EDE8;
+  --primary-line:#C3D2C8;
+  --primary-soft-2:#D8E5DC;
+  --primary-tint:#CFDDD4;
+  --paid-bg:#F3F7F4;
+  --on-primary:#FFFFFF;
+  --hero-bg:#3D5A4C;
+  --hero-text:#FFFFFF;
+  --hero-sub:#D2E0D6;
+  --hero-accent:#F2E8D2;
+  --hero-soft:#E9EFEA;
+  --secondary:#6C7C86;
+  --secondary-ink:#4C5A63;
+  --secondary-soft:#ECEFF1;
+  --secondary-line:#D5DBDF;
+  --secondary-hover:#E0E5E8;
+  --secondary-text:#54626B;
+  --secondary-text-2:#404C54;
+  --accent:#B08C63;
+  --accent-soft:#F3EADC;
+  --accent-ink:#6E5432;
+  --accent-ink-2:#46351F;
+  --warn:#8C6127;
+  --warn-soft:#F5EADA;
+  --warn-bg:#FBF6EE;
+  --warn-line:#E8DCC8;
+  --success:#3A7A5C;
+  --danger:#9E3E38;
+  --toast-bg:#1E1F1B;
+  --toast-text:#F4F3EF;
+  --header-bg:rgba(244,243,239,.9);
+  --nav-bg:rgba(255,255,255,.96);
+  --toast-icon:#B08C63;
+}
+
+/* Menta — claro, verde mais vivo e fundo esverdeado. */
+[data-sbf-theme="menta"] {
+  --bg:#F3F8F4;
+  --surface:#FFFFFF;
+  --surface-2:#FAFDFB;
+  --hover:#F6FBF8;
+  --hover-2:#E7F2EB;
+  --muted:#EDF5F0;
+  --line:#D5E4DA;
+  --line-soft:#E6F0EA;
+  --text:#12211A;
+  --text-2:#36483E;
+  --text-3:#5F7268;
+  --text-4:#88998F;
+  --text-5:#98A79D;
+  --primary:#1F6B54;
+  --primary-dark:#175442;
+  --primary-ink:#1B5C48;
+  --primary-soft:#DFF1E7;
+  --primary-line:#ADD8C4;
+  --primary-soft-2:#CFE9DC;
+  --primary-tint:#C6E4D5;
+  --paid-bg:#EFF8F3;
+  --on-primary:#FFFFFF;
+  --hero-bg:#1F6B54;
+  --hero-text:#FFFFFF;
+  --hero-sub:#C9E6D8;
+  --hero-accent:#F3EBCF;
+  --hero-soft:#E2F1EA;
+  --secondary:#4E7C8C;
+  --secondary-ink:#365A68;
+  --secondary-soft:#E8F1F4;
+  --secondary-line:#C6DCE3;
+  --secondary-hover:#DAE9EE;
+  --secondary-text:#3F6675;
+  --secondary-text-2:#2F515E;
+  --accent:#C9A85E;
+  --accent-soft:#F5EEDA;
+  --accent-ink:#7A6322;
+  --accent-ink-2:#4A3F18;
+  --warn:#8F6321;
+  --warn-soft:#F6ECDA;
+  --warn-bg:#FBF7EE;
+  --warn-line:#E9DEC5;
+  --success:#2A8060;
+  --danger:#A33A3A;
+  --toast-bg:#12211A;
+  --toast-text:#F3F8F4;
+  --header-bg:rgba(243,248,244,.9);
+  --nav-bg:rgba(255,255,255,.96);
+  --toast-icon:#C9A85E;
+}
+
+/* Noite — escuro canonico, primario verde claro sobre fundo carvao. */
+[data-sbf-theme="noite"] {
+  --bg:#0F1512;
+  --surface:#171F1B;
+  --surface-2:#141B17;
+  --hover:#1D2620;
+  --hover-2:#223029;
+  --muted:#1F2823;
+  --line:#2A3831;
+  --line-soft:#232E28;
+  --text:#E8EEE9;
+  --text-2:#C2CFC7;
+  --text-3:#94A39B;
+  --text-4:#93A39A;
+  --text-5:#66756D;
+  --primary:#6FB295;
+  --primary-dark:#8AC4AA;
+  --primary-ink:#A7D5C0;
+  --primary-soft:#1E3A30;
+  --primary-line:#2F5A49;
+  --primary-soft-2:#24463A;
+  --primary-tint:#2A5142;
+  --paid-bg:#17251E;
+  --on-primary:#0F1512;
+  --hero-bg:#1E4436;
+  --hero-text:#F2F8F4;
+  --hero-sub:#9CC4B2;
+  --hero-accent:#E6CE8E;
+  --hero-soft:#24483B;
+  --secondary:#7FA8BC;
+  --secondary-ink:#A9CBDB;
+  --secondary-soft:#1B2A32;
+  --secondary-line:#2C424D;
+  --secondary-hover:#23343D;
+  --secondary-text:#A9C6D3;
+  --secondary-text-2:#BBD5E0;
+  --accent:#D6B96B;
+  --accent-soft:#332B14;
+  --accent-ink:#E4CE8F;
+  --accent-ink-2:#F0E3BA;
+  --warn:#E0A65C;
+  --warn-soft:#3A2A14;
+  --warn-bg:#241C10;
+  --warn-line:#4A3720;
+  --success:#6FBF95;
+  --danger:#E58686;
+  --toast-bg:#E8EEE9;
+  --toast-text:#0F1512;
+  --header-bg:rgba(15,21,18,.92);
+  --nav-bg:rgba(23,31,27,.96);
+  --toast-icon:#1F5C46;
+}
+
+/* Grafite — escuro azulado, primario azul claro. */
+[data-sbf-theme="grafite"] {
+  --bg:#101418;
+  --surface:#182028;
+  --surface-2:#141A20;
+  --hover:#1E2731;
+  --hover-2:#24303B;
+  --muted:#1F2831;
+  --line:#2B3742;
+  --line-soft:#232E37;
+  --text:#E7EDF2;
+  --text-2:#C0CDD7;
+  --text-3:#93A2AE;
+  --text-4:#92A0AB;
+  --text-5:#65737E;
+  --primary:#78AFC7;
+  --primary-dark:#93C2D6;
+  --primary-ink:#AFD4E3;
+  --primary-soft:#17303B;
+  --primary-line:#2B4C5C;
+  --primary-soft-2:#1E3B49;
+  --primary-tint:#234453;
+  --paid-bg:#17251F;
+  --on-primary:#101418;
+  --hero-bg:#1B3B4A;
+  --hero-text:#F1F7FA;
+  --hero-sub:#9DC0D0;
+  --hero-accent:#E6CE8E;
+  --hero-soft:#1F4152;
+  --secondary:#86BFA7;
+  --secondary-ink:#A8D6C0;
+  --secondary-soft:#172A22;
+  --secondary-line:#2A4838;
+  --secondary-hover:#1F3A2E;
+  --secondary-text:#A6CFBA;
+  --secondary-text-2:#BCE0CC;
+  --accent:#D8BC72;
+  --accent-soft:#332B15;
+  --accent-ink:#E6D096;
+  --accent-ink-2:#F1E5BE;
+  --warn:#E2AA62;
+  --warn-soft:#3A2C15;
+  --warn-bg:#241D11;
+  --warn-line:#4B3922;
+  --success:#6FC49B;
+  --danger:#E98A8A;
+  --toast-bg:#E7EDF2;
+  --toast-text:#101418;
+  --header-bg:rgba(16,20,24,.92);
+  --nav-bg:rgba(24,32,40,.96);
+  --toast-icon:#1C4A38;
+}
+
+/* Sem tema explicito, respeitar a preferencia do sistema: o escuro canonico
+ * (noite) assume. Um data-sbf-theme explicito sempre vence esta regra. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-sbf-theme]) {
+    --bg:#0F1512;
+    --surface:#171F1B;
+    --surface-2:#141B17;
+    --hover:#1D2620;
+    --hover-2:#223029;
+    --muted:#1F2823;
+    --line:#2A3831;
+    --line-soft:#232E28;
+    --text:#E8EEE9;
+    --text-2:#C2CFC7;
+    --text-3:#94A39B;
+    --text-4:#93A39A;
+    --text-5:#66756D;
+    --primary:#6FB295;
+    --primary-dark:#8AC4AA;
+    --primary-ink:#A7D5C0;
+    --primary-soft:#1E3A30;
+    --primary-line:#2F5A49;
+    --primary-soft-2:#24463A;
+    --primary-tint:#2A5142;
+    --paid-bg:#17251E;
+    --on-primary:#0F1512;
+    --hero-bg:#1E4436;
+    --hero-text:#F2F8F4;
+    --hero-sub:#9CC4B2;
+    --hero-accent:#E6CE8E;
+    --hero-soft:#24483B;
+    --secondary:#7FA8BC;
+    --secondary-ink:#A9CBDB;
+    --secondary-soft:#1B2A32;
+    --secondary-line:#2C424D;
+    --secondary-hover:#23343D;
+    --secondary-text:#A9C6D3;
+    --secondary-text-2:#BBD5E0;
+    --accent:#D6B96B;
+    --accent-soft:#332B14;
+    --accent-ink:#E4CE8F;
+    --accent-ink-2:#F0E3BA;
+    --warn:#E0A65C;
+    --warn-soft:#3A2A14;
+    --warn-bg:#241C10;
+    --warn-line:#4A3720;
+    --success:#6FBF95;
+    --danger:#E58686;
+    --toast-bg:#E8EEE9;
+    --toast-text:#0F1512;
+    --header-bg:rgba(15,21,18,.92);
+    --nav-bg:rgba(23,31,27,.96);
+    --toast-icon:#1F5C46;
+  }
+}
+
+/* Base — reset minimo e tipografia, portados do canvas. */
+*, *::before, *::after { box-sizing: border-box; }
+
+.sbf-root {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sbf-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sbf-root a { color: var(--primary); text-decoration: none; }
+.sbf-root a:hover { color: var(--primary-dark); text-decoration: underline; }
+.sbf-root button { font-family: inherit; font-size: inherit; color: inherit; }
+.sbf-root input, .sbf-root select, .sbf-root textarea { font-family: inherit; }
+
+.sbf-root ::-webkit-scrollbar { width: 10px; height: 10px; }
+.sbf-root ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+
+/* Listas encostadas (Card variant="flush"): a primeira linha nao repete o
+ * separador, senao a borda do card e o traco da linha 1 viram um risco duplo. */
+.sbf-flush > *:first-child {
+  border-top: 0 !important;
+}
+
+/* Icones — Material Symbols Rounded. O texto do span e o nome do icone. */
+.sbf-icon {
+  font-family: var(--sbf-font-icon);
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'opsz' 24, 'wght' 400, 'FILL' 0, 'GRAD' 0;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Movimento — portado do canvas, com reduced-motion respeitado. */
+@keyframes sbfUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes sbfSheet { from { transform: translateY(101%); } to { transform: none; } }
+@keyframes sbfFade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sbf-root *, .sbf-root *::before, .sbf-root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
