@@ -21,11 +21,8 @@ const productTypeOptions = [
   { value: "checking_account", label: "Conta Corrente" },
   { value: "savings_account", label: "Poupança" },
   { value: "credit_card", label: "Cartão de Crédito" },
-  { value: "debit_card", label: "Cartão de Débito" },
   { value: "investment", label: "Investimento" },
-  { value: "loan", label: "Empréstimo" },
   { value: "mortgage", label: "Financiamento" },
-  { value: "insurance", label: "Seguro" },
   { value: "overdraft", label: "Cheque Especial" },
   { value: "other", label: "Outro" },
 ];

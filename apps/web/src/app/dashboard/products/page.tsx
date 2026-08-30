@@ -20,11 +20,8 @@ const productTypeLabels: Record<string, string> = {
   checking_account: "Conta Corrente",
   savings_account: "Poupança",
   credit_card: "Cartão de Crédito",
-  debit_card: "Cartão de Débito",
   investment: "Investimento",
-  loan: "Empréstimo",
   mortgage: "Financiamento",
-  insurance: "Seguro",
   overdraft: "Cheque Especial",
   other: "Outro",
 };
