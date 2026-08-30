@@ -67,24 +67,21 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 -- NOTA (ADR-009 Fase 1 -> Fase 2 -- ver
 -- docs/superpowers/plans/2026-08-25-adr-009-fase1-neon-drizzle.md):
 --
--- 1. O schema `private` NAO foi portado (private.crypto_keys,
---    private.get_crypto_key -- ver
---    supabase/migrations/20260727184000_fix_secrets_encryption.sql), porque
---    `pg_dump --schema=public` nunca o incluiu. A chave de criptografia em
---    si e DADO, nao DDL -- recria-la (ou decidir uma alternativa) e decisao
---    de Fase 2, nao desta task. Ate la, chamar public.encrypt_secret(),
---    public.decrypt_secret() ou public.fn_get_secrets() no Neon falha em
---    runtime: function private.get_crypto_key(integer) does not exist.
---    A extensao `pgcrypto` (que fornece pgp_sym_encrypt/pgp_sym_decrypt,
---    chamadas por encrypt_secret/decrypt_secret) FOI reinstalada aqui, no
---    schema public, pelo mesmo motivo do pg_trgm -- mas isso sozinho NAO
---    fecha o gap: continuam faltando o schema `private`, a tabela
---    private.crypto_keys e a chave em si. Alem disso as duas funcoes
---    declaram `SET search_path TO 'public', 'private', 'extensions'` e o
---    schema `extensions` (convencao do Supabase) tambem nao existe no Neon;
---    com pgcrypto no public isso e inofensivo (search_path ignora schema
---    inexistente), mas Fase 2 deve revisar essa clausula ao recriar o
---    `private`.
+-- 1. RESOLVIDO em packages/db/migrations/0002_crypto_key_e_usuarios.sql
+--    (2026-08-30). O schema `private`, a tabela private.crypto_keys e a
+--    funcao private.get_crypto_key foram portados, e a chave versao 1 foi
+--    gerada dentro do proprio Neon. encrypt_secret/decrypt_secret/
+--    fn_get_secrets funcionam -- verificado com round-trip real no banco.
+--
+--    O que isso EXIGE do operador: backup. A chave nasce dentro do banco e
+--    nunca sai dele -- e essa propriedade que a torna segura, e e tambem o
+--    que faz um dump que exclua o schema `private` tornar todo segredo
+--    indecifravel para sempre.
+--
+--    A clausula `SET search_path TO 'public','private','extensions'` das
+--    duas funcoes segue mencionando o schema `extensions` (convencao do
+--    Supabase), que nao existe no Neon. E inofensivo: search_path ignora
+--    schema inexistente, e pgcrypto esta instalado no `public`.
 --
 -- 2. As FK para auth.users(id) foram removidas por completo (auth.users nao
 --    existe no Neon). 30 das 46 removidas tinham ON DELETE CASCADE --
@@ -4404,3 +4401,18 @@ ALTER TABLE ONLY public.transfers
 --
 -- PostgreSQL database dump complete
 --
+--
+--    ATUALIZACAO (2026-08-30): os call sites dessas funcoes FORAM migrados.
+--    Nenhuma delas e mais chamada por SQL em lugar nenhum do repositorio; a
+--    logica equivalente vive em TypeScript:
+--      generate_financial_periods    -> apps/web/src/app/actions/financial-periods.ts
+--                                       (reusa generatePeriods de @sbf/domain)
+--      get_financial_period_for_date -> idem, consulta Drizzle nativa
+--      register_pattern_feedback     -> apps/web/src/app/actions/patterns.ts
+--      fn_set_secret                 -> packages/db/src/secrets.ts (gravarSegredo),
+--                                       compartilhada entre web e worker
+--      search_suppliers              -> apps/web/src/app/actions/suppliers.ts,
+--                                       SQL cru (similarity/pg_trgm nao tem
+--                                       equivalente no query builder)
+--    NAO recrie essas funcoes no banco sem antes remover as versoes em TS --
+--    ter as duas e garantir que uma divirja da outra em silencio.

@@ -1,7 +1,6 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@sbf/db";
 import { and, desc, eq, ilike, sql } from "drizzle-orm";
@@ -294,27 +293,110 @@ export async function reactivatePattern(id: string): Promise<void> {
   revalidatePath("/dashboard/ingestion/patterns");
 }
 
+const TIPOS_DE_FEEDBACK = ["correct", "incorrect", "partial", "improved"] as const;
+type FeedbackType = (typeof TIPOS_DE_FEEDBACK)[number];
+
 /**
- * BLOQUEADA — NÃO CONVERTIDA. `register_pattern_feedback` foi descartada por
- * inteiro na migração (packages/db/schema.sql, NOTA de gaps). Ver Apêndice
- * "RPCs bloqueadas". Permanece com o código Supabase atual.
+ * Registra feedback sobre um padrão (era a RPC `register_pattern_feedback`).
+ *
+ * `register_pattern_feedback` é uma das SEIS funções descartadas por inteiro
+ * na migração Supabase → Neon (packages/db/schema.sql, NOTA item 4) — sabia
+ * quem era o usuário só via `auth.uid()`. Confirmado por consulta ao `pg_proc`
+ * do Neon: NÃO existe lá. Reimplementada aqui em Drizzle, preservando a ordem
+ * de escrita do plpgsql: INSERT primeiro (é ele que dispara o trigger
+ * `pattern_auto_deactivation`, que lê os contadores ANTES do incremento),
+ * UPDATE dos contadores depois.
+ *
+ * Regra de contadores idêntica à original: `correct` incrementa
+ * `success_count`, `incorrect`/`improved` incrementam `feedback_count`,
+ * `partial` não incrementa nada (ambíguo por design).
+ *
+ * Duas escritas sequenciais sem transação — paridade com o que a RPC fazia
+ * dentro de uma (candidato ao Apêndice B, não decidido aqui).
  */
 export async function registerPatternFeedback(input: {
   pattern_id: string;
   source_document_id?: string | null;
-  feedback_type: "correct" | "incorrect" | "partial" | "improved";
+  feedback_type: FeedbackType;
   corrections?: Record<string, unknown>;
 }): Promise<PatternFeedback> {
-  const supabase = await createClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc("register_pattern_feedback", {
-    p_pattern_id: input.pattern_id,
-    p_source_document_id: input.source_document_id ?? null,
-    p_feedback_type: input.feedback_type,
-    p_corrections: input.corrections ?? {},
-  });
+  const userId = await requireUserId();
+  const db = getDb();
 
-  if (error) throw new Error(error.message);
+  if (!TIPOS_DE_FEEDBACK.includes(input.feedback_type)) {
+    throw new Error(`Invalid feedback_type: ${input.feedback_type}`);
+  }
+
+  // Mesma mensagem da RPC: "não existe" e "é de outro usuário" continuam
+  // indistinguíveis para quem chama.
+  const [pattern] = await db
+    .select({ id: schema.document_patterns.id })
+    .from(schema.document_patterns)
+    .where(
+      and(
+        eq(schema.document_patterns.id, input.pattern_id),
+        eq(schema.document_patterns.user_id, userId),
+      ),
+    );
+  if (!pattern) throw new Error("Pattern not found or access denied");
+
+  // IDOR que a RPC original NÃO fechava: `source_document_id` chegava do
+  // cliente e ia direto para a FK, sem checar de quem é o documento. O RLS de
+  // `pattern_feedback` não cobria isso (a política olhava o user_id da linha
+  // inserida, não o dono do documento referenciado).
+  if (input.source_document_id) {
+    const [documento] = await db
+      .select({ id: schema.source_documents.id })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.id, input.source_document_id),
+          eq(schema.source_documents.user_id, userId),
+        ),
+      );
+    if (!documento) throw new Error("Documento não encontrado");
+  }
+
+  const [row] = await db
+    .insert(schema.pattern_feedback)
+    .values({
+      user_id: userId,
+      pattern_id: input.pattern_id,
+      source_document_id: input.source_document_id ?? null,
+      feedback_type: input.feedback_type,
+      corrections: (input.corrections ?? {}) as Json,
+    })
+    .returning();
+  if (!row) throw new Error("Falha ao registrar feedback do padrão");
+
+  if (input.feedback_type === "correct") {
+    await db
+      .update(schema.document_patterns)
+      .set({
+        success_count: sql`${schema.document_patterns.success_count} + 1`,
+        updated_at: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(schema.document_patterns.id, input.pattern_id),
+          eq(schema.document_patterns.user_id, userId),
+        ),
+      );
+  } else if (input.feedback_type === "incorrect" || input.feedback_type === "improved") {
+    await db
+      .update(schema.document_patterns)
+      .set({
+        feedback_count: sql`${schema.document_patterns.feedback_count} + 1`,
+        updated_at: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(schema.document_patterns.id, input.pattern_id),
+          eq(schema.document_patterns.user_id, userId),
+        ),
+      );
+  }
+
   revalidatePath(`/dashboard/ingestion/patterns/${input.pattern_id}`);
-  return data;
+  return row as PatternFeedback;
 }

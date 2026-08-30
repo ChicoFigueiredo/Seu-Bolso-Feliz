@@ -10,7 +10,7 @@
 
 import { generateText } from "ai";
 import { iaConfigurada, modeloDeSugestao } from "@/lib/ai/provider";
-import { createClient } from "@/lib/supabase/server";
+import { getUserOrNull } from "@/lib/auth";
 import { sbfTools } from "@/lib/ai/tools";
 
 // Rate limiting independente do chat — janela mais apertada (inline suggestions)
@@ -42,17 +42,16 @@ const ALLOWED_TOOLS = new Set([
 ]);
 
 export async function POST(req: Request) {
-  // Auth
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Auth — Route Handler: devolve 401, não redireciona.
+  const user = await getUserOrNull();
 
   if (!user) {
     return Response.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  // Rate limit
+  // Rate limit por ATOR (`user.id`), não por dono: a cota é de quem dispara
+  // as sugestões. Nenhum dado é lido aqui — as ferramentas em `lib/ai/tools`
+  // é que consultam o banco, e lá o filtro é sempre `user.ownerId`.
   if (!checkRateLimit(user.id)) {
     return Response.json(
       { error: `Limite de ${RATE_LIMIT_PER_MINUTE} sugestões por minuto atingido.` },

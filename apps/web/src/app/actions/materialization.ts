@@ -15,12 +15,19 @@
  *     auditar, tudo em uma única transação (`SECURITY DEFINER`,
  *     `packages/db/schema.sql`).
  *
- * `p_user_id` é sempre o `user.id` da sessão autenticada (nunca um valor
+ * `p_user_id` é sempre o `ownerId` da sessão autenticada (nunca um valor
  * vindo do cliente) — a função é `SECURITY DEFINER` e materializa dados
  * financeiros de verdade.
+ *
+ * ⚠️ Dívida que este arquivo paga: no Supabase, `fn_materialize_draft_record`
+ * amarrava `p_user_id` ao JWT (`auth.uid() <> p_user_id`). No Neon essa
+ * checagem não existe mais (NOTA nº 3 de `packages/db/schema.sql`), então o
+ * `p_user_id` que chega na função é confiável PORQUE aqui ele vem da sessão
+ * e o draft é lido antes com `user_id = ownerId` — a autorização é deste
+ * call site, não da função.
  */
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@sbf/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -77,22 +84,17 @@ function failure(
  * função SQL. A checagem dupla é intencional — a daqui dá mensagem útil à
  * UI, a de lá é a que nenhum cliente consegue contornar.
  *
- * "Sem usuário" e demais recusas são reportadas como objeto de falha
- * (`success: false`), não exceção — a UI depende desse contrato, por isso
- * não se usa aqui o padrão `requireUserId()` que lança.
+ * As recusas de NEGÓCIO (draft inexistente, ainda pendente, payload
+ * inválido) continuam sendo objeto de falha (`success: false`), porque a UI
+ * depende desse contrato. Falta de sessão não é recusa de negócio: sem
+ * cookie válido, `requireUser()` manda para o /login como no resto do app.
  */
 export async function postApprovedDraftRecord(
   draftRecordId: string,
 ): Promise<MaterializationResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // `!user?.id` (não só `!user`): um usuário com id vazio não é um usuário
-  // válido, e comparar user_id (uuid) contra "" faria a query abaixo
-  // estourar em erro de sintaxe em vez de recusar de forma limpa.
-  if (!user?.id) return failure(draftRecordId, "Não autenticado");
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo
+  // ator. Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
 
   const db = getDb();
 
@@ -100,7 +102,7 @@ export async function postApprovedDraftRecord(
     .select()
     .from(schema.draft_records)
     .where(
-      and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
+      and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, ownerId)),
     );
 
   if (!draft) {
@@ -172,7 +174,7 @@ export async function postApprovedDraftRecord(
       result: { status: string; posted_record_id: string; posted_record_type: string };
     }>(
       sql`SELECT fn_materialize_draft_record(
-        ${user.id}::uuid,
+        ${ownerId}::uuid,
         ${draftRecordId}::uuid,
         ${targetTable}::text,
         ${JSON.stringify(insertPayload)}::jsonb,
@@ -187,7 +189,7 @@ export async function postApprovedDraftRecord(
       .update(schema.draft_records)
       .set({ materialization_error: { message, at: new Date().toISOString() } })
       .where(
-        and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, user.id)),
+        and(eq(schema.draft_records.id, draftRecordId), eq(schema.draft_records.user_id, ownerId)),
       );
 
     return failure(draftRecordId, `Falha ao lançar: ${message}`);
@@ -215,20 +217,7 @@ export async function postApprovedDraftRecord(
  * Item a item — falha individual não cancela os demais.
  */
 export async function postApprovedDraftBatch(batchId: string): Promise<MaterializationBatchResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user?.id) {
-    return {
-      batchId,
-      totalProcessed: 0,
-      succeeded: 0,
-      failed: 1,
-      results: [failure("", "Não autenticado")],
-    };
-  }
+  const { ownerId } = await requireUser();
 
   const db = getDb();
 
@@ -240,7 +229,7 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
       .where(
         and(
           eq(schema.draft_records.batch_id, batchId),
-          eq(schema.draft_records.user_id, user.id),
+          eq(schema.draft_records.user_id, ownerId),
           inArray(schema.draft_records.status, POSTABLE_STATUSES),
         ),
       );
@@ -276,7 +265,7 @@ export async function postApprovedDraftBatch(batchId: string): Promise<Materiali
       rejected_count: failed,
       updated_at: new Date().toISOString(),
     })
-    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, user.id)));
+    .where(and(eq(schema.draft_batches.id, batchId), eq(schema.draft_batches.user_id, ownerId)));
 
   return { batchId, totalProcessed: drafts.length, succeeded, failed, results };
 }

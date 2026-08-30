@@ -1,11 +1,21 @@
 /**
  * AI function calling tool definitions for the SBF chat assistant.
  * Each tool maps to a real operation in the ingestion/financial domain.
+ *
+ * Identidade: `getUserOrNull()` (e não `requireUser()`) porque estas
+ * ferramentas rodam dentro de Route Handlers (`/api/chat`, `/api/ai-suggest`)
+ * e o contrato de retorno é `{ error }`, não exceção/redirect — um
+ * `redirect("/login")` no meio de um stream de tool call viraria lixo na
+ * resposta.
+ *
+ * ⚠️ Todo filtro de dados usa `user.ownerId`, nunca `user.id`: `id` é quem
+ * está agindo, `ownerId` é de quem são os dados (ver `@/lib/auth`). Sem RLS
+ * no Neon, este `where` explícito é a ÚNICA barreira entre usuários.
  */
 
 import { tool } from "ai";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { getUserOrNull } from "@/lib/auth";
 import { getDb, schema } from "@sbf/db";
 import { and, desc, eq, gte, ilike, inArray, isNotNull, lte, or } from "drizzle-orm";
 import type { Json } from "@sbf/shared-types";
@@ -66,14 +76,11 @@ export const listPendingDocuments = tool({
       .describe("Filtrar por status do documento (ex: processed, failed)"),
   }),
   execute: async ({ limit, status }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
-    const conditions = [eq(schema.source_documents.user_id, user.id)];
+    const conditions = [eq(schema.source_documents.user_id, user.ownerId)];
     if (status) conditions.push(eq(schema.source_documents.status, status));
 
     const documents = await db
@@ -101,10 +108,7 @@ export const getDocumentDetails = tool({
     documentId: z.string().uuid().describe("ID do documento"),
   }),
   execute: async ({ documentId }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -116,7 +120,7 @@ export const getDocumentDetails = tool({
         .where(
           and(
             eq(schema.source_documents.id, documentId),
-            eq(schema.source_documents.user_id, user.id),
+            eq(schema.source_documents.user_id, user.ownerId),
           ),
         ),
       db
@@ -131,7 +135,7 @@ export const getDocumentDetails = tool({
         .where(
           and(
             eq(schema.ingestion_jobs.source_document_id, documentId),
-            eq(schema.ingestion_jobs.user_id, user.id),
+            eq(schema.ingestion_jobs.user_id, user.ownerId),
           ),
         )
         .orderBy(desc(schema.ingestion_jobs.created_at)),
@@ -148,7 +152,7 @@ export const getDocumentDetails = tool({
         .where(
           and(
             eq(schema.draft_records.source_document_id, documentId),
-            eq(schema.draft_records.user_id, user.id),
+            eq(schema.draft_records.user_id, user.ownerId),
           ),
         )
         .orderBy(desc(schema.draft_records.created_at)),
@@ -172,10 +176,7 @@ export const listDrafts = tool({
     limit: z.number().optional().default(10).describe("Máximo de drafts"),
   }),
   execute: async ({ status, limit }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -191,7 +192,10 @@ export const listDrafts = tool({
       })
       .from(schema.draft_records)
       .where(
-        and(eq(schema.draft_records.user_id, user.id), eq(schema.draft_records.status, status)),
+        and(
+          eq(schema.draft_records.user_id, user.ownerId),
+          eq(schema.draft_records.status, status),
+        ),
       )
       .orderBy(desc(schema.draft_records.created_at))
       .limit(limit);
@@ -207,10 +211,7 @@ export const getDraftDetails = tool({
     draftId: z.string().uuid().describe("ID do draft"),
   }),
   execute: async ({ draftId }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -227,7 +228,9 @@ export const getDraftDetails = tool({
         updated_at: schema.draft_records.updated_at,
       })
       .from(schema.draft_records)
-      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
+      .where(
+        and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+      );
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -243,7 +246,7 @@ export const getDraftDetails = tool({
         .where(
           and(
             eq(schema.source_documents.id, draft.source_document_id),
-            eq(schema.source_documents.user_id, user.id),
+            eq(schema.source_documents.user_id, user.ownerId),
           ),
         );
       sourceDoc = doc ?? null;
@@ -260,14 +263,11 @@ export const listRecentTransactions = tool({
     category: z.string().optional().describe("Filtrar por categoria"),
   }),
   execute: async ({ limit, category }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
-    const conditions = [eq(schema.transactions.user_id, user.id)];
+    const conditions = [eq(schema.transactions.user_id, user.ownerId)];
     if (category) conditions.push(eq(schema.categories.name, category));
 
     const transactions = await db
@@ -288,14 +288,14 @@ export const listRecentTransactions = tool({
           // Defesa em profundidade: mesmo que `category_id` aponte pra uma
           // categoria de outro usuário (dado legado/bug de escrita anterior),
           // nunca devolver o nome dela — mesmo padrão de cards.ts.
-          eq(schema.categories.user_id, user.id),
+          eq(schema.categories.user_id, user.ownerId),
         ),
       )
       .leftJoin(
         schema.suppliers,
         and(
           eq(schema.transactions.supplier_id, schema.suppliers.id),
-          eq(schema.suppliers.user_id, user.id),
+          eq(schema.suppliers.user_id, user.ownerId),
         ),
       )
       .where(and(...conditions))
@@ -360,10 +360,7 @@ export const approveDraft = tool({
       .describe("Correções a aplicar antes de aprovar (campo: valor)"),
   }),
   execute: async ({ draftId, corrections }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -373,7 +370,7 @@ export const approveDraft = tool({
         .select({ draft_data: schema.draft_records.draft_data })
         .from(schema.draft_records)
         .where(
-          and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
+          and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
         );
 
       if (draft) {
@@ -385,7 +382,10 @@ export const approveDraft = tool({
           .update(schema.draft_records)
           .set({ draft_data: updatedData as Json, corrections, status: "corrected" })
           .where(
-            and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)),
+            and(
+              eq(schema.draft_records.id, draftId),
+              eq(schema.draft_records.user_id, user.ownerId),
+            ),
           );
       }
     }
@@ -399,7 +399,9 @@ export const approveDraft = tool({
     await db
       .update(schema.draft_records)
       .set({ status: "approved" })
-      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
+      .where(
+        and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+      );
 
     return {
       success: true,
@@ -409,8 +411,8 @@ export const approveDraft = tool({
 });
 
 /**
- * Sem alteração — delega para materialization.ts (já reescrito na Task 13
- * do plano), sem chamada direta a supabase/Drizzle aqui.
+ * Delega para materialization.ts — nenhum acesso a banco acontece aqui, e é
+ * lá que a posse do draft é conferida antes da função SECURITY DEFINER.
  */
 export const postDraft = tool({
   description:
@@ -445,10 +447,7 @@ export const rejectDraft = tool({
     reason: z.string().describe("Motivo da rejeição"),
   }),
   execute: async ({ draftId, reason }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -457,7 +456,9 @@ export const rejectDraft = tool({
     await db
       .update(schema.draft_records)
       .set({ status: "rejected", corrections: { rejection_reason: reason } })
-      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
+      .where(
+        and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+      );
 
     return { success: true, message: `Draft ${draftId} rejeitado: ${reason}` };
   },
@@ -470,10 +471,7 @@ export const reprocessDocumentTool = tool({
     documentId: z.string().uuid().describe("ID do documento a reprocessar"),
   }),
   execute: async ({ documentId }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -486,7 +484,7 @@ export const reprocessDocumentTool = tool({
       .where(
         and(
           eq(schema.draft_records.source_document_id, documentId),
-          eq(schema.draft_records.user_id, user.id),
+          eq(schema.draft_records.user_id, user.ownerId),
           inArray(schema.draft_records.status, ["pending_review", "rejected"]),
         ),
       );
@@ -497,7 +495,7 @@ export const reprocessDocumentTool = tool({
       .where(
         and(
           eq(schema.ingestion_jobs.source_document_id, documentId),
-          eq(schema.ingestion_jobs.user_id, user.id),
+          eq(schema.ingestion_jobs.user_id, user.ownerId),
         ),
       )
       .orderBy(desc(schema.ingestion_jobs.created_at))
@@ -510,7 +508,7 @@ export const reprocessDocumentTool = tool({
         .where(
           and(
             eq(schema.ingestion_jobs.id, latestJob.id),
-            eq(schema.ingestion_jobs.user_id, user.id),
+            eq(schema.ingestion_jobs.user_id, user.ownerId),
           ),
         );
     }
@@ -538,14 +536,11 @@ export const listDocumentPatterns = tool({
     limit: z.number().optional().default(20).describe("Máximo de padrões"),
   }),
   execute: async ({ documentType, activeOnly, limit }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
-    const conditions = [eq(schema.document_patterns.user_id, user.id)];
+    const conditions = [eq(schema.document_patterns.user_id, user.ownerId)];
     if (activeOnly) conditions.push(eq(schema.document_patterns.is_active, true));
     if (documentType) conditions.push(eq(schema.document_patterns.document_type, documentType));
 
@@ -623,10 +618,7 @@ export const registerDocumentPattern = tool({
     supplierId,
     institutionId,
   }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     // IDOR fechado nesta task: supplierId/institutionId vêm do cliente (a IA
@@ -634,14 +626,14 @@ export const registerDocumentPattern = tool({
     // ser vinculado a um fornecedor/instituição de outro usuário. Mesmo
     // achado já corrigido em `app/actions/patterns.ts`
     // (`assertOwnsOptionalFks`), agora aplicado aqui também.
-    const fkError = await findUnownedFkError(user.id, { supplierId, institutionId });
+    const fkError = await findUnownedFkError(user.ownerId, { supplierId, institutionId });
     if (fkError) return { error: fkError };
 
     const db = getDb();
     const [pattern] = await db
       .insert(schema.document_patterns)
       .values({
-        user_id: user.id,
+        user_id: user.ownerId,
         name,
         document_type: documentType,
         extraction_rules: extractionRules ?? {},
@@ -699,10 +691,7 @@ export const updateDocumentPattern = tool({
     isActive: z.boolean().optional().describe("Ativar ou desativar o padrão"),
   }),
   execute: async ({ patternId, extractionRules, fieldMappings, confidenceThreshold, isActive }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -712,7 +701,7 @@ export const updateDocumentPattern = tool({
       .where(
         and(
           eq(schema.document_patterns.id, patternId),
-          eq(schema.document_patterns.user_id, user.id),
+          eq(schema.document_patterns.user_id, user.ownerId),
         ),
       );
 
@@ -737,7 +726,7 @@ export const updateDocumentPattern = tool({
       .where(
         and(
           eq(schema.document_patterns.id, patternId),
-          eq(schema.document_patterns.user_id, user.id),
+          eq(schema.document_patterns.user_id, user.ownerId),
         ),
       )
       .returning({
@@ -764,17 +753,16 @@ export const suggestReconciliation = tool({
     draftId: z.string().uuid().describe("ID do draft para buscar candidatos de reconciliação"),
   }),
   execute: async ({ draftId }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
     const [draft] = await db
       .select({ draft_data: schema.draft_records.draft_data })
       .from(schema.draft_records)
-      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
+      .where(
+        and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+      );
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -795,7 +783,7 @@ export const suggestReconciliation = tool({
     const margin = numAmount * 0.05;
 
     const conditions = [
-      eq(schema.transactions.user_id, user.id),
+      eq(schema.transactions.user_id, user.ownerId),
       gte(schema.transactions.amount, numAmount - margin),
       lte(schema.transactions.amount, numAmount + margin),
     ];
@@ -824,7 +812,7 @@ export const suggestReconciliation = tool({
         and(
           eq(schema.transactions.supplier_id, schema.suppliers.id),
           // Defesa em profundidade: mesmo padrão de cards.ts/listRecentTransactions.
-          eq(schema.suppliers.user_id, user.id),
+          eq(schema.suppliers.user_id, user.ownerId),
         ),
       )
       .where(and(...conditions))
@@ -863,10 +851,7 @@ export const explainClassification = tool({
     draftId: z.string().uuid().describe("ID do draft para explicar a classificação"),
   }),
   execute: async ({ draftId }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -879,7 +864,9 @@ export const explainClassification = tool({
         source_document_id: schema.draft_records.source_document_id,
       })
       .from(schema.draft_records)
-      .where(and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.id)));
+      .where(
+        and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+      );
 
     if (!draft) return { error: "Draft não encontrado" };
 
@@ -896,7 +883,7 @@ export const explainClassification = tool({
         .where(
           and(
             eq(schema.source_documents.id, draft.source_document_id),
-            eq(schema.source_documents.user_id, user.id),
+            eq(schema.source_documents.user_id, user.ownerId),
           ),
         );
       sourceInfo = doc ?? null;
@@ -926,10 +913,7 @@ export const listErrorDocuments = tool({
     limit: z.number().optional().default(10).describe("Máximo de documentos"),
   }),
   execute: async ({ limit }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -943,7 +927,7 @@ export const listErrorDocuments = tool({
       .from(schema.source_documents)
       .where(
         and(
-          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.user_id, user.ownerId),
           eq(schema.source_documents.status, "error"),
         ),
       )
@@ -961,10 +945,7 @@ export const listMissingPasswordDocuments = tool({
     limit: z.number().optional().default(10).describe("Máximo de documentos"),
   }),
   execute: async ({ limit }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -983,8 +964,8 @@ export const listMissingPasswordDocuments = tool({
       )
       .where(
         and(
-          eq(schema.ingestion_jobs.user_id, user.id),
-          eq(schema.source_documents.user_id, user.id),
+          eq(schema.ingestion_jobs.user_id, user.ownerId),
+          eq(schema.source_documents.user_id, user.ownerId),
           eq(schema.ingestion_jobs.status, "failed"),
           or(
             ilike(schema.ingestion_jobs.error_message, "%password%"),
@@ -1010,10 +991,7 @@ export const batchApproveDrafts = tool({
     draftIds: z.array(z.string().uuid()).describe("Lista de IDs dos drafts a aprovar"),
   }),
   execute: async ({ draftIds }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     if (draftIds.length > 50) {
@@ -1035,7 +1013,7 @@ export const batchApproveDrafts = tool({
           .where(
             and(
               eq(schema.draft_records.id, draftId),
-              eq(schema.draft_records.user_id, user.id),
+              eq(schema.draft_records.user_id, user.ownerId),
               eq(schema.draft_records.status, "pending_review"),
             ),
           );
@@ -1057,8 +1035,7 @@ export const batchApproveDrafts = tool({
 });
 
 /**
- * Sem alteração — delega para materialization.ts (Task 13), sem chamada
- * direta a supabase/Drizzle aqui.
+ * Delega para materialization.ts — nenhum acesso a banco acontece aqui.
  */
 export const postDraftBatch = tool({
   description:
@@ -1103,10 +1080,7 @@ export const suggestSplits = tool({
       .describe("Dica adicional do usuário sobre como dividir (ex: 50% pessoal, 50% empresa)"),
   }),
   execute: async ({ document_id, total_amount, hint }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -1122,7 +1096,7 @@ export const suggestSplits = tool({
       .where(
         and(
           eq(schema.source_documents.id, document_id),
-          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.user_id, user.ownerId),
         ),
       );
 
@@ -1156,10 +1130,7 @@ export const suggestSupplierName = tool({
     document_number: z.string().describe("CNPJ ou CPF do fornecedor (apenas dígitos ou formatado)"),
   }),
   execute: async ({ document_number }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -1175,7 +1146,7 @@ export const suggestSupplierName = tool({
       .from(schema.suppliers)
       .where(
         and(
-          eq(schema.suppliers.user_id, user.id),
+          eq(schema.suppliers.user_id, user.ownerId),
           eq(schema.suppliers.document_number, document_number),
         ),
       )
@@ -1202,7 +1173,7 @@ export const suggestSupplierName = tool({
       .from(schema.source_documents)
       .where(
         and(
-          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.user_id, user.ownerId),
           isNotNull(schema.source_documents.supplier_name_raw),
         ),
       )
@@ -1244,10 +1215,7 @@ export const explainExtraction = tool({
     source: z.string().optional().describe("Método de extração (ex: ocr, regex, gpt-4o)"),
   }),
   execute: async ({ document_id, field_name, extracted_value, confidence, source }) => {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getUserOrNull();
     if (!user) return { error: "Não autenticado" };
 
     const db = getDb();
@@ -1263,7 +1231,7 @@ export const explainExtraction = tool({
       .where(
         and(
           eq(schema.source_documents.id, document_id),
-          eq(schema.source_documents.user_id, user.id),
+          eq(schema.source_documents.user_id, user.ownerId),
         ),
       );
 

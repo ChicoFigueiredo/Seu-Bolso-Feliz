@@ -18,7 +18,7 @@
  * acertar de primeira. Operação local e limitada, sem oráculo, auto-corretiva.
  */
 import { sql } from "drizzle-orm";
-import type { Database } from "@sbf/db";
+import { gravarSegredo, type Database } from "@sbf/db";
 
 export interface SecretMatch {
   secretId: string;
@@ -104,39 +104,35 @@ export async function markSecretUsed(
 }
 
 /**
- * Associa uma senha que funcionou ao fornecedor recém-descoberto, para que o
- * próximo documento do mesmo emissor resolva na primeira tentativa.
+ * Registra que esta senha abre os PDFs deste fornecedor, para o próximo
+ * documento dele acertar de primeira em vez de varrer todas as senhas.
  *
- * Usa a RPC de escrita, que criptografa. Nunca grava texto puro.
+ * ⚠️ **Esta função não tem nenhum chamador hoje.** Ela é a segunda metade de um
+ * atalho cuja primeira metade (`listPdfPasswordCandidates`) está ligada e
+ * funcionando: o pipeline acerta a senha por tentativa, mas nunca guarda de
+ * quem ela é, então repete a varredura toda vez. Ligar isto exige chamar aqui
+ * no ponto em que o parse resolve o fornecedor — depois que o documento já foi
+ * aberto —, e esse ponto ainda não passa `supplierId` adiante.
  *
- * ⚠️ PENDÊNCIA DE SCHEMA (não de código): `fn_set_secret` está entre as seis
- * funções que NÃO foram portadas para o Neon — ela sabia quem era o usuário
- * só por `auth.uid()`, que não existe fora do Supabase (ver a NOTA no topo de
- * packages/db/schema.sql, item 4). Enquanto ela não for recriada com
- * `p_user_id` explícito, esta chamada falha em runtime e a associação é
- * silenciosamente perdida — que é exatamente o que já acontecia antes, já que
- * o erro sempre foi engolido aqui. O parse continua funcionando: só o atalho
- * "próximo documento deste fornecedor acerta de primeira" deixa de valer.
+ * Até aqui, a chamada apontava para `public.fn_set_secret`, que **não existe no
+ * Neon** (é uma das seis descartadas na migração). Ou seja: mesmo que alguém a
+ * chamasse, ela falharia — e o `catch {}` silencioso garantia que ninguém
+ * descobrisse. Agora usa `gravarSegredo`, o mesmo caminho da tela de senhas.
  */
 export async function associateSecretToSupplier(
-  db: Database,
+  _db: Database,
   plaintext: string,
   supplierId: string,
+  userId: string,
   label?: string,
 ): Promise<void> {
-  try {
-    await db.execute(
-      sql`select public.fn_set_secret(
-        'pdf_password',
-        ${plaintext},
-        'supplier',
-        ${supplierId}::uuid,
-        null,
-        ${label ?? null}::text
-      )`,
-    );
-  } catch {
-    // Ver a pendência de schema acima: sem a função recriada no Neon, falhar
-    // aqui é o caminho esperado e não deve derrubar o parse.
-  }
+  await gravarSegredo({
+    userId,
+    plaintext,
+    secretType: "pdf_password",
+    entityType: "supplier",
+    entityId: supplierId,
+    label: label ?? null,
+    origem: "worker-ingestao",
+  });
 }

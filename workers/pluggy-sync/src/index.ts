@@ -152,7 +152,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(errorMessage(err));
-  process.exit(1);
-});
+// Só roda quando este arquivo É o programa. Sem a guarda, qualquer `import`
+// deste módulo — um teste, uma ferramenta, um autocompletar de editor que
+// resolva o módulo — dispara uma sincronização de verdade contra a Pluggy e
+// grava no banco. Já era assim antes; é o tipo de coisa que só se descobre
+// depois de acontecer.
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(errorMessage(err));
+    process.exit(1);
+  });
+}

@@ -14,17 +14,30 @@ import {
   registerDocumentPattern,
 } from "./tools";
 
-let currentUserId = "";
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    auth: {
-      getUser: async () => ({ data: { user: currentUserId ? { id: currentUserId } : null } }),
-    },
-  }),
+// Sessão corrente do teste. `id` é o ATOR, `ownerId` é o DONO dos dados —
+// campos distintos de propósito (apps/web/src/lib/auth/session.ts). Os testes
+// que os deixam DIFERENTES são os que impedem a troca silenciosa de um pelo
+// outro no código.
+let sessao: { id: string; ownerId: string } | null = null;
+
+vi.mock("@/lib/auth", () => ({
+  getUserOrNull: async () =>
+    sessao ? { ...sessao, email: "teste@sbf.local", role: "owner" as const, name: null } : null,
+  requireUser: async () => {
+    if (!sessao) throw new Error("NEXT_REDIRECT");
+    return { ...sessao, email: "teste@sbf.local", role: "owner" as const, name: null };
+  },
 }));
+
+/** Açúcar para o caso comum: dono operando a própria conta. */
+function entraComo(userId: string) {
+  sessao = { id: userId, ownerId: userId };
+}
 
 const USER_A = "00000000-0000-0000-0000-0000000000a1";
 const USER_B = "00000000-0000-0000-0000-0000000000b2";
+// Administrador de emergência: age em nome de USER_A, com id próprio.
+const ADMIN = "00000000-0000-0000-0000-00000000ad11";
 // Sem `as const`: `ToolExecutionOptions.messages` é `CoreMessage[]` (mutável)
 // — um tuplo `readonly []` não é atribuível a ele.
 const toolOpts = { toolCallId: "test", messages: [] };
@@ -90,7 +103,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     const docB = await seedSourceDocument(USER_B);
     docIds.push(docB.id);
 
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const result = await listPendingDocuments.execute!({ limit: 10 }, toolOpts);
     expect("documents" in result).toBe(true);
     if ("documents" in result && result.documents) {
@@ -100,8 +113,29 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     }
   });
 
+  // Este é o teste que separa `ownerId` de `id`: para o dono comum os dois
+  // são iguais e trocar um pelo outro passaria despercebido até o dia em que
+  // o administrador de emergência entrasse e visse um app vazio.
+  it("list_pending_documents segue o ownerId da sessão, não o id do ator", async () => {
+    const docDoDono = await seedSourceDocument(USER_A);
+    docIds.push(docDoDono.id);
+    const docDoAtor = await seedSourceDocument(ADMIN);
+    docIds.push(docDoAtor.id);
+
+    // Administrador de emergência operando a conta de USER_A.
+    sessao = { id: ADMIN, ownerId: USER_A };
+    const result = await listPendingDocuments.execute!({ limit: 50 }, toolOpts);
+
+    expect("documents" in result).toBe(true);
+    if ("documents" in result && result.documents) {
+      const ids = result.documents.map((d) => d.id);
+      expect(ids).toContain(docDoDono.id);
+      expect(ids).not.toContain(docDoAtor.id);
+    }
+  });
+
   it("approve_draft aprova um draft do próprio usuário (caminho feliz)", async () => {
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const draft = await seedDraft(USER_A);
     draftIds.push(draft.id);
 
@@ -120,7 +154,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     const draftB = await seedDraft(USER_B);
     draftIds.push(draftB.id);
 
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const result = await approveDraft.execute!({ draftId: draftB.id }, toolOpts);
     expect(result).toMatchObject({ success: true }); // comportamento pré-existente, documentado no código
 
@@ -133,7 +167,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
   });
 
   it("list_recent_transactions traz nome de categoria e fornecedor via join", async () => {
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const institution = await seedInstitution(USER_A);
     institutionIds.push(institution.id);
     const product = await seedFinancialProduct(USER_A, institution.id, "checking_account");
@@ -187,7 +221,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     if (!supplierB) throw new Error("Falha ao semear supplier de teste");
     supplierIds.push(supplierB.id);
 
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const patternName = `Tentativa cross-user ${crypto.randomUUID()}`;
     const result = await registerDocumentPattern.execute!(
       {
@@ -212,7 +246,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
     const institutionB = await seedInstitution(USER_B);
     institutionIds.push(institutionB.id);
 
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const patternName = `Tentativa cross-user ${crypto.randomUUID()}`;
     const result = await registerDocumentPattern.execute!(
       {
@@ -235,7 +269,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("lib/ai/tools.ts", () => {
   });
 
   it("register_document_pattern aceita supplierId/institutionId do próprio usuário (caminho feliz)", async () => {
-    currentUserId = USER_A;
+    entraComo(USER_A);
     const institution = await seedInstitution(USER_A);
     institutionIds.push(institution.id);
 

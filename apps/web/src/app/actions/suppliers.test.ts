@@ -11,6 +11,7 @@ import {
   getSupplier,
   getSupplierDetail,
   getSuppliers,
+  searchSuppliers,
   updateSupplier,
   updateSupplierActive,
   updateSupplierAlias,
@@ -18,9 +19,16 @@ import {
 } from "./suppliers";
 
 let currentUserId = "";
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: { id: currentUserId } } }) },
+// `ownerId` é o dono dos dados; `id` é o ator. Toda action filtra por
+// `ownerId` — o mock usa ids DIFERENTES de propósito, para que um filtro
+// feito por `id` por engano apareça como falha em vez de passar despercebido.
+vi.mock("@/lib/auth", () => ({
+  requireUser: async () => ({
+    id: "00000000-0000-0000-0000-00000000ac70",
+    ownerId: currentUserId,
+    email: "teste@exemplo.com",
+    role: "owner" as const,
+    name: "Teste",
   }),
 }));
 
@@ -327,5 +335,106 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("suppliers actions", () => {
     await expect(
       updateSupplierContract(contractA.id, { supplier_id: supplierB.id }),
     ).rejects.toThrow();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// searchSuppliers (era a RPC search_suppliers)
+// ══════════════════════════════════════════════════════════════
+//
+// Depende do pg_trgm (`similarity`, operador `%`), que o schema.sql instala.
+
+describe.skipIf(!process.env.TEST_DATABASE_URL)("searchSuppliers", () => {
+  const supplierIds: string[] = [];
+
+  afterEach(async () => {
+    const db = getDb();
+    // supplier_aliases cai por CASCADE junto com o fornecedor.
+    for (const id of supplierIds.splice(0)) {
+      await db.delete(schema.suppliers).where(eq(schema.suppliers.id, id));
+    }
+  });
+
+  async function seedSupplier(userId: string, name: string, isActive = true) {
+    const db = getDb();
+    const [row] = await db
+      .insert(schema.suppliers)
+      .values({ user_id: userId, name, type: "company", is_active: isActive })
+      .returning();
+    if (!row) throw new Error("Falha ao semear supplier de teste");
+    supplierIds.push(row.id);
+    return row;
+  }
+
+  async function seedAlias(userId: string, supplierId: string, aliasName: string) {
+    const db = getDb();
+    const [row] = await db
+      .insert(schema.supplier_aliases)
+      .values({ user_id: userId, supplier_id: supplierId, alias_name: aliasName })
+      .returning();
+    if (!row) throw new Error("Falha ao semear alias de teste");
+    return row;
+  }
+
+  it("encontra por nome, mesmo com a busca parcial", async () => {
+    currentUserId = USER_A;
+    const cemig = await seedSupplier(USER_A, "Cemig Distribuicao SA");
+
+    const encontrados = await searchSuppliers("Cemig");
+    expect(encontrados.map((s) => s.id)).toContain(cemig.id);
+
+    const linha = encontrados.find((s) => s.id === cemig.id)!;
+    expect(linha.name).toBe("Cemig Distribuicao SA");
+    expect(linha.matched_alias).toBeNull();
+    expect(typeof linha.similarity_score).toBe("number");
+  });
+
+  it("encontra pelo alias e informa qual alias casou", async () => {
+    currentUserId = USER_A;
+    const supplier = await seedSupplier(USER_A, "CEMIG");
+    await seedAlias(USER_A, supplier.id, "Companhia Energetica de Minas Gerais");
+
+    const encontrados = await searchSuppliers("Companhia Energetica");
+    const linha = encontrados.find((s) => s.id === supplier.id);
+    expect(linha).toBeDefined();
+    expect(linha!.matched_alias).toBe("Companhia Energetica de Minas Gerais");
+  });
+
+  // IDOR: a RPC filtrava por auth.uid(); sem RLS, o filtro tem de estar nas
+  // DUAS pernas da união (nome e alias).
+  it("nunca devolve fornecedor de outro usuário", async () => {
+    currentUserId = USER_B;
+    const doB = await seedSupplier(USER_B, "Fornecedor Exclusivo do B");
+    await seedAlias(USER_B, doB.id, "Apelido Exclusivo do B");
+
+    currentUserId = USER_A;
+    expect(await searchSuppliers("Fornecedor Exclusivo do B")).toEqual([]);
+    expect(await searchSuppliers("Apelido Exclusivo do B")).toEqual([]);
+  });
+
+  it("ignora fornecedor inativo", async () => {
+    currentUserId = USER_A;
+    const inativo = await seedSupplier(USER_A, "Fornecedor Desativado Antigo", false);
+
+    const encontrados = await searchSuppliers("Fornecedor Desativado Antigo");
+    expect(encontrados.map((s) => s.id)).not.toContain(inativo.id);
+  });
+
+  it("devolve cada fornecedor uma única vez, mesmo casando por nome e por alias", async () => {
+    currentUserId = USER_A;
+    const supplier = await seedSupplier(USER_A, "Telefonica Brasil");
+    await seedAlias(USER_A, supplier.id, "Telefonica Brasil Vivo");
+
+    const encontrados = await searchSuppliers("Telefonica Brasil");
+    expect(encontrados.filter((s) => s.id === supplier.id)).toHaveLength(1);
+  });
+
+  it("respeita o limite", async () => {
+    currentUserId = USER_A;
+    await seedSupplier(USER_A, "Limite Teste Um");
+    await seedSupplier(USER_A, "Limite Teste Dois");
+    await seedSupplier(USER_A, "Limite Teste Tres");
+
+    expect(await searchSuppliers("Limite Teste", 2)).toHaveLength(2);
   });
 });

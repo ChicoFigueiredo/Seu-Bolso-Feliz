@@ -1,7 +1,8 @@
 import { streamText } from "ai";
+import { and, eq, sql } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
 import { iaConfigurada, modeloDeConversa } from "@/lib/ai/provider";
-import { createClient } from "@/lib/supabase/server";
-import { untypedFrom, untypedRpc } from "@/lib/supabase/untyped";
+import { getUserOrNull } from "@/lib/auth";
 import { SBF_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { sbfTools } from "@/lib/ai/tools";
 
@@ -56,18 +57,40 @@ function checkRateLimit(userId: string): { allowed: boolean; error?: string } {
   return { allowed: true };
 }
 
+/**
+ * Confere que a sessão de chat pertence ao dono dos dados.
+ *
+ * `sessionId` chega no corpo da requisição, e `ai_chat_messages.session_id` é
+ * uma FK: sem esta checagem, o usuário A conseguiria injetar mensagens (e
+ * inflar contadores) na conversa do usuário B só chutando/vazando um UUID.
+ * Mesmo padrão de validação de FK de `app/actions/transactions.ts`.
+ */
+async function sessaoPertenceAoDono(sessionId: string, ownerId: string): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: schema.ai_chat_sessions.id })
+    .from(schema.ai_chat_sessions)
+    .where(
+      and(eq(schema.ai_chat_sessions.id, sessionId), eq(schema.ai_chat_sessions.user_id, ownerId)),
+    );
+  return Boolean(row);
+}
+
 export async function POST(req: Request) {
-  // Validate auth
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Validate auth — Route Handler: devolve 401, não redireciona.
+  const user = await getUserOrNull();
 
   if (!user) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response(JSON.stringify({ error: "Não autenticado" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  // Check rate limit
+  // Rate limit por ATOR (`user.id`), não por dono: se um administrador de
+  // emergência estiver operando a conta, a cota dele é dele. Este é o único
+  // ponto do arquivo em que `id` é o valor certo — todo acesso a dados abaixo
+  // usa `ownerId`.
   const rateCheck = checkRateLimit(user.id);
   if (!rateCheck.allowed) {
     return new Response(JSON.stringify({ error: rateCheck.error }), {
@@ -96,18 +119,30 @@ export async function POST(req: Request) {
     });
   }
 
+  // A posse é conferida UMA vez, antes de qualquer escrita: `onFinish` roda
+  // depois que o stream começou e não teria como recusar a requisição.
+  const sessaoValida =
+    typeof sessionId === "string" && sessionId.length > 0
+      ? await sessaoPertenceAoDono(sessionId, user.ownerId)
+      : false;
+
+  if (sessionId && !sessaoValida) {
+    return new Response(JSON.stringify({ error: "Sessão de chat não encontrada" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const db = getDb();
+
   // Log the interaction
-  if (sessionId) {
-    await untypedFrom(supabase, "ai_chat_messages")
-      .insert({
-        session_id: sessionId,
-        user_id: user.id,
-        role: "user",
-        content: messages[messages.length - 1]?.content ?? "",
-      })
-      .then(() => {
-        // Fire and forget - don't block on logging
-      });
+  if (sessaoValida) {
+    await db.insert(schema.ai_chat_messages).values({
+      session_id: sessionId,
+      user_id: user.ownerId,
+      role: "user",
+      content: messages[messages.length - 1]?.content ?? "",
+    });
   }
 
   const result = streamText({
@@ -118,11 +153,13 @@ export async function POST(req: Request) {
     maxTokens: MAX_TOKENS_PER_REQUEST,
     maxSteps: 5,
     onFinish: async ({ text, usage, toolCalls, toolResults }) => {
+      if (!sessaoValida) return;
+
       // Log assistant response
-      if (sessionId && text) {
-        await untypedFrom(supabase, "ai_chat_messages").insert({
+      if (text) {
+        await db.insert(schema.ai_chat_messages).values({
           session_id: sessionId,
-          user_id: user.id,
+          user_id: user.ownerId,
           role: "assistant",
           content: text,
           tokens_used: usage?.totalTokens,
@@ -130,10 +167,10 @@ export async function POST(req: Request) {
       }
 
       // Log tool calls for audit
-      if (sessionId && toolCalls && toolCalls.length > 0) {
+      if (toolCalls && toolCalls.length > 0) {
         const toolEntries = toolCalls.map((call, i) => ({
-          session_id: sessionId,
-          user_id: user.id,
+          session_id: sessionId as string,
+          user_id: user.ownerId,
           role: "tool" as const,
           content: JSON.stringify({
             tool_name: call.toolName,
@@ -143,18 +180,31 @@ export async function POST(req: Request) {
           tokens_used: 0,
         }));
 
-        await untypedFrom(supabase, "ai_chat_messages").insert(toolEntries);
+        await db.insert(schema.ai_chat_messages).values(toolEntries);
       }
 
-      // Update session token counter
-      if (sessionId) {
-        const msgCount = 2 + (toolCalls?.length ?? 0);
-        await untypedRpc(supabase, "increment_session_tokens", {
-          p_session_id: sessionId,
-          p_tokens: usage?.totalTokens ?? 0,
-          p_messages: msgCount,
-        });
-      }
+      // Update session token counter.
+      //
+      // Antes isto era a RPC `increment_session_tokens`, que NÃO existe no
+      // Neon: ela descobria o usuário por `auth.uid()` e foi descartada na
+      // migração (ver a NOTA nº 4 no topo de `packages/db/schema.sql`). O
+      // incremento é feito aqui, no SQL, e não com um read-modify-write em
+      // TypeScript — duas requisições concorrentes na mesma sessão
+      // perderiam contagem.
+      const msgCount = 2 + (toolCalls?.length ?? 0);
+      await db
+        .update(schema.ai_chat_sessions)
+        .set({
+          total_tokens_used: sql`COALESCE(${schema.ai_chat_sessions.total_tokens_used}, 0) + ${usage?.totalTokens ?? 0}`,
+          message_count: sql`COALESCE(${schema.ai_chat_sessions.message_count}, 0) + ${msgCount}`,
+          updated_at: new Date().toISOString(),
+        })
+        .where(
+          and(
+            eq(schema.ai_chat_sessions.id, sessionId),
+            eq(schema.ai_chat_sessions.user_id, user.ownerId),
+          ),
+        );
     },
   });
 

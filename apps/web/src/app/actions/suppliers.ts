@@ -1,9 +1,8 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
 import { getDb, schema } from "@sbf/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 export type Supplier = typeof schema.suppliers.$inferSelect;
 type SupplierInsert = Omit<typeof schema.suppliers.$inferInsert, "user_id" | "id">;
@@ -86,18 +85,83 @@ export async function getSupplier(id: string): Promise<Supplier | null> {
 }
 
 /**
- * BLOQUEADA — NÃO CONVERTIDA. `search_suppliers` foi descartada por inteiro
- * na migração. Ver Apêndice "RPCs bloqueadas". Permanece com o código
- * Supabase atual.
+ * `type` e não `interface` de propósito: `db.execute<T>` exige
+ * `T extends Record<string, unknown>`, e só um alias de tipo objeto ganha a
+ * assinatura de índice implícita que satisfaz essa restrição.
  */
-export async function searchSuppliers(query: string, limit = 10) {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("search_suppliers", {
-    p_query: query,
-    p_limit: limit,
-  });
-  if (error) throw new Error(error.message);
-  return data;
+export type SupplierSearchResult = {
+  id: string;
+  name: string;
+  type: string | null;
+  document_number: string | null;
+  is_active: boolean;
+  /** Alias que casou com a busca; `null` quando o casamento foi pelo nome. */
+  matched_alias: string | null;
+  similarity_score: number;
+};
+
+/**
+ * Busca fuzzy de fornecedores por nome ou alias ativo (era a RPC
+ * `search_suppliers`).
+ *
+ * `search_suppliers` é uma das SEIS funções descartadas por inteiro na
+ * migração Supabase → Neon (packages/db/schema.sql, NOTA item 4) — filtrava
+ * por `auth.uid()`. Confirmado por consulta ao `pg_proc` do Neon: NÃO existe
+ * lá. O corpo dela vem para cá como `sql` parametrizado, com o filtro por
+ * dono explícito nas DUAS pernas da união (nome e alias): `similarity()` e o
+ * operador `%` são do pg_trgm e não têm equivalente no query builder do
+ * Drizzle, e os índices GIN `idx_suppliers_name_trgm`/
+ * `idx_supplier_aliases_trgm` só servem essa forma.
+ */
+export async function searchSuppliers(query: string, limit = 10): Promise<SupplierSearchResult[]> {
+  const userId = await requireUserId();
+  const db = getDb();
+
+  const resultado = await db.execute<SupplierSearchResult>(sql`
+    WITH direct_matches AS (
+      SELECT s.id, s.name, s.type, s.document_number, s.is_active,
+             NULL::text AS matched_alias,
+             similarity(s.name, ${query}::text) AS similarity_score
+        FROM public.suppliers s
+       WHERE s.user_id = ${userId}::uuid
+         AND s.is_active = true
+         AND (s.name % ${query}::text OR s.name ILIKE '%' || ${query}::text || '%')
+    ),
+    alias_matches AS (
+      SELECT s.id, s.name, s.type, s.document_number, s.is_active,
+             sa.alias_name AS matched_alias,
+             similarity(sa.alias_name, ${query}::text) AS similarity_score
+        FROM public.supplier_aliases sa
+        JOIN public.suppliers s ON s.id = sa.supplier_id
+       WHERE s.user_id = ${userId}::uuid
+         -- Defesa em profundidade: sem RLS, um alias com user_id de outro
+         -- dono pendurado num fornecedor deste não pode entrar no resultado.
+         AND sa.user_id = ${userId}::uuid
+         AND sa.is_active = true
+         AND s.is_active = true
+         AND (sa.alias_name % ${query}::text OR sa.alias_name ILIKE '%' || ${query}::text || '%')
+         AND (sa.valid_from IS NULL OR sa.valid_from <= CURRENT_DATE)
+         AND (sa.valid_until IS NULL OR sa.valid_until >= CURRENT_DATE)
+    ),
+    combined AS (
+      SELECT * FROM direct_matches
+      UNION ALL
+      SELECT * FROM alias_matches
+    )
+    SELECT sub.id, sub.name, sub.type, sub.document_number, sub.is_active,
+           sub.matched_alias, sub.similarity_score
+      FROM (
+        SELECT DISTINCT ON (combined.id)
+               combined.id, combined.name, combined.type, combined.document_number,
+               combined.is_active, combined.matched_alias, combined.similarity_score
+          FROM combined
+         ORDER BY combined.id, combined.similarity_score DESC
+      ) sub
+     ORDER BY sub.similarity_score DESC
+     LIMIT ${limit}
+  `);
+
+  return resultado.rows;
 }
 
 export async function createSupplier(input: SupplierInsert): Promise<Supplier> {
