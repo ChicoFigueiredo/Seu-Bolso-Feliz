@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PluggyConnect } from "react-pluggy-connect";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Plug } from "lucide-react";
@@ -10,6 +10,15 @@ import {
   createPluggyConnectToken,
   completePluggyConnection,
 } from "@/app/actions/pluggy-connections";
+
+// O widget toca `window` já na avaliação do módulo. Um import estático faz o
+// Next avaliá-lo também no servidor — e o processo cai com
+// "ReferenceError: window is not defined" antes de responder qualquer coisa.
+// `ssr: false` faz o pacote existir só no navegador, que é o único lugar onde
+// ele tem sentido. O build não pega isso: é falha de execução, não de tipo.
+const PluggyConnect = dynamic(() => import("react-pluggy-connect").then((m) => m.PluggyConnect), {
+  ssr: false,
+});
 
 interface PluggyConnectButtonProps {
   /** Presente quando o botão reautentica uma conexão existente em vez de criar uma nova. */
