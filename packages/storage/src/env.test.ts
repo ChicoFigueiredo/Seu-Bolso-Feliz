@@ -1,50 +1,39 @@
 import { describe, expect, it } from "vitest";
+import { createStorageClientFromEnv } from "./index";
 import { loadStorageConfigFromEnv } from "./env";
 
-function fullEnv(overrides: Record<string, string | undefined> = {}): Record<string, string> {
-  return {
-    S3_ENDPOINT: "http://127.0.0.1:9000",
-    S3_ACCESS_KEY_ID: "key-id",
-    S3_SECRET_ACCESS_KEY: "secret",
-    ...overrides,
-  } as Record<string, string>;
-}
-
 describe("loadStorageConfigFromEnv", () => {
-  it("lê as variáveis obrigatórias e aplica defaults", () => {
-    const config = loadStorageConfigFromEnv(fullEnv());
-    expect(config).toEqual({
-      endpoint: "http://127.0.0.1:9000",
-      accessKeyId: "key-id",
-      secretAccessKey: "secret",
-      region: "us-east-1",
-      forcePathStyle: true,
+  it("lê o token do Vercel Blob", () => {
+    expect(loadStorageConfigFromEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_abc" })).toEqual({
+      token: "vercel_blob_rw_abc",
     });
   });
 
-  it("respeita S3_REGION quando informado", () => {
-    const config = loadStorageConfigFromEnv(fullEnv({ S3_REGION: "sa-east-1" }));
-    expect(config.region).toBe("sa-east-1");
+  it("lança nomeando a variável quando o token está ausente", () => {
+    expect(() => loadStorageConfigFromEnv({})).toThrow(/BLOB_READ_WRITE_TOKEN/);
   });
 
-  it("só desliga forcePathStyle com o literal 'false'", () => {
-    expect(loadStorageConfigFromEnv(fullEnv({ S3_FORCE_PATH_STYLE: "false" })).forcePathStyle).toBe(
-      false,
+  it("trata token vazio como ausente", () => {
+    expect(() => loadStorageConfigFromEnv({ BLOB_READ_WRITE_TOKEN: "" })).toThrow(
+      /BLOB_READ_WRITE_TOKEN/,
     );
-    expect(loadStorageConfigFromEnv(fullEnv({ S3_FORCE_PATH_STYLE: "true" })).forcePathStyle).toBe(
-      true,
-    );
-    expect(
-      loadStorageConfigFromEnv(fullEnv({ S3_FORCE_PATH_STYLE: "qualquer-outra-coisa" }))
-        .forcePathStyle,
-    ).toBe(true);
+  });
+});
+
+describe("createStorageClientFromEnv", () => {
+  /**
+   * Este é o ponto do contrato que mais importa na prática: sem o token, o
+   * erro tem que aparecer aqui, com o nome da variável, e não no meio de um
+   * upload de boleto — que é onde ele apareceria se o cliente deixasse o
+   * `@vercel/blob` procurar a credencial sozinho no `process.env`.
+   */
+  it("falha na construção quando o token não está no ambiente", () => {
+    expect(() => createStorageClientFromEnv({})).toThrow(/BLOB_READ_WRITE_TOKEN/);
   });
 
-  it.each(["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"])(
-    "lança com o nome da variável quando %s está ausente",
-    (missingKey) => {
-      const env = fullEnv({ [missingKey]: undefined });
-      expect(() => loadStorageConfigFromEnv(env)).toThrow(new RegExp(missingKey));
-    },
-  );
+  it("constrói normalmente quando o token está presente", () => {
+    expect(() =>
+      createStorageClientFromEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_abc" }),
+    ).not.toThrow();
+  });
 });

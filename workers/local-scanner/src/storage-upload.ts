@@ -16,8 +16,8 @@ export const BUCKET_ORIGINAIS = "ingestion-originals";
 /**
  * Só a fatia do `StorageClient` que o upload usa.
  *
- * Declarar o mínimo permite passar um dublê nos testes sem assinar requisição
- * S3 de verdade.
+ * Declarar o mínimo permite passar um dublê nos testes sem falar com a loja
+ * de blobs de verdade.
  */
 export interface DestinoDeUpload {
   from(bucket: string): {
@@ -44,10 +44,10 @@ export async function uploadOriginal(
 /**
  * Texto legível de qualquer erro.
  *
- * `StorageError` ganha o código e o status na mensagem: quando o S3 devolve um
- * XML de erro, a mensagem sozinha ("Access Denied") não diz se o problema é
- * credencial, bucket ou política — o `AccessDenied 403` junto resolve isso na
- * primeira leitura do log.
+ * `StorageError` ganha o código e o status na mensagem: a mensagem sozinha
+ * ("Access denied") não diz se o problema é credencial, caminho ou loja
+ * suspensa — o `access_denied 403` junto resolve isso na primeira leitura do
+ * log.
  */
 export function mensagemDeErro(err: unknown): string {
   if (err instanceof StorageError) {
