@@ -13,7 +13,7 @@ import {
 import { hojeIso, somaDias } from "@/lib/datas";
 
 // Mesmo mock de apps/web/src/app/actions/liabilities.test.ts: a identidade
-// vem do nosso próprio `requireUser()` desde a saída do Supabase.
+// vem do nosso próprio `requireUser()`, sem provedor externo.
 let currentUserId = "";
 vi.mock("@/lib/auth", () => {
   const sessao = () =>

@@ -1,3 +1,13 @@
+/**
+ * ⚠️ Arquivo gerado, e hoje ENCALHADO: o gerador que o produzia lia o schema
+ * de um provedor que o projeto não usa mais. O schema de verdade vive em
+ * `packages/db/src/schema.ts` (Drizzle), e `$inferSelect`/`$inferInsert` de lá
+ * substituem cada tipo daqui.
+ *
+ * Enquanto 14 arquivos importarem `@sbf/shared-types`, este arquivo continua
+ * no ar. Trocá-lo é uma decisão de ferramenta, não uma limpeza — ver
+ * `scripts/generate-types.sh`.
+ */
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
@@ -3031,7 +3041,10 @@ export type Database = {
   };
 };
 
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
+// A chave omitida aqui nunca existiu neste `Database` — o `Omit` é herança do
+// gerador que produziu o arquivo e não remove nada. Fica porque toda a
+// aritmética de tipos abaixo já se apoia neste alias.
+type DatabaseWithoutInternals = Omit<Database, "__Internal">;
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">];
 

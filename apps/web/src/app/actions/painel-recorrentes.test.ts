@@ -13,7 +13,7 @@ import { paraIso } from "@/lib/datas";
 
 let currentUserId = "";
 // Mesmo mock de recurring.test.ts: `requireUser()` é a única porta de
-// identidade desde a saída do Supabase.
+// identidade, sem provedor externo.
 vi.mock("@/lib/auth", () => {
   const sessao = () =>
     currentUserId
