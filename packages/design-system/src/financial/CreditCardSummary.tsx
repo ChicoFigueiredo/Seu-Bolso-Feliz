@@ -15,6 +15,11 @@ export interface CreditCardSummaryProps {
   /** Limite total, formatado. */
   limit: string;
   /** Fracao do limite já usada, de 0 a 1. */
+  /**
+   * Fração do limite já usada, de 0 a 1 — **não** porcentagem. Vai direto para
+   * o `ProgressBar`, que satura em 1; passar `75` para "75%" pinta a barra
+   * inteira em vez de três quartos, sem erro nenhum a denunciar.
+   */
   used: number;
   /** Aviso de vencimento — `vence amanha`. */
   dueLabel?: string;

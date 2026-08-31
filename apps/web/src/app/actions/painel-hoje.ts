@@ -31,6 +31,7 @@ import { getDb, schema } from "@sbf/db";
 import { and, eq, gte, inArray, isNull, isNotNull, lte, ne, sql, asc, type SQL } from "drizzle-orm";
 import { getCurrentPeriod } from "@sbf/domain";
 import { requireUser } from "@/lib/auth";
+import { paraIso } from "@/lib/datas";
 
 const CONTAS = ["checking_account", "savings_account"] as const;
 const SAIDAS = [
@@ -90,12 +91,20 @@ export interface PainelHoje {
   compromissoMensalDividas: number;
   proximos: CompromissoResumo[];
   faltaAteFimDoPeriodo: number;
-  mes: { entrou: number; saiu: number; aindaVaiSair: number; livreProjetado: number };
+  mes: {
+    entrou: number;
+    /** Só o que deixou uma conta. Compra no cartão não entra aqui — ver `noCartao`. */
+    saiu: number;
+    /** Comprado no cartão no período. Sai da conta quando a fatura for paga. */
+    noCartao: number;
+    aindaVaiSair: number;
+    livreProjetado: number;
+  };
   pendencias: { rotulo: string; quantidade: number; rota: string }[];
   centros: CentroResumo[];
 }
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = paraIso;
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 
 export async function carregarPainelHoje(): Promise<PainelHoje> {
@@ -142,16 +151,31 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
       )
       .orderBy(asc(schema.financial_products.display_order), asc(schema.financial_products.name)),
 
+    // ⚠️ A chave aqui é `financial_product_id`, não `card_id`.
+    // `statement_cycles.card_id` aponta para `cards`, e `cards` é uma tabela
+    // separada de `financial_products` — o cartão tem UUID em cada uma. O
+    // código anterior indexava os ciclos por `card_id` e procurava por
+    // `financial_products.id`: chaves de tabelas diferentes, que nunca casam.
+    // O efeito era silencioso e total — TODA fatura aparecia como R$ 0,00, com
+    // vencimento e fechamento em branco, sem erro nenhum. Por isso a junção com
+    // `cards` acontece aqui, no SQL, e não numa segunda busca depois.
     db
       .select({
         id: schema.statement_cycles.id,
-        cartaoId: schema.statement_cycles.card_id,
+        produtoId: schema.cards.financial_product_id,
         total: schema.statement_cycles.total_amount,
         pago: schema.statement_cycles.paid_amount,
         fechamento: schema.statement_cycles.cycle_end_date,
         vencimento: schema.statement_cycles.due_date,
       })
       .from(schema.statement_cycles)
+      .innerJoin(
+        schema.cards,
+        and(
+          eq(schema.cards.id, schema.statement_cycles.card_id),
+          eq(schema.cards.user_id, ownerId),
+        ),
+      )
       .where(
         and(
           eq(schema.statement_cycles.user_id, ownerId),
@@ -215,6 +239,13 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
         and(
           eq(schema.recurring_templates.id, schema.recurring_instances.recurring_template_id),
           eq(schema.recurring_templates.user_id, ownerId),
+          // Recorrente pausado não é compromisso. Sem esta linha, pausar uma
+          // assinatura não a tirava da tela: as instâncias já geradas
+          // continuavam contando contra o "livre após compromissos", e o
+          // usuário via um dinheiro comprometido que ele mesmo já tinha
+          // cancelado. Vale também para "excluir", que no banco é o mesmo
+          // estado (`is_active = false`).
+          eq(schema.recurring_templates.is_active, true),
         ),
       )
       .where(
@@ -257,7 +288,7 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
 
   const disponivelAgora = contas.reduce((s, c) => s + c.saldo, 0);
 
-  const cicloPorCartao = new Map(ciclosAbertos.map((c) => [c.cartaoId, c]));
+  const cicloPorCartao = new Map(ciclosAbertos.map((c) => [c.produtoId, c]));
   const cartoes: CartaoResumo[] = produtos
     .filter((p) => p.tipo === "credit_card")
     .map((p) => {
@@ -321,7 +352,7 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
   for (const c of ciclosAbertos) {
     const aberto = num(c.total) - num(c.pago);
     if (aberto <= 0) continue;
-    const cartao = cartoes.find((x) => x.id === c.cartaoId);
+    const cartao = cartoes.find((x) => x.id === c.produtoId);
     compromissos.push({
       id: c.id,
       descricao: `Fatura ${cartao?.nome ?? "do cartão"}`,
@@ -349,12 +380,28 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
   const faltaAteFimDoPeriodo = Math.max(0, aindaVaiSair - disponivelAgora);
 
   // ── Resultado do mês ───────────────────────────────────────────────────
+  //
+  // "Saiu" é dinheiro que deixou uma CONTA. A compra no cartão ainda não
+  // deixou: ela sai quando a fatura é paga, e a fatura já entra aqui como
+  // `statement_payment`. Sem a guarda de `cicloId`, a compra e o pagamento da
+  // fatura que a contém somavam os dois — o mesmo dinheiro contado duas vezes,
+  // inflando o gasto do mês. A guarda existia para os compromissos desde o
+  // começo (ver a query acima) e faltava justamente aqui, no total.
+  //
+  // O valor comprado no cartão não é descartado: vira `noCartao`, exibido
+  // separado, porque é dinheiro comprometido que o usuário precisa enxergar —
+  // só não é dinheiro que já saiu.
   let entrou = 0;
   let saiu = 0;
+  let noCartao = 0;
   for (const m of movimentos) {
     if (!m.confirmada) continue;
-    if (m.tipo === "income" || m.tipo === "refund") entrou += num(m.valor);
-    else if ((SAIDAS as readonly string[]).includes(m.tipo)) saiu += num(m.valor);
+    if (m.tipo === "income" || m.tipo === "refund") {
+      entrou += num(m.valor);
+    } else if ((SAIDAS as readonly string[]).includes(m.tipo)) {
+      if (m.cicloId) noCartao += num(m.valor);
+      else saiu += num(m.valor);
+    }
   }
 
   // ── Pendências ─────────────────────────────────────────────────────────
@@ -418,6 +465,7 @@ export async function carregarPainelHoje(): Promise<PainelHoje> {
     mes: {
       entrou,
       saiu,
+      noCartao,
       aindaVaiSair,
       // Livre projetado é a posição no fim do período: o que há hoje menos o
       // que ainda sai. Não soma receita futura — receita prevista que não
@@ -503,7 +551,7 @@ async function contarPendencias(
       rota: "/dashboard/movimentacoes?filtro=sem-categoria",
     },
     {
-      rotulo: "Sem centro",
+      rotulo: "Não alocadas",
       quantidade: semCentro,
       rota: "/dashboard/movimentacoes?filtro=sem-centro",
     },

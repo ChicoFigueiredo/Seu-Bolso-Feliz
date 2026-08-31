@@ -16,6 +16,8 @@ import { hashSenha, verificaSenha } from "@/lib/auth/password";
 
 const MAX_TENTATIVAS = 5;
 const MINUTOS_BLOQUEIO = 15;
+/** Esta é a única credencial de reserva de um sistema financeiro: vale um piso alto. */
+const SENHA_INICIAL_MINIMA = 12;
 
 export interface ResultadoLogin {
   erro: string;
@@ -33,7 +35,26 @@ async function semeiaSenhaSePreciso(
 ): Promise<string | null> {
   if (hashAtual) return hashAtual;
   const inicial = process.env.ADMIN_INITIAL_PASSWORD;
-  if (!inicial || inicial.length < 12) return null;
+
+  // A recusa é silenciosa para quem está na tela de login — dizer a um
+  // desconhecido *por que* o login está capado conta algo sobre a configuração.
+  // Mas ela não pode ser silenciosa para quem opera o sistema: uma senha curta
+  // demais faz o login falhar com "não está configurado", que não aponta para a
+  // causa e manda o operador procurar no lugar errado. Daí o log explícito.
+  if (!inicial) {
+    console.error(
+      "[auth] ADMIN_INITIAL_PASSWORD não está definida — o login por senha fica indisponível.",
+    );
+    return null;
+  }
+  if (inicial.length < SENHA_INICIAL_MINIMA) {
+    console.error(
+      `[auth] ADMIN_INITIAL_PASSWORD tem menos de ${SENHA_INICIAL_MINIMA} caracteres — ` +
+        "o login por senha fica indisponível até ela ser trocada por uma mais longa.",
+    );
+    return null;
+  }
+
   const hash = await hashSenha(inicial);
   await getDb()
     .update(schema.users)

@@ -59,7 +59,21 @@ function dateWithinDays(a: string, b: string, days = 7): boolean {
   return Math.abs(da - db) <= days * 24 * 60 * 60 * 1000;
 }
 
+/**
+ * Mês de competência (`yyyy-mm`) de uma data.
+ *
+ * Lê os caracteres da string em vez de passar por `new Date`. Passar por
+ * `Date` parece inofensivo e não é: `new Date("2026-09-01")` é meia-noite
+ * **UTC**, e `getMonth()` devolve o mês do fuso do processo — em UTC−3, agosto.
+ * O dia 1º de todo mês cairia na competência do mês anterior, e a conciliação
+ * procuraria no lugar errado. Em produção (Vercel roda em UTC) não aparecia;
+ * na máquina do desenvolvedor, sim.
+ */
 function competenceKey(date: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(date);
+  if (m) return `${m[1]}-${m[2]}`;
+  // Não é `yyyy-mm-dd`: cai para o parser, e aí o fuso do processo é o melhor
+  // palpite disponível.
   const d = new Date(date);
   if (isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -90,8 +104,8 @@ async function runReconciliation(
   // Regra 1: Duplicate hash
   if (sourceDocumentId) {
     // Filtro por dono também AQUI: a leitura do hash do documento de origem
-    // não tinha `user_id` e dependia do RLS do Supabase para não vazar o
-    // conteúdo de documentos alheios. No Neon isso viraria leitura
+    // não tinha `user_id` e dependia de política de RLS do banco para não
+    // vazar o conteúdo de documentos alheios. No Neon isso viraria leitura
     // cross-user, então o filtro é explícito.
     const [srcDoc] = await db
       .select({ content_hash: schema.source_documents.content_hash })

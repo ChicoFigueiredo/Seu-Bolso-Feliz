@@ -32,6 +32,7 @@ import {
   formatBRL,
 } from "@sbf/design-system";
 import type { PainelHoje } from "@/app/actions/painel-hoje";
+import { hojeIso as hojeIsoSP, somaDias } from "@/lib/datas";
 
 const DIAS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -56,7 +57,7 @@ export function PainelHojeView({ dados }: { dados: PainelHoje }) {
   const router = useRouter();
   const [pendenciasAbertas, setPendenciasAbertas] = useState(false);
 
-  const hojeIso = new Date().toISOString().slice(0, 10);
+  const hojeIso = hojeIsoSP();
   const temAlgo = dados.contas.length > 0 || dados.cartoes.length > 0 || dados.proximos.length > 0;
 
   if (!temAlgo) {
@@ -149,7 +150,7 @@ export function PainelHojeView({ dados }: { dados: PainelHoje }) {
                 invoice={formatBRL(c.faturaAtual)}
                 available={c.limiteLivre == null ? "—" : formatBRL(c.limiteLivre)}
                 limit={c.limiteTotal == null ? "—" : formatBRL(c.limiteTotal)}
-                used={c.limiteTotal ? Math.min(100, (c.faturaAtual / c.limiteTotal) * 100) : 0}
+                used={c.limiteTotal ? c.faturaAtual / c.limiteTotal : 0}
                 dueLabel={c.vencimento ? `Vence ${dataCurta(c.vencimento)}` : undefined}
                 dueTone={
                   c.vencimento && c.vencimento < hojeIso
@@ -213,6 +214,32 @@ export function PainelHojeView({ dados }: { dados: PainelHoje }) {
             committed: dados.mes.aindaVaiSair,
           }}
         />
+
+        {/* "Saiu" conta só o que deixou uma conta. O comprado no cartão ainda
+            não saiu — sai quando a fatura for paga — mas some-lo ali contaria o
+            mesmo dinheiro duas vezes. Some-lo em lugar nenhum seria pior: é
+            dinheiro comprometido. Por isso aparece aqui, dito por extenso. */}
+        {dados.mes.noCartao > 0 ? (
+          <Card variant="quiet">
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                fontSize: 13,
+                color: "var(--text-3)",
+              }}
+            >
+              <Icon name="credit_card" size={18} />
+              <span>
+                Mais{" "}
+                <strong style={{ color: "var(--text-2)" }}>{formatBRL(dados.mes.noCartao)}</strong>{" "}
+                comprados no cartão neste período. Não entram em &ldquo;Saiu&rdquo; porque só deixam
+                a conta quando a fatura for paga.
+              </span>
+            </div>
+          </Card>
+        ) : null}
 
         {dados.pendencias.length > 0 ? (
           <PendingBox
@@ -279,7 +306,5 @@ export function PainelHojeView({ dados }: { dados: PainelHoje }) {
 }
 
 function proximosSeteDias(hojeIso: string): string {
-  const d = new Date(`${hojeIso}T12:00:00`);
-  d.setDate(d.getDate() + 7);
-  return d.toISOString().slice(0, 10);
+  return somaDias(hojeIso, 7);
 }
