@@ -46,6 +46,7 @@ const rotuloEstilo: CSSProperties = {
 const campoEstilo: CSSProperties = {
   fontFamily: "var(--sbf-font-sans)",
   width: "100%",
+  boxSizing: "border-box",
   minHeight: 44,
   padding: "10px 12px",
   fontSize: 14,

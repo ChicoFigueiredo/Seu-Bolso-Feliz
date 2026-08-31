@@ -595,6 +595,20 @@
   flex-shrink: 0;
 }
 
+/* ── Estouro de flex e grid ──────────────────────────────────────────────
+   Item de flex e item de grid nascem com `min-width: auto`, que os impede de
+   encolher abaixo do próprio conteúdo. Numa tela de 390px isso não corta o
+   conteúdo: empurra a largura da PÁGINA e a coisa toda ganha rolagem
+   horizontal. Foi assim que Movimentações forçou 508px dentro de uma coluna de
+   358px — quatro cards de 210px que deveriam ter virado uma coluna só.
+
+   `:where(*)` tem especificidade zero de propósito: qualquer `min-width`
+   escrito por um componente, em classe ou em style inline, continua ganhando.
+   O que esta regra troca é só o padrão implícito. */
+.sbf-root :where(*) {
+  min-width: 0;
+}
+
 /* Movimento — portado do canvas, com reduced-motion respeitado. */
 @keyframes sbfUp {
   from {

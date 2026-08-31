@@ -103,6 +103,7 @@ export function FaturasSection({ cartao }: { cartao: CartaoDetalhe }) {
                     alignItems: "center",
                     gap: 12,
                     width: "100%",
+                    boxSizing: "border-box",
                     minHeight: 44,
                     padding: "13px 16px",
                     border: 0,

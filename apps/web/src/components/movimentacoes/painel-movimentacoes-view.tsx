@@ -267,6 +267,7 @@ export function PainelMovimentacoesView({
                 style={{
                   fontFamily: "var(--sbf-font-sans)",
                   width: "100%",
+                  boxSizing: "border-box",
                   minHeight: 44,
                   padding: "10px 12px 10px 38px",
                   fontSize: 14,

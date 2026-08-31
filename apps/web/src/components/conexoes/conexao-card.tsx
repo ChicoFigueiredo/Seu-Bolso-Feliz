@@ -47,6 +47,7 @@ export interface ConexaoCardProps {
 
 const estiloSelect = {
   width: "100%",
+  boxSizing: "border-box",
   minHeight: 44,
   padding: "10px 12px",
   borderRadius: "var(--sbf-radius-md)",
