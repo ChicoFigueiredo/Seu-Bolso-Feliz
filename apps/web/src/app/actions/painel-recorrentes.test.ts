@@ -9,7 +9,8 @@ import {
   equivalenteMensal,
   gerarInstanciasDoPeriodo,
 } from "./painel-recorrentes";
-import { paraIso } from "@/lib/datas";
+import { getCurrentPeriod } from "@sbf/domain";
+import { paraIso, somaDias } from "@/lib/datas";
 
 let currentUserId = "";
 // Mesmo mock de recurring.test.ts: `requireUser()` é a única porta de
@@ -101,10 +102,6 @@ async function seedRecurringInstance(
     .returning();
   return required(row, "Falha ao semear recurring_instance de teste");
 }
-
-// Mesmo relógio que o código sob teste: em UTC−3, depois das 21h o UTC já
-// virou o dia seguinte, e 'amanhã' cairia fora do período consultado.
-const iso = paraIso;
 
 // ─── equivalenteMensal: função pura, roda sem banco ──────────────────────
 describe("equivalenteMensal", () => {
@@ -285,18 +282,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("painel-recorrentes (integraçã
     const { institutionId, transaction } = await seedTransaction(USER_A);
     institutionIds.push(institutionId);
 
-    const hoje = new Date();
-    const amanha = new Date(hoje.getTime() + 86400000);
+    // As duas datas precisam cair DENTRO do período corrente, senão a lista de
+    // "instâncias do período" não as enxerga. Usar hoje/amanhã quebrava o teste
+    // todo dia 31 (ou último dia do ciclo), quando "amanhã" já é o mês que vem
+    // — falha real, uma vez por mês, que só apareceu à meia-noite.
+    const periodo = getCurrentPeriod({ startDay: 1 }, new Date());
+    const primeiroDia = paraIso(periodo.startDate);
+    const segundoDia = somaDias(primeiroDia, 1);
 
     // Mais antiga, mas já virou uma transação de verdade — não pode ser "a
     // próxima", senão o compromisso conta duas vezes (aqui e na transação).
     const conciliada = await seedRecurringInstance(USER_A, template.id, {
-      expected_date: iso(hoje),
+      expected_date: primeiroDia,
       transaction_id: transaction.id,
     });
     // Mais recente, ainda sem transação — esta é a próxima de verdade.
     const pendente = await seedRecurringInstance(USER_A, template.id, {
-      expected_date: iso(amanha),
+      expected_date: segundoDia,
     });
 
     const painel = await carregarPainelRecorrentes();
