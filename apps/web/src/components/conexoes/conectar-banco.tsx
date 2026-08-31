@@ -1,0 +1,125 @@
+"use client";
+
+/**
+ * O botão que abre o Pluggy Connect — a única porta por onde um banco entra
+ * no Seu Bolso Feliz.
+ *
+ * O widget vem do pacote `react-pluggy-connect`, que JÁ é dependência de
+ * apps/web (package.json) — nada de script de CDN nem de dependência nova.
+ * Este arquivo existe separado do resto da tela por dois motivos: manter o
+ * pacote isolado num único ponto de import, e não vazar o estado do widget
+ * para o componente que desenha os cards.
+ *
+ * O `connectToken` só é pedido no clique. Ele vale 30 minutos e é o ÚNICO
+ * segredo que atravessa para o navegador — `PLUGGY_CLIENT_SECRET` fica no
+ * servidor, dentro de `createPluggyConnectToken`.
+ */
+
+import { useCallback, useState } from "react";
+import { PluggyConnect } from "react-pluggy-connect";
+import { Button, type ButtonSize, type ButtonVariant } from "@sbf/design-system";
+import {
+  completePluggyConnection,
+  createPluggyConnectToken,
+} from "@/app/actions/pluggy-connections";
+
+export interface ConectarBancoProps {
+  /**
+   * Presente quando é reautenticação de uma conexão existente
+   * (`provider_connections.external_item_id`). O widget abre em modo update:
+   * o banco pede a senha de novo sem criar uma segunda conexão.
+   */
+  itemId?: string;
+  rotulo: string;
+  icone?: string;
+  variante?: ButtonVariant;
+  tamanho?: ButtonSize;
+  bloco?: boolean;
+  desabilitado?: boolean;
+  /** Conexão salva no banco — a tela precisa recarregar os dados. */
+  aoConcluir: (mensagem: string) => void;
+  aoFalhar: (mensagem: string) => void;
+}
+
+function mensagemDoErro(erro: unknown): string {
+  return erro instanceof Error ? erro.message : String(erro);
+}
+
+export function ConectarBanco({
+  itemId,
+  rotulo,
+  icone = "add_link",
+  variante = "primary",
+  tamanho = "lg",
+  bloco = false,
+  desabilitado = false,
+  aoConcluir,
+  aoFalhar,
+}: ConectarBancoProps) {
+  const [connectToken, setConnectToken] = useState<string | null>(null);
+  const [abrindo, setAbrindo] = useState(false);
+
+  const abrirWidget = useCallback(async () => {
+    setAbrindo(true);
+    try {
+      const { connectToken } = await createPluggyConnectToken({ itemId });
+      setConnectToken(connectToken);
+    } catch (erro) {
+      aoFalhar(mensagemDoErro(erro));
+    } finally {
+      setAbrindo(false);
+    }
+  }, [itemId, aoFalhar]);
+
+  const concluir = useCallback(
+    async (dados: { item: { id: string } }) => {
+      // Fechar o widget antes de gravar: a chamada abaixo bate na Pluggy para
+      // listar as contas e pode demorar alguns segundos. Deixar o modal aberto
+      // nesse intervalo faz parecer que travou.
+      setConnectToken(null);
+      try {
+        await completePluggyConnection(dados.item.id);
+        aoConcluir(
+          itemId
+            ? "Conexão reautenticada."
+            : "Banco conectado. Agora diga qual conta é qual, abaixo.",
+        );
+      } catch (erro) {
+        // Distinção que importa: o banco autorizou, o que falhou foi guardar.
+        // Dizer só "falhou" faria o usuário tentar autorizar de novo à toa.
+        aoFalhar(`O banco autorizou, mas falhou ao salvar aqui: ${mensagemDoErro(erro)}`);
+      }
+    },
+    [itemId, aoConcluir, aoFalhar],
+  );
+
+  return (
+    <>
+      <Button
+        variant={variante}
+        size={tamanho}
+        icon={icone}
+        block={bloco}
+        disabled={desabilitado || abrindo}
+        onClick={abrirWidget}
+        style={{ minHeight: 44 }}
+      >
+        {abrindo ? "Abrindo…" : rotulo}
+      </Button>
+
+      {connectToken ? (
+        <PluggyConnect
+          connectToken={connectToken}
+          updateItem={itemId}
+          language="pt"
+          onSuccess={concluir}
+          onError={(erro) => {
+            setConnectToken(null);
+            aoFalhar(erro.message || "O banco não concluiu a autorização.");
+          }}
+          onClose={() => setConnectToken(null)}
+        />
+      ) : null}
+    </>
+  );
+}

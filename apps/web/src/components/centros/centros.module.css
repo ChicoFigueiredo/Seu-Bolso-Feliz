@@ -1,0 +1,92 @@
+/* Projetos & Centros — o pouco de CSS que estilo inline não resolve bem:
+   posicionamento fixo da folha, foco visível e media query. */
+
+/* O <Sheet> do design system é `position: relative` e alinha o cartão à base
+   do próprio container — quem coloca a folha na tela é este overlay. */
+.overlayFolha {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* Numa tela alta a folha não deve ocupar tudo; numa tela baixa ela precisa
+   rolar por dentro em vez de esconder o botão de salvar. */
+/* Desconta a alça, o título e o respiro do cartão do <Sheet>, senão o rodapé
+   com o botão de salvar escapa da janela numa tela de 640px de altura. */
+.corpoFolha {
+  max-height: min(calc(88dvh - 130px), 700px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.campo {
+  font-family: var(--sbf-font-sans);
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--sbf-radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.campo::placeholder {
+  color: var(--text-4);
+  font-weight: 500;
+}
+
+.campo:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-color: var(--primary);
+}
+
+.campoComProblema {
+  border-color: var(--danger);
+}
+
+.campoValor {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Toda superfície clicável desta tela respeita o alvo mínimo de 44px. */
+.alvo {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.grade {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 560px) {
+  .grade {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+}
+
+/* A linha de rateio empilha no celular e vira uma linha só a partir de 430px:
+   a 390px, campo de valor ao lado do seletor de centro deixa os dois
+   pequenos demais para o polegar. */
+.linhaRateio {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+@media (min-width: 430px) {
+  .linhaRateio {
+    grid-template-columns: 1fr 132px auto;
+    align-items: center;
+  }
+}

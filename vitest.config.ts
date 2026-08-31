@@ -48,6 +48,13 @@ export default defineConfig({
             "packages/*/src/**/*.test.ts",
             "__tests__/domain/**/*.test.ts",
             "workers/*/src/**/*.test.ts",
+            // Lógica pura das telas (aritmética de rateio, filtros, períodos).
+            // Sem esta linha os testes existem, passam quando rodados à mão e
+            // nunca rodam na suíte — código morto que dá a sensação de
+            // cobertura. Fica em `unit` porque não toca banco; o que toca
+            // banco vive em app/actions e já está no projeto `integration`.
+            "apps/web/src/components/**/*.test.ts",
+            "apps/web/src/lib/**/*.test.ts",
           ],
         },
       },
