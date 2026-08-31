@@ -1,0 +1,10 @@
+# O que sai do upload para a Vercel. Cuidado: `apps/*`, `packages/*` e
+# `workers/*` são workspaces do Bun — remover qualquer um deles quebra o
+# `bun install` na build, mesmo que a aplicação web não importe nada de lá.
+# Por isso só saem daqui diretórios que não são workspace nenhum.
+docs
+docs-html
+__tests__
+.design-sync
+supabase
+inbox

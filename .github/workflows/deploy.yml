@@ -5,10 +5,10 @@
 # aparecer um segundo usuário, esta decisão cai e staging volta.
 #
 # Compensações pela ausência de pré-produção, todas obrigatórias:
-#   1. `supabase db reset` a cada PR (no ci.yml) prova que as migrations
-#      reconstroem o schema do zero;
+#   1. o ci.yml reconstrói o schema do zero a cada PR, provando que a linha de
+#      base mais as migrations chegam ao mesmo lugar;
 #   2. todo arquivo de migration carrega um bloco `-- rollback:` revisado;
-#   3. dump do banco como artifact ANTES de qualquer `db push`;
+#   3. dump do banco como artifact ANTES de qualquer migration;
 #   4. portão humano: environment `production` com required reviewer, e
 #      workflow_dispatch — nunca dispara sozinho num push.
 name: Deploy
@@ -30,31 +30,32 @@ env:
 
 jobs:
   database:
-    name: Migrations e Edge Functions
+    name: Migrations (Neon)
     if: ${{ !inputs.skip_migrations }}
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Vincular projeto
-        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      # `psql` do cliente 17 — o servidor do Neon é 17, e um cliente antigo
+      # recusa o dump com "server version mismatch".
+      - name: Instalar o cliente do Postgres 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
 
       # Rede de segurança obrigatória sem staging: se uma migration corromper
-      # dados, o dump anterior é o caminho de volta.
+      # dados, este dump é o caminho de volta. Vem ANTES de qualquer DDL.
       - name: Backup antes de migrar
-        run: supabase db dump --file "backup-$(date -u +%Y%m%dT%H%M%SZ).sql"
+        run: pg_dump "$DATABASE_URL_UNPOOLED" --no-owner --no-acl -f "backup-$(date -u +%Y%m%dT%H%M%SZ).sql"
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -62,19 +63,14 @@ jobs:
           path: backup-*.sql
           retention-days: 30
 
+      # `scripts/aplicar-migrations.sh` é o único caminho de migration do
+      # projeto: aplica `packages/db/migrations/*.sql` em ordem, cada uma numa
+      # transação, pela conexão direta (DDL pelo pooler pode trocar de backend
+      # no meio do trabalho). As migrations são idempotentes.
       - name: Aplicar migrations
-        run: supabase db push
+        run: bash scripts/aplicar-migrations.sh
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-
-      # Sem `--no-verify-jwt`: o `verify_jwt` de cada função está declarado em
-      # supabase/config.toml. O flag global desligaria a verificação para toda
-      # função futura sem que ninguém decidisse isso.
-      - name: Deploy das Edge Functions
-        run: supabase functions deploy
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
 
   web:
     name: Web (Vercel)
@@ -93,8 +89,6 @@ jobs:
         with:
           bun-version: 1.3.11
 
-      # Deploy real, substituindo o `echo "configurar provedor"` que ocupava
-      # este lugar no .gitlab-ci.yml e nunca publicou nada.
       - name: Vercel pull
         run: bunx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
         env:
