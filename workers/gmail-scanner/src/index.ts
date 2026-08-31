@@ -18,6 +18,7 @@ import {
   ingestion_runs,
   source_documents,
   type Database,
+  resolveOwnerId,
 } from "@sbf/db";
 import { createStorageClientFromEnv, type StorageClient } from "@sbf/storage";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
@@ -194,10 +195,12 @@ function parseEmailDate(dateStr: string | undefined): string | null {
 
 // ─── Core ─────────────────────────────────────────────────────
 
-function getUserId(): string {
-  const uid = process.env.LOCAL_USER_ID;
-  if (!uid) throw new Error("LOCAL_USER_ID is required for gmail-scanner");
-  return uid;
+/**
+ * Quem é o dono das mensagens varridas. Sai do banco, não de um UUID copiado
+ * à mão para o `.env` — ver `resolveOwnerId` em @sbf/db para o porquê.
+ */
+function getUserId(): Promise<string> {
+  return resolveOwnerId();
 }
 
 /**
@@ -544,7 +547,7 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   const stats = createStats();
   const gmail = createGmailClient();
   const db = getDb();
-  const userId = getUserId();
+  const userId = await getUserId();
   // Em dry-run nada sobe: exigir credencial de S3 seria pedir configuração
   // para não usar. Fora dele, o cliente é criado uma vez, no início, para a
   // falha de configuração aparecer antes do primeiro download.

@@ -1,8 +1,8 @@
 /**
  * Conexão dos testes de integração/e2e com um Postgres real.
  *
- * Depois da ADR-009 não existe mais cliente Supabase: `@sbf/db` fala Drizzle
- * com um Postgres qualquer, e **não há RLS** — toda consulta filtra `user_id`
+ * Depois da ADR-009, `@sbf/db` fala Drizzle direto com um Postgres qualquer,
+ * e **não há RLS** — toda consulta filtra `user_id`
  * explicitamente, inclusive as deste diretório. Um teste que esqueça o filtro
  * passa a enxergar as linhas dos outros arquivos da suíte, então o filtro faz
  * parte do que está sendo testado, não é cerimônia.
@@ -69,8 +69,8 @@ export function getTestDb(): Database {
  * Apaga as linhas de um usuário nas tabelas informadas, na ordem dada.
  *
  * A ordem é responsabilidade de quem chama: filhas antes das pais, senão a FK
- * recusa. Ao contrário do `.delete()` do supabase-js — que devolvia o erro num
- * campo que ninguém lia —, aqui uma violação de FK **lança**, que é como um
+ * recusa. Ao contrário do `.delete()` do driver anterior — que devolvia o erro
+ * num campo que ninguém lia —, aqui uma violação de FK **lança**, que é como um
  * cleanup quebrado deve se comportar (o silêncio anterior deixava documentos
  * acumulando entre execuções e falseava contagens).
  *
@@ -90,6 +90,29 @@ export async function limparPorUsuario(
       // nomes vêm de literais deste próprio diretório, nunca de entrada externa.
       await db.execute(sql`delete from public.${sql.raw(tabela)} where user_id = ${userId}::uuid`);
     }
+  }
+}
+
+/**
+ * Garante que os usuários de teste existem em `public.users`.
+ *
+ * Antes ninguém semeava essa tabela: os testes gravavam `user_id` de um
+ * usuário que não existia, e passavam — nenhuma FK aponta para `public.users`,
+ * então o Postgres não reclamava. Era exatamente o mesmo defeito que existia em
+ * produção, onde o `LOCAL_USER_ID` do `.env` ficou apontando para o id de um
+ * banco antigo e os workers escreviam no vazio.
+ *
+ * Com `resolveOwnerId` validando o id na largada, a lacuna virou falha visível
+ * — que é o comportamento certo. Este helper fecha a lacuna no teste em vez de
+ * afrouxar a validação.
+ */
+export async function semearUsuarios(db: Database, ...userIds: string[]): Promise<void> {
+  for (const userId of userIds) {
+    await db.execute(sql`
+      INSERT INTO public.users (id, email, role)
+      VALUES (${userId}::uuid, ${`teste-${userId}@exemplo.invalido`}, 'owner')
+      ON CONFLICT (id) DO NOTHING
+    `);
   }
 }
 
@@ -115,8 +138,9 @@ export async function linha<T = Record<string, unknown>>(
  *
  * Existe porque metade destes testes afirma sobre a MENSAGEM de erro de uma
  * função do banco (`/pending_review/`, `/not allowed/i`) e a outra metade
- * sobre o valor devolvido. Com o supabase-js isso vinha pronto; com Drizzle um
- * erro do Postgres é exceção. Encapsular aqui evita espalhar try/catch por
+ * sobre o valor devolvido. Com o driver anterior isso vinha pronto; com
+ * Drizzle um erro do Postgres é exceção. Encapsular aqui evita espalhar
+ * try/catch por
  * cada asserção.
  */
 export interface Resultado<T> {

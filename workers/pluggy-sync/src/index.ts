@@ -20,7 +20,7 @@
  *   bun run workers/pluggy-sync/src/index.ts --backfill --from 2025-08-24
  */
 import { and, eq } from "drizzle-orm";
-import { getDb, schema } from "@sbf/db";
+import { getDb, resolveOwnerId, schema } from "@sbf/db";
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
 import { syncProviderConnection, type AccountMapping } from "./sync-runner";
 
@@ -57,10 +57,10 @@ function errorMessage(err: unknown): string {
 }
 
 async function main(): Promise<void> {
-  const userId = process.env.LOCAL_USER_ID;
-  if (!userId) {
-    throw new Error("LOCAL_USER_ID é obrigatório (app de usuário único, ver ADR-007)");
-  }
+  // O dono sai do banco, não de um UUID copiado à mão para o `.env`: um valor
+  // velho ali faria o backfill gravar centenas de linhas em nome de um usuário
+  // inexistente, sem erro nenhum, e a tela ficaria vazia. Ver @sbf/db/owner.
+  const userId = await resolveOwnerId();
 
   const opts = parseArgs();
   const provider = PluggyProvider.fromEnv();

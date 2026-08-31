@@ -5,7 +5,13 @@
 import { readdir, stat, readFile, rename, mkdir } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { and, eq } from "drizzle-orm";
-import { enqueueJob, ingestion_runs, source_documents, type Database } from "@sbf/db";
+import {
+  enqueueJob,
+  ingestion_runs,
+  resolveOwnerId,
+  source_documents,
+  type Database,
+} from "@sbf/db";
 import { createStorageClientFromEnv, type StorageClient } from "@sbf/storage";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
@@ -43,13 +49,11 @@ const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
 const MIME_MAP = MIME_POR_EXTENSAO;
 
 /**
- * ID do usuário local — em ambiente de desenvolvimento, usa variável de ambiente.
- * Em produção, isso será resolvido via auth token do request.
+ * Quem é o dono dos arquivos varridos. Sai do banco, não de um UUID copiado à
+ * mão para o `.env` — ver `resolveOwnerId` em @sbf/db para o porquê.
  */
-function getUserId(): string {
-  const uid = process.env.LOCAL_USER_ID;
-  if (!uid) throw new Error("LOCAL_USER_ID is required for local scanner");
-  return uid;
+function getUserId(): Promise<string> {
+  return resolveOwnerId();
 }
 
 /**
@@ -105,7 +109,7 @@ export async function scanDirectory(
   dirPath: string,
   options: ScannerOptions = {},
 ): Promise<number> {
-  const userId = getUserId();
+  const userId = await getUserId();
   const {
     recursive = false,
     extensions = ACCEPTED_EXTENSIONS,
