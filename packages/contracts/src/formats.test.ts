@@ -134,7 +134,7 @@ describe("equivalência com os scanners", () => {
 describe("a porta de entrada do upload", () => {
   /**
    * Este bloco existia como "equivalência com o bucket de Storage": o bucket
-   * do Supabase tinha uma allowlist de MIME e recusava o que estivesse fora —
+   * anterior tinha uma allowlist de MIME e recusava o que estivesse fora —
    * mas recusava DEPOIS de o documento já estar registrado, deixando linha
    * órfã em `source_documents`.
    *

@@ -1,6 +1,6 @@
 /**
- * Ponto de entrada da autenticação. Substitui inteiramente o
- * `supabase.auth.getUser()` que existia em ~40 pontos do app.
+ * Ponto de entrada da autenticação. Substitui inteiramente a chamada a um
+ * provedor de autenticação externo que existia em ~40 pontos do app.
  *
  * Uso em Server Component, Server Action ou Route Handler:
  *

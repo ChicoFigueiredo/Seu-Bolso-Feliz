@@ -4,7 +4,7 @@ import { cleanupInstitution, seedFinancialProduct, seedInstitution } from "./__t
 import { createCard, deleteCard, getCard, getCards, updateCard } from "./cards";
 
 let currentUserId = "";
-// A identidade vem do nosso próprio `requireUser()` desde a saída do Supabase.
+// A identidade vem inteiramente do nosso próprio `requireUser()`, sem dependência de provedor externo.
 // Este mock devolve `ownerId === id` porque estes testes exercitam o dono; a
 // distinção ator/dono (o admin de emergência operando sobre a base do dono)
 // tem cobertura própria em apps/web/src/app/api/**.

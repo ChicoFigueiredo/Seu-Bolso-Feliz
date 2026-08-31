@@ -18,14 +18,14 @@
  * mora.
  *
  * Depois da ADR-009 o ciclo roda contra Postgres puro (sem RLS: todo filtro de
- * `user_id` é explícito) e contra um storage S3 em memória. O `drain` deixou
+ * `user_id` é explícito) e contra uma loja de blobs em memória. O `drain` deixou
  * de ser um laço que chama `processJob` e engole o resultado: agora é o mesmo
  * contrato do worker de verdade — processa, e em caso de erro entrega a
  * decisão de retentar à fila.
  *
  * Requer o Postgres de teste — ver `__tests__/helpers/db.ts`.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
@@ -42,9 +42,24 @@ import { processJob } from "@sbf/worker-ingestion";
 import { resetIngestionBucket } from "../../workers/ingestion/src/storage";
 import { POSTABLE_SCHEMAS, TO_INSERT, TARGET_TABLES, parseDraftPayload } from "@sbf/contracts";
 import { boletoCemig } from "../fixtures/documents/boleto-cemig";
-import { getTestDb, limparPorUsuario, linha, linhas, semBancoDeTeste, tentar } from "../helpers/db";
+import {
+  getTestDb,
+  limparPorUsuario,
+  linha,
+  linhas,
+  semBancoDeTeste,
+  semearUsuarios,
+  tentar,
+} from "../helpers/db";
 import { startFakeStorage, type FakeStorage } from "../helpers/fake-storage";
 import { jobsDoUsuario } from "../helpers/jobs";
+
+// Precisa vir antes de qualquer coisa que importe `@sbf/storage`: é o que põe
+// a loja de blobs em memória no lugar do SDK do Vercel Blob.
+vi.mock("../../packages/storage/src/blob-api", async () => {
+  const { moduloBlobApiFalso } = await import("../helpers/fake-storage");
+  return moduloBlobApiFalso();
+});
 
 const USER_ID = "80000000-0000-4000-8000-000000000001";
 const INBOX = join(process.cwd(), "__tests__/e2e/.e2e-inbox");
@@ -54,8 +69,8 @@ const INBOX = join(process.cwd(), "__tests__/e2e/.e2e-inbox");
  *
  * `parsed_document_versions` estava faltando numa primeira versão desta lista
  * e, por ser referenciada em cascata a partir de `source_documents`, fazia o
- * delete dos documentos violar FK — silenciosamente, porque `.delete()` do
- * supabase-js sem checagem de erro não reclamava. Hoje `limparPorUsuario`
+ * delete dos documentos violar FK — silenciosamente, porque o `.delete()` do
+ * driver anterior, sem checagem de erro, não reclamava. Hoje `limparPorUsuario`
  * propaga a violação, então uma lista errada quebra o teste em vez de deixar
  * documento acumulado entre execuções.
  *
@@ -147,6 +162,7 @@ describe.skipIf(semBancoDeTeste)("Marco 1 — um documento fecha o ciclo", () =>
     storage = await startFakeStorage();
     resetIngestionBucket();
     process.env.LOCAL_USER_ID = USER_ID;
+    await semearUsuarios(db, USER_ID);
 
     await limparPorUsuario(db, [...TABELAS, "financial_products", "institutions"], USER_ID);
 

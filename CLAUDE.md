@@ -30,16 +30,15 @@ bun run lint:fix
 bun run format
 
 # Database
-bun run db:migrate            # push migrations to Supabase
-bun run db:reset
+bun run db:migrate            # push migrations to Neon
 
-# Regenerate TypeScript types from Supabase schema
+# Regenerate TypeScript types from the database schema
 bun run generate-types
 ```
 
 ## Architecture
 
-This is a **Bun monorepo** (workspaces) for a personal finance app backed by **Supabase** (Postgres + Storage + Edge Functions).
+This is a **Bun monorepo** (workspaces) for a personal finance app backed by **Neon** (Postgres via Drizzle ORM), with its own custom authentication (`apps/web/src/lib/auth/`) and object storage on **Vercel Blob** (via `@sbf/storage`).
 
 ### Workspace layout
 
@@ -50,7 +49,7 @@ apps/
   mcp-server/    MCP server exposing 9 tools for AI agents (stdio transport)
 
 packages/
-  shared-types/  TypeScript types auto-generated from the Supabase schema — do not edit by hand
+  shared-types/  TypeScript types auto-generated from the database schema — do not edit by hand
   ingestion-types/ Enums for the ingestion state machine (IngestionJobStatus, ParserType, etc.)
   domain/        Pure business logic: financial-cycle, amortization, priority, deduplication, financial-intent (reconciliation logic lives in workers/ingestion/src/reconciliation/)
   validation/    Zod schemas for all entities
@@ -121,7 +120,7 @@ Conventional commits are enforced via commitlint (husky `commit-msg` hook). Subj
 
 **Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `perf`, `migration`
 
-**Scopes:** `web`, `mobile`, `domain`, `types`, `validation`, `supabase`, `ci`, `docs`, `config`, `tokens`, `gmail-scanner`, `ingestion`, `mcp-server`, `local-scanner`
+**Scopes:** `web`, `mobile`, `domain`, `types`, `validation`, `ci`, `docs`, `config`, `tokens`, `gmail-scanner`, `ingestion`, `mcp-server`, `local-scanner`, `db`
 
 Example: `feat(ingestion): add field-consensus resolver`
 
@@ -131,7 +130,7 @@ Example: `feat(ingestion): add field-consensus resolver`
 
 ## Environment
 
-Copy `.env.example` to `.env` and fill in Supabase credentials. The ingestion worker additionally reads:
+Copy `.env.example` to `.env` and fill in the credentials (Neon, storage, auth, AI provider). The ingestion worker additionally reads:
 
 - `INGESTION_ENABLE_OCRMYPDF` — enable OCR (default `true` in dev)
 - `OCRMYPDF_BIN` — path to ocrmypdf binary (default `ocrmypdf`)

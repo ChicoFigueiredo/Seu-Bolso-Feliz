@@ -54,7 +54,7 @@ export async function approveDraftBatch(
   const toApprove = drafts.filter((d) => !rejectIds.has(d.id)).map((d) => d.id);
   const now = new Date().toISOString();
 
-  // Dois UPDATEs em lote (por IN) em vez do loop item-a-item do supabase-js
+  // Dois UPDATEs em lote (por IN) em vez do loop item-a-item do código
   // original — mesmo resultado, menos round-trips. `user_id` reforçado em
   // cada WHERE mesmo os ids já vindo de uma leitura escopada: não há mais
   // RLS de graça, então toda escrita filtra dono explicitamente.

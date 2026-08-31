@@ -19,7 +19,7 @@
  * vindo do cliente) — a função é `SECURITY DEFINER` e materializa dados
  * financeiros de verdade.
  *
- * ⚠️ Dívida que este arquivo paga: no Supabase, `fn_materialize_draft_record`
+ * ⚠️ Dívida que este arquivo paga: antes, `fn_materialize_draft_record`
  * amarrava `p_user_id` ao JWT (`auth.uid() <> p_user_id`). No Neon essa
  * checagem não existe mais (NOTA nº 3 de `packages/db/schema.sql`), então o
  * `p_user_id` que chega na função é confiável PORQUE aqui ele vem da sessão

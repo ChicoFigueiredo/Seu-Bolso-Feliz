@@ -1,4 +1,4 @@
--- ADR-009 — remoção do Supabase: identidade, fila de jobs e Centros.
+-- ADR-009 — saída do backend anterior: identidade, fila de jobs e Centros.
 -- Idempotente: pode rodar duas vezes sem erro.
 
 BEGIN;
@@ -12,7 +12,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS private;
 
 -- ─────────────────────────────────────────────────────────────────────────
--- 2. Identidade própria (substitui auth.users do Supabase).
+-- 2. Identidade própria (substitui o auth.users do backend anterior).
 --    Dois usuários: o dono (entra pelo Google) e o admin de emergência (entra
 --    por e-mail/senha). O admin opera sobre os dados do dono — por isso
 --    owner_id: quem você é e de quem são os dados são coisas separadas.

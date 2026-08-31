@@ -80,8 +80,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --
 --    A clausula `SET search_path TO 'public','private','extensions'` das
 --    duas funcoes segue mencionando o schema `extensions` (convencao do
---    Supabase), que nao existe no Neon. E inofensivo: search_path ignora
---    schema inexistente, e pgcrypto esta instalado no `public`.
+--    backend anterior), que nao existe no Neon. E inofensivo: search_path
+--    ignora schema inexistente, e pgcrypto esta instalado no `public`.
 --
 -- 2. As FK para auth.users(id) foram removidas por completo (auth.users nao
 --    existe no Neon). 30 das 46 removidas tinham ON DELETE CASCADE --
@@ -102,7 +102,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 -- 3. fn_get_secrets, fn_mark_secret_used, fn_materialize_draft_record e
 --    fn_upsert_financial_obligation tiveram a checagem
 --    `auth.uid() IS NOT NULL AND auth.uid() <> p_user_id` removida. Essa
---    checagem NAO era redundante em Supabase: ela amarrava p_user_id a
+--    checagem NAO era redundante: ela amarrava p_user_id a
 --    identidade do JWT nestas funcoes SECURITY DEFINER expostas via
 --    PostgREST -- sem ela, qualquer portador de JWT valido podia chamar a
 --    RPC passando o p_user_id de outra pessoa. Nao virou Critical aqui
@@ -116,8 +116,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --    increment_session_tokens, register_pattern_feedback e search_suppliers.
 --    Todas sabiam "quem e o usuario atual" SO via auth.uid()/auth.role(), sem
 --    receber user_id como parametro -- nao da para salva-las apagando uma
---    linha. Isso NAO e esquecimento, mas tambem NAO e inofensivo: as seis tem
---    call sites reais em producao hoje (via supabase.rpc()):
+--    linha. Isso NAO e esquecimento, mas tambem NAO e inofensivo: as seis
+--    tinham call sites reais em producao (chamadas via RPC direto):
 --      - fn_set_secret ................. apps/web/src/app/actions/secrets.ts
 --                                        workers/ingestion/src/parsers/secret-lookup.ts
 --      - generate_financial_periods .... apps/web/src/app/actions/financial-periods.ts
@@ -126,13 +126,10 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 --      - increment_session_tokens ...... apps/web/src/app/api/chat/route.ts
 --      - register_pattern_feedback ..... apps/web/src/app/actions/patterns.ts
 --      - search_suppliers .............. apps/web/src/app/actions/suppliers.ts
---    Enquanto esses call sites falarem com o Supabase, nada quebra. Mas a
---    Fase 2 -- que reescreve essas Server Actions/workers para falar com o
---    Neon direto via Drizzle -- PRECISA, antes ou junto com a reescrita,
---    recriar cada uma dessas funcoes no Neon com a assinatura mudada para
---    receber `p_user_id` como parametro explicito (ou reimplementar a logica
---    em TypeScript). Migrar o call site sem isso da "function ... does not
---    exist" em runtime.
+--    RESOLVIDO (2026-08-30): todos os seis call sites foram reescritos para
+--    falar com o Neon direto via Drizzle, reimplementando a logica em
+--    TypeScript em vez de recriar as funcoes no banco -- ver a ATUALIZACAO no
+--    fim deste arquivo para o mapeamento completo de onde cada uma foi parar.
 --
 
 

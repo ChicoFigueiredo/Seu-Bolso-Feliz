@@ -12,8 +12,9 @@
  *
  * Entrada igual, resultado diferente: o defeito é estado interno do parser, não
  * o documento. O E2E `document-to-transaction` falhava de forma reprodutível na
- * primeira execução após `supabase db reset` — o momento em que a máquina está
- * mais ocupada, com os containers reiniciando. Um parser sensível a pressão de
+ * primeira execução logo após um reset completo do ambiente local — o momento
+ * em que a máquina está mais ocupada, com os containers reiniciando. Um parser
+ * sensível a pressão de
  * event loop não é um problema só de teste: sob um worker carregado, ele
  * reprova documentos de verdade.
  *

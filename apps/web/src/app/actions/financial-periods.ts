@@ -90,8 +90,8 @@ export async function updateFinancialPeriod(
 }
 
 export async function deleteFinancialPeriod(id: string): Promise<void> {
-  // Nota: o código Supabase original não faz `.select().single()` aqui — só
-  // verifica `error`. 0 linhas afetadas (id inexistente ou de outro usuário)
+  // Nota: por contrato herdado, não fazemos `.select().single()` aqui — o
+  // delete não verifica linhas afetadas. Id inexistente ou de outro usuário
   // não lança erro hoje; esta reescrita preserva esse comportamento (exceção
   // documentada à regra geral de "lança erro em 0 linhas").
   const userId = await requireUserId();
@@ -106,7 +106,7 @@ export async function deleteFinancialPeriod(id: string): Promise<void> {
 // ══════════════════════════════════════════════════════════════
 //
 // `generate_financial_periods` é uma das SEIS funções descartadas por inteiro
-// na migração Supabase → Neon (packages/db/schema.sql, NOTA item 4): sabia
+// na migração para o Neon (packages/db/schema.sql, NOTA item 4): sabia
 // "quem é o usuário atual" só via `auth.uid()`. Confirmado por consulta ao
 // `pg_proc` do Neon: NÃO existe lá. Reimplementada aqui em TypeScript, o que
 // é preferível a recriá-la no banco — a aritmética de ciclo já existe pura e

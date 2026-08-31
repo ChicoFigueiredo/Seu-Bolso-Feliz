@@ -224,7 +224,7 @@ export async function updatePattern(
 
 /**
  * Candidato a Apêndice B (não decidido aqui): update seguido de insert sem
- * transação — comportamento pré-existente no Supabase original.
+ * transação — comportamento pré-existente, herdado do código original.
  */
 export async function createPatternVersion(
   id: string,
@@ -300,7 +300,7 @@ type FeedbackType = (typeof TIPOS_DE_FEEDBACK)[number];
  * Registra feedback sobre um padrão (era a RPC `register_pattern_feedback`).
  *
  * `register_pattern_feedback` é uma das SEIS funções descartadas por inteiro
- * na migração Supabase → Neon (packages/db/schema.sql, NOTA item 4) — sabia
+ * na migração para o Neon (packages/db/schema.sql, NOTA item 4) — sabia
  * quem era o usuário só via `auth.uid()`. Confirmado por consulta ao `pg_proc`
  * do Neon: NÃO existe lá. Reimplementada aqui em Drizzle, preservando a ordem
  * de escrita do plpgsql: INSERT primeiro (é ele que dispara o trigger

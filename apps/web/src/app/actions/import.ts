@@ -5,6 +5,7 @@ import { getDb, schema } from "@sbf/db";
 import { createStorageClientFromEnv } from "@sbf/storage";
 import { and, eq } from "drizzle-orm";
 import { requireTransactionForeignKeysOwned } from "./_shared/transaction-fk-ownership";
+import { hojeIso } from "@/lib/datas";
 
 type ImportJob = typeof schema.import_jobs.$inferSelect;
 type ImportJobInsert = Omit<typeof schema.import_jobs.$inferInsert, "user_id" | "id">;
@@ -23,14 +24,14 @@ async function requireUserId(): Promise<string> {
  * Guarda o CSV como ele chegou, antes de qualquer parsing.
  *
  * Nenhuma tela lê este arquivo de volta hoje — e foi por isso que ele quase
- * deixou de ser guardado na saída do Supabase. Mas o original é a única prova
+ * deixou de ser guardado na migração de backend. Mas o original é a única prova
  * do que foi importado quando um número não bate meses depois: sem ele, a
  * conferência vira palavra contra palavra. Guardar é barato; reconstituir é
  * impossível.
  */
 export async function arquivarCsvImportado(file: File): Promise<string> {
   const userId = await requireUserId();
-  const caminho = `${userId}/importacoes/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.csv`;
+  const caminho = `${userId}/importacoes/${hojeIso()}/${crypto.randomUUID()}.csv`;
   await createStorageClientFromEnv()
     .from("user-files")
     .upload(caminho, file, { contentType: file.type || "text/csv", upsert: false });

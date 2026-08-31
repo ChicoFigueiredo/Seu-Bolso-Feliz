@@ -1,7 +1,7 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
-import { uploadAceito, descricaoDosFormatos } from "@sbf/contracts";
+import { uploadAceito, descricaoDosFormatos, DRAFT_SCHEMA_VERSION } from "@sbf/contracts";
 import { computeContentHash } from "@sbf/operations";
 import { getDb, schema } from "@sbf/db";
 import { createStorageClientFromEnv } from "@sbf/storage";
@@ -142,16 +142,10 @@ export async function getDocumentWithRelations(id: string) {
 }
 
 /**
- * URL temporária para o navegador exibir o arquivo original sem que a
- * credencial do storage saia do servidor. Uma hora é o suficiente para ler um
- * boleto e curto o bastante para o link não virar acesso permanente se vazar
- * num histórico.
- */
-/**
  * O balde dos arquivos originais — boletos, faturas e comprovantes, exatamente
  * como chegaram. Singleton preguiçoso pelo mesmo motivo de `getDb()`: montar o
- * assinador SigV4 lê variáveis de ambiente e não é de graça, e uma instância
- * serverless atende muitas requisições antes de morrer.
+ * cliente lê `BLOB_READ_WRITE_TOKEN` do ambiente e não é de graça, e uma
+ * instância serverless atende muitas requisições antes de morrer.
  */
 let _originais: ReturnType<ReturnType<typeof createStorageClientFromEnv>["from"]> | null = null;
 function originais() {
@@ -159,7 +153,37 @@ function originais() {
   return _originais;
 }
 
+/**
+ * URL temporária para o navegador exibir o arquivo original sem que a
+ * credencial do storage saia do servidor. Uma hora é o suficiente para ler um
+ * boleto e curto o bastante para o link não virar acesso permanente se vazar
+ * num histórico.
+ *
+ * O `storage_path` chega do cliente, então **ele não é prova de nada**: antes
+ * de assinar qualquer coisa, é preciso existir um `source_documents` com aquele
+ * caminho E pertencente ao dono logado. Sem essa checagem, esta Server Action
+ * assinaria o boleto de qualquer um que descobrisse um caminho alheio.
+ *
+ * Caminho de outro dono e caminho inexistente devolvem o mesmo `null`, de
+ * propósito: a resposta não conta a quem pergunta se o arquivo existe.
+ */
 export async function getDocumentStorageUrl(storagePath: string): Promise<string | null> {
+  const userId = await requireUserId();
+  const db = getDb();
+
+  const [dono] = await db
+    .select({ id: schema.source_documents.id })
+    .from(schema.source_documents)
+    .where(
+      and(
+        eq(schema.source_documents.storage_path, storagePath),
+        eq(schema.source_documents.user_id, userId),
+      ),
+    )
+    .limit(1);
+
+  if (!dono) return null;
+
   try {
     return await originais().getSignedUrl(storagePath, 3600);
   } catch {
@@ -398,6 +422,10 @@ export async function updateDraftData(
     .update(schema.draft_records)
     .set({
       draft_data: draftData as Json,
+      // O payload que a tela devolve já é v1 (a leitura migra v0 em memória
+      // antes de exibir). Gravar sem subir a versão deixaria a linha marcada
+      // v0 com conteúdo v1, e a próxima leitura tentaria migrar o migrado.
+      draft_schema_version: DRAFT_SCHEMA_VERSION,
       status: "corrected",
       corrections: { manual_edit: true, edited_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),
@@ -572,10 +600,10 @@ export async function uploadDocument(formData: FormData): Promise<SourceDocument
   const file = formData.get("file") as File | null;
   if (!file) throw new Error("Arquivo não informado");
 
-  // Antes de gravar qualquer coisa. O bucket do Supabase recusava formato
-  // desconhecido; o S3 não recusa nada. Validar depois da escrita deixaria uma
-  // linha em `source_documents` apontando para um arquivo que o pipeline nunca
-  // vai conseguir ler.
+  // Antes de gravar qualquer coisa: o backend anterior recusava formato
+  // desconhecido; o storage aceita qualquer byte. Validar depois da escrita
+  // deixaria uma linha em `source_documents` apontando para um arquivo que o
+  // pipeline nunca vai conseguir ler.
   if (!uploadAceito(file.name, file.type)) {
     throw new Error(`Formato não suportado. Aceitamos ${descricaoDosFormatos()}.`);
   }

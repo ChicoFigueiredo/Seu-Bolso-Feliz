@@ -32,8 +32,9 @@ export async function listUnparsedDocuments(
     statuses.push(IngestionJobStatus.FAILED);
   }
 
-  // `!inner` do Supabase (só jobs com source_document existente) vira
-  // innerJoin aqui. O join é reforçado com `user_id` da tabela ligada —
+  // O modificador `!inner` do driver anterior (só jobs com source_document
+  // existente) vira innerJoin aqui. O join é reforçado com `user_id` da
+  // tabela ligada —
   // defesa em profundidade agora que não há RLS garantindo isso sozinho.
   const rows = await db
     .select({

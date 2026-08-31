@@ -15,7 +15,6 @@ export default {
         "domain",
         "types",
         "validation",
-        "supabase",
         "ci",
         "docs",
         "config",

@@ -8,7 +8,7 @@
  * (Fase 4b, fora deste arquivo), concedida somente a service_role.
  *
  * `fn_set_secret` era uma das SEIS funções descartadas por inteiro na
- * migração Supabase → Neon (packages/db/schema.sql, NOTA item 4): sabia quem
+ * migração para o Neon (packages/db/schema.sql, NOTA item 4): sabia quem
  * era o usuário só via `auth.uid()`. Confirmado por consulta ao `pg_proc` do
  * Neon: NÃO existe lá. `setSecret` abaixo reimplementa o corpo dela.
  *

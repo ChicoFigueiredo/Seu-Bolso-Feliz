@@ -1,16 +1,11 @@
 {
   "servers": {
-    "supabase-local": {
-      "type": "http",
-      "url": "http://127.0.0.1:54321/mcp"
-    },
     "sbf": {
       "type": "stdio",
       "command": "bun",
       "args": ["run", "${workspaceFolder}/apps/mcp-server/src/index.ts"],
       "env": {
-        "SUPABASE_URL": "http://127.0.0.1:54321",
-        "SUPABASE_SECRET_KEY": "${env:SUPABASE_SECRET_KEY}",
+        "DATABASE_URL": "${env:DATABASE_URL}",
         "LOCAL_USER_ID": "00000000-0000-0000-0000-000000000001"
       }
     }

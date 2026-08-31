@@ -2,12 +2,12 @@ import { describe, it, expect } from "vitest";
 import { getDb, institutions } from "@sbf/db";
 import { sql } from "drizzle-orm";
 
-// Este teste exige um Neon real alcançável via DATABASE_URL. O CI
-// (.github/workflows/ci.yml) provisiona só o Supabase local e roda
-// `bun run test:integration` SEM DATABASE_URL — sem o skipIf, getDb() lança
-// "DATABASE_URL é obrigatório para @sbf/db" e quebra o job. Apontar o CI para
-// o Neon de produção não é opção: isso exigiria um branch Neon dedicado a CI,
-// decisão de Fase 2 da ADR-009.
+// Este teste exige um Postgres real alcançável via DATABASE_URL — em
+// desenvolvimento normalmente é o Neon; no CI (.github/workflows/ci.yml) é o
+// Postgres efêmero do job, com schema.sql e as migrations já aplicados antes
+// da suíte rodar. Sem DATABASE_URL (ex.: clone novo, ainda sem `.env.local`
+// configurado), o skipIf evita que getDb() lance "DATABASE_URL é obrigatório
+// para @sbf/db" e quebre o job.
 describe.skipIf(!process.env.DATABASE_URL)("Neon smoke test", () => {
   it("conecta no Neon real e executa uma query simples", async () => {
     const db = getDb();

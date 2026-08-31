@@ -2,10 +2,15 @@ import "./test-db-setup";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@sbf/db";
-import { deleteSourceDocument, getSourceDocument, getSourceDocuments } from "./ingestion";
+import {
+  deleteSourceDocument,
+  getDocumentStorageUrl,
+  getSourceDocument,
+  getSourceDocuments,
+} from "./ingestion";
 
 let currentUserId = "";
-// A identidade vem do nosso próprio `requireUser()` desde a saída do Supabase.
+// A identidade vem inteiramente do nosso próprio `requireUser()`, sem dependência de provedor externo.
 // Este mock devolve `ownerId === id` porque estes testes exercitam o dono; a
 // distinção ator/dono (o admin de emergência operando sobre a base do dono)
 // tem cobertura própria em apps/web/src/app/api/**.
@@ -54,7 +59,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ingestion actions — source do
     }
   });
 
-  async function seedDoc(userId: string) {
+  async function seedDoc(userId: string, storagePath?: string) {
     const db = getDb();
     const [doc] = await db
       .insert(schema.source_documents)
@@ -64,6 +69,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ingestion actions — source do
         origin_key: `test::${crypto.randomUUID()}`,
         filename: "boleto.pdf",
         status: "new",
+        ...(storagePath ? { storage_path: storagePath } : {}),
       })
       .returning();
     if (!doc) throw new Error("Falha ao criar source_document de teste");
@@ -90,6 +96,31 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("ingestion actions — source do
 
     currentUserId = USER_A;
     await expect(deleteSourceDocument(docB.id, "document_only")).rejects.toThrow();
+  });
+
+  /**
+   * `getDocumentStorageUrl` recebe o `storage_path` cru do cliente. Sem
+   * checagem de dono, ela assina o boleto de quem for.
+   *
+   * As duas asserções andam juntas de propósito: a segunda (o dono recebe a
+   * URL) é o que impede a primeira de passar por acidente — se a checagem de
+   * dono for removida, USER_A passa a receber a mesma URL e o teste quebra.
+   */
+  it("não assina URL do documento de outro usuário", async () => {
+    const caminhoDeB = `${USER_B}/manual/${crypto.randomUUID()}.pdf`;
+    currentUserId = USER_B;
+    await seedDoc(USER_B, caminhoDeB);
+
+    currentUserId = USER_A;
+    expect(await getDocumentStorageUrl(caminhoDeB)).toBeNull();
+
+    currentUserId = USER_B;
+    expect(await getDocumentStorageUrl(caminhoDeB)).toBe("https://exemplo.invalido/arquivo");
+  });
+
+  it("devolve null para caminho que não existe, sem revelar a diferença", async () => {
+    currentUserId = USER_A;
+    expect(await getDocumentStorageUrl(`${USER_A}/manual/inexistente.pdf`)).toBeNull();
   });
 
   it("exclui documento (modo document_only) removendo o registro", async () => {

@@ -70,8 +70,8 @@ function transactionPayload(overrides: Record<string, unknown> = {}) {
 /**
  * Chama a função e devolve `{ data, error }`.
  *
- * O formato veio do supabase-js e continua útil: metade das asserções deste
- * arquivo é sobre a MENSAGEM do erro que o banco levanta, não sobre uma
+ * O formato veio do driver anterior e continua útil: metade das asserções
+ * deste arquivo é sobre a MENSAGEM do erro que o banco levanta, não sobre uma
  * exceção genérica.
  */
 async function materialize(

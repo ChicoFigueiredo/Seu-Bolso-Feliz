@@ -24,12 +24,12 @@ export interface DraftBatchSummary {
 /**
  * `draft_records` nunca teve `record_type`/`confidence`/`payload` — as
  * colunas reais são `draft_type`/`confidence_score`/`draft_data`. O
- * `.select(...)` do supabase-js (string livre) não é checado estaticamente,
- * então essa ferramenta selecionava colunas inexistentes em silêncio; o
- * Postgres teria recusado a query e o `.select()` embutido do Supabase
- * (`source_documents(filename), draft_records(...)`) teria devolvido erro,
- * mascarado pelo `if (error || !batches) return [];` logo abaixo. Corrigido
- * para os nomes reais.
+ * `.select(...)` do driver anterior (string livre) não é checado
+ * estaticamente, então essa ferramenta selecionava colunas inexistentes em
+ * silêncio; o Postgres teria recusado a query e o `.select()` embutido
+ * daquele driver (`source_documents(filename), draft_records(...)`) teria
+ * devolvido erro, mascarado pelo `if (error || !batches) return [];` logo
+ * abaixo. Corrigido para os nomes reais.
  */
 function extractSuggestedDescription(draftData: unknown): string | null {
   if (!draftData || typeof draftData !== "object" || Array.isArray(draftData)) return null;

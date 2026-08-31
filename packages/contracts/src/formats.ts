@@ -135,8 +135,8 @@ export function extensaoAceita(nomeDoArquivo: string): boolean {
 }
 
 /**
- * O bucket do Supabase recusava upload com MIME fora da allowlist. O S3 não
- * tem esse conceito — a recusa precisa acontecer na aplicação, e **antes** de
+ * O bucket do storage anterior recusava upload com MIME fora da allowlist. O
+ * S3 não tem esse conceito — a recusa precisa acontecer na aplicação, e **antes** de
  * qualquer escrita. Se acontecer depois, sobra linha órfã em `source_documents`
  * apontando para um arquivo que o pipeline nunca vai conseguir ler.
  *

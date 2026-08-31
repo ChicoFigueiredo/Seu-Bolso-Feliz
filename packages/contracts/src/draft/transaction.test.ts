@@ -40,7 +40,7 @@ describe("TransactionDraftV1Schema — camada honesta", () => {
     expect(centsToNumeric(draft.amount_cents!)).toBe(245.5);
   });
 
-  it("converte numeric devolvido como string pelo driver do Supabase", () => {
+  it("converte numeric devolvido como string pelo driver do banco", () => {
     // Origem exata do `amount` inválido que reprovava todo draft: o gerador
     // antigo repassava total_amount cru, e numeric(12,2) chega como string.
     const draft = toTransactionDraft({ ...CEMIG, total_amount: "245.50" }) as TransactionDraftV1;

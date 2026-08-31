@@ -3,9 +3,10 @@
 # Substitui os stages validate/install/check/test/build do .gitlab-ci.yml.
 #
 # Diferença importante em relação ao pipeline anterior: o filtro de caminhos
-# dos testes de integração incluía apenas supabase/**, packages/domain/** e
-# packages/validation/**, de modo que NENHUMA mudança em workers/ingestion
-# jamais disparou os testes de integração. Aqui os testes rodam sempre.
+# dos testes de integração incluía só um punhado de diretórios (o antigo
+# diretório do backend, packages/domain/** e packages/validation/**), de modo
+# que NENHUMA mudança em workers/ingestion jamais disparou os testes de
+# integração. Aqui os testes rodam sempre.
 name: CI
 
 on:

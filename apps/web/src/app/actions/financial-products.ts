@@ -95,10 +95,11 @@ export async function updateFinancialProduct(
 
 export async function deleteFinancialProduct(id: string): Promise<void> {
   // Nota: sem checagem de "0 linhas afetadas" — comportamento preservado
-  // (o código anterior via Supabase também não lançava erro ao tentar
-  // excluir um produto de outro usuário; o RLS simplesmente não encontrava
-  // a linha e o delete não afetava nada. O filtro explícito por user_id
-  // abaixo reproduz o mesmo efeito sem depender de RLS).
+  // (o código anterior, apoiado em política de RLS do banco, também não
+  // lançava erro ao tentar excluir um produto de outro usuário; a política
+  // simplesmente não encontrava a linha e o delete não afetava nada. O
+  // filtro explícito por user_id abaixo reproduz o mesmo efeito sem
+  // depender de RLS).
   const userId = await requireUserId();
   const db = getDb();
   await db

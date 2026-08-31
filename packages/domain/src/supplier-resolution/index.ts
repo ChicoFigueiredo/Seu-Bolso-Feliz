@@ -6,7 +6,7 @@
  * Sem match, cai para needs_review — o motor completo de scoring
  * (CPF/CNPJ/NSU) fica para uma fase futura.
  *
- * A busca dos candidatos (Supabase, filtrada por user_id) é responsabilidade
+ * A busca dos candidatos (no banco, filtrada por user_id) é responsabilidade
  * do chamador; esta função é pura para ficar testável sem infraestrutura.
  */
 import { normalizeName } from "../financial-intent/identity-key";

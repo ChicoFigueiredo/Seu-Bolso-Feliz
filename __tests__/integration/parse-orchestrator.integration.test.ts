@@ -12,7 +12,7 @@
  * um tem seus próprios testes de unidade.
  *
  * O banco, ao contrário, **não** é mockado. A versão anterior deste arquivo
- * montava um dublê de query builder do Supabase e afirmava sobre o payload
+ * montava um dublê do query builder anterior e afirmava sobre o payload
  * capturado por ele — ou seja, provava que o dublê tinha guardado o objeto que
  * acabara de receber, e não que o Postgres aceitaria aquela linha. Depois da
  * ADR-009 (`@sbf/db`/Drizzle) o dublê parou até de encaixar na assinatura, e

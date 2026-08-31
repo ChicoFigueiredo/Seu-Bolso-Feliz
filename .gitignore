@@ -35,9 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .next/
 out/
 
-# Supabase
-supabase/.temp/
-
 # Environment files — nunca versionar arquivos com segredos reais
 .env
 .env.local
@@ -72,3 +69,4 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+.env*

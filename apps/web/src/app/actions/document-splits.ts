@@ -97,7 +97,7 @@ export async function createDocumentSplit(input: DocumentSplitInsert): Promise<D
   // usuário. O RLS antigo cobria esse gap de graça; sem RLS, a checagem
   // precisa ser explícita aqui (mesmo padrão do fix em
   // document-transactions.ts, commit b5995eb). Desvio deliberado do
-  // comportamento original em Supabase, que pulava a validação de soma em
+  // comportamento original, que pulava a validação de soma em
   // vez de lançar erro quando o documento não existia/não pertencia ao
   // usuário — aqui isso é tratado como IDOR e bloqueado.
   const [doc] = await db

@@ -7,8 +7,9 @@
  * MCP devem conseguir transformar um documento em dinheiro numa chamada só.
  *
  * `fn_materialize_draft_record` continua existindo no Neon (SECURITY
- * DEFINER), mas perdeu a amarração a `auth.uid()` que o RLS/JWT do Supabase
- * garantia. Por isso o draft é lido e confirmado como dono de `userId`
+ * DEFINER), mas perdeu a amarração a `auth.uid()` que o RLS/JWT do backend
+ * anterior garantia. Por isso o draft é lido e confirmado como dono de
+ * `userId`
  * *antes* de chamar a função — a autorização é deste call site, não da
  * função (mesmo desenho de apps/web/src/app/actions/materialization.ts).
  */

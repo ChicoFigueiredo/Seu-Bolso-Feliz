@@ -50,9 +50,9 @@
  * ⚠️ Toda coluna `jsonb()` precisa de `.$type<Json>()` encadeado logo depois
  * (import `Json` de `@sbf/shared-types`) — sem isso o Drizzle infere
  * `unknown`, que quebra o typecheck de qualquer componente/página que ainda
- * espera o tipo `Json` antigo (gerado pelo Supabase CLI) vindo das Server
- * Actions em `apps/web/src/app/actions/`. Achado na Fase 4a (Task 8,
- * ingestion.ts): sem essa anotação, `bun run typecheck` falha em vários
+ * espera o tipo `Json` antigo (gerado por introspecção externa do schema)
+ * vindo das Server Actions em `apps/web/src/app/actions/`. Achado na Fase 4a
+ * (Task 8, ingestion.ts): sem essa anotação, `bun run typecheck` falha em vários
  * componentes de `apps/web/src/app/dashboard/` e `apps/web/src/components/`
  * que nunca são tocados pelas Server Actions em si — o tipo `unknown` se
  * propaga pelos tipos de retorno inferidos (`typeof schema.<tabela>.$inferSelect`)
@@ -2270,7 +2270,7 @@ export const mv_supplier_spending = pgMaterializedView("mv_supplier_spending", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Identidade própria, no lugar de `auth.users` do Supabase.
+ * Identidade própria, no lugar do `auth.users` do backend anterior.
  *
  * `role` e `owner_id` separam duas coisas que costumam ser confundidas: **quem
  * você é** e **de quem são os dados que você opera**. O dono entra pelo Google

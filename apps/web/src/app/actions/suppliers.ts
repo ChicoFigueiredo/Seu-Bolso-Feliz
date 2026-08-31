@@ -105,7 +105,7 @@ export type SupplierSearchResult = {
  * `search_suppliers`).
  *
  * `search_suppliers` é uma das SEIS funções descartadas por inteiro na
- * migração Supabase → Neon (packages/db/schema.sql, NOTA item 4) — filtrava
+ * migração para o Neon (packages/db/schema.sql, NOTA item 4) — filtrava
  * por `auth.uid()`. Confirmado por consulta ao `pg_proc` do Neon: NÃO existe
  * lá. O corpo dela vem para cá como `sql` parametrizado, com o filtro por
  * dono explícito nas DUAS pernas da união (nome e alias): `similarity()` e o
@@ -206,7 +206,7 @@ export async function deleteSupplier(id: string): Promise<void> {
 
 /**
  * NOVA — migrada de `app/dashboard/suppliers/[id]/page.tsx` (handleDelete).
- * Sem contrato Supabase anterior a preservar — aplica a regra padrão da fase
+ * Sem contrato herdado a preservar — aplica a regra padrão da fase
  * (lança erro em 0 linhas) em vez do silêncio de `deleteSupplier`.
  */
 export async function updateSupplierActive(id: string, isActive: boolean): Promise<Supplier> {

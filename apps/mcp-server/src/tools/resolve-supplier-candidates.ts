@@ -17,9 +17,9 @@ export interface SupplierCandidate {
 
 /**
  * `suppliers` nunca teve `canonical_name`/`category` — colunas assim não
- * existem no schema (nem existiram no Supabase, a julgar pelos tipos
+ * existem no schema (nem existiram antes, a julgar pelos tipos
  * gerados antigos). O `.select("id, name, canonical_name, ...")` do
- * supabase-js não é checado estaticamente, então essa ferramenta vinha
+ * driver anterior não é checado estaticamente, então essa ferramenta vinha
  * quebrada em silêncio: a busca por texto (`.or("canonical_name.ilike...")`)
  * provavelmente sempre lançava erro no lado do Postgres (coluna
  * inexistente) e o resultado virava lista vazia. Corrigido aqui para as

@@ -77,7 +77,7 @@ export const LiabilityTypeSchema = z.enum([
  * Dinheiro em centavos inteiros.
  *
  * Ponto flutuante não representa 0,1 exatamente, e o gerador antigo repassava
- * `total_amount` cru — que o Supabase devolve como *string* para `numeric`.
+ * `total_amount` cru — que o driver antigo devolvia como *string* para `numeric`.
  * Centavos inteiros eliminam os dois problemas e casam com a unidade que a
  * identity key já usa.
  */
@@ -132,8 +132,8 @@ export function centsToNumeric(cents: number): number {
 /**
  * Converte um valor monetário vindo da extração para centavos inteiros.
  *
- * Aceita number e string porque o driver do Supabase devolve `numeric` como
- * string — a origem exata do `amount` inválido que reprovava todo draft.
+ * Aceita number e string porque o driver do banco pode devolver `numeric`
+ * como string — a origem exata do `amount` inválido que reprovava todo draft.
  */
 export function toCents(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;

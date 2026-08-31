@@ -1,7 +1,7 @@
 /**
  * Implementa `FinancialDataProvider` sobre a API da Pluggy.
- * Não sabe nada de `draft_records`/Supabase — ver `map-to-draft.ts` para o
- * próximo passo (normalizado → `TransactionDraftV1`).
+ * Não sabe nada de `draft_records`/banco de dados — ver `map-to-draft.ts` para
+ * o próximo passo (normalizado → `TransactionDraftV1`).
  */
 import type {
   ConnectTokenResult,

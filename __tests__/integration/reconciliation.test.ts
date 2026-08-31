@@ -5,8 +5,9 @@
  * tinha sido exercitado contra o schema real. As Regras 2 e 3 referenciavam
  * colunas que não existem em `transactions`/`recurring_instances`
  * (transaction_date/supplier_name/category, due_date/template_id), sob casts
- * `as never`/`as unknown as typeof supabase` que escondiam o erro de tipo —
- * a query falhava silenciosamente (erro do Supabase nunca checado) e a Regra
+ * `as never`/`as unknown as` (apontando pro cliente de banco antigo) que
+ * escondiam o erro de tipo — a query falhava silenciosamente (erro do banco
+ * nunca checado) e a Regra
  * 2 (match_exact/match_fuzzy, a regra principal) sempre voltava zero
  * candidatos em produção. Hoje o motor fala Drizzle: um nome de coluna errado
  * não compila, e um erro de banco vira exceção em vez de resultado vazio.

@@ -8,8 +8,8 @@
  * diferentes NÃO se fundam.
  *
  * `fn_upsert_financial_obligation` continua sendo uma função do banco (recebe
- * `p_user_id` explícito, então sobreviveu à saída do Supabase); o que mudou é
- * quem a chama — Drizzle no lugar de `supabase.rpc`, e um erro do Postgres
+ * `p_user_id` explícito, então sobreviveu à migração de backend); o que mudou
+ * é quem a chama — Drizzle no lugar do driver anterior, e um erro do Postgres
  * agora é exceção em vez de um campo `error` que ninguém precisava ler.
  *
  * Requer o Postgres de teste — ver `__tests__/helpers/db.ts`.

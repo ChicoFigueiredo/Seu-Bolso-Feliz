@@ -2,7 +2,7 @@
  * @sbf/mcp-server — Tool: recompute_financial_periods
  *
  * Substitui a chamada à RPC `generate_financial_periods`: uma das seis
- * funções descartadas por inteiro na migração Supabase → Neon (não amarrava
+ * funções descartadas por inteiro na migração para o Neon (não amarrava
  * mais nada além de `auth.uid()` — ver NOTA em packages/db/schema.sql;
  * confirmado ausente em `pg_proc` do Neon).
  *

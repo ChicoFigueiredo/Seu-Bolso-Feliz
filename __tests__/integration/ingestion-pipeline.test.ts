@@ -5,10 +5,10 @@
  * 2.28 — Deduplicação: mesmo documento 2x não duplica
  * 2.29 — Reprocessamento forçado (force_reprocess)
  *
- * Roda contra Postgres real (ver `__tests__/helpers/db.ts`) e contra um
- * storage S3 em memória (ver `__tests__/helpers/fake-storage.ts`). O storage é
- * um servidor HTTP de verdade, e não um dublê injetado, porque o worker não
- * recebe cliente de storage por parâmetro: ele resolve o dele por ambiente
+ * Roda contra Postgres real (ver `__tests__/helpers/db.ts`) e contra uma loja
+ * de blobs em memória (ver `__tests__/helpers/fake-storage.ts`). O dublê fica
+ * no SDK do Vercel Blob, e não no `@sbf/storage`, porque o worker não recebe
+ * cliente de storage por parâmetro: ele resolve o dele por ambiente
  * (`getIngestionBucket()`), e injetar onde a produção não injeta testaria
  * outro caminho.
  *
@@ -19,7 +19,7 @@
  * describe prova isso; até então, um erro transitório de storage aposentava o
  * documento para sempre e `retry_count`/`max_retries` eram colunas decorativas.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
@@ -28,9 +28,24 @@ import { IngestionJobStatus, IngestionRunStatus, SourceDocumentOrigin } from "@s
 import { scanDirectory } from "../../workers/local-scanner/src/scanner";
 import { processJob } from "../../workers/ingestion/src/processor";
 import { resetIngestionBucket } from "../../workers/ingestion/src/storage";
-import { getTestDb, limparPorUsuario, linha, linhas, semBancoDeTeste, tentar } from "../helpers/db";
+import {
+  getTestDb,
+  limparPorUsuario,
+  linha,
+  linhas,
+  semBancoDeTeste,
+  semearUsuarios,
+  tentar,
+} from "../helpers/db";
 import { startFakeStorage, type FakeStorage } from "../helpers/fake-storage";
 import { jobPorId, jobsDoUsuario } from "../helpers/jobs";
+
+// Precisa vir antes de qualquer coisa que importe `@sbf/storage`: é o que põe
+// a loja de blobs em memória no lugar do SDK do Vercel Blob.
+vi.mock("../../packages/storage/src/blob-api", async () => {
+  const { moduloBlobApiFalso } = await import("../helpers/fake-storage");
+  return moduloBlobApiFalso();
+});
 
 const USER_ID = "70000000-0000-4000-8000-000000000001";
 const INBOX_DIR = join(process.cwd(), "__tests__/integration/.test-inbox");
@@ -104,11 +119,13 @@ async function getLogs() {
 describe.skipIf(semBancoDeTeste)("pipeline de ingestão", () => {
   beforeAll(async () => {
     db = getTestDb();
-    // Aponta S3_* para o storage em memória e descarta o bucket já resolvido
-    // (o singleton do worker guarda o cliente construído na primeira chamada).
+    // Zera a loja em memória, põe o token de mentira no ambiente e descarta o
+    // bucket já resolvido (o singleton do worker guarda o cliente construído
+    // na primeira chamada).
     storage = await startFakeStorage();
     resetIngestionBucket();
     process.env.LOCAL_USER_ID = USER_ID;
+    await semearUsuarios(db, USER_ID);
   });
 
   afterAll(async () => {
