@@ -23,8 +23,6 @@ export interface PluggyProviderConfig {
   baseUrl?: string;
 }
 
-const TRANSACTIONS_PAGE_SIZE = 500;
-
 /**
  * O conector do Meu Pluggy (meu.pluggy.ai).
  *
@@ -101,18 +99,17 @@ export class PluggyProvider implements FinancialDataProvider {
     externalAccountId: string,
     options?: ListTransactionsOptions,
   ): Promise<ListTransactionsResult> {
-    const page = options?.cursor ? Number(options.cursor) : 1;
+    // O cursor agora é o da própria Pluggy — opaco, repassado como veio. Antes
+    // era um número de página que este método inventava; a v2 não tem página.
     const data = await this.client.listTransactions(externalAccountId, {
       from: options?.from,
       to: options?.to,
-      page,
-      pageSize: TRANSACTIONS_PAGE_SIZE,
+      cursor: options?.cursor,
     });
 
-    const hasMore = data.totalPages !== undefined && page < data.totalPages;
     return {
       transactions: data.results.map(normalizeTransaction),
-      nextCursor: hasMore ? String(page + 1) : undefined,
+      nextCursor: data.next ?? undefined,
     };
   }
 }

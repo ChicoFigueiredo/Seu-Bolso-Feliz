@@ -33,17 +33,24 @@ import { and, eq } from "drizzle-orm";
 import { schema, type Database } from "@sbf/db";
 
 const SOURCE_TYPE = "pluggy";
-const CURSOR_KIND = "page_number";
+// A `/v2/transactions` pagina por cursor opaco. O valor guardado aqui é o
+// `next` que a própria Pluggy devolveu — não um número que a gente calcula.
+// Era "page_number" enquanto a v1 existia; a v1 foi descontinuada.
+const CURSOR_KIND = "cursor";
 
 export interface CheckpointState {
   id: string;
   from: string;
   to: string;
-  startPage: number;
+  /** Cursor de onde retomar, ou `null` para começar do início da janela. */
+  startCursor: string | null;
 }
 
 export interface PageProgress {
+  /** Só para métrica e log: quantas voltas o laço já deu. */
   page: number;
+  /** Cursor da PRÓXIMA página, ou `null` quando acabou. */
+  nextCursor: string | null;
   transactionsSeen: number;
   created: number;
   duplicates: number;
@@ -81,7 +88,7 @@ export async function startOrResumeCheckpoint(
       id: existing.id,
       from: existing.window_start ?? defaultWindow.from,
       to: existing.window_end ?? defaultWindow.to,
-      startPage: existing.cursor_value ? Number(existing.cursor_value) : 1,
+      startCursor: existing.cursor_value ?? null,
     };
   }
 
@@ -131,7 +138,7 @@ export async function startOrResumeCheckpoint(
     throw new Error(`Falha ao criar checkpoint (${scopeKey}): upsert não retornou linha`);
   }
 
-  return { id: created.id, from: defaultWindow.from, to: defaultWindow.to, startPage: 1 };
+  return { id: created.id, from: defaultWindow.from, to: defaultWindow.to, startCursor: null };
 }
 
 /** Chamar depois de processar cada página — persiste o progresso e onde retomar. */
@@ -154,7 +161,7 @@ export async function recordPageProgress(
   await db
     .update(schema.ingestion_checkpoints)
     .set({
-      cursor_value: String(progress.page + 1),
+      cursor_value: progress.nextCursor,
       messages_seen: (current?.messages_seen ?? 0) + progress.transactionsSeen,
       documents_created: (current?.documents_created ?? 0) + progress.created,
       duplicates_skipped: (current?.duplicates_skipped ?? 0) + progress.duplicates,

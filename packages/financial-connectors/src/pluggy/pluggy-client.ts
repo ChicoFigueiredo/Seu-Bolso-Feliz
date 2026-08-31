@@ -143,17 +143,28 @@ export class PluggyClient {
    * isso como um cursor opaco (string do número da página) — ver
    * `pluggy-provider.ts`.
    */
+  /**
+   * Transações de uma conta, pela `/v2/transactions`.
+   *
+   * A `/transactions` (v1) foi descontinuada e responde 410
+   * `ENDPOINT_DEPRECATED` mandando usar esta. A v2 muda três coisas ao mesmo
+   * tempo, e as três quebram em silêncio se passarem batidas:
+   *
+   *   - os filtros de data chamam `dateFrom`/`dateTo`, não `from`/`to`;
+   *   - `page` e `pageSize` deixaram de existir — a v2 recusa a requisição
+   *     inteira com 400 se algum deles aparecer;
+   *   - a paginação é por cursor opaco (`next`), sem total de páginas.
+   */
   async listTransactions(
     accountId: string,
-    options?: { from?: string; to?: string; page?: number; pageSize?: number },
+    options?: { from?: string; to?: string; cursor?: string },
   ): Promise<PluggyTransactionsPage> {
     const params = new URLSearchParams({ accountId });
-    if (options?.from) params.set("from", options.from);
-    if (options?.to) params.set("to", options.to);
-    if (options?.page) params.set("page", String(options.page));
-    if (options?.pageSize) params.set("pageSize", String(options.pageSize));
+    if (options?.from) params.set("dateFrom", options.from);
+    if (options?.to) params.set("dateTo", options.to);
+    if (options?.cursor) params.set("cursor", options.cursor);
 
-    return this.request<PluggyTransactionsPage>(`/transactions?${params.toString()}`);
+    return this.request<PluggyTransactionsPage>(`/v2/transactions?${params.toString()}`);
   }
 }
 

@@ -65,12 +65,12 @@ function makeDb(options: {
 const JANELA_PADRAO = { from: "2026-08-01", to: "2026-08-30" };
 
 describe("startOrResumeCheckpoint", () => {
-  it("retoma checkpoint em andamento — janela e página vêm do banco, não do argumento", async () => {
+  it("retoma checkpoint em andamento — janela e cursor vêm do banco, não do argumento", async () => {
     const { db, calls } = makeDb({
       selectRows: [
         {
           id: "cp-1",
-          cursor_value: "4",
+          cursor_value: "cursor-do-banco",
           window_start: "2025-09-01",
           window_end: "2026-08-30",
           status: "running",
@@ -84,13 +84,13 @@ describe("startOrResumeCheckpoint", () => {
       id: "cp-1",
       from: "2025-09-01",
       to: "2026-08-30",
-      startPage: 4,
+      startCursor: "cursor-do-banco",
     });
     // Retomar nunca reescreve o checkpoint: o upsert só roda no outro ramo.
     expect(calls.insertCount).toBe(0);
   });
 
-  it("checkpoint sem cursor_value retoma da página 1 (nada foi processado ainda)", async () => {
+  it("checkpoint sem cursor_value começa do início da janela (nada foi processado ainda)", async () => {
     const { db } = makeDb({
       selectRows: [
         {
@@ -105,7 +105,7 @@ describe("startOrResumeCheckpoint", () => {
 
     const state = await startOrResumeCheckpoint(db, "user-1", "item:acc-1", JANELA_PADRAO);
 
-    expect(state.startPage).toBe(1);
+    expect(state.startCursor).toBeNull();
     // window_start/window_end nulos caem na janela do chamador.
     expect(state.from).toBe(JANELA_PADRAO.from);
     expect(state.to).toBe(JANELA_PADRAO.to);
@@ -131,13 +131,13 @@ describe("startOrResumeCheckpoint", () => {
       id: "cp-antigo",
       from: JANELA_PADRAO.from,
       to: JANELA_PADRAO.to,
-      startPage: 1,
+      startCursor: null,
     });
     expect(calls.insertCount).toBe(1);
     expect(calls.conflictSet).toMatchObject({ status: "running", cursor_value: null });
   });
 
-  it("sem checkpoint existente, cria com contadores zerados e cursor_kind page_number", async () => {
+  it("sem checkpoint existente, cria com contadores zerados e cursor_kind cursor", async () => {
     const { db, calls } = makeDb({ selectRows: [] });
 
     const state = await startOrResumeCheckpoint(db, "user-9", "item:acc-7", JANELA_PADRAO);
@@ -146,13 +146,13 @@ describe("startOrResumeCheckpoint", () => {
       id: "cp-novo",
       from: JANELA_PADRAO.from,
       to: JANELA_PADRAO.to,
-      startPage: 1,
+      startCursor: null,
     });
     expect(calls.insertValues).toEqual({
       user_id: "user-9",
       source_type: "pluggy",
       scope_key: "item:acc-7",
-      cursor_kind: "page_number",
+      cursor_kind: "cursor",
       cursor_value: null,
       window_start: JANELA_PADRAO.from,
       window_end: JANELA_PADRAO.to,
@@ -165,7 +165,7 @@ describe("startOrResumeCheckpoint", () => {
     // O SET do ON CONFLICT reescreve tudo menos as colunas do target
     // (user_id, source_type, scope_key) — reescrevê-las seria no-op.
     expect(calls.conflictSet).toEqual({
-      cursor_kind: "page_number",
+      cursor_kind: "cursor",
       cursor_value: null,
       window_start: JANELA_PADRAO.from,
       window_end: JANELA_PADRAO.to,
@@ -198,13 +198,14 @@ describe("startOrResumeCheckpoint", () => {
 });
 
 describe("recordPageProgress", () => {
-  it("acumula sobre os contadores atuais e aponta o cursor pra PRÓXIMA página", async () => {
+  it("acumula sobre os contadores atuais e grava o cursor da PRÓXIMA página", async () => {
     const { db, calls } = makeDb({
       selectRows: [{ messages_seen: 10, documents_created: 3, duplicates_skipped: 2, errors: 1 }],
     });
 
     await recordPageProgress(db, "cp-1", {
       page: 4,
+      nextCursor: "eyJvZmZzZXQiOjIwMDB9",
       transactionsSeen: 5,
       created: 2,
       duplicates: 1,
@@ -212,7 +213,7 @@ describe("recordPageProgress", () => {
     });
 
     expect(calls.updateSet).toEqual({
-      cursor_value: "5",
+      cursor_value: "eyJvZmZzZXQiOjIwMDB9",
       messages_seen: 15,
       documents_created: 5,
       duplicates_skipped: 3,
@@ -225,6 +226,7 @@ describe("recordPageProgress", () => {
 
     await recordPageProgress(db, "cp-1", {
       page: 1,
+      nextCursor: null,
       transactionsSeen: 7,
       created: 7,
       duplicates: 0,
@@ -232,7 +234,7 @@ describe("recordPageProgress", () => {
     });
 
     expect(calls.updateSet).toEqual({
-      cursor_value: "2",
+      cursor_value: null,
       messages_seen: 7,
       documents_created: 7,
       duplicates_skipped: 0,

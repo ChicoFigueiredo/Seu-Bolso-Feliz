@@ -176,15 +176,20 @@ export async function syncProviderConnection(
           )
         : null;
 
-    const window = checkpoint ?? { from, to, startPage: 1 };
-    let pageNumber = window.startPage;
+    const window = checkpoint ?? { from, to, startCursor: null };
+    // `pagina` só conta quantas voltas o laço deu — serve para a métrica de
+    // progresso e para o log. Quem manda na paginação é o cursor opaco da
+    // Pluggy; a v2 não tem número de página nem total.
+    let cursor: string | null = window.startCursor;
+    let pagina = 0;
     let hasMore = true;
 
     while (hasMore) {
+      pagina++;
       const page = await provider.listTransactions(mapping.externalAccountId, {
         from: window.from,
         to: window.to,
-        cursor: String(pageNumber),
+        ...(cursor ? { cursor } : {}),
       });
 
       let pageCreated = 0;
@@ -276,18 +281,22 @@ export async function syncProviderConnection(
       skippedDuplicate += pageDuplicates;
       itemErrors += pageErrors;
 
+      // O cursor gravado é o da PRÓXIMA página: é de onde uma execução
+      // interrompida precisa recomeçar. Gravar o atual repetiria a página que
+      // acabou de ser processada.
+      cursor = page.nextCursor ?? null;
+      hasMore = Boolean(cursor);
+
       if (checkpoint) {
         await recordPageProgress(db, checkpoint.id, {
-          page: pageNumber,
+          page: pagina,
+          nextCursor: cursor,
           transactionsSeen: page.transactions.length,
           created: pageCreated,
           duplicates: pageDuplicates,
           errors: pageErrors,
         });
       }
-
-      hasMore = Boolean(page.nextCursor);
-      pageNumber++;
     }
 
     if (checkpoint) {

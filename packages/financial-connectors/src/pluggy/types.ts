@@ -76,9 +76,14 @@ export interface PluggyTransaction {
 
 export interface PluggyTransactionsPage {
   results: PluggyTransaction[];
-  total?: number;
-  totalPages?: number;
-  page?: number;
+  /**
+   * Cursor da próxima página, ou `null` no fim.
+   *
+   * A `/v2/transactions` paginou por cursor opaco no lugar de `page`/
+   * `totalPages`. Não dá para calcular quantas páginas faltam — só para
+   * perguntar se há mais uma.
+   */
+  next?: string | null;
 }
 
 /** O recorte de `/connectors` que interessa para filtrar o widget. */
