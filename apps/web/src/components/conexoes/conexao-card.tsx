@@ -14,7 +14,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, Icon, Pill, formatBRL } from "@sbf/design-system";
 import type { Conexao, ContaExterna, ProdutoOpcao } from "@/app/actions/painel-conexoes";
-import { updateExternalAccountMapping } from "@/app/actions/pluggy-connections";
+import {
+  criarProdutoDaContaExterna,
+  ignorarContasPendentes,
+  updateExternalAccountMapping,
+} from "@/app/actions/pluggy-connections";
 import { ConectarBanco } from "./conectar-banco";
 import {
   aparenciaDaConexao,
@@ -121,6 +125,18 @@ function ContaExternaLinha({
     }
   }
 
+  async function criarConta() {
+    setSalvando(true);
+    try {
+      await criarProdutoDaContaExterna(conta.id);
+      aoMudar();
+    } catch (erro) {
+      aoFalhar(erro instanceof Error ? erro.message : String(erro));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   return (
     <div
       style={{
@@ -176,6 +192,33 @@ function ContaExternaLinha({
           <option value={NAO_IMPORTAR}>Não importar esta conta</option>
         </select>
       </label>
+
+      {/* A saída para quem acabou de conectar o primeiro banco: sem nenhuma
+          conta cadastrada aqui dentro, o <select> acima só oferece "não
+          importar", e o fluxo morre. Isto cria a conta com o nome que o banco
+          deu e já vincula as duas. */}
+      {conta.produtoNome ? null : (
+        <button
+          type="button"
+          disabled={salvando}
+          onClick={() => void criarConta()}
+          style={{
+            justifySelf: "start",
+            minHeight: 36,
+            padding: "6px 12px",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--sbf-radius-pill)",
+            background: "var(--surface)",
+            font: "inherit",
+            fontSize: 12.5,
+            color: "var(--text-2)",
+            cursor: salvando ? "default" : "pointer",
+            opacity: salvando ? 0.6 : 1,
+          }}
+        >
+          + Criar &ldquo;{conta.nome ?? "esta conta"}&rdquo; aqui e vincular
+        </button>
+      )}
     </div>
   );
 }
@@ -195,6 +238,24 @@ export function ConexaoCard({
   const sincronizacao = momentoRelativo(conexao.ultimaSincronizacao);
   const pendentes = conexao.contas.filter((c) => c.status === "pending_mapping").length;
   const desconectada = conexao.status === "revoked";
+  const [ignorando, setIgnorando] = useState(false);
+
+  async function ignorarRestantes() {
+    setIgnorando(true);
+    try {
+      const { ignoradas } = await ignorarContasPendentes(conexao.id);
+      aoAvisar(
+        ignoradas === 1
+          ? "1 conta dispensada. Ela some da lista, mas continua no banco."
+          : `${ignoradas} contas dispensadas. Elas somem da lista, mas continuam no banco.`,
+      );
+      aoMudar();
+    } catch (erro) {
+      aoFalhar(erro instanceof Error ? erro.message : String(erro));
+    } finally {
+      setIgnorando(false);
+    }
+  }
 
   return (
     <Card padding={18} style={{ gap: 14 }}>
@@ -277,19 +338,45 @@ export function ConexaoCard({
           {produtos.length === 0 ? (
             <div style={{ display: "grid", gap: 8, marginTop: 8, justifyItems: "start" }}>
               <span style={{ fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.45 }}>
-                Você ainda não cadastrou nenhuma conta ou cartão aqui dentro, então não há a que
-                vincular. Cadastre uma e volte — o que o banco mandou continua esperando.
+                Você ainda não tem nenhuma conta cadastrada aqui dentro. O caminho curto é criar
+                cada uma a partir do que o banco mandou, no botão de cada linha abaixo — você
+                corrige nome e tipo depois, em Contas &amp; Cartões.
               </span>
               <Button
-                variant="outline"
-                size="lg"
+                variant="quiet"
+                size="md"
                 icon="add"
                 onClick={() => router.push("/dashboard/products")}
-                style={{ minHeight: 44 }}
+                style={{ minHeight: 40 }}
               >
-                Cadastrar conta ou cartão
+                Ou cadastrar uma à mão
               </Button>
             </div>
+          ) : null}
+
+          {/* Um banco pode devolver dezenas de contas quase idênticas — a Caixa
+              mandou 31 com o mesmo nome. Dispensar uma a uma seria 31 cliques
+              para chegar às duas que interessam. */}
+          {pendentes > 3 && !desconectada ? (
+            <button
+              type="button"
+              disabled={ignorando}
+              onClick={() => void ignorarRestantes()}
+              style={{
+                justifySelf: "start",
+                marginTop: 4,
+                padding: 0,
+                border: 0,
+                background: "none",
+                font: "inherit",
+                fontSize: 12,
+                color: "var(--text-3)",
+                textDecoration: "underline",
+                cursor: ignorando ? "default" : "pointer",
+              }}
+            >
+              {ignorando ? "Dispensando…" : `Não importar as ${pendentes} contas que sobraram`}
+            </button>
           ) : null}
 
           {conexao.contas.map((conta) => (

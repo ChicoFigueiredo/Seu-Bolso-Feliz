@@ -209,3 +209,133 @@ export async function revokeProviderConnection(id: string): Promise<void> {
     .returning({ id: schema.provider_connections.id });
   if (result.length === 0) throw new Error("Conexão não encontrada");
 }
+
+/**
+ * Cria a conta interna a partir de uma conta que o banco trouxe, e já vincula
+ * as duas.
+ *
+ * Existe porque o vínculo, sozinho, é uma armadilha: o `<select>` só oferece
+ * contas que já existem aqui dentro, e quem acabou de conectar o primeiro
+ * banco não tem nenhuma — então a única opção real era "não importar". Pior em
+ * escala: a Caixa devolveu 31 contas de uma vez, todas com o mesmo nome.
+ * Cadastrar 31 à mão, para só então poder escolher, não é um fluxo, é uma
+ * punição.
+ */
+export async function criarProdutoDaContaExterna(
+  mappingId: string,
+): Promise<{ financialProductId: string }> {
+  const userId = await requireUserId();
+  const db = getDb();
+
+  const [conta] = await db
+    .select({
+      id: schema.external_account_mappings.id,
+      nome: schema.external_account_mappings.external_account_name,
+      tipo: schema.external_account_mappings.external_account_type,
+      jaVinculada: schema.external_account_mappings.financial_product_id,
+      instituicao: schema.provider_connections.institution_name,
+    })
+    .from(schema.external_account_mappings)
+    .innerJoin(
+      schema.provider_connections,
+      and(
+        eq(schema.provider_connections.id, schema.external_account_mappings.provider_connection_id),
+        eq(schema.provider_connections.user_id, userId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.external_account_mappings.id, mappingId),
+        eq(schema.external_account_mappings.user_id, userId),
+      ),
+    );
+
+  if (!conta) throw new Error("conta externa não encontrada");
+  if (conta.jaVinculada) return { financialProductId: conta.jaVinculada };
+
+  // `institution_id` é NOT NULL, então a instituição vem antes do produto.
+  // Uma por nome, reaproveitada nas próximas contas da mesma conexão.
+  const nomeInstituicao = conta.instituicao?.trim() || "Instituição";
+  const [existente] = await db
+    .select({ id: schema.institutions.id })
+    .from(schema.institutions)
+    .where(
+      and(eq(schema.institutions.user_id, userId), eq(schema.institutions.name, nomeInstituicao)),
+    )
+    .limit(1);
+
+  const institutionId =
+    existente?.id ??
+    (
+      await db
+        .insert(schema.institutions)
+        .values({ user_id: userId, name: nomeInstituicao, type: "bank" })
+        .returning({ id: schema.institutions.id })
+    )[0]!.id;
+
+  // O tipo vem do que a Pluggy diz. `CREDIT` é cartão; o resto entra como
+  // conta corrente, que é o recorte que a tela Hoje soma em "Disponível
+  // agora". Se estiver errado, o usuário corrige em Contas & Cartões — o que
+  // não dá para corrigir é uma conta que nunca foi criada.
+  const tipoProduto = conta.tipo?.toUpperCase() === "CREDIT" ? "credit_card" : "checking_account";
+
+  const [produto] = await db
+    .insert(schema.financial_products)
+    .values({
+      user_id: userId,
+      institution_id: institutionId,
+      name: conta.nome?.trim() || nomeInstituicao,
+      type: tipoProduto,
+    })
+    .returning({ id: schema.financial_products.id });
+
+  const financialProductId = produto!.id;
+
+  await db
+    .update(schema.external_account_mappings)
+    .set({ financial_product_id: financialProductId, status: "mapped" })
+    .where(
+      and(
+        eq(schema.external_account_mappings.id, mappingId),
+        eq(schema.external_account_mappings.user_id, userId),
+      ),
+    );
+
+  return { financialProductId };
+}
+
+/**
+ * Marca como "não importar" todas as contas ainda pendentes de uma conexão.
+ *
+ * A saída para o caso da Caixa: 31 contas idênticas em nome, das quais o
+ * usuário quer duas. Sem isto, dispensar as outras 29 é 29 cliques.
+ */
+export async function ignorarContasPendentes(connectionId: string): Promise<{ ignoradas: number }> {
+  const userId = await requireUserId();
+  const db = getDb();
+
+  const [conexao] = await db
+    .select({ id: schema.provider_connections.id })
+    .from(schema.provider_connections)
+    .where(
+      and(
+        eq(schema.provider_connections.id, connectionId),
+        eq(schema.provider_connections.user_id, userId),
+      ),
+    );
+  if (!conexao) throw new Error("conexão não encontrada");
+
+  const ignoradas = await db
+    .update(schema.external_account_mappings)
+    .set({ status: "ignored" })
+    .where(
+      and(
+        eq(schema.external_account_mappings.provider_connection_id, connectionId),
+        eq(schema.external_account_mappings.user_id, userId),
+        eq(schema.external_account_mappings.status, "pending_mapping"),
+      ),
+    )
+    .returning({ id: schema.external_account_mappings.id });
+
+  return { ignoradas: ignoradas.length };
+}
