@@ -6,25 +6,28 @@
 ## Princípio de arquitetura (inegociável)
 
 A IA **não é um fluxo paralelo** — é a interface inteligente do pipeline já existente.
-Toda ação da IA passa pelos mesmos workers/Edge Functions/tabelas. **IA nunca grava no
+Toda ação da IA passa pelos mesmos workers/Server Actions/tabelas — não existem mais Edge
+Functions no projeto. **IA nunca grava no
 ledger sem revisão humana** nas fases atuais. Determinístico primeiro, IA depois, humano decide.
 
 ## Componentes (contrato) — verificado
 
-| Componente             | Onde                                                | Modelo        | Função                                                            |
-| ---------------------- | --------------------------------------------------- | ------------- | ----------------------------------------------------------------- |
-| Chat drawer            | `apps/web/src/components/ai-chat-drawer.tsx`        | —             | UI lateral, histórico, streaming, upload                          |
-| Chat API               | `apps/web/src/app/api/chat/route.ts`                | gpt-4o        | assistente com tool use, rate limit 10/min·100/dia, log de sessão |
-| Sugestões inline       | `apps/web/src/app/api/ai-suggest/route.ts`          | gpt-4o-mini   | single-shot, whitelist de tools, rate limit 20/min                |
-| Enrich lite (pipeline) | `workers/ingestion/src/parsers/ai-lite-enricher.ts` | gpt-4o-mini   | preenche campos críticos faltantes                                |
-| Enrich full (pipeline) | `workers/ingestion/src/parsers/ai-full-enricher.ts` | gpt-4o Vision | imagens/escaneados                                                |
-| Auditoria              | tabelas `ai_chat_sessions`, `ai_chat_messages`      | —             | trilha de conversa (migração `20260401100000`)                    |
+| Componente             | Onde                                                | Modelo        | Função                                                                                                     |
+| ---------------------- | --------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
+| Chat drawer            | `apps/web/src/components/ai-chat-drawer.tsx`        | —             | UI lateral, histórico, streaming, upload                                                                   |
+| Chat API               | `apps/web/src/app/api/chat/route.ts`                | gpt-4o        | assistente com tool use, rate limit 10/min·100/dia, log de sessão                                          |
+| Sugestões inline       | `apps/web/src/app/api/ai-suggest/route.ts`          | gpt-4o-mini   | single-shot, whitelist de tools, rate limit 20/min                                                         |
+| Enrich lite (pipeline) | `workers/ingestion/src/parsers/ai-lite-enricher.ts` | gpt-4o-mini   | preenche campos críticos faltantes                                                                         |
+| Enrich full (pipeline) | `workers/ingestion/src/parsers/ai-full-enricher.ts` | gpt-4o Vision | imagens/escaneados                                                                                         |
+| Auditoria              | tabelas `ai_chat_sessions`, `ai_chat_messages`      | —             | trilha de conversa (hoje em `packages/db/schema.sql`; era a migração `20260401100000` do backend anterior) |
 
 ## Upload-pelo-chat (fluxo verificado)
 
 `ai-chat-drawer` aceita `.pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx,.ofx,.qif` (≤10MB) →
-grava em bucket `ingestion-originals` → chama Edge `trigger-ingestion` → manda mensagem ao chat.
-**Mesmo pipeline do upload manual.** ✅
+chama `uploadDocument()` (`actions/ingestion.ts`), que grava no Vercel Blob (`ingestion-originals`)
+e insere direto em `ingestion_jobs` — não existe mais Edge Function; o worker acorda por
+`LISTEN/NOTIFY` (ADR-010) → manda mensagem ao chat.
+**É literalmente a mesma Server Action do upload manual**, não só "o mesmo pipeline". ✅
 
 ## Casos de uso do chat (do prompt original) — estado
 
@@ -62,4 +65,4 @@ de documento/transação. ✅
 - `apps/web/src/app/api/{chat,ai-suggest}/route.ts`
 - `apps/web/src/components/ai-chat-drawer.tsx`
 - `workers/ingestion/src/parsers/ai-{lite,full}-enricher.ts`
-- `supabase/migrations/20260401100000_*.sql`
+- `packages/db/schema.sql` (tabelas `ai_chat_sessions`, `ai_chat_messages` — `supabase/migrations/20260401100000_*.sql` era do backend anterior e não existe mais)

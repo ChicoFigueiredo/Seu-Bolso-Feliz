@@ -39,21 +39,21 @@ PluggyClient (REST)  →  PluggyProvider (implementa FinancialDataProvider)
                   findReconciliationCandidates (motor existente, não Pluggy-específico)
 ```
 
-| Camada                                            | Arquivo                                                                                                                 |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Cliente REST + cache de API key                   | `packages/financial-connectors/src/pluggy/pluggy-client.ts`                                                             |
-| Contrato genérico de provedor                     | `packages/financial-connectors/src/financial-data-provider.ts`                                                          |
-| Implementação Pluggy → NormalizedTransaction      | `packages/financial-connectors/src/pluggy/pluggy-provider.ts`                                                           |
-| NormalizedTransaction → TransactionDraftV1        | `packages/financial-connectors/src/pluggy/map-to-draft.ts`                                                              |
-| Resolução de fornecedor (alias exato)             | `packages/domain/src/supplier-resolution/index.ts`                                                                      |
-| Orquestração do sync (por conexão)                | `workers/pluggy-sync/src/sync-runner.ts`                                                                                |
-| Checkpoint de backfill (retomável)                | `workers/pluggy-sync/src/checkpoint.ts`                                                                                 |
-| Draft → linha de `draft_records`                  | `workers/pluggy-sync/src/build-draft.ts`                                                                                |
-| Motor de reconciliação (não é Pluggy-específico)  | `workers/ingestion/src/reconciliation/reconciliation.ts`                                                                |
-| Conexão (widget Connect)                          | `apps/web/src/components/pluggy-connect-button.tsx`                                                                     |
-| Lista de conexões / mapeamento de conta → produto | `apps/web/src/app/dashboard/connections/page.tsx`, `.../connections/[id]/page.tsx`                                      |
-| Server actions de conexão/mapeamento              | `apps/web/src/app/actions/pluggy-connections.ts`                                                                        |
-| Schema: conexões, mapeamento de conta, checkpoint | `supabase/migrations/20260824010000_create_provider_connections.sql`, `20260824030000_ingestion_checkpoints_pluggy.sql` |
+| Camada                                            | Arquivo                                                                                                                                                                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cliente REST + cache de API key                   | `packages/financial-connectors/src/pluggy/pluggy-client.ts`                                                                                                                                                                  |
+| Contrato genérico de provedor                     | `packages/financial-connectors/src/financial-data-provider.ts`                                                                                                                                                               |
+| Implementação Pluggy → NormalizedTransaction      | `packages/financial-connectors/src/pluggy/pluggy-provider.ts`                                                                                                                                                                |
+| NormalizedTransaction → TransactionDraftV1        | `packages/financial-connectors/src/pluggy/map-to-draft.ts`                                                                                                                                                                   |
+| Resolução de fornecedor (alias exato)             | `packages/domain/src/supplier-resolution/index.ts`                                                                                                                                                                           |
+| Orquestração do sync (por conexão)                | `workers/pluggy-sync/src/sync-runner.ts`                                                                                                                                                                                     |
+| Checkpoint de backfill (retomável)                | `workers/pluggy-sync/src/checkpoint.ts`                                                                                                                                                                                      |
+| Draft → linha de `draft_records`                  | `workers/pluggy-sync/src/build-draft.ts`                                                                                                                                                                                     |
+| Motor de reconciliação (não é Pluggy-específico)  | `workers/ingestion/src/reconciliation/reconciliation.ts`                                                                                                                                                                     |
+| Conexão (widget Connect)                          | `apps/web/src/components/pluggy-connect-button.tsx`                                                                                                                                                                          |
+| Lista de conexões / mapeamento de conta → produto | `apps/web/src/app/dashboard/connections/page.tsx`, `.../connections/[id]/page.tsx`                                                                                                                                           |
+| Server actions de conexão/mapeamento              | `apps/web/src/app/actions/pluggy-connections.ts`                                                                                                                                                                             |
+| Schema: conexões, mapeamento de conta, checkpoint | `packages/db/schema.sql` (tabelas `provider_connections`, `ingestion_checkpoints` — criadas como `supabase/migrations/20260824010000_*.sql`/`20260824030000_*.sql` no backend anterior, hoje congeladas no baseline do Neon) |
 
 ## Resolução de fornecedor (Fase 4)
 
@@ -99,7 +99,7 @@ Satisfeito. Dataset 100% sintético e determinístico (sem `Date.now()`/`Math.ra
 sem dado real de usuário) em `__tests__/fixtures/pluggy-reconciliation/`
 (`transactions.ts`, `emails.ts`, `documents.ts`), exercitado por 52 testes em
 `__tests__/integration/pluggy-reconciliation-fixtures.test.ts` contra
-`findReconciliationCandidates` de verdade (Supabase local, sem mock):
+`findReconciliationCandidates` de verdade (Postgres real, sem mock):
 
 | Critério do §37                          | Como é demonstrado                                                                                                                                                                       |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -119,11 +119,20 @@ final para o humano em vez de o motor arbitrar.
 ## Rodando os testes localmente
 
 ```bash
-supabase start
-supabase status -o env | grep SECRET_KEY   # SUPABASE_SECRET_KEY, cole no .env local
+# Postgres descartável (schema.sql + migrations) — receita completa em
+# __tests__/helpers/db.ts. Resumo:
+docker run -d --name sbf-integration-test \
+  -e POSTGRES_PASSWORD=sbf -e POSTGRES_USER=sbf -e POSTGRES_DB=sbf \
+  -p 55480:5432 postgres:17-alpine
 
-bun run test:unit                            # inclui packages/domain/src/supplier-resolution
-bun run test:integration                     # inclui reconciliation.test.ts e pluggy-reconciliation-fixtures.test.ts
+docker exec -i sbf-integration-test psql -U sbf -d sbf < packages/db/schema.sql
+for m in packages/db/migrations/*.sql; do
+  docker exec -i sbf-integration-test psql -U sbf -d sbf < "$m"
+done
+
+bun run test:unit                            # inclui packages/domain/src/supplier-resolution — não toca banco
+INTEGRATION_TEST_DATABASE_URL=postgresql://sbf:sbf@127.0.0.1:55480/sbf \
+  bun run test:integration                   # inclui reconciliation.test.ts e pluggy-reconciliation-fixtures.test.ts
 ```
 
 ## Fora de escopo desta fase (registrado, não esquecido)

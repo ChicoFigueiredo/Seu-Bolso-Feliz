@@ -24,7 +24,8 @@ travado deve.
 
 - Docker + Docker Compose v2 instalados (`docker compose version`).
 - Acesso de rede de saída da VPS para a API do Pluggy e para o Postgres
-  (Neon, quando a Fase 6 estiver pronta; até lá, Supabase).
+  (Neon — o Supabase saiu inteiramente do projeto na ADR-009; o worker já lê só
+  `DATABASE_URL`, ver `.env.example` neste diretório).
 - Repositório clonado (ou só o diretório `workers/pluggy-sync/` + o restante
   do monorepo, já que o build precisa da árvore completa — ver comentário no
   Dockerfile).
@@ -34,8 +35,9 @@ travado deve.
 ```bash
 cd workers/pluggy-sync
 cp .env.example .env
-# edite .env com os valores reais: SUPABASE_URL, SUPABASE_SECRET_KEY,
-# LOCAL_USER_ID, PLUGGY_CLIENT_ID, PLUGGY_CLIENT_SECRET
+# edite .env com os valores reais: DATABASE_URL (Neon, pooled — o worker abre
+# conexões curtas e repetidas), PLUGGY_CLIENT_ID, PLUGGY_CLIENT_SECRET.
+# LOCAL_USER_ID é opcional (ver tabela abaixo).
 ```
 
 `.env` já está coberto pelo `.gitignore` raiz (padrão `.env`) — nunca commitar
@@ -99,15 +101,14 @@ lugar por vez, nunca VPS e local simultaneamente na mesma conexão Pluggy.
 
 ## Variáveis de ambiente
 
-| Variável                    | Obrigatória       | Descrição                                                       |
-| --------------------------- | ----------------- | --------------------------------------------------------------- |
-| `SUPABASE_URL`              | sim               | URL do projeto (produção/branch de dev, ver plano Fase 1)       |
-| `SUPABASE_SECRET_KEY`       | sim               | Service role key — nunca a publishable key                      |
-| `LOCAL_USER_ID`             | sim               | App de usuário único (ADR-007)                                  |
-| `PLUGGY_CLIENT_ID`          | sim               | Meu Pluggy → app → credenciais (🤚 CEO cria)                    |
-| `PLUGGY_CLIENT_SECRET`      | sim               | idem                                                            |
-| `SYNC_INTERVAL_SECONDS`     | não (3600)        | Intervalo entre rodadas de sync incremental no loop             |
-| `HEARTBEAT_MAX_AGE_SECONDS` | não (2×intervalo) | Idade máxima do heartbeat antes do healthcheck marcar unhealthy |
+| Variável                    | Obrigatória       | Descrição                                                                                                                                                                                                                    |
+| --------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`              | sim               | Connection string do Neon, pooled (host `-pooler`) — única fonte de dados, lida por `getDb()` (`@sbf/db`); não existe `DATABASE_URL_UNPOOLED` aqui de propósito, ver `.env.example`                                          |
+| `LOCAL_USER_ID`             | não               | Override do dono dos dados. Por padrão o worker resolve sozinho o usuário com `role='owner'` via `resolveOwnerId()` (`@sbf/db`); só preencha para forçar outro usuário — o valor é validado na largada contra `public.users` |
+| `PLUGGY_CLIENT_ID`          | sim               | Meu Pluggy → app → credenciais (🤚 CEO cria)                                                                                                                                                                                 |
+| `PLUGGY_CLIENT_SECRET`      | sim               | idem                                                                                                                                                                                                                         |
+| `SYNC_INTERVAL_SECONDS`     | não (3600)        | Intervalo entre rodadas de sync incremental no loop                                                                                                                                                                          |
+| `HEARTBEAT_MAX_AGE_SECONDS` | não (2×intervalo) | Idade máxima do heartbeat antes do healthcheck marcar unhealthy                                                                                                                                                              |
 
 ## Fora de escopo deste documento
 

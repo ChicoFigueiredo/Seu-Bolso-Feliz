@@ -29,148 +29,98 @@ Faça nesta ordem. Cada passo depende do anterior.
 
 Copie `.env.example` para `.env` e complete.
 
-> O `.env.example` listava 8 variáveis enquanto o código lê **17** — faltavam
-> `LOCAL_USER_ID` e `SUPABASE_URL` (sem as quais nenhum worker sobe), as três do Gmail,
-> as três da OpenAI e as de OCR. **Já foi corrigido**; as tabelas abaixo detalham cada
-> uma e onde é lida.
+> O Supabase saiu inteiramente do projeto (ADR-009, 2026-08-30). Não existe mais
+> camada de chave de API para o banco, RLS, Edge Function nem Supabase Auth — o que
+> segue é o mapa de "por onde cada peça do backend anterior entra hoje":
+>
+> | Antes (Supabase)                                        | Hoje                                                                                                                 |
+> | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+> | `SUPABASE_URL` + `SUPABASE_SECRET_KEY`/`sb_secret_...`  | `DATABASE_URL` / `DATABASE_URL_UNPOOLED` (Neon, Postgres puro) — ver §1.1                                            |
+> | RLS (`auth.uid() = user_id`)                            | `WHERE user_id = ownerId` explícito em cada query — não há mais política de banco segurando isto                     |
+> | Supabase Auth (`auth.users`)                            | autenticação própria: JWT em cookie httpOnly + Google OAuth + senha de reserva — ver §1.2                            |
+> | Supabase Storage (bucket)                               | Vercel Blob (`BLOB_READ_WRITE_TOKEN`) — ver §1.3 e `docs/integrations/storage-vercel-blob.md`                        |
+> | Edge Function (`trigger-ingestion`)                     | fila na própria tabela `ingestion_jobs` (`LISTEN`/`NOTIFY`) — ver ADR-010                                            |
+> | `LOCAL_USER_ID` obrigatório em todo processo sem sessão | opcional para os workers (`resolveOwnerId()` acha o dono sozinho); ainda obrigatório só para o MCP server — ver §1.4 |
 
-### 1.1 As chaves de API — use as novas
+### 1.1 Banco — `DATABASE_URL` / `DATABASE_URL_UNPOOLED`
 
-O Supabase tem dois modelos de chave convivendo. **Este projeto usa o novo.**
+| Variável                | Obrigatória                        | Onde é lida                                                             | Formato                                             |
+| ----------------------- | ---------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
+| `DATABASE_URL`          | sim                                | `getDb()` (`@sbf/db`) — web, workers, MCP, scripts                      | connection string Neon, **pooled** (host `-pooler`) |
+| `DATABASE_URL_UNPOOLED` | sim, para a fila e para migrations | worker de ingestão (`LISTEN`/`NOTIFY`), `scripts/aplicar-migrations.sh` | connection string Neon, **direta** (sem `-pooler`)  |
 
-| Modelo     | Formato              | Substitui      | Rotação                        |
-| ---------- | -------------------- | -------------- | ------------------------------ |
-| Publicável | `sb_publishable_...` | `anon`         | independente, sem downtime     |
-| Secreta    | `sb_secret_...`      | `service_role` | independente, uma por serviço  |
-| Legacy     | `eyJ...` (JWT)       | —              | **impossível** — vence em 2026 |
+O pooler do Neon não entrega `LISTEN`/`NOTIFY` de forma confiável, e DDL pelo pooler
+pode cair num backend diferente no meio da transação — por isso as duas URLs existem e
+não são intercambiáveis. `packages/db/README.md` documenta as pegadinhas do driver
+(`neon-http` não tem `transaction()`; para atomicidade use `batch()`).
 
-**Se um valor começa com `eyJ`, é chave legacy e está errado.** Elas derivam do JWT
-secret do projeto, e é por isso que não podem ser rotacionadas: mexer numa mexeria em
-tudo que o secret assina. Não existe botão "Rotate" para elas — o caminho é criar as
-novas e desativar as antigas, em **Settings → API Keys**.
+Não há mais "ambiente local do Supabase" com chaves fixas embutidas no CLI: todo
+ambiente — local ou produção — é um Postgres real endereçado por `DATABASE_URL`. Para
+testes de integração/E2E, a prática é um Postgres **descartável** (nunca a base de
+trabalho): receita completa em `__tests__/helpers/db.ts` (resumo: `docker run` com
+`postgres:17-alpine`, aplicar `packages/db/schema.sql` + `packages/db/migrations/*.sql`,
+apontar `INTEGRATION_TEST_DATABASE_URL` para ele).
 
-As chaves secretas novas ainda ganham uma proteção que a `service_role` não tinha:
-respondem **HTTP 401 se usadas a partir de um navegador**, detectado pelo `User-Agent`.
+### 1.2 Autenticação própria — `AUTH_SECRET`, Google OAuth, senha de reserva
 
-#### Onde cada uma vive
+| Variável                           | Obrigatória                        | Efeito                                                                                                                                          |
+| ---------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`                      | sim (≥32 caracteres)               | assina o cookie de sessão (`sbf_session`, JWT via `jose`); trocar invalida toda sessão em aberto                                                |
+| `AUTH_ALLOWED_EMAILS`              | não (default `fran.fig@gmail.com`) | única lista de e-mails que o login por Google aceita                                                                                            |
+| `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` | sim, para login por Google         | credenciais OAuth do Google Cloud Console — URL de retorno autorizada precisa incluir `<origem>/auth/callback`                                  |
+| `ADMIN_INITIAL_PASSWORD`           | sim (≥12 caracteres)               | senha inicial do usuário `admin@` (chave de reserva, para quando o Google falhar); abaixo de 12 caracteres o login por senha fica **desligado** |
 
-| Variável                               | Onde é lida                   | Formato              |
-| -------------------------------------- | ----------------------------- | -------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`             | `apps/web/src/lib/supabase/*` | URL do projeto       |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | idem                          | `sb_publishable_...` |
-| `SUPABASE_SECRET_KEY`                  | workers, MCP, scripts         | `sb_secret_...`      |
-| `SUPABASE_URL`                         | workers, MCP                  | mesma URL            |
-| `SUPABASE_DB_PASSWORD`                 | CLI                           | senha do Postgres    |
-| `SUPABASE_ACCESS_TOKEN`                | CLI e CI                      | token da conta       |
-| `SUPABASE_PROJECT_ID`                  | CLI e CI                      | ref do projeto       |
+Não existe mais `auth.users` nem Supabase Auth. A identidade vive em `public.users`
+(`role`: `owner` | `admin`; `owner_id` — o admin opera sobre os dados do dono, nunca
+sobre os próprios). Implementação completa em `apps/web/src/lib/auth/` (JWT com `jose`,
+Google OAuth escrito à mão, senha com `scrypt`) e semente inicial em
+`packages/db/migrations/0002_crypto_key_e_usuarios.sql`.
 
-> `SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_URL` têm o **mesmo valor** e ambas são
-> necessárias: o Next só expõe ao cliente variáveis com o prefixo `NEXT_PUBLIC_`,
-> e os workers não rodam dentro do Next.
+### 1.3 Storage — `BLOB_READ_WRITE_TOKEN`
 
-> ⚠️ `SUPABASE_SECRET_KEY` **nunca** vai para o Vercel nem para o GitHub. Ela mora só na
-> sua máquina, onde rodam os workers e o MCP. O GitHub guarda `SUPABASE_ACCESS_TOKEN`,
-> que é outra coisa: credencial da sua conta, usada pelo CLI para fazer deploy.
+Único segredo do Vercel Blob — carrega o id da loja, sem endpoint, região nem par de
+chaves para configurar. Detalhe completo, inclusive onde pegar o token e por que
+"bucket" aqui é só prefixo de caminho, em
+[`docs/integrations/storage-vercel-blob.md`](../integrations/storage-vercel-blob.md).
 
-#### Ambiente local
+### 1.4 Identidade local — obrigatória só para o MCP server
 
-O Supabase local tem chaves novas fixas, **embutidas no binário do CLI e iguais em
-qualquer máquina** — não são segredo e já estão no `.env.example`:
+| Variável        | Obrigatória                                           | Onde é lida                                                                                                             |
+| --------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `LOCAL_USER_ID` | **sim, para o MCP server** · opcional para os workers | `apps/mcp-server/src/user.ts` (exige e lança se faltar) · `resolveOwnerId()` em `@sbf/db` (workers — override opcional) |
 
-```bash
-supabase status   # mostra Publishable e Secret do stack local
-```
+Os workers descobrem o dono sozinhos: existe exatamente uma linha com `role = 'owner'`
+em `public.users`, e é dela que sai o id (`resolveOwnerId()`, `packages/db/src/owner.ts`).
+`LOCAL_USER_ID` continua aceito ali como override, mas agora é **validado** — se
+apontar para alguém que não existe, o processo recusa subir em vez de gravar linhas
+órfãs em silêncio.
 
-#### As chaves nas Edge Functions
+O MCP server é diferente: roda como processo stdio, sem sessão nenhuma, e
+`apps/mcp-server/src/user.ts` **exige** `LOCAL_USER_ID` explicitamente — não usa
+`resolveOwnerId()` nem cai em automático.
 
-Aqui os nomes são **diferentes**, e é onde a migração costuma quebrar. A plataforma
-injeta as chaves novas no **plural**, e o valor é um JSON indexado por nome:
-
-```
-SUPABASE_SECRET_KEYS      = {"default":"sb_secret_..."}
-SUPABASE_PUBLISHABLE_KEYS = {"default":"sb_publishable_..."}
-```
-
-Não adianta contornar criando uma variável no singular: **o CLI recusa qualquer secret
-com prefixo `SUPABASE_`** (`Env name cannot start with SUPABASE_, skipping`). Ou seja,
-uma função que leia `SUPABASE_SECRET_KEY` sobe com a chave `undefined` — foi exatamente
-o defeito encontrado nas quatro funções deste projeto, corrigido em
-`supabase/functions/_shared/keys.ts`:
-
-```ts
-import { getPublishableKey, getSecretKey } from "../_shared/keys.ts";
-
-const admin = createClient(Deno.env.get("SUPABASE_URL")!, getSecretKey());
-```
-
-> ⚠️ **A armadilha do `Invalid JWT`:** as chaves novas não são JWT. Em
-> `Authorization: Bearer` a plataforma tenta lê-las como token e rejeita — elas vão no
-> cabeçalho `apikey`, que é o que o `supabase-js` já faz sozinho. Como o `verify_jwt`
-> embutido só entende chave legacy, cada função declara `verify_jwt = false` em
-> `supabase/config.toml` e autoriza no próprio código, com `auth.getUser()`.
-
-#### Se você chamar o banco a partir do Postgres
-
-`pg_net` e Database Webhooks costumam mandar a chave em `Authorization: Bearer`. Com
-chave nova isso falha. Use `apikey`, e leia do Vault em vez de escrever o valor no SQL:
+Para descobrir o id do dono:
 
 ```sql
-headers := jsonb_build_object(
-  'Content-Type', 'application/json',
-  'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'secret_key')
-);
+select id, email, role from public.users;
 ```
 
-Hoje o projeto **não usa** `pg_net` nem Database Webhooks — fica registrado para quando
-usar.
+### 1.5 Limpando um `.env` antigo (se a máquina vem de antes da ADR-009)
 
-### 1.2 O que alterar e o que remover nos `.env`
-
-Nenhum **nome** de variável muda. O que muda são valores — e um punhado de coisas
-precisa sumir.
-
-**Alterar** (só o valor, para o formato novo):
-
-| Arquivo           | Variável                               | Para                 |
-| ----------------- | -------------------------------------- | -------------------- |
-| `.env.production` | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` |
-| `.env.production` | `SUPABASE_SECRET_KEY`                  | `sb_secret_...`      |
-| `.env` (cofre)    | `PRD_PUBLISHABLE_KEY`                  | `sb_publishable_...` |
-| `.env` (cofre)    | `PRD_SECRET_KEY`                       | `sb_secret_...`      |
-
-**Remover:**
-
-| O quê                                                                                                                                                        | Por quê                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| `STAGING_POSTGRES_PASSWORD`, `STAGING_PROJECT_NAME`, `STAGING_PROJECT_URL`, `STAGING_PUBLISHABLE_KEY`, `STAGING_SECRET_KEY`, `STAGING_SUPABASE_ID` no `.env` | Staging foi eliminado; as chaves continuam abrindo um banco |
-| O arquivo `.env.staging`                                                                                                                                     | Idem                                                        |
-| `.env.local.bak-*`                                                                                                                                           | Backup da migração; contém as chaves locais antigas         |
-
-E, fora do repositório: o projeto Supabase `seu-bolso-feliz-staging`. Enquanto ele
-existir, as chaves dele valem — remover a variável não desativa nada.
-
-**Já migrado, não precisa mexer:** `.env.local` (aponta para `127.0.0.1:54321`, chaves
-públicas do CLI), os fallbacks nos testes e o `.vscode/mcp.json`.
-
-### Identidade local — obrigatória para workers e MCP
-
-| Variável        | Onde é lida                                                    | Valor                               |
-| --------------- | -------------------------------------------------------------- | ----------------------------------- |
-| `LOCAL_USER_ID` | `workers/*/src/supabase.ts`, `apps/mcp-server/src/supabase.ts` | UUID do seu usuário em `auth.users` |
-
-Os workers rodam fora do navegador, sem sessão de autenticação, então precisam saber
-de quem são os dados. Para descobrir o seu:
-
-```sql
-select id, email from auth.users;
-```
-
-Ou, com o Supabase local:
+Estas variáveis não são lidas por nenhum código vivo e podem sair do `.env`:
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`,
+`SUPABASE_URL`, `SUPABASE_DB_PASSWORD`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, e
+qualquer `STAGING_*` (o staging foi eliminado — ver `.github/workflows/deploy.yml` —
+antes mesmo da saída do Supabase). Confirme que sumiram:
 
 ```bash
-docker exec -i supabase_db_<projeto> psql -U postgres -d postgres \
-  -tAc "select id, email from auth.users;"
+grep -E "SUPABASE|STAGING_" .env* 2>/dev/null   # não deve imprimir nada
 ```
+
+Fora do repositório: **⚠️ verificar** se o projeto Supabase original (o de produção, e o
+de staging `seu-bolso-feliz-staging`, se ainda existir) foi desativado. Remover a
+variável do `.env` não desativa nada do lado do Supabase — enquanto o projeto existir
+lá, as chaves antigas continuam abrindo aquele banco.
 
 ### Gmail — só se for usar ingestão por e-mail
 
@@ -203,14 +153,32 @@ docker exec -i supabase_db_<projeto> psql -U postgres -d postgres \
 
 ## 2. Banco e usuário
 
+Num Neon **já provisionado com o schema base** (o caso comum — produção, ou um banco
+que alguém já rodou antes):
+
 ```bash
-supabase start          # sobe o Supabase local
-bun run db:migrate      # aplica as migrations
-bun run generate-types  # regenera packages/shared-types
+bash scripts/aplicar-migrations.sh    # aplica packages/db/migrations/*.sql pendentes
+bun run generate-types                # regenera packages/shared-types
 ```
 
-Crie o usuário pela tela de login (`/login`) ou via API admin, e pegue o `id` para
-`LOCAL_USER_ID`.
+Num Postgres **do zero** (ex.: banco de teste descartável), aplique primeiro o
+baseline — `packages/db/schema.sql` não é histórico, é o estado atual congelado, e as
+migrations são só o delta desde ali (ver `packages/db/README.md`):
+
+```bash
+psql "$DATABASE_URL_UNPOOLED" -f packages/db/schema.sql
+bash scripts/aplicar-migrations.sh
+```
+
+O dono (`fran.fig@gmail.com`) e o admin de emergência (`admin@seubolsofeliz.com.br`) já
+nascem semeados por `packages/db/migrations/0002_crypto_key_e_usuarios.sql` — não é
+preciso criar usuário nenhum. O primeiro login pelo Google casa por e-mail e preenche
+`google_sub`; o login por senha usa `ADMIN_INITIAL_PASSWORD` (§1.2). Para achar o `id`
+de alguém (uso em `LOCAL_USER_ID`, se for forçar um usuário específico):
+
+```sql
+select id, email, role from public.users;
+```
 
 ---
 
@@ -224,23 +192,26 @@ Tela: **`/dashboard/settings`**. Tabela: `user_financial_preferences`.
 | `financial_cycle_anchor_date` | Data-âncora para gerar os períodos                                         |
 | `default_currency`            | `BRL`                                                                      |
 
-Depois de definir, gere os períodos:
+Depois de definir, gere os períodos. `generate_financial_periods` era uma RPC do
+Postgres — uma das seis descartadas na migração para o Neon (dependia só de
+`auth.uid()`, ver nota em `packages/db/schema.sql`) — hoje é a Server Action
+`generateFinancialPeriods` (`apps/web/src/app/actions/financial-periods.ts`), que reusa
+`generatePeriods` de `@sbf/domain`. Não há tela que a chame diretamente; rode via MCP:
 
-```sql
-select generate_financial_periods(
-  p_start_day    => 5,
-  p_months_ahead => 12,
-  p_anchor_date  => current_date
-);
+```
+recompute_financial_periods { "monthsAhead": 12 }
 ```
 
-> ⚠️ **Duas ressalvas verificadas:**
+> ⚠️ **Duas ressalvas:**
 >
-> 1. A tela de settings **não chama** `generate_financial_periods` ao salvar. Rode o SQL
->    à mão depois de mudar o dia.
-> 2. A tool MCP `recompute_financial_periods` **não funciona**: os nomes de parâmetro
->    divergem da RPC e `auth.uid()` é NULL sob `service_role`. Está registrada como
->    defeito conhecido.
+> 1. A tela de settings **não chama** `generateFinancialPeriods` ao salvar o dia do
+>    ciclo. É preciso disparar à parte (MCP, acima, ou chamando a Server Action).
+> 2. A tool MCP `recompute_financial_periods` **já não tem o defeito antigo**
+>    (`auth.uid()`/`service_role` eram conceitos do Supabase; a RPC de que dependia nem
+>    existe mais). Foi reimplementada em TypeScript em
+>    `apps/mcp-server/src/tools/recompute-financial-periods.ts`, com chamador real
+>    (registrada em `apps/mcp-server/src/index.ts`) — mas sem teste automatizado
+>    dedicado ainda, então trate como 🟡 e confirme o resultado depois de rodar.
 
 ---
 
@@ -266,12 +237,11 @@ produto financeiro cadastrado, nenhum documento pode ser lançado.**
 | `type`           | `checking_account` · `savings_account` · `credit_card` · `overdraft` · `personal_loan` · `mortgage` · `investment` · `other` |
 | `credit_limit`   | Limite, para produtos de crédito                                                                                             |
 
-### 4.3 Cartões — ⚠️ **não há tela**
+### 4.3 Cartões — tela `/dashboard/cards`
 
-A tabela `cards` existe e já tem todas as colunas necessárias, mas **a rota
-`/dashboard/cards` não existe**. Não é possível cadastrar um cartão pela interface.
-
-Enquanto a tela não existir (issue #4 no GitHub), cadastre por SQL:
+A rota `/dashboard/cards` existe (`apps/web/src/app/dashboard/cards/page.tsx`), com
+lista, criação e edição — cadastre o cartão por ali. Se precisar por SQL mesmo assim
+(script, backfill):
 
 ```sql
 insert into cards (
@@ -419,19 +389,18 @@ sai de lá.
 
 ### Cadastrar
 
-Pela server action (`apps/web/src/app/actions/secrets.ts`), ou por SQL **autenticado
-como o usuário** — `fn_set_secret` usa `auth.uid()` de propósito e não aceita um
-parâmetro de usuário, o que elimina a possibilidade de forjar:
+Pela tela **`/dashboard/settings/passwords`**, que chama a Server Action `setSecret`
+(`apps/web/src/app/actions/secrets.ts`).
 
-```sql
-select fn_set_secret(
-  p_secret_type => 'pdf_password',
-  p_plaintext   => 'senha-do-pdf',
-  p_entity_type => 'supplier',              -- ou null para senha global
-  p_entity_id   => '<supplier_id>',
-  p_label       => 'Fatura Cartão X'
-);
-```
+`fn_set_secret` — a RPC que fazia isto antes, autenticando por `auth.uid()` — foi uma
+das seis funções **descartadas** na migração para o Neon (dependia só de identidade
+Supabase; nota em `packages/db/schema.sql`). Hoje **não há caminho por SQL direto que
+se autentique sozinho**: `setSecret` resolve `userId` da sessão (`requireUser()`) e
+chama `assertOwnsEntity()` antes de gravar — é essa checagem em TypeScript, não mais
+`auth.uid()` no banco, que impede gravar em nome de outro dono ou apontar para uma
+entidade alheia. Quem precisar fazer isso por script (ex.: um worker) usa
+`gravarSegredo()` (`packages/db/src/secrets.ts`), que **não** checa posse sozinha — a
+responsabilidade de provar que a entidade pertence ao usuário é de quem chama.
 
 | `entity_type`       | Escopo                           |
 | ------------------- | -------------------------------- |
@@ -448,11 +417,10 @@ Há **um segredo por escopo** (índice único). Regravar o mesmo escopo substitu
 
 No momento em que a senha é necessária, o documento ainda não foi lido — logo o
 fornecedor **ainda é desconhecido**. O worker então tenta as senhas cadastradas em
-ordem de uso recente, com teto de 20, e marca a que funcionou para subir na ordem da
-próxima vez.
-
-> ⚠️ **Ainda não há tela** para gerenciar senhas. A action existe; a interface é a
-> issue de F6.2.
+ordem de uso recente, com teto de 20 (`listPdfPasswordCandidates` em
+`workers/ingestion/src/parsers/secret-lookup.ts`, que lê pela função `fn_get_secrets`
+— esta ainda existe no Neon, mas sem `service_role` nem a checagem de posse que tinha
+no Supabase; ver §1), e marca a que funcionou para subir na ordem da próxima vez.
 
 ---
 
@@ -534,14 +502,14 @@ sudo apt install ocrmypdf tesseract-ocr-por   # Debian/Ubuntu/WSL
 ## Verificar se está tudo certo
 
 ```bash
-# 0. Nenhuma chave legacy sobrou (não deve imprimir nada)
-grep -l "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" .env* 2>/dev/null
+# 0. Nenhuma variável do Supabase sobrou no seu .env (não deve imprimir nada — §1.5)
+grep -E "SUPABASE|STAGING_" .env* 2>/dev/null
 
 # 1. Ambiente e banco
-supabase start && bun run db:migrate
+bash scripts/aplicar-migrations.sh
 
-# 2. Suíte completa
-bun run test        # esperado: 505/505
+# 2. Suíte completa (contagem de referência é anterior à saída do Supabase — reconfirme)
+bun run test
 
 # 3. Só o ciclo ponta a ponta
 bunx vitest run --project e2e
@@ -577,10 +545,10 @@ group by draft_type, status;
 
 ## Resumo do que ainda não é configurável pela interface
 
-| O quê                                    | Alternativa hoje    | Rastreado |
-| ---------------------------------------- | ------------------- | --------- |
-| Cartões (fechamento, vencimento, limite) | SQL                 | issue #4  |
-| Senhas de PDF                            | server action / SQL | F6.2      |
-| Templates de extração                    | código              | —         |
-| Regeneração de períodos financeiros      | SQL                 | —         |
-| Padrões documentais aplicados ao parser  | não fecha           | —         |
+| O quê                                    | Alternativa hoje                                                    | Rastreado                           |
+| ---------------------------------------- | ------------------------------------------------------------------- | ----------------------------------- |
+| Cartões (fechamento, vencimento, limite) | `/dashboard/cards` — já tem tela (issues #4/#5 fechadas por código) | issue #6 (`credit_limit` duplicado) |
+| Senhas de PDF                            | `/dashboard/settings/passwords` — já tem tela                       | —                                   |
+| Templates de extração                    | código                                                              | —                                   |
+| Regeneração de períodos financeiros      | tool MCP `recompute_financial_periods` (sem tela)                   | —                                   |
+| Padrões documentais aplicados ao parser  | não fecha                                                           | —                                   |
