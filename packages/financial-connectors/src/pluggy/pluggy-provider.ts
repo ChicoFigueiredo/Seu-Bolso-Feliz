@@ -25,6 +25,17 @@ export interface PluggyProviderConfig {
 
 const TRANSACTIONS_PAGE_SIZE = 500;
 
+/**
+ * O conector do Meu Pluggy (meu.pluggy.ai).
+ *
+ * Ele não é marcado como Open Finance na API — é um proxy — mas é por Open
+ * Finance que o usuário liga os bancos dele lá dentro, e nenhuma senha de
+ * banco passa por aqui. Precisa estar na lista à parte porque o filtro de
+ * `isOpenFinance` o esconderia, e ele é justamente o caminho gratuito para uso
+ * pessoal: a conexão direta pelo Dashboard exige plano pago.
+ */
+const CONECTOR_MEU_PLUGGY = 200;
+
 export class PluggyProvider implements FinancialDataProvider {
   readonly providerName = "pluggy" as const;
   private readonly client: PluggyClient;
@@ -66,7 +77,9 @@ export class PluggyProvider implements FinancialDataProvider {
    */
   async listOpenFinanceConnectorIds(country = "BR"): Promise<number[]> {
     const conectores = await this.client.listConnectors(country);
-    return conectores.filter((c) => c.isOpenFinance && !c.isSandbox).map((c) => c.id);
+    return conectores
+      .filter((c) => (c.isOpenFinance || c.id === CONECTOR_MEU_PLUGGY) && !c.isSandbox)
+      .map((c) => c.id);
   }
 
   async getConnection(externalItemId: string): Promise<NormalizedConnection> {

@@ -50,8 +50,33 @@ export interface ConectarBancoProps {
   aoFalhar: (mensagem: string) => void;
 }
 
+/**
+ * Códigos da Pluggy que chegam crus e não dizem nada a quem está na tela.
+ *
+ * Um `TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED` estampado no painel manda a pessoa
+ * pesquisar o que ela deveria fazer. Traduzir aqui é o mínimo; dizer o caminho
+ * de saída é o que resolve.
+ */
+const RECADOS: Array<[RegExp, string]> = [
+  [
+    /TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED/i,
+    "A sua aplicação na Pluggy está em teste, e o teste não deixa criar conexão nova. " +
+      "O caminho gratuito é o Meu Pluggy: ligue os bancos em meu.pluggy.ai e depois " +
+      "conecte aqui escolhendo “MeuPluggy” na lista.",
+  ],
+  [
+    /CLIENT_NOT_ALLOWED|FORBIDDEN|Forbidden/i,
+    "A Pluggy recusou a operação para esta aplicação — normalmente é limite do plano.",
+  ],
+  [/MISSING_OR_INVALID_CREDENTIALS|INVALID_CREDENTIALS/i, "O banco recusou os dados informados."],
+];
+
 function mensagemDoErro(erro: unknown): string {
-  return erro instanceof Error ? erro.message : String(erro);
+  const bruto = erro instanceof Error ? erro.message : String(erro);
+  for (const [padrao, recado] of RECADOS) {
+    if (padrao.test(bruto)) return recado;
+  }
+  return bruto;
 }
 
 export function ConectarBanco({
