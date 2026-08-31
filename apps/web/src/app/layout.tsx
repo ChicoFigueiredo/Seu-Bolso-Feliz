@@ -39,13 +39,31 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Casa com o tema claro fixo: sem isto, a barra de rolagem e os controles
+  // nativos de formulário continuam escuros no sistema em modo escuro.
+  colorScheme: "light",
   themeColor: "#245C4A",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
-      <body className="min-h-screen bg-background text-foreground antialiased">
+    // `data-sbf-theme` no <html> não é decoração: sem ele, o bloco
+    // `:root:not([data-sbf-theme])` de tokens.css troca a paleta inteira pelo
+    // tema escuro quando o sistema está em modo escuro — e como o painel
+    // declara `salvia` mais abaixo, sobrava só a moldura do `<main>` pintada
+    // de escuro em volta do conteúdo claro. Declarar o tema aqui faz a regra
+    // deixar de casar, que é o mecanismo previsto pelo próprio design system.
+    <html lang="pt-BR" data-sbf-theme="salvia" suppressHydrationWarning>
+      {/*
+        O fundo sai do token do design system, não do `bg-background` do
+        shadcn. Os dois não eram o mesmo bege: mesmo no claro sobrava uma
+        costura branca de 24px em volta do conteúdo, na área de padding do
+        `<main>`. `--bg` vive no `:root` de tokens.css, importado logo acima.
+      */}
+      <body
+        className="min-h-screen text-foreground antialiased"
+        style={{ background: "var(--bg)" }}
+      >
         <Providers>
           <OfflineBanner />
           {children}

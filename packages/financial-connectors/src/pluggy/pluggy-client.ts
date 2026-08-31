@@ -4,6 +4,7 @@
  * pra `NormalizedTransaction`/`FinancialDataProvider` vive em `pluggy-provider.ts`.
  */
 import type {
+  PluggyConnectorResumo,
   PluggyAccount,
   PluggyAuthResponse,
   PluggyConnectTokenResponse,
@@ -106,6 +107,23 @@ export class PluggyClient {
         },
       }),
     });
+  }
+
+  /**
+   * Conectores disponíveis no país, com a marcação de Open Finance.
+   *
+   * Existe para o widget poder esconder os conectores que pedem a senha do
+   * internet banking. Não é preferência estética: com Open Finance o usuário
+   * autoriza no site do próprio banco e nenhuma senha passa por aqui, que é a
+   * razão de o Open Finance existir. Na Pluggy os dois convivem na mesma
+   * lista, às vezes com nomes idênticos a menos de um acento — "Caixa
+   * Economica Federal" pede senha, "Caixa Econômica Federal" não.
+   */
+  async listConnectors(country = "BR"): Promise<PluggyConnectorResumo[]> {
+    const dados = await this.request<{ results?: PluggyConnectorResumo[] }>(
+      `/connectors?countries=${encodeURIComponent(country)}`,
+    );
+    return dados.results ?? [];
   }
 
   async getItem(itemId: string): Promise<PluggyItem> {

@@ -80,3 +80,12 @@ export interface PluggyTransactionsPage {
   totalPages?: number;
   page?: number;
 }
+
+/** O recorte de `/connectors` que interessa para filtrar o widget. */
+export interface PluggyConnectorResumo {
+  id: number;
+  name: string;
+  type: string;
+  isOpenFinance?: boolean;
+  isSandbox?: boolean;
+}

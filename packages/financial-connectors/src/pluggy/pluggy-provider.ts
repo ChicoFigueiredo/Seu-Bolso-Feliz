@@ -55,6 +55,20 @@ export class PluggyProvider implements FinancialDataProvider {
     return { connectToken: data.accessToken };
   }
 
+  /**
+   * Ids dos conectores que falam Open Finance — os que levam o usuário a
+   * autorizar no site do próprio banco, sem senha nenhuma passando por aqui.
+   *
+   * A Pluggy lista os dois mundos juntos, e para vários bancos o conector
+   * antigo (usuário + senha do internet banking) aparece ao lado do de Open
+   * Finance com um nome quase idêntico. Deixar a escolha para o usuário é
+   * pedir que ele erre; e o erro custa a senha do banco dele.
+   */
+  async listOpenFinanceConnectorIds(country = "BR"): Promise<number[]> {
+    const conectores = await this.client.listConnectors(country);
+    return conectores.filter((c) => c.isOpenFinance && !c.isSandbox).map((c) => c.id);
+  }
+
   async getConnection(externalItemId: string): Promise<NormalizedConnection> {
     const item = await this.client.getItem(externalItemId);
     return {

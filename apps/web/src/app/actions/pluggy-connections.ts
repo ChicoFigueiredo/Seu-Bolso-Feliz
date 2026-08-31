@@ -45,17 +45,41 @@ export async function getExternalAccountMappings(
     .orderBy(asc(schema.external_account_mappings.created_at));
 }
 
-/** Token de vida curta (30min) pro widget Pluggy Connect no navegador. */
+/**
+ * Token de vida curta (30min) pro widget Pluggy Connect no navegador, mais a
+ * lista de conectores que o widget deve oferecer.
+ *
+ * A lista vem junto de propósito. Sem ela o widget mostra também os conectores
+ * antigos, que pedem a senha do internet banking — e para vários bancos os
+ * dois aparecem lado a lado com nomes que só diferem por um acento ("Caixa
+ * Economica Federal" pede senha; "Caixa Econômica Federal" não). Escolher
+ * errado ali entrega a senha do banco a um widget de terceiro, que é
+ * exatamente o que o Open Finance existe para evitar.
+ *
+ * Se a consulta de conectores falhar, o token ainda vale e a lista volta
+ * vazia: melhor abrir o widget sem filtro do que não abrir.
+ */
 export async function createPluggyConnectToken(options?: {
   itemId?: string;
-}): Promise<{ connectToken: string }> {
+  /** `true` devolve todos os conectores, inclusive os que pedem senha. */
+  incluirConectoresComSenha?: boolean;
+}): Promise<{ connectToken: string; connectorIds: number[] }> {
   const userId = await requireUserId();
   const provider = PluggyProvider.fromEnv();
   const { connectToken } = await provider.createConnectToken({
     itemId: options?.itemId,
     clientUserId: userId,
   });
-  return { connectToken };
+
+  if (options?.incluirConectoresComSenha) return { connectToken, connectorIds: [] };
+
+  let connectorIds: number[] = [];
+  try {
+    connectorIds = await provider.listOpenFinanceConnectorIds();
+  } catch (erro) {
+    console.error("[pluggy] não consegui listar os conectores para filtrar o widget:", erro);
+  }
+  return { connectToken, connectorIds };
 }
 
 /**

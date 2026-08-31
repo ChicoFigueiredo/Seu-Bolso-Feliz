@@ -66,19 +66,25 @@ export function ConectarBanco({
   aoFalhar,
 }: ConectarBancoProps) {
   const [connectToken, setConnectToken] = useState<string | null>(null);
+  // Os conectores que o widget pode oferecer. Lista vazia = sem filtro.
+  const [connectorIds, setConnectorIds] = useState<number[]>([]);
   const [abrindo, setAbrindo] = useState(false);
 
-  const abrirWidget = useCallback(async () => {
-    setAbrindo(true);
-    try {
-      const { connectToken } = await createPluggyConnectToken({ itemId });
-      setConnectToken(connectToken);
-    } catch (erro) {
-      aoFalhar(mensagemDoErro(erro));
-    } finally {
-      setAbrindo(false);
-    }
-  }, [itemId, aoFalhar]);
+  const abrirWidget = useCallback(
+    async (incluirConectoresComSenha = false) => {
+      setAbrindo(true);
+      try {
+        const resposta = await createPluggyConnectToken({ itemId, incluirConectoresComSenha });
+        setConnectorIds(resposta.connectorIds);
+        setConnectToken(resposta.connectToken);
+      } catch (erro) {
+        aoFalhar(mensagemDoErro(erro));
+      } finally {
+        setAbrindo(false);
+      }
+    },
+    [itemId, aoFalhar],
+  );
 
   const concluir = useCallback(
     async (dados: { item: { id: string } }) => {
@@ -110,16 +116,43 @@ export function ConectarBanco({
         icon={icone}
         block={bloco}
         disabled={desabilitado || abrindo}
-        onClick={abrirWidget}
+        onClick={() => void abrirWidget(false)}
         style={{ minHeight: 44 }}
       >
         {abrindo ? "Abrindo…" : rotulo}
       </Button>
 
+      {/* Saída para as poucas instituições que ainda não têm Open Finance —
+          sobretudo corretoras e contas PJ. Fica discreta e diz o preço: por
+          este caminho a senha do banco é digitada no widget. */}
+      {!itemId ? (
+        <button
+          type="button"
+          onClick={() => void abrirWidget(true)}
+          disabled={abrindo}
+          style={{
+            display: "block",
+            marginTop: 8,
+            padding: 0,
+            border: 0,
+            background: "none",
+            font: "inherit",
+            fontSize: 12,
+            color: "var(--text-3)",
+            textDecoration: "underline",
+            cursor: "pointer",
+          }}
+        >
+          Minha instituição não aparece (usa usuário e senha)
+        </button>
+      ) : null}
+
       {connectToken ? (
         <PluggyConnect
           connectToken={connectToken}
           updateItem={itemId}
+          // Lista vazia = sem filtro (reautenticação, ou a consulta falhou).
+          {...(connectorIds.length > 0 ? { connectorIds } : {})}
           language="pt"
           onSuccess={concluir}
           onError={(erro) => {
