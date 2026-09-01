@@ -138,12 +138,6 @@ export class PluggyClient {
   }
 
   /**
-   * `page` é 1-based, espelhando a paginação clássica da Pluggy
-   * (`{results, total, totalPages, page}`). `FinancialDataProvider` expõe
-   * isso como um cursor opaco (string do número da página) — ver
-   * `pluggy-provider.ts`.
-   */
-  /**
    * Transações de uma conta, pela `/v2/transactions`.
    *
    * A `/transactions` (v1) foi descontinuada e responde 410
@@ -153,7 +147,8 @@ export class PluggyClient {
    *   - os filtros de data chamam `dateFrom`/`dateTo`, não `from`/`to`;
    *   - `page` e `pageSize` deixaram de existir — a v2 recusa a requisição
    *     inteira com 400 se algum deles aparecer;
-   *   - a paginação é por cursor opaco (`next`), sem total de páginas.
+   *   - a paginação é por `after`, e o campo `next` da resposta **não** é o
+   *     valor de `after`: é a query string inteira da próxima chamada.
    */
   async listTransactions(
     accountId: string,
@@ -162,10 +157,44 @@ export class PluggyClient {
     const params = new URLSearchParams({ accountId });
     if (options?.from) params.set("dateFrom", options.from);
     if (options?.to) params.set("dateTo", options.to);
-    if (options?.cursor) params.set("cursor", options.cursor);
+    const after = extrairCursor(options?.cursor);
+    if (after) params.set("after", after);
 
-    return this.request<PluggyTransactionsPage>(`/v2/transactions?${params.toString()}`);
+    const pagina = await this.request<PluggyTransactionsPage>(
+      `/v2/transactions?${params.toString()}`,
+    );
+    return { results: pagina.results, next: extrairCursor(pagina.next) ?? null };
   }
+}
+
+/**
+ * Reduz o `next` da v2 ao token de paginação.
+ *
+ * A v2 devolve a próxima página como uma query string pronta —
+ * `?accountId=…&dateFrom=…&dateTo=…&after=<token>` — e só o `after` é cursor.
+ * Guardamos apenas ele, por dois motivos:
+ *
+ *   - o `accountId` vai embutido no `next`. Como o checkpoint guarda o cursor
+ *     por conta, seguir a query inteira faria um cursor gravado para a conta A
+ *     e reaplicado na conta B importar as transações de A. O filtro tem que
+ *     vir sempre de quem chama, nunca do cursor;
+ *   - mandar a query string no lugar do token devolve 400, e o valor errado
+ *     fica **gravado** no checkpoint — toda execução seguinte repete o mesmo
+ *     erro. Por isso a normalização vale também na entrada: um cursor antigo,
+ *     salvo no formato errado, volta a funcionar sozinho.
+ *
+ * `?` e `&` não existem no alfabeto do base64, então servem para distinguir a
+ * query string de um token que já veio limpo.
+ */
+export function extrairCursor(next: string | null | undefined): string | undefined {
+  if (!next) return undefined;
+
+  const ehQueryString =
+    next.startsWith("?") || next.startsWith("after=") || next.includes("&after=");
+  if (!ehQueryString) return next;
+
+  const query = next.startsWith("?") ? next.slice(1) : next;
+  return new URLSearchParams(query).get("after") ?? undefined;
 }
 
 async function safeJson(response: Response): Promise<unknown> {

@@ -77,11 +77,13 @@ export interface PluggyTransaction {
 export interface PluggyTransactionsPage {
   results: PluggyTransaction[];
   /**
-   * Cursor da próxima página, ou `null` no fim.
+   * Continuação, ou `null`/ausente no fim.
    *
-   * A `/v2/transactions` paginou por cursor opaco no lugar de `page`/
-   * `totalPages`. Não dá para calcular quantas páginas faltam — só para
-   * perguntar se há mais uma.
+   * **Na resposta crua da Pluggy** este campo é a query string inteira da
+   * próxima chamada (`?accountId=…&after=<token>`), não o cursor. O
+   * `PluggyClient.listTransactions` o reduz ao `after` antes de devolver —
+   * ver `extrairCursor`. Não há total de páginas: dá para perguntar se existe
+   * mais uma, não quantas faltam.
    */
   next?: string | null;
 }

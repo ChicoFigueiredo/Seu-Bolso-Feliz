@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const aliases = {
   // O prefixo "@/" de apps/web só era resolvido pelo TypeScript, nunca pelo
@@ -56,6 +56,12 @@ export default defineConfig({
             "apps/web/src/components/**/*.test.ts",
             "apps/web/src/lib/**/*.test.ts",
           ],
+          // `lib/ai/` toca o banco e já é do projeto `integration`. Sem esta
+          // exclusão os dois projetos coletam o mesmo arquivo: aqui ele se
+          // auto-pula por não ter banco, e a suíte passa a relatar 8 testes
+          // "pulados" que na verdade rodam — ruído que treina a gente a
+          // ignorar a linha de pulados, justo a que denuncia teste morto.
+          exclude: [...configDefaults.exclude, "apps/web/src/lib/ai/**"],
         },
       },
       {
