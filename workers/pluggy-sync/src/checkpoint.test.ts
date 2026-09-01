@@ -137,7 +137,7 @@ describe("startOrResumeCheckpoint", () => {
     expect(calls.conflictSet).toMatchObject({ status: "running", cursor_value: null });
   });
 
-  it("sem checkpoint existente, cria com contadores zerados e cursor_kind cursor", async () => {
+  it("sem checkpoint existente, cria com contadores zerados e cursor_kind page_token", async () => {
     const { db, calls } = makeDb({ selectRows: [] });
 
     const state = await startOrResumeCheckpoint(db, "user-9", "item:acc-7", JANELA_PADRAO);
@@ -152,7 +152,7 @@ describe("startOrResumeCheckpoint", () => {
       user_id: "user-9",
       source_type: "pluggy",
       scope_key: "item:acc-7",
-      cursor_kind: "cursor",
+      cursor_kind: "page_token",
       cursor_value: null,
       window_start: JANELA_PADRAO.from,
       window_end: JANELA_PADRAO.to,
@@ -165,7 +165,7 @@ describe("startOrResumeCheckpoint", () => {
     // O SET do ON CONFLICT reescreve tudo menos as colunas do target
     // (user_id, source_type, scope_key) — reescrevê-las seria no-op.
     expect(calls.conflictSet).toEqual({
-      cursor_kind: "cursor",
+      cursor_kind: "page_token",
       cursor_value: null,
       window_start: JANELA_PADRAO.from,
       window_end: JANELA_PADRAO.to,

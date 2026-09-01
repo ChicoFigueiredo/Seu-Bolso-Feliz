@@ -35,8 +35,12 @@ import { schema, type Database } from "@sbf/db";
 const SOURCE_TYPE = "pluggy";
 // A `/v2/transactions` pagina por cursor opaco. O valor guardado aqui é o
 // `next` que a própria Pluggy devolveu — não um número que a gente calcula.
-// Era "page_number" enquanto a v1 existia; a v1 foi descontinuada.
-const CURSOR_KIND = "cursor";
+//
+// `page_token` e não `cursor`: a coluna tem CHECK que só aceita
+// `page_token | internal_date | mtime | page_number`, e "token opaco de
+// paginação" é exatamente o que `page_token` já nomeia. Era `page_number`
+// enquanto a v1 existia; a v1 foi descontinuada.
+const CURSOR_KIND = "page_token";
 
 export interface CheckpointState {
   id: string;
