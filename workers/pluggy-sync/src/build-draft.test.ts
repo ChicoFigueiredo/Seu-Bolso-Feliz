@@ -18,6 +18,29 @@ function makeNormalized(overrides: Partial<NormalizedTransaction> = {}): Normali
 }
 
 describe("buildDraftRecordInsert", () => {
+  it("leva a categoria resolvida para o draft, sem perder a sugestão crua", () => {
+    // A sugestão continua no payload porque ela é a EVIDÊNCIA de por que esta
+    // categoria foi escolhida — a revisão humana precisa dela para discordar.
+    const row = buildDraftRecordInsert(makeNormalized({ category: "Groceries" }), {
+      batchId: "batch-1",
+      userId: "user-1",
+      financialProductId: "11111111-1111-4111-8111-111111111111",
+      categoryId: "22222222-2222-4222-8222-222222222222",
+    });
+    const data = row.draft_data as Record<string, unknown>;
+    expect(data.category_id).toBe("22222222-2222-4222-8222-222222222222");
+    expect(data.category_suggestion).toBe("Groceries");
+  });
+
+  it("sem categoria resolvida, o draft nasce sem categoria (não inventa)", () => {
+    const row = buildDraftRecordInsert(makeNormalized({ category: "Algo Desconhecido" }), {
+      batchId: "batch-1",
+      userId: "user-1",
+      financialProductId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect((row.draft_data as Record<string, unknown>).category_id).toBeNull();
+  });
+
   it("gera external_ref opaco e estável a partir do id da transação", () => {
     const row = buildDraftRecordInsert(makeNormalized({ externalTransactionId: "txn_abc123" }), {
       batchId: "batch-1",

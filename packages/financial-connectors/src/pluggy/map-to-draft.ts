@@ -30,6 +30,13 @@ export interface MapToDraftOptions {
    * honesto mesmo sem fornecedor; a revisão humana resolve depois.
    */
   supplierId?: string | null;
+  /**
+   * Resolvido pelo chamador a partir de `category_suggestion` (ver
+   * `nomeDeCategoria` e o cache de categorias em `sync-runner`). A sugestão
+   * crua continua no draft: ela é a evidência de POR QUE esta categoria foi
+   * escolhida, e a revisão humana precisa dela para discordar.
+   */
+  categoryId?: string | null;
 }
 
 /**
@@ -75,7 +82,7 @@ export function pluggyTransactionToDraft(
     supplier_name_raw: tx.merchantName ?? null,
     supplier_id: options.supplierId ?? null,
     category_suggestion: tx.category ?? null,
-    category_id: null,
+    category_id: options.categoryId ?? null,
     tags: [],
     priority: null,
     document_number: null,

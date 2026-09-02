@@ -18,6 +18,7 @@ import { schema, type Database } from "@sbf/db";
 import type { FinancialDataProvider } from "@sbf/financial-connectors";
 import { findReconciliationCandidates } from "@sbf/worker-ingestion/reconciliation";
 import { resolveSupplierForTransaction, type SupplierAliasCandidate } from "@sbf/domain";
+import { nomeDeCategoria } from "@sbf/financial-connectors/pluggy";
 import { buildDraftRecordInsert } from "./build-draft";
 import { completeCheckpoint, recordPageProgress, startOrResumeCheckpoint } from "./checkpoint";
 
@@ -158,6 +159,51 @@ export async function syncProviderConnection(
     isActive: true,
   }));
 
+  // Categorias do usuário indexadas por nome, carregadas uma vez por sync.
+  // Sem isto a transação nasce sem categoria e a tela mostra "Sem categoria"
+  // em tudo — a Pluggy JÁ classifica, era só traduzir e resolver o id.
+  const categoriaIdPorNome = new Map<string, string>();
+  try {
+    const linhas = await db
+      .select({ id: schema.categories.id, name: schema.categories.name })
+      .from(schema.categories)
+      .where(and(eq(schema.categories.user_id, userId), eq(schema.categories.is_active, true)));
+    for (const linha of linhas) categoriaIdPorNome.set(linha.name, linha.id);
+  } catch (err) {
+    console.error(
+      `[pluggy-sync] falha ao buscar categorias (não crítico): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  /**
+   * Id da categoria para a sugestão da Pluggy, criando-a na primeira vez.
+   *
+   * Falha ao criar não derruba a importação: a transação entra sem categoria,
+   * que é recuperável depois — perder a transação não é.
+   */
+  async function resolverCategoriaId(sugestao: string | null | undefined): Promise<string | null> {
+    const nome = nomeDeCategoria(sugestao);
+    if (!nome) return null;
+
+    const existente = categoriaIdPorNome.get(nome);
+    if (existente) return existente;
+
+    try {
+      const [nova] = await db
+        .insert(schema.categories)
+        .values({ user_id: userId, name: nome })
+        .returning({ id: schema.categories.id });
+      if (!nova) return null;
+      categoriaIdPorNome.set(nome, nova.id);
+      return nova.id;
+    } catch (err) {
+      console.error(
+        `[pluggy-sync] falha ao criar categoria "${nome}" (não crítico): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
   let created = 0;
   let skippedDuplicate = 0;
   let itemErrors = 0;
@@ -204,11 +250,14 @@ export async function syncProviderConnection(
         const supplierId =
           supplierResolution.status === "matched" ? supplierResolution.supplierId : null;
 
+        const categoryId = await resolverCategoriaId(tx.category);
+
         const insertRow = buildDraftRecordInsert(tx, {
           batchId,
           userId,
           financialProductId: mapping.financialProductId,
           supplierId,
+          categoryId,
         });
 
         let draftId: string | undefined;

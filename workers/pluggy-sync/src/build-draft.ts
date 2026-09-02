@@ -35,11 +35,14 @@ export function buildDraftRecordInsert(
     userId: string;
     financialProductId: string | null;
     supplierId?: string | null;
+    /** Resolvido pelo chamador a partir de `tx.category` — ver sync-runner. */
+    categoryId?: string | null;
   },
 ): DraftRecordInsert {
   const draftData = pluggyTransactionToDraft(tx, {
     financialProductId: options.financialProductId,
     supplierId: options.supplierId,
+    categoryId: options.categoryId,
   });
 
   return {
