@@ -2,6 +2,7 @@
 
 import { requireUser } from "@/lib/auth";
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
+import { nomeDeExibicaoDaConta } from "@sbf/financial-connectors";
 import { getDb, schema } from "@sbf/db";
 import { and, asc, desc, eq } from "drizzle-orm";
 
@@ -125,8 +126,13 @@ export async function completePluggyConnection(
         user_id: userId,
         provider_connection_id: row.id,
         external_account_id: account.externalAccountId,
-        external_account_name: account.name,
-        external_account_type: account.type,
+        // Nome de exibição, não o cru: a Caixa manda 31 subcontas todas
+        // chamadas "CAIXA", e este nome vira o do produto criado a partir
+        // daqui. O subtipo entra no lugar de BANK quando é poupança — o
+        // produto certo depende disso.
+        external_account_name: nomeDeExibicaoDaConta(account),
+        external_account_type:
+          account.subtype?.toUpperCase() === "SAVINGS_ACCOUNT" ? "SAVINGS_ACCOUNT" : account.type,
       })
       .onConflictDoNothing({
         target: [
@@ -277,7 +283,13 @@ export async function criarProdutoDaContaExterna(
   // conta corrente, que é o recorte que a tela Hoje soma em "Disponível
   // agora". Se estiver errado, o usuário corrige em Contas & Cartões — o que
   // não dá para corrigir é uma conta que nunca foi criada.
-  const tipoProduto = conta.tipo?.toUpperCase() === "CREDIT" ? "credit_card" : "checking_account";
+  const tipoExterno = conta.tipo?.toUpperCase();
+  const tipoProduto =
+    tipoExterno === "CREDIT" || tipoExterno === "CREDIT_CARD"
+      ? "credit_card"
+      : tipoExterno === "SAVINGS_ACCOUNT"
+        ? "savings_account"
+        : "checking_account";
 
   const [produto] = await db
     .insert(schema.financial_products)

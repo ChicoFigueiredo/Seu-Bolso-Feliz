@@ -23,6 +23,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, resolveOwnerId, schema } from "@sbf/db";
 import { PluggyProvider } from "@sbf/financial-connectors/pluggy";
 import { syncProviderConnection, type AccountMapping } from "./sync-runner";
+import { planejarAtualizacaoDeSaldos } from "./saldos";
 
 export { syncProviderConnection } from "./sync-runner";
 
@@ -144,6 +145,31 @@ async function main(): Promise<void> {
         `${result.skippedDuplicate} já sincronizado(s), ${result.skippedIgnored} ignorado(s), ` +
         `${result.itemErrors} erro(s).`,
     );
+
+    // Saldo é posição, não fluxo: as transações importadas acima nunca o
+    // atualizam, então toda sincronização termina espelhando o saldo que o
+    // banco declarou. Falha aqui não pode derrubar a sincronização — as
+    // transações já estão gravadas e valem sozinhas.
+    try {
+      const contas = await provider.listAccounts(connection.external_item_id);
+      const plano = planejarAtualizacaoDeSaldos(contas, mappings);
+      for (const atualizacao of plano) {
+        await db
+          .update(schema.financial_products)
+          .set({ current_balance: atualizacao.saldo, updated_at: new Date().toISOString() })
+          .where(
+            and(
+              eq(schema.financial_products.id, atualizacao.financialProductId),
+              eq(schema.financial_products.user_id, userId),
+            ),
+          );
+      }
+      if (plano.length > 0) {
+        console.log(`Conexão ${connection.id}: saldo atualizado em ${plano.length} conta(s).`);
+      }
+    } catch (err) {
+      console.error(`Falha ao atualizar saldos de ${connection.id}: ${errorMessage(err)}`);
+    }
 
     await db
       .update(schema.provider_connections)

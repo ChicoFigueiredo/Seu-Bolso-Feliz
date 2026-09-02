@@ -36,6 +36,8 @@ export interface NormalizedAccount {
   name: string;
   type: string;
   subtype?: string;
+  /** Número da conta no banco (ex.: "400000181-6") ou final do cartão. */
+  number?: string;
   currency: string;
   balanceCents?: number;
   raw: Record<string, unknown>;

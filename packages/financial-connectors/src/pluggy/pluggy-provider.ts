@@ -121,6 +121,7 @@ export function normalizeAccount(account: PluggyAccount): NormalizedAccount {
     name: account.name,
     type: account.type,
     subtype: account.subtype,
+    number: account.number,
     currency: account.currencyCode,
     balanceCents: Math.round(account.balance * 100),
     raw: account as unknown as Record<string, unknown>,
