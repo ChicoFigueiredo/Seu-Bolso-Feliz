@@ -140,10 +140,21 @@ export function PainelMovimentacoesView({
     setFiltros((atuais) => ({ ...atuais, limite: atuais.limite + TAMANHO_PAGINA }));
   }, []);
 
+  /** Tira só o recorte de tempo, preservando os demais filtros escolhidos. */
+  const verTodoHistorico = useCallback(() => {
+    setFiltros((atuais) => ({ ...atuais, periodo: "tudo", limite: TAMANHO_PAGINA }));
+  }, []);
+
   const { resumo, itens } = dados;
   const grupos = useMemo(() => agruparPorDia(itens, dados.hoje), [itens, dados.hoje]);
   const filtrosDetalhados = contarFiltrosDetalhados(filtros);
   const comFiltro = temFiltroAtivo(filtros);
+  // Existe histórico fora do recorte atual? É a diferença entre "você ainda
+  // não tem nada" e "você tem, só não aqui" — e dizer a primeira para quem
+  // acabou de importar 12 meses é como perder os dados dele na cara dele.
+  const temHistorico = dados.totalGeral > 0;
+  const rotuloTotalGeral = `${dados.totalGeral} ${plural(dados.totalGeral, "movimentação", "movimentações")}`;
+  const foraDoRecorte = dados.totalGeral - resumo.total;
   const previstoTotal = resumo.previstoEntrada + resumo.previstoSaida;
 
   const nomeDe = (lista: { id: string; nome: string }[], id: string | null): string =>
@@ -380,17 +391,23 @@ export function PainelMovimentacoesView({
         {itens.length === 0 && !carregando ? (
           <Card>
             <EmptyState
-              icon={comFiltro ? "filter_alt_off" : "receipt_long"}
-              title={comFiltro ? "Nada com esses filtros" : "Nenhuma movimentação ainda"}
+              icon={temHistorico ? "filter_alt_off" : "receipt_long"}
+              title={
+                temHistorico
+                  ? `Nada neste recorte, mas você tem ${rotuloTotalGeral}`
+                  : comFiltro
+                    ? "Nada com esses filtros"
+                    : "Nenhuma movimentação ainda"
+              }
               description={
-                comFiltro
-                  ? "Nenhuma movimentação casa com o recorte atual. Amplie o período ou tire um filtro para ver mais."
+                temHistorico
+                  ? "Nenhuma movimentação casa com o recorte atual. Veja todo o histórico ou amplie o período."
                   : "Assim que uma conta for conectada ou um comprovante chegar, tudo que entrou e saiu aparece aqui."
               }
             >
-              {comFiltro ? (
-                <Button variant="outline" size="lg" icon="restart_alt" onClick={limparTudo}>
-                  Limpar filtros
+              {temHistorico ? (
+                <Button variant="primary" size="lg" icon="history" onClick={verTodoHistorico}>
+                  Ver todo o histórico
                 </Button>
               ) : (
                 <Button
@@ -468,9 +485,31 @@ export function PainelMovimentacoesView({
           </Button>
         ) : null}
 
+        {dados.atingiuTeto ? (
+          <div
+            style={{
+              fontSize: 12.5,
+              color: "var(--text-3)",
+              textAlign: "center",
+              lineHeight: 1.5,
+            }}
+          >
+            Este é o máximo que cabe numa lista só. Use o período, a conta ou a categoria para
+            chegar às demais.
+          </div>
+        ) : null}
+
         {itens.length > 0 ? (
           <div style={{ fontSize: 12.5, color: "var(--text-3)", textAlign: "center" }}>
             {`Mostrando ${itens.length} de ${resumo.total} ${plural(resumo.total, "movimentação", "movimentações")}.`}
+          </div>
+        ) : null}
+
+        {itens.length > 0 && foraDoRecorte > 0 ? (
+          <div style={{ textAlign: "center" }}>
+            <Button variant="quiet" size="sm" icon="history" onClick={verTodoHistorico}>
+              {`Ver mais ${foraDoRecorte} fora deste recorte`}
+            </Button>
           </div>
         ) : null}
       </section>

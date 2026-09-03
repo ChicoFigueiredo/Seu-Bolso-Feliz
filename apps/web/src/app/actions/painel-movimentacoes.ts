@@ -39,6 +39,7 @@ import {
   type FiltrosMovimentacoes,
 } from "@/components/movimentacoes/filtros";
 import { intervaloDoPeriodo } from "@/components/movimentacoes/periodos";
+import { decidirPaginacao, limiteDaConsulta } from "@/components/movimentacoes/paginacao";
 
 const ENTRADAS = ["income", "refund"] as const;
 const SAIDAS = [
@@ -101,8 +102,20 @@ export interface PainelMovimentacoes {
   hoje: string;
   resumo: ResumoMovimentacoes;
   itens: MovimentacaoItem[];
-  /** Há mais linhas além das carregadas. */
+  /** Há mais linhas além das carregadas, e dá para carregá-las. */
   temMais: boolean;
+  /** Há mais linhas, mas o teto por requisição foi atingido: filtre. */
+  atingiuTeto: boolean;
+  /**
+   * Quantas movimentações o usuário tem AO TODO, ignorando todo filtro.
+   *
+   * Existe por um motivo concreto: com o período padrão num mês recém-começado
+   * e 12 meses de extrato importados, a tela dizia "Nenhuma movimentação
+   * ainda — assim que uma conta for conectada…" para quem tinha 2858. Um app
+   * financeiro que parece ter perdido o histórico perde o usuário; comparar o
+   * recorte com este número é o que permite dizer a verdade.
+   */
+  totalGeral: number;
 }
 
 export interface OpcoesMovimentacoes {
@@ -219,11 +232,11 @@ export async function carregarMovimentacoes(
 
   const intervalo = intervaloDoPeriodo(filtros.periodo, agora, preferencia?.dia ?? 1);
   const onde = and(...condicoesDoRecorte(filtros, ownerId, intervalo, hoje));
-  const limite = Math.max(TAMANHO_PAGINA, Math.min(filtros.limite, 600));
+  const limite = limiteDaConsulta(filtros.limite, TAMANHO_PAGINA);
 
   // Todo `leftJoin` repete o filtro por dono de propósito (defesa em
   // profundidade): sem RLS, um join sem `user_id` é a porta de um IDOR.
-  const [linhas, [totais]] = await Promise.all([
+  const [linhas, [totais], [geral]] = await Promise.all([
     db
       .select({
         id: T.id,
@@ -263,6 +276,13 @@ export async function carregarMovimentacoes(
       .leftJoin(P, and(eq(P.id, T.financial_product_id), eq(P.user_id, ownerId)))
       .leftJoin(F, and(eq(F.id, T.supplier_id), eq(F.user_id, ownerId)))
       .where(onde),
+
+    // Sem NENHUM filtro, nem de período: é a régua contra a qual o recorte se
+    // compara. Barata — `idx_transactions_user_id` cobre exatamente isto.
+    db
+      .select({ total: sql<number>`count(*)` })
+      .from(T)
+      .where(eq(T.user_id, ownerId)),
   ]);
 
   const ids = linhas.map((linha) => linha.id);
@@ -330,7 +350,8 @@ export async function carregarMovimentacoes(
       total,
     },
     itens,
-    temMais: total > itens.length,
+    ...decidirPaginacao(total, itens.length),
+    totalGeral: num(geral?.total),
   };
 }
 

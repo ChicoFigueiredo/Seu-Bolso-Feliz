@@ -68,8 +68,14 @@ export const OPCOES_SITUACAO: readonly OpcaoFiltro[] = [
   { value: "nao-alocadas", label: "Saídas não alocadas" },
 ];
 
-/** Quantas movimentações cada pedido traz. O "Carregar mais" soma outra. */
-export const TAMANHO_PAGINA = 30;
+/**
+ * Quantas movimentações cada pedido traz. O "Carregar mais" soma outra.
+ *
+ * 100, e não 30: um extrato bancário de 12 meses passa de 2500 linhas, e a
+ * 30 por clique "ver tudo" custaria quase cem cliques — na prática, um jeito
+ * educado de dizer que não dá.
+ */
+export const TAMANHO_PAGINA = 100;
 
 export interface FiltrosMovimentacoes {
   periodo: ChavePeriodo;
