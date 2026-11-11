@@ -8,7 +8,10 @@
  * 3. Arquivo no acervo que nenhum achado aponta (sobra de cópia interrompida):
  *    removido. É sempre cópia; o original nunca fica no acervo.
  *
- *   bun run workers/inventario/src/reparar-acervo.ts [--aplicar]
+ *   bun run workers/inventario/src/reparar-acervo.ts [--aplicar] [--documentos]
+ *
+ * --documentos: inclui achados confirmados como documento em qualquer camada
+ * (os da camada B só tinham hash; a E3 os promoveu e eles passam a ter cópia).
  */
 import {
   chmodSync,
@@ -40,6 +43,7 @@ async function sha256(caminho: string): Promise<string> {
 
 async function main(): Promise<void> {
   const aplicar = process.argv.includes("--aplicar");
+  const documentos = process.argv.includes("--documentos");
   const cofre = caminhosDoCofre();
   const db = abrirBanco(cofre.banco);
   aplicarSchema(db);
@@ -49,10 +53,11 @@ async function main(): Promise<void> {
   const candidatos = db
     .query(
       `SELECT content_hash, extensao, file_size_bytes, caminho_acervo FROM achado
-        WHERE camada = 'A' AND file_size_bytes <= ? AND extensao IN (${marcas})
+        WHERE (camada = 'A' OR (? = 1 AND estado = 'documento'))
+          AND file_size_bytes <= ? AND extensao IN (${marcas})
           AND (notas IS NULL OR notas NOT LIKE '%cópia removida%')`,
     )
-    .all(LIMITE, ...copiaveis) as {
+    .all(documentos ? 1 : 0, LIMITE, ...copiaveis) as {
     content_hash: string;
     extensao: string | null;
     file_size_bytes: number;
