@@ -101,7 +101,11 @@ async function main(): Promise<void> {
     c.refeitos++;
   }
 
-  // Sobras: arquivos do acervo que nenhum achado aponta.
+  // Sobras: arquivos do acervo que nenhum achado aponta. Os coletores gravam o
+  // arquivo antes de registrá-lo (o Gmail grava e só depois insere o achado; o
+  // scanner copia para .parcial-<pid> e renomeia), então só conta como sobra o
+  // que não é cópia em andamento e já tem mais de uma hora.
+  const umaHoraAtras = Date.now() - 60 * 60 * 1000;
   const apontados = new Set(
     (
       db.query("SELECT caminho_acervo FROM achado WHERE caminho_acervo IS NOT NULL").all() as {
@@ -112,7 +116,8 @@ async function main(): Promise<void> {
   for (const sub of readdirSync(cofre.acervo)) {
     for (const nome of readdirSync(join(cofre.acervo, sub))) {
       const relativo = join("acervo", sub, nome);
-      if (apontados.has(relativo)) continue;
+      if (apontados.has(relativo) || nome.includes(".parcial-")) continue;
+      if (statSync(join(cofre.raiz, relativo)).mtimeMs > umaHoraAtras) continue;
       c.sobras++;
       if (aplicar) rmSync(join(cofre.raiz, relativo), { force: true });
     }

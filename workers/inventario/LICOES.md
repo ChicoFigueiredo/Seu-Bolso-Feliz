@@ -25,6 +25,9 @@ worker segue estas regras; cada uma custou uma falha real.
   outro pela metade.
 - **Nunca apagar cópia sem confirmar o original** (existe e tem o mesmo
   tamanho). O original nunca é tocado.
+- **Faxina não corre atrás de quem está escrevendo.** Coletor grava o arquivo
+  antes de registrar no índice; um "arquivo sem dono" pode ser só o próximo
+  registro. Limpeza ignora `.parcial-*` e tudo com menos de uma hora.
 - **Arquivo grande (> 100 MB) não é copiado**, só hasheado.
 - **NTFS (ntfs3) lista nomes que não abre** (acentos e símbolos de arquivos
   vindos do Windows): `ENOENT` no `stat` de algo que o `readdir` acabou de
