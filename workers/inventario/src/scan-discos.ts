@@ -41,6 +41,12 @@ import { caminhoNoAcervo, caminhosDoCofre } from "./cofre";
 import { FONTES } from "./fontes";
 
 const RESPONSAVEL = "scan-discos@1";
+/**
+ * Acima disso o arquivo fica só com hash, sem cópia ao cofre (decisão da E1:
+ * 74 arquivos grandes, quase todos zip/7z/csv, ocupavam 41 GB). Se a E3
+ * confirmar que um deles é documento, ele é copiado então.
+ */
+export const LIMITE_COPIA_BYTES = 100 * 1024 ** 2;
 /** Acima disso a origem é registrada sem hash (vira pendência), para não travar o disco. */
 const LIMITE_HASH_BYTES = 2 * 1024 ** 3;
 
@@ -131,6 +137,7 @@ class Scanner {
     private readonly varreduraId: number,
     private readonly log: string,
     raiz: string,
+    private readonly pular: readonly string[] = [],
   ) {
     this.raizesA = new Set(
       [...REGRAS_POR_CAMINHO]
@@ -231,6 +238,11 @@ class Scanner {
           continue;
         }
         if (ent.isDirectory()) {
+          if (this.pular.includes(caminho)) {
+            // Pasta ainda sendo escrita por outro processo: fica para depois.
+            this.escreverLog(`PULADA ${caminho}`);
+            continue;
+          }
           let sub = classificarPasta(caminho, classe);
           if (sub.ignorar) continue;
           if (sub.camada === "C" && !REGRAS_POR_CAMINHO.has(caminho)) {
@@ -336,7 +348,7 @@ class Scanner {
     );
     this.c.novos++;
 
-    if (tratamento === "copiar" && !existente?.caminho_acervo) {
+    if (tratamento === "copiar" && !existente?.caminho_acervo && st.size <= LIMITE_COPIA_BYTES) {
       this.copiarAoAcervo(caminho, hash, ext, st);
     }
   }
@@ -430,8 +442,11 @@ function lerArgs(argv: string[]): {
 }
 
 async function main(): Promise<void> {
-  const { fonte, raiz, soAreasA, entrada } = lerArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const { fonte, raiz, soAreasA, entrada } = lerArgs(argv);
   const etapa = entrada ? "E2" : "E1";
+  // --pular <pasta>, repetível: pasta que outro processo ainda está escrevendo.
+  const pular = argv.flatMap((a, i) => (a === "--pular" && argv[i + 1] ? [argv[i + 1]!] : []));
   const cofre = caminhosDoCofre();
   const db = abrirBanco(cofre.banco);
   aplicarSchema(db);
@@ -450,13 +465,17 @@ async function main(): Promise<void> {
       etapa,
       raiz,
       RESPONSAVEL,
-      JSON.stringify({ limiteHashBytes: LIMITE_HASH_BYTES }),
+      JSON.stringify({
+        limiteHashBytes: LIMITE_HASH_BYTES,
+        limiteCopiaBytes: LIMITE_COPIA_BYTES,
+        pular,
+      }),
     ) as {
     id: number;
   };
 
   const log = join(cofre.logs, `${etapa}-${fonte.replace(":", "-")}-${id}.log`);
-  const scanner = new Scanner(db, fonte, id, log, raiz);
+  const scanner = new Scanner(db, fonte, id, log, raiz, pular);
   const interromper = () => {
     scanner.finalizar("interrompida");
     process.exit(130);
