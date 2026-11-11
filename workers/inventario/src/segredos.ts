@@ -37,15 +37,16 @@ function derivarChave(senhaMestra: string, sal: Buffer, kdf = SCRYPT): Buffer {
   return scryptSync(senhaMestra, sal, 32, { ...kdf, maxmem: 256 * 1024 * 1024 });
 }
 
-export function cifrar(segredos: Segredos, senhaMestra: string): ArquivoCifrado {
+/** `kdf` só é trocado em teste; o arquivo guarda os parâmetros usados. */
+export function cifrar(segredos: Segredos, senhaMestra: string, kdf = SCRYPT): ArquivoCifrado {
   const sal = randomBytes(16);
   const iv = randomBytes(12);
-  const cifra = createCipheriv("aes-256-gcm", derivarChave(senhaMestra, sal), iv);
+  const cifra = createCipheriv("aes-256-gcm", derivarChave(senhaMestra, sal, kdf), iv);
   cifra.setAAD(AAD);
   const dados = Buffer.concat([cifra.update(JSON.stringify(segredos), "utf8"), cifra.final()]);
   return {
     versao: 1,
-    kdf: { alg: "scrypt", ...SCRYPT, sal: sal.toString("base64") },
+    kdf: { alg: "scrypt", ...kdf, sal: sal.toString("base64") },
     iv: iv.toString("base64"),
     tag: cifra.getAuthTag().toString("base64"),
     dados: dados.toString("base64"),

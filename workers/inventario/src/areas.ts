@@ -177,6 +177,8 @@ export const REGRAS_POR_NOME: ReadonlyMap<string, Regra> = new Map<string, Regra
   ].map((nome): [string, Regra] => [nome, c("sistema")]),
 ]);
 
+const DENTRO_DE_IR = /\/(ir|irpf\d*|impostorenda|imposto[ _.-]de[ _.-]renda)\//i;
+
 /** Classe de uma pasta, dada a da pasta-mãe (undefined na raiz do disco). */
 export function classificarPasta(
   caminho: string,
@@ -187,6 +189,11 @@ export function classificarPasta(
   const exata = porCaminho.get(caminho);
   if (exata) return { ...exata, raiz: caminho };
   const pelaPasta = porNome.get(basename(caminho));
+  // Comprovantes de dependente dentro do SEU imposto de renda são seus
+  // (decisão da abertura da E2): a pasta herda a classe da mãe.
+  if (pelaPasta?.motivo === "outra-pessoa" && mae?.camada === "A" && DENTRO_DE_IR.test(caminho)) {
+    return mae;
+  }
   if (pelaPasta && (pelaPasta.camada === "C" || mae?.camada !== "C")) {
     return { ...pelaPasta, raiz: caminho };
   }

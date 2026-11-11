@@ -5,6 +5,7 @@
  *   bun run workers/inventario/src/init.ts
  */
 import { chmodSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { DIA_DE_CORTE, cicloDe, ciclosEntre, hojeIso } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
@@ -24,6 +25,22 @@ function main(): void {
     c.segredos,
     c.logs,
     c.tmp,
+    join(c.raiz, "painel"),
+    // Onde você larga o que trouxe de fora antes do scan (E2).
+    ...[
+      "celular",
+      "sms",
+      "telegram",
+      "onedrive",
+      "gdrive",
+      "outlook",
+      "bancos/faturas",
+      "bancos/emprestimos",
+      "bancos/ofx",
+      "bancos/beneficios",
+      "lgpd",
+      "contracheques",
+    ].map((sub) => join(c.entrada, sub)),
   ]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);

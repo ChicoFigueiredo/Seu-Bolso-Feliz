@@ -198,8 +198,9 @@ class Scanner {
     this.agregados.set(chave, a);
   }
 
-  async varrer(raiz: string): Promise<void> {
+  async varrer(raiz: string, soAreasA = false): Promise<void> {
     for (const raizA of this.raizesA) await this.andar(raizA, classeDoCaminho(raizA), "A");
+    if (soAreasA) return;
 
     const classeRaiz = classeDoCaminho(raiz);
     if (classeRaiz.ignorar) return;
@@ -396,7 +397,7 @@ class Scanner {
   }
 }
 
-function lerArgs(argv: string[]): { fonte: string; raiz: string } {
+function lerArgs(argv: string[]): { fonte: string; raiz: string; soAreasA: boolean } {
   const valor = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -409,11 +410,11 @@ function lerArgs(argv: string[]): { fonte: string; raiz: string } {
   }
   const raiz = valor("--raiz") ?? definida.raiz;
   if (!dentroDe(raiz, definida.raiz)) throw new Error(`--raiz fora de ${definida.raiz}`);
-  return { fonte: definida.id, raiz };
+  return { fonte: definida.id, raiz, soAreasA: argv.includes("--so-areas-a") };
 }
 
 async function main(): Promise<void> {
-  const { fonte, raiz } = lerArgs(process.argv.slice(2));
+  const { fonte, raiz, soAreasA } = lerArgs(process.argv.slice(2));
   const cofre = caminhosDoCofre();
   const db = abrirBanco(cofre.banco);
   aplicarSchema(db);
@@ -442,7 +443,7 @@ async function main(): Promise<void> {
 
   console.log(`${fonte}: varredura ${id} de ${raiz} (log em ${log})`);
   try {
-    await scanner.varrer(raiz);
+    await scanner.varrer(raiz, soAreasA);
     scanner.finalizar("concluida");
   } catch (e) {
     scanner.finalizar("falhou");

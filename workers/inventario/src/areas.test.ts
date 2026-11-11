@@ -42,6 +42,12 @@ describe("classificarPasta", () => {
     });
   });
 
+  it("Daiane dentro do seu IR é dependente na sua declaração: continua A", () => {
+    expect(classeDe("/mnt/p/OneDrive/Pessoal/IR/2025-2024/Comprovantes/Daiane").camada).toBe("A");
+    expect(classeDe("/mnt/e2/Pessoal/Chico/Financeiro/ImpostoRenda/2014/Daiane").camada).toBe("A");
+    expect(classeDe("/mnt/p/OneDrive/Pessoal/Daiane").camada).toBe("C");
+  });
+
   it("Mayara é A em qualquer lugar, menos dentro de C", () => {
     expect(classeDe("/mnt/p2/Diversos/Mayara").camada).toBe("A");
     expect(classeDe("/mnt/p/CAIXA/Mayara").camada).toBe("C");
