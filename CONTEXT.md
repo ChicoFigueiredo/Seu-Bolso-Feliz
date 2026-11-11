@@ -24,6 +24,15 @@ Entrou menos saiu dentro do período. É uma medida de fluxo, não de posição 
 positivo com a conta no vermelho.
 _Avoid_: saldo do mês, balanço
 
+**Ciclo**:
+O período financeiro pessoal: começa no dia de corte escolhido pelo usuário (hoje, o
+dia 20) e termina na véspera do mesmo dia no mês seguinte, inclusive. Cada dia pertence
+a exatamente um ciclo. Um ciclo é chamado pelo mês em que começa: o
+ciclo 2026-10 vai de 20/out a 19/nov. Um registro cai no ciclo da data em que o dinheiro
+se moveu; uma compra no cartão, no ciclo da data da compra — o pagamento da fatura é
+outro registro. O período de uma fatura de cartão não é um ciclo: chama-se fatura.
+_Avoid_: mês (quando se quer dizer ciclo), período, competência, ciclo da fatura
+
 ## Classificação
 
 Três eixos independentes. Uma movimentação pode ter os três ao mesmo tempo, e nenhum
@@ -90,10 +99,46 @@ Possível duplicidade, Protegido por senha, Não reconhecido, Processando. Os es
 internos do pipeline não aparecem na interface.
 _Avoid_: ingestion job, draft batch, reconciliation status, parsed, posted
 
+**Origem**:
+Cada lugar onde um mesmo conteúdo foi encontrado — um caminho no disco, um anexo do
+Gmail, uma conversa do WhatsApp. O mesmo comprovante, byte a byte, salvo em três lugares
+é **um** documento com três origens, nunca três documentos.
+_Avoid_: cópia, localização, fonte
+
+**Registro**:
+Um fato financeiro que um documento ou uma conexão declara — uma compra numa fatura,
+uma linha de extrato, o pagamento de um contracheque, uma transação do banco. Ainda não
+é movimentação: só vira uma quando o usuário aprova.
+_Avoid_: lançamento, transação, linha, item
+
+**Sub-registro**:
+Um detalhe que compõe um registro sem ser um fato à parte — a parcela 3/10 de uma
+compra, o IOF que veio junto, cada rubrica de um contracheque.
+_Avoid_: item, sub-item, linha
+
 **Conciliação**:
 O ato de reconhecer que dois registros — uma transação importada e um documento, ou
-duas importações da mesma coisa — descrevem o mesmo fato financeiro.
+duas importações da mesma coisa — descrevem o mesmo fato financeiro. Conteúdo idêntico
+não é conciliação: é o mesmo documento com mais de uma origem.
 _Avoid_: reconciliation, match, dedup
+
+## Inventário
+
+**Inventário**:
+O catálogo de tudo que foi encontrado em todas as fontes, com suas origens, feito
+**antes** de qualquer análise. Nada entra na análise sem ter passado pelo inventário.
+_Avoid_: índice, varredura, backup
+
+**Achado**:
+Algo encontrado numa fonte que pode ser financeiro — um arquivo, um anexo, uma mensagem.
+Vira documento quando se confirma que comprova ou origina um fato financeiro; caso
+contrário, fica registrado como descartado, para provar que foi visto.
+_Avoid_: evidência, candidato, item
+
+**Cofre**:
+O acervo privado que guarda uma cópia de cada documento original, exatamente como foi
+encontrado, fora de qualquer repositório e de qualquer nuvem não autorizada.
+_Avoid_: backup, pasta de finanças, vault
 
 ## Fontes
 
