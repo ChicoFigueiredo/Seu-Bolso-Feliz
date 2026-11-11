@@ -200,6 +200,16 @@ export function classificarPasta(
   return mae ?? { camada: "B", raiz: caminho };
 }
 
+/** Classe de um caminho qualquer, descendo a partir da raiz do sistema. */
+export function classeDoCaminho(caminho: string): Classe {
+  const partes = caminho.split("/").filter(Boolean);
+  let classe: Classe | undefined;
+  for (let i = 1; i <= partes.length; i++) {
+    classe = classificarPasta(`/${partes.slice(0, i).join("/")}`, classe);
+  }
+  return classe ?? { camada: "B", raiz: "/" };
+}
+
 export const DOCUMENTOS = new Set([
   "pdf",
   "ofx",

@@ -31,6 +31,7 @@ import { dirname, join } from "node:path";
 import {
   type Classe,
   REGRAS_POR_CAMINHO,
+  classeDoCaminho,
   classificarPasta,
   extensaoDe,
   tratamentoDoArquivo,
@@ -74,16 +75,6 @@ const MIME: Record<string, string> = {
   htm: "text/html",
   json: "application/json",
 };
-
-/** Classe de um caminho qualquer, descendo a partir da raiz do sistema. */
-function classeDoCaminho(caminho: string): Classe {
-  const partes = caminho.split("/").filter(Boolean);
-  let classe: Classe | undefined;
-  for (let i = 1; i <= partes.length; i++) {
-    classe = classificarPasta(`/${partes.slice(0, i).join("/")}`, classe);
-  }
-  return classe ?? { camada: "B", raiz: "/" };
-}
 
 function dentroDe(caminho: string, raiz: string): boolean {
   return caminho === raiz || caminho.startsWith(`${raiz}/`);
