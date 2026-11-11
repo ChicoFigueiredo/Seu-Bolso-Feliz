@@ -59,6 +59,13 @@ tmp/
 # para cá por padrão.
 inbox/
 
+# Inventário financeiro (ADR-011): o cofre vive em /mnt/d/Chico/financas, fora
+# do repo. `financas` aqui é só um symlink de conveniência; banco SQLite local
+# nenhum entra no git.
+/financas
+*.sqlite
+*.sqlite3
+
 # Saída do `drizzle-kit introspect` (packages/db). O schema.ts/relations.ts
 # reais vivem em packages/db/src/ (movidos à mão depois da introspecção — ver
 # cabeçalho de packages/db/src/schema.ts); esta pasta é artefato de

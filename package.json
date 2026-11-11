@@ -31,6 +31,8 @@
     "worker:ingestion": "cd workers/ingestion && bun run src/index.ts",
     "worker:gmail": "bun run workers/gmail-scanner/src/index.ts",
     "worker:local": "bun run workers/local-scanner/src/index.ts",
+    "inventario:init": "bun run workers/inventario/src/init.ts",
+    "inventario:segredos": "bun run workers/inventario/src/segredos.ts",
     "--- PIPELINE: Passo-a-Passo para dados no Dashboard ---": "",
     "pipeline:passo01:scan-gmail": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50",
     "pipeline:passo01:scan-gmail:dry": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50 --dry-run",

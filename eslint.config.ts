@@ -23,6 +23,8 @@ export default tseslint.config(
       ".next/",
       "**/.next/",
       "docs-html/",
+      // Symlink para o cofre do inventário financeiro (ADR-011): documentos, não código.
+      "financas/",
       // Ferramental e saída do sync do design system (claude.ai/design). São
       // gitignorados e contêm bundle vendorizado do React — ~2400 erros que
       // afogam qualquer erro real do projeto.
