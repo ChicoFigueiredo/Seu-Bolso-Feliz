@@ -64,11 +64,11 @@ describe("cabecalho", () => {
 });
 
 describe("consultaFinanceira", () => {
-  it("é um OR único de termos e anexos de documento", () => {
+  it("tira listas e promoções dos termos, mas aceita anexo de documento de qualquer categoria", () => {
     const q = consultaFinanceira();
-    expect(q.startsWith("{") && q.endsWith("}")).toBe(true);
-    expect(q).toContain("contracheque");
-    expect(q).toContain("has:attachment filename:(pdf");
+    expect(q).toMatch(
+      /^\(\{.*contracheque.*\} -category:promotions -category:forums -category:social\) OR \(has:attachment filename:\(pdf/,
+    );
   });
 });
 

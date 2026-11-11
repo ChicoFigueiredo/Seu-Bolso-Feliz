@@ -40,8 +40,15 @@ const TERMOS = [
 ];
 
 /** A busca financeira: termos no assunto/corpo, ou anexo de documento. */
+/**
+ * Termos financeiros fora de Promoções, Fóruns e Social (newsletter também diz
+ * "assinatura" e "compra" no corpo), ou qualquer e-mail com anexo de documento,
+ * em qualquer categoria.
+ */
 export function consultaFinanceira(): string {
-  return `{${TERMOS.join(" ")} has:attachment filename:(pdf OR xml OR ofx OR csv OR xlsx OR xls)}`;
+  const anexos = "has:attachment filename:(pdf OR xml OR ofx OR csv OR xlsx OR xls)";
+  const foraDeListas = "-category:promotions -category:forums -category:social";
+  return `({${TERMOS.join(" ")}} ${foraDeListas}) OR (${anexos})`;
 }
 
 export interface Anexo {
