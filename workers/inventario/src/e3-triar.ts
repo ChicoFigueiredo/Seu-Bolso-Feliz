@@ -6,6 +6,9 @@
  *
  * Idempotente: só toca achados em estado 'novo'. Com --simular não grava nada
  * e imprime contagens e exemplos (só nome do arquivo ou domínio do remetente).
+ *
+ * --duvidas-com-texto: segunda passada, depois da extração. Reavalia só as
+ * dúvidas que ganharam texto (o sinal que faltava) e grava o novo veredito.
  */
 import type { Database } from "bun:sqlite";
 import { aplicarSchema, abrirBanco } from "./banco";
@@ -33,6 +36,8 @@ function argumento(nome: string): string | undefined {
 }
 
 const simular = process.argv.includes("--simular");
+const duvidasComTexto = process.argv.includes("--duvidas-com-texto");
+const ESTADO_ALVO = duvidasComTexto ? "duvida" : "novo";
 const limite = argumento("--limite") ? Number(argumento("--limite")) : Infinity;
 
 function dominioDe(remetente: string | null): string {
@@ -104,19 +109,22 @@ const lista = db
          SELECT content_hash, MAX(COALESCE(local_mtime, gmail_date, '')) AS recente
            FROM origem GROUP BY content_hash
        ) r ON r.content_hash = a.content_hash
-      WHERE a.estado = 'novo'
+      WHERE a.estado = ?
+        AND (? = 0 OR length(t.conteudo) > 0)
       ORDER BY r.recente DESC`,
   )
-  .all() as LinhaAchado[];
+  .all(ESTADO_ALVO, duvidasComTexto ? 1 : 0) as LinhaAchado[];
 
 const alvo = lista.slice(0, Number.isFinite(limite) ? limite : lista.length);
-console.log(`${alvo.length} achados 'novo'${simular ? " (simulação, nada é gravado)" : ""}`);
+console.log(
+  `${alvo.length} achados '${ESTADO_ALVO}'${duvidasComTexto ? " com texto" : ""}${simular ? " (simulação, nada é gravado)" : ""}`,
+);
 
 const atualizar = db.query(
   `UPDATE achado
       SET estado = ?, document_type = ?, confianca = ?, classificado_por = ?,
           notas = CASE WHEN notas IS NULL OR notas = '' THEN ? ELSE notas || char(10) || ? END
-    WHERE content_hash = ? AND estado = 'novo'`,
+    WHERE content_hash = ? AND estado = ?`,
 );
 
 for (let i = 0; i < alvo.length; i += LOTE) {
@@ -137,7 +145,16 @@ for (let i = 0; i < alvo.length; i += LOTE) {
     db.transaction(() => {
       for (const { hash, v } of veredictos) {
         const nota = `E3 ${VERSAO_REGRAS}: ${v.motivo}`;
-        atualizar.run(v.estado, v.document_type, v.confianca, VERSAO_REGRAS, nota, nota, hash);
+        atualizar.run(
+          v.estado,
+          v.document_type,
+          v.confianca,
+          VERSAO_REGRAS,
+          nota,
+          nota,
+          hash,
+          ESTADO_ALVO,
+        );
       }
     })();
   }
