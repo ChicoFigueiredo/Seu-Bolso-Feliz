@@ -227,7 +227,10 @@
     "workers/inventario": {
       "name": "@sbf/worker-inventario",
       "dependencies": {
+        "@sbf/db": "workspace:*",
         "@sbf/domain": "workspace:*",
+        "@sbf/worker-gmail-scanner": "workspace:*",
+        "drizzle-orm": "^0.45.2",
       },
     },
     "workers/local-scanner": {

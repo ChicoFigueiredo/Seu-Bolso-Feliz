@@ -1,0 +1,78 @@
+/**
+ * Partes puras do coletor do Gmail: a busca financeira e a leitura do payload.
+ * Sem Bun nem banco, para o teste rodar no vitest.
+ */
+import type { GmailPart, GmailPayload } from "@sbf/worker-gmail-scanner/src/gmail-client";
+
+const TERMOS = [
+  "fatura",
+  "boleto",
+  "comprovante",
+  "extrato",
+  "recibo",
+  '"nota fiscal"',
+  "nfe",
+  '"nf-e"',
+  "danfe",
+  "pagamento",
+  "pix",
+  "cobrança",
+  "vencimento",
+  "assinatura",
+  "renovação",
+  '"seu pedido"',
+  "compra",
+  "parcela",
+  "empréstimo",
+  "consignado",
+  "financiamento",
+  "contracheque",
+  "holerite",
+  '"informe de rendimentos"',
+  "irpf",
+  "darf",
+  '"débito automático"',
+  "invoice",
+  "receipt",
+  "subscription",
+  "payment",
+  '"order confirmation"',
+];
+
+/** A busca financeira: termos no assunto/corpo, ou anexo de documento. */
+export function consultaFinanceira(): string {
+  return `{${TERMOS.join(" ")} has:attachment filename:(pdf OR xml OR ofx OR csv OR xlsx OR xls)}`;
+}
+
+export interface Anexo {
+  filename: string;
+  mimeType: string;
+  attachmentId?: string;
+  /** Anexo pequeno pode vir embutido, em base64url, sem attachmentId. */
+  data?: string;
+}
+
+/** Todas as partes com nome de arquivo, em qualquer profundidade. */
+export function anexosDe(payload: GmailPayload): Anexo[] {
+  const anexos: Anexo[] = [];
+  const visitar = (partes: GmailPart[] | undefined) => {
+    for (const p of partes ?? []) {
+      if (p.filename && (p.body.attachmentId || p.body.data)) {
+        anexos.push({
+          filename: p.filename,
+          mimeType: p.mimeType,
+          attachmentId: p.body.attachmentId,
+          data: p.body.attachmentId ? undefined : p.body.data,
+        });
+      }
+      visitar(p.parts);
+    }
+  };
+  visitar(payload.parts);
+  return anexos;
+}
+
+export function cabecalho(payload: GmailPayload, nome: string): string | null {
+  const alvo = nome.toLowerCase();
+  return payload.headers.find((h) => h.name.toLowerCase() === alvo)?.value ?? null;
+}

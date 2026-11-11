@@ -91,6 +91,13 @@ function main(): void {
       como: "Num terminal seu: bun run inventario:segredos criar",
     },
     {
+      id: "t14",
+      tarefa: "Renovar o token do Gmail (o atual expirou)",
+      etapa: "E2",
+      feito: feitoPorMim("t14"),
+      como: "Num terminal seu: bun run get:gmail-token, autorizar no navegador e trocar GMAIL_REFRESH_TOKEN no .env e no .env.local",
+    },
+    {
       id: "t03",
       tarefa: "Conectar OneDrive e Google Drive no rclone",
       etapa: "E2",

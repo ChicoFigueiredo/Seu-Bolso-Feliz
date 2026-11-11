@@ -125,6 +125,25 @@ describe("GmailClient — API methods", () => {
     expect(id).toBe("Label_1");
   });
 
+  it("getRawMessage pede format=raw e devolve o RFC 822 em base64url", async () => {
+    setupToken();
+    fetchSpy.mockResolvedValueOnce(
+      mockFetchResponse({
+        id: "m1",
+        threadId: "t1",
+        internalDate: "1",
+        sizeEstimate: 3,
+        raw: "YWJj",
+      }),
+    );
+
+    const msg = await client.getRawMessage("m1");
+    expect(msg.raw).toBe("YWJj");
+    const url = String(fetchSpy.mock.calls[1]![0]);
+    expect(url).toContain("/messages/m1");
+    expect(url).toContain("format=raw");
+  });
+
   it("findLabelId retorna null quando label não existe", async () => {
     setupToken();
     fetchSpy.mockResolvedValueOnce(

@@ -7,6 +7,9 @@
     "segredos": "bun run src/segredos.ts"
   },
   "dependencies": {
-    "@sbf/domain": "workspace:*"
+    "@sbf/db": "workspace:*",
+    "@sbf/domain": "workspace:*",
+    "@sbf/worker-gmail-scanner": "workspace:*",
+    "drizzle-orm": "^0.45.2"
   }
 }
