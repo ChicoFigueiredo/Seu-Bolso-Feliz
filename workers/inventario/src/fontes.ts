@@ -92,6 +92,12 @@ export const FONTES: readonly Fonte[] = [
     escopo: "dentro",
   },
   {
+    id: "mensageiro:whatsapp",
+    tipo: "mensageiro",
+    descricao: "WhatsApp: conversas exportadas com mídia (texto + comprovantes)",
+    escopo: "dentro",
+  },
+  {
     id: "mensageiro:telegram",
     tipo: "mensageiro",
     descricao: "Telegram: conversas pessoais e Mensagens Salvas, 12 meses",

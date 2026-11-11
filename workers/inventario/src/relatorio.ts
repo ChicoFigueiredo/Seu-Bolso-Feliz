@@ -116,6 +116,13 @@ function main(): void {
       como: "Outro agente está copiando para /mnt/bak/Pessoal/Chico/Celular/Xiomi; o scan pula essa pasta até você avisar que terminou",
     },
     {
+      id: "t15",
+      tarefa: "Exportar conversas do WhatsApp com dinheiro no meio",
+      etapa: "E2",
+      feito: temArquivos(entrada("whatsapp")),
+      como: "Em cada conversa: ⋮ → Mais → Exportar conversa → Incluir mídia; o .zip vai para entrada/whatsapp/ (guia: Coleta do Inventário)",
+    },
+    {
       id: "t05",
       tarefa: "Backup de SMS em XML",
       etapa: "E2",

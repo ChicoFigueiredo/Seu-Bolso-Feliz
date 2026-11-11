@@ -31,6 +31,7 @@ function main(): void {
       "celular",
       "sms",
       "telegram",
+      "whatsapp",
       "onedrive",
       "gdrive",
       "outlook",
