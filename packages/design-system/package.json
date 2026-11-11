@@ -1,0 +1,35 @@
+{
+  "name": "@sbf/design-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Design system do Seu Bolso Feliz — tokens e componentes da linguagem \"prosperidade tranquila\".",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tokens.css": "./src/tokens.css"
+  },
+  "files": [
+    "dist",
+    "src/tokens.css"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && cp src/tokens.css dist/tokens.css",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "react": "^19",
+    "typescript": "^5",
+    "react-dom": "^19",
+    "@types/react-dom": "^19"
+  }
+}

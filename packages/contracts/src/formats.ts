@@ -135,6 +135,20 @@ export function extensaoAceita(nomeDoArquivo: string): boolean {
 }
 
 /**
+ * O bucket do storage anterior recusava upload com MIME fora da allowlist. O
+ * S3 não tem esse conceito — a recusa precisa acontecer na aplicação, e **antes** de
+ * qualquer escrita. Se acontecer depois, sobra linha órfã em `source_documents`
+ * apontando para um arquivo que o pipeline nunca vai conseguir ler.
+ *
+ * Aceita por extensão OU por MIME, porque nem todo navegador preenche
+ * `file.type` (OFX e XML costumam chegar com string vazia).
+ */
+export function uploadAceito(nomeDoArquivo: string, mimeType?: string | null): boolean {
+  if (extensaoAceita(nomeDoArquivo)) return true;
+  return !!mimeType && MIME_TYPES_ACEITOS.has(mimeType);
+}
+
+/**
  * Texto para a interface dizer o que aceita, sem inventar.
  *
  * Ex.: "PDF, CSV, Excel (XLSX), OFX (extrato bancário), XML e imagens

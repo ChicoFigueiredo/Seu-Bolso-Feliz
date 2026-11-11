@@ -4,7 +4,17 @@
  * Fluxo: discovered → downloaded → hashed → queued → parsing → parsed
  *        → ai_lite_enriching (condicional) → classified → reconciled → drafted → pending_review.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq, inArray, or } from "drizzle-orm";
+import {
+  document_fingerprints,
+  extraction_results,
+  ingestion_jobs,
+  parsed_document_versions,
+  source_documents,
+  draft_records,
+  type Database,
+  type QueueJob,
+} from "@sbf/db";
 import { IngestionJobStatus, IngestionLogLevel } from "@sbf/ingestion-types";
 import { computeContentHash, computeCanonicalFingerprint, checkIdempotency } from "@sbf/operations";
 import { isValidTransition } from "./state-machine";
@@ -20,23 +30,22 @@ import {
   type AiLiteInput,
 } from "./parsers/ai-lite-enricher";
 import { enrichWithAiFull } from "./parsers/ai-full-enricher";
+import { getIngestionBucket } from "./storage";
 
-interface JobRow {
-  id: string;
-  run_id: string;
-  user_id: string;
-  source_document_id: string | null;
-  status: string;
-  retry_count: number;
-  max_retries: number;
-  metadata: Record<string, unknown>;
-}
+/**
+ * O job como a fila o entrega (`packages/db/src/queue.ts`).
+ *
+ * O processador muta `status` e `metadata` conforme avança pelos passos —
+ * o `QueueJob` é o snapshot local do que já foi persistido, não um cache
+ * autoritativo.
+ */
+type JobRow = QueueJob;
 
 /**
  * Atualiza status de um job com validação de transição.
  */
 async function transitionJob(
-  supabase: SupabaseClient,
+  db: Database,
   jobId: string,
   from: string,
   to: string,
@@ -47,50 +56,62 @@ async function transitionJob(
     return false;
   }
 
-  const { error } = await supabase
-    .from("ingestion_jobs")
-    .update({ status: to, updated_at: new Date().toISOString(), ...extra })
-    .eq("id", jobId)
-    .eq("status", from); // Optimistic locking
+  try {
+    // O `where` por status é locking otimista, e continua valendo mesmo com o
+    // lock da fila: ele protege contra o próprio processador reaplicar uma
+    // transição já feita (um passo reentrante depois de um retry), não contra
+    // dois workers — disso cuida o `locked_by`.
+    const updated = await db
+      .update(ingestion_jobs)
+      .set({ status: to, updated_at: new Date().toISOString(), ...extra })
+      .where(and(eq(ingestion_jobs.id, jobId), eq(ingestion_jobs.status, from)))
+      .returning({ id: ingestion_jobs.id });
 
-  return !error;
+    return updated.length > 0;
+  } catch (err) {
+    console.error(`Falha na transição ${from} → ${to}:`, err);
+    return false;
+  }
 }
 
 /**
- * Marca job como failed com detalhes do erro.
+ * Registra a falha do job e devolve o erro para quem chamou decidir.
+ *
+ * MUDANÇA DE COMPORTAMENTO (revisar): antes esta função marcava
+ * `ingestion_jobs.status = 'failed'` na hora, e um erro transitório
+ * (indisponibilidade do storage, timeout da OpenAI) aposentava o documento
+ * para sempre — as colunas `retry_count`/`max_retries` existiam sem ninguém
+ * as consultando. Agora quem decide retentar é a fila
+ * (`failJob` em packages/db/src/queue.ts), com backoff exponencial; aqui só
+ * fica o registro do contexto.
+ *
+ * `source_documents` só é marcado como falho na ÚLTIMA tentativa: marcá-lo
+ * antes disso mostraria "falhou" na interface para um documento que ainda
+ * vai ser reprocessado em segundos.
  */
-async function failJob(
-  supabase: SupabaseClient,
+async function recordJobFailure(
+  db: Database,
   ctx: LogContext,
-  jobId: string,
-  sourceDocumentId: string | null,
+  job: JobRow,
   currentStatus: string,
   error: unknown,
 ): Promise<void> {
   const msg = error instanceof Error ? error.message : String(error);
-  await writeLog(supabase, ctx, IngestionLogLevel.ERROR, `Job failed: ${msg}`, {
+  const isLastAttempt = job.retryCount >= job.maxRetries;
+
+  await writeLog(db, ctx, IngestionLogLevel.ERROR, `Job failed: ${msg}`, {
     error: msg,
     previous_status: currentStatus,
+    attempt: job.retryCount + 1,
+    max_retries: job.maxRetries,
+    final: isLastAttempt,
   });
 
-  await supabase
-    .from("ingestion_jobs")
-    .update({
-      status: IngestionJobStatus.FAILED,
-      error_message: msg.slice(0, 1000),
-      error_details: { previous_status: currentStatus },
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", jobId);
-
-  if (sourceDocumentId) {
-    await supabase
-      .from("source_documents")
-      .update({
-        status: "failed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", sourceDocumentId);
+  if (isLastAttempt && job.sourceDocumentId) {
+    await db
+      .update(source_documents)
+      .set({ status: "failed", updated_at: new Date().toISOString() })
+      .where(eq(source_documents.id, job.sourceDocumentId));
   }
 }
 
@@ -99,35 +120,40 @@ async function failJob(
  * No MVP, para local_file, o arquivo já está no Storage (upload pelo scanner).
  */
 async function stepDownload(
-  supabase: SupabaseClient,
+  db: Database,
   ctx: LogContext,
   job: JobRow,
 ): Promise<{ data: ArrayBuffer; mimeType: string | null } | null> {
-  if (!job.source_document_id) {
+  if (!job.sourceDocumentId) {
     throw new Error("Job without source_document_id cannot download");
   }
 
-  const { data: doc } = await supabase
-    .from("source_documents")
-    .select("storage_path, mime_type, filename")
-    .eq("id", job.source_document_id)
-    .single();
+  const doc = await fetchSourceDocument(db, job.sourceDocumentId);
 
   if (!doc?.storage_path) {
-    throw new Error(`Source document ${job.source_document_id} has no storage_path`);
+    throw new Error(`Source document ${job.sourceDocumentId} has no storage_path`);
   }
 
-  const { data: blob, error } = await supabase.storage
-    .from("ingestion-originals")
-    .download(doc.storage_path);
-
-  if (error || !blob) {
-    throw new Error(`Failed to download ${doc.storage_path}: ${error?.message}`);
+  let bytes: Uint8Array;
+  try {
+    bytes = await getIngestionBucket().download(doc.storage_path);
+  } catch (err) {
+    throw new Error(
+      `Failed to download ${doc.storage_path}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
 
-  const arrayBuffer = await blob.arrayBuffer();
+  // `.slice()` materializa um ArrayBuffer próprio: a view devolvida pelo
+  // storage pode ser uma janela sobre um buffer maior, e repassar
+  // `bytes.buffer` cru entregaria bytes vizinhos ao parser.
+  const arrayBuffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `Downloaded ${doc.filename} (${arrayBuffer.byteLength} bytes)`,
@@ -135,11 +161,41 @@ async function stepDownload(
   return { data: arrayBuffer, mimeType: doc.mime_type };
 }
 
+/** Texto bruto de uma versão parseada, para alimentar os prompts de IA. */
+async function fetchRawText(
+  db: Database,
+  parsedVersionId: string,
+): Promise<{ raw_text: string | null } | null> {
+  const [pv] = await db
+    .select({ raw_text: parsed_document_versions.raw_text })
+    .from(parsed_document_versions)
+    .where(eq(parsed_document_versions.id, parsedVersionId))
+    .limit(1);
+  return pv ?? null;
+}
+
+/** Metadados do documento usados por vários passos do pipeline. */
+async function fetchSourceDocument(
+  db: Database,
+  sourceDocumentId: string,
+): Promise<{ storage_path: string | null; mime_type: string | null; filename: string } | null> {
+  const [doc] = await db
+    .select({
+      storage_path: source_documents.storage_path,
+      mime_type: source_documents.mime_type,
+      filename: source_documents.filename,
+    })
+    .from(source_documents)
+    .where(eq(source_documents.id, sourceDocumentId))
+    .limit(1);
+  return doc ?? null;
+}
+
 /**
  * Step: hash — calcula content_hash e canonical_fingerprint, executa dedup.
  */
 async function stepHash(
-  supabase: SupabaseClient,
+  db: Database,
   ctx: LogContext,
   job: JobRow,
   fileData: ArrayBuffer,
@@ -150,44 +206,60 @@ async function stepHash(
   );
 
   // Buscar duplicatas existentes
-  const { data: existing } = await supabase
-    .from("document_fingerprints")
-    .select("id, source_document_id, content_hash, canonical_fingerprint")
-    .eq("user_id", ctx.userId)
-    .or(`content_hash.eq.${contentHash},canonical_fingerprint.eq.${canonicalFingerprint}`);
+  const existing = await db
+    .select({
+      id: document_fingerprints.id,
+      source_document_id: document_fingerprints.source_document_id,
+      content_hash: document_fingerprints.content_hash,
+      canonical_fingerprint: document_fingerprints.canonical_fingerprint,
+    })
+    .from(document_fingerprints)
+    .where(
+      and(
+        eq(document_fingerprints.user_id, ctx.userId),
+        or(
+          eq(document_fingerprints.content_hash, contentHash),
+          eq(document_fingerprints.canonical_fingerprint, canonicalFingerprint),
+        ),
+      ),
+    );
 
-  const forceReprocess = !!(job.metadata as Record<string, unknown>)?.force_reprocess;
+  const forceReprocess = !!job.metadata?.force_reprocess;
 
   // Salvar fingerprints
-  if (job.source_document_id) {
-    await supabase.from("document_fingerprints").upsert(
-      {
-        source_document_id: job.source_document_id,
+  if (job.sourceDocumentId) {
+    await db
+      .insert(document_fingerprints)
+      .values({
+        source_document_id: job.sourceDocumentId,
         user_id: ctx.userId,
         content_hash: contentHash,
         canonical_fingerprint: canonicalFingerprint,
         hash_algorithm: "sha256",
-      },
-      { onConflict: "user_id,content_hash" },
-    );
-
-    await supabase
-      .from("source_documents")
-      .update({
-        content_hash: contentHash,
-        updated_at: new Date().toISOString(),
       })
-      .eq("id", job.source_document_id);
+      .onConflictDoUpdate({
+        target: [document_fingerprints.user_id, document_fingerprints.content_hash],
+        set: {
+          source_document_id: job.sourceDocumentId,
+          canonical_fingerprint: canonicalFingerprint,
+          hash_algorithm: "sha256",
+        },
+      });
+
+    await db
+      .update(source_documents)
+      .set({ content_hash: contentHash, updated_at: new Date().toISOString() })
+      .where(eq(source_documents.id, job.sourceDocumentId));
   }
 
-  if (!existing || existing.length === 0) {
-    await writeLog(supabase, ctx, IngestionLogLevel.INFO, "No duplicates found — proceeding");
+  if (existing.length === 0) {
+    await writeLog(db, ctx, IngestionLogLevel.INFO, "No duplicates found — proceeding");
     return { contentHash, shouldProceed: true };
   }
 
   // force_reprocess: pular verificação de idempotência
   if (forceReprocess) {
-    await writeLog(supabase, ctx, IngestionLogLevel.INFO, "force_reprocess — skipping dedup check");
+    await writeLog(db, ctx, IngestionLogLevel.INFO, "force_reprocess — skipping dedup check");
     return { contentHash, shouldProceed: true };
   }
 
@@ -211,7 +283,7 @@ async function stepHash(
     },
   );
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO, `Idempotency check: ${result.action}`, {
+  await writeLog(db, ctx, IngestionLogLevel.INFO, `Idempotency check: ${result.action}`, {
     action: result.action,
     reason: result.reason,
   });
@@ -226,72 +298,61 @@ async function stepHash(
  * Step: parse — extrai texto e dados estruturados do documento.
  * Transição: queued → parsing → parsed.
  */
-async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow): Promise<void> {
-  if (!job.source_document_id) {
+async function stepParse(db: Database, ctx: LogContext, job: JobRow): Promise<void> {
+  if (!job.sourceDocumentId) {
     throw new Error("Job without source_document_id cannot parse");
   }
 
   // Transition queued → parsing
-  const ok = await transitionJob(
-    supabase,
-    job.id,
-    IngestionJobStatus.QUEUED,
-    IngestionJobStatus.PARSING,
-  );
+  const ok = await transitionJob(db, job.id, IngestionJobStatus.QUEUED, IngestionJobStatus.PARSING);
   if (!ok) return;
   job.status = IngestionJobStatus.PARSING;
 
-  if (job.source_document_id) {
-    await supabase
-      .from("source_documents")
-      .update({
-        status: "processing",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.source_document_id);
-  }
+  await db
+    .update(source_documents)
+    .set({ status: "processing", updated_at: new Date().toISOString() })
+    .where(eq(source_documents.id, job.sourceDocumentId));
 
   // Fetch source document metadata
-  const { data: doc } = await supabase
-    .from("source_documents")
-    .select("storage_path, mime_type, filename")
-    .eq("id", job.source_document_id)
-    .single();
+  const doc = await fetchSourceDocument(db, job.sourceDocumentId);
 
   if (!doc?.storage_path) {
-    throw new Error(`Source document ${job.source_document_id} has no storage_path`);
+    throw new Error(`Source document ${job.sourceDocumentId} has no storage_path`);
   }
 
   // Re-download file from storage
-  const { data: blob, error: dlError } = await supabase.storage
-    .from("ingestion-originals")
-    .download(doc.storage_path);
-
-  if (dlError || !blob) {
-    throw new Error(`Failed to download for parsing: ${dlError?.message}`);
+  let bytes: Uint8Array;
+  try {
+    bytes = await getIngestionBucket().download(doc.storage_path);
+  } catch (dlError) {
+    throw new Error(
+      `Failed to download for parsing: ${dlError instanceof Error ? dlError.message : String(dlError)}`,
+      { cause: dlError },
+    );
   }
 
-  const fileData = await blob.arrayBuffer();
+  const fileData = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
   const mimeType =
-    ((job.metadata as Record<string, unknown>)?.mime_type as string) ??
-    doc.mime_type ??
-    "application/octet-stream";
+    (job.metadata?.mime_type as string) ?? doc.mime_type ?? "application/octet-stream";
 
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO, `Parsing ${doc.filename} (${mimeType})`);
+  await writeLog(db, ctx, IngestionLogLevel.INFO, `Parsing ${doc.filename} (${mimeType})`);
 
   const result = await parseDocument(
     {
-      supabase,
+      db,
       ctx,
       userId: ctx.userId,
-      sourceDocumentId: job.source_document_id,
+      sourceDocumentId: job.sourceDocumentId,
       mimeType,
     },
     fileData,
   );
 
   // Transition parsing → parsed
-  await transitionJob(supabase, job.id, IngestionJobStatus.PARSING, IngestionJobStatus.PARSED, {
+  await transitionJob(db, job.id, IngestionJobStatus.PARSING, IngestionJobStatus.PARSED, {
     metadata: {
       ...(job.metadata ?? {}),
       parsed_version_id: result.parsedVersionId,
@@ -302,7 +363,7 @@ async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   });
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `Parsed with ${result.parserType} (confidence: ${result.confidence})`,
@@ -324,19 +385,15 @@ async function stepParse(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
  * o parser determinístico ficou abaixo do limiar ou deixou campos críticos vazios.
  * Transição: parsed → ai_lite_enriching → classified.
  */
-async function stepAiLiteEnrichment(
-  supabase: SupabaseClient,
-  ctx: LogContext,
-  job: JobRow,
-): Promise<void> {
-  const meta = job.metadata as Record<string, unknown>;
+async function stepAiLiteEnrichment(db: Database, ctx: LogContext, job: JobRow): Promise<void> {
+  const meta = job.metadata;
   let extractionResultId = meta.extraction_result_id as string | null;
   const currentConfidence = (meta.confidence as number) ?? 0;
   const aiMode = String(meta.ai_mode ?? "auto");
 
   if (aiMode === "skip") {
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       "IA desabilitada por ai_mode=skip — seguindo com camada determinística",
@@ -344,21 +401,17 @@ async function stepAiLiteEnrichment(
     return;
   }
 
-  if (!job.source_document_id) {
+  if (!job.sourceDocumentId) {
     throw new Error("Job sem source_document_id não pode executar enriquecimento por IA");
   }
 
-  const { data: sourceDoc } = await supabase
-    .from("source_documents")
-    .select("storage_path, mime_type")
-    .eq("id", job.source_document_id)
-    .single();
+  const sourceDoc = await fetchSourceDocument(db, job.sourceDocumentId);
 
   if (!extractionResultId) {
     // Sem extraction_result: documento sem dados estruturados. Escalar direto para IA full.
     if (!sourceDoc?.storage_path) {
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.WARN,
         "IA full não pôde iniciar: source_document sem storage_path",
@@ -366,22 +419,21 @@ async function stepAiLiteEnrichment(
       return;
     }
 
-    const { data: createdEr } = await supabase
-      .from("extraction_results")
-      .insert({
+    const [createdEr] = await db
+      .insert(extraction_results)
+      .values({
         parsed_version_id: meta.parsed_version_id as string,
         user_id: ctx.userId,
         metadata: { created_by: "ai_full_fallback" },
       })
-      .select("id")
-      .single();
+      .returning({ id: extraction_results.id });
 
     extractionResultId = createdEr?.id ?? null;
     meta.extraction_result_id = extractionResultId;
 
     if (!extractionResultId) {
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.WARN,
         "IA full não pôde iniciar: falha ao criar extraction_result fallback",
@@ -390,7 +442,7 @@ async function stepAiLiteEnrichment(
     }
 
     const ok = await transitionJob(
-      supabase,
+      db,
       job.id,
       IngestionJobStatus.PARSED,
       IngestionJobStatus.AI_LITE_ENRICHING,
@@ -398,15 +450,11 @@ async function stepAiLiteEnrichment(
     if (!ok) return;
     job.status = IngestionJobStatus.AI_LITE_ENRICHING;
 
-    const { data: pv } = await supabase
-      .from("parsed_document_versions")
-      .select("raw_text")
-      .eq("id", meta.parsed_version_id as string)
-      .single();
+    const pv = await fetchRawText(db, meta.parsed_version_id as string);
 
-    const full = await enrichWithAiFull(supabase, ctx, {
+    const full = await enrichWithAiFull(db, ctx, {
       extractionResultId,
-      sourceDocumentId: job.source_document_id,
+      sourceDocumentId: job.sourceDocumentId,
       storagePath: sourceDoc.storage_path,
       mimeType: sourceDoc.mime_type ?? "application/octet-stream",
       rawText: pv?.raw_text ?? "",
@@ -419,7 +467,7 @@ async function stepAiLiteEnrichment(
     job.metadata = meta;
 
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       "IA full executada por ausência de extraction_result na camada determinística",
@@ -428,11 +476,18 @@ async function stepAiLiteEnrichment(
   }
 
   // Carregar extraction_result para verificar campos
-  const { data: er } = await supabase
-    .from("extraction_results")
-    .select("total_amount, due_date, supplier_name_raw, competence_date, document_number, metadata")
-    .eq("id", extractionResultId)
-    .single();
+  const [er] = await db
+    .select({
+      total_amount: extraction_results.total_amount,
+      due_date: extraction_results.due_date,
+      supplier_name_raw: extraction_results.supplier_name_raw,
+      competence_date: extraction_results.competence_date,
+      document_number: extraction_results.document_number,
+      metadata: extraction_results.metadata,
+    })
+    .from(extraction_results)
+    .where(eq(extraction_results.id, extractionResultId))
+    .limit(1);
 
   if (!er) return;
 
@@ -463,7 +518,7 @@ async function stepAiLiteEnrichment(
 
   if (!shouldForceFull && !shouldRunLite && !shouldEscalateByCoverage) {
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       `IA: confiança ${(currentConfidence * 100).toFixed(0)}% e cobertura crítica 100% — sem escalonamento`,
@@ -473,7 +528,7 @@ async function stepAiLiteEnrichment(
 
   // Transição parsed → ai_lite_enriching
   const ok = await transitionJob(
-    supabase,
+    db,
     job.id,
     IngestionJobStatus.PARSED,
     IngestionJobStatus.AI_LITE_ENRICHING,
@@ -482,11 +537,7 @@ async function stepAiLiteEnrichment(
   job.status = IngestionJobStatus.AI_LITE_ENRICHING;
 
   // Buscar texto bruto para o prompt
-  const { data: pv } = await supabase
-    .from("parsed_document_versions")
-    .select("raw_text")
-    .eq("id", meta.parsed_version_id as string)
-    .single();
+  const pv = await fetchRawText(db, meta.parsed_version_id as string);
 
   const rawText = pv?.raw_text ?? "";
 
@@ -495,7 +546,7 @@ async function stepAiLiteEnrichment(
   let enrichmentType: "lite" | "full" | null = null;
 
   if (shouldRunLite) {
-    const result = await enrichWithAiLite(supabase, ctx, {
+    const result = await enrichWithAiLite(db, ctx, {
       extractionResultId,
       rawText,
       currentConfidence,
@@ -508,9 +559,9 @@ async function stepAiLiteEnrichment(
   }
 
   if (needsFullReview && sourceDoc?.storage_path) {
-    const full = await enrichWithAiFull(supabase, ctx, {
+    const full = await enrichWithAiFull(db, ctx, {
       extractionResultId,
-      sourceDocumentId: job.source_document_id,
+      sourceDocumentId: job.sourceDocumentId,
       storagePath: sourceDoc.storage_path,
       mimeType: sourceDoc.mime_type ?? "application/octet-stream",
       rawText,
@@ -522,10 +573,10 @@ async function stepAiLiteEnrichment(
   }
 
   if (needsFullReview) {
-    await supabase
-      .from("ingestion_jobs")
-      .update({ needs_full_ai_review: true, updated_at: new Date().toISOString() })
-      .eq("id", job.id);
+    await db
+      .update(ingestion_jobs)
+      .set({ needs_full_ai_review: true, updated_at: new Date().toISOString() })
+      .where(eq(ingestion_jobs.id, job.id));
   }
 
   // Transição ai_lite_enriching → classified via stepDraft (chamado após)
@@ -541,23 +592,23 @@ async function stepAiLiteEnrichment(
  * Transições: parsed|ai_lite_enriching → classified → reconciled → drafted → pending_review.
  * No MVP, classify e reconcile são passthrough automáticos.
  */
-async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow): Promise<void> {
-  if (!job.source_document_id) {
+async function stepDraft(db: Database, ctx: LogContext, job: JobRow): Promise<void> {
+  if (!job.sourceDocumentId) {
     throw new Error("Job without source_document_id cannot generate drafts");
   }
 
-  const meta = job.metadata as Record<string, unknown>;
+  const meta = job.metadata;
 
   // parsed|ai_lite_enriching → classified
   const fromStatus = job.status as IngestionJobStatus;
-  let ok = await transitionJob(supabase, job.id, fromStatus, IngestionJobStatus.CLASSIFIED, {
+  let ok = await transitionJob(db, job.id, fromStatus, IngestionJobStatus.CLASSIFIED, {
     metadata: { ...meta, classified_at: new Date().toISOString() },
   });
   if (!ok) return;
   job.status = IngestionJobStatus.CLASSIFIED;
 
   // classified → reconciled (engine determinística de reconciliação)
-  await writeLog(supabase, ctx, IngestionLogLevel.INFO, "Executando reconciliação...");
+  await writeLog(db, ctx, IngestionLogLevel.INFO, "Executando reconciliação...");
 
   // Buscar draft_data do primeiro draft gerado para rodar reconciliação
   // (neste ponto os drafts ainda não existem — reconciliação ocorre antes de gerar)
@@ -567,13 +618,13 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   // abaixo, a convergência para a obrigação canônica.
   let extractionRow: Record<string, unknown> | null = null;
   if (meta.extraction_result_id) {
-    const { data: er } = await supabase
-      .from("extraction_results")
-      .select("*")
-      .eq("id", meta.extraction_result_id as string)
-      .single();
+    const [er] = await db
+      .select()
+      .from(extraction_results)
+      .where(eq(extraction_results.id, meta.extraction_result_id as string))
+      .limit(1);
 
-    extractionRow = (er as Record<string, unknown> | null) ?? null;
+    extractionRow = (er as Record<string, unknown> | undefined) ?? null;
 
     if (er) {
       const draftDataForReconciliation: Record<string, unknown> = {
@@ -585,23 +636,23 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
       };
 
       const reconcResult = await findReconciliationCandidates(
-        supabase,
+        db,
         ctx.userId,
         draftDataForReconciliation,
-        job.source_document_id,
+        job.sourceDocumentId,
       );
 
       if (isDuplicateRisk(reconcResult)) {
         reconciliationConflicts = 1;
         await writeLog(
-          supabase,
+          db,
           ctx,
           IngestionLogLevel.WARN,
           `Risco de duplicata detectado: ${reconcResult.status} (${reconcResult.candidates.length} candidatos)`,
         );
       } else if (reconcResult.status !== "no_match") {
         await writeLog(
-          supabase,
+          db,
           ctx,
           IngestionLogLevel.INFO,
           `Reconciliação: ${reconcResult.status} (${reconcResult.candidates.length} candidatos)`,
@@ -623,9 +674,9 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   let obligationId: string | null = null;
   try {
     const obligation = await upsertObligationFromEvidence({
-      supabase,
+      db,
       userId: ctx.userId,
-      sourceDocumentId: job.source_document_id,
+      sourceDocumentId: job.sourceDocumentId,
       extraction: extractionRow,
       intent: (meta.financial_intent as string | null) ?? null,
       confidence: (meta.confidence as number | null) ?? null,
@@ -636,7 +687,7 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
       meta.obligation_id = obligation.obligationId;
       meta.obligation_matched_by = obligation.matchedBy;
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.INFO,
         obligation.isNew
@@ -648,7 +699,7 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     // Falhar aqui não deve derrubar a ingestão: o documento ainda tem valor
     // como draft, mesmo sem obrigação canônica.
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.WARN,
       `Não foi possível convergir para obrigação: ${err instanceof Error ? err.message : String(err)}`,
@@ -656,7 +707,7 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   }
 
   ok = await transitionJob(
-    supabase,
+    db,
     job.id,
     IngestionJobStatus.CLASSIFIED,
     IngestionJobStatus.RECONCILED,
@@ -673,10 +724,10 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
 
   // reconciled → drafted (gera draft_batch + draft_records)
   const result = await generateDrafts({
-    supabase,
+    db,
     ctx,
     userId: ctx.userId,
-    sourceDocumentId: job.source_document_id,
+    sourceDocumentId: job.sourceDocumentId,
     extractionResultId: meta.extraction_result_id as string | null,
     parsedVersionId: meta.parsed_version_id as string,
     parserType: meta.parser_type as string,
@@ -684,21 +735,15 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     obligationId,
   });
 
-  ok = await transitionJob(
-    supabase,
-    job.id,
-    IngestionJobStatus.RECONCILED,
-    IngestionJobStatus.DRAFTED,
-    {
-      metadata: {
-        ...meta,
-        batch_id: result.batchId,
-        draft_count: result.drafts.length,
-        draft_types: result.drafts.map((d) => d.draftType),
-        draft_ids: result.drafts.map((d) => d.id),
-      },
+  ok = await transitionJob(db, job.id, IngestionJobStatus.RECONCILED, IngestionJobStatus.DRAFTED, {
+    metadata: {
+      ...meta,
+      batch_id: result.batchId,
+      draft_count: result.drafts.length,
+      draft_types: result.drafts.map((d) => d.draftType),
+      draft_ids: result.drafts.map((d) => d.id),
     },
-  );
+  });
   if (!ok) return;
   job.status = IngestionJobStatus.DRAFTED;
 
@@ -708,19 +753,19 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
     const reconcCandidates = meta.reconciliation_candidates ?? [];
     const draftIds = result.drafts.map((d) => d.id);
 
-    await supabase
-      .from("draft_records")
-      .update({
+    await db
+      .update(draft_records)
+      .set({
         reconciliation_status: reconcStatus,
-        reconciliation_candidates: reconcCandidates,
+        reconciliation_candidates: reconcCandidates as never,
         reconciled_at: new Date().toISOString(),
       })
-      .in("id", draftIds);
+      .where(inArray(draft_records.id, draftIds));
   }
 
   // drafted → pending_review
   ok = await transitionJob(
-    supabase,
+    db,
     job.id,
     IngestionJobStatus.DRAFTED,
     IngestionJobStatus.PENDING_REVIEW,
@@ -729,21 +774,16 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
   job.status = IngestionJobStatus.PENDING_REVIEW;
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `Drafts gerados e aguardando revisão (batch: ${result.batchId}, ${result.drafts.length} drafts)`,
   );
 
-  if (job.source_document_id) {
-    await supabase
-      .from("source_documents")
-      .update({
-        status: "pending_review",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.source_document_id);
-  }
+  await db
+    .update(source_documents)
+    .set({ status: "pending_review", updated_at: new Date().toISOString() })
+    .where(eq(source_documents.id, job.sourceDocumentId));
 }
 
 /**
@@ -751,21 +791,21 @@ async function stepDraft(supabase: SupabaseClient, ctx: LogContext, job: JobRow)
  * Fluxo: discovered → downloaded → hashed → queued → parsing → parsed
  *        → ai_lite_enriching (condicional) → classified → reconciled → drafted → pending_review.
  */
-export async function processJob(supabase: SupabaseClient, job: JobRow): Promise<void> {
+export async function processJob(db: Database, job: JobRow): Promise<void> {
   const ctx: LogContext = {
-    userId: job.user_id,
-    runId: job.run_id,
+    userId: job.userId,
+    runId: job.runId,
     jobId: job.id,
   };
 
   try {
     // Step 1: discovered → downloaded
     if (job.status === IngestionJobStatus.DISCOVERED) {
-      const file = await stepDownload(supabase, ctx, job);
+      const file = await stepDownload(db, ctx, job);
       if (!file) return;
 
       const ok = await transitionJob(
-        supabase,
+        db,
         job.id,
         IngestionJobStatus.DISCOVERED,
         IngestionJobStatus.DOWNLOADED,
@@ -786,7 +826,7 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
       };
 
       // Step 2: downloaded → hashed
-      const hashResult = await stepHash(supabase, ctx, job, file.data);
+      const hashResult = await stepHash(db, ctx, job, file.data);
 
       const nextStatus = hashResult.shouldProceed
         ? IngestionJobStatus.HASHED
@@ -795,31 +835,31 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
         ? { metadata: { ...(job.metadata ?? {}), content_hash: hashResult.contentHash } }
         : { error_message: "Duplicate document detected" };
 
-      await transitionJob(supabase, job.id, IngestionJobStatus.DOWNLOADED, nextStatus, extraData);
+      await transitionJob(db, job.id, IngestionJobStatus.DOWNLOADED, nextStatus, extraData);
 
       if (!hashResult.shouldProceed) return;
       job.status = IngestionJobStatus.HASHED;
       job.metadata = { ...(job.metadata ?? {}), content_hash: hashResult.contentHash };
 
       // Continue to queued
-      await transitionJob(supabase, job.id, IngestionJobStatus.HASHED, IngestionJobStatus.QUEUED);
+      await transitionJob(db, job.id, IngestionJobStatus.HASHED, IngestionJobStatus.QUEUED);
       job.status = IngestionJobStatus.QUEUED;
     }
 
     // Step 3: hashed → queued (legacy: para jobs que pararam em HASHED)
     if (job.status === IngestionJobStatus.HASHED) {
-      await transitionJob(supabase, job.id, IngestionJobStatus.HASHED, IngestionJobStatus.QUEUED);
+      await transitionJob(db, job.id, IngestionJobStatus.HASHED, IngestionJobStatus.QUEUED);
       job.status = IngestionJobStatus.QUEUED;
     }
 
     // Step 4: queued → parsing → parsed
     if (job.status === IngestionJobStatus.QUEUED) {
-      await stepParse(supabase, ctx, job);
+      await stepParse(db, ctx, job);
     }
 
     // Step 5: parsed → ai_lite_enriching (condicional) → classified
     if (job.status === IngestionJobStatus.PARSED) {
-      await stepAiLiteEnrichment(supabase, ctx, job);
+      await stepAiLiteEnrichment(db, ctx, job);
     }
 
     // Step 6: parsed|ai_lite_enriching → classified → reconciled → drafted → pending_review
@@ -827,9 +867,12 @@ export async function processJob(supabase: SupabaseClient, job: JobRow): Promise
       job.status === IngestionJobStatus.PARSED ||
       job.status === IngestionJobStatus.AI_LITE_ENRICHING
     ) {
-      await stepDraft(supabase, ctx, job);
+      await stepDraft(db, ctx, job);
     }
   } catch (err) {
-    await failJob(supabase, ctx, job.id, job.source_document_id, job.status, err);
+    // Registra o contexto e propaga: a política de retentativa é da fila,
+    // não deste arquivo (ver recordJobFailure).
+    await recordJobFailure(db, ctx, job, job.status, err);
+    throw err;
   }
 }

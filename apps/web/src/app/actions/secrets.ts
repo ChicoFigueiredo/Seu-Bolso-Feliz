@@ -3,17 +3,27 @@
 /**
  * Gestão de senhas de documentos protegidos.
  *
- * Existe porque, até aqui, NENHUM caminho de escrita de segredo existia: nem
- * UI, nem action, nem RPC. A tabela `user_secrets` só podia ser populada à mão
- * via SQL, e o pipeline de PDFs protegidos portanto nunca tinha o que ler.
- *
  * O valor em claro nunca volta para o cliente. A listagem devolve apenas
- * escopo e rótulo — quem precisa da senha é o worker, via `fn_get_secrets`,
- * que é concedida somente a service_role.
+ * escopo e rótulo — quem precisa da senha é o worker, via `fn_get_secrets`
+ * (Fase 4b, fora deste arquivo), concedida somente a service_role.
+ *
+ * `fn_set_secret` era uma das SEIS funções descartadas por inteiro na
+ * migração para o Neon (packages/db/schema.sql, NOTA item 4): sabia quem
+ * era o usuário só via `auth.uid()`. Confirmado por consulta ao `pg_proc` do
+ * Neon: NÃO existe lá. `setSecret` abaixo reimplementa o corpo dela.
+ *
+ * A criptografia, que era o segundo bloqueio, deixou de ser: o schema
+ * `private` (crypto_keys + get_crypto_key) foi portado para o Neon, e o
+ * round-trip `decrypt_secret(encrypt_secret(x)) = x` foi verificado no banco
+ * real antes desta reescrita. O texto em claro continua sem passar pelo
+ * TypeScript: ele vai como parâmetro de bind direto para `encrypt_secret()`
+ * dentro do INSERT, e o que a aplicação enxerga de volta é só o `id`.
  */
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { getDb, schema } from "@sbf/db";
+import { and, eq, sql } from "drizzle-orm";
 
 export interface SecretSummary {
   id: string;
@@ -27,92 +37,179 @@ export interface SecretSummary {
   createdAt: string | null;
 }
 
+async function requireUserId(): Promise<string> {
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
+}
+
 /** Lista os segredos do usuário SEM os valores. */
 export async function listSecrets(): Promise<SecretSummary[]> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const { data, error } = await supabase
-    .from("user_secrets")
-    .select(
-      "id, secret_type, entity_type, entity_id, contract_identifier, label, last_used_at, success_count, created_at",
-    )
-    .eq("user_id", user.id)
-    .order("last_used_at", { ascending: false, nullsFirst: false });
+  // asc()/desc() do drizzle-orm não encadeiam .nullsLast() em orderBy() nesta
+  // versão — fragmento sql`` cru replica "NULLS LAST" de hoje.
+  const rows = await db
+    .select({
+      id: schema.user_secrets.id,
+      secretType: schema.user_secrets.secret_type,
+      entityType: schema.user_secrets.entity_type,
+      entityId: schema.user_secrets.entity_id,
+      contractIdentifier: schema.user_secrets.contract_identifier,
+      label: schema.user_secrets.label,
+      lastUsedAt: schema.user_secrets.last_used_at,
+      successCount: schema.user_secrets.success_count,
+      createdAt: schema.user_secrets.created_at,
+    })
+    .from(schema.user_secrets)
+    .where(eq(schema.user_secrets.user_id, userId))
+    .orderBy(sql`${schema.user_secrets.last_used_at} desc nulls last`);
 
-  if (error) throw new Error(error.message);
-
-  return (data ?? []).map((s) => ({
-    id: s.id,
-    secretType: s.secret_type,
-    entityType: s.entity_type,
-    entityId: s.entity_id,
-    contractIdentifier: s.contract_identifier,
-    label: s.label,
-    lastUsedAt: s.last_used_at,
-    successCount: s.success_count ?? 0,
-    createdAt: s.created_at,
-  }));
+  return rows.map((s) => ({ ...s, successCount: s.successCount ?? 0 }));
 }
+
+/** Mesma lista do CHECK `chk_user_secrets_entity_type` no banco. */
+const TIPOS_DE_ENTIDADE = [
+  "supplier",
+  "financial_product",
+  "card",
+  "supplier_contract",
+  "institution",
+] as const;
+
+export type SecretEntityType = (typeof TIPOS_DE_ENTIDADE)[number];
 
 export interface SetSecretInput {
   plaintext: string;
   label?: string | null;
-  entityType?:
-    "supplier" | "financial_product" | "card" | "supplier_contract" | "institution" | null;
+  entityType?: SecretEntityType | null;
   entityId?: string | null;
   contractIdentifier?: string | null;
   secretType?: string;
 }
 
 /**
- * Grava (ou substitui) a senha de um escopo.
+ * `user_secrets.entity_id` é polimórfico: não tem (nem pode ter) FK, e o
+ * comentário da migration que o criou prometia um trigger de validação que
+ * nunca chegou ao banco — confirmado por consulta a `pg_trigger` no Neon,
+ * onde `user_secrets` só tem o trigger de `updated_at`. Sem RLS e sem FK, a
+ * única checagem de posse que existe é esta.
+ */
+const TABELA_POR_ENTIDADE = {
+  supplier: schema.suppliers,
+  financial_product: schema.financial_products,
+  card: schema.cards,
+  supplier_contract: schema.supplier_contracts,
+  institution: schema.institutions,
+} as const;
+
+/**
+ * `entityType` chega de um cliente: o tipo do parâmetro é só uma promessa de
+ * compilação. Sem esta checagem, indexar o objeto acima com `"constructor"`
+ * ou `"toString"` devolveria algo truthy — uma chave que não é entidade
+ * nenhuma passaria pela validação de posse.
+ */
+function ehTipoDeEntidade(valor: string): valor is SecretEntityType {
+  return TIPOS_DE_ENTIDADE.includes(valor as SecretEntityType);
+}
+
+async function assertOwnsEntity(
+  userId: string,
+  entityType: SecretEntityType | null | undefined,
+  entityId: string | null | undefined,
+): Promise<void> {
+  if (!entityId) return;
+  // Um id sem tipo não diz em qual tabela procurar — não dá para validar
+  // posse, e gravar assim mesmo seria exatamente o IDOR que esta função
+  // existe para impedir.
+  if (!entityType) throw new Error("Informe o tipo da entidade junto com o id");
+  if (!ehTipoDeEntidade(entityType)) {
+    throw new Error(`Tipo de entidade desconhecido: ${entityType}`);
+  }
+
+  const tabela = TABELA_POR_ENTIDADE[entityType];
+
+  const db = getDb();
+  const [row] = await db
+    .select({ id: tabela.id })
+    .from(tabela)
+    .where(and(eq(tabela.id, entityId), eq(tabela.user_id, userId)));
+  if (!row) throw new Error("Entidade não encontrada");
+}
+
+/**
+ * Grava (ou substitui) a senha de um escopo. Reimplementa `fn_set_secret`;
+ * ver o cabeçalho do arquivo.
  *
- * Delega a `fn_set_secret`, que criptografa dentro do banco e usa `auth.uid()`
- * diretamente — não há parâmetro de usuário para forjar.
+ * O `ON CONFLICT` reproduz literalmente o índice único por expressão
+ * `uq_user_secrets_scope` — um segredo por (dono, tipo, entidade, contrato).
+ * Isso não é representável pelo `onConflictDoUpdate` do Drizzle (que só
+ * aceita colunas como alvo), então o statement vai como `sql` parametrizado.
  */
 export async function setSecret(input: SetSecretInput): Promise<{ id: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
 
   if (!input.plaintext || input.plaintext.length === 0) {
     throw new Error("Informe a senha");
   }
 
-  const { data, error } = await supabase.rpc("fn_set_secret", {
-    p_secret_type: input.secretType ?? "pdf_password",
-    p_plaintext: input.plaintext,
-    p_entity_type: input.entityType ?? null,
-    p_entity_id: input.entityId ?? null,
-    p_contract_identifier: input.contractIdentifier ?? null,
-    p_label: input.label ?? null,
+  await assertOwnsEntity(userId, input.entityType, input.entityId);
+
+  const db = getDb();
+  const secretType = input.secretType ?? "pdf_password";
+
+  const inserido = await db.execute<{ id: string }>(sql`
+    INSERT INTO public.user_secrets (
+      user_id, secret_type, entity_type, entity_id, contract_identifier,
+      label, encrypted_value, encryption_version
+    ) VALUES (
+      ${userId}::uuid,
+      ${secretType}::text,
+      ${input.entityType ?? null}::text,
+      ${input.entityId ?? null}::uuid,
+      ${input.contractIdentifier ?? null}::text,
+      ${input.label ?? null}::text,
+      public.encrypt_secret(${input.plaintext}::text),
+      1
+    )
+    ON CONFLICT (user_id, secret_type, COALESCE(entity_type, '-'::text),
+                 COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                 COALESCE(contract_identifier, '-'::text))
+    DO UPDATE SET encrypted_value    = EXCLUDED.encrypted_value,
+                  encryption_version = EXCLUDED.encryption_version,
+                  label              = COALESCE(EXCLUDED.label, user_secrets.label),
+                  updated_at         = now()
+    RETURNING id
+  `);
+
+  const id = inserido.rows[0]?.id;
+  if (!id) throw new Error("Falha ao gravar a senha");
+
+  // Auditoria sem o valor — nunca registrar o segredo em lugar algum.
+  await db.insert(schema.audit_logs).values({
+    user_id: userId,
+    action: "secret_written",
+    entity_type: "user_secrets",
+    entity_id: id,
+    new_values: { secret_type: secretType, entity_type: input.entityType ?? null },
   });
 
-  if (error) throw new Error(error.message);
-
   revalidatePath("/dashboard/settings/passwords");
-  return { id: data as unknown as string };
+  return { id };
 }
 
 export async function deleteSecret(id: string): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const { error } = await supabase
-    .from("user_secrets")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
+  const result = await db
+    .delete(schema.user_secrets)
+    .where(and(eq(schema.user_secrets.id, id), eq(schema.user_secrets.user_id, userId)))
+    .returning({ id: schema.user_secrets.id });
 
-  if (error) throw new Error(error.message);
+  if (result.length === 0) throw new Error("Senha não encontrada");
+
   revalidatePath("/dashboard/settings/passwords");
 }

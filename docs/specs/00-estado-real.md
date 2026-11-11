@@ -34,6 +34,13 @@ chamadores**: nenhuma UI, action, worker, tool de IA ou MCP a invocava.
 (ver §11) e as três suítes reexecutadas. Rodar sobre um banco que já acumulou dados
 de execuções anteriores esconde exatamente a classe de defeito que o CI encontra.
 
+> ⚠️ Procedimento anterior à saída do Supabase (ADR-009, 2026-08-30). Hoje não existe
+> mais `supabase db reset` nem kong: o banco é o Neon, e o equivalente a "resetar limpo"
+> é recriar um Postgres descartável a partir de `packages/db/schema.sql` +
+> `packages/db/migrations/*.sql` — receita em `__tests__/helpers/db.ts`. Os números desta
+> tabela não foram remedidos depois da migração; reconfirme-os antes de confiar neles,
+> como a nota do topo do documento já manda.
+
 **Histórico:** os 5 erros de typecheck — dois deles consultas a colunas inexistentes
 (`transactions.category`, `ingestion_jobs.step`) — foram corrigidos em `ab07bf4`. Os
 unitários eram 319 em 20 arquivos; hoje são 499 em 30, e os projetos `integration` e
@@ -102,14 +109,14 @@ formato só entra quando existe código que o lê**; não há categoria "planeja
 
 ### 4. IA e Chat — ✅ integrado
 
-| Item                                         | Estado | Evidência                                                                      |
-| -------------------------------------------- | ------ | ------------------------------------------------------------------------------ |
-| Chat drawer com histórico e streaming        | ✅     | `ai-chat-drawer.tsx`, `api/chat/route.ts`                                      |
-| Sugestões inline                             | ✅     | `api/ai-suggest/route.ts`                                                      |
-| Rate limiting                                | ✅     | `api/chat/route.ts`                                                            |
-| **`approve_draft` e `post_draft` separadas** | ✅     | `lib/ai/tools.ts` — a IA não cria dinheiro numa chamada só                     |
-| Explicabilidade                              | 🟡     | tool existe; calibração pendente                                               |
-| Upload-pelo-chat                             | 🟡     | chama `trigger-ingestion`, uma Edge Function **quebrada** contra o schema real |
+| Item                                         | Estado | Evidência                                                                                                                                          |
+| -------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat drawer com histórico e streaming        | ✅     | `ai-chat-drawer.tsx`, `api/chat/route.ts`                                                                                                          |
+| Sugestões inline                             | ✅     | `api/ai-suggest/route.ts`                                                                                                                          |
+| Rate limiting                                | ✅     | `api/chat/route.ts`                                                                                                                                |
+| **`approve_draft` e `post_draft` separadas** | ✅     | `lib/ai/tools.ts` — a IA não cria dinheiro numa chamada só                                                                                         |
+| Explicabilidade                              | 🟡     | tool existe; calibração pendente                                                                                                                   |
+| Upload-pelo-chat                             | ✅     | chama `uploadDocument()` — a **mesma** Server Action do upload manual (`actions/ingestion.ts`); não existe mais Edge Function nem caminho separado |
 
 ### 5. Materialização e integridade — ✅ (seção nova)
 
@@ -161,26 +168,26 @@ Esta é a correção mais importante do documento. A versão anterior marcava tu
 
 ### 8. Segurança e segredos — ✅ corrigido em P0-8
 
-| Item                                 | Estado | Evidência                                                                                             |
-| ------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------- |
-| Criptografia real de segredos        | ✅     | `private.crypto_keys` + `encrypt/decrypt_secret` — antes a chave vinha de uma GUC que ninguém definia |
-| Leitura decriptada, só service_role  | ✅     | `fn_get_secrets` + 8 testes                                                                           |
-| Escrita sem superfície de forja      | ✅     | `fn_set_secret` usa `auth.uid()`, não aceita `p_user_id`                                              |
-| Senha nunca em log                   | ✅     | teste com sentinela                                                                                   |
-| `audit_logs` imutável                | ✅     | DELETE recusado por política                                                                          |
-| Rotação de chave                     | 🟡     | estrutura pronta (`encryption_version`); procedimento a documentar                                    |
-| Rotação das chaves Supabase expostas | 🔒     | pendência aberta (commit `38b8126`)                                                                   |
-| Repositório público                  | 🔒     | app financeiro pessoal, público, com histórico de vazamento                                           |
+| Item                                 | Estado | Evidência                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Criptografia real de segredos        | ✅     | `private.crypto_keys` + `encrypt/decrypt_secret`, portados para o Neon em `packages/db/migrations/0002_crypto_key_e_usuarios.sql` — a chave nasce dentro do banco e nunca sai dele                                                                                                                                                                                      |
+| Leitura decriptada                   | 🟡     | `fn_get_secrets` continua no Neon, mas **sem `service_role`** (papel que não existe fora do Supabase) e sem a checagem `auth.uid() <> p_user_id` — removida na migração porque hoje o banco só é alcançável via `DATABASE_URL` de servidor (nota em `packages/db/schema.sql`). A proteção é "a connection string nunca chega ao navegador", não mais um papel de banco  |
+| Escrita sem superfície de forja      | ✅     | `fn_set_secret` era uma das seis funções **descartadas** na migração (dependia só de `auth.uid()`). Reimplementada como `gravarSegredo()` em `packages/db/src/secrets.ts` — que não checa posse sozinha — chamada depois de `assertOwnsEntity()` em `apps/web/src/app/actions/secrets.ts`                                                                               |
+| Senha nunca em log                   | ✅     | teste com sentinela                                                                                                                                                                                                                                                                                                                                                     |
+| `audit_logs` imutável                | ✅     | UPDATE/DELETE recusados por trigger (`prevent_audit_log_mutation`) — nível de banco, não depende de RLS                                                                                                                                                                                                                                                                 |
+| Rotação de chave                     | 🟡     | estrutura pronta (`encryption_version`); procedimento a documentar                                                                                                                                                                                                                                                                                                      |
+| Rotação das chaves Supabase expostas | ⚠️     | vazaram no commit `38b8126`. A aplicação não fala mais com o Supabase (verificado: zero credencial Supabase em uso no código vivo) — o risco residual depende de o projeto Supabase antigo ainda existir com aquelas chaves válidas. **⚠️ verificar** com o CEO se o projeto foi excluído/desativado; se ainda existir, apagá-lo (ou girar as chaves lá) segue pendente |
+| Repositório público                  | 🔒     | app financeiro pessoal, público, com histórico de vazamento                                                                                                                                                                                                                                                                                                             |
 
 ### 9. MCP server — ✅ 10 tools
 
-| Item                                                      | Estado | Evidência                                                                                      |
-| --------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
-| 9 tools originais                                         | ✅     | `apps/mcp-server/src/index.ts`                                                                 |
-| **`post_draft_batch`** (lançamento separado da aprovação) | ✅     | `tools/post-draft-batch.ts`                                                                    |
-| `recompute_financial_periods`                             | ⬜     | **nunca funcionou**: nomes de parâmetro divergem da RPC e `auth.uid()` é NULL sob service_role |
-| Tools de Gmail / conciliação / decisão financeira via MCP | ⬜     | —                                                                                              |
-| Identidade de dispositivo e auditoria por chamador        | ⬜     | usa `SUPABASE_SECRET_KEY` + `LOCAL_USER_ID`                                                    |
+| Item                                                      | Estado | Evidência                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 9 tools originais                                         | ✅     | `apps/mcp-server/src/index.ts`                                                                                                                                                                                                                                                                                                                        |
+| **`post_draft_batch`** (lançamento separado da aprovação) | ✅     | `tools/post-draft-batch.ts`                                                                                                                                                                                                                                                                                                                           |
+| `recompute_financial_periods`                             | 🟡     | a RPC de que dependia (`generate_financial_periods`) foi descartada na migração para o Neon — reimplementada em TypeScript em `apps/mcp-server/src/tools/recompute-financial-periods.ts`, reusando `generatePeriods` de `@sbf/domain` (mesma conta da Server Action). Tem chamador (registrada em `apps/mcp-server/src/index.ts`); sem teste dedicado |
+| Tools de Gmail / conciliação / decisão financeira via MCP | ⬜     | —                                                                                                                                                                                                                                                                                                                                                     |
+| Identidade de dispositivo e auditoria por chamador        | ⬜     | usa `DATABASE_URL` + `LOCAL_USER_ID` — e aqui `LOCAL_USER_ID` **não** é opcional: `apps/mcp-server/src/user.ts` não usa `resolveOwnerId()`, exige a variável e lança se faltar                                                                                                                                                                        |
 
 ### 10. Infra, deploy e ambientes — 🟡 escrito e verde localmente; nunca executado em nuvem
 
@@ -195,7 +202,16 @@ Esta é a correção mais importante do documento. A versão anterior marcava tu
 | Promoção entre ambientes               | ⬜     | não existe, por decisão: ambiente único                                                     |
 | Segredos do GitHub e do Vercel         | 🔒     | seis secrets e as variáveis do Vercel dependem de você                                      |
 
-### 11. O bloqueador que estava invisível — privilégios de tabela
+### 11. O bloqueador que estava invisível — privilégios de tabela (histórico, era Supabase)
+
+> ⚠️ **Esta seção é história, não estado atual.** Descreve um incidente do Supabase
+> (papéis `service_role`/`authenticated`, RLS, `ALTER DEFAULT PRIVILEGES`), backend que
+> saiu do projeto na ADR-009 (2026-08-30). No Neon não existe esse par de papéis nem RLS
+> — o isolamento hoje é `WHERE user_id = ownerId` explícito em cada query (ver
+> `packages/db/src/owner.ts`), e a migration `supabase/migrations/20260804220000_grant_api_roles.sql`
+> citada abaixo não existe mais no diretório de migrations atual
+> (`packages/db/migrations/`). Esta classe de bug não pode se repetir no desenho atual.
+> Mantido como registro de auditoria.
 
 Descoberto por execução em 2026-08-04, não por leitura. Depois de um
 `supabase db reset` limpo, **nenhuma** das 47 tabelas e views de `public` era
@@ -220,13 +236,12 @@ descarta problema de formato de chave.
 Atualizado em 2026-08-05. Os fechados ficam na lista, riscados, porque saber o
 que já foi resolvido evita reabrir a discussão.
 
-1. **Rotação das chaves Supabase expostas** — pendência de segurança aberta desde o commit `38b8126`, num repositório público. (🔒 você)
+1. **Chaves Supabase vazadas no commit `38b8126`** — a aplicação não fala mais com o Supabase (saída completa via ADR-009), mas isso não gira nem revoga as chaves antigas. ⚠️ verificar se o projeto Supabase original ainda existe; se sim, é preciso desativá-lo ou girar as chaves lá. (🔒 você)
 2. **Primeira execução do CI** — os workflows existem e nunca rodaram: 18 commits ainda não enviados. A paridade só se confirma na primeira execução.
 3. **Validação com documentos reais seus** — o pipeline tem E2E com PDF sintético e nunca viu suas faturas. (🔒 depende de você fornecer amostras anonimizadas)
 4. **Inteligência de cartão** — `/dashboard/cards` agora existe (#4, #5), mas derivação de ciclo (#8), parcelas (#9) e limite comprometido (#10) continuam abertos.
 5. **OCR desligado por padrão** — `INGESTION_ENABLE_OCRMYPDF` e `INGESTION_ENABLE_IMAGE_OCR` default `false`. O código existe; ligar depende de instalar os binários.
 6. **Lógica de reconciliação duplicada** — `reconciliation.ts` e `api/reconciliation/[draftId]/route.ts` são cópias que podem divergir.
-7. **Upload-pelo-chat** — chama `trigger-ingestion`, uma Edge Function quebrada contra o schema real.
 
 Fechados em 2026-08-05:
 
@@ -236,6 +251,18 @@ Fechados em 2026-08-05:
 - ~~**Deploy web real**~~ — `deploy.yml` publica no Vercel de verdade.
 - ~~**5 erros de typecheck**~~ — corrigidos; dois eram bugs de coluna inexistente.
 - ~~**`pdf-parse@1.1.1`**~~ — substituído por `pdfjs-dist`. A build de 2018 devolvia erros DIFERENTES para os mesmos bytes no mesmo processo, e reprovava o E2E em toda primeira execução após reset.
+
+Fechados na saída do Supabase (ADR-009, 2026-08-30) — o Supabase saiu inteiramente do
+projeto: banco Neon/Drizzle, storage Vercel Blob, autenticação própria, fila em
+`ingestion_jobs`. Isso fechou, de um só golpe, vários itens que dependiam só daquilo:
+
+- ~~**Upload-pelo-chat quebrado**~~ — a Edge Function `trigger-ingestion` não existe mais;
+  o chat chama a mesma `uploadDocument()` do upload manual, que grava direto em
+  `ingestion_jobs` (o worker acorda por `LISTEN/NOTIFY`, ver ADR-010).
+- ~~**RLS + `GRANT` de tabela**~~ — não existe mais papel `service_role`/`authenticated`
+  nem RLS; o isolamento é `WHERE user_id = ownerId` explícito em cada query.
+- ~~**Chaves de API Supabase (`sb_publishable_...`/`sb_secret_...`)**~~ — não há mais
+  chave de API de banco: a única credencial é `DATABASE_URL`.
 
 ## Como manter este mapa honesto
 

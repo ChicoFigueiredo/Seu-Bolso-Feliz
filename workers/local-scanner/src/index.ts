@@ -1,18 +1,28 @@
 /**
  * @sbf/worker-local-scanner — Entry point
  *
- * Escaneia diretório local por documentos financeiros, faz upload para
- * Supabase Storage e cria source_documents + ingestion_jobs.
+ * Escaneia diretório local por documentos financeiros, envia os arquivos para
+ * o storage S3-compatível e cria source_documents + ingestion_jobs.
  *
  * Uso:
  *   bun run workers/local-scanner/src/index.ts --dir ./inbox --scan-once
  *   bun run workers/local-scanner/src/index.ts --dir ./inbox --watch
  *   bun run workers/local-scanner/src/index.ts --dir ./inbox --recursive --dry-run
  */
-import { getSupabaseClient } from "./supabase";
+import { createShutdownSignal, getDb, resolveCapabilities, sleep } from "@sbf/db";
 import { scanDirectory } from "./scanner";
 
 export { scanDirectory } from "./scanner";
+
+/**
+ * Capacidades do host quando `WORKER_CAPABILITIES` não diz nada.
+ *
+ * Descreve a máquina WSL do dia a dia, que é onde a pasta vigiada está
+ * montada: ela tem o `ocrmypdf` instalado, enxerga o diretório local e conhece
+ * as senhas de PDF. É o padrão certo justamente porque quem roda o scanner
+ * local é, quase sempre, quem também processa o que ele descobre.
+ */
+const CAPACIDADES_PADRAO = ["ocr", "pasta-local", "senha-pdf"] as const;
 
 // ─── CLI Options ──────────────────────────────────────────────
 
@@ -114,8 +124,8 @@ Opções:
 
 // ─── Main ─────────────────────────────────────────────────────
 
-async function runScan(opts: LocalScanOptions): Promise<number> {
-  const supabase = getSupabaseClient();
+async function runScan(opts: LocalScanOptions, capabilities: readonly string[]): Promise<number> {
+  const db = getDb();
 
   const extensions =
     opts.extensions.length > 0
@@ -126,12 +136,13 @@ async function runScan(opts: LocalScanOptions): Promise<number> {
         )
       : undefined;
 
-  const count = await scanDirectory(supabase, opts.dir, {
+  const count = await scanDirectory(db, opts.dir, {
     recursive: opts.recursive,
     extensions,
     dryRun: opts.dryRun,
     verbose: opts.verbose,
     moveProcessedTo: opts.moveProcessedTo || undefined,
+    capabilities,
   });
 
   return count;
@@ -147,36 +158,36 @@ async function main(): Promise<void> {
 
   console.log(`[SCANNER] Local scanner — dir: ${opts.dir}`);
   console.log(`[SCANNER] Modo: ${opts.dryRun ? "DRY RUN" : opts.watch ? "WATCH" : "SCAN-ONCE"}`);
+
+  // As capacidades deste host decidem se os jobs criados aqui têm quem os
+  // reivindique — por isso vão para o log logo de cara, antes de qualquer scan.
+  const capabilities = resolveCapabilities(CAPACIDADES_PADRAO);
+  console.log(`[SCANNER] Capacidades do host: [${capabilities.join(", ")}]`);
   if (opts.recursive) console.log(`[SCANNER] Recursivo: sim`);
   if (opts.extensions) console.log(`[SCANNER] Extensões: ${opts.extensions}`);
   if (opts.moveProcessedTo) console.log(`[SCANNER] Mover para: ${opts.moveProcessedTo}`);
 
   if (opts.watch) {
-    let running = true;
-    process.on("SIGTERM", () => {
-      running = false;
-    });
-    process.on("SIGINT", () => {
-      running = false;
-    });
+    // `createShutdownSignal` também acorda o `sleep` do intervalo: com os
+    // handlers manuais anteriores, um SIGTERM logo depois de um scan só era
+    // notado ao fim da espera inteira (até 30 s parado sem motivo).
+    const signal = createShutdownSignal();
 
-    while (running) {
+    while (!signal.aborted) {
       try {
-        const count = await runScan(opts);
+        const count = await runScan(opts, capabilities);
         if (count > 0 || opts.verbose) {
           console.log(`[SCANNER] Descobertos: ${count} documento(s)`);
         }
       } catch (err) {
         console.error("[SCANNER] Erro no scan:", err instanceof Error ? err.message : err);
       }
-      if (running) {
-        await new Promise((resolve) => setTimeout(resolve, opts.intervalMs));
-      }
+      await sleep(opts.intervalMs, signal);
     }
     console.log("[SCANNER] Scanner encerrado.");
   } else {
     // scan-once (default)
-    const count = await runScan(opts);
+    const count = await runScan(opts, capabilities);
     console.log(`[SCANNER] Concluído: ${count} documento(s) descoberto(s).`);
   }
 }

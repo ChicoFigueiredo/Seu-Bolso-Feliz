@@ -10,14 +10,14 @@
 reutilizável**, versionado, ligado a fornecedor/instituição/tipo — e **um padrão ruim não pode
 contaminar extrações futuras**.
 
-## Modelagem (contrato) — migração `20260403100000`
+## Modelagem (contrato) — hoje em `packages/db/schema.sql` (era a migração `20260403100000` do backend anterior)
 
 **`document_patterns`** — verificado:
 
 - `name`, `document_type`, `supplier_id?`, `institution_id?`
 - `extraction_rules JSONB`, `field_mappings JSONB`, `sample_fingerprints TEXT[]`
 - contadores de feedback: `feedback_count`, (+ positivos/negativos e taxa de sucesso)
-- RLS por `auth.uid() = user_id`
+- Isolamento por `user_id` — hoje não há mais RLS: cada query filtra `WHERE user_id = ownerId` explicitamente (não existe `auth.uid()` fora do Supabase)
 
 **`pattern_feedback`** — verificado:
 
@@ -53,7 +53,7 @@ e versões antigas no histórico usam nomenclatura divergente (`supplier_match`,
 
 ## Referências de código
 
-- `supabase/migrations/20260403100000_*.sql`
+- `packages/db/schema.sql` (tabelas `document_patterns`, `pattern_feedback` — `supabase/migrations/20260403100000_*.sql` era do backend anterior e não existe mais)
 - `apps/web/src/app/actions/patterns.ts`
 - `apps/web/src/app/dashboard/ingestion/patterns/`
 - `workers/ingestion/src/parsers/supplier-templates.ts`

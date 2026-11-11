@@ -8,7 +8,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { getSupabaseClient, getUserId } from "./supabase.js";
+import { getDb } from "@sbf/db";
+import { getUserId } from "./user.js";
 import { scanLocalFolder } from "./tools/scan-local-folder.js";
 import { listUnparsedDocuments } from "./tools/list-unparsed-documents.js";
 import { reprocessDocument } from "./tools/reprocess-document.js";
@@ -30,12 +31,12 @@ const server = new McpServer({
 // ---------------------------------------------------------------------------
 server.tool(
   "scan_local_folder",
-  "Escaneia um diretório local por documentos financeiros (PDF, imagens, CSV, XLS, OFX) e cria jobs de ingestão no Supabase. Retorna contagem de descobertos, ignorados e erros.",
+  "Escaneia um diretório local por documentos financeiros (PDF, imagens, CSV, XLSX, XML, OFX) e cria jobs de ingestão no banco. Retorna contagem de descobertos, ignorados e erros.",
   { dirPath: z.string().describe("Caminho absoluto do diretório a escanear") },
   async ({ dirPath }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await scanLocalFolder(supabase, userId, dirPath);
+    const result = await scanLocalFolder(db, userId, dirPath);
     return {
       content: [
         {
@@ -58,9 +59,9 @@ server.tool(
     includeErrors: z.boolean().optional().describe("Incluir documentos com status FAILED"),
   },
   async ({ limit, includeErrors }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const docs = await listUnparsedDocuments(supabase, userId, {
+    const docs = await listUnparsedDocuments(db, userId, {
       limit,
       includeErrors,
     });
@@ -85,9 +86,9 @@ server.tool(
     documentId: z.string().uuid().describe("UUID do source_document a reprocessar"),
   },
   async ({ documentId }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await reprocessDocument(supabase, userId, documentId);
+    const result = await reprocessDocument(db, userId, documentId);
     return {
       content: [
         {
@@ -110,9 +111,9 @@ server.tool(
     cnpj: z.string().optional().describe("CNPJ exato (apenas dígitos)"),
   },
   async ({ text, cnpj }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const candidates = await resolveSupplierCandidates(supabase, userId, {
+    const candidates = await resolveSupplierCandidates(db, userId, {
       text,
       cnpj,
     });
@@ -141,9 +142,9 @@ server.tool(
     limit: z.number().optional().describe("Máximo de resultados (padrão: 20)"),
   },
   async ({ status, limit }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const batches = await listDraftBatches(supabase, userId, { status, limit });
+    const batches = await listDraftBatches(db, userId, { status, limit });
     return {
       content: [
         {
@@ -169,9 +170,9 @@ server.tool(
       .describe("Lista de UUIDs de draft_records específicos a rejeitar neste batch"),
   },
   async ({ batchId, rejectDraftIds }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await approveDraftBatch(supabase, userId, batchId, {
+    const result = await approveDraftBatch(db, userId, batchId, {
       rejectDraftIds,
     });
     return {
@@ -195,9 +196,9 @@ server.tool(
     batchId: z.string().uuid().describe("UUID do draft_batch a lancar"),
   },
   async ({ batchId }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await postDraftBatch(supabase, userId, batchId);
+    const result = await postDraftBatch(db, userId, batchId);
     return {
       content: [
         {
@@ -217,9 +218,9 @@ server.tool(
   "Encontra documentos PDF que falharam no processamento por falta de senha. Útil para identificar quais PDFs protegidos precisam de perfil de senha.",
   {},
   async () => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const docs = await findDocumentsWithoutPassword(supabase, userId);
+    const docs = await findDocumentsWithoutPassword(db, userId);
     return {
       content: [
         {
@@ -236,7 +237,7 @@ server.tool(
 // ---------------------------------------------------------------------------
 server.tool(
   "recompute_financial_periods",
-  "Gera ou atualiza os períodos financeiros do usuário com base no dia de início do ciclo configurado nas preferências. Usa a RPC generate_financial_periods do Supabase.",
+  "Gera ou atualiza os períodos financeiros do usuário com base no dia de início do ciclo configurado nas preferências.",
   {
     startDay: z
       .number()
@@ -254,9 +255,9 @@ server.tool(
       .describe("Quantos meses à frente gerar (padrão: 12)"),
   },
   async ({ startDay, monthsAhead }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await recomputeFinancialPeriods(supabase, userId, {
+    const result = await recomputeFinancialPeriods(db, userId, {
       startDay,
       monthsAhead,
     });
@@ -286,9 +287,9 @@ server.tool(
       .describe("Modo de IA: auto | lite | full | skip"),
   },
   async ({ documentId, aiMode }) => {
-    const supabase = getSupabaseClient();
+    const db = getDb();
     const userId = getUserId();
-    const result = await ingestDocument(supabase, userId, documentId, aiMode ?? "auto");
+    const result = await ingestDocument(db, userId, documentId, aiMode ?? "auto");
     return {
       content: [
         {

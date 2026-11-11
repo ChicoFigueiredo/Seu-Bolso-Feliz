@@ -11,7 +11,8 @@
  *
  * Custo alvo: ~500 tokens entrada + 300 saída por documento (≈ $0.003–0.005 / doc).
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { eq } from "drizzle-orm";
+import { extraction_results, type Database } from "@sbf/db";
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 import { writeLog, type LogContext } from "../logger";
 import { chamarChatCompletions } from "./llm-endpoint";
@@ -274,12 +275,12 @@ async function callOpenAi(prompt: string): Promise<Record<string, unknown>> {
  * @returns AiLiteOutput com os campos enriquecidos e flags de resultado
  */
 export async function enrichWithAiLite(
-  supabase: SupabaseClient,
+  db: Database,
   ctx: LogContext,
   input: AiLiteInput,
 ): Promise<AiLiteOutput> {
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `IA lite: campos críticos ausentes ou confiança baixa (${(input.currentConfidence * 100).toFixed(0)}%). Iniciando enriquecimento...`,
@@ -292,7 +293,7 @@ export async function enrichWithAiLite(
     parsed = await callOpenAi(prompt);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await writeLog(supabase, ctx, IngestionLogLevel.WARN, `IA lite falhou: ${msg}`);
+    await writeLog(db, ctx, IngestionLogLevel.WARN, `IA lite falhou: ${msg}`);
     return {
       enriched: false,
       needsFullReview: true,
@@ -374,36 +375,36 @@ export async function enrichWithAiLite(
   // Campos que têm colunas dedicadas em extraction_results
   // Campos sem coluna dedicada (supplier_cnpj, barcode_digitable_line, document_type, description)
   // são armazenados no metadata para não perder informação.
-  const { error } = await supabase
-    .from("extraction_results")
-    .update({
-      supplier_name_raw: aiSupplier ?? input.extractedFields.supplier_name_raw,
-      due_date: aiDueDate ?? input.extractedFields.due_date,
-      total_amount: aiAmount ?? input.extractedFields.total_amount,
-      competence_date: aiCompetenceDate ?? input.extractedFields.competence_date,
-      document_number: aiDocNumber ?? input.extractedFields.document_number,
-      ai_enrichment_type: "lite",
-      ai_enrichment_at: new Date().toISOString(),
-      confidence_per_field: aiConfPerField,
-      reasoning: aiReasoning,
-      financial_intent: aiIntent,
-      metadata: {
-        ai_lite_extras: {
-          supplier_cnpj: aiCnpj,
-          barcode_digitable_line: aiBarcode,
-          document_type: aiDocType,
-          description: aiDescription,
+  try {
+    await db
+      .update(extraction_results)
+      .set({
+        supplier_name_raw: aiSupplier ?? input.extractedFields.supplier_name_raw,
+        due_date: aiDueDate ?? input.extractedFields.due_date,
+        total_amount: aiAmount ?? input.extractedFields.total_amount,
+        competence_date: aiCompetenceDate ?? input.extractedFields.competence_date,
+        document_number: aiDocNumber ?? input.extractedFields.document_number,
+        ai_enrichment_type: "lite",
+        ai_enrichment_at: new Date().toISOString(),
+        confidence_per_field: aiConfPerField,
+        reasoning: aiReasoning,
+        financial_intent: aiIntent,
+        metadata: {
+          ai_lite_extras: {
+            supplier_cnpj: aiCnpj,
+            barcode_digitable_line: aiBarcode,
+            document_type: aiDocType,
+            description: aiDescription,
+          },
         },
-      },
-    })
-    .eq("id", input.extractionResultId);
-
-  if (error) {
+      })
+      .where(eq(extraction_results.id, input.extractionResultId));
+  } catch (err) {
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.WARN,
-      `Falha ao persistir enriquecimento lite: ${error.message}`,
+      `Falha ao persistir enriquecimento lite: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
@@ -426,7 +427,7 @@ export async function enrichWithAiLite(
   );
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `IA lite concluída: type=${aiDocType}, intent=${aiIntent}, ` +

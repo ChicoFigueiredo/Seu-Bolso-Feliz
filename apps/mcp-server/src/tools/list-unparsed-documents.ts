@@ -2,7 +2,8 @@
  * @sbf/mcp-server — Tool: list_unparsed_documents
  * Lista documentos que ainda não foram parseados ou estão com erro.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { schema, type Database } from "@sbf/db";
 import { IngestionJobStatus } from "@sbf/ingestion-types";
 
 export interface UnparsedDocument {
@@ -15,7 +16,7 @@ export interface UnparsedDocument {
 }
 
 export async function listUnparsedDocuments(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   opts?: { limit?: number; includeErrors?: boolean },
 ): Promise<UnparsedDocument[]> {
@@ -31,32 +32,42 @@ export async function listUnparsedDocuments(
     statuses.push(IngestionJobStatus.FAILED);
   }
 
-  const { data, error } = await supabase
-    .from("ingestion_jobs")
-    .select(
-      `
-      id,
-      source_document_id,
-      status,
-      error_message,
-      created_at,
-      source_documents!inner(filename)
-    `,
+  // O modificador `!inner` do driver anterior (só jobs com source_document
+  // existente) vira innerJoin aqui. O join é reforçado com `user_id` da
+  // tabela ligada —
+  // defesa em profundidade agora que não há RLS garantindo isso sozinho.
+  const rows = await db
+    .select({
+      id: schema.ingestion_jobs.id,
+      source_document_id: schema.ingestion_jobs.source_document_id,
+      status: schema.ingestion_jobs.status,
+      error_message: schema.ingestion_jobs.error_message,
+      created_at: schema.ingestion_jobs.created_at,
+      filename: schema.source_documents.filename,
+    })
+    .from(schema.ingestion_jobs)
+    .innerJoin(
+      schema.source_documents,
+      and(
+        eq(schema.ingestion_jobs.source_document_id, schema.source_documents.id),
+        eq(schema.source_documents.user_id, userId),
+      ),
     )
-    .eq("user_id", userId)
-    .in("status", statuses)
-    .order("created_at", { ascending: false })
+    .where(
+      and(
+        eq(schema.ingestion_jobs.user_id, userId),
+        inArray(schema.ingestion_jobs.status, statuses),
+      ),
+    )
+    .orderBy(desc(schema.ingestion_jobs.created_at))
     .limit(limit);
 
-  if (error || !data) return [];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return data.map((row: any) => ({
+  return rows.map((row) => ({
     job_id: row.id,
     document_id: row.source_document_id,
-    filename: row.source_documents?.filename ?? "unknown",
+    filename: row.filename ?? "unknown",
     status: row.status,
     error_message: row.error_message,
-    created_at: row.created_at,
+    created_at: row.created_at ?? "",
   }));
 }

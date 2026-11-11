@@ -2,7 +2,9 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { getTransaction, updateTransaction, deleteTransaction } from "@/app/actions/transactions";
+import { getFinancialProducts } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +34,6 @@ import Link from "next/link";
 export default function EditTransactionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -51,40 +52,39 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
   >([]);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("transactions").select("*").eq("id", id).single(),
-      supabase.from("financial_products").select("id, name, institutions(name)"),
-    ]).then(([{ data: t }, { data: prods }]) => {
-      if (t) {
-        setForm({
-          description: t.description ?? "",
-          amount: String(t.amount),
-          type: t.type,
-          is_confirmed: t.is_confirmed ?? false,
-          event_date: t.event_date ?? "",
-          competence_date: t.competence_date ?? "",
-          financial_product_id: t.financial_product_id ?? "",
-          notes: t.notes ?? "",
-          priority: t.priority ?? "",
-        });
-      }
-      setProducts(
-        (prods ?? []).map((p) => ({
-          id: p.id,
-          name: p.name,
-          institution_name: (p.institutions as { name: string } | null)?.name ?? "",
-        })),
-      );
-      setLoading(false);
-    });
-  }, [id, supabase]);
+    Promise.all([getTransaction(id), getFinancialProducts(), getInstitutions()]).then(
+      ([t, prods, institutions]) => {
+        if (t) {
+          setForm({
+            description: t.description ?? "",
+            amount: String(t.amount),
+            type: t.type,
+            is_confirmed: t.is_confirmed ?? false,
+            event_date: t.event_date ?? "",
+            competence_date: t.competence_date ?? "",
+            financial_product_id: t.financial_product_id ?? "",
+            notes: t.notes ?? "",
+            priority: t.priority ?? "",
+          });
+        }
+        const institutionName = new Map(institutions.map((i) => [i.id, i.name]));
+        setProducts(
+          prods.map((p) => ({
+            id: p.id,
+            name: p.name,
+            institution_name: institutionName.get(p.institution_id) ?? "",
+          })),
+        );
+        setLoading(false);
+      },
+    );
+  }, [id]);
 
   async function handleUpdate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
-    const { error } = await supabase
-      .from("transactions")
-      .update({
+    try {
+      await updateTransaction(id, {
         description: form.description,
         amount: Number(form.amount),
         type: form.type,
@@ -94,24 +94,27 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
         financial_product_id: form.financial_product_id || undefined,
         notes: form.notes || undefined,
         priority: form.priority || undefined,
-      })
-      .eq("id", id);
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao atualizar", { description: error.message });
-    } else {
+      });
       toast.success("Transação atualizada");
       router.push("/dashboard/transactions");
+    } catch (err) {
+      toast.error("Erro ao atualizar", {
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleDelete() {
-    const { error } = await supabase.from("transactions").delete().eq("id", id);
-    if (error) {
-      toast.error("Erro ao excluir", { description: error.message });
-    } else {
+    try {
+      await deleteTransaction(id);
       toast.success("Transação excluída");
       router.push("/dashboard/transactions");
+    } catch (err) {
+      toast.error("Erro ao excluir", {
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      });
     }
   }
 

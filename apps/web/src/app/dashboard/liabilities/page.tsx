@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { Plus, Landmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,15 +39,43 @@ const statusVariants: Record<string, "default" | "secondary" | "destructive" | "
 };
 
 export default async function LiabilitiesPage() {
-  const supabase = await createClient();
-  const { data: liabilities } = await supabase
-    .from("liabilities")
-    .select(
-      "id, name, type, original_amount, outstanding_balance, interest_rate, rate_type, total_installments, paid_installments, status, start_date, financial_products(name, institutions(name))",
+  const { ownerId } = await requireUser();
+  const db = getDb();
+  const liabilities = await db
+    .select({
+      id: schema.liabilities.id,
+      name: schema.liabilities.name,
+      type: schema.liabilities.type,
+      original_amount: schema.liabilities.original_amount,
+      outstanding_balance: schema.liabilities.outstanding_balance,
+      interest_rate: schema.liabilities.interest_rate,
+      rate_type: schema.liabilities.rate_type,
+      total_installments: schema.liabilities.total_installments,
+      paid_installments: schema.liabilities.paid_installments,
+      status: schema.liabilities.status,
+      start_date: schema.liabilities.start_date,
+      product_name: schema.financial_products.name,
+      institution_name: schema.institutions.name,
+    })
+    .from(schema.liabilities)
+    .leftJoin(
+      schema.financial_products,
+      and(
+        eq(schema.financial_products.id, schema.liabilities.financial_product_id),
+        eq(schema.financial_products.user_id, ownerId),
+      ),
     )
-    .order("outstanding_balance", { ascending: false });
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.institutions.id, schema.financial_products.institution_id),
+        eq(schema.institutions.user_id, ownerId),
+      ),
+    )
+    .where(eq(schema.liabilities.user_id, ownerId))
+    .orderBy(desc(schema.liabilities.outstanding_balance));
 
-  const totalDebt = (liabilities ?? [])
+  const totalDebt = liabilities
     .filter((l) => l.status === "active")
     .reduce((sum, l) => sum + (l.outstanding_balance ?? 0), 0);
 
@@ -67,7 +97,7 @@ export default async function LiabilitiesPage() {
         </Button>
       </div>
 
-      {(liabilities ?? []).length === 0 ? (
+      {liabilities.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Landmark className="mb-4 size-12 text-muted-foreground" />
@@ -101,12 +131,8 @@ export default async function LiabilitiesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(liabilities ?? []).map((l) => {
-                  const fp = l.financial_products as {
-                    name: string;
-                    institutions: { name: string } | null;
-                  } | null;
-                  const prodLabel = `${fp?.institutions?.name ?? ""} ${fp?.name ?? ""}`.trim();
+                {liabilities.map((l) => {
+                  const prodLabel = `${l.institution_name ?? ""} ${l.product_name ?? ""}`.trim();
                   const progress = l.total_installments
                     ? Math.round((l.paid_installments / l.total_installments) * 100)
                     : null;

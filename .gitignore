@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# superpowers subagent-driven-development scratch workspace
+.superpowers
+
 # output
 out
 dist
@@ -32,9 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .next/
 out/
 
-# Supabase
-supabase/.temp/
-
 # Environment files — nunca versionar arquivos com segredos reais
 .env
 .env.local
@@ -58,3 +58,15 @@ tmp/
 # artefato de código. `bun run pipeline:scan-local` e `--dir ./inbox` apontam
 # para cá por padrão.
 inbox/
+
+# Saída do `drizzle-kit introspect` (packages/db). O schema.ts/relations.ts
+# reais vivem em packages/db/src/ (movidos à mão depois da introspecção — ver
+# cabeçalho de packages/db/src/schema.ts); esta pasta é artefato de
+# reexportação (snapshot SQL + meta/_journal.json) e nunca deve ser commitada.
+packages/db/drizzle/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+.env*

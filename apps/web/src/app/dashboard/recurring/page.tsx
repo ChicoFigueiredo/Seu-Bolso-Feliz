@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRecurringTemplates } from "@/app/actions/recurring";
 import Link from "next/link";
 import { Plus, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,13 +31,9 @@ const freqLabels: Record<string, string> = {
 };
 
 export default async function RecurringPage() {
-  const supabase = await createClient();
-  const { data: templates } = await supabase
-    .from("recurring_templates")
-    .select(
-      "id, name, type, amount, is_variable_amount, frequency, day_of_month, priority, is_active",
-    )
-    .order("name");
+  // `false`: a tela também precisa listar (e rotular como "Inativo") os
+  // templates desativados — não é só uma lista dos ativos.
+  const templates = await getRecurringTemplates(false);
 
   return (
     <div className="space-y-6">
@@ -54,7 +50,7 @@ export default async function RecurringPage() {
         </Button>
       </div>
 
-      {(templates ?? []).length === 0 ? (
+      {templates.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Repeat className="mb-4 size-12 text-muted-foreground" />
@@ -86,7 +82,7 @@ export default async function RecurringPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(templates ?? []).map((t) => (
+                {templates.map((t) => (
                   <TableRow key={t.id}>
                     <TableCell className="font-medium">{t.name}</TableCell>
                     <TableCell>

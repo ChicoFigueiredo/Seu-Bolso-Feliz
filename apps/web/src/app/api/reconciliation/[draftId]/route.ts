@@ -6,15 +6,21 @@
  *
  * Também aceita PATCH para confirmar uma decisão do usuário:
  *   { action: "confirmed_new" | "confirmed_duplicate", transactionId? }
+ *
+ * ⚠️ Sem RLS: cada consulta abaixo carrega o filtro `user_id = user.ownerId`
+ * explicitamente. `ownerId` (o dono dos dados), nunca `id` (quem está
+ * agindo) — ver `@/lib/auth`.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import type { Database } from "@sbf/shared-types";
-import { createClient } from "@/lib/supabase/server";
+import { and, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
+import { getUserOrNull } from "@/lib/auth";
 import type { Json } from "@sbf/shared-types";
 
-// Engine de reconciliação reutilizada do worker (lógica pura, sem dependências de runtime)
-// Importamos diretamente as heurísticas para evitar duplicação
+// Cópia independente das regras de workers/ingestion/src/reconciliation/reconciliation.ts
+// (duplicação catalogada em docs/specs/00-estado-real.md item 6) — as duas precisam ficar
+// em sincronia manualmente até serem extraídas para um módulo compartilhado.
 
 type ReconciliationStatus =
   | "not_checked"
@@ -53,19 +59,39 @@ function dateWithinDays(a: string, b: string, days = 7): boolean {
   return Math.abs(da - db) <= days * 24 * 60 * 60 * 1000;
 }
 
+/**
+ * Mês de competência (`yyyy-mm`) de uma data.
+ *
+ * Lê os caracteres da string em vez de passar por `new Date`. Passar por
+ * `Date` parece inofensivo e não é: `new Date("2026-09-01")` é meia-noite
+ * **UTC**, e `getMonth()` devolve o mês do fuso do processo — em UTC−3, agosto.
+ * O dia 1º de todo mês cairia na competência do mês anterior, e a conciliação
+ * procuraria no lugar errado. Em produção (Vercel roda em UTC) não aparecia;
+ * na máquina do desenvolvedor, sim.
+ */
 function competenceKey(date: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(date);
+  if (m) return `${m[1]}-${m[2]}`;
+  // Não é `yyyy-mm-dd`: cai para o parser, e aí o fuso do processo é o melhor
+  // palpite disponível.
   const d = new Date(date);
   if (isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Data ISO (YYYY-MM-DD) deslocada em N dias. */
+function isoDatePlusDays(base: string, days: number): string | null {
+  const ms = new Date(base).getTime();
+  if (isNaN(ms)) return null;
+  return new Date(ms + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 async function runReconciliation(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  userId: string,
+  ownerId: string,
   draftData: Record<string, unknown>,
   sourceDocumentId: string | null,
 ): Promise<{ status: ReconciliationStatus; candidates: ReconciliationCandidate[] }> {
+  const db = getDb();
   const candidates: ReconciliationCandidate[] = [];
 
   const amount = typeof draftData.amount === "number" ? draftData.amount : null;
@@ -77,36 +103,56 @@ async function runReconciliation(
 
   // Regra 1: Duplicate hash
   if (sourceDocumentId) {
-    const { data: srcDoc } = await supabase
-      .from("source_documents")
-      .select("content_hash")
-      .eq("id", sourceDocumentId)
-      .single();
+    // Filtro por dono também AQUI: a leitura do hash do documento de origem
+    // não tinha `user_id` e dependia de política de RLS do banco para não
+    // vazar o conteúdo de documentos alheios. No Neon isso viraria leitura
+    // cross-user, então o filtro é explícito.
+    const [srcDoc] = await db
+      .select({ content_hash: schema.source_documents.content_hash })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.id, sourceDocumentId),
+          eq(schema.source_documents.user_id, ownerId),
+        ),
+      );
 
     if (srcDoc?.content_hash) {
-      const { data: dupes } = await supabase
-        .from("source_documents")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("content_hash", srcDoc.content_hash)
-        .neq("id", sourceDocumentId)
+      const dupes = await db
+        .select({ id: schema.source_documents.id })
+        .from(schema.source_documents)
+        .where(
+          and(
+            eq(schema.source_documents.user_id, ownerId),
+            eq(schema.source_documents.content_hash, srcDoc.content_hash),
+            ne(schema.source_documents.id, sourceDocumentId),
+          ),
+        )
         .limit(3);
 
-      if (dupes && dupes.length > 0) {
-        const { data: dupeDrafts } = await supabase
-          .from("draft_records")
-          .select("id, draft_data, created_at")
-          .eq("user_id", userId)
-          .in(
-            "source_document_id",
-            dupes.map((d: { id: string }) => d.id),
+      if (dupes.length > 0) {
+        const dupeDrafts = await db
+          .select({
+            id: schema.draft_records.id,
+            draft_data: schema.draft_records.draft_data,
+            created_at: schema.draft_records.created_at,
+          })
+          .from(schema.draft_records)
+          .where(
+            and(
+              eq(schema.draft_records.user_id, ownerId),
+              inArray(
+                schema.draft_records.source_document_id,
+                dupes.map((d) => d.id),
+              ),
+              inArray(schema.draft_records.status, ["approved", "posted"]),
+            ),
           )
-          .in("status", ["approved", "posted"])
           .limit(1);
 
-        if (dupeDrafts && dupeDrafts.length > 0) {
-          const dd = dupeDrafts[0];
-          const ddData = dd.draft_data as Record<string, unknown>;
+        const dd = dupeDrafts[0];
+        if (dd) {
+          const ddData = (dd.draft_data ?? {}) as Record<string, unknown>;
           candidates.push({
             transactionId: dd.id,
             recurringTemplateId: null,
@@ -127,78 +173,107 @@ async function runReconciliation(
 
   // Regra 2: Match por supplier + amount + data
   if (supplierId && amount !== null && dueDate) {
-    const fromDate = new Date(new Date(dueDate).getTime() - 60 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-    const toDate = new Date(new Date(dueDate).getTime() + 60 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
+    const fromDate = isoDatePlusDays(dueDate, -60);
+    const toDate = isoDatePlusDays(dueDate, 60);
 
-    const { data: txns } = await supabase
-      .from("transactions")
-      .select("id, amount, transaction_date, supplier_name, category")
-      .eq("user_id", userId)
-      .eq("supplier_id", supplierId)
-      .gte("transaction_date", fromDate)
-      .lte("transaction_date", toDate)
-      .limit(10);
+    if (fromDate && toDate) {
+      const txns = await db
+        .select({
+          id: schema.transactions.id,
+          amount: schema.transactions.amount,
+          event_date: schema.transactions.event_date,
+          category_id: schema.transactions.category_id,
+        })
+        .from(schema.transactions)
+        .where(
+          and(
+            eq(schema.transactions.user_id, ownerId),
+            eq(schema.transactions.supplier_id, supplierId),
+            gte(schema.transactions.event_date, fromDate),
+            lte(schema.transactions.event_date, toDate),
+          ),
+        )
+        .limit(10);
 
-    for (const txn of txns ?? []) {
-      if (!amountWithinPct(amount, txn.amount)) continue;
-      const isExact = dateWithinDays(dueDate, txn.transaction_date, 7);
-      candidates.push({
-        transactionId: txn.id,
-        recurringTemplateId: null,
-        matchType: isExact ? "match_exact" : "match_fuzzy",
-        score: isExact ? 0.95 : 0.7,
-        description: isExact
-          ? "Transação com mesmo fornecedor, valor e data encontrada."
-          : "Transação com mesmo fornecedor e valor semelhante (data difere).",
-        candidateData: {
-          amount: txn.amount,
-          date: txn.transaction_date,
-          supplierName: txn.supplier_name,
-          category: txn.category,
-        },
-      });
+      for (const txn of txns) {
+        if (!amountWithinPct(amount, txn.amount)) continue;
+        const isExact = dateWithinDays(dueDate, txn.event_date, 7);
+        candidates.push({
+          transactionId: txn.id,
+          recurringTemplateId: null,
+          matchType: isExact ? "match_exact" : "match_fuzzy",
+          score: isExact ? 0.95 : 0.7,
+          description: isExact
+            ? "Transação com mesmo fornecedor, valor e data encontrada."
+            : "Transação com mesmo fornecedor e valor semelhante (data difere).",
+          candidateData: {
+            amount: txn.amount,
+            date: txn.event_date,
+            supplierName: supplierName,
+            category: txn.category_id,
+          },
+        });
+      }
     }
   }
 
   // Regra 3: Recorrência mensal
   if (supplierId && competenceDate) {
-    const { data: templates } = await supabase
-      .from("recurring_templates")
-      .select("id, name, amount, frequency, supplier_id")
-      .eq("user_id", userId)
-      .eq("supplier_id", supplierId)
-      .eq("is_active", true)
-      .eq("frequency", "monthly")
+    const templates = await db
+      .select({
+        id: schema.recurring_templates.id,
+        name: schema.recurring_templates.name,
+        amount: schema.recurring_templates.amount,
+        frequency: schema.recurring_templates.frequency,
+        supplier_id: schema.recurring_templates.supplier_id,
+      })
+      .from(schema.recurring_templates)
+      .where(
+        and(
+          eq(schema.recurring_templates.user_id, ownerId),
+          eq(schema.recurring_templates.supplier_id, supplierId),
+          eq(schema.recurring_templates.is_active, true),
+          eq(schema.recurring_templates.frequency, "monthly"),
+        ),
+      )
       .limit(5);
 
-    for (const tpl of templates ?? []) {
-      if (amount !== null && !amountWithinPct(amount, tpl.amount, 0.15)) continue;
+    for (const tpl of templates) {
+      // `amount` é anulável em recurring_templates (template de valor
+      // variável): sem valor não há como comparar, então a regra de 15% é
+      // pulada em vez de tratar null como zero.
+      if (amount !== null && tpl.amount !== null && !amountWithinPct(amount, tpl.amount, 0.15))
+        continue;
       const compKey = competenceKey(competenceDate);
-      const { data: instances } = await supabase
-        .from("recurring_instances")
-        .select("id, due_date, status")
-        .eq("user_id", userId)
-        .eq("template_id", tpl.id)
-        .gte("due_date", `${compKey}-01`)
-        .lte("due_date", `${compKey}-31`)
+      const instances = await db
+        .select({
+          id: schema.recurring_instances.id,
+          expected_date: schema.recurring_instances.expected_date,
+          status: schema.recurring_instances.status,
+        })
+        .from(schema.recurring_instances)
+        .where(
+          and(
+            eq(schema.recurring_instances.user_id, ownerId),
+            eq(schema.recurring_instances.recurring_template_id, tpl.id),
+            gte(schema.recurring_instances.expected_date, `${compKey}-01`),
+            lte(schema.recurring_instances.expected_date, `${compKey}-31`),
+          ),
+        )
         .limit(1);
 
-      const hasInstance = instances && instances.length > 0;
+      const firstInstance = instances[0];
       candidates.push({
         transactionId: null,
         recurringTemplateId: tpl.id,
         matchType: "match_recurrence",
-        score: hasInstance ? 0.85 : 0.6,
-        description: hasInstance
+        score: firstInstance ? 0.85 : 0.6,
+        description: firstInstance
           ? `Template recorrente "${tpl.name}" tem instância prevista neste período.`
           : `Template recorrente "${tpl.name}" corresponde ao fornecedor.`,
         candidateData: {
           amount: tpl.amount,
-          date: hasInstance ? instances[0].due_date : null,
+          date: firstInstance ? firstInstance.expected_date : null,
           supplierName,
           category: null,
         },
@@ -217,23 +292,27 @@ async function runReconciliation(
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getUserOrNull();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Buscar draft com dados necessários
-  const { data: draft, error } = await supabase
-    .from("draft_records")
-    .select(
-      "id, draft_data, source_document_id, reconciliation_status, reconciliation_candidates, reconciled_at",
-    )
-    .eq("id", draftId)
-    .eq("user_id", user.id)
-    .single();
+  const db = getDb();
 
-  if (error || !draft) {
+  // Buscar draft com dados necessários
+  const [draft] = await db
+    .select({
+      id: schema.draft_records.id,
+      draft_data: schema.draft_records.draft_data,
+      source_document_id: schema.draft_records.source_document_id,
+      reconciliation_status: schema.draft_records.reconciliation_status,
+      reconciliation_candidates: schema.draft_records.reconciliation_candidates,
+      reconciled_at: schema.draft_records.reconciled_at,
+    })
+    .from(schema.draft_records)
+    .where(
+      and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+    );
+
+  if (!draft) {
     return NextResponse.json({ error: "Draft não encontrado" }, { status: 404 });
   }
 
@@ -241,7 +320,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ dra
   if (
     draft.reconciliation_status !== "not_checked" &&
     Array.isArray(draft.reconciliation_candidates) &&
-    (draft.reconciliation_candidates as unknown[]).length > 0
+    draft.reconciliation_candidates.length > 0
   ) {
     return NextResponse.json({
       draftId,
@@ -253,24 +332,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ dra
   }
 
   // Executar reconciliação ao vivo
-  const draftData = draft.draft_data as Record<string, unknown>;
+  const draftData = (draft.draft_data ?? {}) as Record<string, unknown>;
   const { status, candidates } = await runReconciliation(
-    supabase,
-    user.id,
+    user.ownerId,
     draftData,
-    draft.source_document_id as string | null,
+    draft.source_document_id,
   );
 
   // Persistir resultado
-  await supabase
-    .from("draft_records")
-    .update({
+  await db
+    .update(schema.draft_records)
+    .set({
       reconciliation_status: status,
       reconciliation_candidates: candidates as unknown as Json,
       reconciled_at: new Date().toISOString(),
     })
-    .eq("id", draftId)
-    .eq("user_id", user.id);
+    .where(
+      and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+    );
 
   return NextResponse.json({
     draftId,
@@ -288,10 +367,7 @@ export async function PATCH(
   { params }: { params: Promise<{ draftId: string }> },
 ) {
   const { draftId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getUserOrNull();
   if (!user) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
   let body: { action: string; transactionId?: string };
@@ -305,24 +381,50 @@ export async function PATCH(
     return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
   }
 
-  // Tipado como o Update da tabela, e nao Record<string, unknown>: a tipagem
-  // do supabase-js recusa indice generico para impedir que uma coluna
-  // inexistente passe despercebida.
-  const updateData: Database["public"]["Tables"]["draft_records"]["Update"] = {
+  // Tipado pelo $inferInsert da tabela, não Record<string, unknown>: uma
+  // coluna inexistente precisa continuar sendo erro de compilação.
+  const updateData: Partial<typeof schema.draft_records.$inferInsert> = {
     reconciliation_status: body.action,
   };
 
+  const db = getDb();
+
   if (body.action === "confirmed_duplicate" && body.transactionId) {
+    // IDOR fechado aqui: `transactionId` vem do cliente e vira a FK
+    // `reconciled_transaction_id`. Sem esta checagem, o usuário A poderia
+    // apontar o próprio draft para uma transação do usuário B — e a tela de
+    // reconciliação passaria a exibir dados alheios como "duplicata
+    // confirmada". Mesmo padrão de `app/actions/transactions.ts`.
+    const [txn] = await db
+      .select({ id: schema.transactions.id })
+      .from(schema.transactions)
+      .where(
+        and(
+          eq(schema.transactions.id, body.transactionId),
+          eq(schema.transactions.user_id, user.ownerId),
+        ),
+      );
+
+    if (!txn) {
+      return NextResponse.json({ error: "Transação não encontrada" }, { status: 404 });
+    }
+
     updateData.reconciled_transaction_id = body.transactionId;
   }
 
-  const { error } = await supabase
-    .from("draft_records")
-    .update(updateData)
-    .eq("id", draftId)
-    .eq("user_id", user.id);
+  // `.returning()` para distinguir "atualizei" de "não existe / não é seu" —
+  // antes o retorno era `success: true` mesmo com zero linhas afetadas.
+  const updated = await db
+    .update(schema.draft_records)
+    .set(updateData)
+    .where(
+      and(eq(schema.draft_records.id, draftId), eq(schema.draft_records.user_id, user.ownerId)),
+    )
+    .returning({ id: schema.draft_records.id });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (updated.length === 0) {
+    return NextResponse.json({ error: "Draft não encontrado" }, { status: 404 });
+  }
 
   return NextResponse.json({ success: true, draftId, action: body.action });
 }

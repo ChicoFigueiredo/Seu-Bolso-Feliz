@@ -1,20 +1,41 @@
 /**
  * @sbf/worker-local-scanner — Core scanner logic
- * Escaneia diretório por arquivos novos, faz upload e cria jobs.
+ * Escaneia diretório por arquivos novos, envia ao storage e cria jobs.
  */
 import { readdir, stat, readFile, rename, mkdir } from "node:fs/promises";
 import { join, extname } from "node:path";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import {
+  enqueueJob,
+  ingestion_runs,
+  resolveOwnerId,
+  source_documents,
+  type Database,
+} from "@sbf/db";
+import { createStorageClientFromEnv, type StorageClient } from "@sbf/storage";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
 import { EXTENSOES_ACEITAS, MIME_POR_EXTENSAO } from "@sbf/contracts";
+import { capacidadesNaoAtendidas, resolveFileRequires } from "./job-requires";
+import { mensagemDeErro, uploadOriginal } from "./storage-upload";
 
 export interface ScannerOptions {
   recursive?: boolean;
-  extensions?: Set<string>;
+  extensions?: ReadonlySet<string>;
   dryRun?: boolean;
   verbose?: boolean;
   moveProcessedTo?: string;
+  /**
+   * Capacidades que este host anuncia (ver `resolveCapabilities` em
+   * `@sbf/db`). Quando informado, o scanner avisa ao criar um job que exige
+   * algo que ninguém aqui atende. Ausente, a checagem é pulada.
+   */
+  capabilities?: readonly string[];
+  /**
+   * Cliente de storage. Por padrão, o configurado por ambiente — o parâmetro
+   * existe para os testes poderem injetar um dublê.
+   */
+  storage?: StorageClient;
 }
 
 /**
@@ -28,13 +49,11 @@ const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
 const MIME_MAP = MIME_POR_EXTENSAO;
 
 /**
- * ID do usuário local — em ambiente de desenvolvimento, usa variável de ambiente.
- * Em produção, isso será resolvido via auth token do request.
+ * Quem é o dono dos arquivos varridos. Sai do banco, não de um UUID copiado à
+ * mão para o `.env` — ver `resolveOwnerId` em @sbf/db para o porquê.
  */
-function getUserId(): string {
-  const uid = process.env.LOCAL_USER_ID;
-  if (!uid) throw new Error("LOCAL_USER_ID is required for local scanner");
-  return uid;
+function getUserId(): Promise<string> {
+  return resolveOwnerId();
 }
 
 /**
@@ -43,7 +62,9 @@ function getUserId(): string {
 async function collectFiles(
   dirPath: string,
   recursive: boolean,
-  acceptedExts: Set<string>,
+  // `ReadonlySet` porque o padrão é o `EXTENSOES_ACEITAS` de `@sbf/contracts`,
+  // que é imutável de propósito — e ninguém aqui precisa escrever no conjunto.
+  acceptedExts: ReadonlySet<string>,
 ): Promise<string[]> {
   const files: string[] = [];
   let entries: string[];
@@ -84,17 +105,18 @@ async function collectFiles(
  * `options` é opcional para compatibilidade retroativa.
  */
 export async function scanDirectory(
-  supabase: SupabaseClient,
+  db: Database,
   dirPath: string,
   options: ScannerOptions = {},
 ): Promise<number> {
-  const userId = getUserId();
+  const userId = await getUserId();
   const {
     recursive = false,
     extensions = ACCEPTED_EXTENSIONS,
     dryRun = false,
     verbose = false,
     moveProcessedTo,
+    capabilities,
   } = options;
 
   const filePaths = await collectFiles(dirPath, recursive, extensions);
@@ -103,25 +125,30 @@ export async function scanDirectory(
     return 0;
   }
 
+  // Em dry-run nada sobe, então nem o cliente é criado: exigir credencial de
+  // S3 seria pedir configuração para não usar.
+  const storage = dryRun ? undefined : (options.storage ?? createStorageClientFromEnv());
+
   // Criar run (skip em dry-run)
   let runId = "dry-run";
   if (!dryRun) {
-    const { data: run, error: runError } = await supabase
-      .from("ingestion_runs")
-      .insert({
-        user_id: userId,
-        source_type: SourceDocumentOrigin.LOCAL_FILE,
-        status: IngestionRunStatus.RUNNING,
-        metadata: { directory: dirPath, recursive },
-      })
-      .select("id")
-      .single();
+    try {
+      const [run] = await db
+        .insert(ingestion_runs)
+        .values({
+          user_id: userId,
+          source_type: SourceDocumentOrigin.LOCAL_FILE,
+          status: IngestionRunStatus.RUNNING,
+          metadata: { directory: dirPath, recursive },
+        })
+        .returning({ id: ingestion_runs.id });
 
-    if (runError || !run) {
-      console.error("[SCANNER] Failed to create run:", runError?.message);
+      if (!run) throw new Error("insert de ingestion_run não devolveu linha");
+      runId = run.id;
+    } catch (err) {
+      console.error("[SCANNER] Failed to create run:", mensagemDeErro(err));
       return 0;
     }
-    runId = run.id;
   }
 
   let discovered = 0;
@@ -138,7 +165,7 @@ export async function scanDirectory(
       continue;
     }
 
-    if (dryRun) {
+    if (dryRun || !storage) {
       console.log(`  [DRY RUN] ${filePath} (${mimeType})`);
       discovered++;
       continue;
@@ -151,66 +178,98 @@ export async function scanDirectory(
     });
 
     // Verificar se já existe um source_document com mesma origin_key
-    const { data: existing } = await supabase
-      .from("source_documents")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("origin_type", SourceDocumentOrigin.LOCAL_FILE)
-      .eq("origin_key", originKey)
-      .limit(1);
+    let jaProcessado: boolean;
+    try {
+      const [existing] = await db
+        .select({ id: source_documents.id })
+        .from(source_documents)
+        .where(
+          and(
+            eq(source_documents.user_id, userId),
+            eq(source_documents.origin_type, SourceDocumentOrigin.LOCAL_FILE),
+            eq(source_documents.origin_key, originKey),
+          ),
+        )
+        .limit(1);
+      jaProcessado = existing !== undefined;
+    } catch (err) {
+      // A consulta antiga descartava o erro e seguia como se nada existisse —
+      // o que, na prática, mandava o arquivo para um upload que ia falhar
+      // igual. Aqui a falha é dita e o arquivo fica para o próximo scan.
+      console.error(`[SCANNER] Dedup check failed for ${entry}:`, mensagemDeErro(err));
+      continue;
+    }
 
-    if (existing && existing.length > 0) {
+    if (jaProcessado) {
       if (verbose) console.log(`[SCANNER] Skip (já processado): ${filePath}`);
       continue;
     }
 
-    // Upload para Storage
-    const fileBuffer = await readFile(filePath);
+    // `new Uint8Array(...)` copia para um ArrayBuffer comum: o `Buffer` do
+    // Node é tipado sobre `ArrayBufferLike`, que não satisfaz o `UploadBody`
+    // do `@sbf/storage` (restrito a views sobre `ArrayBuffer`).
+    const fileBuffer = new Uint8Array(await readFile(filePath));
     const storagePath = `${userId}/${crypto.randomUUID()}/${entry}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("ingestion-originals")
-      .upload(storagePath, fileBuffer, { contentType: mimeType });
+    const upload = await uploadOriginal(storage, storagePath, fileBuffer, mimeType);
 
-    if (uploadError) {
-      console.error(`[SCANNER] Upload failed for ${entry}:`, uploadError.message);
+    if (!upload.ok) {
+      console.error(`[SCANNER] Upload failed for ${entry}:`, upload.erro);
       continue;
     }
 
     // Criar source_document
-    const { data: doc, error: docError } = await supabase
-      .from("source_documents")
-      .insert({
-        user_id: userId,
-        origin_type: SourceDocumentOrigin.LOCAL_FILE,
-        origin_key: originKey,
-        local_filepath: filePath,
-        local_mtime: fileStat.mtime.toISOString(),
-        filename: entry,
-        mime_type: mimeType,
-        file_size_bytes: fileStat.size,
-        storage_path: storagePath,
-        status: "active",
-      })
-      .select("id")
-      .single();
+    let documentId: string;
+    try {
+      const [doc] = await db
+        .insert(source_documents)
+        .values({
+          user_id: userId,
+          origin_type: SourceDocumentOrigin.LOCAL_FILE,
+          origin_key: originKey,
+          local_filepath: filePath,
+          local_mtime: fileStat.mtime.toISOString(),
+          filename: entry,
+          mime_type: mimeType,
+          file_size_bytes: fileStat.size,
+          storage_path: storagePath,
+          status: "active",
+        })
+        .returning({ id: source_documents.id });
 
-    if (docError || !doc) {
-      console.error(`[SCANNER] Failed to create source_document for ${entry}:`, docError?.message);
+      if (!doc) throw new Error("insert de source_document não devolveu linha");
+      documentId = doc.id;
+    } catch (err) {
+      console.error(
+        `[SCANNER] Failed to create source_document for ${entry}:`,
+        mensagemDeErro(err),
+      );
       continue;
     }
 
     // Criar ingestion_job
-    const { error: jobError } = await supabase.from("ingestion_jobs").insert({
-      run_id: runId,
-      user_id: userId,
-      source_document_id: doc.id,
-      status: IngestionJobStatus.DISCOVERED,
-      metadata: { filename: entry, origin: "local_scanner" },
-    });
+    const requires = resolveFileRequires(entry, fileBuffer);
+    if (capabilities) {
+      const semAtendimento = capacidadesNaoAtendidas(requires, capabilities);
+      if (semAtendimento.length > 0) {
+        console.warn(
+          `[SCANNER] ⚠️  ${entry} exige [${semAtendimento.join(", ")}] — nenhum worker deste host anuncia essa capacidade; o job só sai da fila se outro host oferecer.`,
+        );
+      }
+    }
 
-    if (jobError) {
-      console.error(`[SCANNER] Failed to create job for ${entry}:`, jobError.message);
+    try {
+      await enqueueJob({
+        db,
+        runId,
+        userId,
+        sourceDocumentId: documentId,
+        status: IngestionJobStatus.DISCOVERED,
+        requires,
+        metadata: { filename: entry, origin: "local_scanner" },
+      });
+    } catch (err) {
+      console.error(`[SCANNER] Failed to create job for ${entry}:`, mensagemDeErro(err));
       continue;
     }
 
@@ -235,14 +294,20 @@ export async function scanDirectory(
 
   // Finalizar run
   if (!dryRun && runId !== "dry-run") {
-    await supabase
-      .from("ingestion_runs")
-      .update({
-        status: IngestionRunStatus.COMPLETED,
-        completed_at: new Date().toISOString(),
-        stats: { discovered, directory: dirPath },
-      })
-      .eq("id", runId);
+    try {
+      await db
+        .update(ingestion_runs)
+        .set({
+          status: IngestionRunStatus.COMPLETED,
+          completed_at: new Date().toISOString(),
+          stats: { discovered, directory: dirPath },
+        })
+        .where(eq(ingestion_runs.id, runId));
+    } catch (err) {
+      // O scan já aconteceu; só o registro do desfecho se perde. Derrubar o
+      // processo aqui transformaria um scan bem-sucedido em erro.
+      console.error("[SCANNER] Failed to finalize run:", mensagemDeErro(err));
+    }
   }
 
   return discovered;

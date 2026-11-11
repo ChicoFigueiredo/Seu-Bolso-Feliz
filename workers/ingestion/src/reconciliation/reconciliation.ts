@@ -13,7 +13,15 @@
  * Nenhuma regra é aplicada automaticamente: o resultado orienta o usuário.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import {
+  draft_records,
+  recurring_instances,
+  recurring_templates,
+  source_documents,
+  transactions,
+  type Database,
+} from "@sbf/db";
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -80,13 +88,13 @@ function competenceKey(date: string): string {
 /**
  * Busca candidatos de reconciliação para os dados extraídos de um documento.
  *
- * @param supabase  Cliente Supabase autenticado
+ * @param db        Instância Drizzle
  * @param userId    ID do usuário dono do draft
  * @param draftData Dados do draft (draft_data JSONB) a ser conciliado
  * @param sourceDocumentId  ID do source_document (para checar duplicate hash)
  */
 export async function findReconciliationCandidates(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   draftData: Record<string, unknown>,
   sourceDocumentId: string | null,
@@ -125,33 +133,45 @@ export async function findReconciliationCandidates(
 
   // ── Regra 1: Duplicate hash ────────────────────────────────────────────
   if (sourceDocumentId) {
-    const { data: srcDoc } = await supabase
-      .from("source_documents")
-      .select("content_hash")
-      .eq("id", sourceDocumentId)
-      .single();
+    const [srcDoc] = await db
+      .select({ content_hash: source_documents.content_hash })
+      .from(source_documents)
+      .where(eq(source_documents.id, sourceDocumentId))
+      .limit(1);
 
     if (srcDoc?.content_hash) {
-      const { data: dupes } = await supabase
-        .from("source_documents")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("content_hash", srcDoc.content_hash)
-        .neq("id", sourceDocumentId)
+      const dupes = await db
+        .select({ id: source_documents.id })
+        .from(source_documents)
+        .where(
+          and(
+            eq(source_documents.user_id, userId),
+            eq(source_documents.content_hash, srcDoc.content_hash),
+            ne(source_documents.id, sourceDocumentId),
+          ),
+        )
         .limit(3);
 
-      if (dupes && dupes.length > 0) {
+      if (dupes.length > 0) {
         // Buscar drafts aprovados originados desses documentos
         const dupeDocIds = dupes.map((d) => d.id);
-        const { data: dupeDrafts } = await supabase
-          .from("draft_records")
-          .select("id, draft_data, created_at")
-          .eq("user_id", userId)
-          .in("source_document_id", dupeDocIds)
-          .in("status", ["approved", "posted"])
+        const dupeDrafts = await db
+          .select({
+            id: draft_records.id,
+            draft_data: draft_records.draft_data,
+            created_at: draft_records.created_at,
+          })
+          .from(draft_records)
+          .where(
+            and(
+              eq(draft_records.user_id, userId),
+              inArray(draft_records.source_document_id, dupeDocIds),
+              inArray(draft_records.status, ["approved", "posted"]),
+            ),
+          )
           .limit(1);
 
-        if (dupeDrafts && dupeDrafts.length > 0) {
+        if (dupeDrafts.length > 0) {
           const dd = dupeDrafts[0]!;
           const ddData = dd.draft_data as Record<string, unknown>;
           candidates.push({
@@ -182,29 +202,43 @@ export async function findReconciliationCandidates(
       .toISOString()
       .split("T")[0];
 
-    const { data: txns } = (await (
-      supabase as unknown as Record<string, unknown>["from"] extends never ? never : typeof supabase
-    )
-      .from("transactions" as never)
-      .select("id, amount, transaction_date, supplier_name, category")
-      .eq("user_id", userId)
-      .eq("supplier_id", supplierId)
-      .gte("transaction_date", fromDate!)
-      .lte("transaction_date", toDate!)
-      .limit(10)) as unknown as {
-      data: Array<{
-        id: string;
-        amount: number;
-        transaction_date: string;
-        supplier_name: string | null;
-        category: string | null;
-      }> | null;
-    };
+    let txns: Array<{
+      id: string;
+      amount: number;
+      event_date: string;
+      category_id: string | null;
+    }>;
+    try {
+      txns = await db
+        .select({
+          id: transactions.id,
+          amount: transactions.amount,
+          event_date: transactions.event_date,
+          category_id: transactions.category_id,
+        })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.user_id, userId),
+            eq(transactions.supplier_id, supplierId),
+            gte(transactions.event_date, fromDate!),
+            lte(transactions.event_date, toDate!),
+          ),
+        )
+        .limit(10);
+    } catch (err) {
+      throw new Error(
+        `findReconciliationCandidates (regra 2): ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
 
-    for (const txn of txns ?? []) {
-      if (!amountWithinPct(amount, txn.amount)) continue;
+    for (const txn of txns) {
+      // `transactions.amount` é nullable no schema; uma transação sem valor
+      // não tem como casar por valor, então não é candidata.
+      if (txn.amount === null || !amountWithinPct(amount, txn.amount)) continue;
 
-      const isExact = dateWithinDays(dueDate, txn.transaction_date, 7);
+      const isExact = dateWithinDays(dueDate, txn.event_date, 7);
       candidates.push({
         transactionId: txn.id,
         recurringTemplateId: null,
@@ -215,9 +249,9 @@ export async function findReconciliationCandidates(
           : `Transação com mesmo fornecedor e valor semelhante (data difere).`,
         candidateData: {
           amount: txn.amount,
-          date: txn.transaction_date,
-          supplierName: txn.supplier_name,
-          category: txn.category,
+          date: txn.event_date,
+          supplierName: supplierName,
+          category: txn.category_id,
         },
       });
     }
@@ -225,40 +259,61 @@ export async function findReconciliationCandidates(
 
   // ── Regra 3: Match por recorrência (template mensal mesmo competence) ──
   if (supplierId && competenceDate) {
-    const { data: templates } = (await (supabase as unknown as typeof supabase)
-      .from("recurring_templates" as never)
-      .select("id, name, amount, frequency, supplier_id")
-      .eq("user_id", userId)
-      .eq("supplier_id", supplierId)
-      .eq("is_active", true)
-      .eq("frequency", "monthly")
-      .limit(5)) as unknown as {
-      data: Array<{
-        id: string;
-        name: string;
-        amount: number;
-        frequency: string;
-        supplier_id: string;
-      }> | null;
-    };
+    const templates = await db
+      .select({
+        id: recurring_templates.id,
+        name: recurring_templates.name,
+        amount: recurring_templates.amount,
+        frequency: recurring_templates.frequency,
+        supplier_id: recurring_templates.supplier_id,
+      })
+      .from(recurring_templates)
+      .where(
+        and(
+          eq(recurring_templates.user_id, userId),
+          eq(recurring_templates.supplier_id, supplierId),
+          eq(recurring_templates.is_active, true),
+          eq(recurring_templates.frequency, "monthly"),
+        ),
+      )
+      .limit(5);
 
-    for (const tpl of templates ?? []) {
-      if (amount !== null && !amountWithinPct(amount, tpl.amount, 0.15)) continue;
+    for (const tpl of templates) {
+      // `recurring_templates.amount` é nullable (template de valor variável):
+      // nesse caso não há valor para comparar, e o match segue valendo pelo
+      // fornecedor — que é justamente o ponto de um template variável.
+      if (amount !== null && tpl.amount !== null && !amountWithinPct(amount, tpl.amount, 0.15)) {
+        continue;
+      }
 
       // Verificar se já existe instância no mesmo mês/ano
       const compKey = competenceKey(competenceDate);
-      const { data: instances } = (await (supabase as unknown as typeof supabase)
-        .from("recurring_instances" as never)
-        .select("id, due_date, status")
-        .eq("user_id", userId)
-        .eq("template_id", tpl.id)
-        .gte("due_date", `${compKey}-01`)
-        .lte("due_date", `${compKey}-31`)
-        .limit(1)) as unknown as {
-        data: Array<{ id: string; due_date: string; status: string }> | null;
-      };
+      let instances: Array<{ id: string; expected_date: string; status: string }>;
+      try {
+        instances = await db
+          .select({
+            id: recurring_instances.id,
+            expected_date: recurring_instances.expected_date,
+            status: recurring_instances.status,
+          })
+          .from(recurring_instances)
+          .where(
+            and(
+              eq(recurring_instances.user_id, userId),
+              eq(recurring_instances.recurring_template_id, tpl.id),
+              gte(recurring_instances.expected_date, `${compKey}-01`),
+              lte(recurring_instances.expected_date, `${compKey}-31`),
+            ),
+          )
+          .limit(1);
+      } catch (err) {
+        throw new Error(
+          `findReconciliationCandidates (regra 3): ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
 
-      const hasInstance = instances && instances.length > 0;
+      const hasInstance = instances.length > 0;
       candidates.push({
         transactionId: null,
         recurringTemplateId: tpl.id,
@@ -269,7 +324,7 @@ export async function findReconciliationCandidates(
           : `Template recorrente "${tpl.name}" corresponde ao fornecedor (sem instância confirmada).`,
         candidateData: {
           amount: tpl.amount,
-          date: hasInstance ? instances![0]!.due_date : null,
+          date: hasInstance ? instances[0]!.expected_date : null,
           supplierName: supplierName,
           category: null,
         },

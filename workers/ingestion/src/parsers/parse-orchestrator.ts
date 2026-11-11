@@ -3,9 +3,13 @@
  * Coordena: download → extração de texto → detecção de parser → parsing → persistência.
  * Implementa os itens 4.1-4.7 do checklist.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { desc, eq } from "drizzle-orm";
+import { extraction_results, parsed_document_versions, type Database } from "@sbf/db";
+
+/** O tipo que o schema declara para as colunas jsonb tocadas aqui. */
+type JsonColumn = (typeof parsed_document_versions.$inferInsert)["metadata"];
 import { IngestionLogLevel, ParserType } from "@sbf/ingestion-types";
-import { extractText, PdfPasswordRequiredError } from "./text-extractor";
+import { extractText, PdfPasswordRequiredError, type TextExtractResult } from "./text-extractor";
 import { listPdfPasswordCandidates, markSecretUsed } from "./secret-lookup";
 import { isCemig, parseCemig } from "./cemig-parser";
 import { parseBoleto } from "./boleto-parser";
@@ -16,7 +20,7 @@ import { resolveFieldConsensus, toFieldCandidates, type FieldCandidate } from ".
 import { writeLog, type LogContext } from "../logger";
 
 interface ParseContext {
-  supabase: SupabaseClient;
+  db: Database;
   ctx: LogContext;
   userId: string;
   sourceDocumentId: string;
@@ -157,6 +161,78 @@ function evaluateDetectionConfidence(
 }
 
 /**
+ * Extrai o texto do documento, tentando as senhas cadastradas quando o PDF é
+ * protegido. Devolve `null` quando o documento não pôde ser aberto — cabe ao
+ * chamador gravar a versão "somente texto bruto" nesse caso.
+ *
+ * Estar numa função à parte não é só arrumação: com o `try`/`catch` embutido em
+ * `parseDocument`, o TypeScript não conseguia provar que as cinco saídas
+ * (`text`, `pages`, `wasProtected`, `extractionMethod`, `ocrApplied`) estavam
+ * atribuídas em todo caminho que chega ao fim do bloco — ele não correlaciona o
+ * `opened` do laço com as atribuições feitas dentro dele — e acusava TS2454 em
+ * cada uso. Devolvendo um objeto, essa garantia passa a ser parte do tipo.
+ */
+async function extractTextWithStoredPasswords(
+  pctx: ParseContext,
+  fileData: ArrayBuffer,
+): Promise<TextExtractResult | null> {
+  const { db, ctx, userId, mimeType } = pctx;
+
+  try {
+    return await extractText(fileData, mimeType);
+  } catch (err) {
+    if (!(err instanceof PdfPasswordRequiredError)) throw err;
+
+    await writeLog(db, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
+
+    const candidates = await listPdfPasswordCandidates(db, userId);
+    if (candidates.length === 0) {
+      await writeLog(db, ctx, IngestionLogLevel.WARN, "Sem senha encontrada para PDF protegido");
+      return null;
+    }
+
+    // Neste ponto o fornecedor ainda é desconhecido — estamos ANTES de
+    // conseguir ler o documento — então tentamos as candidatas em ordem de
+    // uso recente. A anterior desistia após a primeira, o que fazia com que
+    // um usuário com mais de uma senha nunca abrisse a segunda fatura.
+    for (const candidate of candidates) {
+      let retryResult: TextExtractResult;
+      try {
+        retryResult = await extractText(fileData, mimeType, candidate.value);
+      } catch {
+        // Senha errada: seguir para a próxima. O valor nunca é registrado.
+        continue;
+      }
+
+      // Sobe na ordem para o próximo documento resolver na 1ª tentativa.
+      // Falhar aqui não invalida a extração — o documento já foi aberto —,
+      // então o erro vira aviso e o fluxo segue com o texto obtido.
+      try {
+        await markSecretUsed(db, userId, candidate.secretId);
+      } catch (markErr) {
+        const msg = markErr instanceof Error ? markErr.message : String(markErr);
+        await writeLog(
+          db,
+          ctx,
+          IngestionLogLevel.WARN,
+          `Não foi possível registrar o uso da senha do PDF: ${msg}`,
+        );
+      }
+
+      return { ...retryResult, wasProtected: true };
+    }
+
+    await writeLog(
+      db,
+      ctx,
+      IngestionLogLevel.WARN,
+      `Nenhuma das ${candidates.length} senha(s) cadastrada(s) abriu o documento`,
+    );
+    return null;
+  }
+}
+
+/**
  * Pipeline completo de parsing para um documento.
  * 1. Download do storage
  * 2. Tentativa de extração de texto (com retry + senha se necessário)
@@ -168,81 +244,23 @@ export async function parseDocument(
   pctx: ParseContext,
   fileData: ArrayBuffer,
 ): Promise<ParseResult> {
-  const { supabase, ctx, userId, sourceDocumentId, mimeType } = pctx;
+  const { db, ctx, userId, sourceDocumentId } = pctx;
 
   // ── 1. Extração de texto ──
-  let text: string;
-  let pages: number;
-  let wasProtected: boolean;
-  let extractionMethod: string;
-  let ocrApplied: boolean;
-
-  try {
-    const result = await extractText(fileData, mimeType);
-    text = result.text;
-    pages = result.pages;
-    wasProtected = result.wasProtected;
-    extractionMethod = result.extractionMethod;
-    ocrApplied = result.ocrApplied;
-  } catch (err) {
-    if (err instanceof PdfPasswordRequiredError) {
-      await writeLog(supabase, ctx, IngestionLogLevel.INFO, "PDF protegido. Buscando senha...");
-
-      const candidates = await listPdfPasswordCandidates(supabase, userId);
-      if (candidates.length === 0) {
-        await writeLog(
-          supabase,
-          ctx,
-          IngestionLogLevel.WARN,
-          "Sem senha encontrada para PDF protegido",
-        );
-        return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
-      }
-
-      // Neste ponto o fornecedor ainda é desconhecido — estamos ANTES de
-      // conseguir ler o documento — então tentamos as candidatas em ordem de
-      // uso recente. A anterior desistia após a primeira, o que fazia com que
-      // um usuário com mais de uma senha nunca abrisse a segunda fatura.
-      let opened = false;
-      for (const candidate of candidates) {
-        try {
-          const retryResult = await extractText(fileData, mimeType, candidate.value);
-          text = retryResult.text;
-          pages = retryResult.pages;
-          wasProtected = true;
-          extractionMethod = retryResult.extractionMethod;
-          ocrApplied = retryResult.ocrApplied;
-          opened = true;
-          // Sobe na ordem para o próximo documento resolver na 1ª tentativa.
-          await markSecretUsed(supabase, userId, candidate.secretId);
-          break;
-        } catch {
-          // Senha errada: seguir para a próxima. O valor nunca é registrado.
-          continue;
-        }
-      }
-
-      if (!opened) {
-        await writeLog(
-          supabase,
-          ctx,
-          IngestionLogLevel.WARN,
-          `Nenhuma das ${candidates.length} senha(s) cadastrada(s) abriu o documento`,
-        );
-        return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
-      }
-    } else {
-      throw err;
-    }
+  const extraction = await extractTextWithStoredPasswords(pctx, fileData);
+  if (extraction === null) {
+    return saveRawOnlyVersion(pctx, "", 0, ParserType.LOCAL_TEXT, 0);
   }
 
-  if (!text || text.trim().length === 0) {
-    await writeLog(supabase, ctx, IngestionLogLevel.WARN, "Texto vazio após extração");
-    return saveRawOnlyVersion(pctx, "", pages ?? 0, ParserType.LOCAL_TEXT, 0);
+  const { text, pages, wasProtected, extractionMethod, ocrApplied } = extraction;
+
+  if (text.trim().length === 0) {
+    await writeLog(db, ctx, IngestionLogLevel.WARN, "Texto vazio após extração");
+    return saveRawOnlyVersion(pctx, "", pages, ParserType.LOCAL_TEXT, 0);
   }
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `Texto extraído: ${text.length} chars, ${pages} páginas${wasProtected ? " (PDF protegido)" : ""}`,
@@ -263,7 +281,7 @@ export async function parseDocument(
     extractionData = cemigResult as unknown as Record<string, unknown>;
     confidence = cemigResult.confidence;
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       `Parser CEMIG detectado (confiança: ${(confidence * 100).toFixed(0)}%)`,
@@ -276,7 +294,7 @@ export async function parseDocument(
       extractionData = boletoResult as unknown as Record<string, unknown>;
       confidence = boletoResult.confidence;
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.INFO,
         `Parser boleto genérico (confiança: ${(confidence * 100).toFixed(0)}%)`,
@@ -292,7 +310,7 @@ export async function parseDocument(
 
   if (diagnostics) {
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       `Detecção determinística: cobertura crítica ${diagnostics.criticalDetected}/${diagnostics.criticalTotal}, confiança normalizada ${(diagnostics.normalizedConfidence * 100).toFixed(0)}%`,
@@ -305,7 +323,7 @@ export async function parseDocument(
   if (extractionData) {
     const detectedType = detectDocumentType(extractionData);
     const patternMatch = await findMatchingPattern(
-      supabase,
+      db,
       userId,
       detectedType,
       null, // supplier_id resolvido na fase de draft — ainda não disponível aqui
@@ -321,7 +339,7 @@ export async function parseDocument(
         confidence = patternMatch.confidence;
       }
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.INFO,
         `Padrão aplicado: "${patternMatch.patternName}" v${patternMatch.version} ` +
@@ -332,7 +350,7 @@ export async function parseDocument(
 
   if (extractionData) {
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       "Campos extraídos do documento",
@@ -375,7 +393,7 @@ export async function parseDocument(
     );
 
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       `Template local aplicado: ${templateMatch.templateId} (confiança ${(templateMatch.confidence * 100).toFixed(0)}%)`,
@@ -411,7 +429,7 @@ export async function parseDocument(
     );
 
     await writeLog(
-      supabase,
+      db,
       ctx,
       IngestionLogLevel.INFO,
       `Boleto validado por boleto-utils (tipo: ${boletoUtilsMatch.boletoType ?? "desconhecido"})`,
@@ -454,7 +472,7 @@ export async function parseDocument(
       overallConfidence: consensus.overallConfidence,
     };
 
-    await writeLog(supabase, ctx, IngestionLogLevel.INFO, "Consenso por campo aplicado", {
+    await writeLog(db, ctx, IngestionLogLevel.INFO, "Consenso por campo aplicado", {
       consensus_overall_confidence: consensus.overallConfidence,
       source_per_field: consensus.sourcePerField,
       confidence_per_field: consensus.confidencePerField,
@@ -462,49 +480,49 @@ export async function parseDocument(
   }
 
   // ── 3. Persistir parsed_document_version ──
-  const { data: lastVersion } = await supabase
-    .from("parsed_document_versions")
-    .select("version_number")
-    .eq("source_document_id", sourceDocumentId)
-    .order("version_number", { ascending: false })
-    .limit(1)
-    .single();
+  // `.limit(1)` no lugar do `.single()` do PostgREST: o documento pode não
+  // ter nenhuma versão ainda, e o `.single()` tratava isso como erro
+  // silenciado pelo destructuring.
+  const [lastVersion] = await db
+    .select({ version_number: parsed_document_versions.version_number })
+    .from(parsed_document_versions)
+    .where(eq(parsed_document_versions.source_document_id, sourceDocumentId))
+    .orderBy(desc(parsed_document_versions.version_number))
+    .limit(1);
 
   const versionNumber = (lastVersion?.version_number ?? 0) + 1;
 
-  const { data: parsedVersion, error: pvError } = await supabase
-    .from("parsed_document_versions")
-    .insert({
-      source_document_id: sourceDocumentId,
-      user_id: userId,
-      version_number: versionNumber,
-      parser_type: parserType,
-      parser_version: "1.0.0",
-      raw_text: text,
-      structured_data: extractionData,
-      confidence_score: confidence,
-      metadata: {
-        pages,
-        was_protected: wasProtected,
-        text_length: text.length,
-        extraction_method: extractionMethod,
-        ocr_applied: ocrApplied,
-        detection_diagnostics: diagnostics,
-        field_consensus: consensusMeta,
-      },
-    })
-    .select("id")
-    .single();
-
-  if (pvError || !parsedVersion) {
-    await writeLog(
-      supabase,
-      ctx,
-      IngestionLogLevel.ERROR,
-      `Falha ao salvar parsed_version: ${pvError?.message}`,
-    );
-    throw new Error(`Falha ao salvar parsed_version: ${pvError?.message}`);
+  let parsedVersion: { id: string } | undefined;
+  try {
+    [parsedVersion] = await db
+      .insert(parsed_document_versions)
+      .values({
+        source_document_id: sourceDocumentId,
+        user_id: userId,
+        version_number: versionNumber,
+        parser_type: parserType,
+        parser_version: "1.0.0",
+        raw_text: text,
+        structured_data: extractionData as JsonColumn,
+        confidence_score: confidence,
+        metadata: {
+          pages,
+          was_protected: wasProtected,
+          text_length: text.length,
+          extraction_method: extractionMethod,
+          ocr_applied: ocrApplied,
+          detection_diagnostics: diagnostics,
+          field_consensus: consensusMeta,
+        } as JsonColumn,
+      })
+      .returning({ id: parsed_document_versions.id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await writeLog(db, ctx, IngestionLogLevel.ERROR, `Falha ao salvar parsed_version: ${msg}`);
+    throw new Error(`Falha ao salvar parsed_version: ${msg}`, { cause: err });
   }
+
+  if (!parsedVersion) throw new Error("Falha ao salvar parsed_version: insert não devolveu linha");
 
   const parsedVersionId = parsedVersion.id;
 
@@ -515,53 +533,54 @@ export async function parseDocument(
     const ed = extractionData as Record<string, unknown>;
     const consumption = ed.consumption as { kwh?: number; days?: number } | undefined;
 
-    const { data: exResult, error: exError } = await supabase
-      .from("extraction_results")
-      .insert({
-        parsed_version_id: parsedVersionId,
-        user_id: userId,
-        supplier_name_raw: (ed.supplierNameRaw as string) ?? null,
-        competence_date: (ed.competenceDate as string) ?? null,
-        due_date: (ed.dueDate as string) ?? null,
-        total_amount: (ed.totalAmount as number) ?? null,
-        document_number: (ed.documentNumber as string) ?? null,
-        contract_identifier: (ed.contractIdentifier as string) ?? null,
-        consumption_data: consumption ? { kwh: consumption.kwh, days: consumption.days } : null,
-        breakdown: (ed.breakdown as Record<string, number>) ?? null,
-        category_suggestion: suggestCategory(ed),
-        tags_suggestion: suggestTags(ed),
-        priority_suggestion: "alta",
-        metadata: {
-          parser_type: parserType,
-          parser_version: "1.0.0",
-          detection_diagnostics: diagnostics,
-          source_per_field: consensusMeta?.sourcePerField ?? null,
-          confidence_per_field: consensusMeta?.confidencePerField ?? null,
-          field_decisions: consensusMeta?.decisions ?? null,
-          // Campos sem coluna dedicada — disponíveis para a camada de IA
-          deterministic_extras: {
-            supplier_cnpj: (ed.supplierCnpj as string) ?? null,
-            barcode_digitable_line: (ed.barcodeDigitableLine as string) ?? null,
-          },
-        },
-      })
-      .select("id")
-      .single();
+    try {
+      const [exResult] = await db
+        .insert(extraction_results)
+        .values({
+          parsed_version_id: parsedVersionId,
+          user_id: userId,
+          supplier_name_raw: (ed.supplierNameRaw as string) ?? null,
+          competence_date: (ed.competenceDate as string) ?? null,
+          due_date: (ed.dueDate as string) ?? null,
+          total_amount: (ed.totalAmount as number) ?? null,
+          document_number: (ed.documentNumber as string) ?? null,
+          contract_identifier: (ed.contractIdentifier as string) ?? null,
+          consumption_data: consumption
+            ? ({ kwh: consumption.kwh, days: consumption.days } as JsonColumn)
+            : null,
+          breakdown: ((ed.breakdown as Record<string, number>) ?? null) as JsonColumn,
+          category_suggestion: suggestCategory(ed),
+          tags_suggestion: suggestTags(ed),
+          priority_suggestion: "alta",
+          metadata: {
+            parser_type: parserType,
+            parser_version: "1.0.0",
+            detection_diagnostics: diagnostics,
+            source_per_field: consensusMeta?.sourcePerField ?? null,
+            confidence_per_field: consensusMeta?.confidencePerField ?? null,
+            field_decisions: consensusMeta?.decisions ?? null,
+            // Campos sem coluna dedicada — disponíveis para a camada de IA
+            deterministic_extras: {
+              supplier_cnpj: (ed.supplierCnpj as string) ?? null,
+              barcode_digitable_line: (ed.barcodeDigitableLine as string) ?? null,
+            },
+          } as JsonColumn,
+        })
+        .returning({ id: extraction_results.id });
 
-    if (exError) {
+      extractionResultId = exResult?.id ?? null;
+    } catch (err) {
       await writeLog(
-        supabase,
+        db,
         ctx,
         IngestionLogLevel.WARN,
-        `Falha ao salvar extraction_result: ${exError.message}`,
+        `Falha ao salvar extraction_result: ${err instanceof Error ? err.message : String(err)}`,
       );
-    } else {
-      extractionResultId = exResult?.id ?? null;
     }
   }
 
   await writeLog(
-    supabase,
+    db,
     ctx,
     IngestionLogLevel.INFO,
     `Parsing v${versionNumber} concluído: ${parserType}, confiança ${(confidence * 100).toFixed(0)}%`,
@@ -584,34 +603,43 @@ async function saveRawOnlyVersion(
   parserType: string,
   confidence: number,
 ): Promise<ParseResult> {
-  const { supabase, userId, sourceDocumentId } = pctx;
+  const { db, userId, sourceDocumentId } = pctx;
 
-  const { data: lastVersion } = await supabase
-    .from("parsed_document_versions")
-    .select("version_number")
-    .eq("source_document_id", sourceDocumentId)
-    .order("version_number", { ascending: false })
-    .limit(1)
-    .single();
+  // `.limit(1)` no lugar do `.single()` do PostgREST: o documento pode não
+  // ter nenhuma versão ainda, e o `.single()` tratava isso como erro
+  // silenciado pelo destructuring.
+  const [lastVersion] = await db
+    .select({ version_number: parsed_document_versions.version_number })
+    .from(parsed_document_versions)
+    .where(eq(parsed_document_versions.source_document_id, sourceDocumentId))
+    .orderBy(desc(parsed_document_versions.version_number))
+    .limit(1);
 
   const versionNumber = (lastVersion?.version_number ?? 0) + 1;
 
-  const { data: pv, error } = await supabase
-    .from("parsed_document_versions")
-    .insert({
-      source_document_id: sourceDocumentId,
-      user_id: userId,
-      version_number: versionNumber,
-      parser_type: parserType,
-      parser_version: "1.0.0",
-      raw_text: rawText,
-      confidence_score: confidence,
-      metadata: { pages, needs_manual_review: true },
-    })
-    .select("id")
-    .single();
+  let pv: { id: string } | undefined;
+  try {
+    [pv] = await db
+      .insert(parsed_document_versions)
+      .values({
+        source_document_id: sourceDocumentId,
+        user_id: userId,
+        version_number: versionNumber,
+        parser_type: parserType,
+        parser_version: "1.0.0",
+        raw_text: rawText,
+        confidence_score: confidence,
+        metadata: { pages, needs_manual_review: true } as JsonColumn,
+      })
+      .returning({ id: parsed_document_versions.id });
+  } catch (err) {
+    throw new Error(
+      `Falha ao salvar parsed_version: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
 
-  if (error || !pv) throw new Error(`Falha ao salvar parsed_version: ${error?.message}`);
+  if (!pv) throw new Error("Falha ao salvar parsed_version: insert não devolveu linha");
 
   return {
     parsedVersionId: pv.id,

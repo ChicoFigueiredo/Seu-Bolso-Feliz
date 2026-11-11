@@ -1,0 +1,80 @@
+/**
+ * O pouco de CSS que a tela Documentos não consegue escrever em estilo inline.
+ *
+ * Só entra aqui o que depende de media query ou de pseudo-estado — o resto do
+ * visual vem dos componentes do @sbf/design-system. O breakpoint é o mesmo do
+ * shell (900px), para que "mobile" signifique a mesma coisa nas duas camadas.
+ */
+
+/**
+ * O botão de capturar comprovante, flutuando acima do BottomNav.
+ *
+ * Existe porque a ação principal desta tela precisa continuar sob o polegar
+ * depois de rolar uma caixa de entrada longa — o cartão de captura, que fica no
+ * topo, some da vista. Fica à direita para não disputar espaço com o `+`
+ * central do shell, que é outra ação ("registrar lançamento").
+ *
+ * O `bottom` soma a altura do BottomNav (~78px, o mesmo valor que
+ * shell.module.css reserva) à área segura do home indicator do iOS. O z-index
+ * fica abaixo do 40 do BottomNav e do 50 da folha "Mais": este botão flutua
+ * sobre o conteúdo, nunca sobre a navegação.
+ */
+.acaoFlutuante {
+  display: none;
+}
+
+@media (max-width: 899.98px) {
+  .acaoFlutuante {
+    display: flex;
+    position: fixed;
+    right: 16px;
+    bottom: calc(90px + env(safe-area-inset-bottom));
+    z-index: 30;
+  }
+}
+
+/* O cartão de captura já é a ação primária no desktop, onde nada rola para
+ * fora da vista tão rápido; ali o botão flutuante seria ruído. */
+.somenteDesktop {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .somenteDesktop {
+    display: block;
+  }
+}
+
+/**
+ * Véu + folha de detalhe. O `Sheet` do design system se posiciona relativo ao
+ * pai, então é este contêiner que o prende à tela inteira — mesma solução da
+ * folha "Mais" do shell.
+ *
+ * `align-items: stretch` (o padrão, explicitado aqui porque é carregado de
+ * intenção) faz a caixa externa do Sheet ocupar a tela toda. Sem isso ela teria
+ * só a altura do conteúdo, e o véu escuro — que é `inset: 0` dela — cobriria um
+ * retângulo no rodapé em vez da tela. O Sheet já alinha o cartão embaixo por
+ * conta própria.
+ */
+.folhaSobreposta {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+/* Some visualmente sem sair da árvore de acessibilidade: o input de arquivo
+ * precisa continuar acionável pelo clique programático do botão. */
+.entradaEscondida {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

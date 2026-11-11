@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -19,28 +21,35 @@ export default async function ReportsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const supabase = await createClient();
+  const { ownerId } = await requireUser();
+  const db = getDb();
 
   // O cálculo do ciclo mora em @sbf/domain — ver report-period.ts para o
   // porquê de a versão inline anterior ter sido removida.
-  const { data: prefs } =
-    params.mode === "financial_period"
-      ? await supabase
-          .from("user_financial_preferences")
-          .select("financial_cycle_start_day")
-          .maybeSingle()
-      : { data: null };
+  let cycleStartDay: number | null | undefined;
+  if (params.mode === "financial_period") {
+    // Sem RLS, o filtro por dono precisa estar explícito — antes vinha de
+    // graça da policy de `user_financial_preferences`.
+    const [pref] = await db
+      .select({
+        financial_cycle_start_day: schema.user_financial_preferences.financial_cycle_start_day,
+      })
+      .from(schema.user_financial_preferences)
+      .where(eq(schema.user_financial_preferences.user_id, ownerId))
+      .limit(1);
+    cycleStartDay = pref?.financial_cycle_start_day;
+  }
 
-  const { from, to } = resolverIntervalo(params, prefs?.financial_cycle_start_day);
+  const { from, to } = resolverIntervalo(params, cycleStartDay);
 
   const supplierId = params.supplier || null;
 
   // Fetch suppliers for the filter dropdown
-  const suppliersRes = await supabase
-    .from("suppliers")
-    .select("id, name")
-    .eq("is_active", true)
-    .order("name");
+  const suppliersRows = await db
+    .select({ id: schema.suppliers.id, name: schema.suppliers.name })
+    .from(schema.suppliers)
+    .where(and(eq(schema.suppliers.user_id, ownerId), eq(schema.suppliers.is_active, true)))
+    .orderBy(asc(schema.suppliers.name));
 
   // Despesas vêm de `v_expenses_deduplicated`, não de `transactions` cru.
   //
@@ -52,55 +61,68 @@ export default async function ReportsPage({
   //
   // A view já filtra por tipo de despesa; não há coluna `type` para filtrar
   // aqui, e não deve haver.
-  const expensesQ = supabase
-    .from("v_expenses_deduplicated")
-    .select("canonical_id, amount, description, event_date, supplier_id, category_id")
-    .gte("event_date", from)
-    .lte("event_date", to);
+  const expenseConditions: SQL[] = [
+    eq(schema.v_expenses_deduplicated.user_id, ownerId),
+    gte(schema.v_expenses_deduplicated.event_date, from),
+    lte(schema.v_expenses_deduplicated.event_date, to),
+  ];
 
   // Receita continua em `transactions`: a view é de despesas.
-  const incomeQ = supabase
-    .from("transactions")
-    .select("amount")
-    .eq("type", "income")
-    .gte("event_date", from)
-    .lte("event_date", to);
+  const incomeConditions: SQL[] = [
+    eq(schema.transactions.user_id, ownerId),
+    eq(schema.transactions.type, "income"),
+    gte(schema.transactions.event_date, from),
+    lte(schema.transactions.event_date, to),
+  ];
 
-  const byTypeQ = supabase
-    .from("transactions")
-    .select("type, amount")
-    .gte("event_date", from)
-    .lte("event_date", to);
-
-  const categoriesQ = supabase.from("categories").select("id, name");
+  const byTypeConditions: SQL[] = [
+    eq(schema.transactions.user_id, ownerId),
+    gte(schema.transactions.event_date, from),
+    lte(schema.transactions.event_date, to),
+  ];
 
   // Apply supplier filter when selected
   if (supplierId) {
-    expensesQ.eq("supplier_id", supplierId);
-    incomeQ.eq("supplier_id", supplierId);
-    byTypeQ.eq("supplier_id", supplierId);
+    expenseConditions.push(eq(schema.v_expenses_deduplicated.supplier_id, supplierId));
+    incomeConditions.push(eq(schema.transactions.supplier_id, supplierId));
+    byTypeConditions.push(eq(schema.transactions.supplier_id, supplierId));
   }
 
-  const [incomeRes, expensesRes, byTypeRes, categoriesRes] = await Promise.all([
-    incomeQ,
-    expensesQ,
-    byTypeQ,
-    categoriesQ,
+  const [incomeRows, despesas, byTypeRows, categoriesRows] = await Promise.all([
+    db
+      .select({ amount: schema.transactions.amount })
+      .from(schema.transactions)
+      .where(and(...incomeConditions)),
+    db
+      .select({
+        canonical_id: schema.v_expenses_deduplicated.canonical_id,
+        amount: schema.v_expenses_deduplicated.amount,
+        description: schema.v_expenses_deduplicated.description,
+        event_date: schema.v_expenses_deduplicated.event_date,
+        supplier_id: schema.v_expenses_deduplicated.supplier_id,
+        category_id: schema.v_expenses_deduplicated.category_id,
+      })
+      .from(schema.v_expenses_deduplicated)
+      .where(and(...expenseConditions)),
+    db
+      .select({ type: schema.transactions.type, amount: schema.transactions.amount })
+      .from(schema.transactions)
+      .where(and(...byTypeConditions)),
+    // Sem RLS, o filtro por dono precisa estar explícito — antes vinha de
+    // graça da policy de `categories`.
+    db
+      .select({ id: schema.categories.id, name: schema.categories.name })
+      .from(schema.categories)
+      .where(eq(schema.categories.user_id, ownerId)),
   ]);
-
-  const despesas = expensesRes.data ?? [];
 
   // A view não embute `categories(name)` nem `suppliers(name)`: o PostgREST só
   // faz embed onde há chave estrangeira declarada, e uma view não tem. Os nomes
   // são resolvidos por mapa, com uma consulta cada.
-  const nomeDaCategoria = new Map(
-    (categoriesRes.data ?? []).map((c) => [c.id as string, c.name as string]),
-  );
-  const nomeDoFornecedor = new Map(
-    (suppliersRes.data ?? []).map((s) => [s.id as string, s.name as string]),
-  );
+  const nomeDaCategoria = new Map(categoriesRows.map((c) => [c.id, c.name]));
+  const nomeDoFornecedor = new Map(suppliersRows.map((s) => [s.id, s.name]));
 
-  const totalIncome = (incomeRes.data ?? []).reduce((s, r) => s + r.amount, 0);
+  const totalIncome = incomeRows.reduce((s, r) => s + r.amount, 0);
   const totalExpense = despesas.reduce((s, r) => s + Number(r.amount), 0);
   const balance = totalIncome - totalExpense;
 
@@ -136,7 +158,7 @@ export default async function ReportsPage({
 
   // Group by type
   const typeMap = new Map<string, number>();
-  for (const row of byTypeRes.data ?? []) {
+  for (const row of byTypeRows) {
     typeMap.set(row.type, (typeMap.get(row.type) ?? 0) + row.amount);
   }
 
@@ -163,7 +185,7 @@ export default async function ReportsPage({
 
       <ReportFilters
         current={{ mode: params.mode, from, to, supplier: supplierId ?? undefined }}
-        suppliers={suppliersRes.data ?? []}
+        suppliers={suppliersRows}
       />
 
       {/* Summary cards */}
@@ -316,11 +338,11 @@ export default async function ReportsPage({
           <CardDescription>Top 10 despesas do período</CardDescription>
         </CardHeader>
         <CardContent>
-          {(topExpensesRes.data ?? []).length === 0 ? (
+          {topExpensesRes.data.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhuma despesa neste período.</p>
           ) : (
             <div className="space-y-2">
-              {(topExpensesRes.data ?? []).map((t, i) => (
+              {topExpensesRes.data.map((t, i) => (
                 <div
                   key={i}
                   className="flex items-center justify-between border-b py-2 last:border-0"

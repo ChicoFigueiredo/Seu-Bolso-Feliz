@@ -2,7 +2,13 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { getFinancialProducts } from "@/app/actions/financial-products";
+import { getInstitutions } from "@/app/actions/institutions";
+import {
+  getRecurringTemplate,
+  updateRecurringTemplate,
+  deleteRecurringTemplate,
+} from "@/app/actions/recurring";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +39,6 @@ import Link from "next/link";
 export default function EditRecurringPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -55,43 +60,42 @@ export default function EditRecurringPage({ params }: { params: Promise<{ id: st
   >([]);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("recurring_templates").select("*").eq("id", id).single(),
-      supabase.from("financial_products").select("id, name, institutions(name)"),
-    ]).then(([{ data: t }, { data: prods }]) => {
-      if (t) {
-        setForm({
-          name: t.name,
-          type: t.type,
-          frequency: t.frequency,
-          day_of_month: t.day_of_month ? String(t.day_of_month) : "",
-          amount: t.amount ? String(t.amount) : "",
-          is_variable_amount: t.is_variable_amount,
-          financial_product_id: t.financial_product_id ?? "",
-          priority: t.priority ?? "",
-          starts_at: t.starts_at ?? "",
-          ends_at: t.ends_at ?? "",
-          notes: t.notes ?? "",
-          is_active: t.is_active,
-        });
-      }
-      setProducts(
-        (prods ?? []).map((p) => ({
-          id: p.id,
-          name: p.name,
-          institution_name: (p.institutions as { name: string } | null)?.name ?? "",
-        })),
-      );
-      setLoading(false);
-    });
-  }, [id, supabase]);
+    Promise.all([getRecurringTemplate(id), getFinancialProducts(), getInstitutions()]).then(
+      ([t, prods, institutions]) => {
+        if (t) {
+          setForm({
+            name: t.name,
+            type: t.type,
+            frequency: t.frequency,
+            day_of_month: t.day_of_month ? String(t.day_of_month) : "",
+            amount: t.amount ? String(t.amount) : "",
+            is_variable_amount: t.is_variable_amount,
+            financial_product_id: t.financial_product_id ?? "",
+            priority: t.priority ?? "",
+            starts_at: t.starts_at ?? "",
+            ends_at: t.ends_at ?? "",
+            notes: t.notes ?? "",
+            is_active: t.is_active,
+          });
+        }
+        const institutionNameById = new Map(institutions.map((i) => [i.id, i.name]));
+        setProducts(
+          prods.map((p) => ({
+            id: p.id,
+            name: p.name,
+            institution_name: institutionNameById.get(p.institution_id) ?? "",
+          })),
+        );
+        setLoading(false);
+      },
+    );
+  }, [id]);
 
   async function handleUpdate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
-    const { error } = await supabase
-      .from("recurring_templates")
-      .update({
+    try {
+      await updateRecurringTemplate(id, {
         name: form.name,
         type: form.type,
         frequency: form.frequency,
@@ -104,23 +108,27 @@ export default function EditRecurringPage({ params }: { params: Promise<{ id: st
         ends_at: form.ends_at || null,
         notes: form.notes || null,
         is_active: form.is_active,
-      })
-      .eq("id", id);
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao atualizar", { description: error.message });
-    } else {
+      });
       toast.success("Template atualizado");
       router.push("/dashboard/recurring");
+    } catch (error) {
+      toast.error("Erro ao atualizar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleDelete() {
-    const { error } = await supabase.from("recurring_templates").delete().eq("id", id);
-    if (error) toast.error("Erro ao excluir", { description: error.message });
-    else {
+    try {
+      await deleteRecurringTemplate(id);
       toast.success("Template excluído");
       router.push("/dashboard/recurring");
+    } catch (error) {
+      toast.error("Erro ao excluir", {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -152,14 +160,15 @@ export default function EditRecurringPage({ params }: { params: Promise<{ id: st
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Confirmar exclusão</DialogTitle>
+              <DialogTitle>Desativar esta recorrente?</DialogTitle>
               <DialogDescription>
-                As instâncias vinculadas também serão removidas.
+                Ela para de gerar novos lançamentos. O histórico já registrado e as instâncias
+                existentes continuam onde estão — nada é apagado.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="destructive" onClick={handleDelete}>
-                Sim, excluir
+                Sim, desativar
               </Button>
             </DialogFooter>
           </DialogContent>

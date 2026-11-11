@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { createInstitution } from "@/app/actions/institutions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,18 +36,12 @@ export default function NewInstitutionPage() {
     const name = formData.get("name") as string;
     const type = formData.get("type") as string;
 
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    const { error } = await supabase.from("institutions").insert({ name, type, user_id: user.id });
-
-    if (error) {
-      toast.error("Erro ao criar instituição", { description: error.message });
+    try {
+      await createInstitution({ name, type });
+    } catch (error) {
+      toast.error("Erro ao criar instituição", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }

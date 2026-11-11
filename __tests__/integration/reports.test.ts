@@ -11,273 +11,253 @@
  *
  * A view `v_expenses_deduplicated` já existia e implementava a regra certa.
  * Ninguém a chamava.
+ *
+ * Sem RLS, o `where user_id = ...` da consulta à view deixou de ser cerimônia:
+ * é ele que separa este arquivo dos outros que compartilham o mesmo banco.
+ *
+ * Requer o Postgres de teste — ver `__tests__/helpers/db.ts`.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
-const SUPABASE_SERVICE_KEY = exigirSupabaseSecretKey();
-
-/**
- * A chave secreta local é fixa (mesmo valor em qualquer máquina, sai de
- * `supabase status`), mas não pode ficar hardcoded aqui: o padrão
- * `sb_secret_...` aciona o secret scanning do GitHub mesmo sendo local.
- * O CI exporta SUPABASE_SECRET_KEY logo após subir o Supabase local.
- */
-function exigirSupabaseSecretKey(): string {
-  const key = process.env.SUPABASE_SECRET_KEY;
-  if (!key) {
-    throw new Error(
-      "SUPABASE_SECRET_KEY não definida. Rode `supabase status` e copie SECRET_KEY para .env.",
-    );
-  }
-  return key;
-}
+import { sql } from "drizzle-orm";
+import { cards, financial_products, institutions, statement_cycles, type Database } from "@sbf/db";
+import { getTestDb, limparPorUsuario, linha, linhas, semBancoDeTeste } from "../helpers/db";
 
 const DE = "2026-03-01";
 const ATE = "2026-03-31";
 
-let supabase: SupabaseClient;
-let userId: string;
+const USER_ID = "20000000-0000-4000-8000-000000000001";
+
+/** Filhas antes das pais — sem cascade de `auth.users` para socorrer. */
+const TABELAS = [
+  "statement_items",
+  "transactions",
+  "statement_cycles",
+  "cards",
+  "financial_products",
+  "institutions",
+] as const;
+
+let db: Database;
 let productId: string;
 let cardId: string;
 let cycleId: string;
 
-async function limpar() {
-  for (const tabela of [
-    "statement_items",
-    "transactions",
-    "statement_cycles",
-    "cards",
-    "financial_products",
-    "institutions",
-  ]) {
-    const { error } = await supabase.from(tabela).delete().eq("user_id", userId);
-    if (error) throw new Error(`limpar ${tabela}: ${error.message}`);
-  }
+interface Despesa {
+  canonical_id: string;
+  source_type: string;
+  amount: number | string;
+  description: string | null;
 }
 
-beforeAll(async () => {
-  supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const email = "test-reports@sbf.local";
-  const senha = "TestPass123!";
-  const criado = await supabase.auth.admin.createUser({
-    email,
-    password: senha,
-    email_confirm: true,
-  });
-
-  if (criado.data?.user?.id) {
-    userId = criado.data.user.id;
-  } else {
-    // O usuário já existe de uma execução anterior. `listUsers()` pagina em 50
-    // e os arquivos de integração criam usuários próprios, então procurar na
-    // primeira página é uma aposta que falha assim que a suíte cresce — o
-    // login devolve o id sem depender de paginação.
-    const entrou = await supabase.auth.signInWithPassword({ email, password: senha });
-    if (!entrou.data?.user?.id) {
-      throw new Error(
-        `não foi possível obter o usuário de teste: ${criado.error?.message ?? entrou.error?.message}`,
-      );
-    }
-    userId = entrou.data.user.id;
-  }
-
-  await limpar();
-
-  const { data: inst } = await supabase
-    .from("institutions")
-    .insert({ user_id: userId, name: "Banco Relatórios" })
-    .select("id")
-    .single();
-
-  const { data: prod } = await supabase
-    .from("financial_products")
-    .insert({
-      user_id: userId,
-      institution_id: inst!.id,
-      name: "Cartão Relatórios",
-      type: "credit_card",
-    })
-    .select("id")
-    .single();
-  productId = prod!.id as string;
-
-  const { data: card } = await supabase
-    .from("cards")
-    .insert({ user_id: userId, financial_product_id: productId, closing_day: 20, due_day: 28 })
-    .select("id")
-    .single();
-  cardId = card!.id as string;
-
-  const { data: cycle, error: cycleErr } = await supabase
-    .from("statement_cycles")
-    .insert({
-      user_id: userId,
-      card_id: cardId,
-      reference_month: "2026-03-01",
-      cycle_start_date: "2026-02-21",
-      cycle_end_date: "2026-03-20",
-      due_date: "2026-03-28",
-      status: "open",
-    })
-    .select("id")
-    .single();
-  if (cycleErr) throw new Error(`statement_cycles: ${cycleErr.message}`);
-  cycleId = cycle!.id as string;
-});
-
-afterAll(async () => {
-  await limpar();
-});
-
-async function despesasDoPeriodo() {
-  const { data, error } = await supabase
-    .from("v_expenses_deduplicated")
-    .select("canonical_id, source_type, amount, description")
-    .eq("user_id", userId)
-    .gte("event_date", DE)
-    .lte("event_date", ATE);
-
-  if (error) throw new Error(`view: ${error.message}`);
-  return data ?? [];
+async function despesasDoPeriodo(): Promise<Despesa[]> {
+  return linhas<Despesa>(
+    db,
+    sql`select canonical_id, source_type, amount, description
+          from public.v_expenses_deduplicated
+         where user_id = ${USER_ID}::uuid
+           and event_date >= ${DE}::date
+           and event_date <= ${ATE}::date`,
+  );
 }
 
-const somar = (linhas: { amount: number | string }[]) =>
-  linhas.reduce((s, r) => s + Number(r.amount), 0);
+const somar = (linhasDespesa: { amount: number | string }[]) =>
+  linhasDespesa.reduce((s, r) => s + Number(r.amount), 0);
 
-describe("v_expenses_deduplicated — a fatura não é contada em dobro", () => {
-  it("item de fatura JÁ lançado como transação conta uma vez só", async () => {
-    const { data: tx } = await supabase
-      .from("transactions")
-      .insert({
-        user_id: userId,
-        financial_product_id: productId,
+async function inserirTransacao(valores: {
+  type: string;
+  amount: number;
+  event_date: string;
+  description: string;
+}): Promise<string> {
+  const row = await linha<{ id: string }>(
+    db,
+    sql`insert into public.transactions
+          (user_id, financial_product_id, type, amount, event_date, description)
+        values (${USER_ID}::uuid, ${productId}::uuid, ${valores.type}, ${valores.amount},
+                ${valores.event_date}::date, ${valores.description})
+        returning id`,
+  );
+  return row!.id;
+}
+
+async function inserirItemDeFatura(valores: {
+  transactionId: string | null;
+  amount: number;
+  transaction_date: string;
+  description: string;
+}): Promise<void> {
+  await db.execute(sql`
+    insert into public.statement_items
+      (user_id, statement_cycle_id, transaction_id, amount, transaction_date, description)
+    values (${USER_ID}::uuid, ${cycleId}::uuid, ${valores.transactionId}::uuid,
+            ${valores.amount}, ${valores.transaction_date}::date, ${valores.description})
+  `);
+}
+
+describe.skipIf(semBancoDeTeste)(
+  "v_expenses_deduplicated — a fatura não é contada em dobro",
+  () => {
+    beforeAll(async () => {
+      db = getTestDb();
+      await limparPorUsuario(db, TABELAS, USER_ID);
+
+      const [inst] = await db
+        .insert(institutions)
+        .values({ user_id: USER_ID, name: "Banco Relatórios" })
+        .returning({ id: institutions.id });
+
+      const [prod] = await db
+        .insert(financial_products)
+        .values({
+          user_id: USER_ID,
+          institution_id: inst!.id,
+          name: "Cartão Relatórios",
+          type: "credit_card",
+        })
+        .returning({ id: financial_products.id });
+      productId = prod!.id;
+
+      const [card] = await db
+        .insert(cards)
+        .values({
+          user_id: USER_ID,
+          financial_product_id: productId,
+          closing_day: 20,
+          due_day: 28,
+        })
+        .returning({ id: cards.id });
+      cardId = card!.id;
+
+      const [cycle] = await db
+        .insert(statement_cycles)
+        .values({
+          user_id: USER_ID,
+          card_id: cardId,
+          reference_month: "2026-03-01",
+          cycle_start_date: "2026-02-21",
+          cycle_end_date: "2026-03-20",
+          due_date: "2026-03-28",
+          status: "open",
+        })
+        .returning({ id: statement_cycles.id });
+      cycleId = cycle!.id;
+    });
+
+    afterAll(async () => {
+      await limparPorUsuario(db, TABELAS, USER_ID);
+    });
+
+    it("item de fatura JÁ lançado como transação conta uma vez só", async () => {
+      const txId = await inserirTransacao({
         type: "expense",
         amount: 250,
         event_date: "2026-03-05",
         description: "Mercado",
-      })
-      .select("id")
-      .single();
+      });
 
-    const { error } = await supabase.from("statement_items").insert({
-      user_id: userId,
-      statement_cycle_id: cycleId,
-      transaction_id: tx!.id,
-      amount: 250,
-      transaction_date: "2026-03-05",
-      description: "Mercado",
-    });
-    if (error) throw new Error(`statement_items: ${error.message}`);
+      await inserirItemDeFatura({
+        transactionId: txId,
+        amount: 250,
+        transaction_date: "2026-03-05",
+        description: "Mercado",
+      });
 
-    const despesas = await despesasDoPeriodo();
+      const despesas = await despesasDoPeriodo();
 
-    expect(despesas).toHaveLength(1);
-    expect(despesas[0]!.source_type).toBe("transaction");
-    expect(somar(despesas)).toBe(250);
-  });
-
-  it("item de fatura AINDA NÃO lançado conta como despesa", async () => {
-    // Sem isto, tudo que estivesse na fatura e ainda não tivesse virado
-    // transação simplesmente sumiria do relatório.
-    const { error } = await supabase.from("statement_items").insert({
-      user_id: userId,
-      statement_cycle_id: cycleId,
-      transaction_id: null,
-      amount: 80,
-      transaction_date: "2026-03-07",
-      description: "Farmácia",
-    });
-    if (error) throw new Error(`statement_items: ${error.message}`);
-
-    const despesas = await despesasDoPeriodo();
-
-    expect(despesas).toHaveLength(2);
-    expect(somar(despesas)).toBe(330);
-    expect(despesas.find((d) => d.description === "Farmácia")!.source_type).toBe("statement_item");
-  });
-
-  it("o pagamento da fatura NÃO entra como despesa", async () => {
-    // A terceira contagem: pagar a fatura não é gastar de novo o que já foi
-    // gasto. É este lançamento que dobrava o mês inteiro do cartão.
-    await supabase.from("transactions").insert({
-      user_id: userId,
-      financial_product_id: productId,
-      type: "statement_payment",
-      amount: 330,
-      event_date: "2026-03-28",
-      description: "Pagamento da fatura",
+      expect(despesas).toHaveLength(1);
+      expect(despesas[0]!.source_type).toBe("transaction");
+      expect(somar(despesas)).toBe(250);
     });
 
-    const despesas = await despesasDoPeriodo();
+    it("item de fatura AINDA NÃO lançado conta como despesa", async () => {
+      // Sem isto, tudo que estivesse na fatura e ainda não tivesse virado
+      // transação simplesmente sumiria do relatório.
+      await inserirItemDeFatura({
+        transactionId: null,
+        amount: 80,
+        transaction_date: "2026-03-07",
+        description: "Farmácia",
+      });
 
-    expect(somar(despesas)).toBe(330);
-    expect(despesas.some((d) => d.description === "Pagamento da fatura")).toBe(false);
-  });
+      const despesas = await despesasDoPeriodo();
 
-  it("estorno e transferência também ficam de fora", async () => {
-    await supabase.from("transactions").insert([
-      {
-        user_id: userId,
-        financial_product_id: productId,
-        type: "refund",
-        amount: 50,
-        event_date: "2026-03-10",
-        description: "Estorno",
-      },
-      {
-        user_id: userId,
-        financial_product_id: productId,
-        type: "transfer",
-        amount: 1000,
-        event_date: "2026-03-11",
-        description: "Transferência entre contas",
-      },
-    ]);
+      expect(despesas).toHaveLength(2);
+      expect(somar(despesas)).toBe(330);
+      expect(despesas.find((d) => d.description === "Farmácia")!.source_type).toBe(
+        "statement_item",
+      );
+    });
 
-    expect(somar(await despesasDoPeriodo())).toBe(330);
-  });
+    it("o pagamento da fatura NÃO entra como despesa", async () => {
+      // A terceira contagem: pagar a fatura não é gastar de novo o que já foi
+      // gasto. É este lançamento que dobrava o mês inteiro do cartão.
+      await inserirTransacao({
+        type: "statement_payment",
+        amount: 330,
+        event_date: "2026-03-28",
+        description: "Pagamento da fatura",
+      });
 
-  it("taxa e juros contam — são despesa de verdade", async () => {
-    await supabase.from("transactions").insert([
-      {
-        user_id: userId,
-        financial_product_id: productId,
+      const despesas = await despesasDoPeriodo();
+
+      expect(somar(despesas)).toBe(330);
+      expect(despesas.some((d) => d.description === "Pagamento da fatura")).toBe(false);
+    });
+
+    it("estorno, entrada, ajuste e pagamento de dívida também ficam de fora", async () => {
+      // Esta asserção era vazia até agora. A versão anterior inseria um
+      // `refund` e um `transfer` de uma vez só, sem checar o erro devolvido —
+      // e `transfer` NÃO é um tipo válido de `transactions` (transferência tem
+      // tabela própria, `public.transfers`). O check constraint recusava a
+      // instrução inteira, nenhuma das duas linhas entrava, e o teste
+      // "confirmava" que a view ignora movimentações que nunca existiram.
+      //
+      // Agora entram os quatro tipos que o schema realmente admite e que a view
+      // precisa deixar de fora, um insert por vez, com o erro propagando.
+      for (const [type, description] of [
+        ["refund", "Estorno"],
+        ["income", "Salário"],
+        ["adjustment", "Ajuste de saldo"],
+        ["liability_payment", "Parcela do financiamento"],
+      ] as const) {
+        await inserirTransacao({ type, amount: 1000, event_date: "2026-03-11", description });
+      }
+
+      expect(somar(await despesasDoPeriodo())).toBe(330);
+    });
+
+    it("taxa e juros contam — são despesa de verdade", async () => {
+      await inserirTransacao({
         type: "fee",
         amount: 12,
         event_date: "2026-03-12",
         description: "Anuidade",
-      },
-      {
-        user_id: userId,
-        financial_product_id: productId,
+      });
+      await inserirTransacao({
         type: "interest_charge",
         amount: 8,
         event_date: "2026-03-13",
         description: "Juros do rotativo",
-      },
-    ]);
+      });
 
-    expect(somar(await despesasDoPeriodo())).toBe(350);
-  });
+      expect(somar(await despesasDoPeriodo())).toBe(350);
+    });
 
-  it("a soma crua de transactions diverge da view — é a medida do defeito", async () => {
-    const { data: cru } = await supabase
-      .from("transactions")
-      .select("amount")
-      .eq("user_id", userId)
-      .in("type", ["expense", "fee", "interest_charge"])
-      .gte("event_date", DE)
-      .lte("event_date", ATE);
+    it("a soma crua de transactions diverge da view — é a medida do defeito", async () => {
+      const cru = await linhas<{ amount: string }>(
+        db,
+        sql`select amount from public.transactions
+           where user_id = ${USER_ID}::uuid
+             and type in ('expense', 'fee', 'interest_charge')
+             and event_date >= ${DE}::date
+             and event_date <= ${ATE}::date`,
+      );
 
-    // 250 + 12 + 8 = 270 no cru, contra 350 na view: o cru perde a compra de
-    // fatura ainda não lançada (80) — e, num mês com mais itens de fatura já
-    // conciliados, passaria a contar cada um deles duas vezes.
-    expect(somar(cru ?? [])).toBe(270);
-    expect(somar(await despesasDoPeriodo())).toBe(350);
-  });
-});
+      // 250 + 12 + 8 = 270 no cru, contra 350 na view: o cru perde a compra de
+      // fatura ainda não lançada (80) — e, num mês com mais itens de fatura já
+      // conciliados, passaria a contar cada um deles duas vezes.
+      expect(somar(cru)).toBe(270);
+      expect(somar(await despesasDoPeriodo())).toBe(350);
+    });
+  },
+);

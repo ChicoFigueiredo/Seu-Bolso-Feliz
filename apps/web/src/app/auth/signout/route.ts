@@ -1,9 +1,13 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { fechaSessao } from "@/lib/auth";
+import { origemDe } from "@/lib/auth/url";
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
-  const { origin } = new URL(request.url);
-  return NextResponse.redirect(`${origin}/login`);
+export async function POST(request: NextRequest) {
+  await fechaSessao();
+  return NextResponse.redirect(new URL("/login", origemDe(request)), { status: 303 });
+}
+
+// Sair por GET seria disparado por qualquer <img> apontando para cá.
+export async function GET(request: NextRequest) {
+  return NextResponse.redirect(new URL("/login", origemDe(request)));
 }

@@ -1,0 +1,90 @@
+/**
+ * Alternância desktop/mobile do shell de navegação.
+ *
+ * Decisão: troca por media query em CSS puro, não por hook de JS. Assim o
+ * layout certo já sai no HTML da primeira resposta (sem flash do layout
+ * errado) e continua funcionando se o JavaScript demorar para hidratar — algo
+ * que importa de verdade num PWA que promete abrir rápido.
+ *
+ * O breakpoint (900px) é o mesmo em todo o arquivo: abaixo dele o app é
+ * "mobile" (MobileHeader + BottomNav), no ou acima dele é "desktop"
+ * (AppSidebar + TopBar). Os slots que participam de um flex layout (sidebar,
+ * topbar/header) usam `display: contents` quando visíveis, para que o
+ * elemento real do design system (que já define seu próprio `flex`/`display`
+ * inline) vire o item de flex direto do container pai — a div deste módulo
+ * só existe para a media query, não para o layout em si.
+ */
+
+.desktopSlot {
+  display: none;
+}
+
+.mobileSlot {
+  display: contents;
+}
+
+@media (min-width: 900px) {
+  .desktopSlot {
+    display: contents;
+  }
+
+  .mobileSlot {
+    display: none;
+  }
+}
+
+/* BottomNav não é item de flex de ninguém: flutua fixo sobre o conteúdo,
+ * por isso não usa `contents` — precisa da própria caixa para se posicionar. */
+.mobileBottomNavSlot {
+  display: none;
+}
+
+@media (max-width: 899.98px) {
+  .mobileBottomNavSlot {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+  }
+}
+
+.shellRoot {
+  display: flex;
+  min-height: 100dvh;
+  width: 100%;
+}
+
+.mainColumn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mainContent {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Reserva espaço para o BottomNav fixo (altura ~64px + a bolha do FAB) para o
+ * conteúdo não nascer escondido atrás dele, respeitando a área segura do
+ * home indicator do iOS. */
+@media (max-width: 899.98px) {
+  .mainContent {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+}
+
+/* A folha "Mais" cobre a tela inteira por cima de tudo, inclusive do
+ * BottomNav — sem isto ela nasceria atrás dele. */
+.moreSheetOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.hiddenSignOutForm {
+  display: none;
+}

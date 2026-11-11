@@ -5,10 +5,10 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@sbf/db": "workspace:*",
     "@sbf/ingestion-types": "workspace:*",
     "@sbf/worker-gmail-scanner": "workspace:*",
     "@sbf/worker-ingestion": "workspace:*",
-    "@sbf/worker-local-scanner": "workspace:*",
-    "@supabase/supabase-js": "^2.110.9"
+    "@sbf/worker-local-scanner": "workspace:*"
   }
 }

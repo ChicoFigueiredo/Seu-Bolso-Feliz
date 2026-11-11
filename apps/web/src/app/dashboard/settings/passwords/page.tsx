@@ -1,19 +1,14 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
 import { listSecrets } from "@/app/actions/secrets";
+import { getSuppliers } from "@/app/actions/suppliers";
 import { Button } from "@/components/ui/button";
 import { SecretsManager } from "./secrets-manager";
 
 export const metadata = { title: "Senhas de documentos" };
 
 export default async function PasswordsPage() {
-  const supabase = await createClient();
-
-  const [secrets, fornecedores] = await Promise.all([
-    listSecrets(),
-    supabase.from("suppliers").select("id, name").eq("is_active", true).order("name"),
-  ]);
+  const [secrets, fornecedores] = await Promise.all([listSecrets(), getSuppliers(true)]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -31,7 +26,7 @@ export default async function PasswordsPage() {
         </p>
       </div>
 
-      <SecretsManager secrets={secrets} fornecedores={fornecedores.data ?? []} />
+      <SecretsManager secrets={secrets} fornecedores={fornecedores} />
     </div>
   );
 }

@@ -2,7 +2,10 @@
  * @sbf/worker-ingestion — Logger estruturado
  * Escreve logs tanto no console quanto na tabela ingestion_logs.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { ingestion_logs, type Database } from "@sbf/db";
+
+/** O tipo que o schema declara para a coluna jsonb. */
+type JsonColumn = (typeof ingestion_logs.$inferInsert)["details"];
 import { IngestionLogLevel } from "@sbf/ingestion-types";
 
 export interface LogContext {
@@ -12,7 +15,7 @@ export interface LogContext {
 }
 
 export async function writeLog(
-  supabase: SupabaseClient,
+  db: Database,
   ctx: LogContext,
   level: (typeof IngestionLogLevel)[keyof typeof IngestionLogLevel],
   message: string,
@@ -23,13 +26,16 @@ export async function writeLog(
   console.log(`${prefix} ${message}`, details ?? "");
 
   try {
-    await supabase.from("ingestion_logs").insert({
+    await db.insert(ingestion_logs).values({
       user_id: ctx.userId,
       run_id: ctx.runId ?? null,
       job_id: ctx.jobId ?? null,
       level,
       message,
-      details: details ?? null,
+      // `details` é sempre um objeto de log montado aqui no código, nunca um
+      // valor arbitrário do usuário — o cast só reconcilia `unknown` com o
+      // `Json` recursivo que o schema declara.
+      details: (details ?? null) as JsonColumn,
       created_at: timestamp,
     });
   } catch {

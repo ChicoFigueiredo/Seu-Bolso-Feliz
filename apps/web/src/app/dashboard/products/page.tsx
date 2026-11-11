@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { Plus, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,21 +20,33 @@ const productTypeLabels: Record<string, string> = {
   checking_account: "Conta Corrente",
   savings_account: "Poupança",
   credit_card: "Cartão de Crédito",
-  debit_card: "Cartão de Débito",
   investment: "Investimento",
-  loan: "Empréstimo",
   mortgage: "Financiamento",
-  insurance: "Seguro",
   overdraft: "Cheque Especial",
   other: "Outro",
 };
 
 export default async function ProductsPage() {
-  const supabase = await createClient();
-  const { data: products } = await supabase
-    .from("financial_products")
-    .select("*, institutions(name)")
-    .order("institution_id, name");
+  const user = await requireUser();
+  const db = getDb();
+  const products = await db
+    .select({
+      id: schema.financial_products.id,
+      name: schema.financial_products.name,
+      type: schema.financial_products.type,
+      current_balance: schema.financial_products.current_balance,
+      institution_name: schema.institutions.name,
+    })
+    .from(schema.financial_products)
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.institutions.id, schema.financial_products.institution_id),
+        eq(schema.institutions.user_id, user.ownerId),
+      ),
+    )
+    .where(eq(schema.financial_products.user_id, user.ownerId))
+    .orderBy(asc(schema.financial_products.institution_id), asc(schema.financial_products.name));
 
   return (
     <div className="space-y-6">
@@ -49,7 +63,7 @@ export default async function ProductsPage() {
         </Button>
       </div>
 
-      {(products ?? []).length === 0 ? (
+      {products.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Wallet className="mb-4 size-12 text-muted-foreground" />
@@ -79,12 +93,10 @@ export default async function ProductsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(products ?? []).map((prod) => (
+                {products.map((prod) => (
                   <TableRow key={prod.id}>
                     <TableCell className="font-medium">{prod.name}</TableCell>
-                    <TableCell>
-                      {(prod.institutions as { name: string } | null)?.name ?? "—"}
-                    </TableCell>
+                    <TableCell>{prod.institution_name ?? "—"}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{productTypeLabels[prod.type] ?? prod.type}</Badge>
                     </TableCell>

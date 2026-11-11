@@ -6,8 +6,8 @@ body:
     attributes:
       value: |
         > ⚠️ **Este repositório é público.** Não inclua caminhos com dados
-        > pessoais, valores reais, nomes de instituições, ids de projeto
-        > Supabase, chaves ou trechos de documentos financeiros.
+        > pessoais, valores reais, nomes de instituições, ids de projeto de
+        > infraestrutura, chaves ou trechos de documentos financeiros.
 
   - type: input
     id: parent

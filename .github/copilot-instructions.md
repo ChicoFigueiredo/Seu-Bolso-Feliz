@@ -13,7 +13,7 @@ Olá! Este documento serve como guia completo para o desenvolvimento do projeto 
 ### Escopo do Projeto
 
 - Desenvolvimento do **Seu Bolso Feliz**, um sistema web/mobile de **organização financeira pessoal** com foco em controle patrimonial, despesas recorrentes, cartões e faturas, múltiplos bancos e produtos, empréstimos, financiamento habitacional, histórico financeiro, documentos/anexos, categorização/etiquetagem flexível e priorização de pagamentos.
-- Plataforma **multiplataforma**: web (React/Next.js/TailwindCSS), mobile (React Native/Expo), e backend com **Supabase** (Postgres, Auth, RLS, Storage, Edge Functions) + **Bun** como runtime para lógica local, ferramentas de desenvolvimento e scripts.
+- Plataforma **multiplataforma**: web (React/Next.js/TailwindCSS), mobile (React Native/Expo), e backend com **Postgres** (Neon/Drizzle), autenticação própria e storage de arquivos no Vercel Blob + **Bun** como runtime para lógica local, ferramentas de desenvolvimento e scripts.
 - Arquitetura **serverless-first**, evitando VPS no início, priorizando baixo custo operacional e simplicidade de manutenção.
 - Foco em **experiência do usuário** excepcional, acessibilidade e design adequado a produto financeiro.
 - Futura integração com **IA** (classificação automática, leitura de documentos, assistente conversacional) e **MCP/agentes**.
@@ -283,7 +283,7 @@ ${EDITOR:-nano} "$FILE"
 
 #### Backend / Dados / Auth / Storage
 
-- **Supabase** como backend principal: Postgres, Auth, RLS, Storage, Edge Functions, rotinas agendadas server-side
+- **Neon** (Postgres) via Drizzle ORM, autenticação própria e storage de objetos S3-compatível via `@sbf/storage`
 - **Bun** como runtime para scripts, ferramentas locais e lógica de desenvolvimento
 
 ### Coerência entre Web e Mobile
@@ -440,7 +440,7 @@ Categoria principal, tags múltiplas por entidade, prioridade de pagamento (camp
 
 ### H. Documentos e anexos
 
-Armazenamento no Supabase Storage, vínculo com entidades, versionamento, classificação por tipo, tratamento de PDFs protegidos.
+Armazenamento em bucket de objetos, vínculo com entidades, versionamento, classificação por tipo, tratamento de PDFs protegidos.
 
 ### I. Segredos e segurança
 
@@ -540,7 +540,7 @@ A equipe deve evitar:
 - jogar segredos em tabela comum;
 - construir arquitetura complexa demais para fase inicial;
 - ignorar modelagem de ciclos financeiros personalizados;
-- escolher stack visual sem justificar aderência a React + Next.js + Tailwind + Supabase;
+- escolher stack visual sem justificar aderência a React + Next.js + Tailwind;
 - propor design system incompatível com evolução coerente entre web e mobile;
 - confundir categoria com tag;
 - tratar prioridade de pagamento apenas como detalhe visual.

@@ -1,4 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, eq } from "drizzle-orm";
+import { getLiabilityInstallments } from "@/app/actions/liabilities";
 import Link from "next/link";
 import { ArrowLeft, Landmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,27 +29,48 @@ const installmentStatusLabels: Record<string, string> = {
 
 export default async function LiabilityDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const { ownerId } = await requireUser();
+  const db = getDb();
 
-  const { data: liability } = await supabase
-    .from("liabilities")
-    .select("*, financial_products(name, institutions(name))")
-    .eq("id", id)
-    .single();
+  const [liability] = await db
+    .select({
+      id: schema.liabilities.id,
+      name: schema.liabilities.name,
+      type: schema.liabilities.type,
+      original_amount: schema.liabilities.original_amount,
+      outstanding_balance: schema.liabilities.outstanding_balance,
+      interest_rate: schema.liabilities.interest_rate,
+      rate_type: schema.liabilities.rate_type,
+      amortization_system: schema.liabilities.amortization_system,
+      total_installments: schema.liabilities.total_installments,
+      paid_installments: schema.liabilities.paid_installments,
+      start_date: schema.liabilities.start_date,
+      end_date: schema.liabilities.end_date,
+      product_name: schema.financial_products.name,
+      institution_name: schema.institutions.name,
+    })
+    .from(schema.liabilities)
+    .leftJoin(
+      schema.financial_products,
+      and(
+        eq(schema.financial_products.id, schema.liabilities.financial_product_id),
+        eq(schema.financial_products.user_id, ownerId),
+      ),
+    )
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.institutions.id, schema.financial_products.institution_id),
+        eq(schema.institutions.user_id, ownerId),
+      ),
+    )
+    .where(and(eq(schema.liabilities.id, id), eq(schema.liabilities.user_id, ownerId)));
 
   if (!liability) redirect("/dashboard/liabilities");
 
-  const { data: installments } = await supabase
-    .from("liability_installments")
-    .select("*")
-    .eq("liability_id", id)
-    .order("installment_number");
+  const installments = await getLiabilityInstallments(id);
 
-  const fp = liability.financial_products as {
-    name: string;
-    institutions: { name: string } | null;
-  } | null;
-  const prodLabel = `${fp?.institutions?.name ?? ""} ${fp?.name ?? ""}`.trim();
+  const prodLabel = `${liability.institution_name ?? ""} ${liability.product_name ?? ""}`.trim();
   const progress = liability.total_installments
     ? Math.round((liability.paid_installments / liability.total_installments) * 100)
     : 0;
@@ -155,7 +179,7 @@ export default async function LiabilityDetailPage({ params }: { params: Promise<
           <CardTitle>Cronograma de Parcelas</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(installments ?? []).length === 0 ? (
+          {installments.length === 0 ? (
             <p className="p-6 text-center text-muted-foreground">
               Nenhuma parcela registrada ainda.
             </p>
@@ -174,7 +198,7 @@ export default async function LiabilityDetailPage({ params }: { params: Promise<
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(installments ?? []).map((inst) => {
+                {installments.map((inst) => {
                   const overdue = isOverdue(inst.due_date) && inst.status !== "paid";
                   return (
                     <TableRow

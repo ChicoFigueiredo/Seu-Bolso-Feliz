@@ -9,10 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Bot, Send, Loader2, AlertCircle, User, Wrench, Plus, Paperclip } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
-import { createClient } from "@/lib/supabase/client";
+import { uploadDocument } from "@/app/actions/ingestion";
 import { toast } from "sonner";
 import { useChatContext } from "@/contexts/chat-context";
 import { ACCEPT_UPLOAD } from "@sbf/contracts";
+import { getOrCreateChatSession } from "@/app/actions/chat-sessions";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -68,24 +69,12 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
   }, [open, pendingMessage, append, setPendingMessage]);
 
   async function createSession() {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (supabase as any)
-      .from("ai_chat_sessions")
-      .insert({
-        user_id: user.id,
-        title: "Nova conversa",
-        context_type: "general",
-      })
-      .select("id")
-      .single();
-
-    if (data) setSessionId(data.id);
+    try {
+      const session = await getOrCreateChatSession();
+      setSessionId(session.id);
+    } catch (err) {
+      console.error("Falha ao criar sessão de chat:", err);
+    }
   }
 
   const handleNewSession = useCallback(() => {
@@ -108,39 +97,36 @@ export function AIChatDrawer({ open, onOpenChange }: AIChatDrawerProps) {
       }
 
       setUploading(true);
-      const supabase = createClient();
-      const uploadedPaths: string[] = [];
+
+      // Sobe pela Server Action, não do navegador para o storage: é ela que
+      // deduplica por hash, registra o documento e enfileira o job. Nenhuma
+      // credencial de storage precisa existir no cliente.
       const uploadedNames: string[] = [];
+      const falhas: string[] = [];
 
       try {
         for (const file of fileArray) {
-          const docId = crypto.randomUUID();
-          const storagePath = `uploads/${docId}/${file.name}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from("ingestion-originals")
-            .upload(storagePath, file, { contentType: file.type });
-
-          if (uploadError) {
-            toast.error(`Erro no upload de ${file.name}`, { description: uploadError.message });
-            continue;
+          const formData = new FormData();
+          formData.append("file", file);
+          try {
+            await uploadDocument(formData);
+            uploadedNames.push(file.name);
+          } catch (e) {
+            falhas.push(`${file.name}: ${e instanceof Error ? e.message : "erro desconhecido"}`);
           }
-          uploadedPaths.push(storagePath);
-          uploadedNames.push(file.name);
         }
 
-        if (uploadedPaths.length === 0) {
-          toast.error("Nenhum arquivo enviado com sucesso");
+        if (uploadedNames.length === 0) {
+          toast.error("Nenhum arquivo foi enviado", {
+            description: falhas.join(" · ") || undefined,
+          });
           return;
         }
-
-        // Trigger ingestion
-        await supabase.functions.invoke("trigger-ingestion", {
-          body: {
-            source_type: "manual",
-            file_paths: uploadedPaths,
-          },
-        });
+        if (falhas.length > 0) {
+          toast.warning(`${falhas.length} arquivo(s) não entraram`, {
+            description: falhas.join(" · "),
+          });
+        }
 
         // Send message to chat about uploaded files
         const fileList = uploadedNames.join(", ");

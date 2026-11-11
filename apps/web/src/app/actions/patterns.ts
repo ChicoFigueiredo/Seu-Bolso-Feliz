@@ -1,39 +1,21 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq, ilike, sql } from "drizzle-orm";
+import type { Json } from "@sbf/shared-types";
 
-// ── Tipos locais (tabela ainda não está nos generated types) ──
-
-export interface DocumentPattern {
-  id: string;
-  user_id: string;
-  name: string;
-  supplier_id: string | null;
-  document_type: string;
-  institution_id: string | null;
+type DocumentPatternRow = typeof schema.document_patterns.$inferSelect;
+export type DocumentPattern = Omit<DocumentPatternRow, "extraction_rules" | "field_mappings"> & {
   extraction_rules: Record<string, unknown>;
   field_mappings: Record<string, unknown>;
-  sample_fingerprints: string[];
-  confidence_threshold: number;
-  version: number;
-  is_active: boolean;
-  feedback_count: number;
-  success_count: number;
-  created_at: string;
-  updated_at: string;
-}
+};
 
-export interface PatternFeedback {
-  id: string;
-  user_id: string;
-  pattern_id: string;
-  source_document_id: string | null;
-  feedback_type: "correct" | "incorrect" | "partial" | "improved";
+type PatternFeedbackRow = typeof schema.pattern_feedback.$inferSelect;
+export type PatternFeedback = Omit<PatternFeedbackRow, "corrections"> & {
   corrections: Record<string, unknown>;
-  notes: string | null;
-  created_at: string;
-}
+};
 
 export type CreatePatternInput = {
   name: string;
@@ -59,9 +41,48 @@ export type UpdatePatternInput = Partial<
   >
 >;
 
-// ══════════════════════════════════════════════════════════════
-// List
-// ══════════════════════════════════════════════════════════════
+async function requireUserId(): Promise<string> {
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
+}
+
+/**
+ * Valida posse das FKs opcionais (supplier_id/institution_id) antes de
+ * gravar — sem isso, o usuário A poderia apontar o próprio padrão para um
+ * supplier ou institution que pertence a outro usuário. O RLS antigo cobria
+ * esse gap de graça em `suppliers`/`institutions`; sem RLS, a checagem
+ * precisa ser explícita aqui (mesmo padrão de document-transactions.ts,
+ * liabilities.ts, etc.).
+ */
+async function assertOwnsOptionalFks(
+  userId: string,
+  fks: { supplier_id?: string | null; institution_id?: string | null },
+): Promise<void> {
+  const db = getDb();
+
+  if (fks.supplier_id) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, fks.supplier_id), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) throw new Error("Fornecedor não encontrado");
+  }
+
+  if (fks.institution_id) {
+    const [institution] = await db
+      .select({ id: schema.institutions.id })
+      .from(schema.institutions)
+      .where(
+        and(
+          eq(schema.institutions.id, fks.institution_id),
+          eq(schema.institutions.user_id, userId),
+        ),
+      );
+    if (!institution) throw new Error("Instituição não encontrada");
+  }
+}
 
 export async function listPatterns(filters?: {
   document_type?: string;
@@ -72,252 +93,310 @@ export async function listPatterns(filters?: {
   limit?: number;
   offset?: number;
 }): Promise<{ data: DocumentPattern[]; count: number }> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query = (supabase as any)
-    .from("document_patterns")
-    .select("*", { count: "exact" })
-    .order("updated_at", { ascending: false });
+  const conditions = [eq(schema.document_patterns.user_id, userId)];
+  if (filters?.document_type)
+    conditions.push(eq(schema.document_patterns.document_type, filters.document_type));
+  if (filters?.supplier_id)
+    conditions.push(eq(schema.document_patterns.supplier_id, filters.supplier_id));
+  if (filters?.institution_id)
+    conditions.push(eq(schema.document_patterns.institution_id, filters.institution_id));
+  if (filters?.is_active !== undefined)
+    conditions.push(eq(schema.document_patterns.is_active, filters.is_active));
+  if (filters?.search) conditions.push(ilike(schema.document_patterns.name, `%${filters.search}%`));
 
-  if (filters?.document_type) {
-    query = query.eq("document_type", filters.document_type);
-  }
-  if (filters?.supplier_id) {
-    query = query.eq("supplier_id", filters.supplier_id);
-  }
-  if (filters?.institution_id) {
-    query = query.eq("institution_id", filters.institution_id);
-  }
-  if (filters?.is_active !== undefined) {
-    query = query.eq("is_active", filters.is_active);
-  }
-  if (filters?.search) {
-    query = query.ilike("name", `%${filters.search}%`);
-  }
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
-  }
-  if (filters?.offset) {
-    const limit = filters.limit ?? 20;
-    query = query.range(filters.offset, filters.offset + limit - 1);
-  }
+  const [countRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.document_patterns)
+    .where(and(...conditions));
 
-  const { data, error, count } = await query;
-  if (error) throw new Error(error.message);
-  return { data: data ?? [], count: count ?? 0 };
+  const base = db
+    .select()
+    .from(schema.document_patterns)
+    .where(and(...conditions))
+    .orderBy(desc(schema.document_patterns.updated_at));
+
+  const data =
+    filters?.offset !== undefined
+      ? await base.limit(filters.limit ?? 20).offset(filters.offset)
+      : filters?.limit
+        ? await base.limit(filters.limit)
+        : await base;
+
+  return { data: data as DocumentPattern[], count: countRow?.count ?? 0 };
 }
-
-// ══════════════════════════════════════════════════════════════
-// Get (detalhe + histórico de feedback)
-// ══════════════════════════════════════════════════════════════
 
 export async function getPattern(id: string): Promise<{
   pattern: DocumentPattern | null;
   feedback: PatternFeedback[];
 }> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  const [patternResult, feedbackResult] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any).from("document_patterns").select("*").eq("id", id).single(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
-      .from("pattern_feedback")
-      .select("*")
-      .eq("pattern_id", id)
-      .order("created_at", { ascending: false })
+  const [pattern, feedback] = await Promise.all([
+    db
+      .select()
+      .from(schema.document_patterns)
+      .where(
+        and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)),
+      ),
+    db
+      .select()
+      .from(schema.pattern_feedback)
+      .where(
+        and(
+          eq(schema.pattern_feedback.pattern_id, id),
+          eq(schema.pattern_feedback.user_id, userId),
+        ),
+      )
+      .orderBy(desc(schema.pattern_feedback.created_at))
       .limit(50),
   ]);
 
-  if (patternResult.error) {
-    if (patternResult.error.code === "PGRST116") return { pattern: null, feedback: [] };
-    throw new Error(patternResult.error.message);
-  }
-
   return {
-    pattern: patternResult.data,
-    feedback: feedbackResult.data ?? [],
+    pattern: (pattern[0] as DocumentPattern) ?? null,
+    feedback: feedback as PatternFeedback[],
   };
 }
 
-// ══════════════════════════════════════════════════════════════
-// Create
-// ══════════════════════════════════════════════════════════════
-
 export async function createPattern(input: CreatePatternInput): Promise<DocumentPattern> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
-    .from("document_patterns")
-    .insert({
-      user_id: user.id,
+  await assertOwnsOptionalFks(userId, {
+    supplier_id: input.supplier_id,
+    institution_id: input.institution_id,
+  });
+
+  const [row] = await db
+    .insert(schema.document_patterns)
+    .values({
+      user_id: userId,
       name: input.name,
       document_type: input.document_type,
       supplier_id: input.supplier_id ?? null,
       institution_id: input.institution_id ?? null,
-      extraction_rules: input.extraction_rules ?? {},
-      field_mappings: input.field_mappings ?? {},
+      extraction_rules: (input.extraction_rules ?? {}) as Json,
+      field_mappings: (input.field_mappings ?? {}) as Json,
       sample_fingerprints: input.sample_fingerprints ?? [],
       confidence_threshold: input.confidence_threshold ?? 0.8,
     })
-    .select()
-    .single();
+    .returning();
 
-  if (error) throw new Error(error.message);
+  if (!row) throw new Error("Falha ao criar padrão");
 
   revalidatePath("/dashboard/ingestion/patterns");
-  return data;
+  return row as DocumentPattern;
 }
-
-// ══════════════════════════════════════════════════════════════
-// Update
-// Cria nova versão se extraction_rules ou field_mappings mudar significativamente
-// ══════════════════════════════════════════════════════════════
 
 export async function updatePattern(
   id: string,
   input: UpdatePatternInput,
 ): Promise<DocumentPattern> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
-    .from("document_patterns")
-    .update({
-      ...input,
+  await assertOwnsOptionalFks(userId, {
+    supplier_id: input.supplier_id,
+    institution_id: input.institution_id,
+  });
+
+  const { extraction_rules, field_mappings, ...rest } = input;
+  const [row] = await db
+    .update(schema.document_patterns)
+    .set({
+      ...rest,
+      ...(extraction_rules !== undefined ? { extraction_rules: extraction_rules as Json } : {}),
+      ...(field_mappings !== undefined ? { field_mappings: field_mappings as Json } : {}),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id)
-    .select()
-    .single();
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)))
+    .returning();
 
-  if (error) throw new Error(error.message);
+  if (!row) throw new Error("Padrão não encontrado");
 
   revalidatePath("/dashboard/ingestion/patterns");
   revalidatePath(`/dashboard/ingestion/patterns/${id}`);
-  return data;
+  return row as DocumentPattern;
 }
 
-// ══════════════════════════════════════════════════════════════
-// Create new version (copia o padrão com version+1, desativa o anterior)
-// ══════════════════════════════════════════════════════════════
-
+/**
+ * Candidato a Apêndice B (não decidido aqui): update seguido de insert sem
+ * transação — comportamento pré-existente, herdado do código original.
+ */
 export async function createPatternVersion(
   id: string,
   updates: Pick<UpdatePatternInput, "extraction_rules" | "field_mappings">,
 ): Promise<DocumentPattern> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // Busca o padrão atual
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: current, error: fetchError } = await (supabase as any)
-    .from("document_patterns")
-    .select("*")
-    .eq("id", id)
-    .single();
+  // Nota: a busca original não filtra por user_id na query — a checagem de
+  // posse é feita depois, em código de aplicação ("Access denied"). Mantido
+  // assim pra não perder a distinção entre "não encontrado" e "de outro usuário".
+  const [current] = await db
+    .select()
+    .from(schema.document_patterns)
+    .where(eq(schema.document_patterns.id, id));
+  if (!current) throw new Error("Padrão não encontrado");
+  if (current.user_id !== userId) throw new Error("Access denied");
 
-  if (fetchError) throw new Error(fetchError.message);
-  if (current.user_id !== user.id) throw new Error("Access denied");
+  // Nota: sem `.select().single()` hoje — comportamento preservado (exceção documentada).
+  await db
+    .update(schema.document_patterns)
+    .set({ is_active: false })
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
 
-  // Desativa versão atual
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (supabase as any).from("document_patterns").update({ is_active: false }).eq("id", id);
-
-  // Cria nova versão
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: newVersion, error: insertError } = await (supabase as any)
-    .from("document_patterns")
-    .insert({
-      user_id: user.id,
+  const [newVersion] = await db
+    .insert(schema.document_patterns)
+    .values({
+      user_id: userId,
       name: current.name,
       supplier_id: current.supplier_id,
       document_type: current.document_type,
       institution_id: current.institution_id,
-      extraction_rules: updates.extraction_rules ?? current.extraction_rules,
-      field_mappings: updates.field_mappings ?? current.field_mappings,
+      extraction_rules: (updates.extraction_rules ?? current.extraction_rules) as Json,
+      field_mappings: (updates.field_mappings ?? current.field_mappings) as Json,
       sample_fingerprints: current.sample_fingerprints,
       confidence_threshold: current.confidence_threshold,
       version: current.version + 1,
       is_active: true,
     })
-    .select()
-    .single();
+    .returning();
 
-  if (insertError) throw new Error(insertError.message);
+  if (!newVersion) throw new Error("Falha ao criar nova versão do padrão");
 
   revalidatePath("/dashboard/ingestion/patterns");
   revalidatePath(`/dashboard/ingestion/patterns/${id}`);
-  return newVersion;
+  return newVersion as DocumentPattern;
 }
-
-// ══════════════════════════════════════════════════════════════
-// Deactivate
-// ══════════════════════════════════════════════════════════════
 
 export async function deactivatePattern(id: string): Promise<void> {
-  const supabase = await createClient();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
-    .from("document_patterns")
-    .update({ is_active: false, updated_at: new Date().toISOString() })
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
-
+  const userId = await requireUserId();
+  const db = getDb();
+  await db
+    .update(schema.document_patterns)
+    .set({ is_active: false, updated_at: new Date().toISOString() })
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
   revalidatePath("/dashboard/ingestion/patterns");
 }
-
-// ══════════════════════════════════════════════════════════════
-// Reactivate
-// ══════════════════════════════════════════════════════════════
 
 export async function reactivatePattern(id: string): Promise<void> {
-  const supabase = await createClient();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
-    .from("document_patterns")
-    .update({ is_active: true, updated_at: new Date().toISOString() })
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
-
+  const userId = await requireUserId();
+  const db = getDb();
+  await db
+    .update(schema.document_patterns)
+    .set({ is_active: true, updated_at: new Date().toISOString() })
+    .where(and(eq(schema.document_patterns.id, id), eq(schema.document_patterns.user_id, userId)));
   revalidatePath("/dashboard/ingestion/patterns");
 }
 
-// ══════════════════════════════════════════════════════════════
-// Register feedback (via RPC para atomicidade)
-// ══════════════════════════════════════════════════════════════
+const TIPOS_DE_FEEDBACK = ["correct", "incorrect", "partial", "improved"] as const;
+type FeedbackType = (typeof TIPOS_DE_FEEDBACK)[number];
 
+/**
+ * Registra feedback sobre um padrão (era a RPC `register_pattern_feedback`).
+ *
+ * `register_pattern_feedback` é uma das SEIS funções descartadas por inteiro
+ * na migração para o Neon (packages/db/schema.sql, NOTA item 4) — sabia
+ * quem era o usuário só via `auth.uid()`. Confirmado por consulta ao `pg_proc`
+ * do Neon: NÃO existe lá. Reimplementada aqui em Drizzle, preservando a ordem
+ * de escrita do plpgsql: INSERT primeiro (é ele que dispara o trigger
+ * `pattern_auto_deactivation`, que lê os contadores ANTES do incremento),
+ * UPDATE dos contadores depois.
+ *
+ * Regra de contadores idêntica à original: `correct` incrementa
+ * `success_count`, `incorrect`/`improved` incrementam `feedback_count`,
+ * `partial` não incrementa nada (ambíguo por design).
+ *
+ * Duas escritas sequenciais sem transação — paridade com o que a RPC fazia
+ * dentro de uma (candidato ao Apêndice B, não decidido aqui).
+ */
 export async function registerPatternFeedback(input: {
   pattern_id: string;
   source_document_id?: string | null;
-  feedback_type: "correct" | "incorrect" | "partial" | "improved";
+  feedback_type: FeedbackType;
   corrections?: Record<string, unknown>;
 }): Promise<PatternFeedback> {
-  const supabase = await createClient();
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc("register_pattern_feedback", {
-    p_pattern_id: input.pattern_id,
-    p_source_document_id: input.source_document_id ?? null,
-    p_feedback_type: input.feedback_type,
-    p_corrections: input.corrections ?? {},
-  });
+  if (!TIPOS_DE_FEEDBACK.includes(input.feedback_type)) {
+    throw new Error(`Invalid feedback_type: ${input.feedback_type}`);
+  }
 
-  if (error) throw new Error(error.message);
+  // Mesma mensagem da RPC: "não existe" e "é de outro usuário" continuam
+  // indistinguíveis para quem chama.
+  const [pattern] = await db
+    .select({ id: schema.document_patterns.id })
+    .from(schema.document_patterns)
+    .where(
+      and(
+        eq(schema.document_patterns.id, input.pattern_id),
+        eq(schema.document_patterns.user_id, userId),
+      ),
+    );
+  if (!pattern) throw new Error("Pattern not found or access denied");
+
+  // IDOR que a RPC original NÃO fechava: `source_document_id` chegava do
+  // cliente e ia direto para a FK, sem checar de quem é o documento. O RLS de
+  // `pattern_feedback` não cobria isso (a política olhava o user_id da linha
+  // inserida, não o dono do documento referenciado).
+  if (input.source_document_id) {
+    const [documento] = await db
+      .select({ id: schema.source_documents.id })
+      .from(schema.source_documents)
+      .where(
+        and(
+          eq(schema.source_documents.id, input.source_document_id),
+          eq(schema.source_documents.user_id, userId),
+        ),
+      );
+    if (!documento) throw new Error("Documento não encontrado");
+  }
+
+  const [row] = await db
+    .insert(schema.pattern_feedback)
+    .values({
+      user_id: userId,
+      pattern_id: input.pattern_id,
+      source_document_id: input.source_document_id ?? null,
+      feedback_type: input.feedback_type,
+      corrections: (input.corrections ?? {}) as Json,
+    })
+    .returning();
+  if (!row) throw new Error("Falha ao registrar feedback do padrão");
+
+  if (input.feedback_type === "correct") {
+    await db
+      .update(schema.document_patterns)
+      .set({
+        success_count: sql`${schema.document_patterns.success_count} + 1`,
+        updated_at: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(schema.document_patterns.id, input.pattern_id),
+          eq(schema.document_patterns.user_id, userId),
+        ),
+      );
+  } else if (input.feedback_type === "incorrect" || input.feedback_type === "improved") {
+    await db
+      .update(schema.document_patterns)
+      .set({
+        feedback_count: sql`${schema.document_patterns.feedback_count} + 1`,
+        updated_at: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(schema.document_patterns.id, input.pattern_id),
+          eq(schema.document_patterns.user_id, userId),
+        ),
+      );
+  }
 
   revalidatePath(`/dashboard/ingestion/patterns/${input.pattern_id}`);
-  return data;
+  return row as PatternFeedback;
 }

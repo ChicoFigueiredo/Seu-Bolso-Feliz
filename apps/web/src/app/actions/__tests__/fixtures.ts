@@ -1,0 +1,60 @@
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
+
+// NOTA (Task 1, Step 3 do brief): a introspecção real com `introspect.casing:
+// "preserve"` gerou identificadores de tabela em snake_case (ex.:
+// `schema.financial_products`, não `schema.financialProducts`) — não só as
+// colunas. Este arquivo usa os nomes reais de packages/db/src/schema.ts.
+
+type Institution = typeof schema.institutions.$inferSelect;
+type FinancialProduct = typeof schema.financial_products.$inferSelect;
+type Card = typeof schema.cards.$inferSelect;
+
+export async function seedInstitution(userId: string): Promise<Institution> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.institutions)
+    .values({ user_id: userId, name: `Instituição de teste ${crypto.randomUUID()}`, type: "bank" })
+    .returning();
+  // noUncheckedIndexedAccess: insert().returning() sempre devolve a linha
+  // inserida — falhar aqui só seria possível por bug de infraestrutura de
+  // teste, não fluxo esperado. Padrão já ratificado nas Tasks 2/3/8.
+  if (!row) throw new Error("Falha ao semear institution de teste");
+  return row;
+}
+
+export async function seedFinancialProduct(
+  userId: string,
+  institutionId: string,
+  type: string = "checking_account",
+): Promise<FinancialProduct> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.financial_products)
+    .values({ user_id: userId, institution_id: institutionId, name: "Produto de teste", type })
+    .returning();
+  if (!row) throw new Error("Falha ao semear financial_product de teste");
+  return row;
+}
+
+export async function seedCard(userId: string, financialProductId: string): Promise<Card> {
+  const db = getDb();
+  const [row] = await db
+    .insert(schema.cards)
+    .values({ user_id: userId, financial_product_id: financialProductId })
+    .returning();
+  if (!row) throw new Error("Falha ao semear card de teste");
+  return row;
+}
+
+/**
+ * Deleta a instituição de teste — o `ON DELETE CASCADE` em toda a cadeia
+ * (financial_products → cards/transactions/liabilities/recurring_templates
+ * → statement_cycles/statement_items/recurring_instances/
+ * document_transactions/liability_installments) remove tudo que dependia
+ * dela. Usar isto no `afterEach` em vez de deletar tabela por tabela.
+ */
+export async function cleanupInstitution(institutionId: string) {
+  const db = getDb();
+  await db.delete(schema.institutions).where(eq(schema.institutions.id, institutionId));
+}

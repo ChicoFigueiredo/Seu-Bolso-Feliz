@@ -5,19 +5,28 @@
 > documento anterior sem reexecução — onde não deu para medir, está escrito
 > "não verificado".
 >
+> ⚠️ **Atualizado em 2026-08-30** só nos trechos sobre a arquitetura de backend: o
+> Supabase saiu inteiramente do projeto (ADR-009) — banco Neon/Drizzle, storage Vercel
+> Blob, autenticação própria, fila em `ingestion_jobs`. As seções que descreviam
+> chaves de API, RLS/`GRANT`, `supabase db reset`/kong e Edge Functions foram
+> corrigidas para o mecanismo real de hoje; o resto (números de teste, histórico de
+> commits) é a medição original de 2026-08-05 e **não foi reconfirmado** — trate como
+> desatualizado até rodar de novo.
+>
 > **Toda a fila ⚙️ foi executada** — o §4 é o registro do que cada item mudou.
 > O que restou é 🔒: está no §5, e o resumo na ordem em que eu faria está no §10.
 >
 > Legenda: ✅ feito e verificado · 🟡 parcial · ⬜ não existe · 🔒 **só você pode fazer**
-> · ⚙️ **eu executo** (é só mandar) · 🚨 bloqueador
+> · ⚙️ **eu executo** (é só mandar) · 🚨 bloqueador · ⚠️ verificar
 >
 > Complementos: [`cfg.fornecedores.md`](cfg.fornecedores.md) (detalhe de cada parâmetro)
 > · [`../specs/00-estado-real.md`](../specs/00-estado-real.md) (mapa por capacidade)
 >
-> ⚠️ [`_checklist.imediato.md`](_checklist.imediato.md) é de 2026-07-27 e **está
-> desatualizado**: fala de 36 migrations, 505 testes, "cartões só por SQL" e "só PDF tem
-> parser". O passo-a-passo de deploy que ele traz continua correto e está reproduzido
-> aqui no §5 — na dúvida entre os dois, **este documento vence**.
+> ⚠️ [`_checklist.imediato.md`](_checklist.imediato.md) é de 2026-07-27 (também
+> atualizado em 2026-08-30 só na arquitetura) e **está desatualizado** no restante: era
+> sobre migrar chaves do Supabase, "cartões só por SQL" e "só PDF tem parser" — tudo
+> isso já mudou. O passo-a-passo de deploy que ele traz hoje é o mesmo deste documento,
+> só que para Neon/Vercel — na dúvida entre os dois, **este documento vence**.
 
 ---
 
@@ -98,7 +107,16 @@ porque os parsers determinísticos casam expressões contra LINHAS
 **Ressalva honesta:** o worker continua sem ter visto um documento seu de
 verdade. Todos os fixtures são sintéticos.
 
-## 1. ✅ O bloqueador que estava invisível — `GRANT` faltando nas migrations
+## 1. ✅ O bloqueador que estava invisível — `GRANT` faltando nas migrations (histórico, era Supabase)
+
+> ⚠️ **Esta seção é história do Supabase, não checklist de hoje.** Descreve um
+> incidente com os papéis `service_role`/`authenticated` e RLS — backend que saiu do
+> projeto na ADR-009 (2026-08-30). No Neon não existe esse par de papéis nem RLS
+> (`row_security = off`, ver `packages/db/schema.sql`): o isolamento é
+> `WHERE user_id = ownerId` explícito em cada query. Esta classe de bug não pode se
+> repetir no desenho atual, e a migration `supabase/migrations/20260804220000_grant_api_roles.sql`
+> citada abaixo não existe no diretório de migrations atual (`packages/db/migrations/`).
+> Mantido como registro de auditoria.
 
 **Resolvido.** Era o achado mais importante da sessão anterior e a primeira coisa
 executada nesta.
@@ -130,19 +148,25 @@ postgres` para que a próxima migration não reintroduza o bug em silêncio.
 > **RLS continua protegendo.** `GRANT` dá acesso à tabela; as políticas de RLS
 > filtram linha por linha. Sem o `GRANT`, o RLS nem chegava a ser avaliado.
 
-🔒 **Falta uma verificação sua, em produção**, logo depois do primeiro
-`db push` — está no §5.3.
+~~🔒 Falta uma verificação sua, em produção, logo depois do primeiro `db push`~~ — não
+se aplica mais: sem `service_role`/`authenticated` nem RLS, não há "grant" separado
+para conferir. `packages/db/schema.sql` + as migrations rodam com o único papel que o
+Neon usa (o dono da `DATABASE_URL`), que já nasce com privilégio sobre tudo que criou.
 
-### Efeito colateral do diagnóstico: o kong local
+### Efeito colateral do diagnóstico: o kong local (histórico, não existe mais)
 
-Vale saber, porque custa meia hora quando pega de surpresa: `supabase db reset`
-reinicia os containers, e o **kong guarda o IP antigo do serviço de auth**. Todo
-`/auth/v1/*` passa a devolver **502** — inclusive `createUser` nos testes — sem
-nenhuma pista do motivo. A saída é reiniciar o kong:
+Vale saber, porque custou meia hora quando pegou de surpresa: `supabase db reset`
+reiniciava os containers, e o **kong guardava o IP antigo do serviço de auth**. Todo
+`/auth/v1/*` passava a devolver **502** — inclusive `createUser` nos testes — sem
+nenhuma pista do motivo. A saída era reiniciar o kong:
 
 ```bash
 docker restart supabase_kong_seu.bolso.feliz
 ```
+
+Não existe mais Supabase local, kong, nem esse modo de falha. Hoje um teste de
+integração fala com um Postgres real (Neon ou um container `postgres:17-alpine`
+descartável — receita em `__tests__/helpers/db.ts`), sem proxy de API na frente.
 
 ## 2. Saúde do código — medido a frio, não afirmado
 
@@ -203,9 +227,14 @@ só este documento.
 | Tela de senhas de documentos                                    | `dashboard/settings/passwords/`                    |
 | Limpeza de staging (`.env.staging`, `.env.local.bak-*`, 6 vars) | raiz                                               |
 
-### 3.2 Migração das chaves de API do Supabase — código 100% pronto
+### 3.2 Migração das chaves de API do Supabase — código 100% pronto (histórico, superado)
 
-| Feito                                                          | Onde                                 |
+> ⚠️ Todo este trabalho foi **superado** pela saída completa do Supabase (ADR-009,
+> 2026-08-30): não sobrou Edge Function, `verify_jwt`, nem chave `sb_secret_...`/
+> `sb_publishable_...` para migrar — o projeto não fala mais com Supabase em lugar
+> nenhum. Mantido como registro do que foi feito nesta fase intermediária.
+
+| Feito (nesta fase intermediária, hoje superado)                | Onde (na época)                      |
 | -------------------------------------------------------------- | ------------------------------------ |
 | Edge Functions leem `SUPABASE_SECRET_KEYS` / `..._KEYS` (JSON) | `supabase/functions/_shared/keys.ts` |
 | `verify_jwt = false` declarado por função                      | `supabase/config.toml`               |
@@ -214,12 +243,21 @@ só este documento.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` órfã removida do CI            | `.github/workflows/ci.yml`           |
 | `.env.example` / `.env.production.example` documentados        | raiz                                 |
 
-**Verificado hoje:** a chave nova `sb_secret_...` autentica corretamente contra o stack
-local. O que falhava era privilégio (§1), não formato de chave.
+**Verificado na época:** a chave nova `sb_secret_...` autenticava corretamente contra o
+stack local. O que falhava era privilégio (§1), não formato de chave. Hoje nenhuma
+dessas linhas tem chamador: `.env.example` já é só Neon/Vercel Blob/auth própria.
 
 ### 3.3 CI/CD escrito
 
-| Arquivo                        | Conteúdo                                                                                    | Já rodou?    |
+> ⚠️ A coluna "Conteúdo" abaixo descrevia os workflows **na época** (Supabase local no
+> CI, `db push` + edge functions no deploy). Reescritos desde então para Neon/Vercel —
+> conteúdo atual: `ci.yml` sobe `postgres:17-alpine` como serviço, aplica
+> `packages/db/schema.sql` + migrations do zero e roda lint/format/typecheck/
+> commitlint/testes/build, sem Supabase em lugar nenhum; `deploy.yml` faz
+> `pg_dump` → `scripts/aplicar-migrations.sh` → `vercel pull/build/deploy --prod`, com
+> portão humano (`environment: production`) e sem passo de Edge Functions.
+
+| Arquivo                        | Conteúdo (na época)                                                                         | Já rodou?    |
 | ------------------------------ | ------------------------------------------------------------------------------------------- | ------------ |
 | `.github/workflows/ci.yml`     | lint · format · typecheck · commitlint · unit + integração + E2E com Supabase local · build | ⬜ **nunca** |
 | `.github/workflows/deploy.yml` | backup → `db push` → edge functions → `vercel pull/build/deploy`, com portão humano         | ⬜ **nunca** |
@@ -253,23 +291,23 @@ O deploy web é **real** agora (`bunx vercel deploy --prebuilt --prod`), não o
 
 Os treze itens da lista anterior, mais dois que apareceram durante a execução.
 
-| #    | Tarefa                                                     | Estado | Evidência                                                                       |
-| ---- | ---------------------------------------------------------- | ------ | ------------------------------------------------------------------------------- |
-| ⚙️1  | Migration de `GRANT` para os papéis da API                 | ✅     | `20260804220000_grant_api_roles.sql` · 47/47 tabelas, integração 66/66          |
-| ⚙️2  | `db reset` + suíte inteira provando a migration            | ✅     | três resets frios seguidos, tudo verde                                          |
-| ⚙️3  | Apagar `.env.staging` e `.env.local.bak-*`                 | ✅     | removidos do disco                                                              |
-| ⚙️4  | Remover as 6 variáveis `STAGING_*` do `.env`               | ✅     | bloco substituído por uma nota do porquê                                        |
-| ⚙️5  | Atualizar `docs/specs/00-estado-real.md`                   | ✅     | seções de infra e formatos reescritas, números remedidos, gaps reordenados      |
-| ⚙️6  | `inbox/` no `.gitignore`                                   | ✅     | são seus documentos, não artefato de código                                     |
-| ⚙️7  | **OpenRouter** — provedor por env, web e workers           | ✅     | `lib/ai/provider.ts` · `parsers/llm-endpoint.ts` · 7 testes                     |
-| ⚙️8  | `supported-formats` como fonte única (#14)                 | ✅     | `@sbf/contracts/formats` · 19 testes, incluindo equivalência contra os arquivos |
-| ⚙️9  | Ciclo financeiro e dedup ADR-001 nos relatórios (#17, #18) | ✅     | `report-period.ts` (7 testes) · `reports.test.ts` (6 testes de integração)      |
-| ⚙️10 | `actions/cards.ts` + `/dashboard/cards` (#4, #5)           | ✅     | CRUD, lista, formulário, edição — e link na sidebar                             |
-| ⚙️11 | Tela de senhas de documentos protegidos                    | ✅     | `/dashboard/settings/passwords`                                                 |
-| ⚙️12 | Parsers de XLSX / OFX / CSV (#13)                          | ✅     | `parsers/tabular.ts` · 24 testes                                                |
-| ⚙️13 | OCR de imagem (#15)                                        | ✅     | tesseract, atrás de `INGESTION_ENABLE_IMAGE_OCR`                                |
-| ➕   | Substituir `pdf-parse@1.1.1` por `pdfjs-dist`              | ✅     | `parsers/pdf-text.ts` · 8 testes — ver §0; era defeito real, não teste frágil   |
-| ➕   | Delimitador de CSV que reconhece "não é tabela"            | ✅     | apareceu ao integrar o ⚙️12; ver abaixo                                         |
+| #    | Tarefa                                                                                             | Estado | Evidência                                                                                      |
+| ---- | -------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| ⚙️1  | Migration de `GRANT` para os papéis da API (histórico — Supabase; arquivo não existe mais, ver §1) | ✅     | era `supabase/migrations/20260804220000_grant_api_roles.sql` · 47/47 tabelas, integração 66/66 |
+| ⚙️2  | `db reset` + suíte inteira provando a migration                                                    | ✅     | três resets frios seguidos, tudo verde                                                         |
+| ⚙️3  | Apagar `.env.staging` e `.env.local.bak-*`                                                         | ✅     | removidos do disco                                                                             |
+| ⚙️4  | Remover as 6 variáveis `STAGING_*` do `.env`                                                       | ✅     | bloco substituído por uma nota do porquê                                                       |
+| ⚙️5  | Atualizar `docs/specs/00-estado-real.md`                                                           | ✅     | seções de infra e formatos reescritas, números remedidos, gaps reordenados                     |
+| ⚙️6  | `inbox/` no `.gitignore`                                                                           | ✅     | são seus documentos, não artefato de código                                                    |
+| ⚙️7  | **OpenRouter** — provedor por env, web e workers                                                   | ✅     | `lib/ai/provider.ts` · `parsers/llm-endpoint.ts` · 7 testes                                    |
+| ⚙️8  | `supported-formats` como fonte única (#14)                                                         | ✅     | `@sbf/contracts/formats` · 19 testes, incluindo equivalência contra os arquivos                |
+| ⚙️9  | Ciclo financeiro e dedup ADR-001 nos relatórios (#17, #18)                                         | ✅     | `report-period.ts` (7 testes) · `reports.test.ts` (6 testes de integração)                     |
+| ⚙️10 | `actions/cards.ts` + `/dashboard/cards` (#4, #5)                                                   | ✅     | CRUD, lista, formulário, edição — e link na sidebar                                            |
+| ⚙️11 | Tela de senhas de documentos protegidos                                                            | ✅     | `/dashboard/settings/passwords`                                                                |
+| ⚙️12 | Parsers de XLSX / OFX / CSV (#13)                                                                  | ✅     | `parsers/tabular.ts` · 24 testes                                                               |
+| ⚙️13 | OCR de imagem (#15)                                                                                | ✅     | tesseract, atrás de `INGESTION_ENABLE_IMAGE_OCR`                                               |
+| ➕   | Substituir `pdf-parse@1.1.1` por `pdfjs-dist`                                                      | ✅     | `parsers/pdf-text.ts` · 8 testes — ver §0; era defeito real, não teste frágil                  |
+| ➕   | Delimitador de CSV que reconhece "não é tabela"                                                    | ✅     | apareceu ao integrar o ⚙️12; ver abaixo                                                        |
 
 ### O que cada um mudou, em detalhe
 
@@ -377,89 +415,70 @@ devolver o texto cru. **+72 no total**, de 505 para 577.
 
 ## 5. O que falta — 🔒 **só você pode fazer**
 
-### 5.1 🚨 Segurança: neutralizar as chaves vazadas
+### 5.1 ⚠️ Verificar: o projeto Supabase antigo ainda existe?
 
-As chaves de produção vazaram no commit `38b8126`, em **repositório público**. Enquanto
-valerem, quem tiver o histórico entra no banco.
+As chaves de produção vazaram no commit `38b8126`, em **repositório público**. Isto
+era 🚨 quando a aplicação ainda dependia delas — hoje ela não fala mais com o Supabase
+em lugar nenhum (verificado: zero credencial Supabase em código vivo), mas isso **não
+desliga** o projeto Supabase em si. Enquanto ele existir com aquelas chaves ativas, o
+passivo de segurança continua real, só que fora do raio do código deste repositório.
 
-**Estado atual, medido em 2026-08-05:** `.env.production` tem **2** chaves no formato
-legacy `eyJ...`, e o `.env` (cofre) também tem **2** — as do projeto de produção. Eram
-4 no cofre; as duas de staging saíram junto com o ambiente (⚙️4).
+- [ ] **⚠️ Verificar** se o projeto Supabase de produção e o de staging
+      (`seu-bolso-feliz-staging`) ainda existem
+- [ ] Se existirem: apagar o projeto, ou girar/desativar as chaves lá (Settings → API
+      Keys) e decidir se o repositório continua **público**
 
-Não existe botão "Rotate" para chave legacy — elas derivam do JWT secret do projeto, e é
-isso que as torna irrotacionáveis. O caminho é substituir:
+Não há mais ação de código associada a este item — é inteiramente do lado do painel do
+Supabase (ou da decisão de apagar o projeto de vez).
 
-- [ ] **a.** Supabase → **Settings → API Keys** → aba **Publishable and secret API keys**
-      → **Create new API keys**. Nascem com o nome `default` — é esse nome que o código procura
-- [ ] **b.** Trocar os valores (nenhum **nome** de variável muda):
+### 5.2 🔒 Neon de produção
 
-| Onde                           | Variável                               | De       | Para                 |
-| ------------------------------ | -------------------------------------- | -------- | -------------------- |
-| `.env.production`              | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `eyJ...` | `sb_publishable_...` |
-| `.env.production`              | `SUPABASE_SECRET_KEY`                  | `eyJ...` | `sb_secret_...`      |
-| `.env` (cofre)                 | `PRD_PUBLISHABLE_KEY`                  | `eyJ...` | `sb_publishable_...` |
-| `.env` (cofre)                 | `PRD_SECRET_KEY`                       | `eyJ...` | `sb_secret_...`      |
-| Vercel → Environment Variables | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `eyJ...` | `sb_publishable_...` |
-
-- [ ] **c.** Varrer o que mais usa as legacy — MCP na sua máquina, `~/.config`, scripts
-      avulsos, `.env` fora deste repositório:
+- [ ] Anotar as duas connection strings do projeto/branch de produção: **pooled**
+      (`DATABASE_URL`) e **direta** (`DATABASE_URL_UNPOOLED`)
+- [ ] Aplicar schema + migrations (substitui `supabase db push`):
 
   ```bash
-  grep -rn "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" ~ --include=".env*" --include="*.json" 2>/dev/null
+  psql "$DATABASE_URL_UNPOOLED" -f packages/db/schema.sql   # só se o banco for novo
+  bash scripts/aplicar-migrations.sh
   ```
 
-- [ ] **d.** **Desativar as legacy** na mesma tela. **É este passo que neutraliza o
-      vazamento**; tudo antes é preparação. Reversível
-- [ ] **e.** `supabase functions deploy` — o `verify_jwt = false` só vale a partir de um
-      deploy novo
-- [ ] **f.** Apagar o projeto Supabase `seu-bolso-feliz-staging` (ref
-      `dcljzgjgnkmxdvhybvpt`), se ainda existir. As variáveis dele saíram do `.env`, mas
-      **isso não desativa a chave lá** — enquanto o projeto existir, ela abre um banco
-- [ ] **g.** Decidir se o repositório **continua público**
-
-> As chaves do `.env.local` **não são segredo**: estão embutidas no binário do CLI e são
-> iguais em qualquer máquina. O que importa é `.env.production` e o `PRD_*` do `.env`.
-
-**Depois (não urgente, mas fecha o assunto):** migrar as JWT signing keys em
-**Settings → JWT Keys** — aí sim com botão **Rotate** e **Revoke** de verdade.
-
-### 5.2 🔒 Supabase de produção
-
-- [ ] Anotar o **project ref** (Settings → General) → vai em `SUPABASE_PROJECT_ID`
-- [ ] `supabase login` e `supabase link --project-ref <ref>` (uma vez, local)
-- [ ] **Auth → URL Configuration**: Site URL `https://seudominio.com.br`, Redirect URL
-      `https://seudominio.com.br/auth/callback`. `config.toml` aponta para
-      `127.0.0.1:3105` — isso é **local**, não vale para o hospedado. Sem isso o login
-      redireciona para localhost
-- [ ] **Backup da chave de criptografia** — irreversível se perder:
+- [ ] **Google Cloud Console**: credencial OAuth 2.0, com
+      `https://seudominio.com.br/auth/callback` na lista de URIs de redirecionamento
+      autorizadas. Não existe mais "Auth → URL Configuration" do Supabase — a
+      autenticação é própria (`apps/web/src/lib/auth/`). Sem essa URI cadastrada, o
+      login falha no callback (o equivalente de hoje ao antigo "redireciona para
+      localhost")
+- [ ] **Backup da chave de criptografia** — irreversível se perder. Isto **continua
+      valendo** depois da saída do Supabase: a mesma tabela `private.crypto_keys` foi
+      portada para o Neon em `packages/db/migrations/0002_crypto_key_e_usuarios.sql`:
 
   ```sql
   select version, key from private.crypto_keys;
   ```
 
-  A migration gera essa chave aleatoriamente e ela **nunca sai do banco**. Um dump que
-  exclua o schema `private` torna **todas as senhas de PDF indecifráveis para sempre**.
-  Guarde num gerenciador de senhas e confirme que o backup do deploy inclui o schema:
+  A chave nasce dentro do banco e **nunca sai dele**. Um dump que exclua o schema
+  `private` torna **todas as senhas de PDF indecifráveis para sempre**. Guarde num
+  gerenciador de senhas e confirme que o backup do deploy inclui o schema — o workflow
+  de deploy já tira um dump via `pg_dump` antes de qualquer migration:
 
   ```bash
-  supabase db dump --file backup.sql && grep -c "crypto_keys" backup.sql
+  grep -c "crypto_keys" backup-*.sql
   ```
 
-- [ ] Criar seu usuário em `/login` e pegar o id → `LOCAL_USER_ID` no `.env` da sua
-      máquina (workers rodam local e não têm sessão)
+- [ ] **Não é preciso criar usuário.** O dono (`fran.fig@gmail.com`) e o admin de
+      emergência (`admin@seubolsofeliz.com.br`) já nascem semeados pela migration
+      acima. `LOCAL_USER_ID` só importa para os workers (opcional — `resolveOwnerId()`
+      acha o dono sozinho) e para o MCP server (obrigatório) — ver
+      [cfg §1.4](cfg.fornecedores.md#14-identidade-local--obrigatória-só-para-o-mcp-server)
 
-### 5.3 🚨 Logo depois do primeiro `db push` — conferir os grants
+### 5.3 ~~🚨 Logo depois do primeiro `db push` — conferir os grants~~ (não se aplica mais)
 
-Não pule. É a mesma falha do §1, e em produção ela é silenciosa até alguém tentar usar:
-
-```sql
-select count(*) filter (where has_table_privilege('service_role', c.oid, 'SELECT')) as ok,
-       count(*)                                                                     as total
-  from pg_class c join pg_namespace n on n.oid = c.relnamespace
- where n.nspname = 'public' and c.relkind = 'r';
-```
-
-**`ok` tem que ser igual a `total`.** Se `ok = 0`, a migration do ⚙️1 não foi aplicada.
+Esta verificação era específica do Supabase (`service_role`/`authenticated`, RLS) —
+ver o histórico no §1. O Neon não tem esse par de papéis nem RLS (`row_security = off`
+no dump, `packages/db/schema.sql`); o isolamento é `WHERE user_id = ownerId` explícito
+em cada query, e o único papel de banco é o dono da `DATABASE_URL`, que já nasce com
+privilégio sobre tudo que criou. Não há "grant" separado para conferir depois do
+deploy.
 
 ### 5.4 🔒 Vercel
 
@@ -472,86 +491,98 @@ select count(*) filter (where has_table_privilege('service_role', c.oid, 'SELECT
   | Build Command  | padrão     |
 
 - [ ] Anotar `VERCEL_PROJECT_ID` e `VERCEL_ORG_ID` (Settings → General)
-- [ ] **Settings → Environment Variables**, ambiente **Production**:
+- [ ] **Settings → Environment Variables**, ambiente **Production** — não existe mais
+      `NEXT_PUBLIC_SUPABASE_*`, o banco não expõe nada ao cliente:
 
-  | Variável                               | Valor                                        |
-  | -------------------------------------- | -------------------------------------------- |
-  | `NEXT_PUBLIC_SUPABASE_URL`             | `https://<ref>.supabase.co`                  |
-  | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` — **nunca um `eyJ...`** |
-  | `NEXT_PUBLIC_APP_URL`                  | `https://seudominio.com.br`                  |
-  | `OPENAI_API_KEY`                       | só se quiser chat e sugestões na web         |
-  | `OPENROUTER_API_KEY`                   | alternativa à de cima — tem precedência      |
-  | `AI_CHAT_MODEL`                        | opcional; default `gpt-4o`                   |
-  | `AI_SUGGEST_MODEL`                     | opcional; default `gpt-4o-mini`              |
+  | Variável                           | Valor                                            |
+  | ---------------------------------- | ------------------------------------------------ |
+  | `DATABASE_URL`                     | connection string Neon, **pooled**               |
+  | `AUTH_SECRET`                      | `openssl rand -base64 48`                        |
+  | `AUTH_ALLOWED_EMAILS`              | e-mails autorizados a entrar pelo Google         |
+  | `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` | credenciais OAuth do Google Cloud Console (§5.2) |
+  | `ADMIN_INITIAL_PASSWORD`           | senha inicial do `admin@` (≥12 caracteres)       |
+  | `BLOB_READ_WRITE_TOKEN`            | token do Vercel Blob                             |
+  | `NEXT_PUBLIC_APP_URL`              | `https://seudominio.com.br`                      |
+  | `OPENAI_API_KEY`                   | só se quiser chat e sugestões na web             |
+  | `OPENROUTER_API_KEY`               | alternativa à de cima — tem precedência          |
+  | `AI_CHAT_MODEL`                    | opcional; default `gpt-4o`                       |
+  | `AI_SUGGEST_MODEL`                 | opcional; default `gpt-4o-mini`                  |
 
   > Só uma das duas chaves de IA é necessária. No OpenRouter os modelos levam prefixo
   > (`openai/gpt-4o`), então definir a chave sem ajustar os modelos daria erro de modelo
   > inexistente na primeira mensagem do chat.
 
-  > ⚠️ **`SUPABASE_SECRET_KEY` NÃO vai no Vercel.** Ela ignora RLS e pertence à sua
-  > máquina, onde rodam workers e MCP. A chave secreta nova tem uma proteção a mais que
-  > a `service_role` não tinha: responde **HTTP 401 se usada a partir de um navegador**.
-  > Rede de segurança, não substituto de cuidado.
+  > ⚠️ **`DATABASE_URL_UNPOOLED` não vai no Vercel.** A web (serverless) usa só a
+  > pooled; a unpooled é para os workers (`LISTEN`/`NOTIFY`) e migrations, que rodam
+  > fora da Vercel.
 
-- [ ] **Settings → Domains** — o domínio precisa bater com o Site URL do §5.2
+- [ ] **Settings → Domains** — o domínio precisa bater com a URI de redirecionamento
+      do Google OAuth (§5.2)
 
 ### 5.5 🔒 GitHub
 
-- [ ] **Settings → Secrets and variables → Actions**, seis secrets:
+- [ ] **Settings → Secrets and variables → Actions** — os que `deploy.yml` de fato lê
+      hoje, bem menos que antes (não há mais projeto Supabase para autenticar):
 
-  | Secret                  | Onde obter                |
-  | ----------------------- | ------------------------- |
-  | `SUPABASE_ACCESS_TOKEN` | Account → Access Tokens   |
-  | `SUPABASE_PROJECT_ID`   | §5.2                      |
-  | `SUPABASE_DB_PASSWORD`  | Settings → Database       |
-  | `VERCEL_TOKEN`          | Vercel → Account → Tokens |
-  | `VERCEL_ORG_ID`         | §5.4                      |
-  | `VERCEL_PROJECT_ID`     | §5.4                      |
+  | Secret                  | Onde obter                      |
+  | ----------------------- | ------------------------------- |
+  | `DATABASE_URL_UNPOOLED` | Neon — connection string direta |
+  | `VERCEL_TOKEN`          | Vercel → Account → Tokens       |
+  | `VERCEL_ORG_ID`         | §5.4                            |
+  | `VERCEL_PROJECT_ID`     | §5.4                            |
 
 - [ ] **Settings → Environments → New environment** → `production` → marcar **Required
       reviewers** e se adicionar. Sem staging, esse clique é a última barreira entre uma
       migration ruim e o banco de verdade
-- [ ] `git push origin feat/api-key` e acompanhar em **Actions** — o CI nunca rodou.
-      São **18 commits não enviados** mais **42 arquivos ainda não commitados** (o
-      trabalho desta sessão). O ⚙️1 já está entre eles: sem a migration de `GRANT`, o
-      job de teste do CI falharia, porque ele roda `supabase db reset` e depois a
-      suíte de integração
+- [ ] `git push` da sua branch e acompanhar em **Actions**. O `ci.yml` de hoje sobe um
+      Postgres real como serviço (`postgres:17-alpine`), aplica `packages/db/schema.sql` + migrations do zero e roda a suíte inteira — não depende de nenhum stack
+      Supabase, nem de uma migration de `GRANT` (histórico, §1)
 - [ ] **Actions → Deploy → Run workflow**, e aprovar quando pausar
 
 ---
 
-## 6. Subir o ambiente local — verificado, funciona
+## 6. Subir o ambiente local — reescrito para Neon (⚠️ não reverificado ponta a ponta)
 
-Sem conflito de porta: o outro Supabase seu (`imobtotal`) usa a faixa `544xx`, este usa
-`543xx`.
+> ⚠️ Esta seção descrevia o stack local do Supabase (`supabase start`, kong, `seed.sql`).
+> Isso não existe mais — não há "ambiente local do Supabase" nem `seed.sql` em
+> `packages/db/` (confirmado: só há `schema.sql` + 3 migrations, sem arquivo de seed).
+> O procedimento abaixo é a reconstrução fiel a partir do código de hoje, mas **não foi
+> reexecutado ponta a ponta** para gerar números novos — trate os passos como corretos
+> e os números de teste como a pedir reconfirmação.
 
 ```bash
 export PATH="$HOME/.bun/bin:$PATH"
 
-npx supabase start          # sobe o stack (Docker precisa estar rodando)
-npx supabase db reset       # aplica as 39 migrations + seed.sql
+# Aponte DATABASE_URL/DATABASE_URL_UNPOOLED (.env) para o seu Neon de desenvolvimento,
+# ou suba um Postgres descartável (ex.: para rodar a suíte de integração sem tocar o
+# banco de trabalho — receita completa em __tests__/helpers/db.ts):
+docker run -d --name sbf-integration-test \
+  -e POSTGRES_PASSWORD=sbf -e POSTGRES_USER=sbf -e POSTGRES_DB=sbf \
+  -p 55480:5432 postgres:17-alpine
 
-# Obrigatório depois de todo `db reset`: o kong guarda o IP antigo do serviço de
-# auth e passa a devolver 502 em /auth/v1/* — sem nenhuma pista do motivo.
-docker restart supabase_kong_seu.bolso.feliz
+psql "postgresql://sbf:sbf@127.0.0.1:55480/sbf" -f packages/db/schema.sql
+for m in packages/db/migrations/*.sql; do
+  psql "postgresql://sbf:sbf@127.0.0.1:55480/sbf" -f "$m"
+done
 
-bun run test:unit                # 499/499
-bun run test:integration         # 66/66
-bunx vitest run --project e2e    # 12/12
+bun run test:unit                # não toca banco
+INTEGRATION_TEST_DATABASE_URL=postgresql://sbf:sbf@127.0.0.1:55480/sbf bun run test:integration
+INTEGRATION_TEST_DATABASE_URL=postgresql://sbf:sbf@127.0.0.1:55480/sbf bunx vitest run --project e2e
 
-bun run dev                 # web + worker de ingestão juntos
+bun run dev                 # web + worker de ingestão juntos, contra o DATABASE_URL do .env
 ```
 
-Os grants não precisam mais de passo manual: a migration `20260804220000` os
-aplica, e declara `ALTER DEFAULT PRIVILEGES` para que tabelas futuras já nasçam
-com o privilégio certo.
+Não existe mais RLS/`GRANT` para conferir (§1, §5.3) — o Postgres do `docker run` acima
+usa um único papel (`sbf`), dono de tudo que criou.
 
-O `seed.sql` já cria o usuário `teste@seubolsofeliz.com.br`
-(`00000000-0000-0000-0000-000000000001`) e **6 produtos financeiros** — então local não
-esbarra no bloqueio do §7.2.
+**Não há mais `seed.sql`.** O único dado semeado é o dono e o admin de emergência, pela
+migration `0002_crypto_key_e_usuarios.sql` — nenhum produto financeiro. Isso significa
+que **o ambiente local esbarra no mesmo bloqueio do §7.2** que a produção: sem cadastrar
+ao menos um produto financeiro pela UI (ou por INSERT direto), nenhum documento é
+lançável, nem localmente.
 
-O `.env.local` já aponta para `127.0.0.1:54321` com as chaves novas do CLI. Confere com
-o `supabase status`. **Nada a fazer aqui.**
+O `.env` local aponta para o seu Neon (não há mais `127.0.0.1:54321` nem chave fixa de
+CLI) — confira com `psql "$DATABASE_URL" -c '\dt'` ou olhando o painel do Neon.
 
 Para exercitar o pipeline com um documento:
 
@@ -583,16 +614,16 @@ Todas estão documentadas no `.env.example`.
 
 ## 7. Depois de subir a produção — configuração de dados
 
-| #   | O quê                                                       | Referência                                                      |
-| --- | ----------------------------------------------------------- | --------------------------------------------------------------- |
-| 7.1 | Ciclo financeiro (dia do seu mês) + gerar períodos por SQL  | [cfg §3](cfg.fornecedores.md#3-ciclo-financeiro)                |
-| 7.2 | 🚨 **Ao menos uma instituição e um produto financeiro**     | [cfg §4](cfg.fornecedores.md#4-instituições-produtos-e-cartões) |
-| 7.3 | Categorias e tags                                           | [cfg §5](cfg.fornecedores.md#5-categorias-e-tags)               |
-| 7.4 | Fornecedores e aliases                                      | [cfg §6](cfg.fornecedores.md#6-fornecedores)                    |
-| 7.5 | Cartões — **agora pela interface**                          | `/dashboard/cards` (era só por SQL)                             |
-| 7.6 | Senhas de PDF, se tiver fatura protegida                    | `/dashboard/settings/passwords` (era só por SQL)                |
-| 7.7 | Gmail: OAuth com redirect de produção                       | [cfg §8](cfg.fornecedores.md#8-gmail)                           |
-| 7.8 | Regenerar tipos: `bun run generate-types` + conferir o diff | —                                                               |
+| #   | O quê                                                                                                                                                       | Referência                                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 7.1 | Ciclo financeiro (dia do seu mês) + gerar períodos via MCP                                                                                                  | [cfg §3](cfg.fornecedores.md#3-ciclo-financeiro)                |
+| 7.2 | 🚨 **Ao menos uma instituição e um produto financeiro**                                                                                                     | [cfg §4](cfg.fornecedores.md#4-instituições-produtos-e-cartões) |
+| 7.3 | Categorias e tags                                                                                                                                           | [cfg §5](cfg.fornecedores.md#5-categorias-e-tags)               |
+| 7.4 | Fornecedores e aliases                                                                                                                                      | [cfg §6](cfg.fornecedores.md#6-fornecedores)                    |
+| 7.5 | Cartões — **agora pela interface**                                                                                                                          | `/dashboard/cards` (era só por SQL)                             |
+| 7.6 | Senhas de PDF, se tiver fatura protegida                                                                                                                    | `/dashboard/settings/passwords` (era só por SQL)                |
+| 7.7 | Gmail: OAuth com redirect de produção                                                                                                                       | [cfg §8](cfg.fornecedores.md#8-gmail)                           |
+| 7.8 | Regenerar tipos: `bun run generate-types` + conferir o diff — ⚠️ verificar: o script ainda invoca `supabase gen types` internamente, provavelmente quebrado | —                                                               |
 
 > **7.2 trava tudo.** `transactions.financial_product_id` é `NOT NULL` e o pipeline não
 > tem como adivinhar a conta. Sem um produto cadastrado, **nenhum documento pode ser
@@ -602,10 +633,9 @@ Todas estão documentadas no `.env.example`.
 
 ```bash
 curl -sI https://seudominio.com.br | head -1      # aplicação responde
-supabase migration list                           # migrations aplicadas
+psql "$DATABASE_URL" -c "\dt" | head               # tabelas presentes (sem "supabase migration list")
 # a chave de criptografia existe (deve retornar 1):
 psql "$DATABASE_URL" -tAc "select count(*) from private.crypto_keys;"
-# e os grants do §5.3
 ```
 
 Na aplicação: login → cadastrar instituição e produto → subir documento em
@@ -664,20 +694,20 @@ goldens e E2E da jornada (#11, #12).
 
 Não são bloqueadores de subida, mas evitam surpresa.
 
-| Limitação                          | Detalhe                                                                                                                                                                                                |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Sem derivação de ciclo de fatura   | O cartão tem fechamento e vencimento cadastrados; nada deriva em qual fatura uma compra cai                                                                                                            |
-| Sem detecção de parcelas           | `statement_items.installment_number` existe e nada o preenche                                                                                                                                          |
-| Sem limite comprometido            | `cards.credit_limit` é exibido, mas nada calcula quanto dele já está comprometido                                                                                                                      |
-| **Dois `credit_limit` sem regra**  | `cards.credit_limit` e `financial_products.credit_limit` coexistem; a tela nova escreve no primeiro e nada define qual vence — issue [#6](https://github.com/ChicoFigueiredo/Seu-Bolso-Feliz/issues/6) |
-| Sem agenda consolidada             | A home mostra três listas separadas                                                                                                                                                                    |
-| OCR desligado por padrão           | PDF e imagem: requer `ocrmypdf`/`tesseract-ocr-por` instalados e a flag ligada                                                                                                                         |
-| XLS, DOC, DOCX e QIF não são lidos | **Saíram da interface** de propósito — a promessa foi removida junto com a lacuna                                                                                                                      |
-| Upload acima de ~4,5 MB falha      | Teto de Server Action do Vercel; corrigido em F6.4                                                                                                                                                     |
-| MCP `recompute_financial_periods`  | Nunca funcionou; use o SQL de [cfg §3](cfg.fornecedores.md#3-ciclo-financeiro)                                                                                                                         |
-| Upload-pelo-chat                   | Chama `trigger-ingestion`, Edge Function quebrada contra o schema real                                                                                                                                 |
-| Lógica de reconciliação duplicada  | `reconciliation.ts` e `api/reconciliation/[draftId]/route.ts` são cópias que podem divergir                                                                                                            |
-| Nenhum documento seu foi testado   | Todos os fixtures são sintéticos                                                                                                                                                                       |
+| Limitação                          | Detalhe                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sem derivação de ciclo de fatura   | O cartão tem fechamento e vencimento cadastrados; nada deriva em qual fatura uma compra cai                                                                                                                                                                                 |
+| Sem detecção de parcelas           | `statement_items.installment_number` existe e nada o preenche                                                                                                                                                                                                               |
+| Sem limite comprometido            | `cards.credit_limit` é exibido, mas nada calcula quanto dele já está comprometido                                                                                                                                                                                           |
+| **Dois `credit_limit` sem regra**  | `cards.credit_limit` e `financial_products.credit_limit` coexistem; a tela nova escreve no primeiro e nada define qual vence — issue [#6](https://github.com/ChicoFigueiredo/Seu-Bolso-Feliz/issues/6)                                                                      |
+| Sem agenda consolidada             | A home mostra três listas separadas                                                                                                                                                                                                                                         |
+| OCR desligado por padrão           | PDF e imagem: requer `ocrmypdf`/`tesseract-ocr-por` instalados e a flag ligada                                                                                                                                                                                              |
+| XLS, DOC, DOCX e QIF não são lidos | **Saíram da interface** de propósito — a promessa foi removida junto com a lacuna                                                                                                                                                                                           |
+| Upload acima de ~4,5 MB falha      | Teto de Server Action do Vercel; corrigido em F6.4                                                                                                                                                                                                                          |
+| MCP `recompute_financial_periods`  | O defeito antigo (`auth.uid()`/`service_role`) era do Supabase e não existe mais — a tool foi reimplementada em TypeScript (`apps/mcp-server/src/tools/recompute-financial-periods.ts`) e tem chamador real, mas sem teste dedicado ainda; trate como 🟡, não como quebrada |
+| ~~Upload-pelo-chat~~               | Resolvido: não existe mais Edge Function `trigger-ingestion`; o chat chama a mesma `uploadDocument()` do upload manual                                                                                                                                                      |
+| Lógica de reconciliação duplicada  | `reconciliation.ts` e `api/reconciliation/[draftId]/route.ts` são cópias que podem divergir                                                                                                                                                                                 |
+| Nenhum documento seu foi testado   | Todos os fixtures são sintéticos                                                                                                                                                                                                                                            |
 
 ---
 
@@ -685,16 +715,18 @@ Não são bloqueadores de subida, mas evitam surpresa.
 
 Tudo que era ⚙️ foi feito. A fila restante é sua.
 
-1. 🔒 **Neutralizar as chaves vazadas** (§5.1) — criar as novas, trocar os valores
-   e **desativar as legacy**. O código está pronto para as novas desde `12f20ce`
+1. ⚠️ **Verificar se o projeto Supabase antigo ainda existe** (§5.1) e, se sim,
+   desativá-lo ou girar as chaves vazadas lá — a aplicação já não depende delas
 2. 🔒 **Backup da chave de criptografia** (§5.2) — perdê-la é irreversível, e o
    sintoma só aparece no dia em que uma senha de PDF precisar ser lida
-3. 🔒 Projeto, variáveis de ambiente e domínio no Vercel (§5.4)
-4. 🔒 Seis secrets + environment `production` com aprovação no GitHub (§5.5)
+3. 🔒 Projeto Neon, credencial OAuth do Google, variáveis de ambiente e domínio no
+   Vercel (§5.2, §5.4)
+4. 🔒 Quatro secrets + environment `production` com aprovação no GitHub (§5.5)
 5. 🔒 `git push` dos commits → primeira execução do CI → **Run workflow** do Deploy
-6. 🚨 Conferir os grants em produção logo após o `db push` (§5.3) — a falha é
-   silenciosa até alguém tentar usar
-7. 🔒 Instituição + produto financeiro (§7.2), senão nada é lançável
+6. ~~🚨 Conferir os grants em produção~~ — não se aplica mais (§5.3); Neon não tem
+   RLS nem papel `service_role` para verificar
+7. 🔒 Instituição + produto financeiro (§7.2), senão nada é lançável — vale local
+   também, já que não há mais `seed.sql` semeando produtos de teste (§6)
 8. 🔒 Mandar algumas faturas suas, anonimizadas: é o único gap de qualidade que
    nenhum teste sintético cobre
 9. ⚙️ Depois disso, o que resta do backlog: derivação de ciclo (#8), parcelas

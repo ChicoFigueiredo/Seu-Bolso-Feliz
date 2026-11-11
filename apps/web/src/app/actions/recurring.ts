@@ -1,157 +1,267 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
-import type { RecurringTemplate, RecurringInstance, Insert, Update } from "@sbf/shared-types";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 
-type TemplateInsert = Omit<Insert<"recurring_templates">, "user_id">;
-type TemplateUpdate = Update<"recurring_templates">;
+type RecurringTemplate = typeof schema.recurring_templates.$inferSelect;
+type RecurringTemplateInsert = Omit<
+  typeof schema.recurring_templates.$inferInsert,
+  "user_id" | "id"
+>;
+type RecurringTemplateUpdate = Partial<RecurringTemplateInsert>;
+type RecurringInstance = typeof schema.recurring_instances.$inferSelect;
+type RecurringInstanceUpdate = Partial<
+  Omit<typeof schema.recurring_instances.$inferInsert, "user_id" | "id">
+>;
+type RecurringInstanceInsert = Omit<
+  typeof schema.recurring_instances.$inferInsert,
+  "id" | "created_at" | "updated_at"
+>;
 
-// ══════════════════════════════════════════════════════════════
-// Recurring Templates
-// ══════════════════════════════════════════════════════════════
+async function requireUserId(): Promise<string> {
+  // `ownerId`, não `id`: o filtro de dados é sempre pelo dono, nunca pelo ator.
+  // Ver apps/web/src/lib/auth/index.ts.
+  const { ownerId } = await requireUser();
+  return ownerId;
+}
 
-export async function getRecurringTemplates(activeOnly = true): Promise<RecurringTemplate[]> {
-  const supabase = await createClient();
-  let query = supabase.from("recurring_templates").select("*").order("name");
-
-  if (activeOnly) {
-    query = query.eq("is_active", true);
+// Fecha IDOR (achado da varredura retroativa, mesma classe do fix em
+// document-transactions.ts, commit b5995eb): create/update aceitavam
+// financial_product_id/category_id/supplier_id vindos do cliente e
+// gravavam sem checar que pertencem ao usuário chamador. Um usuário A
+// conseguia criar/atualizar um template apontando para um produto
+// financeiro, categoria ou fornecedor de outro usuário B (e a partir daí
+// referenciar/vazar dados de B via joins em outras telas). Valida posse de
+// cada FK presente antes do insert/update — mesmo padrão SELECT id WHERE
+// id = fk AND user_id = userId, lançando erro se vazio.
+async function assertOwnsRecurringTemplateForeignKeys(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  input: Pick<RecurringTemplateInsert, "financial_product_id" | "category_id" | "supplier_id">,
+): Promise<void> {
+  if (input.financial_product_id) {
+    const [product] = await db
+      .select({ id: schema.financial_products.id })
+      .from(schema.financial_products)
+      .where(
+        and(
+          eq(schema.financial_products.id, input.financial_product_id),
+          eq(schema.financial_products.user_id, userId),
+        ),
+      );
+    if (!product) throw new Error("Produto financeiro não encontrado");
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data;
+  if (input.category_id) {
+    const [category] = await db
+      .select({ id: schema.categories.id })
+      .from(schema.categories)
+      .where(
+        and(eq(schema.categories.id, input.category_id), eq(schema.categories.user_id, userId)),
+      );
+    if (!category) throw new Error("Categoria não encontrada");
+  }
+
+  if (input.supplier_id) {
+    const [supplier] = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(and(eq(schema.suppliers.id, input.supplier_id), eq(schema.suppliers.user_id, userId)));
+    if (!supplier) throw new Error("Fornecedor não encontrado");
+  }
+}
+
+// Mesmo anti-padrão, achado secundário da mesma varredura: tag_id (dentro de
+// tagIds) nunca era validado contra tags.user_id antes de gravar em
+// recurring_template_tags. A ordem de escrita (template já
+// validado/committado antes de tocar nas tags) já impede vazamento de leitura
+// hoje, mas sem esta checagem um usuário A conseguiria associar ao próprio
+// template uma tag_id de outro usuário B.
+async function assertOwnsTags(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  tagIds: string[],
+): Promise<void> {
+  const uniqueIds = [...new Set(tagIds)];
+  const owned = await db
+    .select({ id: schema.tags.id })
+    .from(schema.tags)
+    .where(and(inArray(schema.tags.id, uniqueIds), eq(schema.tags.user_id, userId)));
+  if (owned.length !== uniqueIds.length) {
+    throw new Error("Uma ou mais tags não pertencem ao usuário");
+  }
+}
+
+export async function getRecurringTemplates(activeOnly = true): Promise<RecurringTemplate[]> {
+  const userId = await requireUserId();
+  const db = getDb();
+  const conditions = [eq(schema.recurring_templates.user_id, userId)];
+  if (activeOnly) conditions.push(eq(schema.recurring_templates.is_active, true));
+  return db
+    .select()
+    .from(schema.recurring_templates)
+    .where(and(...conditions))
+    .orderBy(asc(schema.recurring_templates.name));
 }
 
 export async function getRecurringTemplate(id: string): Promise<RecurringTemplate | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("recurring_templates")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null;
-    throw new Error(error.message);
-  }
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.recurring_templates)
+    .where(
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
+    );
+  return row ?? null;
 }
 
 export async function createRecurringTemplate(
-  input: TemplateInsert,
+  input: RecurringTemplateInsert,
   tagIds?: string[],
 ): Promise<RecurringTemplate> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
+  await assertOwnsRecurringTemplateForeignKeys(db, userId, input);
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
 
-  const { data, error } = await supabase
-    .from("recurring_templates")
-    .insert({ ...input, user_id: user.id })
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
+  const [row] = await db
+    .insert(schema.recurring_templates)
+    .values({ ...input, user_id: userId })
+    .returning();
+  if (!row) throw new Error("Falha ao criar template recorrente");
 
   if (tagIds && tagIds.length > 0) {
-    const tagInserts = tagIds.map((tag_id) => ({
-      recurring_template_id: data.id,
-      tag_id,
-    }));
-    const { error: tagError } = await supabase.from("recurring_template_tags").insert(tagInserts);
-    if (tagError) throw new Error(tagError.message);
+    await db
+      .insert(schema.recurring_template_tags)
+      .values(tagIds.map((tagId) => ({ recurring_template_id: row.id, tag_id: tagId })));
   }
-
-  return data;
+  return row;
 }
 
 export async function updateRecurringTemplate(
   id: string,
-  input: TemplateUpdate,
+  input: RecurringTemplateUpdate,
   tagIds?: string[],
 ): Promise<RecurringTemplate> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("recurring_templates")
-    .update(input)
-    .eq("id", id)
-    .select()
-    .single();
+  const userId = await requireUserId();
+  const db = getDb();
+  await assertOwnsRecurringTemplateForeignKeys(db, userId, input);
+  if (tagIds && tagIds.length > 0) await assertOwnsTags(db, userId, tagIds);
 
-  if (error) throw new Error(error.message);
+  const [row] = await db
+    .update(schema.recurring_templates)
+    .set(input)
+    .where(
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
+    )
+    .returning();
+  if (!row) throw new Error("Template recorrente não encontrado");
 
   if (tagIds !== undefined) {
-    await supabase.from("recurring_template_tags").delete().eq("recurring_template_id", id);
+    await db
+      .delete(schema.recurring_template_tags)
+      .where(eq(schema.recurring_template_tags.recurring_template_id, id));
     if (tagIds.length > 0) {
-      const tagInserts = tagIds.map((tag_id) => ({
-        recurring_template_id: id,
-        tag_id,
-      }));
-      const { error: tagError } = await supabase.from("recurring_template_tags").insert(tagInserts);
-      if (tagError) throw new Error(tagError.message);
+      await db
+        .insert(schema.recurring_template_tags)
+        .values(tagIds.map((tagId) => ({ recurring_template_id: id, tag_id: tagId })));
     }
   }
-
-  return data;
+  return row;
 }
 
 export async function deleteRecurringTemplate(id: string): Promise<void> {
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("recurring_templates")
-    .update({ is_active: false })
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
+  // Nota: soft delete (is_active=false), sem checagem de linhas afetadas hoje
+  // — comportamento preservado (exceção documentada).
+  const userId = await requireUserId();
+  const db = getDb();
+  await db
+    .update(schema.recurring_templates)
+    .set({ is_active: false })
+    .where(
+      and(eq(schema.recurring_templates.id, id), eq(schema.recurring_templates.user_id, userId)),
+    );
 }
 
-// ══════════════════════════════════════════════════════════════
-// Recurring Instances
-// ══════════════════════════════════════════════════════════════
+// Fecha IDOR (achado Important da revisão final de branch, mesma classe já
+// corrigida acima para os templates): updateRecurringInstance aceitava
+// recurring_template_id/transaction_id vindos do cliente sem checar que
+// pertencem ao usuário chamador — ficou de fora do fix anterior por ser uma
+// função separada (recurring_instances, não recurring_templates). Mesmo
+// padrão: SELECT id WHERE id = fk AND user_id = userId, lança erro se vazio.
+async function assertOwnsRecurringInstanceForeignKeys(
+  db: ReturnType<typeof getDb>,
+  userId: string,
+  input: Pick<RecurringInstanceUpdate, "recurring_template_id" | "transaction_id">,
+): Promise<void> {
+  if (input.recurring_template_id) {
+    const [template] = await db
+      .select({ id: schema.recurring_templates.id })
+      .from(schema.recurring_templates)
+      .where(
+        and(
+          eq(schema.recurring_templates.id, input.recurring_template_id),
+          eq(schema.recurring_templates.user_id, userId),
+        ),
+      );
+    if (!template) throw new Error("Template recorrente não encontrado");
+  }
+
+  if (input.transaction_id) {
+    const [transaction] = await db
+      .select({ id: schema.transactions.id })
+      .from(schema.transactions)
+      .where(
+        and(
+          eq(schema.transactions.id, input.transaction_id),
+          eq(schema.transactions.user_id, userId),
+        ),
+      );
+    if (!transaction) throw new Error("Transação não encontrada");
+  }
+}
 
 export async function getRecurringInstances(
   templateId: string,
   filters?: { status?: string; startDate?: string; endDate?: string },
 ): Promise<RecurringInstance[]> {
-  const supabase = await createClient();
-  let query = supabase
-    .from("recurring_instances")
-    .select("*")
-    .eq("recurring_template_id", templateId)
-    .order("expected_date", { ascending: true });
-
-  if (filters?.status) {
-    query = query.eq("status", filters.status);
-  }
-  if (filters?.startDate) {
-    query = query.gte("expected_date", filters.startDate);
-  }
-  if (filters?.endDate) {
-    query = query.lte("expected_date", filters.endDate);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data;
+  const userId = await requireUserId();
+  const db = getDb();
+  const conditions = [
+    eq(schema.recurring_instances.recurring_template_id, templateId),
+    eq(schema.recurring_instances.user_id, userId),
+  ];
+  if (filters?.status) conditions.push(eq(schema.recurring_instances.status, filters.status));
+  if (filters?.startDate)
+    conditions.push(gte(schema.recurring_instances.expected_date, filters.startDate));
+  if (filters?.endDate)
+    conditions.push(lte(schema.recurring_instances.expected_date, filters.endDate));
+  return db
+    .select()
+    .from(schema.recurring_instances)
+    .where(and(...conditions))
+    .orderBy(asc(schema.recurring_instances.expected_date));
 }
 
 export async function updateRecurringInstance(
   id: string,
-  input: Update<"recurring_instances">,
+  input: RecurringInstanceUpdate,
 ): Promise<RecurringInstance> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("recurring_instances")
-    .update(input)
-    .eq("id", id)
-    .select()
-    .single();
+  const userId = await requireUserId();
+  const db = getDb();
+  await assertOwnsRecurringInstanceForeignKeys(db, userId, input);
 
-  if (error) throw new Error(error.message);
-  return data;
+  const [row] = await db
+    .update(schema.recurring_instances)
+    .set(input)
+    .where(
+      and(eq(schema.recurring_instances.id, id), eq(schema.recurring_instances.user_id, userId)),
+    )
+    .returning();
+  if (!row) throw new Error("Instância recorrente não encontrada");
+  return row;
 }
 
 /**
@@ -162,25 +272,24 @@ export async function generateRecurringInstances(
   templateId: string,
   untilDate: string,
 ): Promise<number> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Não autenticado");
+  const userId = await requireUserId();
+  const db = getDb();
 
-  // Buscar template
   const template = await getRecurringTemplate(templateId);
   if (!template) throw new Error("Template não encontrado");
   if (!template.is_active) throw new Error("Template inativo");
 
-  // Buscar última instância existente
-  const { data: lastInstance } = await supabase
-    .from("recurring_instances")
-    .select("expected_date")
-    .eq("recurring_template_id", templateId)
-    .order("expected_date", { ascending: false })
-    .limit(1)
-    .single();
+  const [lastInstance] = await db
+    .select({ expected_date: schema.recurring_instances.expected_date })
+    .from(schema.recurring_instances)
+    .where(
+      and(
+        eq(schema.recurring_instances.recurring_template_id, templateId),
+        eq(schema.recurring_instances.user_id, userId),
+      ),
+    )
+    .orderBy(desc(schema.recurring_instances.expected_date))
+    .limit(1);
 
   const startFrom = lastInstance
     ? new Date(lastInstance.expected_date)
@@ -189,39 +298,27 @@ export async function generateRecurringInstances(
       : new Date();
 
   const endDate = new Date(untilDate);
-  const instances: Array<{
-    user_id: string;
-    recurring_template_id: string;
-    expected_date: string;
-    expected_amount: number | null;
-    status: string;
-  }> = [];
-
+  const instances: RecurringInstanceInsert[] = [];
   const current = new Date(startFrom);
   if (lastInstance) {
-    // Avançar para a próxima data após a última instância
     advanceDate(current, template.frequency, template.day_of_month, template.custom_interval_days);
   }
 
   while (current <= endDate) {
     if (template.ends_at && current > new Date(template.ends_at)) break;
-
     instances.push({
-      user_id: user.id,
+      user_id: userId,
       recurring_template_id: templateId,
       expected_date: current.toISOString().split("T")[0]!,
       expected_amount: template.amount,
       status: "pending",
     });
-
     advanceDate(current, template.frequency, template.day_of_month, template.custom_interval_days);
   }
 
   if (instances.length > 0) {
-    const { error } = await supabase.from("recurring_instances").insert(instances);
-    if (error) throw new Error(error.message);
+    await db.insert(schema.recurring_instances).values(instances);
   }
-
   return instances.length;
 }
 

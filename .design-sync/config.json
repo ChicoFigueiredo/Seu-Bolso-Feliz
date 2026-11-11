@@ -1,0 +1,34 @@
+{
+  "projectId": "aad8d8b8-72bb-4f32-9ce3-6ebf28859e87",
+  "shape": "package",
+  "pkg": "@sbf/design-system",
+  "globalName": "SBF",
+  "buildCmd": "bun run build",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.build.json",
+  "cssEntry": "dist/tokens.css",
+  "provider": {
+    "component": "SbfTheme",
+    "props": {
+      "theme": "salvia"
+    }
+  },
+  "overrides": {
+    "BottomNav": {
+      "cardMode": "column"
+    },
+    "MobileHeader": {
+      "cardMode": "column"
+    },
+    "TopBar": {
+      "cardMode": "column"
+    },
+    "Sheet": {
+      "cardMode": "column"
+    },
+    "AppSidebar": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

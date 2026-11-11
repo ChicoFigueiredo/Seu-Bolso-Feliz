@@ -1,0 +1,111 @@
+/*
+ * O design system (@sbf/design-system) não tem primitiva de input/select —
+ * `Field` é só leitura (ver o próprio docstring do componente). Estas classes
+ * estilizam elementos nativos com os tokens de tokens.css para não destoar
+ * do resto da tela. `.sheetOverlay` replica
+ * apps/web/src/components/shell/shell.module.css::.moreSheetOverlay: o
+ * <Sheet> em si é `position: relative`, então precisa de um contêiner fixo
+ * cobrindo a viewport pra flutuar por cima do conteúdo.
+ */
+
+.sheetOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.formLabel {
+  font-family: var(--sbf-font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.formInput,
+.formSelect {
+  font-family: var(--sbf-font-sans);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--sbf-radius-md);
+  padding: 10px 12px;
+  min-height: 44px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.formSelect {
+  /* Aparência nativa do <select> varia bastante entre navegadores; sem uma
+     seta customizada aqui (SVG inline exigiria outra dependência de asset)
+     o navegador desenha a própria — aceitável, não é o foco visual da tela. */
+  appearance: auto;
+}
+
+.formInput:focus,
+.formSelect:focus {
+  outline: 2px solid var(--primary-line);
+  outline-offset: 1px;
+  border-color: var(--primary);
+}
+
+.formHint {
+  font-family: var(--sbf-font-sans);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.formGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.formError {
+  font-family: var(--sbf-font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--sbf-radius-sm);
+  padding: 10px 12px;
+}
+
+.formActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.scheduleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  padding: 12px 4px;
+  font-family: var(--sbf-font-sans);
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.scheduleRow:first-child {
+  border-top: none;
+}
+
+.scheduleRow:hover {
+  background: var(--muted);
+}

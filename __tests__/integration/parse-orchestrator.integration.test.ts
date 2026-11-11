@@ -1,4 +1,35 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/**
+ * Testes de integração: orquestrador de parsing (`parseDocument`).
+ *
+ * O que está sob teste é a **persistência decidida pelo orquestrador**: qual
+ * metadata de extração ele grava em `parsed_document_versions` e qual valor de
+ * cada campo ele grava em `extraction_results` quando três fontes
+ * determinísticas discordam entre si.
+ *
+ * Por isso os parsers continuam mockados (`extractText`, `parseBoleto`,
+ * `applySupplierTemplate`, `extractWithBoletoUtils`, `isCemig`): eles são a
+ * ENTRADA do orquestrador, e fixá-los é o que torna a decisão observável. Cada
+ * um tem seus próprios testes de unidade.
+ *
+ * O banco, ao contrário, **não** é mockado. A versão anterior deste arquivo
+ * montava um dublê do query builder anterior e afirmava sobre o payload
+ * capturado por ele — ou seja, provava que o dublê tinha guardado o objeto que
+ * acabara de receber, e não que o Postgres aceitaria aquela linha. Depois da
+ * ADR-009 (`@sbf/db`/Drizzle) o dublê parou até de encaixar na assinatura, e
+ * refazê-lo em Drizzle repetiria o mesmo vício. Agora as asserções releem as
+ * duas tabelas do banco real, o que passa a cobrir de graça o que o dublê
+ * escondia: os CHECKs (`parser_type`), as FKs, os tipos das colunas
+ * (`numeric(12,2)`, `date`), o `user_id` de cada linha — sem RLS, o filtro por
+ * usuário é do código — e a serialização do jsonb.
+ *
+ * `writeLog` segue mockado porque logging não é o assunto deste arquivo e
+ * `ingestion_logs.run_id`/`job_id` exigiriam semear uma run e um job inteiros
+ * só para satisfazer FK; o conteúdo dos logs do pipeline já é verificado em
+ * `ingestion-pipeline.test.ts`.
+ *
+ * Requer o Postgres de teste — ver `__tests__/helpers/db.ts`.
+ */
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../workers/ingestion/src/parsers/text-extractor", () => ({
   extractText: vi.fn(),
@@ -30,76 +61,71 @@ vi.mock("../../workers/ingestion/src/logger", () => ({
   writeLog: vi.fn(async () => undefined),
 }));
 
+import { sql } from "drizzle-orm";
+import type { Database } from "@sbf/db";
+import { ParserType } from "@sbf/ingestion-types";
 import { parseDocument } from "../../workers/ingestion/src/parsers/parse-orchestrator";
 import { extractText } from "../../workers/ingestion/src/parsers/text-extractor";
 import { parseBoleto } from "../../workers/ingestion/src/parsers/boleto-parser";
 import { applySupplierTemplate } from "../../workers/ingestion/src/parsers/supplier-templates";
 import { extractWithBoletoUtils } from "../../workers/ingestion/src/parsers/boleto-utils-extractor";
+import { getTestDb, limparPorUsuario, linha, semBancoDeTeste } from "../helpers/db";
 
-type InsertPayload = Record<string, unknown>;
+// UUID fixo e exclusivo deste arquivo — os arquivos de integração dividem o
+// mesmo Postgres (ver `__tests__/helpers/db.ts`).
+const USER_ID = "80000000-0000-4000-8000-000000000001";
 
-function createSupabaseMock() {
-  const captures: Record<string, InsertPayload[]> = {
-    parsed_document_versions: [],
-    extraction_results: [],
-  };
+/** Filhas antes das pais. */
+const TABELAS = ["extraction_results", "parsed_document_versions", "source_documents"];
 
-  const tableState = new Map<string, { action: "select" | "insert"; payload?: InsertPayload }>();
+let db: Database;
 
-  const api = {
-    from(table: string) {
-      tableState.set(table, { action: "select" });
-      const chain = {
-        select() {
-          tableState.set(table, { action: "select" });
-          return chain;
-        },
-        insert(payload: InsertPayload) {
-          captures[table]?.push(payload);
-          tableState.set(table, { action: "insert", payload });
-          return chain;
-        },
-        eq() {
-          return chain;
-        },
-        order() {
-          return chain;
-        },
-        limit() {
-          return chain;
-        },
-        single() {
-          const state = tableState.get(table);
-          if (state?.action === "select") {
-            if (table === "parsed_document_versions") {
-              return Promise.resolve({ data: { version_number: 0 }, error: null });
-            }
-            return Promise.resolve({ data: null, error: null });
-          }
-
-          if (table === "parsed_document_versions") {
-            return Promise.resolve({ data: { id: "pv-1" }, error: null });
-          }
-          if (table === "extraction_results") {
-            return Promise.resolve({ data: { id: "er-1" }, error: null });
-          }
-
-          return Promise.resolve({ data: { id: "id-1" }, error: null });
-        },
-      };
-      return chain;
-    },
-  };
-
-  return { api, captures };
+/**
+ * Cria o `source_documents` que a FK de `parsed_document_versions` exige.
+ * O conteúdo do arquivo é irrelevante: `extractText` está mockado, e o
+ * orquestrador só usa o id.
+ */
+async function semearDocumento(originKey: string): Promise<string> {
+  const row = await linha<{ id: string }>(
+    db,
+    sql`insert into public.source_documents
+          (user_id, origin_type, origin_key, filename, mime_type, status)
+        values (${USER_ID}::uuid, 'manual_upload', ${originKey}, ${originKey},
+                'application/pdf', 'parsing')
+        returning id`,
+  );
+  return row!.id;
 }
 
-describe("Integração: parse-orchestrator com OCR + consenso", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+/** Chama o orquestrador do jeito que o processador chama em produção. */
+async function rodarParse(sourceDocumentId: string) {
+  return parseDocument(
+    {
+      db,
+      ctx: { userId: USER_ID },
+      userId: USER_ID,
+      sourceDocumentId,
+      mimeType: "application/pdf",
+    },
+    new TextEncoder().encode("fake-pdf").buffer,
+  );
+}
+
+describe.skipIf(semBancoDeTeste)("orquestrador de parsing", () => {
+  beforeAll(() => {
+    db = getTestDb();
   });
 
-  it("persiste metadata de OCR local quando extração usa fallback OCR", async () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await limparPorUsuario(db, TABELAS, USER_ID);
+  });
+
+  afterAll(async () => {
+    await limparPorUsuario(db, TABELAS, USER_ID);
+  });
+
+  it("persiste metadata de OCR local quando a extração usa o fallback OCR", async () => {
     vi.mocked(extractText).mockResolvedValue({
       text: "VENCIMENTO: 20/05/2026\nVALOR DO DOCUMENTO: R$ 100,00",
       pages: 1,
@@ -123,27 +149,45 @@ describe("Integração: parse-orchestrator com OCR + consenso", () => {
     vi.mocked(applySupplierTemplate).mockReturnValue(null);
     vi.mocked(extractWithBoletoUtils).mockResolvedValue(null);
 
-    const { api, captures } = createSupabaseMock();
+    const sourceDocumentId = await semearDocumento("orq:ocr");
+    const resultado = await rodarParse(sourceDocumentId);
 
-    await parseDocument(
-      {
-        supabase: api as never,
-        ctx: { userId: "u1", runId: "r1", jobId: "j1" },
-        userId: "u1",
-        sourceDocumentId: "doc-1",
-        mimeType: "application/pdf",
-      },
-      new TextEncoder().encode("fake-pdf").buffer,
+    // Filtrar por `user_id` faz parte da asserção: sem RLS, achar a linha aqui
+    // é o que prova que o orquestrador gravou o dono certo.
+    const versao = await linha<{
+      id: string;
+      version_number: number;
+      parser_type: string;
+      raw_text: string;
+      metadata: {
+        pages: number;
+        was_protected: boolean;
+        text_length: number;
+        extraction_method: string;
+        ocr_applied: boolean;
+      };
+    }>(
+      db,
+      sql`select id, version_number, parser_type, raw_text, metadata
+            from public.parsed_document_versions
+           where user_id = ${USER_ID}::uuid
+             and source_document_id = ${sourceDocumentId}::uuid`,
     );
 
-    const parsedPayload = captures.parsed_document_versions[0];
-    expect(parsedPayload).toBeTruthy();
-    const metadata = parsedPayload?.metadata as Record<string, unknown>;
-    expect(metadata.extraction_method).toBe("pdf_native_plus_ocrmypdf");
-    expect(metadata.ocr_applied).toBe(true);
+    expect(versao).toBeTruthy();
+    // O id devolvido é o da linha que existe no banco, e não um id inventado.
+    expect(versao!.id).toBe(resultado.parsedVersionId);
+    expect(versao!.version_number).toBe(1);
+    expect(versao!.parser_type).toBe(ParserType.LOCAL_REGEX);
+    expect(versao!.raw_text).toContain("VALOR DO DOCUMENTO");
+
+    expect(versao!.metadata.extraction_method).toBe("pdf_native_plus_ocrmypdf");
+    expect(versao!.metadata.ocr_applied).toBe(true);
+    expect(versao!.metadata.was_protected).toBe(false);
+    expect(versao!.metadata.pages).toBe(1);
   });
 
-  it("aplica precedência do consenso: boleto_utils > template > parser", async () => {
+  it("aplica a precedência do consenso: boleto_utils > template > parser", async () => {
     vi.mocked(extractText).mockResolvedValue({
       text: "boleto teste",
       pages: 1,
@@ -186,29 +230,61 @@ describe("Integração: parse-orchestrator com OCR + consenso", () => {
       reason: "validated_by_boleto_utils",
     });
 
-    const { api, captures } = createSupabaseMock();
+    const sourceDocumentId = await semearDocumento("orq:consenso");
+    const resultado = await rodarParse(sourceDocumentId);
 
-    await parseDocument(
-      {
-        supabase: api as never,
-        ctx: { userId: "u1", runId: "r1", jobId: "j1" },
-        userId: "u1",
-        sourceDocumentId: "doc-2",
-        mimeType: "application/pdf",
-      },
-      new TextEncoder().encode("fake-pdf").buffer,
+    // O join amarra a extração ao documento semeado: sem ele, uma linha órfã de
+    // outra execução passaria por resultado deste teste.
+    const extracao = await linha<{
+      id: string;
+      parsed_version_id: string;
+      supplier_name_raw: string;
+      total_amount: string;
+      due_date: string;
+      competence_date: string;
+      document_number: string;
+      metadata: {
+        source_per_field: Record<string, string>;
+        deterministic_extras: { supplier_cnpj: string; barcode_digitable_line: string };
+      };
+    }>(
+      db,
+      sql`select er.id, er.parsed_version_id, er.supplier_name_raw,
+                 er.total_amount::text as total_amount,
+                 er.due_date::text as due_date,
+                 er.competence_date::text as competence_date,
+                 er.document_number, er.metadata
+            from public.extraction_results er
+            join public.parsed_document_versions pv on pv.id = er.parsed_version_id
+           where er.user_id = ${USER_ID}::uuid
+             and pv.source_document_id = ${sourceDocumentId}::uuid`,
     );
 
-    const extractionPayload = captures.extraction_results[0];
-    expect(extractionPayload).toBeTruthy();
-    expect(extractionPayload?.supplier_name_raw).toBe("BOLETO BANCARIO");
-    expect(extractionPayload?.total_amount).toBe(95);
-    expect(extractionPayload?.due_date).toBe("2026-05-20");
+    expect(extracao).toBeTruthy();
+    expect(extracao!.id).toBe(resultado.extractionResultId);
+    expect(extracao!.parsed_version_id).toBe(resultado.parsedVersionId);
 
-    const metadata = extractionPayload?.metadata as Record<string, unknown>;
-    const sourcePerField = metadata.source_per_field as Record<string, string>;
+    // ── Topo da precedência: boleto_utils vence template e parser ──
+    expect(extracao!.supplier_name_raw).toBe("BOLETO BANCARIO");
+    expect(Number(extracao!.total_amount)).toBe(95);
+    expect(extracao!.due_date).toBe("2026-05-20");
+    expect(extracao!.metadata.deterministic_extras.barcode_digitable_line).toBe(
+      "23794150099001980167035000211405700000000000000",
+    );
+
+    // ── Degrau do meio: onde boleto_utils não opinou, o template vence o parser ──
+    // A versão anterior só checava o degrau de cima, apesar do nome do teste.
+    expect(extracao!.document_number).toBe("DOC-TPL");
+    expect(extracao!.competence_date).toBe("2026-05-01");
+    expect(extracao!.metadata.deterministic_extras.supplier_cnpj).toBe("22222222000122");
+
+    const sourcePerField = extracao!.metadata.source_per_field;
     expect(sourcePerField.total_amount).toBe("boleto_utils");
     expect(sourcePerField.due_date).toBe("boleto_utils");
     expect(sourcePerField.supplier_name_raw).toBe("boleto_utils");
+    expect(sourcePerField.barcode_digitable_line).toBe("boleto_utils");
+    expect(sourcePerField.document_number).toBe("supplier_template");
+    expect(sourcePerField.supplier_cnpj).toBe("supplier_template");
+    expect(sourcePerField.competence_date).toBe("supplier_template");
   });
 });

@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@sbf/db";
+import { and, desc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { ArrowLeft, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,29 +27,68 @@ const statusLabels: Record<string, string> = {
 
 export default async function StatementDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const { ownerId } = await requireUser();
+  const db = getDb();
 
-  const { data: statement } = await supabase
-    .from("statement_cycles")
-    .select("*, cards(last_four_digits, card_brand, financial_products(name, institutions(name)))")
-    .eq("id", id)
-    .single();
+  // Sem RLS, o filtro por dono precisa estar explícito nesta consulta e em
+  // cada JOIN abaixo (defesa em profundidade — ver apps/web/src/app/actions/painel-hoje.ts).
+  const [statement] = await db
+    .select({
+      id: schema.statement_cycles.id,
+      reference_month: schema.statement_cycles.reference_month,
+      due_date: schema.statement_cycles.due_date,
+      total_amount: schema.statement_cycles.total_amount,
+      paid_amount: schema.statement_cycles.paid_amount,
+      status: schema.statement_cycles.status,
+      last_four_digits: schema.cards.last_four_digits,
+      card_brand: schema.cards.card_brand,
+      product_name: schema.financial_products.name,
+      institution_name: schema.institutions.name,
+    })
+    .from(schema.statement_cycles)
+    .leftJoin(
+      schema.cards,
+      and(eq(schema.cards.id, schema.statement_cycles.card_id), eq(schema.cards.user_id, ownerId)),
+    )
+    .leftJoin(
+      schema.financial_products,
+      and(
+        eq(schema.financial_products.id, schema.cards.financial_product_id),
+        eq(schema.financial_products.user_id, ownerId),
+      ),
+    )
+    .leftJoin(
+      schema.institutions,
+      and(
+        eq(schema.institutions.id, schema.financial_products.institution_id),
+        eq(schema.institutions.user_id, ownerId),
+      ),
+    )
+    .where(and(eq(schema.statement_cycles.id, id), eq(schema.statement_cycles.user_id, ownerId)))
+    .limit(1);
 
   if (!statement) redirect("/dashboard/statements");
 
-  const { data: items } = await supabase
-    .from("statement_items")
-    .select("id, description, amount, transaction_date, installment_number, total_installments")
-    .eq("statement_cycle_id", id)
-    .order("transaction_date", { ascending: false });
+  const items = await db
+    .select({
+      id: schema.statement_items.id,
+      description: schema.statement_items.description,
+      amount: schema.statement_items.amount,
+      transaction_date: schema.statement_items.transaction_date,
+      installment_number: schema.statement_items.installment_number,
+      total_installments: schema.statement_items.total_installments,
+    })
+    .from(schema.statement_items)
+    .where(
+      and(
+        eq(schema.statement_items.statement_cycle_id, id),
+        eq(schema.statement_items.user_id, ownerId),
+      ),
+    )
+    .orderBy(desc(schema.statement_items.transaction_date));
 
-  const card = statement.cards as {
-    last_four_digits: string;
-    card_brand: string | null;
-    financial_products: { name: string; institutions: { name: string } | null } | null;
-  } | null;
   const cardLabel =
-    `${card?.financial_products?.institutions?.name ?? ""} ${card?.financial_products?.name ?? ""} •${card?.last_four_digits ?? ""}`.trim();
+    `${statement.institution_name ?? ""} ${statement.product_name ?? ""} •${statement.last_four_digits ?? ""}`.trim();
   const remaining = (statement.total_amount ?? 0) - (statement.paid_amount ?? 0);
 
   return (
@@ -122,7 +163,7 @@ export default async function StatementDetailPage({ params }: { params: Promise<
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(items ?? []).length === 0 ? (
+          {items.length === 0 ? (
             <p className="p-6 text-center text-muted-foreground">Nenhum item nesta fatura.</p>
           ) : (
             <Table>
@@ -135,7 +176,7 @@ export default async function StatementDetailPage({ params }: { params: Promise<
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(items ?? []).map((item) => (
+                {items.map((item) => (
                   <TableRow key={item.id}>
                     <TableCell className="text-sm">
                       {item.transaction_date ? formatDate(item.transaction_date) : "—"}

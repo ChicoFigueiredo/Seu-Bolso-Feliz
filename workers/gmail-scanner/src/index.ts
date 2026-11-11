@@ -1,8 +1,8 @@
 /**
  * @sbf/worker-gmail-scanner — Orquestrador principal
  *
- * Escaneia a label "Comprovantes" do Gmail, baixa anexos,
- * faz upload para Supabase Storage e cria source_documents + ingestion_jobs.
+ * Escaneia a label "Comprovantes" do Gmail, baixa anexos, envia os arquivos
+ * para o storage S3-compatível e cria source_documents + ingestion_jobs.
  *
  * Uso:
  *   bun run workers/gmail-scanner/src/index.ts --label Comprovantes
@@ -10,7 +10,17 @@
  *   bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50
  *   bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 10 --dry-run
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, eq } from "drizzle-orm";
+import {
+  document_fingerprints,
+  enqueueJob,
+  getDb,
+  ingestion_runs,
+  source_documents,
+  type Database,
+  resolveOwnerId,
+} from "@sbf/db";
+import { createStorageClientFromEnv, type StorageClient } from "@sbf/storage";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey, computeContentHash } from "@sbf/operations";
 import { classifyFinancialIntent } from "@sbf/domain";
@@ -24,7 +34,8 @@ import {
   type AttachmentInfo,
   type MessageMetadata,
 } from "./message-processor";
-import { getSupabaseClient } from "./supabase";
+import { resolveAttachmentRequires, resolveEmailBodyRequires } from "./job-requires";
+import { mensagemDeErro, uploadOriginal } from "./storage-upload";
 
 // ─── CLI Options ──────────────────────────────────────────────
 
@@ -155,7 +166,7 @@ function createStats(): ScanStats {
 // ─── Helpers ──────────────────────────────────────────────────
 
 /**
- * Sanitiza nome de arquivo para uso como key no Supabase Storage.
+ * Sanitiza nome de arquivo para uso como chave de objeto no storage.
  * Remove caracteres problemáticos, substitui espaços por underscores.
  */
 function sanitizeFilename(filename: string): string {
@@ -184,10 +195,12 @@ function parseEmailDate(dateStr: string | undefined): string | null {
 
 // ─── Core ─────────────────────────────────────────────────────
 
-function getUserId(): string {
-  const uid = process.env.LOCAL_USER_ID;
-  if (!uid) throw new Error("LOCAL_USER_ID is required for gmail-scanner");
-  return uid;
+/**
+ * Quem é o dono das mensagens varridas. Sai do banco, não de um UUID copiado
+ * à mão para o `.env` — ver `resolveOwnerId` em @sbf/db para o porquê.
+ */
+function getUserId(): Promise<string> {
+  return resolveOwnerId();
 }
 
 /**
@@ -195,21 +208,25 @@ function getUserId(): string {
  * Evita re-download desnecessário do anexo.
  */
 async function isAlreadyProcessedByMsgFile(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   gmailMessageId: string,
   filename: string,
 ): Promise<boolean> {
-  const { data } = await supabase
-    .from("source_documents")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("origin_type", SourceDocumentOrigin.GMAIL)
-    .eq("gmail_message_id", gmailMessageId)
-    .eq("filename", filename)
+  const [existente] = await db
+    .select({ id: source_documents.id })
+    .from(source_documents)
+    .where(
+      and(
+        eq(source_documents.user_id, userId),
+        eq(source_documents.origin_type, SourceDocumentOrigin.GMAIL),
+        eq(source_documents.gmail_message_id, gmailMessageId),
+        eq(source_documents.filename, filename),
+      ),
+    )
     .limit(1);
 
-  return (data?.length ?? 0) > 0;
+  return existente !== undefined;
 }
 
 /**
@@ -217,18 +234,22 @@ async function isAlreadyProcessedByMsgFile(
  * Identifica arquivo idêntico mesmo vindo de e-mail ou nome diferente.
  */
 async function isContentHashDuplicate(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   contentHash: string,
 ): Promise<boolean> {
-  const { data } = await supabase
-    .from("document_fingerprints")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("content_hash", contentHash)
+  const [existente] = await db
+    .select({ id: document_fingerprints.id })
+    .from(document_fingerprints)
+    .where(
+      and(
+        eq(document_fingerprints.user_id, userId),
+        eq(document_fingerprints.content_hash, contentHash),
+      ),
+    )
     .limit(1);
 
-  return (data?.length ?? 0) > 0;
+  return existente !== undefined;
 }
 
 /**
@@ -239,7 +260,8 @@ async function isContentHashDuplicate(
  */
 async function processAttachment(
   gmail: GmailClient,
-  supabase: SupabaseClient,
+  db: Database,
+  storage: StorageClient,
   userId: string,
   runId: string,
   metadata: MessageMetadata,
@@ -247,9 +269,7 @@ async function processAttachment(
   stats: ScanStats,
 ): Promise<void> {
   // Fase 1: Pré-download — evita baixar novamente o mesmo anexo
-  if (
-    await isAlreadyProcessedByMsgFile(supabase, userId, metadata.messageId, attachment.filename)
-  ) {
+  if (await isAlreadyProcessedByMsgFile(db, userId, metadata.messageId, attachment.filename)) {
     stats.skippedAlreadyProcessed++;
     stats.skippedByMsgFilename++;
     return;
@@ -263,7 +283,7 @@ async function processAttachment(
   const contentHash = await computeContentHash(fileBuffer);
 
   // Fase 2: Pós-download — detecta conteúdo idêntico de qualquer origem
-  if (await isContentHashDuplicate(supabase, userId, contentHash)) {
+  if (await isContentHashDuplicate(db, userId, contentHash)) {
     stats.skippedAlreadyProcessed++;
     stats.skippedByContentHash++;
     console.log(
@@ -279,15 +299,13 @@ async function processAttachment(
     contentHash,
   });
 
-  // 3. Upload para Supabase Storage (filename sanitizado para evitar chars inválidos)
+  // 3. Upload para o storage (filename sanitizado para evitar chars inválidos)
   const safeFilename = sanitizeFilename(attachment.filename);
   const storagePath = `${userId}/${crypto.randomUUID()}/${safeFilename}`;
-  const { error: uploadError } = await supabase.storage
-    .from("ingestion-originals")
-    .upload(storagePath, fileBuffer, { contentType: attachment.mimeType });
+  const upload = await uploadOriginal(storage, storagePath, fileBuffer, attachment.mimeType);
 
-  if (uploadError) {
-    console.error(`  ❌ Upload failed: ${attachment.filename} — ${uploadError.message}`);
+  if (!upload.ok) {
+    console.error(`  ❌ Upload failed: ${attachment.filename} — ${upload.erro}`);
     stats.errors++;
     return;
   }
@@ -295,64 +313,73 @@ async function processAttachment(
   stats.attachmentsUploaded++;
 
   // 4. Criar source_document com content_hash
-  const { data: doc, error: docError } = await supabase
-    .from("source_documents")
-    .insert({
-      user_id: userId,
-      origin_type: SourceDocumentOrigin.GMAIL,
-      origin_key: originKey,
-      gmail_message_id: metadata.messageId,
-      gmail_thread_id: metadata.threadId,
-      gmail_attachment_id: attachment.attachmentId,
-      gmail_label: metadata.labelIds.join(","),
-      gmail_date: parseEmailDate(metadata.date),
-      gmail_from: metadata.from,
-      gmail_subject: metadata.subject,
-      filename: attachment.filename,
-      mime_type: attachment.mimeType,
-      file_size_bytes: fileBuffer.byteLength,
-      storage_path: storagePath,
-      content_hash: contentHash,
-      status: "active",
-    })
-    .select("id")
-    .single();
+  let documentId: string;
+  try {
+    const [doc] = await db
+      .insert(source_documents)
+      .values({
+        user_id: userId,
+        origin_type: SourceDocumentOrigin.GMAIL,
+        origin_key: originKey,
+        gmail_message_id: metadata.messageId,
+        gmail_thread_id: metadata.threadId,
+        gmail_attachment_id: attachment.attachmentId,
+        gmail_label: metadata.labelIds.join(","),
+        gmail_date: parseEmailDate(metadata.date),
+        gmail_from: metadata.from,
+        gmail_subject: metadata.subject,
+        filename: attachment.filename,
+        mime_type: attachment.mimeType,
+        file_size_bytes: fileBuffer.byteLength,
+        storage_path: storagePath,
+        content_hash: contentHash,
+        status: "active",
+      })
+      .returning({ id: source_documents.id });
 
-  if (docError || !doc) {
-    console.error(`  ❌ source_document failed: ${attachment.filename} — ${docError?.message}`);
+    if (!doc) throw new Error("insert de source_document não devolveu linha");
+    documentId = doc.id;
+  } catch (err) {
+    console.error(`  ❌ source_document failed: ${attachment.filename} — ${mensagemDeErro(err)}`);
     stats.errors++;
     return;
   }
 
   // 5. Criar fingerprint para deduplicação futura
-  const { error: fpError } = await supabase.from("document_fingerprints").insert({
-    source_document_id: doc.id,
-    user_id: userId,
-    content_hash: contentHash,
-    hash_algorithm: "sha256",
-  });
-
-  if (fpError) {
-    console.warn(`  ⚠️  fingerprint insert failed: ${attachment.filename} — ${fpError.message}`);
+  // Falha aqui não invalida o documento: o job segue, só a dedup por hash
+  // fica cega para este arquivo. Era assim antes e continua sendo.
+  try {
+    await db.insert(document_fingerprints).values({
+      source_document_id: documentId,
+      user_id: userId,
+      content_hash: contentHash,
+      hash_algorithm: "sha256",
+    });
+  } catch (err) {
+    console.warn(
+      `  ⚠️  fingerprint insert failed: ${attachment.filename} — ${mensagemDeErro(err)}`,
+    );
   }
 
   // 6. Criar ingestion_job
-  const { error: jobError } = await supabase.from("ingestion_jobs").insert({
-    run_id: runId,
-    user_id: userId,
-    source_document_id: doc.id,
-    status: IngestionJobStatus.DISCOVERED,
-    metadata: {
-      filename: attachment.filename,
-      origin: "gmail_scanner",
-      gmail_subject: metadata.subject,
-      gmail_from: metadata.from,
-      gmail_date: parseEmailDate(metadata.date),
-    },
-  });
-
-  if (jobError) {
-    console.error(`  ❌ ingestion_job failed: ${attachment.filename} — ${jobError.message}`);
+  try {
+    await enqueueJob({
+      db,
+      runId,
+      userId,
+      sourceDocumentId: documentId,
+      status: IngestionJobStatus.DISCOVERED,
+      requires: resolveAttachmentRequires(attachment),
+      metadata: {
+        filename: attachment.filename,
+        origin: "gmail_scanner",
+        gmail_subject: metadata.subject,
+        gmail_from: metadata.from,
+        gmail_date: parseEmailDate(metadata.date),
+      },
+    });
+  } catch (err) {
+    console.error(`  ❌ ingestion_job failed: ${attachment.filename} — ${mensagemDeErro(err)}`);
     stats.errors++;
     return;
   }
@@ -368,7 +395,8 @@ async function processAttachment(
  * Aplica FinancialIntent classifier e cria source_document + job se houver sinal.
  */
 async function processEmailBody(
-  supabase: SupabaseClient,
+  db: Database,
+  storage: StorageClient,
   userId: string,
   runId: string,
   metadata: MessageMetadata,
@@ -378,7 +406,7 @@ async function processEmailBody(
   const bodyFilename = `gmail-message-${metadata.messageId}.txt`;
 
   // Dedup: já processamos o corpo desta mensagem?
-  if (await isAlreadyProcessedByMsgFile(supabase, userId, metadata.messageId, bodyFilename)) {
+  if (await isAlreadyProcessedByMsgFile(db, userId, metadata.messageId, bodyFilename)) {
     stats.bodiesSkipped++;
     return;
   }
@@ -398,7 +426,7 @@ async function processEmailBody(
   const bodyBuffer = new TextEncoder().encode(bodyText);
   const contentHash = await computeContentHash(bodyBuffer.buffer);
 
-  if (await isContentHashDuplicate(supabase, userId, contentHash)) {
+  if (await isContentHashDuplicate(db, userId, contentHash)) {
     stats.bodiesSkipped++;
     return;
   }
@@ -409,71 +437,89 @@ async function processEmailBody(
     contentHash,
   });
 
-  // Upload corpo como .txt no Storage
+  // Upload corpo como .txt no storage
   const storagePath = `${userId}/${crypto.randomUUID()}/${bodyFilename}`;
-  const { error: uploadError } = await supabase.storage
-    .from("ingestion-originals")
-    .upload(storagePath, bodyBuffer, { contentType: "text/plain; charset=utf-8" });
+  const upload = await uploadOriginal(
+    storage,
+    storagePath,
+    bodyBuffer,
+    "text/plain; charset=utf-8",
+  );
 
-  if (uploadError) {
-    console.error(`  ❌ Body upload failed (${metadata.messageId}): ${uploadError.message}`);
+  if (!upload.ok) {
+    console.error(`  ❌ Body upload failed (${metadata.messageId}): ${upload.erro}`);
     stats.errors++;
     return;
   }
 
-  const { data: doc, error: docError } = await supabase
-    .from("source_documents")
-    .insert({
+  let documentId: string;
+  try {
+    const [doc] = await db
+      .insert(source_documents)
+      .values({
+        user_id: userId,
+        origin_type: SourceDocumentOrigin.GMAIL,
+        origin_key: originKey,
+        gmail_message_id: metadata.messageId,
+        gmail_thread_id: metadata.threadId,
+        gmail_label: metadata.labelIds.join(","),
+        gmail_date: parseEmailDate(metadata.date),
+        gmail_from: metadata.from,
+        gmail_subject: metadata.subject,
+        filename: bodyFilename,
+        mime_type: "text/plain",
+        file_size_bytes: bodyBuffer.byteLength,
+        storage_path: storagePath,
+        content_hash: contentHash,
+        status: "active",
+      })
+      .returning({ id: source_documents.id });
+
+    if (!doc) throw new Error("insert de source_document não devolveu linha");
+    documentId = doc.id;
+  } catch (err) {
+    console.error(
+      `  ❌ Body source_document failed (${metadata.messageId}): ${mensagemDeErro(err)}`,
+    );
+    stats.errors++;
+    return;
+  }
+
+  // O fingerprint do corpo nunca foi obrigatório para o job seguir: o código
+  // anterior ignorava o erro do insert. Aqui só ganha voz no log.
+  try {
+    await db.insert(document_fingerprints).values({
+      source_document_id: documentId,
       user_id: userId,
-      origin_type: SourceDocumentOrigin.GMAIL,
-      origin_key: originKey,
-      gmail_message_id: metadata.messageId,
-      gmail_thread_id: metadata.threadId,
-      gmail_label: metadata.labelIds.join(","),
-      gmail_date: parseEmailDate(metadata.date),
-      gmail_from: metadata.from,
-      gmail_subject: metadata.subject,
-      filename: bodyFilename,
-      mime_type: "text/plain",
-      file_size_bytes: bodyBuffer.byteLength,
-      storage_path: storagePath,
       content_hash: contentHash,
-      status: "active",
-    })
-    .select("id")
-    .single();
-
-  if (docError || !doc) {
-    console.error(`  ❌ Body source_document failed (${metadata.messageId}): ${docError?.message}`);
-    stats.errors++;
-    return;
+      hash_algorithm: "sha256",
+    });
+  } catch (err) {
+    console.warn(
+      `  ⚠️  Body fingerprint insert failed (${metadata.messageId}): ${mensagemDeErro(err)}`,
+    );
   }
 
-  await supabase.from("document_fingerprints").insert({
-    source_document_id: doc.id,
-    user_id: userId,
-    content_hash: contentHash,
-    hash_algorithm: "sha256",
-  });
-
-  const { error: jobError } = await supabase.from("ingestion_jobs").insert({
-    run_id: runId,
-    user_id: userId,
-    source_document_id: doc.id,
-    status: IngestionJobStatus.DISCOVERED,
-    metadata: {
-      filename: bodyFilename,
-      origin: "gmail_body",
-      financial_intent: classification.intent,
-      financial_confidence: classification.confidence,
-      gmail_subject: metadata.subject,
-      gmail_from: metadata.from,
-      gmail_date: parseEmailDate(metadata.date),
-    },
-  });
-
-  if (jobError) {
-    console.error(`  ❌ Body job failed (${metadata.messageId}): ${jobError.message}`);
+  try {
+    await enqueueJob({
+      db,
+      runId,
+      userId,
+      sourceDocumentId: documentId,
+      status: IngestionJobStatus.DISCOVERED,
+      requires: resolveEmailBodyRequires(),
+      metadata: {
+        filename: bodyFilename,
+        origin: "gmail_body",
+        financial_intent: classification.intent,
+        financial_confidence: classification.confidence,
+        gmail_subject: metadata.subject,
+        gmail_from: metadata.from,
+        gmail_date: parseEmailDate(metadata.date),
+      },
+    });
+  } catch (err) {
+    console.error(`  ❌ Body job failed (${metadata.messageId}): ${mensagemDeErro(err)}`);
     stats.errors++;
     return;
   }
@@ -500,8 +546,12 @@ function formatBytes(bytes: number): string {
 async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   const stats = createStats();
   const gmail = createGmailClient();
-  const supabase = getSupabaseClient();
-  const userId = getUserId();
+  const db = getDb();
+  const userId = await getUserId();
+  // Em dry-run nada sobe: exigir credencial de S3 seria pedir configuração
+  // para não usar. Fora dele, o cliente é criado uma vez, no início, para a
+  // falha de configuração aparecer antes do primeiro download.
+  const storage = options.dryRun ? undefined : createStorageClientFromEnv();
 
   // Query composta a partir de --query, --from-date e --to-date.
   const gmailQuery = buildGmailQuery({
@@ -536,29 +586,31 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   // 2. Criar ingestion_run (se não dry-run)
   let runId = "dry-run";
   if (!options.dryRun) {
-    const { data: run, error: runError } = await supabase
-      .from("ingestion_runs")
-      .insert({
-        user_id: userId,
-        source_type: SourceDocumentOrigin.GMAIL,
-        status: IngestionRunStatus.RUNNING,
-        metadata: {
-          label: options.label,
-          label_id: labelId,
-          query: gmailQuery || null,
-          from_date: options.fromDate,
-          to_date: options.toDate,
-          limit: options.limit === Infinity ? null : options.limit,
-        },
-      })
-      .select("id")
-      .single();
+    try {
+      const [run] = await db
+        .insert(ingestion_runs)
+        .values({
+          user_id: userId,
+          source_type: SourceDocumentOrigin.GMAIL,
+          status: IngestionRunStatus.RUNNING,
+          metadata: {
+            label: options.label,
+            label_id: labelId,
+            query: gmailQuery || null,
+            from_date: options.fromDate,
+            to_date: options.toDate,
+            limit: options.limit === Infinity ? null : options.limit,
+          },
+        })
+        .returning({ id: ingestion_runs.id });
 
-    if (runError || !run) {
-      console.error("❌ Falha ao criar ingestion_run:", runError?.message);
+      if (!run) throw new Error("insert de ingestion_run não devolveu linha");
+      runId = run.id;
+    } catch (err) {
+      // Sem run não há a que pendurar os jobs: abortar é a única saída honesta.
+      console.error("❌ Falha ao criar ingestion_run:", mensagemDeErro(err));
       process.exit(1);
     }
-    runId = run.id;
     console.log(`📋 Run criado: ${runId}\n`);
   }
 
@@ -616,7 +668,9 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
           stats.attachmentsFound += attachments.length;
         }
 
-        if (options.dryRun) {
+        // `!storage` só é verdade em dry-run — o teste conjunto existe para o
+        // TypeScript enxergar que, daqui para baixo, o cliente existe.
+        if (options.dryRun || !storage) {
           if (willProcessAttachments) {
             for (const att of attachments) {
               console.log(`  📎 ${att.filename} (${att.mimeType}, ${formatBytes(att.size)})`);
@@ -632,7 +686,16 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
         if (willProcessAttachments) {
           for (const attachment of attachments) {
             try {
-              await processAttachment(gmail, supabase, userId, runId, metadata, attachment, stats);
+              await processAttachment(
+                gmail,
+                db,
+                storage,
+                userId,
+                runId,
+                metadata,
+                attachment,
+                stats,
+              );
             } catch (err) {
               stats.errors++;
               console.error(
@@ -648,7 +711,7 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
           try {
             const bodyText = extractBodyText(message);
             if (bodyText.length >= 50) {
-              await processEmailBody(supabase, userId, runId, metadata, bodyText, stats);
+              await processEmailBody(db, storage, userId, runId, metadata, bodyText, stats);
             }
           } catch (err) {
             stats.errors++;
@@ -665,17 +728,24 @@ async function scanGmailLabel(options: ScanOptions): Promise<ScanStats> {
   } finally {
     // 4. Finalizar run
     if (!options.dryRun && runId !== "dry-run") {
-      await supabase
-        .from("ingestion_runs")
-        .update({
-          status:
-            stats.errors > 0 && stats.jobsCreated === 0
-              ? IngestionRunStatus.FAILED
-              : IngestionRunStatus.COMPLETED,
-          completed_at: new Date().toISOString(),
-          stats: { ...stats },
-        })
-        .eq("id", runId);
+      try {
+        await db
+          .update(ingestion_runs)
+          .set({
+            status:
+              stats.errors > 0 && stats.jobsCreated === 0
+                ? IngestionRunStatus.FAILED
+                : IngestionRunStatus.COMPLETED,
+            completed_at: new Date().toISOString(),
+            stats: { ...stats },
+          })
+          .where(eq(ingestion_runs.id, runId));
+      } catch (err) {
+        // Estamos num `finally`: deixar esta falha escapar sequestraria o erro
+        // que trouxe o fluxo até aqui. O run fica "running" e o scan já
+        // aconteceu — só o registro do desfecho se perde.
+        console.error("❌ Falha ao finalizar ingestion_run:", mensagemDeErro(err));
+      }
     }
   }
 

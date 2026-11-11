@@ -2,8 +2,8 @@
  * Migração v0 → v1 dos payloads de draft.
  *
  * v0 é o formato que `draft-generator.ts` produzia antes da unificação:
- * `type: "despesa"`, `amount` cru (que o Supabase devolve como string para
- * colunas `numeric`), `due_date` sem `event_date`, `category` textual,
+ * `type: "despesa"`, `amount` cru (que o driver do banco pode devolver como
+ * string para colunas `numeric`), `due_date` sem `event_date`, `category` textual,
  * `recurrence`/`base_amount` em vez de `frequency`/`amount`.
  *
  * Esta função é a ÚNICA definição da conversão. O backfill em

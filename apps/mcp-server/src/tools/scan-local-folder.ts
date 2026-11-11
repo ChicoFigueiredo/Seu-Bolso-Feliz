@@ -2,42 +2,29 @@
  * @sbf/mcp-server — Tool: scan_local_folder
  * Escaneia diretório local por documentos e cria jobs de ingestão.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { readdir, stat, readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
+import { and, eq } from "drizzle-orm";
+import { enqueueJob, schema, type Database } from "@sbf/db";
+import type { StorageBucket } from "@sbf/storage";
 import { IngestionRunStatus, IngestionJobStatus, SourceDocumentOrigin } from "@sbf/ingestion-types";
 import { buildOriginKey } from "@sbf/operations";
+import { EXTENSOES_ACEITAS, MIME_POR_EXTENSAO } from "@sbf/contracts";
+import { getIngestionBucket } from "../storage.js";
+import { resolveRequires } from "../job-requires.js";
 
-const ACCEPTED_EXTENSIONS = new Set([
-  ".pdf",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".csv",
-  ".xls",
-  ".xlsx",
-  ".xml",
-  ".ofx",
-]);
-
-const MIME_MAP: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".csv": "text/csv",
-  ".xls": "application/vnd.ms-excel",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".xml": "application/xml",
-  ".ofx": "application/octet-stream",
-};
+// Registro único de formatos aceitos (@sbf/contracts), em vez da lista local
+// que existia aqui antes — que aceitava `.xls` (o pipeline não abre) e
+// rotulava `.ofx` como `application/octet-stream` (mesma divergência
+// descrita no cabeçalho de workers/local-scanner/src/scanner.ts).
+const ACCEPTED_EXTENSIONS = EXTENSOES_ACEITAS;
+const MIME_MAP = MIME_POR_EXTENSAO;
 
 export async function scanLocalFolder(
-  supabase: SupabaseClient,
+  db: Database,
   userId: string,
   dirPath: string,
+  storage?: StorageBucket,
 ): Promise<{ discovered: number; skipped: number; errors: string[] }> {
   let entries: string[];
   try {
@@ -46,19 +33,27 @@ export async function scanLocalFolder(
     return { discovered: 0, skipped: 0, errors: [`Directory not found: ${dirPath}`] };
   }
 
-  const { data: run, error: runError } = await supabase
-    .from("ingestion_runs")
-    .insert({
-      user_id: userId,
-      source_type: SourceDocumentOrigin.LOCAL_FILE,
-      status: IngestionRunStatus.RUNNING,
-      metadata: { directory: dirPath, triggered_by: "mcp" },
-    })
-    .select("id")
-    .single();
+  const bucket = storage ?? getIngestionBucket();
 
-  if (runError || !run) {
-    return { discovered: 0, skipped: 0, errors: [`Failed to create run: ${runError?.message}`] };
+  let runId: string;
+  try {
+    const [run] = await db
+      .insert(schema.ingestion_runs)
+      .values({
+        user_id: userId,
+        source_type: SourceDocumentOrigin.LOCAL_FILE,
+        status: IngestionRunStatus.RUNNING,
+        metadata: { directory: dirPath, triggered_by: "mcp" },
+      })
+      .returning({ id: schema.ingestion_runs.id });
+    if (!run) throw new Error("insert não devolveu linha");
+    runId = run.id;
+  } catch (err) {
+    return {
+      discovered: 0,
+      skipped: 0,
+      errors: [`Failed to create run: ${err instanceof Error ? err.message : String(err)}`],
+    };
   }
 
   let discovered = 0;
@@ -79,56 +74,69 @@ export async function scanLocalFolder(
         filepath: filePath,
         mtimeMs: fileStat.mtimeMs,
       });
-      const { data: existing } = await supabase
-        .from("source_documents")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("origin_type", SourceDocumentOrigin.LOCAL_FILE)
-        .eq("origin_key", originKey)
-        .maybeSingle();
+
+      const [existing] = await db
+        .select({ id: schema.source_documents.id })
+        .from(schema.source_documents)
+        .where(
+          and(
+            eq(schema.source_documents.user_id, userId),
+            eq(schema.source_documents.origin_type, SourceDocumentOrigin.LOCAL_FILE),
+            eq(schema.source_documents.origin_key, originKey),
+          ),
+        )
+        .limit(1);
 
       if (existing) {
         skipped++;
         continue;
       }
 
-      const fileData = await readFile(filePath);
-      const storagePath = `${userId}/${Date.now()}-${entry}`;
+      // Cópia para ArrayBuffer comum: o `Buffer` do Node é tipado sobre
+      // `ArrayBufferLike`, que não satisfaz o `UploadBody` de @sbf/storage
+      // (restrito a views sobre `ArrayBuffer`).
+      const fileData = new Uint8Array(await readFile(filePath));
+      const storagePath = `${userId}/${crypto.randomUUID()}/${entry}`;
       const mimeType = MIME_MAP[ext] ?? "application/octet-stream";
 
-      const { error: uploadError } = await supabase.storage
-        .from("ingestion-originals")
-        .upload(storagePath, fileData, { contentType: mimeType });
-      if (uploadError) {
-        errors.push(`Upload failed for ${entry}: ${uploadError.message}`);
+      try {
+        await bucket.upload(storagePath, fileData, { contentType: mimeType });
+      } catch (err) {
+        errors.push(
+          `Upload failed for ${entry}: ${err instanceof Error ? err.message : String(err)}`,
+        );
         continue;
       }
 
-      const { data: doc } = await supabase
-        .from("source_documents")
-        .insert({
-          user_id: userId,
-          origin_type: SourceDocumentOrigin.LOCAL_FILE,
-          origin_key: originKey,
-          filename: entry,
-          mime_type: mimeType,
-          file_size_bytes: fileStat.size,
-          storage_path: storagePath,
-          metadata: { local_path: filePath },
-        })
-        .select("id")
-        .single();
-
-      if (!doc) {
+      let documentId: string;
+      try {
+        const [doc] = await db
+          .insert(schema.source_documents)
+          .values({
+            user_id: userId,
+            origin_type: SourceDocumentOrigin.LOCAL_FILE,
+            origin_key: originKey,
+            filename: entry,
+            mime_type: mimeType,
+            file_size_bytes: fileStat.size,
+            storage_path: storagePath,
+            metadata: { local_path: filePath },
+          })
+          .returning({ id: schema.source_documents.id });
+        if (!doc) throw new Error("insert não devolveu linha");
+        documentId = doc.id;
+      } catch {
         errors.push(`Failed to create source_document for ${entry}`);
         continue;
       }
 
-      await supabase.from("ingestion_jobs").insert({
-        run_id: run.id,
-        user_id: userId,
-        source_document_id: doc.id,
+      await enqueueJob({
+        db,
+        runId,
+        userId,
+        sourceDocumentId: documentId,
         status: IngestionJobStatus.DISCOVERED,
+        requires: resolveRequires(entry, fileData),
         metadata: { filename: entry, mime_type: mimeType, triggered_by: "mcp" },
       });
 
@@ -138,9 +146,9 @@ export async function scanLocalFolder(
     }
   }
 
-  await supabase
-    .from("ingestion_runs")
-    .update({
+  await db
+    .update(schema.ingestion_runs)
+    .set({
       status: IngestionRunStatus.COMPLETED,
       metadata: {
         directory: dirPath,
@@ -150,7 +158,7 @@ export async function scanLocalFolder(
         error_count: errors.length,
       },
     })
-    .eq("id", run.id);
+    .where(eq(schema.ingestion_runs.id, runId));
 
   return { discovered, skipped, errors };
 }

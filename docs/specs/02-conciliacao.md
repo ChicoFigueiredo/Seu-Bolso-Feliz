@@ -1,7 +1,16 @@
 # 02 — Spec: Conciliação (documento × registros financeiros)
 
-> **Estado: ✅ motor determinístico pronto · 🟡 UX de revisão.**
-> Verificado contra código em 2026-06-20. Ver [`00-estado-real.md`](00-estado-real.md).
+> **Estado: ✅ motor determinístico pronto e testado · 🟡 UX de revisão.**
+> Verificado contra código em 2026-08-24. Ver [`00-estado-real.md`](00-estado-real.md).
+>
+> ⚠️ Até 2026-08-24 o "✅" acima não tinha evidência real: nenhum teste no repo
+> exercitava `findReconciliationCandidates()`, e a Regra 2 (match exato/aproximado)
+> consultava colunas inexistentes no schema real (`transactions.transaction_date`/
+> `supplier_name`/`category` em vez de `event_date`/sem coluna equivalente/
+> `category_id`), sob casts `as never` que escondiam o erro do TypeScript — o erro do
+> Supabase nunca era checado, então a regra sempre retornava zero candidatos,
+> silenciosamente, em produção. Corrigido e coberto durante a Fase 4 da integração
+> Pluggy (`4d20000`) — ver [`../integrations/pluggy.md`](../integrations/pluggy.md).
 
 ## Objetivo (comportamento desejado)
 
@@ -66,5 +75,10 @@ Precisa ser **extraída para uma tabela explícita** neste spec, ex.:
 - `workers/ingestion/src/reconciliation/reconciliation.ts`
 - `apps/web/src/app/api/reconciliation/[draftId]/route.ts` (+ `/progress`)
 - `apps/web/src/app/api/ai-suggest/route.ts`
-- Testes: `__tests__/integration/domain-flows.test.ts`, `__tests__/domain/draft-generation.test.ts`
+- Testes do motor (`findReconciliationCandidates`): `__tests__/integration/reconciliation.test.ts`
+  (as 4 regras, contra schema real), `__tests__/integration/pluggy-reconciliation-fixtures.test.ts`
+  (52 casos, dataset sintético §37 — exato/aproximado/não-match/ambiguidade/falso
+  positivo/evidência)
+- Testes de classificação/geração de draft (não do motor de matching):
+  `__tests__/integration/domain-flows.test.ts`, `__tests__/domain/draft-generation.test.ts`
 - Decisão original: `docs/_arquivo/adrs/ADR-001-deduplicacao-transacao-item-fatura.md`

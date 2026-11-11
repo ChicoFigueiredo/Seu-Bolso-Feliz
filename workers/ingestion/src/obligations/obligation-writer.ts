@@ -10,12 +10,13 @@
  * a produzir UMA obrigação com DUAS evidências, em vez de dois lotes de
  * revisão independentes que virariam duas despesas.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { sql } from "drizzle-orm";
+import type { Database } from "@sbf/db";
 import { buildFinancialIdentityKeys, type FinancialIdentityInput } from "@sbf/domain";
 import { toObligationType, shouldCreateObligation } from "@sbf/contracts";
 
 export interface ObligationUpsertInput {
-  supabase: SupabaseClient;
+  db: Database;
   userId: string;
   sourceDocumentId: string;
   /** Linha de `extraction_results`, quando houve extração. */
@@ -85,7 +86,7 @@ export function buildIdentityInput(
 export async function upsertObligationFromEvidence(
   input: ObligationUpsertInput,
 ): Promise<ObligationUpsertResult | null> {
-  const { supabase, userId, sourceDocumentId, extraction, intent, confidence } = input;
+  const { db, userId, sourceDocumentId, extraction, intent, confidence } = input;
 
   if (!shouldCreateObligation(intent)) return null;
 
@@ -116,25 +117,41 @@ export async function upsertObligationFromEvidence(
     metadata: { intent, card_last4: extras.card_last4 ?? null },
   };
 
-  const { data, error } = await supabase.rpc("fn_upsert_financial_obligation", {
-    p_user_id: userId,
-    p_payload: payload,
-    p_keys: keys.entries,
-    p_evidence: {
-      source_document_id: sourceDocumentId,
-      confidence_score: confidence,
-      reasons: [],
-    },
-  });
+  const evidence = {
+    source_document_id: sourceDocumentId,
+    confidence_score: confidence,
+    reasons: [],
+  };
 
-  if (error) throw new Error(`fn_upsert_financial_obligation: ${error.message}`);
+  // A função devolve UM jsonb (não uma tabela), então a linha vem como
+  // `{ fn_upsert_financial_obligation: {...} }` — daí o alias explícito.
+  let row: Record<string, unknown> | undefined;
+  try {
+    const result = await db.execute(
+      sql`select public.fn_upsert_financial_obligation(
+        ${userId}::uuid,
+        ${JSON.stringify(payload)}::jsonb,
+        ${JSON.stringify(keys.entries)}::jsonb,
+        ${JSON.stringify(evidence)}::jsonb
+      ) as result`,
+    );
+    row = (result.rows ?? [])[0] as Record<string, unknown> | undefined;
+  } catch (err) {
+    throw new Error(
+      `fn_upsert_financial_obligation: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
 
-  const r = data as {
+  const raw = row?.result;
+  const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
     obligation_id: string;
     is_new: boolean;
     matched_by: string;
     evidence_count: number;
-  };
+  } | null;
+
+  if (!r) throw new Error("fn_upsert_financial_obligation não devolveu resultado");
 
   return {
     obligationId: r.obligation_id,

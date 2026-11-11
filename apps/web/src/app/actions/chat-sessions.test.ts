@@ -1,0 +1,79 @@
+import "./test-db-setup";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@sbf/db";
+import { getOrCreateChatSession } from "./chat-sessions";
+
+let currentUserId = "";
+// A identidade vem inteiramente do nosso próprio `requireUser()`, sem dependência de provedor externo.
+// Este mock devolve `ownerId === id` porque estes testes exercitam o dono; a
+// distinção ator/dono (o admin de emergência operando sobre a base do dono)
+// tem cobertura própria em apps/web/src/app/api/**.
+vi.mock("@/lib/auth", () => {
+  const sessao = () =>
+    currentUserId
+      ? {
+          id: currentUserId,
+          ownerId: currentUserId,
+          email: "teste@exemplo.com",
+          role: "owner" as const,
+          name: "Teste",
+        }
+      : null;
+  return {
+    requireUser: async () => {
+      const s = sessao();
+      if (!s) throw new Error("Não autenticado");
+      return s;
+    },
+    getUser: async () => sessao(),
+    getUserOrNull: async () => sessao(),
+  };
+});
+
+const USER_A = "00000000-0000-0000-0000-0000000000a1";
+const USER_B = "00000000-0000-0000-0000-0000000000b2";
+
+describe.skipIf(!process.env.TEST_DATABASE_URL)("chat-sessions actions", () => {
+  const sessionIds: string[] = [];
+
+  afterEach(async () => {
+    const db = getDb();
+    for (const id of sessionIds.splice(0)) {
+      await db.delete(schema.ai_chat_sessions).where(eq(schema.ai_chat_sessions.id, id));
+    }
+  });
+
+  it("isola sessões de chat por usuário", async () => {
+    currentUserId = USER_A;
+    const sessionA = await getOrCreateChatSession();
+    sessionIds.push(sessionA.id);
+
+    currentUserId = USER_B;
+    const sessionB = await getOrCreateChatSession();
+    sessionIds.push(sessionB.id);
+
+    const db = getDb();
+    const rowsForA = await db
+      .select()
+      .from(schema.ai_chat_sessions)
+      .where(eq(schema.ai_chat_sessions.user_id, USER_A));
+    expect(rowsForA.map((r) => r.id)).toContain(sessionA.id);
+    expect(rowsForA.map((r) => r.id)).not.toContain(sessionB.id);
+  });
+
+  it("cria sessão com título e contexto padrão (caminho feliz)", async () => {
+    currentUserId = USER_A;
+    const session = await getOrCreateChatSession();
+    sessionIds.push(session.id);
+
+    expect(session.title).toBe("Nova conversa");
+    expect(session.context_type).toBe("general");
+    expect(session.user_id).toBe(USER_A);
+  });
+
+  it("lança erro quando não autenticado", async () => {
+    currentUserId = "";
+    await expect(getOrCreateChatSession()).rejects.toThrow("Não autenticado");
+  });
+});

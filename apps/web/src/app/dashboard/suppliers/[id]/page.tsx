@@ -3,8 +3,19 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import {
+  createSupplierAlias,
+  createSupplierContract,
+  deleteSupplierAlias,
+  deleteSupplierContract,
+  getSupplierDetail,
+  updateSupplier,
+  updateSupplierActive,
+  type SupplierAlias,
+  type SupplierContract,
+  type SourceDocumentRef,
+} from "@/app/actions/suppliers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -66,33 +77,6 @@ const contractTypeOptions = [
   { value: "other", label: "Outro" },
 ];
 
-interface Alias {
-  id: string;
-  alias_name: string;
-  alias_type: string;
-  valid_from: string | null;
-  valid_until: string | null;
-}
-
-interface Contract {
-  id: string;
-  identifier: string | null;
-  contract_type: string;
-  label: string | null;
-  start_date: string | null;
-  end_date: string | null;
-  is_active: boolean;
-}
-
-interface SourceDocRef {
-  id: string;
-  filename: string;
-  origin_type: string;
-  status: string;
-  created_at: string | null;
-  metadata: Record<string, unknown> | null;
-}
-
 export default function EditSupplierPage() {
   const router = useRouter();
   const params = useParams();
@@ -110,55 +94,35 @@ export default function EditSupplierPage() {
   const [notes, setNotes] = useState("");
 
   // Aliases
-  const [aliases, setAliases] = useState<Alias[]>([]);
+  const [aliases, setAliases] = useState<SupplierAlias[]>([]);
   const [newAliasName, setNewAliasName] = useState("");
   const [newAliasType, setNewAliasType] = useState("billing_name");
   const [addingAlias, setAddingAlias] = useState(false);
 
   // Contracts
-  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contracts, setContracts] = useState<SupplierContract[]>([]);
   const [newContractId, setNewContractId] = useState("");
   const [newContractType, setNewContractType] = useState("subscription");
   const [newContractLabel, setNewContractLabel] = useState("");
   const [addingContract, setAddingContract] = useState(false);
 
   // Documentos vinculados
-  const [documents, setDocuments] = useState<SourceDocRef[]>([]);
+  const [documents, setDocuments] = useState<SourceDocumentRef[]>([]);
 
   useEffect(() => {
     async function load() {
-      const supabase = createClient();
+      const detail = await getSupplierDetail(id);
 
-      const [supplierRes, aliasesRes, contractsRes, docsRes] = await Promise.all([
-        supabase.from("suppliers").select("*").eq("id", id).single(),
-        supabase
-          .from("supplier_aliases")
-          .select("*")
-          .eq("supplier_id", id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("supplier_contracts")
-          .select("*")
-          .eq("supplier_id", id)
-          .order("start_date", { ascending: false }),
-        supabase
-          .from("source_documents")
-          .select("id, filename, origin_type, status, created_at, metadata")
-          .eq("supplier_id", id)
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ]);
-
-      if (supplierRes.data) {
-        setName(supplierRes.data.name);
-        setType(supplierRes.data.type);
-        setTradeName(supplierRes.data.trade_name ?? "");
-        setDocumentNumber(supplierRes.data.document_number ?? "");
-        setNotes(supplierRes.data.notes ?? "");
+      if (detail.supplier) {
+        setName(detail.supplier.name);
+        setType(detail.supplier.type);
+        setTradeName(detail.supplier.trade_name ?? "");
+        setDocumentNumber(detail.supplier.document_number ?? "");
+        setNotes(detail.supplier.notes ?? "");
       }
-      if (aliasesRes.data) setAliases(aliasesRes.data);
-      if (contractsRes.data) setContracts(contractsRes.data);
-      if (docsRes.data) setDocuments(docsRes.data as SourceDocRef[]);
+      setAliases(detail.aliases);
+      setContracts(detail.contracts);
+      setDocuments(detail.documents);
 
       setFetching(false);
     }
@@ -168,20 +132,18 @@ export default function EditSupplierPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("suppliers")
-      .update({
+    try {
+      await updateSupplier(id, {
         name,
         type,
         trade_name: tradeName || null,
         document_number: documentNumber || null,
         notes: notes || null,
-      })
-      .eq("id", id);
-
-    if (error) {
-      toast.error("Erro ao atualizar", { description: error.message });
+      });
+    } catch (error) {
+      toast.error("Erro ao atualizar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setLoading(false);
       return;
     }
@@ -192,11 +154,12 @@ export default function EditSupplierPage() {
 
   async function handleDelete() {
     setDeleting(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("suppliers").update({ is_active: false }).eq("id", id);
-
-    if (error) {
-      toast.error("Erro ao desativar", { description: error.message });
+    try {
+      await updateSupplierActive(id, false);
+    } catch (error) {
+      toast.error("Erro ao desativar", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       setDeleting(false);
       return;
     }
@@ -208,41 +171,30 @@ export default function EditSupplierPage() {
   async function handleAddAlias() {
     if (!newAliasName.trim()) return;
     setAddingAlias(true);
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setAddingAlias(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("supplier_aliases")
-      .insert({
+    try {
+      const alias = await createSupplierAlias({
         supplier_id: id,
         alias_name: newAliasName.trim(),
         alias_type: newAliasType,
-        user_id: user.id,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      toast.error("Erro ao adicionar alias", { description: error.message });
-    } else if (data) {
-      setAliases((prev) => [data, ...prev]);
+      });
+      setAliases((prev) => [alias, ...prev]);
       setNewAliasName("");
       toast.success("Alias adicionado");
+    } catch (error) {
+      toast.error("Erro ao adicionar alias", {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
     setAddingAlias(false);
   }
 
   async function handleDeleteAlias(aliasId: string) {
-    const supabase = createClient();
-    const { error } = await supabase.from("supplier_aliases").delete().eq("id", aliasId);
-    if (error) {
-      toast.error("Erro ao remover alias", { description: error.message });
+    try {
+      await deleteSupplierAlias(aliasId);
+    } catch (error) {
+      toast.error("Erro ao remover alias", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       return;
     }
     setAliases((prev) => prev.filter((a) => a.id !== aliasId));
@@ -252,43 +204,32 @@ export default function EditSupplierPage() {
   async function handleAddContract() {
     if (!newContractId.trim()) return;
     setAddingContract(true);
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setAddingContract(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("supplier_contracts")
-      .insert({
+    try {
+      const contract = await createSupplierContract({
         supplier_id: id,
         identifier: newContractId.trim(),
         contract_type: newContractType,
         label: newContractLabel || null,
-        user_id: user.id,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      toast.error("Erro ao adicionar contrato", { description: error.message });
-    } else if (data) {
-      setContracts((prev) => [data, ...prev]);
+      });
+      setContracts((prev) => [contract, ...prev]);
       setNewContractId("");
       setNewContractLabel("");
       toast.success("Contrato adicionado");
+    } catch (error) {
+      toast.error("Erro ao adicionar contrato", {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
     setAddingContract(false);
   }
 
   async function handleDeleteContract(contractId: string) {
-    const supabase = createClient();
-    const { error } = await supabase.from("supplier_contracts").delete().eq("id", contractId);
-    if (error) {
-      toast.error("Erro ao remover contrato", { description: error.message });
+    try {
+      await deleteSupplierContract(contractId);
+    } catch (error) {
+      toast.error("Erro ao remover contrato", {
+        description: error instanceof Error ? error.message : String(error),
+      });
       return;
     }
     setContracts((prev) => prev.filter((c) => c.id !== contractId));

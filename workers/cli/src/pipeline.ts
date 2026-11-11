@@ -8,21 +8,32 @@
  * `--process` agora faz o que sempre prometeu: drena a fila de
  * `ingestion_jobs` chamando `processJob` diretamente.
  */
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { IngestionJobStatus } from "@sbf/ingestion-types";
+import {
+  CLAIMABLE_STATUSES,
+  claimJobs,
+  completeJob,
+  failJob,
+  getDb,
+  releaseJob,
+  resolveCapabilities,
+  type Database,
+  type QueueJob,
+} from "@sbf/db";
 import { processJob } from "@sbf/worker-ingestion";
 import { scanDirectory } from "@sbf/worker-local-scanner";
 import { scanGmailLabel } from "@sbf/worker-gmail-scanner";
 import type { CliOptions } from "./args";
 
 /** Status a partir dos quais um job ainda avança na máquina de estados. */
-const PROCESSABLE: string[] = [
-  IngestionJobStatus.DISCOVERED,
-  IngestionJobStatus.DOWNLOADED,
-  IngestionJobStatus.HASHED,
-  IngestionJobStatus.QUEUED,
-  IngestionJobStatus.PARSED,
-];
+const PROCESSABLE: readonly string[] = CLAIMABLE_STATUSES;
+
+/**
+ * Capacidades do CLI.
+ *
+ * Ele roda na máquina do desenvolvedor (WSL), que é onde a pasta local, o
+ * `ocrmypdf` e as senhas de PDF estão — logo, reivindica de tudo.
+ */
+export const DEFAULT_CLI_CAPABILITIES = ["ocr", "pasta-local", "senha-pdf"] as const;
 
 export interface PipelineStats {
   gmailDiscovered: number;
@@ -31,44 +42,57 @@ export interface PipelineStats {
   errors: string[];
 }
 
-export function createSupabase(): SupabaseClient {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !key) {
-    throw new Error("SUPABASE_URL e SUPABASE_SECRET_KEY são obrigatórios");
-  }
-  return createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
 /**
  * Drena a fila até não sobrar job processável ou atingir o teto.
  *
  * O teto existe para que uma execução não vire um loop infinito quando um job
  * volta ao mesmo status por erro persistente.
+ *
+ * Diferente do loop antigo, cada job é REIVINDICADO antes de processar: rodar
+ * o CLI enquanto o worker da VPS está de pé deixou de significar processar
+ * tudo em duplicidade.
  */
 export async function drainJobs(
-  supabase: SupabaseClient,
+  db: Database,
   opts: { maxJobs: number; batchSize: number; verbose: boolean },
 ): Promise<number> {
+  const workerId = `cli:${process.pid}`;
+  const capabilities = resolveCapabilities(DEFAULT_CLI_CAPABILITIES);
   let processed = 0;
 
   while (processed < opts.maxJobs) {
-    const { data: jobs, error } = await supabase
-      .from("ingestion_jobs")
-      .select("id, run_id, user_id, source_document_id, status, retry_count, max_retries, metadata")
-      .in("status", PROCESSABLE)
-      .order("created_at", { ascending: true })
-      .limit(Math.min(opts.batchSize, opts.maxJobs - processed));
+    const jobs: QueueJob[] = await claimJobs({
+      workerId,
+      capabilities,
+      statuses: PROCESSABLE,
+      limit: Math.min(opts.batchSize, opts.maxJobs - processed),
+      db,
+    });
 
-    if (error) throw new Error(`Falha ao ler a fila: ${error.message}`);
-    if (!jobs || jobs.length === 0) break;
+    if (jobs.length === 0) break;
 
     for (const job of jobs) {
-      if (processed >= opts.maxJobs) break;
+      if (processed >= opts.maxJobs) {
+        // Sobrou job reivindicado que não vai ser processado nesta execução:
+        // devolver é obrigatório, senão ele fica travado até o reap.
+        await releaseJob({ jobId: job.id, expectedWorkerId: workerId, db });
+        continue;
+      }
       if (opts.verbose) console.log(`  [job] ${job.id} (${job.status})`);
-      await processJob(supabase, job);
+      try {
+        await processJob(db, job);
+        await completeJob({ jobId: job.id, expectedWorkerId: workerId, db });
+      } catch (err) {
+        await failJob({
+          jobId: job.id,
+          error: err instanceof Error ? err : String(err),
+          expectedWorkerId: workerId,
+          db,
+        });
+        if (opts.verbose) {
+          console.error(`  [job] ${job.id} falhou:`, err instanceof Error ? err.message : err);
+        }
+      }
       processed++;
     }
   }
@@ -87,7 +111,7 @@ export async function runPipeline(opts: CliOptions): Promise<PipelineStats> {
 
   if (opts.userId) process.env.LOCAL_USER_ID = opts.userId;
 
-  const supabase = createSupabase();
+  const db = getDb();
 
   if (opts.source === "gmail" || opts.source === "both") {
     try {
@@ -111,7 +135,7 @@ export async function runPipeline(opts: CliOptions): Promise<PipelineStats> {
 
   if (opts.source === "local" || opts.source === "both") {
     try {
-      stats.localDiscovered = await scanDirectory(supabase, opts.dir ?? "./inbox", {
+      stats.localDiscovered = await scanDirectory(db, opts.dir ?? "./inbox", {
         recursive: opts.recursive,
         dryRun: opts.dryRun,
         verbose: opts.verbose,
@@ -123,7 +147,7 @@ export async function runPipeline(opts: CliOptions): Promise<PipelineStats> {
   }
 
   if (opts.process && !opts.dryRun) {
-    stats.jobsProcessed = await drainJobs(supabase, {
+    stats.jobsProcessed = await drainJobs(db, {
       maxJobs: opts.maxJobs,
       batchSize: opts.batchSize,
       verbose: opts.verbose,

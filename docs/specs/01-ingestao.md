@@ -21,7 +21,7 @@ DISCOVERED → DOWNLOADED → HASHED → QUEUED → PARSING → PARSED
 
 - Implementação: `workers/ingestion/src/state-machine.ts` (transições válidas) + `processor.ts` (driver).
 - Tipos: `@sbf/ingestion-types` (`IngestionJobStatus`, `ParserType` = `LOCAL_TEXT | LOCAL_REGEX | OPENAI_VISION | OPENAI_TEXT`).
-- Persistência: `ingestion_runs`, `ingestion_jobs`, `source_documents`, `draft_batches`, `draft_records` (migração `20260323120200`).
+- Persistência: `ingestion_runs`, `ingestion_jobs`, `source_documents`, `draft_batches`, `draft_records` — hoje no Neon, definidas em `packages/db/schema.sql` (a migração `20260323120200` era do backend anterior e não existe nesta forma em `packages/db/migrations/`).
 
 ## Sub-pipeline de parsing (ordem real)
 
@@ -37,12 +37,12 @@ Orquestração: `parsers/parse-orchestrator.ts` → grava `parsed_document_versi
 
 ## Canais de entrada
 
-| Canal                | Estado | Entrada                                                                                                     |
-| -------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| Upload manual / chat | ✅     | UI `/dashboard/ingestion` + `ai-chat-drawer` → bucket `ingestion-originals` → Edge `trigger-ingestion`      |
-| Gmail                | ✅     | `workers/gmail-scanner` — OAuth2 refresh-token, scan por label/query, dedup por (msgId+filename) e por hash |
-| Pasta local          | ✅     | `workers/local-scanner` — scan-once ou watch, filtro por extensão, dedup por (path+mtime)                   |
-| Orquestrador         | ✅     | `workers/financial-evidence-worker` — CLI unificada Gmail+local com `--dry-run`                             |
+| Canal                | Estado | Entrada                                                                                                                                                                                                                                                                                |
+| -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upload manual / chat | ✅     | UI `/dashboard/ingestion` + `ai-chat-drawer` → ambos chamam `uploadDocument()` (`actions/ingestion.ts`), que grava o arquivo no Vercel Blob (`ingestion-originals`) e insere direto em `ingestion_jobs`; não existe mais Edge Function — o worker acorda por `LISTEN/NOTIFY` (ADR-010) |
+| Gmail                | ✅     | `workers/gmail-scanner` — OAuth2 refresh-token, scan por label/query, dedup por (msgId+filename) e por hash                                                                                                                                                                            |
+| Pasta local          | ✅     | `workers/local-scanner` — scan-once ou watch, filtro por extensão, dedup por (path+mtime)                                                                                                                                                                                              |
+| Orquestrador         | ✅     | `workers/financial-evidence-worker` — CLI unificada Gmail+local com `--dry-run`                                                                                                                                                                                                        |
 
 ## Idempotência (invariante crítica)
 
@@ -62,5 +62,5 @@ Orquestração: `parsers/parse-orchestrator.ts` → grava `parsed_document_versi
 
 - `workers/ingestion/src/{state-machine,processor}.ts`, `workers/ingestion/src/parsers/*`
 - `workers/{gmail-scanner,local-scanner,financial-evidence-worker}/src/*`
-- `supabase/functions/trigger-ingestion/index.ts`
+- `apps/web/src/app/actions/ingestion.ts` (`uploadDocument` — substitui a antiga Edge Function `trigger-ingestion`, que não existe mais)
 - Testes: `__tests__/domain/{state-machine,parsers,text-extractor-ocr,field-consensus,draft-generation}.test.ts`, `__tests__/integration/{ingestion-pipeline,parse-orchestrator.integration}.test.ts`
