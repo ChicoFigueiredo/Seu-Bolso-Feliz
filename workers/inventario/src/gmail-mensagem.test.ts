@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anexosDe, cabecalho, consultaFinanceira } from "./gmail-mensagem";
+import { anexosDe, cabecalho, consultaFinanceira, erroTransitorio } from "./gmail-mensagem";
 
 const payload = {
   mimeType: "multipart/mixed",
@@ -69,5 +69,19 @@ describe("consultaFinanceira", () => {
     expect(q.startsWith("{") && q.endsWith("}")).toBe(true);
     expect(q).toContain("contracheque");
     expect(q).toContain("has:attachment filename:(pdf");
+  });
+});
+
+describe("erroTransitorio", () => {
+  it("trata cota estourada (403) e 429/5xx como espera, e o resto como erro de verdade", () => {
+    expect(
+      erroTransitorio("Gmail API error (403) on /messages: Quota exceeded for quota metric"),
+    ).toBe(true);
+    expect(erroTransitorio("Gmail API error (429) on /messages: x")).toBe(true);
+    expect(erroTransitorio("Gmail API error (503) on /messages: x")).toBe(true);
+    expect(erroTransitorio("Gmail API error (403) on /messages: Insufficient Permission")).toBe(
+      false,
+    );
+    expect(erroTransitorio("Failed to refresh Gmail access token (HTTP 400)")).toBe(false);
   });
 });

@@ -16,23 +16,40 @@ import { dirname, join } from "node:path";
 import { extensaoDe } from "./areas";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { caminhoNoAcervo, caminhosDoCofre } from "./cofre";
-import { anexosDe, cabecalho, consultaFinanceira } from "./gmail-mensagem";
+import { anexosDe, cabecalho, consultaFinanceira, erroTransitorio } from "./gmail-mensagem";
 
 const RESPONSAVEL = "coletar-gmail@1";
+/** Mensagens em paralelo; o ritmo de verdade é o de aguardarVez. */
+const PARALELO = 2;
 
 function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * A cota do Gmail é 15.000 unidades por minuto por usuário, e cada chamada
+ * que fazemos custa 5. Uma chamada a cada 50 ms dá 6.000/min: folga para o
+ * resto da conta e para os picos de anexos.
+ */
+const INTERVALO_MS = 50;
+let proximaChamada = 0;
+async function aguardarVez(): Promise<void> {
+  const agora = Date.now();
+  const espera = Math.max(0, proximaChamada - agora);
+  proximaChamada = Math.max(agora, proximaChamada) + INTERVALO_MS;
+  if (espera) await Bun.sleep(espera);
+}
+
 async function comRetentativa<T>(fazer: () => Promise<T>): Promise<T> {
   for (let tentativa = 1; ; tentativa++) {
+    await aguardarVez();
     try {
       return await fazer();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const transitorio = /\((429|500|502|503|504)\)|fetch failed|ECONNRESET|ETIMEDOUT/.test(msg);
-      if (!transitorio || tentativa >= 5) throw e;
-      await Bun.sleep(2 ** tentativa * 1000);
+      if (!erroTransitorio(msg) || tentativa >= 6) throw e;
+      // A janela da cota é de um minuto: esperar menos que isso só gasta tentativa.
+      await Bun.sleep(/\(403\)|\(429\)/.test(msg) ? 65_000 : 2 ** tentativa * 1000);
     }
   }
 }
@@ -73,6 +90,14 @@ class Coletor {
       ),
       promover: db.query(
         "UPDATE achado SET camada = 'A', caminho_acervo = coalesce(caminho_acervo, ?) WHERE content_hash = ?",
+      ),
+      marcarRefazer: db.query(
+        `INSERT INTO refazer (fonte_id, referencia, motivo) VALUES ('email:gmail', ?, ?)
+         ON CONFLICT (fonte_id, referencia) DO UPDATE SET motivo = excluded.motivo, feito_em = NULL`,
+      ),
+      refeito: db.query(
+        `UPDATE refazer SET feito_em = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE fonte_id = 'email:gmail' AND referencia = ? AND feito_em IS NULL`,
       ),
       inserirOrigem: db.query(
         `INSERT OR IGNORE INTO origem (content_hash, fonte_id, varredura_id, origin_type, origin_key,
@@ -127,6 +152,7 @@ class Coletor {
     this.c.vistos++;
     if (this.q.jaGuardada.get(id)) {
       this.c.repetidos++;
+      this.q.refeito.run(id);
       return;
     }
     try {
@@ -166,9 +192,12 @@ class Coletor {
         null,
       );
       this.c.novos++;
+      this.q.refeito.run(id);
     } catch (e) {
       this.c.erros++;
-      this.escreverLog(`ERRO mensagem ${id}: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      this.q.marcarRefazer.run(id, msg.slice(0, 200));
+      this.escreverLog(`ERRO mensagem ${id}: ${msg}`);
     }
   }
 }
@@ -244,14 +273,23 @@ async function main(): Promise<void> {
 
   let total = 0;
   try {
+    // Primeiro o que ficou para trás em rodadas anteriores (cota, rede).
+    const atrasadas = (
+      db
+        .query("SELECT referencia FROM refazer WHERE fonte_id = 'email:gmail' AND feito_em IS NULL")
+        .all() as { referencia: string }[]
+    ).map((r) => r.referencia);
+    for (let i = 0; i < atrasadas.length; i += PARALELO) {
+      await Promise.all(atrasadas.slice(i, i + PARALELO).map((id) => coletor.mensagem(id)));
+    }
+    if (atrasadas.length) console.log(`gmail: ${atrasadas.length} mensagens atrasadas refeitas`);
     do {
       const lista = await comRetentativa(() =>
         gmail.listMessages({ q: query, maxResults: 100, pageToken: pagina }),
       );
       const ids = (lista.messages ?? []).map((m) => m.id);
-      // Até 4 mensagens em paralelo: a cota do Gmail aguenta e o disco não é o gargalo.
-      for (let i = 0; i < ids.length && total < limite; i += 4) {
-        const lote = ids.slice(i, Math.min(i + 4, i + (limite - total)));
+      for (let i = 0; i < ids.length && total < limite; i += PARALELO) {
+        const lote = ids.slice(i, Math.min(i + PARALELO, i + (limite - total)));
         await Promise.all(lote.map((id) => coletor.mensagem(id)));
         total += lote.length;
       }

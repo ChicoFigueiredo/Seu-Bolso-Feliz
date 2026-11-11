@@ -76,3 +76,11 @@ export function cabecalho(payload: GmailPayload, nome: string): string | null {
   const alvo = nome.toLowerCase();
   return payload.headers.find((h) => h.name.toLowerCase() === alvo)?.value ?? null;
 }
+
+/** Cota estourada vem como 403 "Quota exceeded"/"rateLimitExceeded", não só 429. */
+export function erroTransitorio(msg: string): boolean {
+  return (
+    /\((429|500|502|503|504)\)|fetch failed|ECONNRESET|ETIMEDOUT/.test(msg) ||
+    (/\(403\)/.test(msg) && /quota exceeded|ratelimitexceeded|userratelimitexceeded/i.test(msg))
+  );
+}

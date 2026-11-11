@@ -217,3 +217,14 @@ CREATE TABLE IF NOT EXISTS pendencia (
   resolvida_em TEXT,
   resposta     TEXT
 );
+
+-- Itens que um coletor não conseguiu trazer (cota, rede) e refaz na próxima
+-- rodada antes de seguir. Não é dúvida para o usuário: é trabalho atrasado.
+CREATE TABLE IF NOT EXISTS refazer (
+  fonte_id   TEXT NOT NULL REFERENCES fonte(id),
+  referencia TEXT NOT NULL,  -- ID da mensagem, caminho remoto…
+  motivo     TEXT,
+  criado_em  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  feito_em   TEXT,
+  PRIMARY KEY (fonte_id, referencia)
+);
