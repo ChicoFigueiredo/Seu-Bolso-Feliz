@@ -24,7 +24,8 @@
       "@sbf/domain/*": ["../../packages/domain/src/*"],
       "@sbf/contracts": ["../../packages/contracts/src/index.ts"],
       "@sbf/storage": ["../../packages/storage/src/index.ts"],
-      "@sbf/operations": ["../../packages/operations/src/index.ts"]
+      "@sbf/operations": ["../../packages/operations/src/index.ts"],
+      "@sbf/design-system": ["../../packages/design-system/src/index.ts"]
     }
   },
   "include": [

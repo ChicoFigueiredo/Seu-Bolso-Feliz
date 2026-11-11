@@ -48,7 +48,7 @@ export function AppSidebar({
   workerOnline = true,
   style,
 }: AppSidebarProps) {
-  const row = (item: SidebarNavItem, isActive: boolean, small = false): CSSProperties => ({
+  const row = (isActive: boolean, small = false): CSSProperties => ({
     display: "flex",
     alignItems: "center",
     gap: 11,
@@ -115,7 +115,7 @@ export function AppSidebar({
               key={item.id}
               type="button"
               onClick={() => onNavigate?.(item.id)}
-              style={row(item, isActive)}
+              style={row(isActive)}
             >
               <Icon
                 name={item.icon}
@@ -158,7 +158,7 @@ export function AppSidebar({
             key={item.id}
             type="button"
             onClick={() => onNavigate?.(item.id)}
-            style={row(item, item.id === active, true)}
+            style={row(item.id === active, true)}
           >
             <Icon name={item.icon} size={19} />
             <span>{item.label}</span>
