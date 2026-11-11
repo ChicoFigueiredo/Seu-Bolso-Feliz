@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS varredura (
   repetidos    INTEGER NOT NULL DEFAULT 0,
   excluidos    INTEGER NOT NULL DEFAULT 0,
   erros        INTEGER NOT NULL DEFAULT 0,
-  cursor       TEXT            -- onde retomar se for interrompida
+  cursor       TEXT,           -- onde retomar se for interrompida
+  resumo       TEXT            -- JSON: contagens por tratamento e extensão ignorada
 );
 
 -- Achado: um conteúdo único. Vira documento quando se confirma financeiro.
@@ -126,7 +127,7 @@ CREATE TABLE IF NOT EXISTS area_excluida (
   motivo       TEXT NOT NULL,  -- livros, jogos, cursos, codigo, cache, outra-pessoa, trabalho
   arquivos     INTEGER NOT NULL,
   bytes        INTEGER NOT NULL,
-  UNIQUE (varredura_id, caminho)
+  UNIQUE (varredura_id, caminho, motivo)
 );
 
 -- Registro: fato financeiro declarado por um documento ou por uma conexão.
