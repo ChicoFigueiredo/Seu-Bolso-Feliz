@@ -433,9 +433,19 @@ async function main(): Promise<void> {
   let comFornecedor = 0;
   const exemplos: Resultado[] = [];
   let feitos = 0;
-  let lote = 0;
 
-  if (!simular) db.exec("BEGIN");
+  // Nada de transação aberta atravessando await: com outros processos gravando,
+  // uma leitura dentro dela fixa um snapshot e a escrita seguinte falha com
+  // SQLITE_BUSY_SNAPSHOT. Os resultados esperam em memória e vão em lotes
+  // curtos, numa transação IMMEDIATE sem await dentro.
+  const pendentes: Resultado[] = [];
+  const descarregar = db.transaction((lista: Resultado[]) => {
+    for (const r of lista) gravar(db, r);
+  });
+  const flush = () => {
+    if (simular || !pendentes.length) return;
+    descarregar.immediate(pendentes.splice(0));
+  };
   await pool(alvos, PARALELO, async (alvo) => {
     const r = await processar(cofre.raiz, alvo, origensDe(db, alvo.content_hash));
     contar(situacoes, r.situacao);
@@ -447,15 +457,12 @@ async function main(): Promise<void> {
       exemplos.push(r);
     }
     if (!simular) {
-      gravar(db, r);
-      if (++lote >= 200) {
-        db.exec("COMMIT; BEGIN");
-        lote = 0;
-      }
+      pendentes.push(r);
+      if (pendentes.length >= 200) flush();
     }
     if (++feitos % 500 === 0) console.log(`  ${feitos}/${alvos.length}`);
   });
-  if (!simular) db.exec("COMMIT");
+  flush();
 
   const n = (k: string): number => situacoes.get(k) ?? 0;
   console.log(`\nprocessados: ${feitos}`);

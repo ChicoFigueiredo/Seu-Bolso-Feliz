@@ -11,6 +11,10 @@ worker segue estas regras; cada uma custou uma falha real.
 - **Rodada parcial não substitui a completa.** Uma fonte tem várias varreduras
   (completa, retomada, só áreas A). Relatório agrega por fonte em vez de pegar
   a última.
+- **Nunca deixe uma transação aberta atravessando `await`.** Com outro processo
+  gravando, a leitura dentro dela fixa um snapshot e a escrita seguinte falha com
+  `SQLITE_BUSY_SNAPSHOT`, que o `busy_timeout` não resolve. Junte resultados em
+  memória e grave em lotes curtos com `db.transaction(fn).immediate(...)`.
 - **Esquema evolui por `CREATE TABLE IF NOT EXISTS` e `garantirColuna`.** Tabela
   nova vai no `schema.sql`; coluna nova em tabela existente, em `aplicarSchema`.
 
