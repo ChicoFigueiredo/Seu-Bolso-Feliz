@@ -53,6 +53,16 @@
           "title": "Varreduras",
           "description": "Cada rodada de cada coletor: quando, quanto viu, quanto entrou.",
           "sql": "SELECT id, fonte_id, etapa, status, iniciada_em, concluida_em, vistos, novos, repetidos, excluidos, erros, escopo FROM varredura ORDER BY id DESC"
+        },
+        "faturas_conferencia": {
+          "title": "Faturas dos cartões x compras",
+          "description": "Cada fatura da Pluggy contra a soma das transações ligadas a ela (sem os pagamentos de fatura). Diferença grande igual à fatura anterior indica saldo rolado.",
+          "sql": "WITH f AS (SELECT substr(external_ref, 13) AS fatura, data AS vencimento, -valor_centavos AS total, conta_provavel AS conta FROM registro WHERE tipo = 'fatura_cartao'),\nt AS (SELECT fatura_ref AS fatura, count(*) AS n, -sum(valor_centavos) AS soma FROM registro WHERE fatura_ref IS NOT NULL AND tipo NOT IN ('fatura_cartao', 'pagamento_fatura') GROUP BY 1)\nSELECT f.conta, f.vencimento, printf('%.2f', f.total / 100.0) AS fatura, coalesce(t.n, 0) AS transacoes,\n  printf('%.2f', coalesce(t.soma, 0) / 100.0) AS soma_transacoes, printf('%.2f', (f.total - coalesce(t.soma, 0)) / 100.0) AS diferenca,\n  CASE WHEN abs(f.total - coalesce(t.soma, 0)) <= 100 THEN 'confere' WHEN abs(f.total - coalesce(t.soma, 0)) <= f.total * 0.05 THEN 'quase' ELSE 'não confere' END AS situacao\nFROM f LEFT JOIN t ON t.fatura = f.fatura ORDER BY f.conta, f.vencimento"
+        },
+        "contas_buracos": {
+          "title": "Meses sem transação por conta (Pluggy)",
+          "description": "Contas com uso regular e os meses, dentro do período delas, em que a Pluggy não trouxe nada.",
+          "sql": "WITH m AS (SELECT DISTINCT substr(data, 1, 7) AS mes FROM registro WHERE fonte_id = 'conexao:pluggy' AND data >= '2025-09'),\nct AS (SELECT conta_provavel AS conta, count(*) AS n, min(substr(data, 1, 7)) AS de, max(substr(data, 1, 7)) AS ate FROM registro WHERE fonte_id = 'conexao:pluggy' AND tipo <> 'fatura_cartao' GROUP BY 1 HAVING n >= 20)\nSELECT ct.conta, ct.n AS transacoes, ct.de, ct.ate,\n  (SELECT group_concat(m.mes, ' ') FROM m WHERE m.mes BETWEEN ct.de AND ct.ate AND NOT EXISTS (SELECT 1 FROM registro r WHERE r.conta_provavel = ct.conta AND substr(r.data, 1, 7) = m.mes)) AS meses_sem_nada\nFROM ct ORDER BY ct.n DESC"
         }
       },
       "tables": {
