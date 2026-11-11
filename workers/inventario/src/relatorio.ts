@@ -180,7 +180,9 @@ function main(): void {
     },
   ].map(({ feito, ...t }) => ({ ...t, status: feito ? "feito" : "pendente" }));
 
-  // Fontes: a varredura mais recente de cada uma.
+  // Fontes: uma fonte pode ter várias rodadas (completa, retomada, só áreas A).
+  // Situação = rodando se alguma roda, senão a da última; vistos = a rodada
+  // mais completa; novos e copiados somam todas (rodadas não repetem origem).
   const fontes = todos<{
     id: string;
     descricao: string;
@@ -189,35 +191,37 @@ function main(): void {
     status: string | null;
     vistos: number | null;
     novos: number | null;
+    copiados: number | null;
     erros: number | null;
-    resumo: string | null;
     quando: string | null;
   }>(
-    `SELECT f.id, f.descricao, f.escopo, f.motivo, v.status, v.vistos, v.novos, v.erros, v.resumo,
-            coalesce(v.concluida_em, v.iniciada_em) AS quando
+    `SELECT f.id, f.descricao, f.escopo, f.motivo,
+            (SELECT status FROM varredura WHERE fonte_id = f.id
+              ORDER BY (status = 'rodando') DESC, id DESC LIMIT 1) AS status,
+            (SELECT max(vistos) FROM varredura WHERE fonte_id = f.id) AS vistos,
+            (SELECT sum(novos) FROM varredura WHERE fonte_id = f.id) AS novos,
+            (SELECT sum(json_extract(resumo, '$.copiados')) FROM varredura WHERE fonte_id = f.id) AS copiados,
+            (SELECT erros FROM varredura WHERE fonte_id = f.id ORDER BY vistos DESC LIMIT 1) AS erros,
+            (SELECT max(coalesce(concluida_em, iniciada_em)) FROM varredura WHERE fonte_id = f.id) AS quando
        FROM fonte f
-       LEFT JOIN varredura v ON v.id = (SELECT max(id) FROM varredura WHERE fonte_id = f.id)
       ORDER BY f.escopo, f.id`,
-  ).map((f) => {
-    const resumo = f.resumo ? (JSON.parse(f.resumo) as { copiados?: number }) : {};
-    const status = f.escopo === "fora" ? "fora" : (f.status ?? "ausente");
-    return {
-      id: f.id,
-      fonte: f.descricao,
-      status,
-      vistos: f.vistos ?? 0,
-      novos: f.novos ?? 0,
-      copiados: resumo.copiados ?? null,
-      erros: f.erros ?? 0,
-      atualizado: f.quando,
-      nota: f.motivo,
-    };
-  });
+  ).map((f) => ({
+    id: f.id,
+    fonte: f.descricao,
+    status: f.escopo === "fora" ? "fora" : (f.status ?? "ausente"),
+    vistos: f.vistos ?? 0,
+    novos: f.novos ?? 0,
+    copiados: f.copiados,
+    erros: f.erros ?? 0,
+    atualizado: f.quando,
+    nota: f.motivo,
+  }));
 
   const areas = todos<{ motivo: string; areas: number; arquivos: number; bytes: number }>(
     `SELECT motivo, count(*) AS areas, sum(arquivos) AS arquivos, sum(bytes) AS bytes
        FROM area_excluida a
-      WHERE a.varredura_id = (SELECT max(id) FROM varredura WHERE fonte_id = a.fonte_id AND etapa = 'E1')
+      WHERE a.varredura_id = (SELECT id FROM varredura WHERE fonte_id = a.fonte_id AND etapa = 'E1'
+                               ORDER BY vistos DESC LIMIT 1)
       GROUP BY motivo ORDER BY arquivos DESC`,
   ).map((a) => ({ ...a, gb: Math.round((a.bytes / 1024 ** 3) * 10) / 10 }));
 
