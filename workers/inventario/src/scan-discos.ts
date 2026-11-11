@@ -4,6 +4,8 @@
  *   bun run workers/inventario/src/scan-discos.ts --fonte disco:p
  *   bun run workers/inventario/src/scan-discos.ts --fonte disco:p --raiz /mnt/p/OneDrive
  *
+ *   bun run workers/inventario/src/scan-discos.ts --fonte celular --raiz /mnt/d/Chico/financas/entrada/celular
+ *
  * Ordem: primeiro as áreas A, depois o resto do disco (B), por último a
  * contagem das áreas C — o valioso chega antes. Reexecutar é seguro: uma
  * origem já vista (mesmo caminho e mtime) é pulada sem reler o arquivo.
@@ -19,6 +21,8 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  renameSync,
+  rmSync,
   type Stats,
   statSync,
   utimesSync,
@@ -198,7 +202,13 @@ class Scanner {
     this.agregados.set(chave, a);
   }
 
-  async varrer(raiz: string, soAreasA = false): Promise<void> {
+  async varrer(raiz: string, soAreasA = false, entrada = false): Promise<void> {
+    // Material trazido para o cofre (celular, exportações, downloads) é área
+    // pessoal por definição: tudo A, sem as regras dos discos.
+    if (entrada) {
+      await this.andar(raiz, { camada: "A", raiz }, "A");
+      return;
+    }
     for (const raizA of this.raizesA) await this.andar(raizA, classeDoCaminho(raizA), "A");
     if (soAreasA) return;
 
@@ -343,20 +353,23 @@ class Scanner {
   private copiarAoAcervo(caminho: string, hash: string, ext: string, st: Stats): void {
     const relativo = caminhoNoAcervo(hash, ext);
     const destino = join(this.cofre.raiz, relativo);
+    // Copia para um nome temporário e renomeia: outro disco pode estar copiando o
+    // mesmo conteúdo (os espelhos do OneDrive em p2 e bak) e o arquivo final só
+    // aparece inteiro. Dois renames do mesmo conteúdo dão no mesmo resultado.
+    const temporario = `${destino}.parcial-${process.pid}`;
     try {
       mkdirSync(dirname(destino), { recursive: true, mode: 0o700 });
-      try {
-        copyFileSync(caminho, destino, constants.COPYFILE_EXCL);
-      } catch (e) {
-        // Outro processo pode ter copiado o mesmo conteúdo um instante antes.
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      if (!existsSync(destino) || statSync(destino).size !== st.size) {
+        copyFileSync(caminho, temporario, constants.COPYFILE_EXCL);
+        if (statSync(temporario).size !== st.size) throw new Error("cópia com tamanho diferente");
+        chmodSync(temporario, 0o600);
+        utimesSync(temporario, st.atime, st.mtime);
+        renameSync(temporario, destino);
       }
-      if (statSync(destino).size !== st.size) throw new Error("cópia com tamanho diferente");
-      chmodSync(destino, 0o600);
-      utimesSync(destino, st.atime, st.mtime);
       this.q.marcarCopia.run(relativo, hash);
       this.c.copiados++;
     } catch (e) {
+      rmSync(temporario, { force: true });
       this.erro(caminho, e);
     }
   }
@@ -397,12 +410,24 @@ class Scanner {
   }
 }
 
-function lerArgs(argv: string[]): { fonte: string; raiz: string; soAreasA: boolean } {
+function lerArgs(argv: string[]): {
+  fonte: string;
+  raiz: string;
+  soAreasA: boolean;
+  entrada: boolean;
+} {
   const valor = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const fonte = valor("--fonte");
+  const raizEntrada = valor("--raiz");
+  const entrada = caminhosDoCofre().entrada;
+  if (raizEntrada && dentroDe(raizEntrada, entrada)) {
+    const alvo = FONTES.find((f) => f.id === fonte && f.escopo === "dentro");
+    if (!alvo) throw new Error(`--fonte desconhecida ou fora de escopo: ${fonte}`);
+    return { fonte: alvo.id, raiz: raizEntrada, soAreasA: false, entrada: true };
+  }
   const definida = FONTES.find((f) => f.id === fonte && f.tipo === "disco");
   if (!definida?.raiz) {
     const discos = FONTES.filter((f) => f.tipo === "disco").map((f) => f.id);
@@ -410,29 +435,36 @@ function lerArgs(argv: string[]): { fonte: string; raiz: string; soAreasA: boole
   }
   const raiz = valor("--raiz") ?? definida.raiz;
   if (!dentroDe(raiz, definida.raiz)) throw new Error(`--raiz fora de ${definida.raiz}`);
-  return { fonte: definida.id, raiz, soAreasA: argv.includes("--so-areas-a") };
+  return { fonte: definida.id, raiz, soAreasA: argv.includes("--so-areas-a"), entrada: false };
 }
 
 async function main(): Promise<void> {
-  const { fonte, raiz, soAreasA } = lerArgs(process.argv.slice(2));
+  const { fonte, raiz, soAreasA, entrada } = lerArgs(process.argv.slice(2));
+  const etapa = entrada ? "E2" : "E1";
   const cofre = caminhosDoCofre();
   const db = abrirBanco(cofre.banco);
   aplicarSchema(db);
 
   // Varredura anterior da mesma fonte que ficou "rodando" morreu sem avisar.
   db.query(
-    "UPDATE varredura SET status = 'interrompida' WHERE fonte_id = ? AND etapa = 'E1' AND status = 'rodando'",
-  ).run(fonte);
+    "UPDATE varredura SET status = 'interrompida' WHERE fonte_id = ? AND etapa = ? AND status = 'rodando'",
+  ).run(fonte, etapa);
   const { id } = db
     .query(
       `INSERT INTO varredura (fonte_id, etapa, escopo, responsavel, parametros)
-       VALUES (?, 'E1', ?, ?, ?) RETURNING id`,
+       VALUES (?, ?, ?, ?, ?) RETURNING id`,
     )
-    .get(fonte, raiz, RESPONSAVEL, JSON.stringify({ limiteHashBytes: LIMITE_HASH_BYTES })) as {
+    .get(
+      fonte,
+      etapa,
+      raiz,
+      RESPONSAVEL,
+      JSON.stringify({ limiteHashBytes: LIMITE_HASH_BYTES }),
+    ) as {
     id: number;
   };
 
-  const log = join(cofre.logs, `E1-${fonte.replace(":", "-")}-${id}.log`);
+  const log = join(cofre.logs, `${etapa}-${fonte.replace(":", "-")}-${id}.log`);
   const scanner = new Scanner(db, fonte, id, log, raiz);
   const interromper = () => {
     scanner.finalizar("interrompida");
@@ -443,7 +475,7 @@ async function main(): Promise<void> {
 
   console.log(`${fonte}: varredura ${id} de ${raiz} (log em ${log})`);
   try {
-    await scanner.varrer(raiz, soAreasA);
+    await scanner.varrer(raiz, soAreasA, entrada);
     scanner.finalizar("concluida");
   } catch (e) {
     scanner.finalizar("falhou");
