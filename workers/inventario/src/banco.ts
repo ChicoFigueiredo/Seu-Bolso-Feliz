@@ -30,6 +30,9 @@ function garantirColuna(db: Database, tabela: string, coluna: string, tipo: stri
 export function aplicarSchema(db: Database): void {
   db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
   garantirColuna(db, "varredura", "resumo", "TEXT");
+  // O tipo que o registro tinha antes da E3 reclassificar (compra, debito…),
+  // para uma regra nova poder recalcular a partir dele.
+  garantirColuna(db, "registro", "tipo_original", "TEXT");
   db.query("INSERT OR REPLACE INTO meta (chave, valor) VALUES (?, ?)").run(
     "schema_versao",
     VERSAO_DO_SCHEMA,
