@@ -99,17 +99,21 @@ function main(): void {
     },
     {
       id: "t03",
-      tarefa: "Conectar OneDrive e Google Drive no rclone",
+      tarefa: "Conectar OneDrive e Google Drive no rclone (somente leitura)",
       etapa: "E2",
       feito: rcloneRemotos() >= 2,
-      como: "rclone config: um remoto onedrive e um drive (somente leitura)",
+      como:
+        "Num terminal: rclone config. ONEDRIVE: n → nome onedrive → tipo onedrive → Enter em client_id e client_secret → região global → " +
+        "Edit advanced config? y → access_scopes: a opção de leitura (Files.Read…) → Enter no resto → navegador: login → OneDrive Personal → y. " +
+        "GOOGLE DRIVE: n → nome gdrive → tipo drive → Enter em client_id e client_secret → scope 2 (drive.readonly) → Enter no resto → " +
+        "advanced? n → navegador: login → shared drive? n → y. Depois q para sair. Os nomes precisam ser onedrive e gdrive.",
     },
     {
       id: "t04",
       tarefa: "Copiar o celular por USB",
       etapa: "E2",
-      feito: temArquivos(entrada("celular")),
-      como: "WhatsApp/Media, DCIM, Pictures/Screenshots e Download → entrada/celular/",
+      feito: feitoPorMim("t04"),
+      como: "Outro agente está copiando para /mnt/bak/Pessoal/Chico/Celular/Xiomi; o scan pula essa pasta até você avisar que terminou",
     },
     {
       id: "t05",
