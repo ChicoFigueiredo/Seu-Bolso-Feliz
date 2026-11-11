@@ -33,6 +33,17 @@ export function aplicarSchema(db: Database): void {
   // O tipo que o registro tinha antes da E3 reclassificar (compra, debito…),
   // para uma regra nova poder recalcular a partir dele.
   garantirColuna(db, "registro", "tipo_original", "TEXT");
+  // Do bruto da Pluggy (coletar-pluggy-bruto): quem recebeu/pagou, data
+  // original da compra no cartão, CNPJ do estabelecimento e a fatura.
+  for (const coluna of [
+    "contraparte",
+    "contraparte_doc",
+    "data_compra",
+    "merchant_cnpj",
+    "fatura_ref",
+  ]) {
+    garantirColuna(db, "registro", coluna, "TEXT");
+  }
   db.query("INSERT OR REPLACE INTO meta (chave, valor) VALUES (?, ?)").run(
     "schema_versao",
     VERSAO_DO_SCHEMA,

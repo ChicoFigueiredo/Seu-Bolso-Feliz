@@ -33,10 +33,12 @@ function main(): void {
 
   const linhas = db
     .query(
-      `SELECT id, descricao_original, supplier_name_raw, coalesce(tipo_original, tipo) AS tipo,
+      `SELECT id, descricao_original,
+              coalesce(nullif(supplier_name_raw, ''), contraparte) AS supplier_name_raw,
+              coalesce(tipo_original, tipo) AS tipo,
               tipo AS tipo_atual, valor_centavos, conta_provavel, categoria_provavel,
               fornecedor_normalizado
-         FROM registro WHERE fonte_id = 'conexao:pluggy'`,
+         FROM registro WHERE fonte_id = 'conexao:pluggy' AND tipo <> 'fatura_cartao'`,
     )
     .all() as Linha[];
 

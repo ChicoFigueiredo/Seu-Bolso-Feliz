@@ -9,6 +9,7 @@
   "dependencies": {
     "@sbf/db": "workspace:*",
     "@sbf/domain": "workspace:*",
+    "@sbf/financial-connectors": "workspace:*",
     "@sbf/worker-gmail-scanner": "workspace:*",
     "drizzle-orm": "^0.45.2"
   }
