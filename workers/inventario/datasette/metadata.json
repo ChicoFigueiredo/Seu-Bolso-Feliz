@@ -1,0 +1,68 @@
+{
+  "title": "Inventário Financeiro (local)",
+  "description": "Índice local do inventário (ADR-011). Só leitura; nada sai desta máquina.",
+  "databases": {
+    "inventario": {
+      "queries": {
+        "por_ciclo": {
+          "title": "Entradas e saídas por ciclo (registros)",
+          "description": "Soma dos registros (Pluggy e documentos já fragmentados) por ciclo de 20 a 19. Transferências internas aparecem separadas quando já classificadas.",
+          "sql": "SELECT ciclo_id AS ciclo,\n  printf('%.2f', coalesce(sum(CASE WHEN valor_centavos > 0 AND tipo NOT IN ('transferencia_interna','investimento','pagamento_fatura') THEN valor_centavos END),0)/100.0) AS entrou,\n  printf('%.2f', -coalesce(sum(CASE WHEN valor_centavos < 0 AND tipo NOT IN ('transferencia_interna','investimento','pagamento_fatura') THEN valor_centavos END),0)/100.0) AS saiu,\n  printf('%.2f', -coalesce(sum(CASE WHEN tipo IN ('transferencia_interna','investimento','pagamento_fatura') AND valor_centavos < 0 THEN valor_centavos END),0)/100.0) AS movido_entre_contas,\n  count(*) AS registros\nFROM registro WHERE ciclo_id >= coalesce(nullif(:desde, ''), '2025-10')\nGROUP BY 1 ORDER BY 1 DESC"
+        },
+        "fornecedores": {
+          "title": "Para onde foi o dinheiro (fornecedores)",
+          "description": "Saídas agrupadas por fornecedor no intervalo de ciclos. Deixe em branco para os 12 ciclos completos mais o atual.",
+          "sql": "SELECT coalesce(fornecedor_normalizado, nullif(supplier_name_raw, ''), descricao_original) AS fornecedor,\n  tipo, count(*) AS vezes, printf('%.2f', -sum(valor_centavos)/100.0) AS saiu_reais,\n  min(data) AS primeira, max(data) AS ultima, group_concat(DISTINCT ciclo_id) AS ciclos\nFROM registro\nWHERE valor_centavos < 0 AND ciclo_id BETWEEN coalesce(nullif(:de, ''), '2025-10') AND coalesce(nullif(:ate, ''), '2026-10')\nGROUP BY 1, 2 ORDER BY sum(valor_centavos) LIMIT 300"
+        },
+        "registros": {
+          "title": "Registros (busca)",
+          "description": "Cada fato financeiro: Pluggy e, depois da E4, linhas de documentos. Busca em descrição e fornecedor.",
+          "sql": "SELECT data, ciclo_id AS ciclo, printf('%.2f', valor_centavos/100.0) AS valor, tipo,\n  coalesce(fornecedor_normalizado, supplier_name_raw) AS fornecedor, descricao_original AS descricao,\n  categoria_provavel AS categoria, conta_provavel AS conta, estado, fonte_id AS fonte\nFROM registro\nWHERE (:busca = '' OR descricao_original LIKE '%' || :busca || '%' OR supplier_name_raw LIKE '%' || :busca || '%' OR fornecedor_normalizado LIKE '%' || :busca || '%')\n  AND (:ciclo = '' OR ciclo_id = :ciclo)\nORDER BY data DESC LIMIT 1000"
+        },
+        "documentos": {
+          "title": "Documentos encontrados",
+          "description": "Achados confirmados como documento (E3), com tipo, data-chave, ciclo, valor e fornecedor, e onde a cópia está no cofre.",
+          "sql": "SELECT a.document_type AS tipo, a.data_chave, a.data_chave_tipo, a.ciclo_id AS ciclo,\n  printf('%.2f', a.valor_centavos/100.0) AS valor, a.supplier_name_raw AS fornecedor,\n  (SELECT filename FROM origem o WHERE o.content_hash = a.content_hash LIMIT 1) AS nome,\n  (SELECT coalesce(local_filepath, gmail_subject) FROM origem o WHERE o.content_hash = a.content_hash LIMIT 1) AS onde,\n  (SELECT count(*) FROM origem o WHERE o.content_hash = a.content_hash) AS origens,\n  a.caminho_acervo AS no_cofre, a.confianca\nFROM achado a\nWHERE a.estado = 'documento' AND (:tipo = '' OR a.document_type = :tipo) AND (:ciclo = '' OR a.ciclo_id = :ciclo)\nORDER BY a.data_chave DESC NULLS LAST LIMIT 1000"
+        },
+        "duvidas": {
+          "title": "Achados em dúvida",
+          "description": "O que a triagem não conseguiu decidir sozinha.",
+          "sql": "SELECT a.extensao, a.notas AS motivo,\n  (SELECT filename FROM origem o WHERE o.content_hash = a.content_hash LIMIT 1) AS nome,\n  (SELECT coalesce(local_filepath, gmail_subject) FROM origem o WHERE o.content_hash = a.content_hash LIMIT 1) AS onde,\n  a.caminho_acervo AS no_cofre\nFROM achado a WHERE a.estado = 'duvida' LIMIT 1000"
+        },
+        "emails_por_remetente": {
+          "title": "E-mails por remetente",
+          "description": "Domínios que mais mandaram e-mail financeiro, com o último assunto.",
+          "sql": "SELECT lower(replace(substr(gmail_from, instr(gmail_from, '@') + 1), '>', '')) AS dominio,\n  count(*) AS emails, max(gmail_date) AS ultimo, (SELECT gmail_subject FROM origem x WHERE x.gmail_from = o.gmail_from ORDER BY gmail_date DESC LIMIT 1) AS ultimo_assunto\nFROM origem o WHERE origin_type = 'gmail' AND mensagem_ref = 'eml'\nGROUP BY 1 ORDER BY 2 DESC LIMIT 300"
+        },
+        "emails": {
+          "title": "E-mails (busca)",
+          "description": "Mensagens guardadas no cofre, mais novas primeiro. Busca em remetente e assunto.",
+          "sql": "SELECT substr(o.gmail_date, 1, 16) AS data, o.gmail_from AS de, o.gmail_subject AS assunto,\n  (SELECT count(*) FROM origem x WHERE x.gmail_message_id = o.gmail_message_id AND x.mensagem_ref = 'anexo') AS anexos,\n  a.estado, a.caminho_acervo AS eml_no_cofre\nFROM origem o JOIN achado a ON a.content_hash = o.content_hash\nWHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml'\n  AND (:busca = '' OR o.gmail_from LIKE '%' || :busca || '%' OR o.gmail_subject LIKE '%' || :busca || '%')\nORDER BY o.gmail_date DESC LIMIT 1000"
+        },
+        "arquivos": {
+          "title": "Arquivos (busca por nome ou pasta)",
+          "description": "Origens em disco e nuvem. Busca em nome e caminho.",
+          "sql": "SELECT o.filename AS nome, o.local_filepath AS caminho, o.file_size_bytes AS bytes, substr(o.local_mtime, 1, 10) AS data_arquivo,\n  a.camada, a.estado, a.document_type AS tipo, a.caminho_acervo AS no_cofre\nFROM origem o LEFT JOIN achado a ON a.content_hash = o.content_hash\nWHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive') AND (o.filename LIKE '%' || :busca || '%' OR o.local_filepath LIKE '%' || :busca || '%')\nORDER BY o.local_mtime DESC LIMIT 1000"
+        },
+        "pastas_pessoais": {
+          "title": "Pastas pessoais com mais achados",
+          "description": "Camada A: onde estão os arquivos das áreas pessoais.",
+          "sql": "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1) AS pasta,\n  count(DISTINCT o.content_hash) AS achados,\n  sum(a.estado = 'documento') AS documentos, sum(a.estado = 'descartado') AS descartados\nFROM origem o JOIN achado a ON a.content_hash = o.content_hash\nWHERE a.camada = 'A' AND o.local_filepath IS NOT NULL\nGROUP BY 1 ORDER BY 2 DESC LIMIT 500"
+        },
+        "varreduras": {
+          "title": "Varreduras",
+          "description": "Cada rodada de cada coletor: quando, quanto viu, quanto entrou.",
+          "sql": "SELECT id, fonte_id, etapa, status, iniciada_em, concluida_em, vistos, novos, repetidos, excluidos, erros, escopo FROM varredura ORDER BY id DESC"
+        }
+      },
+      "tables": {
+        "texto": {
+          "hidden": true
+        },
+        "meta": {
+          "hidden": true
+        }
+      }
+    }
+  }
+}
