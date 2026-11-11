@@ -11,8 +11,8 @@
         },
         "fornecedores": {
           "title": "Para onde foi o dinheiro (fornecedores)",
-          "description": "Saídas agrupadas por fornecedor no intervalo de ciclos. Deixe em branco para os 12 ciclos completos mais o atual.",
-          "sql": "SELECT coalesce(fornecedor_normalizado, nullif(supplier_name_raw, ''), descricao_original) AS fornecedor,\n  tipo, count(*) AS vezes, printf('%.2f', -sum(valor_centavos)/100.0) AS saiu_reais,\n  min(data) AS primeira, max(data) AS ultima, group_concat(DISTINCT ciclo_id) AS ciclos\nFROM registro\nWHERE valor_centavos < 0 AND ciclo_id BETWEEN coalesce(nullif(:de, ''), '2025-10') AND coalesce(nullif(:ate, ''), '2026-10')\nGROUP BY 1, 2 ORDER BY sum(valor_centavos) LIMIT 300"
+          "description": "Saídas por fornecedor no intervalo de ciclos, sem movimentos entre suas contas (pagamento de fatura, transferência interna, investimento). Em branco: os 12 ciclos completos mais o atual.",
+          "sql": "SELECT coalesce(fornecedor_normalizado, nullif(supplier_name_raw, ''), descricao_original) AS fornecedor,\n  tipo, count(*) AS vezes, printf('%.2f', -sum(valor_centavos)/100.0) AS saiu_reais,\n  min(data) AS primeira, max(data) AS ultima, group_concat(DISTINCT ciclo_id) AS ciclos\nFROM registro\nWHERE valor_centavos < 0 AND tipo NOT IN ('transferencia_interna', 'pagamento_fatura', 'investimento')\n  AND ciclo_id BETWEEN coalesce(nullif(:de, ''), '2025-10') AND coalesce(nullif(:ate, ''), '2026-10')\nGROUP BY 1, 2 ORDER BY sum(valor_centavos) LIMIT 300"
         },
         "registros": {
           "title": "Registros (busca)",
