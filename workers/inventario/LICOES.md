@@ -67,9 +67,10 @@ worker segue estas regras; cada uma custou uma falha real.
 - **Prettier e ESLint só nos arquivos que você mexeu** quando há outros agentes
   trabalhando na mesma árvore.
 - **commitlint:** assunto em minúsculas, linhas do corpo até 100 caracteres.
-- **Painel: não apague o snapshot que acabou de ser substituído.** Uma aba aberta
-  ainda pode estar lendo o anterior e passa a ver 404 em tudo. Guarde o anterior
-  e apague só o de duas rodadas atrás (lista em `scratchpad/painel/blobs.txt`).
+- **Painel: não apague snapshot recente.** Aba em segundo plano fica presa numa
+  versão antiga dos dados por muito tempo e passa a ver 404 em tudo quando o
+  arquivo some. Guardar só o anterior não bastou: mantenha os últimos 48 (24 h,
+  ~1 MB) e apague só o que passar disso (lista em `scratchpad/painel/blobs.txt`).
 - **Id de elemento igual ao id de um dataset confunde o painel** (a marca da
   tabela acusava "no dataset" com o dataset carregando): use ids distintos.
 - **Nada de nomes de arquivo, valores ou documentos no painel do claude.ai:** lá
