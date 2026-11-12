@@ -148,7 +148,17 @@ Runs as a stdio MCP server (`apps/mcp-server/`). Exposes 10 tools for AI agents:
 
 ## Documentation status (read before trusting docs/)
 
-The `docs/` tree (~54 files: `refinos/`, `checklists/`, `planejamento/`, `passo-a-passo/`, `adrs/`, `veronica/`) was produced by an AI "team roleplay" process and **has drifted badly from the code**. Several checklists mark as "not started" features that are fully implemented (e.g. `004-consolidado-gaps-pendentes.md` claims the ingestion UI and OpenAI integration are 0% done — both exist and work). **Treat docs as historical intent, not ground truth. Always verify a claim against the code before acting on it.** ADRs (`docs/adrs/`) are the most reliable; the newest file in any series is canonical (older versions in history use divergent modeling).
+The `docs/` tree (~54 files: `refinos/`, `checklists/`, `planejamento/`, `passo-a-passo/`, `adrs/`, `veronica/`) was produced by an AI "team roleplay" process and **has drifted badly from the code**. Several checklists mark as "not started" features that are fully implemented (e.g. `004-consolidado-gaps-pendentes.md` claims the ingestion UI and OpenAI integration are 0% done — both exist and work). **Treat docs as historical intent, not ground truth. Always verify a claim against the code before acting on it.** ADRs are the most reliable: ADR-002 to ADR-009 live inside `docs/arquitetura/2026-07-27-arquitetura-hibrida-alvo.md`, and ADR-010 onward are one file each in `docs/arquitetura/` (`AAAA-MM-DD-adr-NNN-slug.md`). The newest ADR on a subject is canonical. The domain glossary is `CONTEXT.md` at the root — use its terms in UI, code comments and docs.
+
+## Rust desktop (in design, 2026-11-12)
+
+The system is moving to a Rust core by strangling the TS one rule at a time (ADR-012):
+one `sbf` binary (window / `worker` / `servidor` / `mcp`), an authoritative Rust API on
+the VPS that desktop stations sync with (ADR-013), the inventory and vault living in the
+desktop (ADR-014), privacy by per-recipient trust level (ADR-015), site scripts that only
+read and download (ADR-016), read-only WhatsApp on Linux (ADR-017), and an egui shell
+shared with Chess Studio in its own repo (ADR-018). Read those ADRs before touching any
+of it. When a rule is ported to Rust, the TS version is deleted in the same PR.
 
 ## Commit convention
 
@@ -162,7 +172,7 @@ Example: `feat(ingestion): add field-consensus resolver`
 
 ## Branches (non-negotiable)
 
-**Never commit to or force-changes onto `main`, `hmp`, or `develop`.** Work happens on feature branches (`feat/*`). Push is the user's responsibility unless they explicitly ask. The repo has multiple remotes (`origin`, `github`).
+**Never commit to or force-changes onto `main`, `hmp`, or `develop`.** Work happens on feature branches (`feat/*`). Since 2026-11-12 the user authorizes pushing `feat/*` branches to `origin` and opening issues and PRs on `ChicoFigueiredo/Seu-Bolso-Feliz` for the Rust desktop work; merging into `main` stays with the user, and nothing else is pushed without asking. Remotes: `origin` (GitHub) and `gitlab`.
 
 ## Environment
 

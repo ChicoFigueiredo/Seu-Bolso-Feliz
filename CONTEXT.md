@@ -125,9 +125,17 @@ _Avoid_: reconciliation, match, dedup
 ## Inventário
 
 **Inventário**:
-O catálogo de tudo que foi encontrado em todas as fontes, com suas origens, feito
-**antes** de qualquer análise. Nada entra na análise sem ter passado pelo inventário.
+O catálogo local de tudo que foi encontrado nas fontes em massa (discos, nuvens,
+WhatsApp, o histórico do e-mail), com suas origens, feito **antes** de qualquer análise.
+Dessas fontes, nada entra na análise sem ter passado pelo inventário e sido promovido.
+Fontes já filtradas (e-mail por consulta financeira, Open Finance, documento mandado ao
+bot) entregam direto na caixa de entrada.
 _Avoid_: índice, varredura, backup
+
+**Promoção**:
+A passagem de um lote de achados aprovados do inventário para a caixa de entrada do
+servidor. É o único caminho de uma fonte em massa até o livro-caixa.
+_Avoid_: upload, importação, envio, sincronização
 
 **Achado**:
 Algo encontrado numa fonte que pode ser financeiro — um arquivo, um anexo, uma mensagem.
@@ -136,18 +144,97 @@ contrário, fica registrado como descartado, para provar que foi visto.
 _Avoid_: evidência, candidato, item
 
 **Cofre**:
-O acervo privado que guarda uma cópia de cada documento original, exatamente como foi
-encontrado, fora de qualquer repositório e de qualquer nuvem não autorizada.
+O acervo privado que guarda uma cópia de cada documento original, de qualquer origem,
+exatamente como foi encontrado, fora de qualquer repositório e de qualquer nuvem não
+autorizada. Inclui o que chegou direto na caixa de entrada do servidor. Não guarda
+segredos: esses ficam no chaveiro.
 _Avoid_: backup, pasta de finanças, vault
+
+**Chaveiro**:
+O lugar protegido onde ficam os segredos: senhas de PDF e de sites, CPF, tokens de
+acesso às conexões e chaves de API. Nunca fica junto dos documentos, nunca aparece em
+texto claro e nunca é mostrado a uma IA.
+_Avoid_: cofre, cofre de senhas, carteira, vault, keyring
 
 ## Fontes
 
 **Conexão**:
-Uma fonte de dados ligada ao sistema: um banco via Open Finance, o Gmail, uma pasta
-local, um worker. Cada conexão tem estado, última sincronização e histórico de falhas.
-_Avoid_: integração, provider, adapter
+Uma fonte de dados ligada ao sistema: um banco via Open Finance, uma caixa de e-mail,
+uma pasta local, o WhatsApp, o Telegram, um site visitado pelo navegador (Receita,
+internet banking), um worker. Cada conexão tem estado, agenda, última coleta e histórico
+de falhas.
+_Avoid_: integração, provider, adapter, serviço, vigia
+
+**Roteiro**:
+O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.
+Nasce da primeira coleta, guiada por IA, e se repete sem IA até o site mudar. Um roteiro
+só consulta e baixa: nunca paga, transfere, contrata ou altera cadastro.
+_Avoid_: script, macro, robô, automação
+
+**Coleta**:
+Uma passagem de uma conexão trazendo o que há de novo na fonte. É sempre de fora para
+dentro; a troca entre o desktop e o servidor não é coleta.
+_Avoid_: sincronização, sync, importação
 
 **Worker**:
-Um processo que executa trabalho pesado fora da aplicação web. É parte legítima do
-produto e aparece na interface com nome, estado e fila — não é infraestrutura escondida.
+Um processo que executa trabalho pesado fora da janela do app, numa estação ou no
+servidor. É parte legítima do produto e aparece na interface com nome, estado e fila —
+não é infraestrutura escondida.
 _Avoid_: agente, daemon, serviço, job runner
+
+## Avisos
+
+**Alerta**:
+Uma regra que observa documentos, registros, compromissos ou conexões e, quando a
+condição acontece, avisa o usuário por um ou mais canais.
+_Avoid_: notificação, gatilho, serviço, monitor
+
+**Canal**:
+Um destino por onde o sistema avisa o usuário: um bot do Telegram, a notificação do
+sistema operacional. Um canal só leva avisos; não traz dados, mesmo quando o aplicativo
+do outro lado também é uma conexão.
+_Avoid_: notificador, serviço, destino
+
+## Análise
+
+**Ponto de atenção**:
+Algo que a análise aponta como digno de ação, em qualquer área: dinheiro, operação do
+sistema, custo de IA e de serviços, tempo do usuário. Traz a evidência e o impacto, com a
+estimativa marcada como estimativa, e fica aberto, resolvido ou ignorado.
+_Avoid_: achado, insight, diagnóstico, sinal, alerta
+
+## Privacidade
+
+**Destinatário**:
+Qualquer lugar fora das máquinas do usuário para onde dados saem: um modelo de IA, um
+cliente MCP, um canal.
+_Avoid_: provedor, consumidor, destino
+
+**Nível de confiança**:
+Quanto de dado identificável um destinatário pode receber: mascarado, parcial ou
+completo. Cada destinatário tem o seu, e um destinatário novo nasce mascarado.
+_Avoid_: permissão, privacidade, escopo
+
+## Desktop e servidor
+
+**Estação**:
+Uma instalação do app desktop numa máquina do usuário, com janela e worker local, com
+identidade própria perante o servidor e uma credencial que pode ser revogada.
+_Avoid_: dispositivo, máquina, cliente, instância
+
+**Sincronização**:
+A troca entre o app desktop e o servidor: o servidor manda o que mudou, o desktop manda
+o que o usuário alterou. Quem decide o livro-caixa é sempre o servidor; a cópia local é
+cache. O inventário não sincroniza. O cofre só recebe: a sincronização traz para ele uma
+cópia de cada documento novo do servidor, e nada sai do cofre por ela, só por promoção.
+_Avoid_: sync, replicação, coleta
+
+**Alteração**:
+Uma mudança que o usuário fez no desktop e que o servidor ainda não aceitou. O servidor
+a aplica inteira ou a recusa, nunca pela metade.
+_Avoid_: intenção, pendência, edição local, rascunho
+
+**Alteração recusada**:
+Uma alteração que o servidor não aplicou porque deixou de valer: o fato mudou depois
+que ela foi feita, ou uma regra a reprovou. Fica visível até o usuário resolver.
+_Avoid_: conflito, erro de sincronização

@@ -1,6 +1,6 @@
 # ADR-011 — O inventário financeiro vive fora do app, num SQLite e num cofre locais
 
-**Data:** 2026-11-11 · **Status:** aceita
+**Data:** 2026-11-11 · **Status:** aceita · **Revisada por:** ADR-014 (2026-11-12): o inventário passa a morar no desktop, ainda fora da nuvem
 
 ## Contexto e decisão
 
