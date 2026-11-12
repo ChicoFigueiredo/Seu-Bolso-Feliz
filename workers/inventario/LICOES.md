@@ -41,6 +41,8 @@ worker segue estas regras; cada uma custou uma falha real.
 - **`pkill -f padrão` mata o próprio shell** se o padrão aparece na linha de
   comando. Ancore no executável: `pkill -f '^bun run workers/inventario/src/x'`.
   **Todos** os padrões do comando, não só o primeiro (aconteceu duas vezes).
+  E o executável pode vir pelo caminho completo (`/home/chico/.bun/bin/bun run …`),
+  que `^bun run` não pega: use `'^(/[^ ]*/)?bun run workers/inventario/src/x'`.
 - **SIGTERM só é atendido quando o laço cede ao event loop.** Laço síncrono
   longo (contagem de milhões de arquivos) ignora o sinal; ceda com
   `await Bun.sleep(0)` de tempos em tempos ou aceite que vai precisar de SIGKILL
