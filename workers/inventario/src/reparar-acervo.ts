@@ -24,7 +24,7 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { DOCUMENTOS, TEXTOS_PESSOAIS } from "./areas";
+import { DOCUMENTOS, FOTOS, TEXTOS_PESSOAIS } from "./areas";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { caminhoNoAcervo, caminhosDoCofre } from "./cofre";
 
@@ -50,14 +50,19 @@ async function main(): Promise<void> {
 
   const copiaveis = [...DOCUMENTOS, ...TEXTOS_PESSOAIS];
   const marcas = copiaveis.map(() => "?").join(",");
+  // Foto só ganha cópia quando a E3 confirma que é documento (print de
+  // comprovante do WhatsApp, por exemplo); foto comum fica só com o hash.
+  const fotos = [...FOTOS];
+  const marcasFotos = fotos.map(() => "?").join(",");
   const candidatos = db
     .query(
       `SELECT content_hash, extensao, file_size_bytes, caminho_acervo FROM achado
         WHERE (camada = 'A' OR (? = 1 AND estado = 'documento'))
-          AND file_size_bytes <= ? AND extensao IN (${marcas})
+          AND file_size_bytes <= ?
+          AND (extensao IN (${marcas}) OR (? = 1 AND estado = 'documento' AND extensao IN (${marcasFotos})))
           AND (notas IS NULL OR notas NOT LIKE '%cópia removida%')`,
     )
-    .all(documentos ? 1 : 0, LIMITE, ...copiaveis) as {
+    .all(documentos ? 1 : 0, LIMITE, ...copiaveis, documentos ? 1 : 0, ...fotos) as {
     content_hash: string;
     extensao: string | null;
     file_size_bytes: number;
