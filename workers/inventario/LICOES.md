@@ -59,9 +59,11 @@ worker segue estas regras; cada uma custou uma falha real.
 - **Conferência de ponteiros com o Gmail rodando acusa falta que não existe.** Em
   12/11 apareceram 29 arquivos “faltando” (anexos grandes) que estavam ali segundos
   depois; de novo 41 logo após a cadeia da E3, com o total de ponteiros igual. A
-  causa não foi achada: o Gmail grava o arquivo antes do ponteiro e a vista só
-  mexe em hardlinks. Antes de reparar, confira de novo os que faltaram; se
-  repetir, guarde a lista e veja o mtime deles minutos depois (quem regravou?).
+  causa não foi achada no código (o Gmail grava o arquivo antes do ponteiro). Na
+  rodada seguinte, conferindo depois de cada passo num processo só (Python lendo
+  o índice e testando os arquivos em 0,5 s), deu zero em todos: a falta vinha da
+  conferência feita em duas etapas (lista exportada pelo `sqlite3`, teste depois).
+  Confira no mesmo processo e, antes de reparar, confira de novo.
 - **Regra de texto boa para PDF falha no OCR:** a frase "comprovante de pix"
   sai quebrada em linhas e "R$" vira "RS". Conte marcas (valor, destino, chave,
   id, instituição…) e limite a texto curto: manuais e FAQs longos juntam as
