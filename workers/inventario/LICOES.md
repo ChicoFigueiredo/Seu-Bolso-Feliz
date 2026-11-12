@@ -95,6 +95,9 @@ worker segue estas regras; cada uma custou uma falha real.
   gravou o documento `page` em `data/users/me` com os dados do snapshot certo.
   Para saber se a página funciona, olhe `page` (o que a última abertura
   desenhou), não só `runs`.
+- **Versão nova do painel que não fui eu que publiquei** costuma ser a atualização
+  do tipo Data (muda `artifact-type/*` e o `index.html` de casca). Confira que a
+  página em `files/index.html` e as versões de `datasets` não mudaram e siga.
 - **Id de elemento igual ao id de um dataset confunde o painel** (a marca da
   tabela acusava "no dataset" com o dataset carregando): use ids distintos.
 - **Nada de nomes de arquivo, valores ou documentos no painel do claude.ai:** lá
