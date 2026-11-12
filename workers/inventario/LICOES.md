@@ -56,6 +56,9 @@ worker segue estas regras; cada uma custou uma falha real.
 - **Passada que roda a cada 30 min não pode acumular nota.** A triagem anexava o
   mesmo motivo a cada rodada, até 31 vezes na mesma linha. Nota igual à que já
   existe não entra de novo.
+- **Conferência de ponteiros com o Gmail rodando acusa falta que não existe.** Em
+  12/11 apareceram 29 arquivos “faltando” (anexos grandes) que estavam ali segundos
+  depois. Antes de reparar, confira de novo os que faltaram.
 - **Regra de texto boa para PDF falha no OCR:** a frase "comprovante de pix"
   sai quebrada em linhas e "R$" vira "RS". Conte marcas (valor, destino, chave,
   id, instituição…) e limite a texto curto: manuais e FAQs longos juntam as
