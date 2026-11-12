@@ -110,10 +110,10 @@ function main(): void {
       etapa: "E2",
       feito: rcloneRemotos() >= 2,
       como:
-        "Num terminal: rclone config. ONEDRIVE: n → nome onedrive → tipo onedrive → Enter em client_id e client_secret → região global → " +
-        "Edit advanced config? y → access_scopes: a opção de leitura (Files.Read…) → Enter no resto → navegador: login → OneDrive Personal → y. " +
-        "GOOGLE DRIVE: n → nome gdrive → tipo drive → Enter em client_id e client_secret → scope 2 (drive.readonly) → Enter no resto → " +
-        "advanced? n → navegador: login → shared drive? n → y. Depois q para sair. Os nomes precisam ser onedrive e gdrive.",
+        "Num terminal: rclone config. ONEDRIVE: n → nome livre → tipo onedrive → Enter em client_id e client_secret → região global → " +
+        "Edit advanced config? y → access_scopes: a opção de leitura (Files.Read…) → Enter no resto → navegador: login → OneDrive Personal → drive 0 → y. " +
+        "Se parou no meio: rclone config reconnect OneDrive:. GOOGLE DRIVE: n → nome livre → tipo drive → scope 2 (drive.readonly) → " +
+        "advanced? n → navegador: login → shared drive? n → y.",
     },
     {
       id: "t04",
@@ -317,7 +317,10 @@ function main(): void {
       etapa: "E0",
       nome: "Preparar",
       status: tarefaFeita("t01") && tarefaFeita("t02") ? "concluida" : "aguardando-voce",
-      detalhe: "Cofre, índice e worker prontos; faltam ferramentas e cofre de segredos",
+      detalhe:
+        tarefaFeita("t01") && tarefaFeita("t02")
+          ? "Cofre, índice, ferramentas e cofre de segredos prontos"
+          : "Cofre, índice e worker prontos; faltam ferramentas ou cofre de segredos",
     },
     {
       etapa: "E1",
@@ -331,7 +334,20 @@ function main(): void {
       detalhe: `${discosConcluidos} de ${discos.length} discos concluídos`,
     },
     { etapa: "E2", nome: "Fontes vivas", status: "aberta", detalhe: "" },
-    { etapa: "E3", nome: "Organizar", status: "aguardando", detalhe: "" },
+    {
+      etapa: "E3",
+      nome: "Organizar",
+      status: "aberta",
+      detalhe: (() => {
+        const n = um<{ docs: number; ciclo: number; duvidas: number }>(
+          `SELECT sum(estado = 'documento') AS docs,
+                  sum(estado = 'documento' AND ciclo_id IS NOT NULL) AS ciclo,
+                  sum(estado = 'duvida') AS duvidas FROM achado`,
+        );
+        const f = (v: number) => v.toLocaleString("pt-BR");
+        return `${f(n.docs)} documentos, ${f(n.ciclo)} já por ciclo; ${f(n.duvidas)} dúvidas na fila de texto/OCR`;
+      })(),
+    },
     { etapa: "E4", nome: "Fragmentar", status: "aguardando", detalhe: "" },
     {
       etapa: "E5",
