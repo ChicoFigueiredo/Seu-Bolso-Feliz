@@ -76,6 +76,11 @@ worker segue estas regras; cada uma custou uma falha real.
   versão antiga dos dados por muito tempo e passa a ver 404 em tudo quando o
   arquivo some. Guardar só o anterior não bastou: mantenha os últimos 48 (24 h,
   ~1 MB) e apague só o que passar disso (lista em `scratchpad/painel/blobs.txt`).
+  Em 12/11 a página gravou 404 em `runs` de 15 s a 4 min depois de cada
+  atualização dos datasets, com o blob novo presente na lista de assets e
+  legível. A suspeita é uma aba aberta à 00:55, mas isso não foi confirmado.
+  Daqui não dá para abrir a página, então a prova é o usuário abri-la numa aba
+  nova. O relatório de encerramento é página estática para não depender disso.
 - **Id de elemento igual ao id de um dataset confunde o painel** (a marca da
   tabela acusava "no dataset" com o dataset carregando): use ids distintos.
 - **Nada de nomes de arquivo, valores ou documentos no painel do claude.ai:** lá
