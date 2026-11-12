@@ -55,6 +55,9 @@ worker segue estas regras; cada uma custou uma falha real.
 
 - **Gmail estoura cota com 403 "Quota exceeded", não só 429.** Ritmo fixo (uma
   chamada a cada 50 ms) e espera de 65 s no 403/429.
+- **Toda chamada de rede tem tempo limite.** Um `fetch` pendurado parou o coletor
+  do Gmail sem erro nenhum; o processo seguia vivo e o cursor, parado. 401 no meio
+  da coleta é token de acesso vencido: tente de novo.
 - **Token OAuth do Google em app de teste vence.** `get:gmail-token --gravar`
   grava nos `.env`.
 - **Bun carrega `.env.local` por cima do `.env`.** Trocar segredo só no `.env`

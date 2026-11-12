@@ -44,7 +44,14 @@ async function comRetentativa<T>(fazer: () => Promise<T>): Promise<T> {
   for (let tentativa = 1; ; tentativa++) {
     await aguardarVez();
     try {
-      return await fazer();
+      // fetch sem tempo limite pode ficar pendurado para sempre: foi assim que
+      // o coletor parou sem erro depois de 21 mil mensagens.
+      return await Promise.race([
+        fazer(),
+        new Promise<never>((_, rejeitar) =>
+          setTimeout(() => rejeitar(new Error("sem resposta em 60 s")), 60_000),
+        ),
+      ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!erroTransitorio(msg) || tentativa >= 6) throw e;

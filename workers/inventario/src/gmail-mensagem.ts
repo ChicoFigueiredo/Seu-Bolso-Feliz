@@ -87,7 +87,9 @@ export function cabecalho(payload: GmailPayload, nome: string): string | null {
 /** Cota estourada vem como 403 "Quota exceeded"/"rateLimitExceeded", não só 429. */
 export function erroTransitorio(msg: string): boolean {
   return (
-    /\((429|500|502|503|504)\)|fetch failed|ECONNRESET|ETIMEDOUT/.test(msg) ||
+    // 401: o token de acesso venceu entre a checagem e o uso; a próxima tentativa
+    // renova. "sem resposta": chamada que passou do tempo limite (rede travada).
+    /\((401|429|500|502|503|504)\)|fetch failed|ECONNRESET|ETIMEDOUT|sem resposta/.test(msg) ||
     (/\(403\)/.test(msg) && /quota exceeded|ratelimitexceeded|userratelimitexceeded/i.test(msg))
   );
 }

@@ -83,5 +83,7 @@ describe("erroTransitorio", () => {
       false,
     );
     expect(erroTransitorio("Failed to refresh Gmail access token (HTTP 400)")).toBe(false);
+    expect(erroTransitorio("Gmail API error (401) on /messages/x: UNAUTHENTICATED")).toBe(true);
+    expect(erroTransitorio("sem resposta em 60 s")).toBe(true);
   });
 });
