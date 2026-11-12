@@ -36,7 +36,7 @@ export interface Veredito {
   confianca: number;
 }
 
-export const VERSAO_REGRAS = "regras@1";
+export const VERSAO_REGRAS = "regras@2";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -133,6 +133,28 @@ function sinalDoTexto(bruto: string): SinalDeTexto | null {
     )
   ) {
     return { tipo: "comprovante", forte: true, motivo: "texto de comprovante" };
+  }
+  // Print de comprovante do app do banco, lido por OCR: as frases quebram em
+  // linhas e "R$" às vezes sai "RS", então conta as marcas em vez de exigir frase.
+  // Só em texto curto: manual, contrato e FAQ longos juntam essas marcas à toa.
+  const valor = tem(/r\$|\brs ?\d/);
+  if (t.length <= 2000 && valor && tem(/\bpix\b|transferencia|pagamento/)) {
+    const marcas = [
+      /comprovante/,
+      /destino|recebedor|quem recebeu|favorecido|beneficiario/,
+      /\bchave\b/,
+      /id da transa|autentica|\be2e|identificador/,
+      /data e hora|data da transa|realizad[oa] em/,
+      /instituicao/,
+      /\bcpf\b|\bcnpj\b/,
+      /enviad|realizad|efetuad|concluid/,
+    ].filter((re) => tem(re)).length;
+    if (marcas >= 2) {
+      return { tipo: "comprovante", forte: true, motivo: "texto curto de comprovante de app" };
+    }
+    if (tem(/\bpix\b/)) {
+      return { tipo: "comprovante", forte: false, motivo: "texto cita Pix com valor" };
+    }
   }
   if (tem(/extrato/) && tem(/saldo|lancamentos|movimentacao/)) {
     return { tipo: "extrato", forte: true, motivo: "texto de extrato com saldo" };

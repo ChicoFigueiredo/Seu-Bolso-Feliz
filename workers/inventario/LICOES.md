@@ -50,6 +50,16 @@ worker segue estas regras; cada uma custou uma falha real.
 - **Retomada por idempotência:** toda origem tem `origin_key` única; reexecutar
   pula o que já viu. Falha transitória vai para a tabela `refazer`, não se perde
   quando o cursor avança.
+- **Ordem da E3:** `e3-triar`, `e3-pluggy`, `e3-extrair` (pdftotext), `e3-ocr`
+  (tesseract nas imagens que a triagem marcou "precisa de OCR"), depois
+  `e3-triar --duvidas-com-texto`, `reparar-acervo` e `vista-ciclos`.
+- **Passada que roda a cada 30 min não pode acumular nota.** A triagem anexava o
+  mesmo motivo a cada rodada, até 31 vezes na mesma linha. Nota igual à que já
+  existe não entra de novo.
+- **Regra de texto boa para PDF falha no OCR:** a frase "comprovante de pix"
+  sai quebrada em linhas e "R$" vira "RS". Conte marcas (valor, destino, chave,
+  id, instituição…) e limite a texto curto: manuais e FAQs longos juntam as
+  mesmas marcas à toa. Simule (`--simular`) antes de gravar.
 
 ## APIs externas
 

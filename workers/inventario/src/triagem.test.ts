@@ -132,6 +132,27 @@ describe("triar: arquivos locais", () => {
     );
   });
 
+  it("print de comprovante Pix lido por OCR vira comprovante", () => {
+    const v = triar(
+      achado("jpg", [local("/espelho/WhatsApp Images/IMG-20261104-WA0019.jpg")], {
+        texto:
+          "Pix enviado\nValor\nRS 150,00\nDestino\nFulano de Tal\nCPF ***.123.456-**\nInstituição\nBanco X\nID da transação E2E123",
+      }),
+    );
+    expect(v.estado).toBe("documento");
+    expect(v.document_type).toBe("comprovante");
+  });
+
+  it("conversa que só cita Pix com valor fica em dúvida, com o tipo sugerido", () => {
+    const v = triar(
+      achado("jpg", [local("/espelho/WhatsApp Images/IMG-20261104-WA0020.jpg")], {
+        texto: "oi, te mandei o pix de R$ 50 ontem, confere aí depois por favor",
+      }),
+    );
+    expect(v.estado).toBe("duvida");
+    expect(v.document_type).toBe("comprovante");
+  });
+
   it("texto de boleto promove pdf sem sinal no caminho", () => {
     const v = triar(
       achado("pdf", [local("/mnt/bak/outros/arq1.pdf")], {

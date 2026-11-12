@@ -123,9 +123,13 @@ console.log(
 const atualizar = db.query(
   `UPDATE achado
       SET estado = ?, document_type = ?, confianca = ?, classificado_por = ?,
-          notas = CASE WHEN notas IS NULL OR notas = '' THEN ? ELSE notas || char(10) || ? END
+          notas = CASE WHEN notas IS NULL OR notas = '' THEN ?
+                       WHEN instr(char(10) || notas || char(10), char(10) || ? || char(10)) > 0 THEN notas
+                       ELSE notas || char(10) || ? END
     WHERE content_hash = ? AND estado = ?`,
 );
+// A mesma nota não se repete: a passada de dúvidas com texto roda a cada 30 min e
+// reavalia as mesmas linhas, que só ganham nota quando o motivo muda.
 
 for (let i = 0; i < alvo.length; i += LOTE) {
   const lote = alvo.slice(i, i + LOTE);
@@ -150,6 +154,7 @@ for (let i = 0; i < alvo.length; i += LOTE) {
           v.document_type,
           v.confianca,
           VERSAO_REGRAS,
+          nota,
           nota,
           nota,
           hash,
