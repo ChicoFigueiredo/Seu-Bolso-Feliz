@@ -85,9 +85,19 @@ function hashLocal(db: Database, caminho: string, tamanho: number): string | nul
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const fonte = argv[argv.indexOf("--fonte") + 1] ?? "";
-  const nuvem = NUVENS[fonte];
-  if (!nuvem) throw new Error(`--fonte deve ser ${Object.keys(NUVENS).join(" ou ")}`);
+  const padrao = NUVENS[fonte];
+  if (!padrao) throw new Error(`--fonte deve ser ${Object.keys(NUVENS).join(" ou ")}`);
   const soListar = argv.includes("--so-listar");
+  // O remoto é achado pelo tipo no rclone, não pelo nome: "OneDrive", "onedrive"
+  // ou qualquer outro nome que o usuário tenha dado.
+  const tipo = fonte === "nuvem:onedrive" ? "onedrive" : "drive";
+  const lista = Bun.spawnSync(["rclone", "listremotes", "--long"]).stdout.toString();
+  const remoto = lista
+    .split("\n")
+    .map((l) => l.trim().split(/\s+/))
+    .find(([, t]) => t === tipo)?.[0];
+  if (!remoto) throw new Error(`nenhum remoto do tipo ${tipo} no rclone`);
+  const nuvem = { ...padrao, remoto };
 
   const cofre = caminhosDoCofre();
   const db = abrirBanco(cofre.banco);

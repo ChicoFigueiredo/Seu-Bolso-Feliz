@@ -40,10 +40,17 @@ function tesseractPortugues(): boolean {
   );
 }
 
+/** Remotos prontos: com tipo onedrive ou drive e, no OneDrive, o drive escolhido. */
 function rcloneRemotos(): number {
   const conf = join(homedir(), ".config/rclone/rclone.conf");
   if (!existsSync(conf)) return 0;
-  return (readFileSync(conf, "utf8").match(/^\[[^\]]+\]/gm) ?? []).length;
+  const blocos = readFileSync(conf, "utf8")
+    .split(/^\[[^\]]+\]\s*$/m)
+    .slice(1);
+  return blocos.filter(
+    (b) =>
+      /^type = drive$/m.test(b) || (/^type = onedrive$/m.test(b) && /^drive_id = \S+/m.test(b)),
+  ).length;
 }
 
 function thunderbirdOutlook(): boolean {
@@ -224,6 +231,60 @@ function main(): void {
     nota: f.motivo,
   }));
 
+  // Datas por fonte: o período que cada uma cobre (arquivos ou mensagens,
+  // documentos, registros) e quando foi varrida pela última vez.
+  const br = (iso: string | null) =>
+    iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : null;
+  const periodo = (de: string | null, ate: string | null) =>
+    de && ate ? (de === ate ? br(de) : `${br(de)} a ${br(ate)}`) : null;
+  const datas = todos<{
+    id: string;
+    descricao: string;
+    escopo: string;
+    situacao: string | null;
+    ultima: string | null;
+    origens: number | null;
+    arq_de: string | null;
+    arq_ate: string | null;
+    docs: number | null;
+    doc_de: string | null;
+    doc_ate: string | null;
+    registros: number | null;
+    reg_de: string | null;
+    reg_ate: string | null;
+  }>(
+    `WITH o AS (
+       SELECT fonte_id, count(*) AS origens,
+              substr(min(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10) AS arq_de,
+              substr(max(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10) AS arq_ate
+         FROM origem WHERE coalesce(local_mtime, gmail_date) >= '1995' GROUP BY fonte_id),
+     d AS (
+       SELECT x.fonte_id, count(DISTINCT a.content_hash) AS docs, min(a.data_chave) AS doc_de,
+              max(a.data_chave) AS doc_ate
+         FROM origem x JOIN achado a ON a.content_hash = x.content_hash
+        WHERE a.estado = 'documento' AND a.data_chave >= '1995' GROUP BY x.fonte_id),
+     r AS (SELECT fonte_id, count(*) AS registros, min(data) AS reg_de, max(data) AS reg_ate
+             FROM registro GROUP BY fonte_id),
+     v AS (SELECT fonte_id, max(coalesce(concluida_em, iniciada_em)) AS ultima,
+                  (SELECT status FROM varredura w WHERE w.fonte_id = v.fonte_id
+                    ORDER BY (status = 'rodando') DESC, id DESC LIMIT 1) AS situacao
+             FROM varredura v GROUP BY fonte_id)
+     SELECT f.id, f.descricao, f.escopo, v.situacao, v.ultima, o.origens, o.arq_de, o.arq_ate,
+            d.docs, d.doc_de, d.doc_ate, r.registros, r.reg_de, r.reg_ate
+       FROM fonte f LEFT JOIN o ON o.fonte_id = f.id LEFT JOIN d ON d.fonte_id = f.id
+       LEFT JOIN r ON r.fonte_id = f.id LEFT JOIN v ON v.fonte_id = f.id
+      ORDER BY (v.situacao IS NULL), coalesce(o.arq_ate, r.reg_ate) DESC, f.id`,
+  ).map((x) => ({
+    id: x.id,
+    fonte: x.descricao,
+    situacao: x.escopo === "fora" ? "fora" : (x.situacao ?? "ausente"),
+    ultima_varredura: x.ultima,
+    itens: x.origens ?? x.registros ?? 0,
+    periodo_itens: periodo(x.arq_de ?? x.reg_de, x.arq_ate ?? x.reg_ate),
+    documentos: x.docs ?? 0,
+    periodo_documentos: periodo(x.doc_de, x.doc_ate),
+  }));
+
   const areas = todos<{ motivo: string; areas: number; arquivos: number; bytes: number }>(
     `SELECT motivo, count(*) AS areas, sum(arquivos) AS arquivos, sum(bytes) AS bytes
        FROM area_excluida a
@@ -312,7 +373,7 @@ function main(): void {
   mkdirSync(dirname(saida), { recursive: true });
   writeFileSync(
     saida,
-    JSON.stringify({ resumo, etapas, tarefas, avisos, fontes, areas, ciclos }, null, 1),
+    JSON.stringify({ resumo, etapas, tarefas, avisos, fontes, datas, areas, ciclos }, null, 1),
   );
   console.log(
     `painel: ${resumo.achados} achados, ${resumo.origens} origens, ${resumo.copiados} copiados → ${saida}`,
