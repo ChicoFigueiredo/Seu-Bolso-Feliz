@@ -4,8 +4,10 @@
 //!
 //! - A lista padrão de estratégias só entra com [`OpcoesDaRodada::tentar_estrategias_padrao`]
 //!   (desligada por padrão): nada de tentativa cega.
-//! - Depois de N falhas de senha (padrão 6), ou quando não há mais nada a tentar, o achado vira
-//!   a pendência "PDF protegido sem regra" e as tentativas param.
+//! - Depois de N falhas de senha **acumuladas** por documento (padrão 6), o achado vira a
+//!   pendência "PDF protegido sem regra" e as tentativas param. Sem estratégia para tentar
+//!   (nenhuma regra e a opção padrão desligada) não há tentativa nem pendência: o achado só
+//!   entra na contagem [`RelatorioDaRodada::sem_regra`] ("N PDFs sem regra" na janela).
 //! - Quando uma estratégia **padrão** vence para um par sem regra, a rodada devolve uma
 //!   [`PropostaDeRegra`]; gravar a regra é decisão do usuário
 //!   ([`PropostaDeRegra::pedido`], que vira `Acao::GuardarRegraDeSenha`).
@@ -115,6 +117,9 @@ pub enum Situacao {
     Pendencia { tipo: String, id: i64 },
     /// Nenhuma estratégia abriu ainda; outras rodadas podem tentar.
     NaoAbriu,
+    /// Não havia estratégia para tentar (nenhuma regra do fornecedor e a opção "tentar
+    /// estratégias padrão" desligada). Nada foi tentado nem gravado.
+    SemRegra,
     /// A senha conferiu, mas a extração falhou (tenta de novo na próxima rodada).
     FalhaNaExtracao,
     /// Faltou um segredo no chaveiro para alguma estratégia (trancado, sem CPF, sem a senha
@@ -149,6 +154,14 @@ impl RelatorioDaRodada {
     /// As propostas de regra, para a janela perguntar.
     pub fn propostas(&self) -> impl Iterator<Item = &PropostaDeRegra> {
         self.resultados.iter().filter_map(|r| r.proposta.as_ref())
+    }
+
+    /// Quantos PDFs ficaram sem estratégia para tentar ("N PDFs sem regra").
+    pub fn sem_regra(&self) -> usize {
+        self.resultados
+            .iter()
+            .filter(|r| r.situacao == Situacao::SemRegra)
+            .count()
     }
 }
 
@@ -337,15 +350,20 @@ fn abrir_um(
         }
     }
 
+    // Sem estratégia para tentar: nem tentativa nem pendência (spec 06, item 7: pendência só
+    // depois de N falhas). A janela mostra a contagem.
+    if lista.is_empty() {
+        resultado.situacao = Situacao::SemRegra;
+        return Ok(resultado);
+    }
+
     let mut tentativas = Vec::new();
     let mut falhas = alvo.falhas;
     let mut conclusao = None;
     let mut situacao = Situacao::NaoAbriu;
     let mut faltou = None;
-    let mut esgotou = true;
     for (estrategia, regra) in &lista {
         if falhas >= limite {
-            esgotou = false;
             break;
         }
         let candidata = match estrategia.candidata(fonte) {
@@ -411,24 +429,13 @@ fn abrir_um(
                 estrategia.clone(),
             ));
         }
-        esgotou = false;
         break;
     }
 
-    let conclusao = match conclusao {
-        Some(c) => c,
-        // Faltou segredo: não é falta de regra, é o chaveiro (a janela pede para destrancar).
-        None if faltou.is_some() && tentativas.is_empty() => Conclusao::SoTentativas,
-        // Nada abriu e não há mais o que tentar.
-        None if esgotou => Conclusao::SemRegra {
-            pergunta: protegidos::pergunta_sem_regra(
-                alvo.fornecedor.as_deref(),
-                alvo.document_type.as_deref(),
-                falhas,
-            ),
-        },
-        None => Conclusao::SoTentativas,
-    };
+    // Nada abriu: só as tentativas. A pendência "sem regra" sai do `registrar` quando as
+    // falhas acumuladas chegam ao limite; faltar segredo não é falha (a janela pede para
+    // destrancar o chaveiro).
+    let conclusao = conclusao.unwrap_or(Conclusao::SoTentativas);
     let tipo = match &conclusao {
         Conclusao::Pendencia { tipo, .. } => *tipo,
         _ => protegidos::TIPO_SEM_REGRA,
