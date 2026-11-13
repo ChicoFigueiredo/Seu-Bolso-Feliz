@@ -206,3 +206,35 @@ fn acoes_pela_janela_gravam_e_desfazem() {
     b.quadro();
     assert!(b.moldura.janela.mensagem.as_ref().is_some_and(|m| m.erro));
 }
+
+#[test]
+fn lote_pela_janela_cria_adiciona_e_aprova() {
+    let mut b = Banco::novo();
+    b.moldura
+        .janela
+        .pedir(Pedido::CriarLote("Teste da janela".into()));
+    b.quadro();
+    let lote = b.moldura.janela.lote_atual.clone().expect("lote atual");
+    b.abrir(Destino::Area(Area::Registros));
+    let reg = Ref::nova(Tipo::Registro, "70");
+    b.moldura.janela.centro.selecao.so(reg.clone());
+    b.moldura.janela.executar(IdAcao::AdicionarSelecao);
+    b.quadro();
+    let itens = b
+        .consulta
+        .tabela(&PedidoDeTabela::Ligados {
+            de: lote.clone(),
+            tipo: Tipo::Registro,
+        })
+        .expect("tabela");
+    assert_eq!(itens.linhas.len(), 1);
+    b.moldura.janela.executar(IdAcao::AprovarLote);
+    b.quadro();
+    let item = b.consulta.item(&reg).expect("item").expect("existe");
+    assert!(matches!(&item.campos[0].valor, Celula::Estado { rotulo, .. } if rotulo == "Aprovado"));
+    // Clicar noutro lote troca o lote atual.
+    let outro = Ref::nova(Tipo::Lote, "1");
+    b.moldura.janela.centro.selecao.so(outro.clone());
+    b.quadro();
+    assert_eq!(b.moldura.janela.lote_atual, Some(outro));
+}

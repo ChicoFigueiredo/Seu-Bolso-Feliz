@@ -72,6 +72,14 @@ fn abrir_para_captura(moldura: &mut MolduraProvisoria, alvo: &str) {
         None => alvo.parse().ok().map(Destino::Item),
     };
     let destino = destino.unwrap_or(Destino::Area(Area::VisaoGeral));
+    if let (Destino::Item(r), Some(aba)) = (
+        &destino,
+        std::env::var("SBF_CAPTURA_ABA")
+            .ok()
+            .and_then(|a| a.parse().ok()),
+    ) {
+        moldura.janela.centro.abas.insert(r.clone(), aba);
+    }
     moldura.janela.pedir(Pedido::Abrir(destino));
 }
 
@@ -138,8 +146,12 @@ fn main() -> ExitCode {
                 selo: Some("Demonstração · dados fictícios".to_owned()),
                 ..Default::default()
             };
+            let mut janela = Janela::nova();
+            if let Ok(t) = std::env::var("SBF_TEMA") {
+                janela.tema = t;
+            }
             abrir_janela(App {
-                moldura: MolduraProvisoria::nova(Janela::nova(), barra),
+                moldura: MolduraProvisoria::nova(janela, barra),
                 consulta: Box::new(consulta),
                 comandos: Box::new(comandos),
                 captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),

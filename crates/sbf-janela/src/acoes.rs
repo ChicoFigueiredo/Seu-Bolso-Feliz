@@ -799,7 +799,13 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
 }
 
 /// A Ação cujo atalho foi apertado neste quadro, se houver. Consome a tecla.
+///
+/// Com um campo de texto em foco não faz nada: Ctrl+Z ali desfaz a digitação, não uma
+/// decisão.
 pub fn atalho_apertado(ctx: &egui::Context) -> Option<IdAcao> {
+    if ctx.egui_wants_keyboard_input() {
+        return None;
+    }
     ctx.input_mut(|i| {
         // Os mais específicos primeiro (Ctrl+Shift+F antes de Ctrl+F).
         let mut lista: Vec<&DefinicaoDeAcao> =

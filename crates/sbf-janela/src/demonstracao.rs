@@ -999,7 +999,38 @@ impl Estado {
                 Some("Valor diferente do comprovante".into()),
             );
         }
+        e.datar_decisoes_iniciais();
         e
+    }
+
+    /// As decisões da carga fictícia ganham datas plausíveis (a coleta, ou o dia em que
+    /// você aprovou); as decisões novas da sessão começam em 13/11/2026 09:01.
+    fn datar_decisoes_iniciais(&mut self) {
+        let mut datas = Vec::new();
+        for d in &self.decisoes {
+            let em = match d.alvo.tipo {
+                Tipo::Achado | Tipo::Documento => self
+                    .origens
+                    .iter()
+                    .find(|o| o.hash == d.alvo.chave)
+                    .map(|o| {
+                        o.visto_em
+                            .replace(":00:00", ":01:00")
+                            .replace(":10:00", ":11:00")
+                    })
+                    .unwrap_or_else(|| "2026-10-02T21:01:00".to_owned()),
+                Tipo::Registro => self
+                    .registro(&d.alvo.chave)
+                    .map(|r| format!("{}-28T21:16:00", proximo_mes(&r.ciclo)))
+                    .unwrap_or_else(|| "2026-10-01T21:16:00".to_owned()),
+                _ => "2026-11-12T21:40:00".to_owned(),
+            };
+            datas.push(em);
+        }
+        for (d, em) in self.decisoes.iter_mut().zip(datas) {
+            d.em = em;
+        }
+        self.relogio = 0;
     }
 
     fn agora(&mut self) -> String {
@@ -1060,12 +1091,8 @@ impl Estado {
                 )
             }),
         });
-        match remetente {
-            Some(_) => {
-                self.nova_origem(&hash, "gmail:pessoal", &format!("Gmail · anexo {nome}"), 3)
-            }
-            None if tipo == "extrato" => {}
-            None => {}
+        if let Some(r) = remetente {
+            self.nova_origem(&hash, "gmail:pessoal", &format!("{r}/anexo {nome}"), 3);
         }
         let alvo = Ref::nova(Tipo::Achado, hash.clone());
         self.registrar(

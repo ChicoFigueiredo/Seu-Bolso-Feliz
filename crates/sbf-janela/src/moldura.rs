@@ -81,7 +81,7 @@ impl MolduraProvisoria {
                     .stroke(Stroke::new(1.0, p.borda))
                     .inner_margin(Margin::symmetric(10, 4)),
             )
-            .show(ui, |ui| self.faixa_de_acoes(ui));
+            .show(ui, |ui| self.faixa_de_acoes(ui, consulta));
         egui::Panel::bottom("sbf-status")
             .frame(
                 Frame::new()
@@ -160,7 +160,7 @@ impl MolduraProvisoria {
         });
     }
 
-    fn faixa_de_acoes(&mut self, ui: &mut Ui) {
+    fn faixa_de_acoes(&mut self, ui: &mut Ui, consulta: &dyn Consulta) {
         let p = tema::paleta(ui.ctx());
         let contexto = self.janela.contexto_das_acoes();
         let achado = contexto.selecao.len() == 1
@@ -229,9 +229,8 @@ impl MolduraProvisoria {
                 ui.label(RichText::new("Lote atual").size(11.0).color(p.tinta_suave));
                 let rotulo = self
                     .janela
-                    .lote_atual
-                    .as_ref()
-                    .map_or_else(|| "nenhum".to_owned(), |l| format!("lote {}", l.chave));
+                    .rotulo_do_lote_atual(consulta)
+                    .unwrap_or_else(|| "nenhum: crie um ou clique num lote".to_owned());
                 ui.label(RichText::new(rotulo).strong());
             }
             if self.aba == Aba::Exibir {

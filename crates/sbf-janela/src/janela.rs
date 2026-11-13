@@ -136,6 +136,12 @@ impl Janela {
         &self.decisoes_da_sessao
     }
 
+    /// O nome do lote atual, para a faixa de Lotes.
+    pub fn rotulo_do_lote_atual(&mut self, consulta: &dyn Consulta) -> Option<String> {
+        let lote = self.lote_atual.clone()?;
+        Some(Leitor::novo(consulta, &mut self.cache).rotulo(&lote))
+    }
+
     /// O item aberto no centro, se for uma página.
     pub fn item_aberto(&self) -> Option<&Ref> {
         match self.navegacao.atual() {
@@ -626,6 +632,13 @@ impl Janela {
         consulta: &dyn Consulta,
         comandos: &mut dyn Comandos,
     ) {
+        // Clicar num lote (na área Lotes ou numa aba) faz dele o lote atual.
+        if let Some(r) = &self.centro.selecao.foco
+            && r.tipo == Tipo::Lote
+            && self.lote_atual.as_ref() != Some(r)
+        {
+            self.lote_atual = Some(r.clone());
+        }
         let pedidos = std::mem::take(&mut self.pedidos);
         for pedido in pedidos {
             let antes = self.navegacao.atual().clone();
@@ -1133,7 +1146,7 @@ fn faixa_do_lote(
     let p = tema::paleta(ui.ctx());
     componentes::cartao(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(icones::icone_cor("inventory_2", 16.0, p.tinta));
             ui.label(RichText::new("Lote atual").color(p.tinta_suave));
             match lote_atual {
