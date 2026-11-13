@@ -120,6 +120,8 @@ pub struct Selecao {
     clausulas: Vec<String>,
     params: Vec<Value>,
     pub limite: Option<usize>,
+    /// Quantas linhas pular antes do `limite` (páginas da tabela).
+    pub deslocamento: usize,
 }
 
 impl Selecao {
@@ -149,11 +151,37 @@ impl Selecao {
             .collect()
     }
 
-    /// `" LIMIT n"`, ou vazio.
+    /// `" LIMIT n OFFSET m"`, ou vazio.
     pub fn sql_limite(&self) -> String {
-        self.limite
-            .map(|n| format!(" LIMIT {n}"))
-            .unwrap_or_default()
+        match (self.limite, self.deslocamento) {
+            (None, 0) => String::new(),
+            (None, m) => format!(" LIMIT -1 OFFSET {m}"),
+            (Some(n), 0) => format!(" LIMIT {n}"),
+            (Some(n), m) => format!(" LIMIT {n} OFFSET {m}"),
+        }
+    }
+
+    /// Pede a página de `limite` linhas que começa em `inicio`.
+    #[must_use]
+    pub fn com_pagina(mut self, inicio: usize, limite: usize) -> Self {
+        self.deslocamento = inicio;
+        self.limite = Some(limite);
+        self
+    }
+
+    /// Alguma condição menciona `texto` (por exemplo, o alias de uma tabela ligada)?
+    pub fn menciona(&self, texto: &str) -> bool {
+        self.clausulas.iter().any(|c| c.contains(texto))
+    }
+
+    /// A mesma seleção, sem limite nem deslocamento (para contar).
+    #[must_use]
+    pub fn sem_pagina(&self) -> Self {
+        Self {
+            limite: None,
+            deslocamento: 0,
+            ..self.clone()
+        }
     }
 
     pub fn params(&self) -> &[Value] {
@@ -166,6 +194,7 @@ impl Selecao {
         self.params.extend(outra.params);
         if outra.limite.is_some() {
             self.limite = outra.limite;
+            self.deslocamento = outra.deslocamento;
         }
         self
     }
@@ -903,15 +932,6 @@ pub struct LinhaDeAchado {
     pub decidido_por: Option<String>,
 }
 
-/// O SELECT-base de achados (alias `a`).
-pub const SQL_BASE_DE_ACHADOS: &str = "SELECT a.content_hash, a.estado, a.document_type, a.extensao, a.data_chave, a.data_chave_tipo,
-       a.ciclo_id, a.valor_centavos, a.supplier_name_raw,
-       (SELECT filename FROM origem o WHERE o.content_hash = a.content_hash ORDER BY o.id LIMIT 1) AS nome,
-       (SELECT coalesce(local_filepath, gmail_subject) FROM origem o WHERE o.content_hash = a.content_hash ORDER BY o.id LIMIT 1) AS onde,
-       (SELECT count(*) FROM origem o WHERE o.content_hash = a.content_hash) AS origens,
-       a.caminho_acervo, a.confianca, a.notas, a.decidido_por
-     FROM achado a WHERE 1 = 1";
-
 fn mapear_achado(l: &Row<'_>) -> rusqlite::Result<LinhaDeAchado> {
     Ok(LinhaDeAchado {
         hash: l.get(0)?,
@@ -934,13 +954,42 @@ fn mapear_achado(l: &Row<'_>) -> rusqlite::Result<LinhaDeAchado> {
 }
 
 /// Achados de qualquer estado, mais novos primeiro.
+///
+/// Em duas fases: a de dentro escolhe e ordena só as chaves (e aplica `LIMIT`/`OFFSET`); a de
+/// fora monta as colunas, com as subconsultas de origem, só para as linhas da página. Num só
+/// SELECT o SQLite calcularia as subconsultas de todos os achados antes de ordenar.
 pub fn achados(ctx: &Contexto<'_>, sel: &Selecao) -> ResultadoDeConsulta<Vec<LinhaDeAchado>> {
     let sql = format!(
-        "{SQL_BASE_DE_ACHADOS}{sel} ORDER BY a.data_chave DESC NULLS LAST, a.primeiro_visto_em DESC, a.content_hash{limite}",
+        "SELECT ax.content_hash, ax.estado, ax.document_type, ax.extensao, ax.data_chave, ax.data_chave_tipo,
+           ax.ciclo_id, ax.valor_centavos, ax.supplier_name_raw,
+           (SELECT filename FROM origem o WHERE o.content_hash = ax.content_hash ORDER BY o.id LIMIT 1) AS nome,
+           (SELECT coalesce(local_filepath, gmail_subject) FROM origem o WHERE o.content_hash = ax.content_hash ORDER BY o.id LIMIT 1) AS onde,
+           (SELECT count(*) FROM origem o WHERE o.content_hash = ax.content_hash) AS origens,
+           ax.caminho_acervo, ax.confianca, ax.notas, ax.decidido_por
+         FROM (SELECT a.content_hash AS h, a.data_chave AS dc, a.primeiro_visto_em AS pv
+                 FROM achado a WHERE 1 = 1{sel}
+                ORDER BY a.data_chave DESC NULLS LAST, a.primeiro_visto_em DESC, a.content_hash{limite}) k
+           JOIN achado ax ON ax.content_hash = k.h
+         ORDER BY k.dc DESC NULLS LAST, k.pv DESC, k.h",
         sel = sel.sql_e(),
         limite = sel.sql_limite(),
     );
     consultar(ctx.conn, &sql, sel.params(), mapear_achado)
+}
+
+/// Quantos achados a seleção tem (ignora limite e deslocamento).
+pub fn contar_achados(ctx: &Contexto<'_>, sel: &Selecao) -> ResultadoDeConsulta<usize> {
+    let sel = sel.sem_pagina();
+    contar_linhas(
+        ctx.conn,
+        &format!("SELECT count(*) FROM achado a WHERE 1 = 1{}", sel.sql_e()),
+        sel.params(),
+    )
+}
+
+/// Roda um `SELECT count(*)`.
+pub fn contar_linhas(conn: &Connection, sql: &str, params: &[Value]) -> ResultadoDeConsulta<usize> {
+    Ok(usize::try_from(escalar(conn, sql, params)?).unwrap_or(0))
 }
 
 fn com_estado(sel: &Selecao, estado: &str) -> Selecao {
@@ -1077,10 +1126,12 @@ pub fn emails_por_remetente(
     ctx: &Contexto<'_>,
     sel: &Selecao,
 ) -> ResultadoDeConsulta<Vec<LinhaDeRemetente>> {
+    // O último assunto vem da linha de `max(gmail_date)` (coluna "nua" do SQLite): a consulta
+    // original do Datasette achava o assunto com uma subconsulta correlacionada por remetente,
+    // que varria `origem` inteira por grupo (130 s com 600 mil origens e 1.000 remetentes).
     let sql = format!(
         "SELECT lower(replace(substr(o.gmail_from, instr(o.gmail_from, '@') + 1), '>', '')) AS dominio,
-           count(*) AS emails, max(o.gmail_date) AS ultimo,
-           (SELECT gmail_subject FROM origem x WHERE x.gmail_from = o.gmail_from ORDER BY gmail_date DESC LIMIT 1) AS ultimo_assunto
+           count(*) AS emails, max(o.gmail_date) AS ultimo, o.gmail_subject AS ultimo_assunto
          FROM origem o WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml'{sel}
          GROUP BY 1 ORDER BY 2 DESC, 1{limite}",
         sel = sel.sql_e(),
@@ -1231,12 +1282,23 @@ pub struct LinhaDeArquivo {
 }
 
 pub fn arquivos(ctx: &Contexto<'_>, sel: &Selecao) -> ResultadoDeConsulta<Vec<LinhaDeArquivo>> {
+    // Em duas fases, como `achados`: a de dentro ordena e corta só as chaves, pelo índice
+    // `origem_local_mtime` e sem juntar `achado` (a menos que o filtro peça); a de fora monta
+    // as colunas para as linhas da página. Pular 500 mil linhas não custa uma junção cada.
+    let juncao = if sel.menciona("a.") {
+        " LEFT JOIN achado a ON a.content_hash = o.content_hash"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT o.id, o.content_hash, o.filename, o.local_filepath, o.file_size_bytes, substr(o.local_mtime, 1, 10),
            a.camada, a.estado, a.document_type, a.caminho_acervo, a.decidido_por
-         FROM origem o LEFT JOIN achado a ON a.content_hash = o.content_hash
-         WHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive'){sel}
-         ORDER BY o.local_mtime DESC, o.id DESC{limite}",
+         FROM (SELECT o.id AS oid, o.local_mtime AS lm FROM origem o{juncao}
+                WHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive'){sel}
+                ORDER BY o.local_mtime DESC, o.id DESC{limite}) k
+           JOIN origem o ON o.id = k.oid
+           LEFT JOIN achado a ON a.content_hash = o.content_hash
+         ORDER BY k.lm DESC, k.oid DESC",
         sel = sel.sql_e(),
         limite = sel.sql_limite(),
     );
@@ -1325,7 +1387,7 @@ pub fn pastas_pessoais(
            count(DISTINCT o.content_hash) AS achados,
            coalesce(sum(a.estado = 'documento'), 0) AS documentos,
            coalesce(sum(a.estado = 'descartado'), 0) AS descartados
-         FROM origem o JOIN achado a ON a.content_hash = o.content_hash
+         FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash
          WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL{sel}
          GROUP BY 1 ORDER BY 2 DESC, 1{limite}",
         sel = sel.sql_e(),
@@ -1837,4 +1899,125 @@ pub fn tabela_de_pastas_pessoais(
         sel = sel.onde("o.local_filepath LIKE ?", vec![texto(format!("%{t}%"))]);
     }
     Ok(tabela_pastas_pessoais(&pastas_pessoais(ctx, &sel)?))
+}
+
+// ---------------------------------------------------------------------------
+// Páginas das áreas grandes
+// ---------------------------------------------------------------------------
+
+/// A área devolve páginas pelo SQL (`LIMIT`/`OFFSET`)? As outras são agregações pequenas (ou
+/// precisam do conjunto inteiro) e a página é um corte da tabela completa.
+pub fn area_e_paginavel(area: Area) -> bool {
+    matches!(
+        area,
+        Area::ATriar
+            | Area::EmDuvida
+            | Area::Documentos
+            | Area::Registros
+            | Area::Emails
+            | Area::ArquivosEPastas
+    )
+}
+
+/// Quantas linhas a área tem com o filtro, sem montar nenhuma. `None` para as áreas que
+/// precisam ser calculadas inteiras.
+pub fn contar_da_area(
+    ctx: &Contexto<'_>,
+    area: Area,
+    filtro: &Filtro,
+) -> ResultadoDeConsulta<Option<usize>> {
+    Ok(Some(match area {
+        Area::ATriar | Area::EmDuvida | Area::Documentos => {
+            let estado = estado_da_area(area);
+            contar_achados(
+                ctx,
+                &com_estado(&selecao_do_filtro(ctx, filtro, Alvo::Achado), estado),
+            )?
+        }
+        Area::Registros => {
+            let sel = selecao_do_filtro(ctx, filtro, Alvo::Registro);
+            contar_linhas(
+                ctx.conn,
+                &format!("SELECT count(*) FROM registro r WHERE 1 = 1{}", sel.sql_e()),
+                sel.params(),
+            )?
+        }
+        Area::Emails => {
+            let sel = selecao_de_emails(filtro);
+            contar_linhas(
+                ctx.conn,
+                &format!(
+                    "SELECT count(*) FROM origem o JOIN achado a ON a.content_hash = o.content_hash
+                     WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml'{}",
+                    sel.sql_e()
+                ),
+                sel.params(),
+            )?
+        }
+        Area::ArquivosEPastas => {
+            let sel = selecao_de_arquivos(filtro);
+            let juncao = if sel.menciona("a.") {
+                " LEFT JOIN achado a ON a.content_hash = o.content_hash"
+            } else {
+                ""
+            };
+            contar_linhas(
+                ctx.conn,
+                &format!(
+                    "SELECT count(*) FROM origem o{juncao}
+                     WHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive'){}",
+                    sel.sql_e()
+                ),
+                sel.params(),
+            )?
+        }
+        _ => return Ok(None),
+    }))
+}
+
+fn estado_da_area(area: Area) -> &'static str {
+    match area {
+        Area::ATriar => "novo",
+        Area::EmDuvida => "duvida",
+        _ => "documento",
+    }
+}
+
+/// A página de `limite` linhas que começa na linha `inicio` de uma área paginável, com as
+/// colunas. Devolve `None` quando a área não é paginável (veja [`area_e_paginavel`]).
+pub fn pagina_da_area(
+    ctx: &Contexto<'_>,
+    area: Area,
+    filtro: &Filtro,
+    inicio: usize,
+    limite: usize,
+) -> ResultadoDeConsulta<Option<Tabela>> {
+    Ok(Some(match area {
+        Area::ATriar | Area::EmDuvida | Area::Documentos => {
+            let sel = com_estado(
+                &selecao_do_filtro(ctx, filtro, Alvo::Achado),
+                estado_da_area(area),
+            )
+            .com_pagina(inicio, limite);
+            let link = if area == Area::Documentos {
+                LinkDoAchado::Documento
+            } else {
+                LinkDoAchado::Achado
+            };
+            tabela_de_achados(&achados(ctx, &sel)?, link)
+        }
+        Area::Registros => {
+            let sel = selecao_do_filtro(ctx, filtro, Alvo::Registro).com_pagina(inicio, limite);
+            tabela_registros(&registros(ctx, &sel)?)
+        }
+        Area::Emails => {
+            let sel = selecao_de_emails(filtro).com_pagina(inicio, limite);
+            tabela_emails(&emails(ctx, &sel)?)
+        }
+        Area::ArquivosEPastas => {
+            let sel = selecao_de_arquivos(filtro).com_pagina(inicio, limite);
+            tabela_arquivos(&arquivos(ctx, &sel)?)
+        }
+        _ => return Ok(None),
+    }))
 }

@@ -76,14 +76,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Area::Lotes,
     ];
     for area in areas {
-        let t = Instant::now();
-        let tabela = leitor.tabela(&PedidoDeTabela::Area {
+        let pedido = PedidoDeTabela::Area {
             area,
             filtro: Filtro::default(),
-        })?;
+        };
+        let t = Instant::now();
+        let pagina = leitor.tabela_paginada(&pedido, 0, 1000)?;
+        let primeira = t.elapsed().as_millis();
+        let t = Instant::now();
+        let ultima = leitor.tabela_paginada(&pedido, pagina.total.saturating_sub(1000), 1000)?;
         println!(
-            "área {area:?}: {} linhas em {} ms",
-            tabela.linhas.len(),
+            "área {area:?}: {} linhas; 1ª página ({}) em {primeira} ms, última ({}) em {} ms",
+            pagina.total,
+            pagina.tabela.linhas.len(),
+            ultima.tabela.linhas.len(),
             t.elapsed().as_millis()
         );
     }

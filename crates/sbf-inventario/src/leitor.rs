@@ -22,14 +22,15 @@
 
 mod itens;
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::Connection;
 
 use crate::consulta::{
-    Area, Consulta, Contagens, ErroDeConsulta, Filtro, Fonte, Item, Painel, PedidoDeTabela,
-    Pergunta, Rastro, ResultadoDeConsulta, Tabela, TotalDoCiclo,
+    Area, Consulta, Contagens, ErroDeConsulta, Filtro, Fonte, Item, PaginaDeTabela, Painel,
+    PedidoDeTabela, Pergunta, Rastro, ResultadoDeConsulta, Tabela, TotalDoCiclo,
 };
 use crate::referencia::{Ref, Tipo};
 use crate::relacoes::{self, lotes, pendencias, tabela_lotes, tabela_pendencias};
@@ -39,6 +40,23 @@ use crate::vistas::{
 };
 use crate::{rastro, relatorios};
 
+/// A última tabela que precisou ser calculada inteira (agregações grandes), para a janela
+/// pedir os pedaços dela sem recalcular. Vale enquanto o banco não muda (`data_version`).
+#[derive(Debug)]
+struct TabelaEmCache {
+    chave: String,
+    versao: i64,
+    tabela: Tabela,
+}
+
+/// O painel da Visão geral calculado por último, com o que o invalida.
+#[derive(Debug)]
+struct PainelEmCache {
+    versao: i64,
+    hoje: String,
+    painel: Painel,
+}
+
 /// O leitor de só leitura do inventário.
 #[derive(Debug)]
 pub struct LeitorSqlite {
@@ -46,6 +64,8 @@ pub struct LeitorSqlite {
     dialeto: Dialeto,
     hoje: Option<String>,
     manual: EstadoManual,
+    cache_de_tabela: RefCell<Option<TabelaEmCache>>,
+    cache_do_painel: RefCell<Option<PainelEmCache>>,
 }
 
 impl LeitorSqlite {
@@ -66,6 +86,8 @@ impl LeitorSqlite {
             dialeto,
             hoje: None,
             manual: EstadoManual::default(),
+            cache_de_tabela: RefCell::new(None),
+            cache_do_painel: RefCell::new(None),
         })
     }
 
@@ -80,6 +102,7 @@ impl LeitorSqlite {
     #[must_use]
     pub fn com_estado_manual(mut self, manual: EstadoManual) -> Self {
         self.manual = manual;
+        *self.cache_do_painel.get_mut() = None;
         self
     }
 
@@ -97,6 +120,13 @@ impl LeitorSqlite {
     /// O ciclo atual (`AAAA-MM`).
     pub fn ciclo_atual(&self) -> String {
         ciclo_da_data(&self.hoje()).unwrap_or_default()
+    }
+
+    /// Muda quando outra conexão grava no banco (`PRAGMA data_version`).
+    fn versao_dos_dados(&self) -> ResultadoDeConsulta<i64> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA data_version", [], |l| l.get::<_, i64>(0))?)
     }
 
     fn ctx(&self) -> Contexto<'_> {
@@ -230,6 +260,60 @@ impl Consulta for LeitorSqlite {
         }
     }
 
+    fn tabela_paginada(
+        &self,
+        pedido: &PedidoDeTabela,
+        inicio: usize,
+        limite: usize,
+    ) -> ResultadoDeConsulta<PaginaDeTabela> {
+        let ctx = self.ctx();
+        // As áreas grandes (achados, registros, e-mails, arquivos) pagam só pelo pedaço pedido.
+        if let PedidoDeTabela::Area { area, filtro } = pedido
+            && vistas::area_e_paginavel(*area)
+        {
+            let total = vistas::contar_da_area(&ctx, *area, filtro)?.unwrap_or(0);
+            let tabela =
+                vistas::pagina_da_area(&ctx, *area, filtro, inicio, limite)?.unwrap_or_default();
+            return Ok(PaginaDeTabela {
+                tabela,
+                inicio,
+                total,
+            });
+        }
+        // As outras se calculam inteiras uma vez; os pedaços seguintes saem do cache.
+        let versao = self.versao_dos_dados()?;
+        let chave = format!("{pedido:?}");
+        let mut cache = self.cache_de_tabela.borrow_mut();
+        let fresco = cache
+            .as_ref()
+            .is_some_and(|c| c.chave == chave && c.versao == versao);
+        if !fresco {
+            *cache = Some(TabelaEmCache {
+                chave,
+                versao,
+                tabela: self.tabela(pedido)?,
+            });
+        }
+        let Some(guardada) = cache.as_ref() else {
+            return Ok(PaginaDeTabela::default());
+        };
+        let tabela = &guardada.tabela;
+        Ok(PaginaDeTabela {
+            tabela: Tabela {
+                colunas: tabela.colunas.clone(),
+                linhas: tabela
+                    .linhas
+                    .iter()
+                    .skip(inicio)
+                    .take(limite)
+                    .cloned()
+                    .collect(),
+            },
+            inicio,
+            total: tabela.linhas.len(),
+        })
+    }
+
     fn item(&self, alvo: &Ref) -> ResultadoDeConsulta<Option<Item>> {
         itens::montar(&self.ctx(), alvo, &self.hoje())
     }
@@ -248,8 +332,22 @@ impl Consulta for LeitorSqlite {
     }
 
     fn visao_geral(&self) -> ResultadoDeConsulta<Painel> {
-        let visao = visao_geral::medir(&self.ctx(), &self.hoje(), &self.manual)?;
-        Ok(visao_geral::painel(&visao))
+        let versao = self.versao_dos_dados()?;
+        let hoje = self.hoje();
+        if let Some(c) = self.cache_do_painel.borrow().as_ref()
+            && c.versao == versao
+            && c.hoje == hoje
+        {
+            return Ok(c.painel.clone());
+        }
+        let visao = visao_geral::medir(&self.ctx(), &hoje, &self.manual)?;
+        let painel = visao_geral::painel(&visao);
+        *self.cache_do_painel.borrow_mut() = Some(PainelEmCache {
+            versao,
+            hoje,
+            painel: painel.clone(),
+        });
+        Ok(painel)
     }
 
     fn relatorio(
@@ -262,22 +360,24 @@ impl Consulta for LeitorSqlite {
     }
 
     fn contagens(&self) -> ResultadoDeConsulta<Contagens> {
-        let linhas = consultar(
+        // Pelo índice `achado_estado`, sem ler as linhas.
+        let por_estado = consultar(
             &self.conn,
-            "SELECT count(*), coalesce(sum(estado = 'documento'), 0), coalesce(sum(estado = 'duvida'), 0),
-                    coalesce(sum(estado = 'novo'), 0)
-               FROM achado",
+            "SELECT estado, count(*) FROM achado GROUP BY estado",
             &[],
-            |l| {
-                Ok(Contagens {
-                    achados: l.get(0)?,
-                    documentos: l.get(1)?,
-                    em_duvida: l.get(2)?,
-                    a_triar: l.get(3)?,
-                })
-            },
+            |l| Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)?)),
         )?;
-        Ok(linhas.into_iter().next().unwrap_or_default())
+        let mut c = Contagens::default();
+        for (estado, n) in por_estado {
+            c.achados += n;
+            match estado.as_str() {
+                "documento" => c.documentos = n,
+                "duvida" => c.em_duvida = n,
+                "novo" => c.a_triar = n,
+                _ => {}
+            }
+        }
+        Ok(c)
     }
 
     fn texto(&self, achado: &Ref) -> ResultadoDeConsulta<Option<String>> {
