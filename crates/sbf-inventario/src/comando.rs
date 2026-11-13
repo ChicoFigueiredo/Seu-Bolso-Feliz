@@ -55,10 +55,14 @@ pub enum Acao {
         resposta: String,
     },
     // PDF protegido (spec 06, item 6): só com a confirmação do usuário.
-    /// O alvo é o fornecedor.
+    /// O alvo é o fornecedor. `tipo_de_documento` é o tipo do achado, ou `*` para todos.
     GuardarRegraDeSenha {
-        document_type: String,
+        tipo_de_documento: String,
         estrategia: String,
+        /// Menor tenta primeiro. `None`: a regra nova fica com a prioridade padrão
+        /// ([`crate::protegidos::PRIORIDADE_PADRAO_DA_REGRA`], o padrão da coluna
+        /// `regra_senha.prioridade`), e a que já existe mantém a dela.
+        prioridade: Option<i64>,
     },
 }
 

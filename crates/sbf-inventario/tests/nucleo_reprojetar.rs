@@ -90,8 +90,9 @@ fn acao(n: u8, extra: u8) -> Acao {
             resposta: format!("resposta {extra}"),
         },
         _ => Acao::GuardarRegraDeSenha {
-            document_type: ["fatura", "*"][extra as usize % 2].to_owned(),
+            tipo_de_documento: ["fatura", "*"][extra as usize % 2].to_owned(),
             estrategia: ["cpf_completo", "cpf_5_primeiros"][extra as usize % 2].to_owned(),
+            prioridade: [None, Some(i64::from(extra % 7))][extra as usize / 2 % 2],
         },
     }
 }

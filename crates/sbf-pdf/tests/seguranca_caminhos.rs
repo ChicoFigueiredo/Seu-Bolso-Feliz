@@ -29,7 +29,7 @@ fn alvo(acervo: Option<&str>, locais: Vec<(String, Option<i64>)>) -> AlvoProtegi
         caminhos_locais: locais,
         file_size_bytes: 10,
         fornecedor: None,
-        document_type: None,
+        tipo_de_documento: None,
         falhas: 0,
     }
 }

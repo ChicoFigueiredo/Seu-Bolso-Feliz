@@ -560,7 +560,7 @@ fn regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             "Fornecedor",
             c_link(Tipo::Fornecedor, &r.fornecedor, &r.fornecedor),
         ),
-        campo("Tipo de documento", c_texto(&r.document_type)),
+        campo("Tipo de documento", c_texto(&r.tipo_de_documento)),
         campo("Estratégia", c_texto(&r.estrategia)),
         campo("Prioridade", c_contagem_solta(r.prioridade)),
         campo(

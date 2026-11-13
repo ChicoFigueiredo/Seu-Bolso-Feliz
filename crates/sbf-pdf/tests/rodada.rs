@@ -414,8 +414,9 @@ fn estrategia_padrao_vencedora_vira_proposta_e_so_grava_com_confirmacao() {
     assert_eq!(
         pedido.acao,
         Acao::GuardarRegraDeSenha {
-            document_type: "fatura".into(),
-            estrategia: "cpf_ultimos:5".into()
+            tipo_de_documento: "fatura".into(),
+            estrategia: "cpf_ultimos:5".into(),
+            prioridade: None,
         }
     );
     assert_eq!(pedido.alvos, [Ref::nova(Tipo::Fornecedor, "Banco Alfa")]);

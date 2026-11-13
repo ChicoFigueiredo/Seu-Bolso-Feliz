@@ -323,8 +323,9 @@ fn inv05_sinalizar_e_responder_pendencia() {
 fn inv05_guardar_regra_de_senha_grava_so_a_estrategia() {
     let (_p, mut inv) = novo();
     let regra = Acao::GuardarRegraDeSenha {
-        document_type: "fatura".into(),
+        tipo_de_documento: "fatura".into(),
         estrategia: "cpf_5_primeiros".into(),
+        prioridade: None,
     };
     inv.executar(&pedido(regra.clone(), vec![fornecedor("Banco Fictício")]))
         .unwrap();
@@ -335,10 +336,51 @@ fn inv05_guardar_regra_de_senha_grava_so_a_estrategia() {
     assert_eq!(
         valor(
             c,
-            "SELECT COUNT(*) || '|' || fornecedor || '|' || estrategia || '|' || ativa FROM regra_senha"
+            "SELECT COUNT(*) || '|' || fornecedor || '|' || estrategia || '|' || ativa || '|' || prioridade FROM regra_senha"
         ),
-        "1|Banco Fictício|cpf_5_primeiros|1"
+        "1|Banco Fictício|cpf_5_primeiros|1|100",
+        "sem prioridade, vale a padrão da coluna"
     );
+}
+
+#[test]
+fn inv05_regra_de_senha_com_prioridade_escolhida_e_desfazer() {
+    let (_p, mut inv) = novo();
+    let regra = |prioridade| Acao::GuardarRegraDeSenha {
+        tipo_de_documento: "fatura".into(),
+        estrategia: "cpf_completo".into(),
+        prioridade,
+    };
+    let linha = |inv: &Inventario| {
+        valor(
+            inv.conexao(),
+            "SELECT COALESCE((SELECT ativa || '|' || prioridade FROM regra_senha), '∅')",
+        )
+    };
+    let criada = inv
+        .executar(&pedido(regra(Some(5)), vec![fornecedor("Banco Fictício")]))
+        .unwrap();
+    assert_eq!(linha(&inv), "1|5", "a prioridade escolhida");
+
+    // Sem prioridade numa regra que existe: mantém a dela.
+    let mantida = inv
+        .executar(&pedido(regra(None), vec![fornecedor("Banco Fictício")]))
+        .unwrap();
+    assert_eq!(linha(&inv), "1|5");
+
+    // Trocar a prioridade e desfazer volta a anterior.
+    let trocada = inv
+        .executar(&pedido(regra(Some(40)), vec![fornecedor("Banco Fictício")]))
+        .unwrap();
+    assert_eq!(linha(&inv), "1|40");
+    inv.desfazer(trocada[0]).unwrap();
+    assert_eq!(linha(&inv), "1|5", "desfazer restaura a prioridade");
+    inv.desfazer(mantida[0]).unwrap();
+    assert_eq!(linha(&inv), "1|5");
+
+    // Desfazer a criação apaga a regra nunca usada.
+    inv.desfazer(criada[0]).unwrap();
+    assert_eq!(linha(&inv), "∅");
 }
 
 #[test]
@@ -495,8 +537,9 @@ fn sem_ciclo(retrato: String) -> String {
 #[test]
 fn inv05_desfazer_restaura_cada_acao_do_paragrafo_10() {
     let regra = Acao::GuardarRegraDeSenha {
-        document_type: "fatura".into(),
+        tipo_de_documento: "fatura".into(),
         estrategia: "cpf_completo".into(),
+        prioridade: Some(7),
     };
     let casos: Vec<(Acao, Ref)> = vec![
         (Acao::MarcarDocumento, achado(1)),

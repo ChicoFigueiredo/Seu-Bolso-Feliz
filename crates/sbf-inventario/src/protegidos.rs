@@ -28,6 +28,9 @@ use std::time::Duration;
 
 use crate::pendencia::ETAPA_DA_JANELA;
 
+/// A prioridade de uma regra de senha nova quando a decisão não diz outra (o padrão da coluna
+/// `regra_senha.prioridade` no esquema do Bun). Menor tenta primeiro.
+pub const PRIORIDADE_PADRAO_DA_REGRA: i64 = 100;
 /// Falhas de senha por documento antes da pendência (spec 06, item 7).
 pub const LIMITE_PADRAO_DE_FALHAS: u32 = 6;
 /// A pendência "PDF protegido sem regra".
@@ -67,7 +70,7 @@ pub struct AlvoProtegido {
     pub caminhos_locais: Vec<(String, Option<i64>)>,
     pub file_size_bytes: i64,
     pub fornecedor: Option<String>,
-    pub document_type: Option<String>,
+    pub tipo_de_documento: Option<String>,
     /// Falhas de senha desde a última resposta a uma pendência de PDF protegido.
     pub falhas: u32,
 }
@@ -77,7 +80,7 @@ pub struct AlvoProtegido {
 pub struct RegraDeSenha {
     pub id: i64,
     pub fornecedor: String,
-    pub document_type: String,
+    pub tipo_de_documento: String,
     pub estrategia: String,
     pub prioridade: i64,
     pub sucessos: i64,
@@ -181,7 +184,7 @@ pub fn alvos(conexao: &Connection, limite_de_falhas: u32) -> rusqlite::Result<Ve
                     caminhos_locais: Vec::new(),
                     file_size_bytes: l.get(2)?,
                     fornecedor: l.get(3)?,
-                    document_type: l.get(4)?,
+                    tipo_de_documento: l.get(4)?,
                     falhas: 0,
                 })
             },
@@ -216,7 +219,7 @@ fn mesmo_fornecedor(a: &str, b: &str) -> bool {
 pub fn regras_para(
     conexao: &Connection,
     fornecedor: Option<&str>,
-    document_type: Option<&str>,
+    tipo_de_documento: Option<&str>,
 ) -> rusqlite::Result<Vec<RegraDeSenha>> {
     let Some(fornecedor) = fornecedor.filter(|f| !f.trim().is_empty()) else {
         return Ok(Vec::new());
@@ -232,7 +235,7 @@ pub fn regras_para(
             Ok(RegraDeSenha {
                 id: l.get(0)?,
                 fornecedor: l.get(1)?,
-                document_type: l.get(2)?,
+                tipo_de_documento: l.get(2)?,
                 estrategia: l.get(3)?,
                 prioridade: l.get(4)?,
                 sucessos: l.get(5)?,
@@ -240,16 +243,16 @@ pub fn regras_para(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let do_fornecedor = |r: &RegraDeSenha| mesmo_fornecedor(&r.fornecedor, fornecedor);
-    let tipo = document_type.filter(|t| *t != "*");
+    let tipo = tipo_de_documento.filter(|t| *t != "*");
     let mut saida: Vec<RegraDeSenha> = todas
         .iter()
-        .filter(|r| do_fornecedor(r) && tipo.is_some_and(|t| r.document_type == t))
+        .filter(|r| do_fornecedor(r) && tipo.is_some_and(|t| r.tipo_de_documento == t))
         .cloned()
         .collect();
     saida.extend(
         todas
             .into_iter()
-            .filter(|r| do_fornecedor(r) && r.document_type == "*"),
+            .filter(|r| do_fornecedor(r) && r.tipo_de_documento == "*"),
     );
     Ok(saida)
 }
@@ -287,10 +290,10 @@ fn abrir_pendencia(
 /// A pergunta da pendência "PDF protegido sem regra" (sem nenhum segredo).
 pub fn pergunta_sem_regra(
     fornecedor: Option<&str>,
-    document_type: Option<&str>,
+    tipo_de_documento: Option<&str>,
     falhas: u32,
 ) -> String {
-    let quem = match (fornecedor, document_type) {
+    let quem = match (fornecedor, tipo_de_documento) {
         (Some(f), Some(t)) => format!("{t} de {f}"),
         (Some(f), None) => format!("documento de {f}"),
         (None, Some(t)) => format!("{t} sem fornecedor conhecido"),
@@ -376,7 +379,7 @@ pub fn registrar(
     if !abriu && pendencia.is_none() && falhas >= limite_de_falhas {
         let pergunta = pergunta_sem_regra(
             alvo.fornecedor.as_deref(),
-            alvo.document_type.as_deref(),
+            alvo.tipo_de_documento.as_deref(),
             falhas,
         );
         pendencia = Some(abrir_pendencia(

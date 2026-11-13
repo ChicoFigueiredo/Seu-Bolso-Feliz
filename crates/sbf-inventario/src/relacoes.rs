@@ -379,11 +379,11 @@ pub fn rotulo_do_item(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Opt
 }
 
 /// O nome de uma regra de senha: `Banco Alfa · fatura · cpf_primeiros:5`.
-pub fn rotulo_da_regra(fornecedor: &str, document_type: &str, estrategia: &str) -> String {
-    let tipo = if document_type == "*" {
+pub fn rotulo_da_regra(fornecedor: &str, tipo_de_documento: &str, estrategia: &str) -> String {
+    let tipo = if tipo_de_documento == "*" {
         "qualquer tipo"
     } else {
-        document_type
+        tipo_de_documento
     };
     format!("{fornecedor} · {tipo} · {estrategia}")
 }
@@ -873,7 +873,7 @@ pub fn tabela_pendencias(
 pub struct LinhaDeRegra {
     pub id: i64,
     pub fornecedor: String,
-    pub document_type: String,
+    pub tipo_de_documento: String,
     pub estrategia: String,
     pub prioridade: i64,
     pub ativa: bool,
@@ -898,7 +898,7 @@ pub fn regras_de_senha(
         Ok(LinhaDeRegra {
             id: l.get(0)?,
             fornecedor: l.get(1)?,
-            document_type: l.get(2)?,
+            tipo_de_documento: l.get(2)?,
             estrategia: l.get(3)?,
             prioridade: l.get(4)?,
             ativa: l.get::<_, i64>(5)? != 0,
@@ -932,10 +932,10 @@ pub fn tabela_regras_de_senha(linhas: &[LinhaDeRegra]) -> Tabela {
                         c_link(
                             Tipo::RegraDeSenha,
                             &id,
-                            &rotulo_da_regra(&l.fornecedor, &l.document_type, &l.estrategia),
+                            &rotulo_da_regra(&l.fornecedor, &l.tipo_de_documento, &l.estrategia),
                         ),
                         c_link(Tipo::Fornecedor, &l.fornecedor, &l.fornecedor),
-                        c_texto(&l.document_type),
+                        c_texto(&l.tipo_de_documento),
                         c_texto(&l.estrategia),
                         c_contagem_solta(l.prioridade),
                         Celula::Estado {

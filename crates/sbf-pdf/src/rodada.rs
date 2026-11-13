@@ -58,7 +58,7 @@ impl Default for OpcoesDaRodada {
 pub struct PropostaDeRegra {
     pub fornecedor: String,
     /// O tipo do achado, ou `*` quando ele não tem tipo.
-    pub document_type: String,
+    pub tipo_de_documento: String,
     pub estrategia: Estrategia,
     pub frase: String,
 }
@@ -85,16 +85,16 @@ fn plural_do_tipo(tipo: &str) -> String {
 }
 
 impl PropostaDeRegra {
-    fn nova(fornecedor: &str, document_type: Option<&str>, estrategia: Estrategia) -> Self {
-        let document_type = document_type.unwrap_or("*").to_owned();
+    fn nova(fornecedor: &str, tipo_de_documento: Option<&str>, estrategia: Estrategia) -> Self {
+        let tipo_de_documento = tipo_de_documento.unwrap_or("*").to_owned();
         let frase = format!(
             "{} do {fornecedor} usam {}. Guardar como regra?",
-            plural_do_tipo(&document_type),
+            plural_do_tipo(&tipo_de_documento),
             estrategia.descricao()
         );
         Self {
             fornecedor: fornecedor.to_owned(),
-            document_type,
+            tipo_de_documento,
             estrategia,
             frase,
         }
@@ -104,8 +104,9 @@ impl PropostaDeRegra {
     pub fn pedido(&self) -> PedidoDeDecisao {
         PedidoDeDecisao {
             acao: Acao::GuardarRegraDeSenha {
-                document_type: self.document_type.clone(),
+                tipo_de_documento: self.tipo_de_documento.clone(),
                 estrategia: self.estrategia.to_string(),
+                prioridade: None,
             },
             alvos: vec![Ref::nova(Tipo::Fornecedor, self.fornecedor.clone())],
             motivo: Some(self.frase.clone()),
@@ -342,7 +343,7 @@ fn abrir_um(
     for regra in protegidos::regras_para(
         conexao,
         alvo.fornecedor.as_deref(),
-        alvo.document_type.as_deref(),
+        alvo.tipo_de_documento.as_deref(),
     )? {
         match regra.estrategia.parse::<Estrategia>() {
             Ok(e) if !lista.iter().any(|(x, _)| *x == e) => lista.push((e, Some(regra.id))),
@@ -442,7 +443,7 @@ fn abrir_um(
         {
             resultado.proposta = Some(PropostaDeRegra::nova(
                 fornecedor,
-                alvo.document_type.as_deref(),
+                alvo.tipo_de_documento.as_deref(),
                 estrategia.clone(),
             ));
         }
