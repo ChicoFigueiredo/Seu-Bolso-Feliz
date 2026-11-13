@@ -21,6 +21,7 @@ import { classeDoCaminho, tratamentoDoArquivo } from "./areas";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { hojeIso } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
+import { dentroDaPastaDoSbf } from "./pasta-sbf";
 
 interface Nuvem {
   remoto: string;
@@ -110,7 +111,7 @@ async function main(): Promise<void> {
   const listagem = join(cofre.entrada, `${nuvem.pasta}-lista-${hoje}.json`);
   console.log(`${fonte}: listando ${nuvem.remoto} (nada é baixado nesta fase)…`);
   await rodar(["rclone", "lsjson", "-R", "--files-only", "--fast-list", nuvem.remoto], listagem);
-  const itens = (JSON.parse(await Bun.file(listagem).text()) as Item[]).filter((i) => !i.IsDir);
+  const itens = (JSON.parse(await Bun.file(listagem).text()) as Item[]).filter((i) => !i.IsDir && !dentroDaPastaDoSbf(i.Path));
 
   const { id: varreduraId } = db
     .query(
