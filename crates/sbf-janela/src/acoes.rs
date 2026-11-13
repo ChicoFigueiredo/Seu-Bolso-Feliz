@@ -97,6 +97,15 @@ pub enum IdAcao {
     CopiarHash,
     // Página
     CopiarRastro,
+    // Livro-caixa (fatia 2)
+    SincronizarAgora,
+    MudarCategoria,
+    EditarMovimentacao,
+    RatearMovimentacao,
+    RefazerAlteracao,
+    DescartarAlteracao,
+    RevogarEstacao,
+    RenomearEstacao,
 }
 
 /// A aba do Ribbon onde a Ação mora.
@@ -112,6 +121,8 @@ pub enum Aba {
     Achado,
     /// Contextual: aparece numa página de item.
     Pagina,
+    /// As Ações do livro-caixa e da estação (fatia 2).
+    LivroCaixa,
 }
 
 impl Aba {
@@ -125,6 +136,7 @@ impl Aba {
             Aba::Exibir => "Exibir",
             Aba::Achado => "Achado",
             Aba::Pagina => "Página",
+            Aba::LivroCaixa => "Livro-caixa",
         }
     }
 }
@@ -937,6 +949,86 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Rastro",
         "Copia a cadeia de proveniência do item como texto",
     ),
+    definir_acao(
+        I::SincronizarAgora,
+        "livro.sincronizar",
+        "Sincronizar agora",
+        "cloud_sync",
+        Some(Atalho::so(Key::F9)),
+        B::LivroCaixa,
+        "Sincronização",
+        "Troca com o servidor agora: manda as alterações e traz o que mudou",
+    ),
+    definir_acao(
+        I::MudarCategoria,
+        "livro.mudar-categoria",
+        "Mudar categoria",
+        "category",
+        None,
+        B::LivroCaixa,
+        "Movimentação",
+        "Muda a categoria da movimentação; vai ao servidor na próxima sincronização",
+    ),
+    definir_acao(
+        I::EditarMovimentacao,
+        "livro.editar",
+        "Editar movimentação",
+        "edit",
+        None,
+        B::LivroCaixa,
+        "Movimentação",
+        "Data, valor, conta e descrição",
+    ),
+    definir_acao(
+        I::RatearMovimentacao,
+        "livro.ratear",
+        "Ratear",
+        "donut_small",
+        None,
+        B::LivroCaixa,
+        "Movimentação",
+        "Divide o valor entre centros",
+    ),
+    definir_acao(
+        I::RefazerAlteracao,
+        "livro.refazer",
+        "Refazer sobre a nova",
+        "redo",
+        None,
+        B::LivroCaixa,
+        "Alterações",
+        "Aplica a sua mudança recusada sobre o que está no servidor agora",
+    ),
+    definir_acao(
+        I::DescartarAlteracao,
+        "livro.descartar",
+        "Descartar alteração",
+        "delete",
+        None,
+        B::LivroCaixa,
+        "Alterações",
+        "Mantém a versão do servidor e descarta a sua",
+    ),
+    definir_acao(
+        I::RevogarEstacao,
+        "livro.revogar",
+        "Revogar estação",
+        "key_off",
+        None,
+        B::LivroCaixa,
+        "Estações",
+        "Corta a credencial da estação; não apaga nada do servidor",
+    ),
+    definir_acao(
+        I::RenomearEstacao,
+        "livro.renomear",
+        "Renomear estação",
+        "edit_note",
+        None,
+        B::LivroCaixa,
+        "Estações",
+        "Muda o nome com que a estação aparece",
+    ),
 ];
 
 /// A definição de uma Ação. Toda `IdAcao` está na lista (conferido por teste).
@@ -985,6 +1077,14 @@ pub struct ContextoDasAcoes {
     pub destino_da_copia: bool,
     /// Uma ferramenta lenta já está rodando.
     pub ferramenta_ocupada: bool,
+    /// Há uma estação (livro-caixa) ligada a esta janela.
+    pub estacao_ligada: bool,
+    /// A estação desta máquina está revogada.
+    pub estacao_revogada: bool,
+    /// A seleção é uma alteração recusada.
+    pub alteracao_recusada: bool,
+    /// A seleção é uma estação com credencial ativa.
+    pub estacao_ativa: bool,
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -1131,8 +1231,46 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         ),
         I::AbrirEmPainelFlutuante => exige(sel.len() == 1, "Selecione um item"),
         I::CopiarRastro => exige(c.item_aberto.is_some(), "Abra a página de um item"),
+        I::SincronizarAgora => {
+            if !c.estacao_ligada {
+                Desabilitada(MOTIVO_SEM_ESTACAO.to_owned())
+            } else {
+                exige(!c.estacao_revogada, "Esta estação foi revogada")
+            }
+        }
+        I::MudarCategoria => {
+            if !c.estacao_ligada {
+                Desabilitada(MOTIVO_SEM_ESTACAO.to_owned())
+            } else if c.estacao_revogada {
+                Desabilitada("Esta estação foi revogada".to_owned())
+            } else {
+                exige(
+                    sel.len() == 1 && todos_de(sel, &[Tipo::Movimentacao]),
+                    "Selecione uma movimentação",
+                )
+            }
+        }
+        I::EditarMovimentacao | I::RatearMovimentacao => {
+            Desabilitada(crate::dinheiro::MOTIVO_FATIA_3.to_owned())
+        }
+        I::RefazerAlteracao | I::DescartarAlteracao => exige(
+            c.alteracao_recusada,
+            "Selecione uma alteração recusada (área Sincronização)",
+        ),
+        I::RevogarEstacao => exige(
+            c.estacao_ativa,
+            "Selecione uma estação com credencial ativa (área Sincronização)",
+        ),
+        I::RenomearEstacao => exige(
+            sel.len() == 1 && todos_de(sel, &[Tipo::Estacao]) && c.estacao_ligada,
+            "Selecione uma estação (área Sincronização)",
+        ),
     }
 }
+
+/// O motivo das Ações do livro-caixa sem estação ligada.
+pub const MOTIVO_SEM_ESTACAO: &str =
+    "Esta máquina ainda não é uma estação: pareie com o servidor na área Sincronização";
 
 /// O filtro de estado de uma Ação do menu "Estado do achado": `Some(None)` = todos.
 pub fn filtro_de_estado(id: IdAcao) -> Option<Option<&'static str>> {
@@ -1266,6 +1404,14 @@ mod testes {
         I::AbrirProtegido,
         I::CopiarHash,
         I::CopiarRastro,
+        I::SincronizarAgora,
+        I::MudarCategoria,
+        I::EditarMovimentacao,
+        I::RatearMovimentacao,
+        I::RefazerAlteracao,
+        I::DescartarAlteracao,
+        I::RevogarEstacao,
+        I::RenomearEstacao,
     ];
 
     #[test]
@@ -1300,6 +1446,31 @@ mod testes {
                 assert!(vistos.insert(at), "atalho repetido: {}", at.texto());
             }
         }
+    }
+
+    #[test]
+    fn mudar_categoria_exige_uma_movimentacao_e_a_estacao() {
+        let mov = Ref::nova(Tipo::Movimentacao, "m1");
+        let mut c = ContextoDasAcoes {
+            selecao: vec![mov.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            disponibilidade(I::MudarCategoria, &c).motivo(),
+            Some(MOTIVO_SEM_ESTACAO)
+        );
+        c.estacao_ligada = true;
+        assert!(disponibilidade(I::MudarCategoria, &c).habilitada());
+        c.selecao = vec![mov.clone(), Ref::nova(Tipo::Movimentacao, "m2")];
+        assert!(!disponibilidade(I::MudarCategoria, &c).habilitada());
+        c.selecao = vec![mov];
+        c.estacao_revogada = true;
+        assert!(!disponibilidade(I::MudarCategoria, &c).habilitada());
+        // A edição do resto do livro-caixa fica para a fatia 3, com o motivo.
+        assert_eq!(
+            disponibilidade(I::EditarMovimentacao, &c).motivo(),
+            Some(crate::dinheiro::MOTIVO_FATIA_3)
+        );
     }
 
     #[test]

@@ -103,6 +103,35 @@ pub fn cores_do_estado(ui: &Ui, rotulo: &str) -> (Color32, Color32, &'static str
         (p.perigo_sutil, p.perigo, "error")
     } else if r.starts_with("a triar") {
         (p.info_sutil, p.info, "schedule")
+    } else if [
+        "confirmada",
+        "paga",
+        "pago",
+        "aceita",
+        "ativa",
+        "pronto",
+        "concluída",
+    ]
+    .iter()
+    .any(|x| r == *x)
+    {
+        (p.sucesso_sutil, p.sucesso, "check_circle")
+    } else if r.starts_with("prevista")
+        || r.starts_with("a vencer")
+        || r.contains("aguardando")
+        || r == "refeita"
+    {
+        (p.info_sutil, p.info, "schedule")
+    } else if r.starts_with("vencid") || r == "recusada" || r.starts_with("falhou") {
+        (p.perigo_sutil, p.perigo, "block")
+    } else if r.starts_with("sem valor")
+        || r.starts_with("não alocada")
+        || r.starts_with("precisa revisar")
+        || r == "fechada"
+    {
+        (p.aviso_sutil, p.aviso, "warning")
+    } else if r == "pausada" || r == "revogada" {
+        (p.superficie_3, p.tinta_suave, "pause")
     } else {
         (p.superficie_3, p.tinta, "radio_button_unchecked")
     }

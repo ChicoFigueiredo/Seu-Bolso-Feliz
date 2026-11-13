@@ -1,6 +1,7 @@
 //! Visão geral e Relatórios: desenham um [`Painel`] (avisos e seções com tabela).
 //! Os Relatórios têm o seletor de pergunta e o de fonte: "Inventário · a conferir" e
-//! "Livro-caixa", desabilitado até a fatia 2 (o mesmo código, só muda a fonte).
+//! "Livro-caixa" (fatia 2, habilitado com a estação ligada): o mesmo código das
+//! perguntas, só muda a fonte. Os números do livro-caixa não levam "a conferir".
 
 use egui::{RichText, Ui};
 use sbf_inventario::consulta::{Filtro, Fonte, Painel, Pergunta};
@@ -139,8 +140,12 @@ pub fn relatorios(
     filtro: &Filtro,
     vista: &mut Vista,
     pedidos: &mut Vec<Pedido>,
+    livro_ligado: bool,
 ) {
     let p = tema::paleta(ui.ctx());
+    if !livro_ligado {
+        estado.fonte = Fonte::Inventario;
+    }
     // Seletor de fonte.
     ui.horizontal(|ui| {
         ui.label(RichText::new("Fonte").color(p.tinta_suave));
@@ -149,14 +154,18 @@ pub fn relatorios(
             Fonte::Inventario,
             format!("Inventário · {A_CONFERIR}"),
         );
-        ui.add_enabled(false, egui::Button::selectable(false, "Livro-caixa"))
-            .on_disabled_hover_text("Chega na fatia 2, com o livro-caixa");
+        ui.add_enabled_ui(livro_ligado, |ui| {
+            ui.selectable_value(&mut estado.fonte, Fonte::LivroCaixa, "Livro-caixa")
+                .on_disabled_hover_text(crate::acoes::MOTIVO_SEM_ESTACAO);
+        });
         ui.separator();
-        ui.label(
-            RichText::new("Movimento entre contas não conta como gasto.")
-                .size(12.0)
-                .color(p.tinta_suave),
-        );
+        let nota = match estado.fonte {
+            Fonte::Inventario => "Movimento entre contas não conta como gasto.",
+            Fonte::LivroCaixa => {
+                "Gasto pela data da compra: compras no cartão e saídas de conta, sem pagamento de fatura nem transferências."
+            }
+        };
+        ui.label(RichText::new(nota).size(12.0).color(p.tinta_suave));
     });
     ui.add_space(6.0);
     // Seletor de pergunta.
