@@ -2,7 +2,7 @@
 # Verificação de ponta a ponta: fmt, clippy, testes Rust, testes Bun do worker e build release.
 # Roda tudo, não para na primeira falha, e imprime um resumo. Saída 0 só se tudo passou.
 # Uso: scripts/desktop/conferir.sh
-set -uo pipefail
+set -o pipefail
 cd "$(dirname "$0")/../.."
 export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
 LOG=$(mktemp -d)
@@ -11,7 +11,7 @@ declare -a NOMES RESULT
 passo() {
   local nome=$1; shift
   echo ">>> $nome"
-  if "$@" >"$LOG/${#NOMES[@]}.log" 2>&1; then RESULT+=("PASS"); else RESULT+=("FAIL"); tail -n 25 "$LOG/$((${#NOMES[@]})).log"; fi
+  if "$@" >"$LOG/${#NOMES[@]}.log" 2>&1; then RESULT+=("PASS"); else RESULT+=("FAIL"); tail -n 25 "$LOG/${#NOMES[@]}.log"; fi
   NOMES+=("$nome")
 }
 
