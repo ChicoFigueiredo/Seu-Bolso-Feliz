@@ -1,0 +1,382 @@
+# 06 — Spec: Desktop, fatia 1 — Inventário no desktop
+
+> **Estado: ⬜ proposta, aguardando o OK do CEO na spec e no protótipo.** Nenhum código
+> antes disso. Escrita em 2026-11-12 a partir do grill do mesmo dia. Decisões em
+> ADR-012 a ADR-018 (`docs/arquitetura/`), vocabulário em `CONTEXT.md`. Fatos do
+> inventário atual verificados contra o código de `workers/inventario/` no mesmo dia.
+
+## Objetivo
+
+O desktop Rust abre o inventário e o cofre que já existem (`inventario.sqlite`, o
+acervo) e vira o lugar onde o CEO **revisa e decide**.
+
+A fatia substitui o Datasette e o "editar o SQLite na mão", e acrescenta:
+
+- o **chaveiro**;
+- a abertura de **PDF protegido**;
+- os **lotes** aprovados para promoção;
+- a **estante** e a **cópia de segurança do cofre** no Google Drive.
+
+Os coletores continuam em Bun por enquanto. Cada um é absorvido numa fatia 1b, 1c… e,
+pela regra do ADR-012, a versão TS é apagada no mesmo PR.
+
+Hoje, verificado no código:
+
+- **Nenhuma decisão do usuário é gravada.** A triagem é toda automática (`regras@2`).
+- **Não existe promoção.**
+- **Nenhum código escreve em `pendencia`, `regra_senha` ou `tentativa_senha`.**
+- **Nenhum PDF protegido é aberto.** Eles só recebem a marca `protegido_senha=1`.
+
+## Fora do escopo desta fatia
+
+- Estação, sincronização, API, livro-caixa e caixa de entrada: fatias 2 e 3.
+- **Enviar** um lote ao servidor: a fatia 1 só aprova.
+- Modo `sbf worker`, agenda, conexões, alertas e canais: fatia 4. Aqui a estante e a
+  cópia de segurança rodam sob demanda.
+- Roteiros (fatia 5) e IA, RAG, pontos de atenção e MCP (fatia 6).
+- Portar os coletores, a E3, o `reparar-acervo` e a `vista-ciclos`: fatias 1b em diante.
+
+## Onde o código mora
+
+Os identificadores são todos em português, sem acento, inclusive o mecânico (ADR-018).
+
+### Repositório novo `ChicoFigueiredo/bancada`
+
+Licença MIT OR Apache-2.0, `cargo deny` com a allowlist do Chess Studio. Nada aqui
+depende de Bevy nem de domínio financeiro.
+
+| Crate              | O que é                                                                                                                                                                                                                                                                                                                                                                                                | Vem de (Chess Studio)                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bancada-casca`    | A shell. Ribbon, com modelo puro, vista egui, KeyTips e bastidores. Lista única de Ações, parametrizada pelo app. Mapa de atalhos e Paleta (Ctrl+K). Barra de Acesso Rápido e painel de navegação (novo). Dock com egui_tiles e painéis. Barra de status. Temas por tokens JSON, densidade, escala e i18n Fluent. Família de ícones plugável (o SBF usa Material Symbols Rounded e o Chess, Phosphor). | `chess-studio/src/{ribbon,dock.rs,panel_chrome.rs,status_bar.rs,palette.rs,ui_theme,i18n.rs,focus.rs}`, `chess-input/src/{actions.rs,controls.rs}` |
+| `bancada-segredos` | Keyring do SO primeiro. Fallback em arquivo próprio, Argon2id + XChaCha20-Poly1305, formato versionado com AAD. `Segredo` com zeroize. Genérico sobre o rótulo.                                                                                                                                                                                                                                        | `chess-vault`                                                                                                                                      |
+| `bancada-armazem`  | Abre SQLite com PRAGMAs (WAL, `busy_timeout`, `foreign_keys`). Escada de migrações por `PRAGMA user_version`, que recusa banco mais novo que o app. Transação IMMEDIATE curta. Tabela só de acréscimo com trigger que recusa UPDATE e DELETE.                                                                                                                                                          | `chess-store/src/{migrations.rs,store.rs}`                                                                                                         |
+
+`bancada-rede` (portão de rede, cache, OAuth loopback) só entra na fatia 2.
+
+### Neste monorepo, em `crates/`
+
+O monorepo ganha um `Cargo.toml` na raiz, e `target/` vai para o `.gitignore`.
+
+| Crate            | O que é                                                                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sbf`            | O binário. Na fatia 1 tem só o modo janela: `sbf [--inventario <pasta-do-cofre>]`.                                                                                              |
+| `sbf-inventario` | Domínio e dados do inventário. Achado, origem, registro, decisão, lote, pendência e regra de senha. As migrações do `inventario.sqlite`, as projeções e as 12 vistas. Sem egui. |
+| `sbf-chaveiro`   | O chaveiro do SBF sobre `bancada-segredos`. Importa o `segredos/cofre.enc` e guarda o CPF e as senhas por rótulo.                                                               |
+| `sbf-pdf`        | A abertura de PDF protegido: estratégias, tentativas, cópia temporária e extração.                                                                                              |
+| `sbf-estante`    | A estante e a cópia de segurança do cofre, via rclone.                                                                                                                          |
+| `sbf-janela`     | A interface egui: áreas, tabelas, painéis e as Ações do SBF.                                                                                                                    |
+
+O commitlint ganha os escopos `desktop` e `inventario`.
+
+## A janela
+
+O protótipo navegável é a referência visual (link na seção "Revisão"). A estrutura,
+de cima para baixo:
+
+1. **Barra de título**, com a Barra de Acesso Rápido (Desfazer decisão, Paleta e
+   Atualizar).
+2. **Ribbon** nos modos clássico, simples e recolhido (Ctrl+F1), com KeyTips (Alt). As
+   abas:
+   - **Arquivo**, que abre os bastidores:
+     - Inventário: a pasta do cofre e o banco;
+     - Chaveiro: estado, Importar `cofre.enc` e os rótulos, nunca os valores;
+     - Estante e cópia de segurança: pasta no Drive e última execução;
+     - Opções: os 7 temas do SBF, densidade e escala;
+     - Sobre.
+   - **Início:** Pesquisar, Período (ciclo atual, anterior ou intervalo), Filtros
+     (estado do achado, tipo, fonte, quem decidiu) e Atualizar.
+   - **Triagem**, com seis grupos:
+     - Triagem: Documento, Descartar, Em dúvida;
+     - Corrigir: Fornecedor, Categoria, Tipo, Data e valor;
+     - Relacionar: Marcar duplicidade, Unir conciliados, Confirmar recorrência;
+     - Interpretação: Aprovar, Rejeitar;
+     - Pendência: Sinalizar, Responder;
+     - Histórico: Desfazer, Ver decisões.
+   - **Lotes:** Novo lote, Adicionar seleção, Remover e Aprovar lote. O botão Enviar ao
+     servidor fica desabilitado, com o tooltip "Chega na fatia 3, com a caixa de
+     entrada".
+   - **Ferramentas:** Abrir PDF protegido, Regras de senha, Atualizar estante e Fazer
+     cópia de segurança.
+   - **Exibir:** uma caixa por painel (Detalhe, Origens, Texto extraído, Histórico de
+     decisões, Prévia), Layout de tela, Tema e Densidade.
+   - **Achado** (contextual, aparece quando há um selecionado): Abrir original, Mostrar
+     no cofre, Ver texto, Abrir protegido e Copiar hash.
+3. **Corpo**, em três partes:
+   - **Painel de navegação** à esquerda, com as áreas da tabela abaixo. O grupo "Em
+     breve" (Hoje, Movimentações, Caixa de entrada, Conexões, Sincronização) aparece
+     desabilitado, com o motivo.
+   - **Tabela densa** no centro, virtualizada.
+   - **Dock** à direita, com Detalhe, Origens, Texto e Histórico de decisões.
+4. **Barra de status:**
+   - o inventário aberto e as contagens (achados, documentos, em dúvida, a triar);
+   - o estado do chaveiro (aberto ou fechado);
+   - o aviso de disco sem cifra (ADR-015);
+   - a última cópia de segurança.
+
+Os estados do achado aparecem como **A triar, Documento, Descartado e Em dúvida**, sempre
+com quem decidiu: "você" ou "regras@2".
+
+### Áreas e vistas
+
+As 12 consultas do Datasette (`workers/inventario/datasette/metadata.json`) viram áreas.
+A regra de "movimento entre contas" (`tipo IN ('transferencia_interna',
+'investimento','pagamento_fatura','fatura_cartao')`) hoje está repetida em várias
+consultas. Ela vira **uma** função em `sbf-inventario`.
+
+| Área              | Fonte                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| Visão geral       | O painel de contagens de `relatorio.ts`: resumo, etapas, fontes, os últimos 13 ciclos e avisos |
+| A triar           | achados com `estado='novo'`                                                                    |
+| Em dúvida         | `duvidas`                                                                                      |
+| Documentos        | `documentos`                                                                                   |
+| Registros         | `registros`                                                                                    |
+| Ciclos            | `por_ciclo`                                                                                    |
+| Fornecedores      | `fornecedores`                                                                                 |
+| Faturas           | `faturas_conferencia`                                                                          |
+| Contas (lacunas)  | `contas_buracos`                                                                               |
+| E-mails           | `emails_por_remetente` + `emails`                                                              |
+| Arquivos e pastas | `arquivos` + `pastas_pessoais`                                                                 |
+| Coletas           | `varreduras`                                                                                   |
+| Pendências        | a tabela `pendencia`, agora com escrita                                                        |
+| Lotes             | as tabelas novas `lote` e `lote_item`                                                          |
+
+## O banco: dono, migrações e o log de decisões
+
+- **Dono do esquema:** o Rust, a partir desta fatia. O esquema atual do Bun (versão "2",
+  `src/schema.sql`) vira a **migração 1**.
+  - Ao abrir um banco com `meta.schema_versao='2'` e `user_version=0`, o Rust confere
+    se as tabelas batem e só carimba `user_version=1`.
+  - Antes de migrar, o desktop mostra o que vai mudar e faz uma cópia do banco pela API
+    de backup do SQLite.
+- **A migração 2 cria:**
+  - `decisao`, só de acréscimo, com UPDATE e DELETE recusados por trigger. Colunas: `id`,
+    `alvo_tipo` (achado, registro, fornecedor, lote ou pendencia), `alvo_id`, `campo`,
+    `antes`, `depois` (JSON), `autor` (`usuario` ou `regras@N`), `motivo`, `em` e
+    `desfaz` (a decisão que esta desfaz, ou nulo).
+  - `lote(id, nome, criado_em, aprovado_em, promovido_em)` e
+    `lote_item(lote_id, alvo_tipo, alvo_id)`.
+  - A coluna `decidido_por` em `achado` e `registro`, preenchida a partir de
+    `classificado_por` / `extraido_por`.
+  - Os índices que faltam: `origem(gmail_message_id)` e `origem(local_filepath)`.
+- **Projeção:**
+  - Uma decisão grava a linha em `decisao` e atualiza a projeção (`achado.estado`,
+    `document_type`, `supplier_name_raw`, `registro.estado`, `relacao`…) na **mesma
+    transação**.
+  - O comando de manutenção `reprojetar` refaz a projeção a partir do log, e um teste
+    confere que o resultado é o mesmo.
+  - Desfazer é uma nova decisão com `desfaz` preenchido, que restaura o `antes`.
+- **A decisão do usuário prevalece.** Nenhuma rodada de regras muda o que tem
+  `decidido_por='usuario'`.
+- **Concorrência com os scripts Bun:** vale o LICOES.md. WAL, `busy_timeout` de 30 s,
+  transação IMMEDIATE curta, e nenhuma transação atravessa um quadro da interface. A
+  leitura usa uma conexão separada.
+
+### Como cada decisão do §10 cai no banco
+
+| Ação (prompt V6, §10)                | `alvo_tipo` / `campo`                       | Projeção                                                                                             |
+| ------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Documento / Descartar / Em dúvida    | achado / `estado`                           | `achado.estado`                                                                                      |
+| Corrigir fornecedor                  | achado ou registro / `fornecedor`           | `supplier_name_raw` ou `fornecedor_normalizado`                                                      |
+| Corrigir categoria                   | registro / `categoria`                      | `categoria_provavel`                                                                                 |
+| Corrigir tipo                        | achado / `document_type`; registro / `tipo` | idem                                                                                                 |
+| Corrigir data e valor                | achado / `data_chave`, `valor_centavos`     | idem, e recalcula `ciclo_id`                                                                         |
+| Marcar duplicidade                   | achado ↔ achado / `duplicidade`             | `relacao(tipo='duplicidade')`. Conteúdo idêntico nunca chega aqui: é o mesmo achado com duas origens |
+| Unir conciliados                     | registro ↔ registro / `conciliacao`         | `relacao(tipo='conciliacao')`                                                                        |
+| Confirmar recorrência                | fornecedor / `recorrente`                   | a decisão em si; vira compromisso recorrente só na fatia 3                                           |
+| Aprovar / Rejeitar                   | registro / `estado`                         | `aprovado` ou `divergente`, com motivo                                                               |
+| Sinalizar / Responder pendência      | pendencia                                   | `pendencia`, com `resposta` e `resolvida_em`                                                         |
+| Novo lote / Adicionar / Aprovar lote | lote                                        | `lote`, `lote_item`; os registros do lote aprovado ficam `aprovado`                                  |
+
+## Chaveiro
+
+- **Importação:**
+  - Lê o `segredos/cofre.enc` atual: scrypt com N, r e p do próprio arquivo, AES-256-GCM
+    com AAD `sbf-inventario-segredos-v1`, conteúdo `{cpf, senhas{rotulo: senha}}`. A
+    senha-mestra é pedida uma vez.
+  - Grava no `bancada-segredos`, com o serviço "Seu Bolso Feliz" e as chaves `cpf` e
+    `senha:<rotulo>`.
+  - Sem keyring disponível (por exemplo, Linux sem Secret Service), usa o arquivo de
+    fallback, aberto por senha-mestra uma vez por sessão.
+- **Onde fica:** o arquivo de fallback mora na pasta de dados do app (XDG_DATA_HOME,
+  %APPDATA% ou Application Support), **nunca dentro do cofre**, porque o glossário manda
+  o chaveiro não ficar junto dos documentos.
+- **O arquivo antigo:** depois de importar e conferir, o desktop **oferece** apagar o
+  `cofre.enc`. Nunca apaga sozinho. O `workers/inventario/src/segredos.ts` sai do repo
+  no mesmo PR.
+- **Garantias:**
+  - Senha errada e arquivo adulterado dão o mesmo erro.
+  - Nenhum valor vai para log, SQLite ou arquivo temporário.
+  - Os bastidores mostram só os rótulos.
+
+## PDF protegido (Apêndice V6)
+
+1. **Alvos:** os achados com `protegido_senha=1`.
+2. **Estratégias:**
+   - `cpf_completo`, `cpf_pontuado`, `cpf_primeiros:N`, `cpf_ultimos:N` e
+     `senha_propria:<rotulo>`.
+   - A ordem segue a prioridade das linhas de `regra_senha` para o par (fornecedor,
+     tipo), depois as do fornecedor com tipo `*`.
+   - A lista padrão de estratégias só entra se você ligar a opção "tentar estratégias
+     padrão", que vem desligada. Nada de tentativa cega.
+3. **Tentativa:**
+   - O candidato é gerado só em memória, com zeroize.
+   - **A senha nunca vai num argumento de linha de comando**, porque fica visível no
+     `ps`. Um spike no ticket decide entre abrir dentro do processo (`lopdf`) e
+     `qpdf --password-file=-` pela entrada padrão.
+4. **Cópia decifrada:**
+   - Fica numa pasta temporária 0700 dentro da pasta de dados do app, fora do cofre e
+     fora de qualquer pasta sincronizada.
+   - É apagada por guarda RAII, mesmo quando a extração falha no meio.
+5. **Registro:**
+   - O texto vai para `texto` e o `canonical_fingerprint` é preenchido.
+   - Cada tentativa grava `tentativa_senha` com a estratégia e o resultado, nunca a
+     senha.
+   - Um sucesso atualiza `regra_senha` (`sucessos`, `ultimo_sucesso`).
+6. **Aprender a regra:** quando uma estratégia vence para um par (fornecedor, tipo) sem
+   regra, o desktop **propõe**, por exemplo: "Faturas do Banco Alfa usam os 5 últimos
+   dígitos do CPF. Guardar como regra?". Só grava com a sua confirmação, que também vira
+   uma decisão.
+7. **Limite:** depois de N falhas por documento (padrão 6), o achado vira pendência
+   "PDF protegido sem regra" e as tentativas param.
+8. **O original nunca muda.** A estante recebe o PDF original, ainda protegido.
+
+## Lotes
+
+- **Montar:** você cria um lote com nome e adiciona achados em estado Documento e
+  registros.
+- **Aprovar:** grava `aprovado_em` e muda os registros do lote para `aprovado`.
+- **Enviar:** o botão Enviar ao servidor fica desabilitado até a fatia 3. Um lote
+  aprovado continua editável só por uma nova decisão (desaprovar).
+
+## Estante e cópia de segurança do cofre
+
+As duas usam o rclone, que o inventário já usa. O remote do Drive e a pasta raiz `SBF/`
+são configurados em Opções.
+
+### Estante (`SBF/Estante/`)
+
+- **Organização:** `<ciclo AAAA-MM>/<tipo>/<data_fornecedor_valor_hash8.ext>`, o mesmo
+  nome de `vista-nome.ts`. Documento sem data-chave vai para `a-classificar/<tipo>/`.
+- **Conteúdo:** só achados em estado Documento, com os bytes originais. Na fatia 2 entram
+  também os documentos que vêm do servidor.
+- **Atualização:** é incremental. Uma correção de fornecedor ou data vira um rename na
+  estante, não um arquivo novo; o spike decide entre `rclone sync --track-renames` e uma
+  lista própria.
+- **A coleta do Drive ignora `SBF/`.** O `coletar-nuvem.ts` ganha essa exclusão nesta
+  fatia, como mudança transitória até ser portado.
+
+### Cópia de segurança (`SBF/Copia-de-seguranca/`)
+
+- **O que vai:** o acervo inteiro e um instantâneo do `inventario.sqlite`, tirado pela
+  API de backup e nunca copiando o WAL, num remote rclone crypt.
+- **A senha da cripto** fica no chaveiro e vai ao rclone sem passar por argumento de
+  linha de comando.
+- **Aviso de perda:** a tela avisa que sem essa senha a cópia é ilegível, e que você
+  precisa tê-la também fora do computador.
+
+## Aviso de disco sem cifra (ADR-015)
+
+Ao abrir, o desktop descobre se a pasta do cofre está num volume cifrado:
+
+- no Linux, procura dm-crypt entre os ancestrais do dispositivo;
+- no Windows, consulta o BitLocker;
+- no macOS, consulta o FileVault.
+
+Se o volume não for cifrado, ou não der para saber, a barra de status mostra o aviso com
+ícone e texto. O aviso não bloqueia nada.
+
+## O que muda nos scripts Bun nesta fatia
+
+São mudanças transitórias, cada uma apagada quando o dono dela for portado:
+
+- `banco.ts` / `aplicarSchema`: com `user_version>=1`, não roda DDL, e recusa um banco
+  numa versão que não conhece.
+- `e3-triar.ts`: pula achado com `decidido_por='usuario'`.
+- `coletar-nuvem.ts`: ignora a pasta `SBF/` do Drive.
+- `segredos.ts`: sai, substituído pelo chaveiro.
+- `datasette/metadata.json` e `inventario:ver`: saem no PR que fecha o aceite das vistas
+  (INV-03).
+
+## Armadilhas do port, para as fatias seguintes e para os testes desta
+
+- **Look-around:** `triagem.ts` tem cerca de 20, `extrair.ts` 13 e `pluggy-normalizar.ts`
+  1. O crate `regex` não suporta; use `fancy-regex` ou reescreva.
+- **`\b`:** o do JS é ASCII e o do Rust é Unicode. Use `(?-u:\b)` onde a regra depende
+  disso, como nos rótulos com acento de `extrair.ts`.
+- **`origin_key` local:** usa `st.mtimeMs` formatado como número JS, que pode ter fração.
+  O Rust precisa produzir a mesma string (por exemplo com `ryu-js`), senão a
+  idempotência quebra.
+- **`canonical_fingerprint`:** é `lower` + `\s+` → espaço + `trim`. O teste usa
+  fixtures geradas pelo próprio TS, porque `toLowerCase` e `\s` do JS e do Rust divergem
+  nas bordas.
+- **Ciclo:** fuso America/Sao_Paulo, dia de corte 20, e o mesmo teste dia a dia de
+  2024 a 2026 que o `ciclo.test.ts` faz contra `@sbf/domain`.
+
+## Matriz de aceite
+
+Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (regra do
+`00-estado-real.md`).
+
+| ID     | Critério                                                                                                                                                                                                                                                 |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| INV-01 | Abre o inventário de verdade, avisa da migração e faz a cópia antes. Fora isso, nada muda no banco até a primeira decisão.                                                                                                                               |
+| INV-02 | Um banco na versão "2" do Bun vira `user_version=2` do Rust. O Rust recusa banco mais novo que ele, e o Bun recusa banco mais novo que ele.                                                                                                              |
+| INV-03 | Cada uma das 12 vistas devolve as mesmas linhas que a consulta do Datasette correspondente, sobre o banco de teste.                                                                                                                                      |
+| INV-04 | A Visão geral mostra as mesmas contagens que o `relatorio.ts` para o mesmo banco.                                                                                                                                                                        |
+| INV-05 | Toda Ação do §10 grava uma decisão e a projeção na mesma transação. Desfazer restaura. `reprojetar` reproduz o estado (teste de propriedade).                                                                                                            |
+| INV-06 | O `e3-triar` rodado depois de uma decisão sua não muda o achado.                                                                                                                                                                                         |
+| INV-07 | `decisao` recusa UPDATE e DELETE.                                                                                                                                                                                                                        |
+| INV-08 | O chaveiro importa um `cofre.enc` de teste (N=2^10). Senha errada e arquivo adulterado dão o mesmo erro. O valor de teste não aparece em nenhum arquivo, log ou banco tocado (busca pelo valor).                                                         |
+| INV-09 | O PDF de teste abre pela regra, e a senha não aparece no argv (conferido por `/proc` durante a execução) nem em log. A cópia decifrada some mesmo com pânico injetado. Depois de N falhas o achado vira pendência. A regra só é gravada com confirmação. |
+| INV-10 | Aprovar um lote marca os itens. Enviar fica desabilitado, com o motivo.                                                                                                                                                                                  |
+| INV-11 | A estante tem só documentos, com o nome de `vista-nome`. Um PDF protegido chega protegido. A coleta do Drive ignora `SBF/`.                                                                                                                              |
+| INV-12 | Restaurar a partir da cópia cifrada reproduz o acervo e o banco com o mesmo hash.                                                                                                                                                                        |
+| INV-13 | O aviso de disco sem cifra aparece num volume sem cifra e some num cifrado.                                                                                                                                                                              |
+| INV-14 | A shell funciona: Ribbon nos 3 modos, KeyTips, Paleta, painel de navegação, os 7 temas, densidade e escala. Toda Ação vem da lista única.                                                                                                                |
+| INV-15 | Abre e navega no Linux, e no Windows e no macOS por VM, como faz o Chess Studio.                                                                                                                                                                         |
+| INV-16 | Com o inventário real, abre em menos de 3 s e filtra em menos de 300 ms nas vistas principais. As tabelas são virtualizadas, sem paginação visível.                                                                                                      |
+| INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                          |
+
+## Tickets e paralelização
+
+Os tickets viram issues em `ChicoFigueiredo/Seu-Bolso-Feliz`: um ticket, uma branch
+`feat/*`, um PR. Os da `bancada` vão para o repositório dela.
+
+São até 6 subagentes ao mesmo tempo, com arquivos disjuntos. Eu reviso e integro. PR de
+visual, UX ou segurança leva `ready-for-human` e espera o OK do CEO.
+
+| Fase | Ticket                                                                                                                              | Modelo sugerido  | Depende de |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
+| A    | T1 `bancada`: criar o repo e extrair `bancada-armazem`                                                                              | Sonnet           | —          |
+| A    | T2 `bancada-segredos`, a partir do `chess-vault`                                                                                    | Opus (segurança) | T1 (repo)  |
+| A    | T3 `bancada-casca`: Ribbon, Ações, Paleta, KeyTips, painel de navegação, dock, status, temas, Fluent, ícones plugáveis              | Opus             | T1 (repo)  |
+| A    | T4 `sbf-inventario`: migrações 1 e 2, log de decisões, projeção, desfazer, e as mudanças transitórias em `banco.ts` e `e3-triar.ts` | Opus             | —          |
+| A    | T5 `sbf-inventario`: as 12 vistas e a Visão geral, com fixture contra o Datasette                                                   | Sonnet           | T4         |
+| A    | T6 Tokens dos 7 temas do SBF (`packages/design-system/src/tokens.css`) em JSON para a casca                                         | Haiku            | —          |
+| B    | T7 `sbf-chaveiro`: importar o `cofre.enc` e apagar `segredos.ts`                                                                    | Opus             | T2         |
+| B    | T8 `sbf-pdf`: PDF protegido, com o spike `lopdf` × `qpdf`                                                                           | Opus             | T4, T7     |
+| B    | T9 `sbf-janela`: áreas, Ações do §10 e Histórico de decisões                                                                        | Sonnet           | T3, T5     |
+| B    | T10 Lotes                                                                                                                           | Sonnet           | T4, T9     |
+| B    | T11 `sbf-estante`: estante, cópia de segurança e exclusão na coleta do Drive                                                        | Sonnet           | T4, T7     |
+| B    | T12 Aviso de disco sem cifra nos 3 SOs                                                                                              | Haiku            | T3         |
+| C    | T13 Empacotamento (scripts do Chess adaptados) e relatório da matriz de aceite                                                      | Sonnet           | todos      |
+
+## Revisão
+
+- Protótipo navegável: link no PR desta spec.
+- O CEO aprova a spec e o protótipo. Só depois os tickets viram issues e o código começa.
+
+## Referências
+
+- Decisões: `docs/arquitetura/2026-11-12-adr-012` a `-018-*.md`, e os ADR-010 e ADR-011
+  revisados.
+- Inventário atual:
+  - `workers/inventario/src/schema.sql` e `banco.ts`;
+  - `relatorio.ts` e `relatorio-encerramento.ts`;
+  - `datasette/metadata.json`;
+  - `segredos.ts`, `vista-nome.ts` e `ciclo.ts`;
+  - `LICOES.md`.
+- Pedidos de origem: `docs/prompts/2026-11-11-seu-bolso-feliz-prompt-operacional-v6-atualizado.md`,
+  no §10 (interface) e no Apêndice V6 (PDF protegido).
+- Chess Studio: `/mnt/d/Chico/chess-studio`, com os crates citados acima,
+  `docs/design/` e as ADR-0002 e ADR-0005.

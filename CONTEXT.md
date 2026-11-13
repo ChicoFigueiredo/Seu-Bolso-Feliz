@@ -132,10 +132,32 @@ Fontes já filtradas (e-mail por consulta financeira, Open Finance, documento ma
 bot) entregam direto na caixa de entrada.
 _Avoid_: índice, varredura, backup
 
+**Triagem**:
+A decisão de que um achado é documento, descartado ou fica em dúvida, tomada por uma
+regra ou pelo usuário. A do usuário sempre prevalece: uma nova rodada de regras nunca a
+desfaz.
+_Avoid_: classificação, veredito, filtro
+
+**Estados do achado** (como o usuário os vê): A triar, Documento, Descartado, Em dúvida
+— sempre com quem decidiu, a regra ou o usuário.
+_Avoid_: novo, dúvida
+
+**Decisão**:
+Uma escolha do usuário ou de uma regra sobre um achado ou um registro do inventário:
+triagem, fornecedor, categoria, duplicidade, aprovação. Fica guardada para sempre e pode
+ser desfeita por outra decisão; o estado atual é o resultado de todas elas. Não vai ao
+servidor: o que vai é a promoção.
+_Avoid_: veredito, ajuste, edição, alteração
+
 **Promoção**:
 A passagem de um lote de achados aprovados do inventário para a caixa de entrada do
 servidor. É o único caminho de uma fonte em massa até o livro-caixa.
 _Avoid_: upload, importação, envio, sincronização
+
+**Lote**:
+Um conjunto nomeado de achados e registros que o usuário aprova junto para promoção. Um
+lote aprovado ainda não foi promovido; fica esperando até ser enviado.
+_Avoid_: batch, draft batch, pacote, remessa
 
 **Achado**:
 Algo encontrado numa fonte que pode ser financeiro — um arquivo, um anexo, uma mensagem.
@@ -149,6 +171,12 @@ exatamente como foi encontrado, fora de qualquer repositório e de qualquer nuve
 autorizada. Inclui o que chegou direto na caixa de entrada do servidor. Não guarda
 segredos: esses ficam no chaveiro.
 _Avoid_: backup, pasta de finanças, vault
+
+**Estante**:
+Uma cópia legível dos documentos, arrumada por ciclo e tipo no Google Drive, para
+folhear de qualquer lugar. Só documentos, nunca achados descartados. Não é fonte: a
+coleta do Drive ignora a estante. A cópia de segurança do cofre, cifrada, é outra coisa.
+_Avoid_: espelho, biblioteca, backup, vista
 
 **Chaveiro**:
 O lugar protegido onde ficam os segredos: senhas de PDF e de sites, CPF, tokens de

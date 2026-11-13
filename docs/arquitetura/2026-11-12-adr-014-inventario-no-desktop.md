@@ -27,7 +27,18 @@ metade muda e a segunda fica.
   - Vira o arquivo completo de originais.
   - A sincronização traz para ele uma cópia de cada documento novo do servidor, e os
     roteiros gravam direto nele.
-  - Nada sai do cofre, a não ser por promoção.
+  - Nada sai do cofre para o servidor, a não ser por promoção. As cópias no Drive
+    estão descritas logo abaixo.
+- **Cópias no Google Drive** (decidido na mesma sessão):
+  - A **estante** é uma cópia legível dos documentos, arrumada por ciclo e tipo, para
+    folhear no Drive e no celular. Só documentos, nunca achados descartados.
+  - A **cópia de segurança do cofre** é o cofre inteiro, cifrado com rclone crypt.
+  - O Drive entra como destinatário de nível completo (ADR-015), porque o Google lê a
+    estante.
+  - A coleta do Drive ignora a pasta do SBF, senão cada documento voltaria como mais
+    uma origem dele mesmo.
+  - No servidor, os originais continuam no Vercel Blob. A troca por um storage
+    S3-compatível fica para quando a API na VPS pedir.
 
 ## Opções descartadas
 

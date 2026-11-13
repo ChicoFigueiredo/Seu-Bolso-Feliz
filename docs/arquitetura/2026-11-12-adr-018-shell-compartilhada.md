@@ -26,6 +26,13 @@ Bevy.
     (migrações e PRAGMAs).
   - Os dois projetos a usam como dependência git fixada.
   - O SBF é o primeiro cliente. O Chess Studio migra depois de fechar a homologação.
+- **Nome e língua:**
+  - A biblioteca se chama `bancada`, num repositório `ChicoFigueiredo/bancada`, com as
+    crates `bancada-casca` (shell), `bancada-segredos`, `bancada-rede` e
+    `bancada-armazem`.
+  - Os identificadores ficam em português, tanto no SBF quanto na `bancada`, sem
+    acento e inclusive no mecânico, por decisão do CEO. O Chess Studio, cujo CLAUDE.md
+    pede identificadores em inglês, ganha uma exceção para o que vem da `bancada`.
 - **Licenças:**
   - A biblioteca segue o ADR-0004 do Chess Studio: MIT OR Apache-2.0, sem a família GPL.
   - O SBF em si não tem política de licenças, porque é software pessoal e não é
@@ -33,6 +40,12 @@ Bevy.
 - **Visual:**
   - Do Chess Studio vêm shell, componentes e densidade.
   - Do `@sbf/design-system` e dos `ui-tokens` vêm cores, tipografia e temas.
+  - A geometria é a densa do Chess: raio de 4 a 8 px, sem pílula, exceto em status
+    e chips.
+  - Os ícones são Material Symbols Rounded, como no web. Por isso a biblioteca aceita
+    a família de ícones de cada app.
+  - A navegação é feita por um painel de áreas à esquerda, como no Outlook. O Ribbon
+    mostra as Ações da área aberta.
   - Cada tela nasce como protótipo navegável e só vira egui depois de aprovada.
 
 ## Opções descartadas
