@@ -3,7 +3,10 @@
 //! [`Inventario`] é o dono do `inventario.sqlite` a partir da fatia 1:
 //!
 //! 1. [`Inventario::abrir`] reconhece o banco (vazio, do Bun "2", do Rust numa versão N) e
-//!    **recusa** banco mais novo que o app. Abrir não muda nada no arquivo (INV-01).
+//!    **recusa** banco mais novo que o app. Abrir não muda nada no arquivo (INV-01): o
+//!    reconhecimento usa uma conexão só de leitura, e um arquivo que não existe nem é
+//!    criado. A conexão de escrita, cujos PRAGMAs (WAL) gravam no cabeçalho, só abre na
+//!    primeira escrita: [`Inventario::migrar`] ou a primeira decisão.
 //! 2. [`Inventario::plano`] diz o que a migração vai mudar, para a janela mostrar.
 //! 3. [`Inventario::migrar`] faz primeiro a cópia pela API de backup do SQLite e só depois
 //!    migra. Sem essa chamada explícita, nada muda até a primeira decisão.
@@ -16,7 +19,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bancada_armazem::{Armazem, Pragmas, Sincronizacao, verificar_integridade_de_arquivo};
+use bancada_armazem::{
+    Armazem, Pragmas, Sincronizacao, copiar_banco, pendentes, verificar_integridade_de_arquivo,
+};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::comando::{Comandos, ErroDeComando, IdDecisao, PedidoDeDecisao, ResultadoDeComando};
@@ -104,6 +109,21 @@ pub struct MigracaoFeita {
     pub adotou_o_bun: bool,
 }
 
+/// Uma etapa de [`Inventario::migrar_com_andamento`], avisada **antes** de começar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EtapaDaMigracao {
+    /// Cópia do banco pela API de backup.
+    Copia,
+    /// `PRAGMA integrity_check` da cópia.
+    ConferenciaDaCopia,
+    /// Adoção do banco do Bun: confere as tabelas e carimba a versão 1.
+    Adocao,
+    /// Uma migração da escada (no banco vazio, a 1 também).
+    Migracao { versao: u32, descricao: String },
+    /// Reconhece o banco migrado.
+    Conferencia,
+}
+
 /// Por que o inventário não abre ou não migra.
 #[derive(Debug, thiserror::Error)]
 pub enum ErroDoBanco {
@@ -125,13 +145,24 @@ pub enum ErroDoBanco {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// O inventário aberto para escrita. Uma instância por processo; a leitura usa outra
-/// conexão (aberta por [`caminho`](Self::caminho)).
+/// O inventário. Uma instância por processo; a leitura da janela usa outra conexão
+/// (aberta por [`caminho`](Self::caminho)).
 #[derive(Debug)]
 pub struct Inventario {
-    armazem: Armazem,
     caminho: PathBuf,
     estado: EstadoDoBanco,
+    /// Só leitura (em memória, vazia, enquanto o arquivo não existe): reconhece e planeja.
+    leitura: Connection,
+    /// A conexão de escrita, aberta na primeira escrita.
+    armazem: Option<Armazem>,
+}
+
+fn abrir_reconhecimento(caminho: &Path) -> rusqlite::Result<Connection> {
+    if caminho.exists() {
+        abrir_leitura(caminho)
+    } else {
+        Connection::open_in_memory()
+    }
 }
 
 fn tem_tabelas(conexao: &Connection) -> rusqlite::Result<bool> {
@@ -182,21 +213,35 @@ fn reconhecer(conexao: &Connection) -> Result<EstadoDoBanco, ErroDoBanco> {
 }
 
 impl Inventario {
-    /// Abre o banco em `caminho` (criando o arquivo, se não existe) e reconhece o estado
-    /// dele. Não migra e não grava nada.
+    /// Reconhece o banco em `caminho` por uma conexão só de leitura. Não migra, não grava
+    /// e não cria o arquivo (um caminho que não existe é um banco vazio).
     ///
     /// # Errors
     /// [`ErroDoBanco::MaisNovo`] (banco de um app mais novo), [`ErroDoBanco::NaoEhDoBun`],
     /// [`ErroDoBanco::NaoBate`] ou falha do SQLite.
     pub fn abrir(caminho: impl AsRef<Path>) -> Result<Self, ErroDoBanco> {
         let caminho = caminho.as_ref().to_path_buf();
-        let armazem = Armazem::abrir(&caminho, &pragmas())?;
-        let estado = reconhecer(armazem.conexao())?;
+        let leitura = abrir_reconhecimento(&caminho)?;
+        let estado = reconhecer(&leitura)?;
         Ok(Self {
-            armazem,
             caminho,
             estado,
+            leitura,
+            armazem: None,
         })
+    }
+
+    /// A conexão de escrita, aberta agora se ainda não estava. Abrir aplica os PRAGMAs
+    /// (WAL), que gravam no cabeçalho de um arquivo novo ou vazio.
+    ///
+    /// # Errors
+    /// Falha do SQLite ao abrir ou configurar.
+    pub fn conexao_de_escrita(&mut self) -> Result<&mut Armazem, ErroDoBanco> {
+        let armazem = match self.armazem.take() {
+            Some(a) => a,
+            None => Armazem::abrir(&self.caminho, &pragmas())?,
+        };
+        Ok(self.armazem.insert(armazem))
     }
 
     /// O caminho do banco, para a leitura abrir a sua própria conexão.
@@ -214,13 +259,20 @@ impl Inventario {
     /// # Errors
     /// Falha do SQLite.
     pub fn versao(&self) -> Result<u32, ErroDoBanco> {
-        Ok(self.armazem.versao()?)
+        Ok(self
+            .conexao()
+            .query_row("PRAGMA user_version", [], |l| l.get(0))?)
     }
 
-    /// A conexão de escrita, para testes e ferramentas de manutenção. Não guarde
+    /// Para testes e ferramentas de manutenção: a conexão de escrita, se já foi aberta
+    /// (por [`migrar`](Self::migrar), uma decisão ou
+    /// [`conexao_de_escrita`](Self::conexao_de_escrita)); senão a de leitura. Não guarde
     /// transação aberta nela.
     pub fn conexao(&self) -> &Connection {
-        self.armazem.conexao()
+        match &self.armazem {
+            Some(armazem) => armazem.conexao(),
+            None => &self.leitura,
+        }
     }
 
     /// O que [`migrar`](Self::migrar) vai mudar. Não grava nada.
@@ -229,7 +281,7 @@ impl Inventario {
     /// [`ErroDoBanco::MaisNovo`] ou falha do SQLite.
     pub fn plano(&self) -> Result<PlanoDeMigracao, ErroDoBanco> {
         let escada = migracoes::escada();
-        let versao_atual = self.armazem.versao()?;
+        let versao_atual = self.versao()?;
         let mut passos = Vec::new();
         if self.estado == EstadoDoBanco::DoBun {
             passos.push(PassoDeMigracao {
@@ -243,7 +295,7 @@ impl Inventario {
             EstadoDoBanco::DoBun => 2,
             _ => versao_atual + 1,
         };
-        for (i, migracao) in self.armazem.pendentes(&escada)?.iter().enumerate() {
+        for (i, migracao) in pendentes(self.conexao(), &escada)?.iter().enumerate() {
             passos.push(PassoDeMigracao {
                 versao: inicio + i as u32,
                 descricao: migracao.descricao.to_owned(),
@@ -278,6 +330,19 @@ impl Inventario {
     /// Falha da cópia (inclusive `copia` já existir), da linha de base ou de uma migração
     /// (desfeita inteira; as anteriores ficam).
     pub fn migrar(&mut self, copia: impl AsRef<Path>) -> Result<MigracaoFeita, ErroDoBanco> {
+        self.migrar_com_andamento(copia, &|_| {})
+    }
+
+    /// Como [`migrar`](Self::migrar), avisando `andamento` antes de cada etapa, para a
+    /// janela mostrar onde está. O aviso roda na thread que migra.
+    ///
+    /// # Errors
+    /// Os de [`migrar`](Self::migrar).
+    pub fn migrar_com_andamento(
+        &mut self,
+        copia: impl AsRef<Path>,
+        andamento: &dyn Fn(EtapaDaMigracao),
+    ) -> Result<MigracaoFeita, ErroDoBanco> {
         let plano = self.plano()?;
         if !plano.precisa_migrar() {
             return Ok(MigracaoFeita {
@@ -289,19 +354,42 @@ impl Inventario {
         }
         let copia = if plano.faz_copia {
             let destino = copia.as_ref().to_path_buf();
-            self.armazem.copiar_para(&destino)?;
+            andamento(EtapaDaMigracao::Copia);
+            copiar_banco(&self.leitura, &destino)?;
+            andamento(EtapaDaMigracao::ConferenciaDaCopia);
             verificar_integridade_de_arquivo(&destino)?;
             Some(destino)
         } else {
             None
         };
-        let relatorio = self.armazem.migrar(&migracoes::escada())?;
-        self.estado = reconhecer(self.armazem.conexao())?;
+        let escada = migracoes::escada();
+        let do_bun = self.estado == EstadoDoBanco::DoBun;
+        let armazem = self.conexao_de_escrita()?;
+        let mut adotou_o_bun = false;
+        let mut versao = plano.versao_atual;
+        if do_bun {
+            andamento(EtapaDaMigracao::Adocao);
+            let relatorio = armazem.migrar_ate(&escada, 1)?;
+            adotou_o_bun = relatorio.linha_de_base_carimbada;
+            versao = relatorio.versao_final;
+        }
+        for passo in plano.passos.iter().filter(|p| p.versao > versao) {
+            andamento(EtapaDaMigracao::Migracao {
+                versao: passo.versao,
+                descricao: passo.descricao.clone(),
+            });
+            armazem.migrar_ate(&escada, passo.versao)?;
+        }
+        andamento(EtapaDaMigracao::Conferencia);
+        let versao_final = armazem.versao()?;
+        self.estado = reconhecer(self.conexao())?;
+        // O arquivo pode ter acabado de nascer: a leitura passa a olhar para ele.
+        self.leitura = abrir_leitura(&self.caminho)?;
         Ok(MigracaoFeita {
-            versao_inicial: relatorio.versao_inicial,
-            versao_final: relatorio.versao_final,
+            versao_inicial: plano.versao_atual,
+            versao_final,
             copia,
-            adotou_o_bun: relatorio.linha_de_base_carimbada,
+            adotou_o_bun,
         })
     }
 
@@ -318,7 +406,9 @@ impl Inventario {
         corpo: impl FnOnce(&rusqlite::Transaction<'_>) -> ResultadoDeComando<T>,
     ) -> ResultadoDeComando<T> {
         self.exigir_migrado()?;
-        self.armazem.transacao_imediata(corpo)
+        self.conexao_de_escrita()
+            .map_err(|e| ErroDeComando::Banco(e.to_string()))?
+            .transacao_imediata(corpo)
     }
 
     /// Comando de manutenção: refaz a projeção a partir do log de decisões, numa
