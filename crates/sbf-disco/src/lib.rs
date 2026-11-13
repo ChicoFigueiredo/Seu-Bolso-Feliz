@@ -74,45 +74,30 @@ pub fn cifra_do_volume(caminho: &Path) -> Cifra {
     }
 }
 
-/// Roda um comando com limite de tempo e devolve a saída padrão, ou `None` se falhou,
-/// saiu com erro ou estourou o tempo.
-#[cfg(any(windows, target_os = "macos"))]
-pub(crate) fn executar_com_limite(
-    mut comando: std::process::Command,
+/// O máximo guardado da saída de `df`, `diskutil`, `fdesetup` ou do PowerShell: poucas
+/// linhas.
+#[cfg(any(windows, target_os = "macos", test))]
+const SAIDA_MAXIMA: usize = 1024 * 1024;
+
+/// Roda `programa` (resolvido nas pastas do sistema pela regra do `sbf-processo`, nunca pelo
+/// `PATH`), com o ambiente mínimo e prazo, e devolve a saída padrão; `None` se não achou,
+/// saiu com erro, estourou o tempo ou a saída passou do teto.
+#[cfg(any(windows, target_os = "macos", test))]
+pub(crate) fn executar_com_limite<S: AsRef<std::ffi::OsStr>>(
+    programa: &str,
+    argumentos: &[S],
     limite: std::time::Duration,
 ) -> Option<String> {
-    use std::io::Read;
-    use std::process::Stdio;
-    use std::time::Instant;
-    let mut filho = comando
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let caminho = sbf_processo::localizar(programa)?;
+    let saida = sbf_processo::Chamada::nova(caminho)
+        .argumentos(argumentos)
+        .com_prazo(limite)
+        .com_saida_maxima(SAIDA_MAXIMA)
+        .com_erro_maximo(4096)
+        .rodar()
         .ok()?;
-    let mut saida = filho.stdout.take()?;
-    let leitor = std::thread::spawn(move || {
-        let mut texto = String::new();
-        let _ = saida.read_to_string(&mut texto);
-        texto
-    });
-    let inicio = Instant::now();
-    loop {
-        match filho.try_wait() {
-            Ok(Some(estado)) => {
-                let texto = leitor.join().ok()?;
-                return estado.success().then_some(texto);
-            }
-            Ok(None) if inicio.elapsed() < limite => {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            _ => {
-                let _ = filho.kill();
-                let _ = filho.wait();
-                return None;
-            }
-        }
-    }
+    (saida.status.success() && !saida.stdout_cortado)
+        .then(|| String::from_utf8_lossy(&saida.stdout).into_owned())
 }
 
 #[cfg(test)]
@@ -126,5 +111,27 @@ mod testes {
         assert!(texto_do_aviso(Cifra::Desconhecido).is_some());
         assert!(!Cifra::Cifrado.pede_aviso());
         assert!(Cifra::Desconhecido.pede_aviso());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn programa_externo_pelas_pastas_do_sistema_com_prazo() {
+        use std::time::Duration;
+        let ok = executar_com_limite("sh", &["-c", "echo ok"], Duration::from_secs(10));
+        assert_eq!(ok.as_deref(), Some("ok\n"));
+        assert_eq!(
+            executar_com_limite("sh", &["-c", "exit 3"], Duration::from_secs(10)),
+            None,
+            "saiu com erro"
+        );
+        assert_eq!(
+            executar_com_limite("sh", &["-c", "sleep 5"], Duration::from_millis(100)),
+            None,
+            "passou do prazo"
+        );
+        assert_eq!(
+            executar_com_limite::<&str>("nao-existe-sbf-ficticio", &[], Duration::from_secs(1)),
+            None
+        );
     }
 }

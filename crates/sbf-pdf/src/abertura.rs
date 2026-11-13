@@ -10,12 +10,11 @@
 //! O original só é lido, nunca escrito.
 
 use crate::estrategia::Candidata;
-use crate::processo::{
-    self, FalhaDeFerramenta, comando, escrever_e_fechar, esperar, ler_tudo, rodar_com_entrada,
-};
+use crate::processo::{self, FalhaDeFerramenta, comando, rodar_com_entrada};
 use crate::texto::{MINIMO_DE_LETRAS, decodificar_saida, espaco_do_js, letras};
 use lopdf::encryption::DecryptionError;
 use lopdf::{Document, LoadOptions};
+use sbf_processo::{escrever_e_fechar, esperar, ler_com_limite};
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -33,7 +32,7 @@ pub const TAMANHO_MAXIMO_DO_PDF: u64 = 50 * 1024 * 1024;
 /// As ferramentas externas e o limite de tempo de cada chamada.
 ///
 /// O padrão resolve cada uma **uma vez**, por caminho absoluto nas pastas do sistema
-/// ([`crate::ferramenta::localizar`]), nunca pelo `PATH`. Os campos são o lugar da
+/// ([`sbf_processo::localizar`]), nunca pelo `PATH`. Os campos são o lugar da
 /// configuração explícita (Opções), e são o caminho a mostrar em Opções e Bastidores. Um
 /// caminho relativo, ausente ou em pasta gravável por outros não roda: dá
 /// [`FalhaDeFerramenta::NaoEncontrada`].
@@ -51,8 +50,8 @@ pub struct Ferramentas {
 impl Default for Ferramentas {
     fn default() -> Self {
         Self {
-            pdftotext: crate::ferramenta::localizar_ou_nome("pdftotext"),
-            qpdf: Some(crate::ferramenta::localizar_ou_nome("qpdf")),
+            pdftotext: sbf_processo::localizar_ou_nome("pdftotext"),
+            qpdf: Some(sbf_processo::localizar_ou_nome("qpdf")),
             limite_de_tempo: Duration::from_secs(30),
         }
     }
@@ -413,13 +412,14 @@ fn pipeline_do_qpdf(
     let mut senha = Zeroizing::new(Vec::with_capacity(candidata.expor().len()));
     senha.extend_from_slice(candidata.expor().as_bytes());
     let escrita = decifrador.stdin.take().map(|e| escrever_e_fechar(e, senha));
-    let erro_do_qpdf = ler_tudo(decifrador.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
-    let texto = ler_tudo(extrator.stdout.take(), processo::SAIDA_MAXIMA_DO_FILHO);
-    let erro_do_pdftotext = ler_tudo(extrator.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
+    let erro_do_qpdf = ler_com_limite(decifrador.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO, 0);
+    let texto = ler_com_limite(extrator.stdout.take(), processo::SAIDA_MAXIMA_DO_FILHO, 0);
+    let erro_do_pdftotext =
+        ler_com_limite(extrator.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO, 0);
 
-    let status_do_qpdf = esperar(&mut decifrador, prazo);
+    let status_do_qpdf = esperar(&mut decifrador, Some(prazo)).map_err(FalhaDeFerramenta::from);
     let status_do_pdftotext = match status_do_qpdf {
-        Ok(_) => esperar(&mut extrator, prazo),
+        Ok(_) => esperar(&mut extrator, Some(prazo)).map_err(FalhaDeFerramenta::from),
         Err(_) => {
             let _ = extrator.kill();
             let _ = extrator.wait();
@@ -427,8 +427,8 @@ fn pipeline_do_qpdf(
         }
     };
     let _ = escrita.map(|t| t.join());
-    let erro_do_qpdf = erro_do_qpdf.join().unwrap_or_default();
-    let texto = texto.join().unwrap_or_default();
+    let erro_do_qpdf = erro_do_qpdf.join().unwrap_or_default().bytes;
+    let texto = texto.join().unwrap_or_default().bytes;
     let _ = erro_do_pdftotext.join();
     let status_do_qpdf = status_do_qpdf?;
 

@@ -1,55 +1,34 @@
-//! Chamada ao `rclone`, sempre por `Command` com lista de argumentos (sem shell) e com
-//! segredos só no ambiente do processo filho ou na entrada padrão, nunca em argumento.
+//! Chamada ao `rclone`, sempre com lista de argumentos (sem shell) e com segredos só no
+//! ambiente do processo filho ou na entrada padrão, nunca em argumento.
 //!
 //! # Qual rclone e com que ambiente (achados A6 e A7 da revisão de segurança da fatia 1)
 //!
+//! A regra é a do `sbf-processo` (uma implementação por regra, ADR-012):
+//!
 //! - [`Rclone::novo`] resolve o caminho **uma vez**, nas pastas do sistema
-//!   ([`PASTAS_DO_SISTEMA`]), nunca pelo `PATH`: um `rclone` plantado em `~/.bun/bin` ou num
-//!   shim receberia a senha ofuscada da cópia. [`Rclone::com_binario`] é a configuração
+//!   ([`sbf_processo::localizar`]), nunca pelo `PATH`: um `rclone` plantado em `~/.bun/bin` ou
+//!   num shim receberia a senha ofuscada da cópia. [`Rclone::com_binario`] é a configuração
 //!   explícita. Um caminho relativo, ausente ou em pasta gravável por outros não roda
 //!   ([`Erro::RcloneAusente`]). [`Rclone::binario`] é o caminho a mostrar em Opções.
-//! - O filho roda com `env_clear`: só um `PATH` mínimo, o idioma, o que o rclone precisa para
-//!   achar a configuração do usuário (`HOME`, `XDG_CONFIG_HOME`, `RCLONE_CONFIG`,
-//!   `RCLONE_CONFIG_PASS`), o cache, a pasta temporária, os proxies e os certificados, e as
-//!   variáveis que o próprio app põe. Nenhum outro `RCLONE_*` do shell (por exemplo
-//!   `RCLONE_DRY_RUN` ou um `PASSWORD2` alheio) muda o comportamento da cópia.
-//!
-//! A regra é a mesma do `sbf-pdf/src/ferramenta.rs` (os dois crates não dependem um do outro).
+//! - O filho roda com o ambiente mínimo: o `PATH` do sistema, o idioma, o que o rclone precisa
+//!   para achar a configuração do usuário (`HOME`, `XDG_CONFIG_HOME`, `RCLONE_CONFIG`,
+//!   `RCLONE_CONFIG_PASS`), o cache, a pasta temporária, os proxies e os certificados
+//!   ([`VARIAVEIS_DO_RCLONE`]), e as variáveis que o próprio app põe. Nenhum outro `RCLONE_*`
+//!   do shell (por exemplo `RCLONE_DRY_RUN` ou um `PASSWORD2` alheio) muda a cópia.
+//! - A saída guardada tem teto ([`SAIDA_MAXIMA_DO_RCLONE`]), e o fim do stderr também.
 
 use crate::erro::{Erro, Resultado};
+use sbf_processo::{Chamada, FalhaDeProcesso};
 use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 /// Variável de ambiente para o filho: nome e valor (zerado ao descartar).
 pub type VariavelDeAmbiente = (String, Zeroizing<String>);
 
-/// Onde procurar o rclone, em ordem.
-#[cfg(all(unix, not(target_os = "macos")))]
-pub const PASTAS_DO_SISTEMA: &[&str] = &["/usr/bin", "/usr/local/bin", "/bin"];
-/// Onde procurar o rclone, em ordem.
-#[cfg(target_os = "macos")]
-pub const PASTAS_DO_SISTEMA: &[&str] = &[
-    "/usr/bin",
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-    "/opt/local/bin",
-];
-/// No Windows a pasta vem de `%ProgramFiles%\rclone`.
-#[cfg(windows)]
-pub const PASTAS_DO_SISTEMA: &[&str] = &[];
-
-#[cfg(unix)]
-const PATH_MINIMO: &str = "/usr/bin:/bin";
-
-/// O que passa do app para o rclone, se existir.
-const VARIAVEIS_PERMITIDAS: &[&str] = &[
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
+/// O que passa do app para o rclone, se existir, além de [`sbf_processo::VARIAVEIS_BASICAS`].
+pub const VARIAVEIS_DO_RCLONE: &[&str] = &[
     "HOME",
     "XDG_CONFIG_HOME",
     "XDG_CACHE_HOME",
@@ -65,16 +44,6 @@ const VARIAVEIS_PERMITIDAS: &[&str] = &[
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     #[cfg(windows)]
-    "SystemRoot",
-    #[cfg(windows)]
-    "SystemDrive",
-    #[cfg(windows)]
-    "windir",
-    #[cfg(windows)]
-    "TEMP",
-    #[cfg(windows)]
-    "TMP",
-    #[cfg(windows)]
     "APPDATA",
     #[cfg(windows)]
     "LOCALAPPDATA",
@@ -86,84 +55,11 @@ const VARIAVEIS_PERMITIDAS: &[&str] = &[
     "HOMEPATH",
 ];
 
-fn pastas_do_sistema() -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        ["ProgramFiles", "ProgramFiles(x86)"]
-            .into_iter()
-            .filter_map(std::env::var_os)
-            .map(|raiz| PathBuf::from(raiz).join("rclone"))
-            .collect()
-    }
-    #[cfg(not(windows))]
-    {
-        PASTAS_DO_SISTEMA.iter().map(PathBuf::from).collect()
-    }
-}
-
 /// O caminho absoluto do `rclone` na primeira pasta do sistema em que ele existe e é
-/// [`confiavel`]. Nunca olha o `PATH`.
+/// confiável ([`sbf_processo::localizar`]). Nunca olha o `PATH`.
 #[must_use]
 pub fn localizar_rclone() -> Option<PathBuf> {
-    let nome = if cfg!(windows) {
-        "rclone.exe"
-    } else {
-        "rclone"
-    };
-    pastas_do_sistema()
-        .into_iter()
-        .map(|pasta| pasta.join(nome))
-        .find(|caminho| confiavel(caminho))
-}
-
-/// `true` se `caminho` é absoluto, é um arquivo e nem ele nem a pasta dele (depois de seguir
-/// links) podem ser escritos por outros usuários.
-#[must_use]
-pub fn confiavel(caminho: &Path) -> bool {
-    if !caminho.is_absolute() {
-        return false;
-    }
-    let Ok(real) = std::fs::canonicalize(caminho) else {
-        return false;
-    };
-    if !real.is_file() {
-        return false;
-    }
-    real.parent().is_some_and(sem_escrita_alheia) && sem_escrita_alheia(&real)
-}
-
-#[cfg(unix)]
-fn sem_escrita_alheia(caminho: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    let Ok(dados) = std::fs::metadata(caminho) else {
-        return false;
-    };
-    let modo = dados.mode();
-    let outros = modo & 0o002 != 0;
-    // Grupo com escrita só vale para o grupo do root ou o grupo próprio do dono (gid = uid).
-    let grupo = modo & 0o020 != 0 && dados.gid() != 0 && dados.gid() != dados.uid();
-    !outros && !grupo
-}
-
-/// No Windows a permissão é por ACL, que a std não lê: vale o caminho absoluto.
-#[cfg(windows)]
-fn sem_escrita_alheia(_caminho: &Path) -> bool {
-    true
-}
-
-fn ambiente_minimo(comando: &mut Command) {
-    comando.env_clear();
-    for nome in VARIAVEIS_PERMITIDAS {
-        if let Some(valor) = std::env::var_os(nome) {
-            comando.env(nome, valor);
-        }
-    }
-    #[cfg(unix)]
-    comando.env("PATH", PATH_MINIMO);
-    #[cfg(windows)]
-    if let Some(raiz) = std::env::var_os("SystemRoot") {
-        comando.env("PATH", PathBuf::from(raiz).join("System32"));
-    }
+    sbf_processo::localizar("rclone")
 }
 
 /// Prazo padrão das chamadas curtas (listar, ler o sal, ofuscar, renomear, apagar): um remoto
@@ -173,6 +69,9 @@ fn ambiente_minimo(comando: &mut Command) {
 pub const PRAZO_PADRAO: Duration = Duration::from_secs(5 * 60);
 /// Capacidade inicial do buffer da saída: cabe a senha ofuscada sem realocar.
 const CAPACIDADE_DA_SAIDA: usize = 4096;
+/// O máximo guardado da saída do rclone: a listagem do acervo inteiro (`lsf`, `lsjson`) cabe
+/// com folga; passar disto é erro, nunca uma listagem cortada em silêncio.
+pub const SAIDA_MAXIMA_DO_RCLONE: usize = 256 * 1024 * 1024;
 /// Subcomandos que transferem dados e ficam sem prazo de relógio.
 const TRANSFERENCIAS: &[&str] = &["copy", "copyto"];
 
@@ -243,79 +142,47 @@ impl Rclone {
             .first()
             .map(|a| a.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if !confiavel(&self.binario) {
-            return Err(Erro::RcloneAusente);
-        }
-        let mut processo = Command::new(&self.binario);
-        ambiente_minimo(&mut processo);
-        processo
-            .args(&argumentos)
-            .stdin(if entrada.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (nome, valor) in ambiente {
-            processo.env(nome, valor.as_str());
-        }
-        let mut filho = processo.spawn().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Erro::RcloneAusente
-            } else {
-                Erro::Io(e)
-            }
-        })?;
-        if let (Some(texto), Some(mut stdin)) = (entrada, filho.stdin.take()) {
-            stdin.write_all(texto.as_bytes())?;
-            // Fecha a entrada para o rclone ver o fim.
-            drop(stdin);
-        }
-        // stdout e stderr em threads, para nenhum pipe encher e travar o filho, e para o prazo
-        // valer mesmo com o filho calado.
-        let mut stderr = filho.stderr.take();
-        let leitor = std::thread::spawn(move || {
-            let mut texto = String::new();
-            if let Some(e) = stderr.as_mut() {
-                let _ = e.read_to_string(&mut texto);
-            }
-            texto
-        });
-        // A saída pode ser a senha ofuscada (`obscure`): vai para um buffer zerável com
-        // capacidade reservada, para não deixar cópias ao crescer (achado A5).
-        let mut stdout = filho.stdout.take();
-        let leitor_da_saida = std::thread::spawn(move || {
-            let mut texto = Zeroizing::new(String::with_capacity(CAPACIDADE_DA_SAIDA));
-            if let Some(s) = stdout.as_mut() {
-                let _ = s.read_to_string(&mut texto);
-            }
-            texto
-        });
-        let prazo =
-            (!TRANSFERENCIAS.contains(&comando.as_str())).then(|| Instant::now() + self.prazo);
-        let estado = loop {
-            if let Some(estado) = filho.try_wait()? {
-                break estado;
-            }
-            if prazo.is_some_and(|p| Instant::now() >= p) {
-                let _ = filho.kill();
-                let _ = filho.wait();
-                let _ = leitor.join();
-                let _ = leitor_da_saida.join();
-                return Err(Erro::TempoEsgotado { comando });
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        let mut chamada = Chamada::nova(&self.binario)
+            .argumentos(&argumentos)
+            .herdando(VARIAVEIS_DO_RCLONE)
+            .com_saida_maxima(SAIDA_MAXIMA_DO_RCLONE)
+            .com_capacidade_da_saida(CAPACIDADE_DA_SAIDA);
+        // As transferências não têm prazo de relógio (vale o `--timeout` do rclone).
+        chamada = if TRANSFERENCIAS.contains(&comando.as_str()) {
+            chamada.sem_prazo()
+        } else {
+            chamada.com_prazo(self.prazo)
         };
-        let saida = leitor_da_saida.join().unwrap_or_default();
-        let erro = leitor.join().unwrap_or_default();
-        if estado.success() {
-            return Ok(saida);
+        for (nome, valor) in ambiente {
+            chamada = chamada.com_variavel(nome.clone(), valor.clone());
+        }
+        if let Some(texto) = entrada {
+            chamada = chamada.com_entrada(Zeroizing::new(texto.as_bytes().to_vec()));
+        }
+        let saida = chamada.rodar().map_err(|falha| match falha {
+            FalhaDeProcesso::TempoEsgotado => Erro::TempoEsgotado {
+                comando: comando.clone(),
+            },
+            FalhaDeProcesso::Io(tipo) => Erro::Io(std::io::Error::from(tipo)),
+            _ => Erro::RcloneAusente,
+        })?;
+        if saida.stdout_cortado {
+            return Err(Erro::Rclone {
+                comando,
+                codigo: saida.status.code(),
+                mensagem: format!(
+                    "a saída passou de {} MiB",
+                    SAIDA_MAXIMA_DO_RCLONE / (1024 * 1024)
+                ),
+            });
+        }
+        if saida.status.success() {
+            return Ok(texto_zeravel(saida.stdout));
         }
         Err(Erro::Rclone {
             comando,
-            codigo: estado.code(),
-            mensagem: fim_do_stderr(&erro),
+            codigo: saida.status.code(),
+            mensagem: fim_do_stderr(&String::from_utf8_lossy(&saida.stderr)),
         })
     }
 
@@ -324,6 +191,18 @@ impl Rclone {
     pub(crate) fn ofuscar(&self, senha: &str) -> Resultado<Zeroizing<String>> {
         let saida = self.executar(["obscure", "-"], &[], Some(senha))?;
         Ok(Zeroizing::new(saida.trim().to_owned()))
+    }
+}
+
+/// Os bytes da saída como texto, sem cópia quando são UTF-8 (a senha ofuscada não fica
+/// espalhada pela memória).
+fn texto_zeravel(mut bytes: Zeroizing<Vec<u8>>) -> Zeroizing<String> {
+    match String::from_utf8(std::mem::take(&mut *bytes)) {
+        Ok(texto) => Zeroizing::new(texto),
+        Err(erro) => {
+            let bytes = Zeroizing::new(erro.into_bytes());
+            Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned())
+        }
     }
 }
 

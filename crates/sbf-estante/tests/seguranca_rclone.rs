@@ -7,7 +7,8 @@
 mod comum;
 
 use comum::{Doc, escrever_executavel, inserir, novo_banco};
-use sbf_estante::{CopiaDeSeguranca, Erro, Estante, PASTAS_DO_SISTEMA, Rclone, Segredo, confiavel};
+use sbf_estante::{CopiaDeSeguranca, Erro, Estante, Rclone, Segredo};
+use sbf_processo::{PASTAS_DO_SISTEMA, confiavel};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 

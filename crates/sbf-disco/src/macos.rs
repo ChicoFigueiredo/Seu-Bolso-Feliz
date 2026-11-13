@@ -52,25 +52,25 @@ pub fn interpretar_fdesetup(saida: &str) -> Cifra {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn cifra_do_volume(caminho: &std::path::Path) -> Cifra {
-    use std::process::Command;
+    use std::ffi::OsStr;
     use std::time::Duration;
     let limite = Duration::from_secs(10);
-    let mut df = Command::new("df");
-    df.arg("-P").arg(caminho);
-    let Some(ponto) = crate::executar_com_limite(df, limite).and_then(|s| ponto_de_montagem(&s))
+    let Some(ponto) =
+        crate::executar_com_limite("df", &[OsStr::new("-P"), caminho.as_os_str()], limite)
+            .and_then(|s| ponto_de_montagem(&s))
     else {
         return Cifra::Desconhecido;
     };
-    let mut diskutil = Command::new("diskutil");
-    diskutil.arg("info").arg(&ponto);
-    let por_volume = crate::executar_com_limite(diskutil, limite)
-        .map_or(Cifra::Desconhecido, |s| interpretar_diskutil(&s));
+    let por_volume = crate::executar_com_limite(
+        "diskutil",
+        &[OsStr::new("info"), OsStr::new(&ponto)],
+        limite,
+    )
+    .map_or(Cifra::Desconhecido, |s| interpretar_diskutil(&s));
     if por_volume != Cifra::Desconhecido {
         return por_volume;
     }
-    let mut fdesetup = Command::new("fdesetup");
-    fdesetup.arg("status");
-    crate::executar_com_limite(fdesetup, limite)
+    crate::executar_com_limite("fdesetup", &["status"], limite)
         .map_or(Cifra::Desconhecido, |s| interpretar_fdesetup(&s))
 }
 
