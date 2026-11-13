@@ -3,8 +3,7 @@
   "private": true,
   "description": "Inventário financeiro local: cofre e índice SQLite fora do app (ADR-011).",
   "scripts": {
-    "init": "bun run src/init.ts",
-    "segredos": "bun run src/segredos.ts"
+    "init": "bun run src/init.ts"
   },
   "dependencies": {
     "@sbf/db": "workspace:*",
