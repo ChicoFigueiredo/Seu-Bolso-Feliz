@@ -7,18 +7,25 @@
 
 use crate::cache::{CacheDoLivro, ErroDoCache};
 use crate::texto::dia_e_mes;
-use sbf_contrato::{Colecao, LinhasDaColecao};
+use sbf_contrato::{Colecao, Documento, LinhasDaColecao};
 use sbf_inventario::consulta::{
     Area, Campo, Celula, Coluna, Consulta, Contagens, Elo, ErroDeConsulta, Filtro, Indicador, Item,
     Linha, Painel, PainelDeArea, PedidoDeTabela, Pergunta, Rastro, ResultadoDeConsulta, Secao,
     Tabela, TotalDoCiclo,
 };
 use sbf_inventario::referencia::{Ref, Tipo};
+use sbf_inventario::relatorios;
+use sbf_inventario::vistas::Contexto;
+use sbf_livro::amortizacao::{ConfiguracaoDeAmortizacao, Sistema, cronograma, total_de_juros};
 use sbf_livro::centros::painel_centros;
 use sbf_livro::contrato::livro_das_linhas;
 use sbf_livro::gastos::GastosDoLivro;
-use sbf_livro::hoje::{MotivoParaResolver, PainelHoje, e_entrada, e_saida, painel_hoje};
-use sbf_livro::{Ciclo, Data, LivroCaixa, Movimentacao, TipoDeMovimentacao};
+use sbf_livro::hoje::{
+    MotivoParaResolver, OrigemDoCompromisso, PainelHoje, e_entrada, e_saida, painel_hoje,
+};
+use sbf_livro::{
+    Centavos, Ciclo, Data, LivroCaixa, Movimentacao, StatusDaOcorrencia, Taxa, TipoDeMovimentacao,
+};
 
 impl From<ErroDoCache> for ErroDeConsulta {
     fn from(e: ErroDoCache) -> Self {
@@ -72,6 +79,7 @@ fn linhas_do_cache(cache: &CacheDoLivro, colecao: Colecao) -> Result<LinhasDaCol
 #[derive(Debug, Clone)]
 pub struct ConsultaDoLivro {
     livro: LivroCaixa,
+    documentos: Vec<Documento>,
     copia_de: Option<String>,
     hoje: Data,
 }
@@ -92,11 +100,30 @@ impl ConsultaDoLivro {
         let mut livro = livro_das_linhas(corte, &colecoes)
             .map_err(|e| ErroDeConsulta::Banco(format!("livro-caixa: {e}")))?;
         livro.documentos_a_revisar = estado.as_ref().map_or(0, |e| e.documentos_a_revisar);
+        let documentos = colecoes
+            .into_iter()
+            .find_map(|c| match c {
+                LinhasDaColecao::Documentos(d) => Some(d),
+                _ => None,
+            })
+            .unwrap_or_default();
         Ok(Self {
             livro,
+            documentos,
             copia_de: cache.copia_de()?,
             hoje: Data::hoje_em_sao_paulo(),
         })
+    }
+
+    /// A consulta sobre um livro já montado (testes e quem não tem cache), com os
+    /// documentos que o servidor mandou.
+    pub fn do_livro(livro: LivroCaixa, documentos: Vec<Documento>, hoje: Data) -> Self {
+        Self {
+            livro,
+            documentos,
+            copia_de: None,
+            hoje,
+        }
     }
 
     /// Fixa o dia de "hoje" (testes).
@@ -169,9 +196,53 @@ impl ConsultaDoLivro {
         match id {
             Some(id) => Celula::Link {
                 alvo: Ref::nova(tipo, id),
-                texto: self.nome_de(tipo, id).unwrap_or("(sem nome)").to_owned(),
+                texto: self
+                    .texto_de(tipo, id)
+                    .unwrap_or_else(|| "(sem nome)".to_owned()),
             },
             None => Celula::Vazia,
+        }
+    }
+
+    /// O nome de um item, inclusive dos que não têm campo de nome (fatura, cartão, parcela,
+    /// documento).
+    fn texto_de(&self, tipo: Tipo, id: &str) -> Option<String> {
+        let l = &self.livro;
+        match tipo {
+            Tipo::Cartao => {
+                let c = l.cartoes.iter().find(|c| c.id == id)?;
+                let nome = l
+                    .contas
+                    .iter()
+                    .find(|x| x.id == c.conta_id)
+                    .map_or_else(|| "Cartão".to_owned(), |x| x.nome.clone());
+                Some(match &c.final_do_numero {
+                    Some(f) => format!("{nome} final {f}"),
+                    None => nome,
+                })
+            }
+            Tipo::Fatura => {
+                let f = l.faturas.iter().find(|f| f.id == id)?;
+                let cartao = self
+                    .texto_de(Tipo::Cartao, &f.cartao_id)
+                    .unwrap_or_else(|| "Cartão".to_owned());
+                let mes = f.mes_de_referencia.to_string();
+                Some(format!(
+                    "Fatura {cartao} · {}",
+                    mes.get(..7).unwrap_or(&mes)
+                ))
+            }
+            Tipo::Parcela => {
+                let p = l.parcelas.iter().find(|p| p.id == id)?;
+                let divida = self.nome_de(Tipo::Divida, &p.divida_id).unwrap_or("Dívida");
+                Some(format!("{divida} · parcela {}", p.numero))
+            }
+            Tipo::Documento => self
+                .documentos
+                .iter()
+                .find(|d| d.id.to_string() == id)
+                .map(|d| d.nome_do_arquivo.clone()),
+            _ => self.nome_de(tipo, id).map(str::to_owned),
         }
     }
 
@@ -543,23 +614,29 @@ impl ConsultaDoLivro {
                         .filter(|m| quer(m)),
                 )
             }
-            (_, Some(outro))
-                if matches!(
-                    outro,
-                    "origem"
-                        | "proximos"
-                        | "fornecedor-e-contrato"
-                        | "simulacao"
-                        | "compromissos-e-dividas"
-                        | "parcelas-e-dividas"
-                        | "documentos-a-revisar"
-                        | "faturas-abertas"
-                ) =>
-            {
-                return Err(ErroDeConsulta::NaoSuportado(format!(
-                    "o recorte {outro} ainda não é lido do cache da estação"
-                )));
+            (Tipo::Compromisso, Some("origem")) => self.origem_do_compromisso(&de.chave),
+            (Tipo::Recorrente, Some("proximos")) => self.proximos_do_recorrente(&de.chave),
+            (Tipo::Recorrente, Some("fornecedor-e-contrato")) => {
+                // O livro-caixa ainda não traz contratos: só o fornecedor.
+                let fornecedor = l
+                    .recorrentes
+                    .iter()
+                    .find(|r| r.id == de.chave)
+                    .and_then(|r| r.fornecedor_id.clone());
+                self.tabela_mista(
+                    fornecedor
+                        .map(|f| (Tipo::Fornecedor, f))
+                        .into_iter()
+                        .collect(),
+                )
             }
+            (Tipo::Divida, Some("simulacao")) => self.simulacao(&de.chave),
+            (Tipo::Cartao, Some("compromissos-e-dividas")) => {
+                self.compromissos_do_cartao(&de.chave)
+            }
+            (_, Some("parcelas-e-dividas")) => self.parcelas_e_dividas(de),
+            (Tipo::Ciclo, Some("documentos-a-revisar")) => self.documentos_a_revisar(),
+            (Tipo::Ciclo, Some("faturas-abertas")) => self.faturas_abertas(),
             // Conta, cartão, fornecedor, categoria…: as movimentações ligadas (sem ajuste).
             _ => self.tabela_de_movimentacoes(
                 self.movimentacoes_de(de)
@@ -567,6 +644,244 @@ impl ConsultaDoLivro {
                     .filter(|m| m.tipo != TipoDeMovimentacao::Ajuste),
             ),
         })
+    }
+
+    /// De onde vem um compromisso: a movimentação, o recorrente da ocorrência ou a fatura.
+    fn origem_do_compromisso(&self, id: &str) -> Tabela {
+        let l = &self.livro;
+        let hoje = painel_hoje(l, self.hoje);
+        let refs = hoje
+            .compromissos
+            .iter()
+            .find(|c| c.id == id)
+            .and_then(|c| match c.origem {
+                OrigemDoCompromisso::Movimentacao => Some((Tipo::Movimentacao, c.id.clone())),
+                OrigemDoCompromisso::Fatura => Some((Tipo::Fatura, c.id.clone())),
+                OrigemDoCompromisso::Recorrente => l
+                    .ocorrencias
+                    .iter()
+                    .find(|o| o.id == c.id)
+                    .map(|o| (Tipo::Recorrente, o.recorrente_id.clone())),
+            })
+            .into_iter()
+            .collect();
+        self.tabela_mista(refs)
+    }
+
+    /// As ocorrências que ainda vão acontecer de um recorrente.
+    fn proximos_do_recorrente(&self, id: &str) -> Tabela {
+        let l = &self.livro;
+        let saida = l
+            .recorrentes
+            .iter()
+            .find(|r| r.id == id)
+            .is_some_and(|r| e_saida(r.tipo));
+        let mut ocorrencias: Vec<_> = l
+            .ocorrencias
+            .iter()
+            .filter(|o| {
+                o.recorrente_id == id
+                    && o.movimentacao_id.is_none()
+                    && matches!(
+                        o.status,
+                        StatusDaOcorrencia::Pendente
+                            | StatusDaOcorrencia::Vencida
+                            | StatusDaOcorrencia::Parcial
+                    )
+            })
+            .collect();
+        ocorrencias.sort_by(|a, b| a.data_esperada.cmp(&b.data_esperada).then(a.id.cmp(&b.id)));
+        Tabela {
+            colunas: colunas(&[("Data", false), ("Situação", false), ("Valor", true)]),
+            linhas: ocorrencias
+                .into_iter()
+                .map(|o| Linha {
+                    alvo: None,
+                    celulas: vec![
+                        Celula::Data(o.data_esperada.to_string()),
+                        Celula::Texto(o.status.codigo().to_owned()),
+                        o.valor_esperado.map_or(Celula::Vazia, |v| {
+                            self.valor(if saida { -v.0 } else { v.0 }, None)
+                        }),
+                    ],
+                })
+                .collect(),
+        }
+    }
+
+    /// SAC contra Price sobre o saldo devedor de hoje, nas parcelas que faltam.
+    fn simulacao(&self, id: &str) -> Tabela {
+        let mut t = Tabela {
+            colunas: colunas(&[
+                ("Sistema", false),
+                ("Primeira parcela", true),
+                ("Última parcela", true),
+                ("Juros até o fim", true),
+                ("Total a pagar", true),
+            ]),
+            linhas: Vec::new(),
+        };
+        let Some(d) = self.livro.dividas.iter().find(|d| d.id == id) else {
+            return t;
+        };
+        let Some(taxa) = d.taxa.filter(|t| t.milionesimos > 0) else {
+            return t;
+        };
+        let mensal = if d.tipo_de_taxa.as_deref() == Some("annual") {
+            taxa_mensal_da_anual(taxa)
+        } else {
+            taxa
+        };
+        let restantes = d
+            .total_de_parcelas
+            .map_or(1, |total| total - d.parcelas_pagas)
+            .max(1);
+        let contratado = d.sistema.and_then(Sistema::da_divida);
+        for (sistema, nome) in [(Sistema::Sac, "SAC"), (Sistema::Price, "Price")] {
+            let cfg = ConfiguracaoDeAmortizacao {
+                sistema,
+                principal: d.saldo_devedor,
+                taxa_mensal: mensal,
+                parcelas: u32::try_from(restantes).unwrap_or(1),
+                seguro_mensal: Centavos::ZERO,
+                tarifa_mensal: Centavos::ZERO,
+            };
+            let parcelas = cronograma(&cfg);
+            let total: i64 = parcelas.iter().map(|p| p.total.0).sum();
+            t.linhas.push(Linha {
+                alvo: None,
+                celulas: vec![
+                    Celula::Texto(if contratado == Some(sistema) {
+                        format!("{nome} (o contratado)")
+                    } else {
+                        nome.to_owned()
+                    }),
+                    self.valor(-parcelas.first().map_or(0, |p| p.total.0), None),
+                    self.valor(-parcelas.last().map_or(0, |p| p.total.0), None),
+                    self.valor(-total_de_juros(&cfg).0, None),
+                    self.valor(-total, None),
+                ],
+            });
+        }
+        t
+    }
+
+    /// As dívidas e as faturas em aberto de um cartão.
+    fn compromissos_do_cartao(&self, id: &str) -> Tabela {
+        let l = &self.livro;
+        let Some(cartao) = l.cartoes.iter().find(|c| c.id == id) else {
+            return self.tabela_mista(Vec::new());
+        };
+        let mut refs: Vec<(Tipo, String)> = l
+            .dividas
+            .iter()
+            .filter(|d| d.conta_id == cartao.conta_id)
+            .map(|d| (Tipo::Divida, d.id.clone()))
+            .collect();
+        refs.extend(
+            l.faturas
+                .iter()
+                .filter(|f| f.cartao_id == cartao.id && f.em_aberto().0 > 0)
+                .map(|f| (Tipo::Fatura, f.id.clone())),
+        );
+        self.tabela_mista(refs)
+    }
+
+    /// As dívidas ligadas a `de` e as parcelas delas.
+    fn parcelas_e_dividas(&self, de: &Ref) -> Tabela {
+        let l = &self.livro;
+        let id = de.chave.as_str();
+        let conta_do_cartao = l
+            .cartoes
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.conta_id.as_str());
+        let dividas: Vec<&str> = l
+            .dividas
+            .iter()
+            .filter(|d| match de.tipo {
+                Tipo::Divida => d.id == id,
+                Tipo::Conta => d.conta_id == id,
+                Tipo::Cartao => conta_do_cartao == Some(d.conta_id.as_str()),
+                Tipo::Fornecedor => d.fornecedor_id.as_deref() == Some(id),
+                _ => false,
+            })
+            .map(|d| d.id.as_str())
+            .collect();
+        let mut refs: Vec<(Tipo, String)> = Vec::new();
+        for d in dividas {
+            refs.push((Tipo::Divida, d.to_owned()));
+            let mut parcelas: Vec<_> = l.parcelas.iter().filter(|p| p.divida_id == d).collect();
+            parcelas.sort_by_key(|p| p.numero);
+            refs.extend(parcelas.into_iter().map(|p| (Tipo::Parcela, p.id.clone())));
+        }
+        self.tabela_mista(refs)
+    }
+
+    /// Os documentos que esperam revisão (`pending_review` ou `drafted` no servidor).
+    fn documentos_a_revisar(&self) -> Tabela {
+        Tabela {
+            colunas: colunas(&[("Documento", false), ("Tipo", false), ("Estado", false)]),
+            linhas: self
+                .documentos
+                .iter()
+                .filter(|d| matches!(d.estado.as_str(), "pending_review" | "drafted"))
+                .map(|d| {
+                    let alvo = Ref::nova(Tipo::Documento, d.id.to_string());
+                    Linha {
+                        alvo: Some(alvo.clone()),
+                        celulas: vec![
+                            Celula::Link {
+                                alvo,
+                                texto: d.nome_do_arquivo.clone(),
+                            },
+                            d.tipo_de_documento
+                                .clone()
+                                .map_or(Celula::Vazia, Celula::Texto),
+                            Celula::Texto(d.estado.clone()),
+                        ],
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    /// As faturas com algo a pagar, da que vence primeiro.
+    fn faturas_abertas(&self) -> Tabela {
+        let mut abertas: Vec<_> = self
+            .livro
+            .faturas
+            .iter()
+            .filter(|f| f.em_aberto().0 > 0)
+            .collect();
+        abertas.sort_by(|a, b| a.vencimento.cmp(&b.vencimento).then(a.id.cmp(&b.id)));
+        Tabela {
+            colunas: colunas(&[
+                ("Fatura", false),
+                ("Vencimento", false),
+                ("Em aberto", true),
+            ]),
+            linhas: abertas
+                .into_iter()
+                .map(|f| {
+                    let alvo = Ref::nova(Tipo::Fatura, f.id.clone());
+                    Linha {
+                        alvo: Some(alvo.clone()),
+                        celulas: vec![
+                            self.link(Tipo::Fatura, Some(&f.id)),
+                            Celula::Data(f.vencimento.to_string()),
+                            self.valor(
+                                -f.em_aberto().0,
+                                Some(PedidoDeTabela::Ligados {
+                                    de: alvo,
+                                    tipo: Tipo::Movimentacao,
+                                }),
+                            ),
+                        ],
+                    }
+                })
+                .collect(),
+        }
     }
 
     fn tabela_de_compromissos(&self, so_os_que_faltam: bool) -> Tabela {
@@ -584,6 +899,35 @@ impl ConsultaDoLivro {
                         Celula::Texto(c.descricao.clone()),
                         self.valor(-c.valor.0, None),
                     ],
+                })
+                .collect(),
+        }
+    }
+
+    /// Uma tabela mista: o tipo e o item (link) de cada referência.
+    fn tabela_mista(&self, refs: Vec<(Tipo, String)>) -> Tabela {
+        Tabela {
+            colunas: colunas(&[("Tipo", false), ("Item", false)]),
+            linhas: refs
+                .into_iter()
+                .map(|(tipo, id)| {
+                    let texto = match tipo {
+                        Tipo::Movimentacao => self
+                            .livro
+                            .movimentacoes
+                            .iter()
+                            .find(|m| m.id == id)
+                            .map_or_else(|| id.clone(), descricao),
+                        _ => self.texto_de(tipo, &id).unwrap_or_else(|| id.clone()),
+                    };
+                    let alvo = Ref::nova(tipo, id);
+                    Linha {
+                        alvo: Some(alvo.clone()),
+                        celulas: vec![
+                            Celula::Texto(format!("{tipo:?}")),
+                            Celula::Link { alvo, texto },
+                        ],
+                    }
                 })
                 .collect(),
         }
@@ -621,32 +965,7 @@ impl ConsultaDoLivro {
                     .map(|m| (Tipo::Movimentacao, m.id.clone())),
             ),
         }
-        Tabela {
-            colunas: colunas(&[("Tipo", false), ("Item", false)]),
-            linhas: refs
-                .into_iter()
-                .map(|(tipo, id)| {
-                    let texto = match tipo {
-                        Tipo::Movimentacao => l
-                            .movimentacoes
-                            .iter()
-                            .find(|m| m.id == id)
-                            .map_or_else(|| id.clone(), descricao),
-                        _ => self
-                            .nome_de(tipo, &id)
-                            .map_or_else(|| id.clone(), str::to_owned),
-                    };
-                    let alvo = Ref::nova(tipo, id);
-                    Linha {
-                        alvo: Some(alvo.clone()),
-                        celulas: vec![
-                            Celula::Texto(format!("{tipo:?}")),
-                            Celula::Link { alvo, texto },
-                        ],
-                    }
-                })
-                .collect(),
-        }
+        self.tabela_mista(refs)
     }
 
     // ---------------- painéis ----------------
@@ -860,6 +1179,15 @@ impl ConsultaDoLivro {
             }],
             avisos: Vec::new(),
         }
+    }
+}
+
+/// A taxa mensal equivalente a uma anual: `(1 + a)^(1/12) − 1`, em milionésimos.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn taxa_mensal_da_anual(anual: Taxa) -> Taxa {
+    let mensal = (1.0 + anual.fracao()).powf(1.0 / 12.0) - 1.0;
+    Taxa {
+        milionesimos: (mensal * 1_000_000.0).round() as i64,
     }
 }
 
@@ -1089,14 +1417,38 @@ impl Consulta for ConsultaDoLivro {
 
     fn relatorio(
         &self,
-        _pergunta: Pergunta,
-        _fonte: sbf_inventario::consulta::Fonte,
-        _filtro: &Filtro,
+        pergunta: Pergunta,
+        fonte: sbf_inventario::consulta::Fonte,
+        filtro: &Filtro,
     ) -> ResultadoDeConsulta<Painel> {
-        Err(ErroDeConsulta::NaoSuportado(
-            "os Relatórios do livro-caixa usam `responder_com` com `ConsultaDoLivro::gastos`"
-                .to_owned(),
-        ))
+        if fonte != sbf_inventario::consulta::Fonte::LivroCaixa {
+            return Err(ErroDeConsulta::NaoSuportado(
+                "o livro-caixa não responde pelo inventário".to_owned(),
+            ));
+        }
+        if matches!(
+            pergunta,
+            Pergunta::NaoClassificado
+                | Pergunta::PossiveisDuplicidades
+                | Pergunta::OQueFaltaParaConfiar
+        ) {
+            return Err(ErroDeConsulta::NaoSuportado(
+                "esta pergunta é do inventário (achados, duplicidades e lacunas da coleta)"
+                    .to_owned(),
+            ));
+        }
+        // As cinco perguntas de gasto não leem o banco do inventário: o contexto é um banco
+        // vazio em memória.
+        let vazio = rusqlite::Connection::open_in_memory()
+            .map_err(|e| ErroDeConsulta::Banco(e.to_string()))?;
+        let ctx = Contexto::novo(&vazio)?;
+        relatorios::responder_com(
+            &self.gastos(),
+            &ctx,
+            pergunta,
+            filtro,
+            &self.hoje.to_string(),
+        )
     }
 
     fn contagens(&self) -> ResultadoDeConsulta<Contagens> {
