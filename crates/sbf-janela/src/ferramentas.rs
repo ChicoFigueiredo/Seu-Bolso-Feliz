@@ -27,6 +27,26 @@ use crate::pagina::Vista;
 use crate::tabela;
 use crate::tema;
 
+/// O rótulo da senha da cópia de segurança no chaveiro (`senha:copia-de-seguranca`).
+pub const ROTULO_DA_SENHA_DA_COPIA: &str = "copia-de-seguranca";
+
+/// A mensagem de um erro da estante ou da cópia, em português e com o que fazer.
+pub fn mensagem_da_copia(e: &sbf_estante::Erro) -> String {
+    use sbf_estante::Erro as E;
+    match e {
+        E::SenhaCurta { minimo } => format!(
+            "A senha da cópia precisa de pelo menos {minimo} caracteres. Use uma mais longa (ou deixe o app gerar uma)."
+        ),
+        E::DestinoSemSal => "O destino da cópia já tem arquivos de outra origem e não tem o sal-da-copia.txt desta cópia. Escolha uma pasta vazia em Opções.".to_owned(),
+        E::SalInvalido => "O sal-da-copia.txt no destino da cópia está adulterado. Nada foi copiado: confira a pasta do destino.".to_owned(),
+        E::TempoEsgotado { comando } => format!(
+            "O rclone ({comando}) passou do limite de tempo. Confira a conexão com o Drive e tente de novo."
+        ),
+        E::Aleatorio => "O sistema não entregou números aleatórios para a senha ou o sal. Tente de novo; se repetir, reinicie o computador.".to_owned(),
+        outro => format!("A cópia não foi feita: {outro}"),
+    }
+}
+
 /// O motivo da estante e da cópia sem destino.
 pub const MOTIVO_SEM_DESTINO: &str = "Configure o destino em Opções";
 
@@ -55,8 +75,10 @@ enum Resultado {
     Regras(Arc<Tabela>),
     Estante(RelatorioDaEstante),
     Copia(RelatorioDaCopia),
-    /// Pede a senha da cópia antes de começar.
+    /// Pede a senha da cópia antes de começar (escolhida pelo usuário, sem chaveiro).
     PedirSenhaDaCopia,
+    /// A senha nova da cópia, gerada e guardada no chaveiro, mostrada **uma vez**.
+    SenhaNovaDaCopia(Segredo),
     Erro(String),
 }
 
@@ -165,6 +187,7 @@ impl Ferramentas {
             Resultado::Estante(r) => format!("estante: {} enviados", r.enviados),
             Resultado::Copia(r) => format!("cópia: {}", r.quando),
             Resultado::PedirSenhaDaCopia => "cópia: pedindo a senha".to_owned(),
+            Resultado::SenhaNovaDaCopia(_) => "cópia: senha nova mostrada uma vez".to_owned(),
             Resultado::Erro(e) => format!("erro: {e}"),
         })
     }
@@ -253,7 +276,8 @@ impl Ferramentas {
         self.comecar("Atualizar estante", move |andamento| {
             let r = (|| -> Result<RelatorioDaEstante, String> {
                 let inv = Inventario::abrir(&banco).map_err(|e| e.to_string())?;
-                let estante = Estante::nova(Rclone::novo(), destino).map_err(|e| e.to_string())?;
+                let estante =
+                    Estante::nova(Rclone::novo(), destino).map_err(|e| mensagem_da_copia(&e))?;
                 let progresso = |a: sbf_estante::Andamento| {
                     let fase = match a.fase {
                         Fase::Planejando => "planejando",
@@ -264,34 +288,60 @@ impl Ferramentas {
                     andamento(format!("{fase}: {} de {}", a.feitos, a.total));
                 };
                 let resultado = estante.atualizar(inv.conexao(), &cofre, &progresso);
-                resultado.map_err(|e| e.to_string())
+                resultado.map_err(|e| mensagem_da_copia(&e))
             })();
             Evento::Estante(r)
         });
     }
 
-    /// Ferramentas › Fazer cópia de segurança: pede a senha antes.
+    /// Ferramentas › Fazer cópia de segurança.
+    ///
+    /// Com a senha da cópia no chaveiro (`senha:copia-de-seguranca`), copia direto. Sem
+    /// ela, gera uma (150 bits), guarda no chaveiro e mostra **uma vez**, com o aviso; a
+    /// cópia só começa depois do "Copiei a senha e guardei fora do computador". Sem
+    /// chaveiro, pede uma senha escolhida (16 caracteres no mínimo).
     pub fn pedir_copia(&mut self) {
         if self.destino_da_copia.trim().is_empty() {
             self.resultado = Some(Resultado::Erro(MOTIVO_SEM_DESTINO.to_owned()));
             return;
         }
-        self.resultado = Some(Resultado::PedirSenhaDaCopia);
+        let Some(chaveiro) = self.chaveiro.clone() else {
+            self.resultado = Some(Resultado::PedirSenhaDaCopia);
+            return;
+        };
+        if let Ok(senha) = chaveiro.senha(ROTULO_DA_SENHA_DA_COPIA) {
+            self.fazer_copia(senha);
+            return;
+        }
+        self.resultado = Some(
+            match sbf_estante::copia::gerar_senha_da_copia()
+                .map_err(|e| mensagem_da_copia(&e))
+                .and_then(|senha| {
+                    chaveiro
+                        .guardar_senha(ROTULO_DA_SENHA_DA_COPIA, senha.clone())
+                        .map(|()| senha)
+                        .map_err(|e| {
+                            format!("Não deu para guardar a senha da cópia no chaveiro: {e}")
+                        })
+                }) {
+                Ok(senha) => Resultado::SenhaNovaDaCopia(senha),
+                Err(e) => Resultado::Erro(e),
+            },
+        );
     }
 
-    fn fazer_copia(&mut self) {
-        let senha = Segredo::novo(std::mem::take(&mut self.senha_da_copia));
+    fn fazer_copia(&mut self, senha: Segredo) {
         let destino = self.destino_da_copia.trim().to_owned();
         let (banco, cofre) = (self.banco.clone(), self.cofre.clone());
         self.comecar("Fazer cópia de segurança", move |andamento| {
             andamento("copiando o banco e o acervo, cifrados…".to_owned());
             let r = (|| -> Result<RelatorioDaCopia, String> {
                 let inv = Inventario::abrir(&banco).map_err(|e| e.to_string())?;
-                let copia =
-                    CopiaDeSeguranca::nova(Rclone::novo(), destino).map_err(|e| e.to_string())?;
+                let copia = CopiaDeSeguranca::nova(Rclone::novo(), destino)
+                    .map_err(|e| mensagem_da_copia(&e))?;
                 copia
                     .fazer(inv.conexao(), &cofre, &senha)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| mensagem_da_copia(&e))
             })();
             Evento::Copia(r)
         });
@@ -445,6 +495,7 @@ impl Ferramentas {
         let p = tema::paleta(ctx);
         let mut fechar = false;
         let mut copiar = false;
+        let mut confirmou_senha: Option<Segredo> = None;
         let titulo = self
             .tarefa
             .as_ref()
@@ -453,9 +504,11 @@ impl Ferramentas {
                 Some(Resultado::Pdf { .. }) => "Abrir PDF protegido".to_owned(),
                 Some(Resultado::Regras(_)) => "Regras de senha".to_owned(),
                 Some(Resultado::Estante(_)) => "Atualizar estante".to_owned(),
-                Some(Resultado::Copia(_) | Resultado::PedirSenhaDaCopia) => {
-                    "Fazer cópia de segurança".to_owned()
-                }
+                Some(
+                    Resultado::Copia(_)
+                    | Resultado::PedirSenhaDaCopia
+                    | Resultado::SenhaNovaDaCopia(_),
+                ) => "Fazer cópia de segurança".to_owned(),
                 _ => "Ferramentas".to_owned(),
             });
         egui::Window::new(RichText::new(titulo).strong())
@@ -525,6 +578,25 @@ impl Ferramentas {
                             r.quando, r.arquivos_do_acervo, r.banco
                         ));
                     }
+                    Some(Resultado::SenhaNovaDaCopia(senha)) => {
+                        componentes::aviso(ui, "warning", AVISO_DA_SENHA, p.aviso_sutil, p.aviso_borda, p.aviso);
+                        ui.label("A senha da cópia de segurança (aparece só agora):");
+                        let mut texto = senha.expor().to_owned();
+                        ui.add(
+                            egui::TextEdit::singleline(&mut texto)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY),
+                        );
+                        texto.clear();
+                        ui.label(
+                            RichText::new("Ela também ficou guardada no chaveiro, para as próximas cópias.")
+                                .size(12.0)
+                                .color(p.tinta_suave),
+                        );
+                        if ui.button("Copiei a senha e guardei fora do computador").clicked() {
+                            confirmou_senha = Some(senha.clone());
+                        }
+                    }
                     Some(Resultado::PedirSenhaDaCopia) => {
                         componentes::aviso(ui, "warning", AVISO_DA_SENHA, p.aviso_sutil, p.aviso_borda, p.aviso);
                         ui.label("Senha da cópia de segurança");
@@ -549,7 +621,11 @@ impl Ferramentas {
                 });
             });
         if copiar {
-            self.fazer_copia();
+            let senha = Segredo::novo(std::mem::take(&mut self.senha_da_copia));
+            self.fazer_copia(senha);
+        }
+        if let Some(senha) = confirmou_senha {
+            self.fazer_copia(senha);
         }
         if fechar {
             self.resultado = None;
@@ -665,11 +741,13 @@ impl Ferramentas {
     pub fn destinos_ui(&mut self, ui: &mut Ui) {
         let p = tema::paleta(ui.ctx());
         ui.label("Destino da estante (remoto do rclone, por exemplo gdrive:SBF/Estante)");
-        ui.add(
+        let a = ui.add(
             egui::TextEdit::singleline(&mut self.destino_da_estante).desired_width(f32::INFINITY),
         );
         ui.label("Destino da cópia de segurança (por exemplo gdrive:SBF/Copia-de-seguranca)");
-        ui.add(egui::TextEdit::singleline(&mut self.destino_da_copia).desired_width(f32::INFINITY));
+        let b = ui.add(
+            egui::TextEdit::singleline(&mut self.destino_da_copia).desired_width(f32::INFINITY),
+        );
         ui.label(
             RichText::new(
                 "Sem destino, Atualizar estante e Fazer cópia de segurança ficam desabilitadas.",
@@ -677,11 +755,82 @@ impl Ferramentas {
             .size(12.0)
             .color(p.tinta_suave),
         );
-        ui.checkbox(
+        let c = ui.checkbox(
             &mut self.tentar_estrategias_padrao,
             "PDF protegido: tentar estratégias padrão",
         );
+        if (a.lost_focus() || b.lost_focus() || c.changed())
+            && let Err(e) = self.salvar_preferencias()
+        {
+            ui.colored_label(p.perigo, format!("Não deu para guardar as opções: {e}"));
+        }
+        if let Some(arquivo) = self.arquivo_de_preferencias() {
+            ui.label(
+                RichText::new(format!("Guardadas em {}", arquivo.display()))
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
+        }
     }
+
+    /// O arquivo das opções das Ferramentas: na pasta de dados do app, nunca no cofre.
+    pub fn arquivo_de_preferencias(&self) -> Option<PathBuf> {
+        let pasta = sbf_chaveiro::pasta_de_dados_do_app().ok()?;
+        sbf_chaveiro::garantir_fora_do_cofre(&pasta, &self.cofre).ok()?;
+        Some(pasta.join("preferencias-das-ferramentas.json"))
+    }
+
+    /// Lê os destinos e a opção do PDF guardados (sem arquivo, fica tudo vazio).
+    pub fn carregar_preferencias(&mut self) {
+        let Some(arquivo) = self.arquivo_de_preferencias() else {
+            return;
+        };
+        let Ok(texto) = std::fs::read_to_string(arquivo) else {
+            return;
+        };
+        let Ok(p) = serde_json::from_str::<PreferenciasDasFerramentas>(&texto) else {
+            return;
+        };
+        self.destino_da_estante = p.destino_da_estante;
+        self.destino_da_copia = p.destino_da_copia;
+        self.tentar_estrategias_padrao = p.tentar_estrategias_padrao;
+    }
+
+    /// Grava os destinos e a opção do PDF.
+    pub fn salvar_preferencias(&self) -> Result<(), String> {
+        let arquivo = self
+            .arquivo_de_preferencias()
+            .ok_or("sem pasta de dados do app (ou ela fica dentro do cofre)")?;
+        if let Some(pasta) = arquivo.parent() {
+            std::fs::create_dir_all(pasta).map_err(|e| e.to_string())?;
+        }
+        let p = PreferenciasDasFerramentas {
+            destino_da_estante: self.destino_da_estante.trim().to_owned(),
+            destino_da_copia: self.destino_da_copia.trim().to_owned(),
+            tentar_estrategias_padrao: self.tentar_estrategias_padrao,
+        };
+        let texto = serde_json::to_string_pretty(&p).map_err(|e| e.to_string())?;
+        std::fs::write(arquivo, texto).map_err(|e| e.to_string())
+    }
+
+    /// Ao abrir: apaga as sobras de cópias interrompidas (`<cofre>/tmp/copia-*` com mais de
+    /// um dia), numa thread.
+    pub fn faxinar_sobras_em_segundo_plano(&self) {
+        let cofre = self.cofre.clone();
+        std::thread::spawn(move || {
+            let _ = sbf_estante::copia::faxinar_sobras(&cofre, sbf_estante::copia::IDADE_DA_SOBRA);
+        });
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct PreferenciasDasFerramentas {
+    #[serde(default)]
+    destino_da_estante: String,
+    #[serde(default)]
+    destino_da_copia: String,
+    #[serde(default)]
+    tentar_estrategias_padrao: bool,
 }
 
 fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
@@ -690,6 +839,7 @@ fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
     let mut sem_texto = 0;
     let mut pendencias = 0;
     let mut nao_abriu = 0;
+    let mut grandes = 0;
     let mut outros = 0;
     for x in &r.resultados {
         match x.situacao {
@@ -697,11 +847,12 @@ fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
             SituacaoDoPdf::SemTexto { .. } => sem_texto += 1,
             SituacaoDoPdf::Pendencia { .. } => pendencias += 1,
             SituacaoDoPdf::NaoAbriu => nao_abriu += 1,
+            SituacaoDoPdf::GrandeDemais => grandes += 1,
             _ => outros += 1,
         }
     }
     ui.label(format!(
-        "{} PDFs protegidos: {abertos} abertos, {sem_texto} sem texto (OCR numa fatia futura), {pendencias} viraram pendência, {nao_abriu} ainda não abriram, {outros} com falha ou sem arquivo.",
+        "{} PDFs protegidos: {abertos} abertos, {sem_texto} sem texto (OCR numa fatia futura), {pendencias} viraram pendência, {nao_abriu} ainda não abriram, {grandes} grandes demais (acima de 50 MiB), {outros} com falha ou sem arquivo.",
         r.resultados.len()
     ));
     if r.resultados.is_empty() {
@@ -754,6 +905,22 @@ fn abrir_no_sistema(caminho: &Path, so_a_pasta: bool) -> Result<(), String> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn erros_da_copia_tem_mensagem_clara() {
+        use sbf_estante::Erro as E;
+        let m = mensagem_da_copia(&E::SenhaCurta { minimo: 16 });
+        assert!(m.contains("16 caracteres"), "{m}");
+        assert!(mensagem_da_copia(&E::DestinoSemSal).contains("sal-da-copia.txt"));
+        assert!(mensagem_da_copia(&E::SalInvalido).contains("adulterado"));
+        assert!(
+            mensagem_da_copia(&E::TempoEsgotado {
+                comando: "lsf".into()
+            })
+            .contains("limite de tempo")
+        );
+        assert!(mensagem_da_copia(&E::Aleatorio).contains("aleatórios"));
+    }
 
     #[test]
     fn situacao_do_chaveiro_em_palavras() {

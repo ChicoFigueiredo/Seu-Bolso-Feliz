@@ -111,6 +111,8 @@ impl AppDoInventario {
                     Ok(c) => f.chaveiro = Some(c),
                     Err(e) => f.erro_do_chaveiro = Some(e),
                 }
+                f.carregar_preferencias();
+                f.faxinar_sobras_em_segundo_plano();
                 janela.ferramentas = Some(f);
                 janela.pre_carregar_visao_geral(inventario.caminho().to_path_buf());
                 if let Some(t) = aviso {
