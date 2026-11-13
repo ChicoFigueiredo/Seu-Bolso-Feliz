@@ -1,6 +1,8 @@
 //! INV-11: a estante tem só documentos, com o nome de `vista-nome`, bytes originais,
 //! PDF protegido protegido, e é incremental (correção vira rename).
 
+#![cfg(unix)]
+
 mod comum;
 
 use comum::{Doc, arvore, inserir, nomes, novo_banco, rclone_com_registro};

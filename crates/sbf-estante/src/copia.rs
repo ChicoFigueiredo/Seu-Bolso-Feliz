@@ -22,7 +22,7 @@
 //! `banco/inventario-<AAAA-MM-DDTHHMMSSZ>-<sha256 16>.sqlite`, e a restauração confere.
 
 use crate::erro::{Erro, Resultado};
-use crate::rclone::{Rclone, VariavelDeAmbiente, juntar, validar_destino};
+use crate::rclone::{Rclone, VariavelDeAmbiente, validar_destino};
 use bancada_armazem::{copiar_banco, verificar_integridade_de_arquivo};
 use bancada_segredos::Segredo;
 use rusqlite::Connection;
@@ -272,12 +272,6 @@ impl CopiaDeSeguranca {
     #[must_use]
     pub fn destino(&self) -> &str {
         &self.destino
-    }
-
-    /// Pasta de um caminho dentro do destino cifrado (para o teste de que nada legível vaza).
-    #[must_use]
-    pub fn caminho_cifrado_base(&self) -> String {
-        juntar(&self.destino, "")
     }
 }
 
