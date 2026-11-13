@@ -163,6 +163,13 @@ responder, como "PDF protegido sem regra". Só vale nesse sentido: um compromiss
 alteração nunca é chamado de pendência.
 _Avoid_: dúvida, tarefa, alerta, bloqueio
 
+**Rastro**:
+A cadeia que liga um item ao que o originou e ao que ele originou. Para trás, uma
+movimentação passa pelo registro, pelo documento, pela origem onde foi achado e pelas
+decisões no caminho. Para a frente, uma origem leva às movimentações e aos rateios que
+gerou. Todo item tem rastro, e todo total abre os itens que o somam.
+_Avoid_: trilha (é o caminho de navegação na tela), histórico, log, auditoria, proveniência
+
 **Promoção**:
 A passagem de um lote de achados aprovados do inventário para a caixa de entrada do
 servidor. É o único caminho de uma fonte em massa até o livro-caixa.

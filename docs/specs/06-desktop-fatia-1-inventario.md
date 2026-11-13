@@ -149,6 +149,11 @@ movimentações dele.
   "Registros · a conferir" vem do inventário (fatia 1). Um registro já promovido mostra
   o link da movimentação em que virou. Nesta fatia, as abas do livro-caixa aparecem
   desabilitadas, com o motivo.
+- **Rastro:** toda página tem a aba Rastro, que mostra a cadeia de proveniência. Para
+  trás vai até a origem e a conexão. Para a frente vai até a movimentação, o rateio e os
+  centros. Cada elo é um link e diz quem decidiu (você ou `regras@2`) e quando.
+- **Todo total é clicável:** em conta, cartão, dívida, centro, fornecedor, ciclo e
+  qualquer outro lugar, o número abre a lista dos itens que o somam.
 - **Histórico:** Voltar e Avançar (Alt+←/→ e os botões laterais do mouse), com a trilha
   "Fornecedores › Energia Exemplo".
 - **Em paralelo:** Ctrl+clique abre a página num painel flutuante, que pode ser
@@ -437,6 +442,7 @@ Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (r
 | INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                          |
 | INV-18 | Cada resposta do §11 bate com uma consulta de referência sobre o banco de teste e leva "a conferir". Nenhum termo do livro-caixa aparece na fatia.                                                                                                       |
 | INV-19 | Todo nome visível é link para a página do item. A página do fornecedor lista os registros dele e os documentos, com as abas do livro-caixa desabilitadas com o motivo. Voltar e Avançar refazem o caminho. Ctrl+clique abre em painel flutuante. |
+| INV-20 | De qualquer conta, cartão, dívida, centro ou fornecedor se chega a cada registro e movimentação ligados. Todo total abre os itens que o somam. A aba Rastro de um item leva até a origem para trás e até os centros para a frente. |
 
 ## Tickets e paralelização
 
