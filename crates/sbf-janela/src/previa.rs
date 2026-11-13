@@ -358,8 +358,28 @@ impl Previas {
         }
         self.limites = (documentos, bytes);
         if let Ok(mut c) = self.cache.lock() {
-            *c = sbf_previa::Cache::novo(documentos, bytes);
+            c.ajustar(documentos, bytes);
         }
+    }
+
+    /// Esquece tudo o que abriu, inclusive páginas de PDF decifrado e as texturas delas.
+    /// Chame quando o chaveiro for trancado.
+    pub fn esquecer_tudo(&mut self) {
+        if let Ok(mut c) = self.cache.lock() {
+            c.limpar();
+        }
+        self.resumos.clear();
+        self.texturas.clear();
+        self.falhas.clear();
+        self.em_voo.clear();
+        if let Ok(mut f) = self.fila.estado.lock() {
+            f.trabalhos.clear();
+        }
+    }
+
+    /// Quantos documentos o cache guarda agora.
+    pub fn documentos_no_cache(&self) -> usize {
+        self.cache.lock().map(|c| c.documentos()).unwrap_or(0)
     }
 
     /// Esquece o que leu do inventário (depois de uma decisão ou de Atualizar). As
@@ -1912,6 +1932,16 @@ pub fn abrir_no_sistema(caminho: &Path) -> Result<(), String> {
     let absoluto =
         std::fs::canonicalize(caminho).map_err(|e| format!("Não achei o arquivo: {e}"))?;
     sbf_processo::abrir_no_sistema(&absoluto, false).map_err(|e| format!("Não deu para abrir: {e}"))
+}
+
+/// Apaga as sobras da conversão do Office de uma sessão anterior, numa thread (na abertura
+/// do app).
+pub fn faxinar_sobras_em_segundo_plano() {
+    let _ = std::thread::Builder::new()
+        .name("sbf-previa-faxina".to_owned())
+        .spawn(|| {
+            let _ = sbf_previa::faxinar_sobras();
+        });
 }
 
 /// As candidatas do inventário real: as regras de senha do fornecedor e tipo do achado,

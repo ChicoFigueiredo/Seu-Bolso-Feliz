@@ -124,6 +124,7 @@ pub struct Janela {
     pub ferramentas: Option<crate::ferramentas::Ferramentas>,
     /// A prévia do arquivo (painel, aba Arquivo, destacadas e a dica).
     pub previas: crate::previa::Previas,
+    chaveiro_trancado: bool,
     visao_geral_pendente:
         Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
     /// Primeiros pedaços de áreas pedidos numa thread (no inventário real), por pedido.
@@ -221,6 +222,7 @@ impl Janela {
             na_casca: false,
             ferramentas: None,
             previas: crate::previa::Previas::nova(),
+            chaveiro_trancado: false,
             visao_geral_pendente: None,
             pedacos_pendentes: HashMap::new(),
         }
@@ -248,6 +250,15 @@ impl Janela {
             return;
         };
         let terminou = f.sondar(ctx);
+        // Chaveiro trancado: a prévia esquece o PDF decifrado (memória e texturas).
+        let trancado = f
+            .chaveiro
+            .as_ref()
+            .is_some_and(|c| c.situacao() == sbf_chaveiro::Situacao::ArquivoTrancado);
+        if trancado && !self.chaveiro_trancado {
+            self.previas.esquecer_tudo();
+        }
+        self.chaveiro_trancado = trancado;
         f.janela_ui(ctx, &mut self.pedidos);
         if terminou {
             self.atualizar();

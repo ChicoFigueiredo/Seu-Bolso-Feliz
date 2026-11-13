@@ -141,6 +141,8 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
 }
 
 fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
+    // As sobras da conversão do Office de uma sessão interrompida (pasta 0700 em tmpfs).
+    sbf_janela::previa::faxinar_sobras_em_segundo_plano();
     let opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Seu Bolso Feliz")
