@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Layout, RichText, Ui};
 use sbf_disco::Cifra;
-use sbf_inventario::banco::{Inventario, MigracaoFeita, PlanoDeMigracao};
+use sbf_inventario::banco::{EtapaDaMigracao, Inventario, MigracaoFeita, PlanoDeMigracao};
 use sbf_inventario::leitor::LeitorSqlite;
 use sbf_janela::ferramentas::{self, Ferramentas};
 use sbf_janela::{EstadoDaBarra, Janela, componentes, tema};
@@ -34,6 +34,8 @@ enum Tela {
         inicio: Instant,
         copia: PathBuf,
         tarefa: Option<Migracao>,
+        etapas: std::sync::mpsc::Receiver<String>,
+        etapa: String,
     },
     /// Não deu para abrir a janela completa.
     Pronto { aviso: String },
@@ -140,22 +142,39 @@ impl AppDoInventario {
             return;
         };
         let destino = copia.clone();
+        let (tx, etapas) = std::sync::mpsc::channel();
         let tarefa = std::thread::spawn(move || {
-            let r = inventario.migrar(&destino).map_err(|e| e.to_string());
+            let andamento = |e: EtapaDaMigracao| {
+                let _ = tx.send(texto_da_etapa(&e));
+            };
+            let r = inventario
+                .migrar_com_andamento(&destino, &andamento)
+                .map_err(|e| e.to_string());
             (inventario, r)
         });
         self.tela = Tela::Migrando {
             inicio: Instant::now(),
             copia,
             tarefa: Some(tarefa),
+            etapas,
+            etapa: "começando…".to_owned(),
         };
     }
 
     /// A migração terminou? Liga a janela (ou volta ao plano com o erro).
     fn sondar_migracao(&mut self) {
-        let Tela::Migrando { tarefa, .. } = &mut self.tela else {
+        let Tela::Migrando {
+            tarefa,
+            etapas,
+            etapa,
+            ..
+        } = &mut self.tela
+        else {
             return;
         };
+        while let Ok(e) = etapas.try_recv() {
+            *etapa = e;
+        }
         if !tarefa.as_ref().is_some_and(JoinHandle::is_finished) {
             return;
         }
@@ -196,6 +215,18 @@ impl AppDoInventario {
                 };
             }
         }
+    }
+}
+
+fn texto_da_etapa(e: &EtapaDaMigracao) -> String {
+    match e {
+        EtapaDaMigracao::Copia => "Copiando o banco (cópia de antes da migração)…".to_owned(),
+        EtapaDaMigracao::ConferenciaDaCopia => "Conferindo a cópia…".to_owned(),
+        EtapaDaMigracao::Adocao => "Adotando o banco do Bun…".to_owned(),
+        EtapaDaMigracao::Migracao { versao, descricao } => {
+            format!("Migração {versao}: {descricao}…")
+        }
+        EtapaDaMigracao::Conferencia => "Conferindo o banco migrado…".to_owned(),
     }
 }
 
@@ -275,16 +306,22 @@ impl eframe::App for AppDoInventario {
                                     }
                                 });
                             }
-                            Tela::Migrando { inicio, copia, .. } => {
+                            Tela::Migrando {
+                                inicio,
+                                copia,
+                                etapa,
+                                ..
+                            } => {
                                 componentes::titulo(ui, "Migrando o inventário", 20.0);
                                 ui.horizontal(|ui| {
                                     ui.add(egui::Spinner::new());
-                                    ui.label(format!(
-                                        "Copiando o banco para {} e migrando… {} s",
-                                        copia.display(),
-                                        inicio.elapsed().as_secs()
-                                    ));
+                                    ui.label(format!("{etapa} · {} s", inicio.elapsed().as_secs()));
                                 });
+                                ui.label(
+                                    RichText::new(format!("Cópia de antes: {}", copia.display()))
+                                        .size(12.0)
+                                        .color(p.tinta_suave),
+                                );
                                 ui.label(
                                     RichText::new(
                                         "Num inventário grande isso leva dezenas de segundos. Não feche a janela.",
