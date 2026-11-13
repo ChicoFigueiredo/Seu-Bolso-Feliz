@@ -235,7 +235,7 @@ fn app_de_demonstracao() -> Result<App, String> {
         .map_err(|e| format!("os temas não carregaram: {e}"))
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -280,6 +280,7 @@ fn main() -> ExitCode {
         },
         None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
         Some("servidor") => servidor::rodar(&args[1..]),
+        Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {
             let (Some("--inventario"), Some(pasta)) =
                 (args.get(1).map(String::as_str), args.get(2))

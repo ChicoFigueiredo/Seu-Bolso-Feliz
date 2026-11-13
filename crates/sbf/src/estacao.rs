@@ -262,6 +262,68 @@ fn parear(
     Ok(())
 }
 
+/// `sbf estacao importar-credencial [--servidor <url>]`: lê a credencial da entrada padrão
+/// (nunca de argv, que aparece em `ps`) e a guarda no chaveiro, onde o pareamento normal a
+/// guardaria. A estação conta como pareada na próxima abertura (a credencial no chaveiro é
+/// o que `pareada()` confere).
+pub fn importar_credencial_cli(args: &[String]) -> std::process::ExitCode {
+    use std::io::Read;
+    let falha = |m: &str| {
+        eprintln!(
+            "sbf estacao: {m}\nuso: sbf estacao importar-credencial [--servidor <url>] < credencial"
+        );
+        std::process::ExitCode::from(2)
+    };
+    let base = match args {
+        [c] if c == "importar-credencial" => None,
+        [c, f, v] if c == "importar-credencial" && f == "--servidor" => Some(v.clone()),
+        _ => return falha("argumentos inválidos"),
+    };
+    let mut texto = zeroize::Zeroizing::new(String::new());
+    if std::io::stdin()
+        .take(4096)
+        .read_to_string(&mut texto)
+        .is_err()
+    {
+        return falha("não deu para ler a credencial da entrada padrão");
+    }
+    let chaveiro = match sbf_janela::ferramentas::abrir_chaveiro_com_espera(Duration::from_secs(3))
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("sbf estacao: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    match importar(&chaveiro, base, &texto) {
+        Ok(msg) => {
+            println!("{msg}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("sbf estacao: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// O miolo testável: valida, guarda e devolve a mensagem de sucesso.
+fn importar(
+    guarda: &dyn GuardaDeCredencial,
+    servidor: Option<String>,
+    texto: &str,
+) -> Result<String, String> {
+    let base = servidor
+        .or_else(|| std::env::var("SBF_SERVIDOR").ok())
+        .unwrap_or_else(|| SERVIDOR_PADRAO.to_owned());
+    let (oficial, _) = servidor_de(&base)?;
+    sbf_estacao::importar_credencial(guarda, oficial.host(), texto).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "estação pareada com {}",
+        base.trim().trim_end_matches('/')
+    ))
+}
+
 /// O que o quadro faz com a estação: "ticar" e reler a cópia.
 pub struct Ligacao {
     estacao: Arc<Mutex<EstacaoLocal>>,
@@ -359,6 +421,31 @@ fn abrir_do_ambiente(cofre: Option<&Path>) -> Result<EstacaoLocal, String> {
 mod testes {
     use super::*;
     use sbf_estacao::GuardaEmMemoria;
+
+    const CRED: &str =
+        "sbfe_0123456789abcdef0123456789abcdef_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde";
+
+    #[test]
+    fn importar_guarda_onde_o_pareamento_guarda_e_so_diz_o_servidor() {
+        let guarda = GuardaEmMemoria::default();
+        let msg = importar(&guarda, Some("http://127.0.0.1:8788".into()), CRED).unwrap();
+        assert_eq!(msg, "estação pareada com http://127.0.0.1:8788");
+        assert!(!msg.contains("sbfe_"));
+        assert!(guarda.tem("127.0.0.1:8788"));
+    }
+
+    #[test]
+    fn importar_recusa_credencial_invalida() {
+        let guarda = GuardaEmMemoria::default();
+        let e = importar(
+            &guarda,
+            Some("http://127.0.0.1:8788".into()),
+            "lixo-secreto",
+        )
+        .unwrap_err();
+        assert!(!e.contains("lixo-secreto"));
+        assert!(!guarda.tem("127.0.0.1:8788"));
+    }
     use sbf_inventario::alteracao::EstadoDaRede;
 
     #[test]

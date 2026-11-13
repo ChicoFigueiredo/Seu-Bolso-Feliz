@@ -650,3 +650,43 @@ async fn alteracao_fora_do_contrato() {
         .await;
     assert_eq!(r.corpo["codigo"], "pedido_invalido");
 }
+
+#[tokio::test]
+async fn emitir_credencial_cria_estacao_que_autentica_e_so_guarda_hash() {
+    let Some(amb) = ambiente().await else { return };
+    let (dono, email, _sub) = novo_dono(&amb).await;
+    let mut c = amb.banco.get().await.unwrap();
+    let (estacao, credencial) =
+        sbf_servidor::estacoes::emitir_credencial(&mut c, &email.to_uppercase(), "Casa", "linux")
+            .await
+            .expect("emitir");
+    assert!(credencial.starts_with("sbfe_"));
+    assert_eq!(estacao.nome, "Casa");
+    let linha = c
+        .query_one(
+            "SELECT row_to_json(e)::text AS t, user_id, octet_length(credencial_sha256) AS n \
+             FROM public.estacoes e WHERE id = $1",
+            &[&estacao.id],
+        )
+        .await
+        .unwrap();
+    let texto: String = linha.get("t");
+    assert!(!texto.contains(credencial.rsplit('_').next().unwrap()));
+    assert_eq!(linha.get::<_, uuid::Uuid>("user_id"), dono);
+    assert_eq!(linha.get::<_, i32>("n"), 32);
+    // A credencial emitida autentica na API como a do pareamento.
+    let r = amb.get("/api/v1/estado", &credencial).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.corpo);
+
+    // E-mail sem cadastro e nome vazio são recusados, sem criar nada.
+    assert!(
+        sbf_servidor::estacoes::emitir_credencial(&mut c, "ninguem@example.com", "X", "linux")
+            .await
+            .is_err()
+    );
+    assert!(
+        sbf_servidor::estacoes::emitir_credencial(&mut c, &email, "  ", "linux")
+            .await
+            .is_err()
+    );
+}

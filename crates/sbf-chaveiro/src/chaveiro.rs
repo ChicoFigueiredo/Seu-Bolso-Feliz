@@ -223,8 +223,7 @@ impl Chaveiro {
 
     /// Há credencial guardada para `servidor` (sem ler o valor).
     pub fn tem_credencial_de_estacao(&self, servidor: &str) -> bool {
-        Self::chave_de_estacao(servidor)
-            .is_ok_and(|chave| self.guarda.rotulos().contains(&chave))
+        Self::chave_de_estacao(servidor).is_ok_and(|chave| self.guarda.rotulos().contains(&chave))
     }
 
     /// Apaga a credencial de `servidor` (estação revogada). Apagar o que não existe não é
