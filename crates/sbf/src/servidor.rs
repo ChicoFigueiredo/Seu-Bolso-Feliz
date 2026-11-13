@@ -4,6 +4,8 @@
 //! - `sbf servidor estacoes`: lista as estações de todos os donos (administração);
 //! - `sbf servidor revogar <id-da-estacao>`: revoga uma estação, para quando a única
 //!   estação foi roubada e não há outra para revogar pela área Sincronização.
+//! - `sbf servidor emitir-credencial --email <e-mail> --nome <estação> [--sistema linux]`:
+//!   pareamento administrativo, sem Google; imprime só a credencial no stdout.
 //!
 //! A URL do banco vem **só** de `SBF_DATABASE_URL` (nunca de argv, que aparece em `ps`),
 //! e o client id do Google de `SBF_GOOGLE_CLIENT_ID`. O servidor escuta só em loopback:
@@ -15,7 +17,7 @@ use std::process::ExitCode;
 use zeroize::Zeroizing;
 
 const ENDERECO_PADRAO: &str = "127.0.0.1:8787";
-const AJUDA: &str = "uso: sbf servidor [--endereco 127.0.0.1:PORTA] | sbf servidor estacoes | sbf servidor revogar <id-da-estacao>\n\
+const AJUDA: &str = "uso: sbf servidor [--endereco 127.0.0.1:PORTA] | sbf servidor estacoes | sbf servidor revogar <id-da-estacao> | sbf servidor emitir-credencial --email <e-mail> --nome <estação> [--sistema linux]\n\
      variáveis: SBF_DATABASE_URL (obrigatória), SBF_GOOGLE_CLIENT_ID (obrigatória para servir)";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,6 +25,11 @@ enum Comando {
     Servir(SocketAddr),
     ListarEstacoes,
     Revogar(uuid::Uuid),
+    Emitir {
+        email: String,
+        nome: String,
+        sistema: String,
+    },
 }
 
 fn ler_argumentos(args: &[String]) -> Result<Comando, String> {
@@ -39,8 +46,35 @@ fn ler_argumentos(args: &[String]) -> Result<Comando, String> {
         Some("revogar") if args.len() == 2 => uuid::Uuid::try_parse(&args[1])
             .map(Comando::Revogar)
             .map_err(|_| "o id da estação não é um UUID".into()),
+        Some("emitir-credencial") => ler_emitir(&args[1..]),
         Some(outro) => Err(format!("argumento desconhecido: {outro}")),
     }
+}
+
+fn ler_emitir(args: &[String]) -> Result<Comando, String> {
+    let (mut email, mut nome, mut sistema) = (None, None, "linux".to_owned());
+    let mut it = args.iter();
+    while let Some(opcao) = it.next() {
+        let destino = match opcao.as_str() {
+            "--email" => &mut email,
+            "--nome" => &mut nome,
+            "--sistema" => {
+                sistema = it.next().ok_or("falta o valor de --sistema")?.clone();
+                continue;
+            }
+            outra => return Err(format!("argumento desconhecido: {outra}")),
+        };
+        *destino = Some(
+            it.next()
+                .ok_or_else(|| format!("falta o valor de {opcao}"))?
+                .clone(),
+        );
+    }
+    Ok(Comando::Emitir {
+        email: email.ok_or("falta --email")?,
+        nome: nome.ok_or("falta --nome")?,
+        sistema,
+    })
 }
 
 fn endereco(texto: &str) -> Result<SocketAddr, String> {
@@ -102,6 +136,11 @@ pub fn rodar(args: &[String]) -> ExitCode {
                 })
                 .await
             }
+            Comando::Emitir {
+                email,
+                nome,
+                sistema,
+            } => emitir(&url, &email, &nome, &sistema).await,
             Comando::ListarEstacoes => administrar(&url, None).await,
             Comando::Revogar(id) => administrar(&url, Some(id)).await,
         }
@@ -113,6 +152,27 @@ pub fn rodar(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+async fn emitir(
+    url: &Zeroizing<String>,
+    email: &str,
+    nome: &str,
+    sistema: &str,
+) -> Result<(), sbf_servidor::ErroDoServidor> {
+    use sbf_servidor::ErroDoServidor::Comando as Erro;
+    let banco = sbf_servidor::abrir_banco(url).await?;
+    let mut cliente = banco.get().await.map_err(|e| Erro(e.to_string()))?;
+    let (estacao, credencial) =
+        sbf_servidor::estacoes::emitir_credencial(&mut cliente, email, nome, sistema)
+            .await
+            .map_err(|e| Erro(e.corpo.mensagem))?;
+    eprintln!(
+        "estação {} ({}) criada: a credencial abaixo não será mostrada de novo; guarde-a só no chaveiro (sbf estacao importar-credencial)",
+        estacao.id, estacao.nome
+    );
+    println!("{}", credencial.as_str());
+    Ok(())
 }
 
 async fn administrar(
@@ -201,5 +261,26 @@ mod testes {
         );
         assert!(ler_argumentos(&a(&["revogar", "nao-e-uuid"])).is_err());
         assert!(ler_argumentos(&a(&["revogar"])).is_err());
+    }
+
+    #[test]
+    fn emitir_credencial_pede_email_e_nome() {
+        assert_eq!(
+            ler_argumentos(&a(&[
+                "emitir-credencial",
+                "--email",
+                "a@b.c",
+                "--nome",
+                "Casa"
+            ])),
+            Ok(Comando::Emitir {
+                email: "a@b.c".into(),
+                nome: "Casa".into(),
+                sistema: "linux".into()
+            })
+        );
+        assert!(ler_argumentos(&a(&["emitir-credencial", "--email", "a@b.c"])).is_err());
+        assert!(ler_argumentos(&a(&["emitir-credencial", "--nome", "x", "--email"])).is_err());
+        assert!(ler_argumentos(&a(&["emitir-credencial", "--nome", "x", "--url", "y"])).is_err());
     }
 }

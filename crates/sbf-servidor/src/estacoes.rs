@@ -197,16 +197,12 @@ fn recusar_pareamento(mensagem: &str) -> ErroHttp {
     )
 }
 
-/// `POST /estacoes/pareamento`: login Google válido de usuário conhecido → credencial.
-pub async fn parear(
-    State(estado): State<EstadoDoServidor>,
-    Extension(contrato): Extension<ContratoDoPedido>,
-    corpo: Bytes,
-) -> Result<impl IntoResponse, ErroHttp> {
-    let pedido: PedidoDePareamento = serde_json::from_slice(&corpo)
-        .map_err(|_| ErroHttp::pedido_invalido("o corpo do pareamento não segue o contrato"))?;
-    let nome = pedido.nome.trim();
-    let sistema = pedido.sistema.trim();
+fn validar_nome_e_sistema<'a>(
+    nome: &'a str,
+    sistema: &'a str,
+) -> Result<(&'a str, &'a str), ErroHttp> {
+    let nome = nome.trim();
+    let sistema = sistema.trim();
     if nome.is_empty() || nome.chars().count() > 120 {
         return Err(ErroHttp::pedido_invalido(
             "o nome da estação precisa ter de 1 a 120 caracteres",
@@ -217,6 +213,90 @@ pub async fn parear(
             "o sistema precisa ter de 1 a 60 caracteres",
         ));
     }
+    Ok((nome, sistema))
+}
+
+/// O usuário do e-mail (sem diferenciar maiúsculas), travado para a transação.
+async fn buscar_usuario<C: GenericClient>(
+    cliente: &C,
+    email: &str,
+) -> Result<Option<Row>, ErroHttp> {
+    Ok(cliente
+        .query_opt(
+            "SELECT id, google_sub, COALESCE(owner_id, id) AS dono FROM public.users \
+             WHERE lower(email) = $1 FOR UPDATE",
+            &[&email],
+        )
+        .await?)
+}
+
+/// Cria a linha da estação com uma credencial nova; só o hash vai para o banco.
+async fn inserir_estacao<C: GenericClient>(
+    cliente: &C,
+    dono: Uuid,
+    ator: Uuid,
+    nome: &str,
+    sistema: &str,
+    contrato: u32,
+) -> Result<(Estacao, Credencial), ErroHttp> {
+    let id = Uuid::new_v4();
+    let credencial = Credencial::nova(id).map_err(ErroHttp::interno)?;
+    let hash = credencial.hash().to_vec();
+    let contrato = i32::try_from(contrato).unwrap_or(i32::MAX);
+    cliente
+        .execute(
+            "INSERT INTO public.estacoes (id, user_id, pareada_por, nome, sistema, \
+             credencial_sha256, contrato) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            &[&id, &dono, &ator, &nome, &sistema, &hash, &contrato],
+        )
+        .await?;
+    let estacao = ler_estacao(cliente, dono, id)
+        .await?
+        .ok_or_else(|| ErroHttp::interno("a estação recém-criada sumiu"))?;
+    Ok((estacao, credencial))
+}
+
+/// Pareamento administrativo (`sbf servidor emitir-credencial`), sem Google: o e-mail
+/// precisa ser de um usuário existente, como no pareamento normal. Devolve a estação e o
+/// texto da credencial.
+pub async fn emitir_credencial(
+    cliente: &mut deadpool_postgres::Object,
+    email: &str,
+    nome: &str,
+    sistema: &str,
+) -> Result<(Estacao, zeroize::Zeroizing<String>), ErroHttp> {
+    let (nome, sistema) = validar_nome_e_sistema(nome, sistema)?;
+    let transacao = cliente.transaction().await?;
+    let email = email.trim().to_lowercase();
+    let Some(usuario) = buscar_usuario(&*transacao, &email).await? else {
+        return Err(recusar_pareamento(
+            "este e-mail não tem cadastro no Seu Bolso Feliz",
+        ));
+    };
+    let ator: Uuid = usuario.try_get("id")?;
+    let dono: Uuid = usuario.try_get("dono")?;
+    let (estacao, credencial) = inserir_estacao(
+        &*transacao,
+        dono,
+        ator,
+        nome,
+        sistema,
+        sbf_contrato::VERSAO_DO_CONTRATO,
+    )
+    .await?;
+    transacao.commit().await?;
+    Ok((estacao, credencial.texto()))
+}
+
+/// `POST /estacoes/pareamento`: login Google válido de usuário conhecido → credencial.
+pub async fn parear(
+    State(estado): State<EstadoDoServidor>,
+    Extension(contrato): Extension<ContratoDoPedido>,
+    corpo: Bytes,
+) -> Result<impl IntoResponse, ErroHttp> {
+    let pedido: PedidoDePareamento = serde_json::from_slice(&corpo)
+        .map_err(|_| ErroHttp::pedido_invalido("o corpo do pareamento não segue o contrato"))?;
+    let (nome, sistema) = validar_nome_e_sistema(&pedido.nome, &pedido.sistema)?;
     let identidade = match estado
         .google
         .verificar(&pedido.id_token, &pedido.nonce)
@@ -234,14 +314,7 @@ pub async fn parear(
 
     let mut cliente = estado.banco.get().await?;
     let transacao = cliente.transaction().await?;
-    let usuario = transacao
-        .query_opt(
-            "SELECT id, google_sub, COALESCE(owner_id, id) AS dono FROM public.users \
-             WHERE lower(email) = $1 FOR UPDATE",
-            &[&identidade.email],
-        )
-        .await?;
-    let Some(usuario) = usuario else {
+    let Some(usuario) = buscar_usuario(&*transacao, &identidade.email).await? else {
         eprintln!("sbf servidor: pareamento recusado: e-mail sem cadastro");
         return Err(recusar_pareamento(
             "esta conta Google não tem acesso ao Seu Bolso Feliz",
@@ -269,20 +342,8 @@ pub async fn parear(
         }
     }
 
-    let id = Uuid::new_v4();
-    let credencial = Credencial::nova(id).map_err(ErroHttp::interno)?;
-    let hash = credencial.hash().to_vec();
-    let contrato = i32::try_from(contrato.0).unwrap_or(i32::MAX);
-    transacao
-        .execute(
-            "INSERT INTO public.estacoes (id, user_id, pareada_por, nome, sistema, \
-             credencial_sha256, contrato) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            &[&id, &dono, &ator, &nome, &sistema, &hash, &contrato],
-        )
-        .await?;
-    let estacao = ler_estacao(&*transacao, dono, id)
-        .await?
-        .ok_or_else(|| ErroHttp::interno("a estação recém-criada sumiu"))?;
+    let (estacao, credencial) =
+        inserir_estacao(&*transacao, dono, ator, nome, sistema, contrato.0).await?;
     transacao.commit().await?;
     let resposta = Pareamento {
         estacao,
