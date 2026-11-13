@@ -233,6 +233,57 @@ fn tirar_acento(c: char) -> char {
     }
 }
 
+/// As Ações que só aparecem dentro de um menu (Período, Filtros), não como botão.
+fn filho_de_menu(id: IdAcao) -> bool {
+    matches!(
+        id,
+        IdAcao::PeriodoAtual
+            | IdAcao::PeriodoAnterior
+            | IdAcao::PeriodoTodos
+            | IdAcao::QuemTodos
+            | IdAcao::QuemVoce
+            | IdAcao::QuemRegras
+    ) || crate::acoes::e_filtro_de_menu(id)
+}
+
+/// Os grupos de uma aba do Ribbon, com as Ações do SBF, na ordem da lista única. É a mesma
+/// composição para montar as abas e para gerar os KeyTips (únicos e sem prefixo por aba).
+pub fn grupos_da_aba(aba: Aba) -> Vec<(&'static str, Vec<IdAcao>)> {
+    let mut grupos: Vec<(&'static str, Vec<IdAcao>)> = Vec::new();
+    for d in ACOES
+        .iter()
+        .filter(|d| d.aba == aba && !fica_de_fora(d.id) && !filho_de_menu(d.id))
+    {
+        match grupos.iter_mut().find(|(g, _)| *g == d.grupo) {
+            Some((_, ids)) => ids.push(d.id),
+            None => grupos.push((d.grupo, vec![d.id])),
+        }
+    }
+    if aba == Aba::Triagem
+        && let Some((_, ids)) = grupos.iter_mut().find(|(g, _)| *g == "Histórico")
+    {
+        ids.insert(0, IdAcao::Desfazer);
+    }
+    if aba == Aba::Inicio {
+        grupos.push(("Dados", vec![IdAcao::Atualizar]));
+    }
+    grupos
+}
+
+/// Os KeyTips das Ações do SBF: uma letra, única dentro de cada aba.
+pub fn keytips_das_acoes() -> HashMap<IdAcao, String> {
+    let mut v = HashMap::new();
+    for (aba, ..) in ABAS {
+        let ids: Vec<&acoes::DefinicaoDeAcao> = grupos_da_aba(aba)
+            .into_iter()
+            .flat_map(|(_, ids)| ids)
+            .map(acoes::definicao)
+            .collect();
+        v.extend(AppSbf::keytips(&ids));
+    }
+    v
+}
+
 const ABAS: [(Aba, &str, &str, &str); 7] = [
     (Aba::Inicio, "inicio", "Início", "I"),
     (Aba::Triagem, "triagem", "Triagem", "T"),
@@ -249,13 +300,7 @@ impl AppCasca for AppSbf {
         let mut v = Vec::new();
         let todas: Vec<&acoes::DefinicaoDeAcao> =
             ACOES.iter().filter(|d| !fica_de_fora(d.id)).collect();
-        // KeyTips únicos dentro de cada aba.
-        let mut keytips: HashMap<IdAcao, String> = HashMap::new();
-        for (aba, ..) in ABAS {
-            let da_aba: Vec<&acoes::DefinicaoDeAcao> =
-                todas.iter().copied().filter(|d| d.aba == aba).collect();
-            keytips.extend(Self::keytips(&da_aba));
-        }
+        let keytips = keytips_das_acoes();
         for d in todas {
             let disp = acoes::disponibilidade(d.id, &contexto);
             let mut a = AcaoCasca::nova(d.codigo, d.rotulo)
@@ -277,6 +322,29 @@ impl AppCasca for AppSbf {
                     "inicio.periodo.anterior",
                     "inicio.periodo.todos",
                 ]),
+                IdAcao::EstadoDoAchado => a.menu(&[
+                    "inicio.estado.todos",
+                    "inicio.estado.a-triar",
+                    "inicio.estado.documento",
+                    "inicio.estado.em-duvida",
+                    "inicio.estado.descartado",
+                ]),
+                IdAcao::TipoDoDocumento => a.menu(&[
+                    "inicio.tipo.todos",
+                    "inicio.tipo.boleto",
+                    "inicio.tipo.fatura",
+                    "inicio.tipo.extrato",
+                    "inicio.tipo.comprovante",
+                    "inicio.tipo.nota-fiscal",
+                    "inicio.tipo.foto",
+                    "inicio.tipo.outro",
+                ]),
+                id if acoes::filtro_de_estado(id).is_some() => a.alternancia(
+                    acoes::filtro_de_estado(id).flatten() == j.estado_do_achado.as_deref(),
+                ),
+                id if acoes::filtro_de_tipo(id).is_some() => a.alternancia(
+                    acoes::filtro_de_tipo(id).flatten() == j.tipo_do_documento.as_deref(),
+                ),
                 IdAcao::QuemDecidiu => a.menu(&[
                     "inicio.quem.todos",
                     "inicio.quem.voce",
@@ -320,36 +388,17 @@ impl AppCasca for AppSbf {
                 Aba::Pagina => a = a.contextual(pagina),
                 _ => {}
             }
-            // Os grupos, na ordem da lista única.
-            let mut grupos: Vec<(&str, Vec<&str>)> = Vec::new();
-            let filho_de_menu = |id: IdAcao| {
-                matches!(
-                    id,
-                    IdAcao::PeriodoAtual
-                        | IdAcao::PeriodoAnterior
-                        | IdAcao::PeriodoTodos
-                        | IdAcao::QuemTodos
-                        | IdAcao::QuemVoce
-                        | IdAcao::QuemRegras
-                )
-            };
-            for d in ACOES
-                .iter()
-                .filter(|d| d.aba == aba && !fica_de_fora(d.id) && !filho_de_menu(d.id))
-            {
-                match grupos.iter_mut().find(|(g, _)| *g == d.grupo) {
-                    Some((_, ids)) => ids.push(d.codigo),
-                    None => grupos.push((d.grupo, vec![d.codigo])),
-                }
-            }
-            if aba == Aba::Triagem
-                && let Some((_, ids)) = grupos.iter_mut().find(|(g, _)| *g == "Histórico")
-            {
-                ids.insert(0, acoes::definicao(IdAcao::Desfazer).codigo);
-            }
-            if aba == Aba::Inicio {
-                grupos.push(("Dados", vec![acoes::definicao(IdAcao::Atualizar).codigo]));
-            }
+            let grupos: Vec<(&str, Vec<&str>)> = grupos_da_aba(aba)
+                .into_iter()
+                .map(|(g, ids)| {
+                    (
+                        g,
+                        ids.into_iter()
+                            .map(|i| acoes::definicao(i).codigo)
+                            .collect(),
+                    )
+                })
+                .collect();
             let mut painel_ids: Vec<String> = Vec::new();
             let mut ribbon_ids: Vec<&str> = Vec::new();
             if aba == Aba::Exibir {

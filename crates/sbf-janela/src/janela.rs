@@ -80,6 +80,9 @@ pub struct Janela {
     pub periodo: Periodo,
     /// Filtro "Quem decidiu" (aba Início): `None` = todos.
     pub quem_decidiu: Option<sbf_inventario::consulta::Quem>,
+    /// Filtros "Estado do achado" e "Tipo" (aba Início): `None` = todos.
+    pub estado_do_achado: Option<String>,
+    pub tipo_do_documento: Option<String>,
     focar_pesquisa: bool,
     relatorios: EstadoDosRelatorios,
     pub lote_atual: Option<Ref>,
@@ -113,6 +116,8 @@ impl Janela {
             pesquisa: String::new(),
             periodo: Periodo::default(),
             quem_decidiu: None,
+            estado_do_achado: None,
+            tipo_do_documento: None,
             focar_pesquisa: false,
             relatorios: EstadoDosRelatorios::default(),
             lote_atual: None,
@@ -237,6 +242,8 @@ impl Janela {
             texto: Some(self.pesquisa.trim().to_owned()).filter(|t| !t.is_empty()),
             ciclos,
             quem_decidiu: self.quem_decidiu.clone(),
+            estados: self.estado_do_achado.iter().cloned().collect(),
+            tipos: self.tipo_do_documento.iter().cloned().collect(),
             ..Filtro::default()
         }
     }
@@ -889,7 +896,29 @@ impl Janela {
                 });
             }
             IdAcao::Pesquisar => self.focar_pesquisa = true,
-            IdAcao::Periodo | IdAcao::QuemDecidiu => {}
+            IdAcao::Periodo
+            | IdAcao::QuemDecidiu
+            | IdAcao::EstadoDoAchado
+            | IdAcao::TipoDoDocumento => {}
+            IdAcao::EstadoTodos
+            | IdAcao::EstadoATriar
+            | IdAcao::EstadoDocumento
+            | IdAcao::EstadoEmDuvida
+            | IdAcao::EstadoDescartado
+            | IdAcao::TipoTodos
+            | IdAcao::TipoBoleto
+            | IdAcao::TipoFatura
+            | IdAcao::TipoExtrato
+            | IdAcao::TipoComprovante
+            | IdAcao::TipoNotaFiscal
+            | IdAcao::TipoFoto
+            | IdAcao::TipoOutro => {
+                if let Some(f) = acoes::filtro_de_estado(id) {
+                    self.estado_do_achado = f.map(str::to_owned);
+                } else if let Some(f) = acoes::filtro_de_tipo(id) {
+                    self.tipo_do_documento = f.map(str::to_owned);
+                }
+            }
             IdAcao::PeriodoAtual => self.periodo = Periodo::CicloAtual,
             IdAcao::PeriodoAnterior => self.periodo = Periodo::CicloAnterior,
             IdAcao::PeriodoTodos => self.periodo = Periodo::TodosOsCiclos,

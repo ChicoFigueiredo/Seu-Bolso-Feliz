@@ -118,6 +118,38 @@ pub fn estado(ui: &mut Ui, rotulo: &str, quem: Option<&sbf_inventario::consulta:
     }
 }
 
+/// O estado numa célula de tabela: o selo e um ícone de quem decidiu (pessoa para você,
+/// robô para as regras), com o texto inteiro no tooltip. Cabe em coluna estreita.
+pub fn estado_compacto(ui: &mut Ui, rotulo: &str, quem: Option<&sbf_inventario::consulta::Quem>) {
+    let p = tema::paleta(ui.ctx());
+    let (fundo, cor, icone) = cores_do_estado(ui, rotulo);
+    let dica = match quem {
+        Some(q) => format!("{rotulo} · por {}", q.rotulo()),
+        None if rotulo == "A triar" => format!("{rotulo} · ninguém decidiu ainda"),
+        None => rotulo.to_owned(),
+    };
+    let r = Frame::new()
+        .fill(fundo)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(6, 1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.label(icones::icone_cor(icone, 13.0, cor));
+            ui.add(egui::Label::new(RichText::new(rotulo).size(12.0).color(cor).strong()).extend());
+        })
+        .response;
+    let quem_icone = match quem {
+        Some(sbf_inventario::consulta::Quem::Usuario) => Some(("person", "você")),
+        Some(sbf_inventario::consulta::Quem::Automatico(_)) => Some(("smart_toy", "regras")),
+        None => None,
+    };
+    let r2 = quem_icone.map(|(i, _)| ui.label(icones::icone_cor(i, 14.0, p.tinta_suave)));
+    r.on_hover_text(&dica);
+    if let Some(r2) = r2 {
+        r2.on_hover_text(&dica);
+    }
+}
+
 /// Desenha uma célula. Links e totais clicáveis viram pedidos.
 pub fn celula(ui: &mut Ui, c: &Celula, pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
@@ -170,7 +202,7 @@ pub fn celula(ui: &mut Ui, c: &Celula, pedidos: &mut Vec<Pedido>) {
             );
         }
         Celula::Estado { rotulo, quem } => {
-            ui.horizontal(|ui| estado(ui, rotulo, quem.as_ref()));
+            ui.horizontal(|ui| estado_compacto(ui, rotulo, quem.as_ref()));
         }
     }
 }

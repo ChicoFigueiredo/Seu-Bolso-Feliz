@@ -125,6 +125,7 @@ fn larguras_das_colunas(tabela: &Tabela) -> Vec<f32> {
                         Celula::Valor { centavos, .. } => {
                             formato::dinheiro(*centavos).chars().count()
                         }
+                        Celula::Estado { rotulo, .. } => rotulo.chars().count() + 4,
                         outra => formato::texto_da_celula(outra).chars().count(),
                     };
                     maior = maior.max(n + extra);
@@ -163,15 +164,25 @@ pub fn desenhar(
     // Cabe na largura disponível: um teto comum para as colunas mais largas (as
     // estreitas, como data e valor, ficam inteiras).
     let disponivel = ui.available_width() - 8.0 * n_colunas as f32;
+    // Números e estados não encolhem (o estado leva o selo e o ícone de quem decidiu).
+    let fixas: Vec<bool> = (0..n_colunas)
+        .map(|i| {
+            tabela.colunas.get(i).is_some_and(|c| c.numerica)
+                || tabela
+                    .linhas
+                    .iter()
+                    .take(16)
+                    .any(|l| matches!(l.celulas.get(i), Some(Celula::Estado { .. })))
+        })
+        .collect();
     if larguras.iter().sum::<f32>() > disponivel {
         let (mut baixo, mut alto) = (48.0f32, 360.0f32);
         for _ in 0..24 {
             let meio = (baixo + alto) / 2.0;
-            let total: f32 = tabela
-                .colunas
+            let total: f32 = fixas
                 .iter()
                 .zip(&larguras)
-                .map(|(c, l)| if c.numerica { *l } else { l.min(meio) })
+                .map(|(fixa, l)| if *fixa { *l } else { l.min(meio) })
                 .sum();
             if total > disponivel {
                 alto = meio;
@@ -179,8 +190,8 @@ pub fn desenhar(
                 baixo = meio;
             }
         }
-        for (c, l) in tabela.colunas.iter().zip(larguras.iter_mut()) {
-            if !c.numerica {
+        for (fixa, l) in fixas.iter().zip(larguras.iter_mut()) {
+            if !*fixa {
                 *l = l.min(baixo);
             }
         }

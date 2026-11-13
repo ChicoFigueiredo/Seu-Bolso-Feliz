@@ -2346,6 +2346,8 @@ impl Estado {
                 .as_deref()
                 .is_none_or(|d| Self::ciclo_no_filtro(filtro, &ciclo_da_data(d)))
                 && Self::quem_no_filtro(filtro, a.decidido_por.as_deref())
+                && (filtro.estados.is_empty() || filtro.estados.contains(&a.estado))
+                && (filtro.tipos.is_empty() || filtro.tipos.contains(&a.document_type))
         };
         match area {
             A::ATriar => self.tabela_de_achados(
