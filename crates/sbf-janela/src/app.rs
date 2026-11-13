@@ -503,16 +503,17 @@ impl AppCasca for AppSbf {
             (Area::Lotes, "Lote"),
             (Area::Pendencias, "Pendência"),
         ] {
-            let Ok(t) = j.tabela(
+            let Ok(c) = j.primeiras(
                 consulta,
                 &PedidoDeTabela::Area {
                     area,
                     filtro: Filtro::default(),
                 },
+                500,
             ) else {
                 continue;
             };
-            for l in t.linhas.iter().take(500) {
+            for l in c.tabela.linhas.iter().take(500) {
                 if let Some(alvo) = &l.alvo {
                     let rotulo = l
                         .celulas

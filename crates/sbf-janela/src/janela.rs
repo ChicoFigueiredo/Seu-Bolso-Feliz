@@ -101,6 +101,8 @@ pub struct Janela {
     /// As Ferramentas do inventário real (PDF protegido, estante, cópia, chaveiro).
     /// `None` no modo demonstração.
     pub ferramentas: Option<crate::ferramentas::Ferramentas>,
+    visao_geral_pendente:
+        Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
 }
 
 impl Default for Janela {
@@ -134,6 +136,7 @@ impl Janela {
             hoje: hoje_em_sao_paulo(),
             na_casca: false,
             ferramentas: None,
+            visao_geral_pendente: None,
         }
     }
 
@@ -163,6 +166,29 @@ impl Janela {
         if terminou {
             self.atualizar();
         }
+    }
+
+    /// As primeiras `n` linhas de uma tabela, lida em pedaços (a Paleta usa).
+    pub fn primeiras(
+        &mut self,
+        consulta: &dyn Consulta,
+        pedido: &PedidoDeTabela,
+        n: usize,
+    ) -> Result<crate::leitura::Carregada, String> {
+        Leitor::novo(consulta, &mut self.cache).carregada(pedido, n)
+    }
+
+    /// Lê a Visão geral numa thread, com uma conexão própria, para a janela abrir sem
+    /// esperar (no inventário real ela leva meio segundo).
+    pub fn pre_carregar_visao_geral(&mut self, banco: std::path::PathBuf) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = sbf_inventario::leitor::LeitorSqlite::abrir(&banco)
+                .and_then(|l| l.visao_geral())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+        self.visao_geral_pendente = Some(rx);
     }
 
     /// Uma tabela pela leitura com cache (a Paleta usa).
@@ -432,6 +458,26 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
+                if let Some(rx) = &self.visao_geral_pendente {
+                    match rx.try_recv() {
+                        Ok(r) => {
+                            leitor.guardar_visao_geral(r);
+                            self.visao_geral_pendente = None;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new());
+                                ui.label("Carregando a Visão geral…");
+                            });
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(100));
+                            return;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            self.visao_geral_pendente = None;
+                        }
+                    }
+                }
                 painel::visao_geral(ui, &mut leitor, vista, pedidos);
             }
             Destino::Area(Area::Relatorios) => {
@@ -468,25 +514,20 @@ impl Janela {
                         filtro: filtro.clone(),
                     };
                     componentes::rotulo_de_secao(ui, areas::rotulo_da_area(outra));
-                    match leitor.tabela(&pedido) {
-                        Ok(t) => {
-                            let chave = format!("area:{outra:?}");
-                            let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                            let altura = (t.linhas.len() as f32 * 26.0 + 30.0).min(200.0);
-                            tabela::desenhar(
-                                ui,
-                                &chave,
-                                &t,
-                                &mut estado,
-                                &mut vista.selecao,
-                                pedidos,
-                                Some(altura),
-                            );
-                            vista.tabelas.insert(chave, estado);
-                        }
-                        Err(e) => {
-                            componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
-                        }
+                    let chave = format!("area:{outra:?}");
+                    let n = leitor.carregada(&pedido, 0).map(|c| c.total).unwrap_or(0);
+                    let altura = (n as f32 * 26.0 + 30.0).min(200.0);
+                    if let Err(e) = pagina::tabela_em_pedacos(
+                        ui,
+                        &mut leitor,
+                        &pedido,
+                        &chave,
+                        vista,
+                        pedidos,
+                        Some(altura),
+                        false,
+                    ) {
+                        componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
                     }
                     ui.add_space(6.0);
                     componentes::rotulo_de_secao(ui, areas::rotulo_da_area(*area));
@@ -495,10 +536,10 @@ impl Janela {
                     area: *area,
                     filtro,
                 };
-                match leitor.tabela(&pedido) {
-                    Ok(t) => {
+                match leitor.carregada(&pedido, 0) {
+                    Ok(c) => {
                         ui.horizontal(|ui| {
-                            let n = t.linhas.len();
+                            let n = c.total;
                             let sel = vista.selecao.itens.len();
                             let mut texto = format!("{} {}", formato::inteiro(n as i64), if n == 1 { "linha" } else { "linhas" });
                             if sel > 0 {
@@ -512,18 +553,18 @@ impl Janela {
                             );
                         });
                         let chave = format!("area:{area:?}");
-                        let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                        estado.teclado = true;
-                        tabela::desenhar(
+                        if let Err(e) = pagina::tabela_em_pedacos(
                             ui,
+                            &mut leitor,
+                            &pedido,
                             &chave,
-                            &t,
-                            &mut estado,
-                            &mut vista.selecao,
+                            vista,
                             pedidos,
                             None,
-                        );
-                        vista.tabelas.insert(chave, estado);
+                            true,
+                        ) {
+                            componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
+                        }
                     }
                     Err(e) => {
                         componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)

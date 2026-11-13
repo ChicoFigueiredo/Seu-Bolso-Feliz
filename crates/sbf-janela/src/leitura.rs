@@ -14,9 +14,20 @@ use sbf_inventario::consulta::{
 /// Resultado de leitura já pronto para desenhar: o erro vira texto.
 pub type Lido<T> = Result<Arc<T>, String>;
 
+/// Quantas linhas um pedaço traz.
+pub const PEDACO: usize = 1000;
+
+/// Uma tabela lida em pedaços: as primeiras linhas e o total.
+#[derive(Debug, Clone)]
+pub struct Carregada {
+    pub tabela: Arc<Tabela>,
+    pub total: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct Cache {
     tabelas: HashMap<String, Lido<Tabela>>,
+    paginadas: HashMap<String, Result<Carregada, String>>,
     itens: HashMap<Ref, Lido<Option<Item>>>,
     rastros: HashMap<Ref, Lido<Rastro>>,
     por_ciclo: HashMap<(Ref, bool, usize), Lido<Vec<TotalDoCiclo>>>,
@@ -66,6 +77,41 @@ impl<'a> Leitor<'a> {
                     .map_err(|e| e.to_string())
             })
             .clone()
+    }
+
+    /// A tabela em pedaços (`Consulta::tabela_paginada`), com pelo menos `minimo` linhas
+    /// carregadas (ou todas, se a tabela tem menos). O pedaço novo entra no fim, sem copiar
+    /// o que já estava carregado.
+    pub fn carregada(
+        &mut self,
+        pedido: &PedidoDeTabela,
+        minimo: usize,
+    ) -> Result<Carregada, String> {
+        let k = chave(pedido);
+        let consulta = self.consulta;
+        let entrada = self.cache.paginadas.entry(k).or_insert_with(|| {
+            consulta
+                .tabela_paginada(pedido, 0, minimo.max(PEDACO))
+                .map(|p| Carregada {
+                    tabela: Arc::new(p.tabela),
+                    total: p.total,
+                })
+                .map_err(|e| e.to_string())
+        });
+        if let Ok(c) = entrada {
+            let carregadas = c.tabela.linhas.len();
+            if carregadas < minimo.min(c.total) {
+                let falta = (minimo.min(c.total) - carregadas).div_ceil(PEDACO) * PEDACO;
+                match consulta.tabela_paginada(pedido, carregadas, falta) {
+                    Ok(p) => {
+                        c.total = p.total;
+                        Arc::make_mut(&mut c.tabela).linhas.extend(p.tabela.linhas);
+                    }
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+        }
+        entrada.clone()
     }
 
     pub fn item(&mut self, alvo: &Ref) -> Lido<Option<Item>> {
@@ -136,6 +182,13 @@ impl<'a> Leitor<'a> {
                     .map_err(|e| e.to_string())
             })
             .clone()
+    }
+
+    /// Guarda uma Visão geral lida em segundo plano.
+    pub fn guardar_visao_geral(&mut self, r: Result<Painel, String>) {
+        self.cache
+            .paineis
+            .insert("visao-geral".to_owned(), r.map(Arc::new));
     }
 
     pub fn relatorio(&mut self, pergunta: Pergunta, fonte: Fonte, filtro: &Filtro) -> Lido<Painel> {

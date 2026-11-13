@@ -266,3 +266,57 @@ fn ferramentas_ligadas_ao_banco_real() {
             .is_some_and(|m| m.erro)
     );
 }
+
+#[test]
+fn areas_grandes_carregam_em_pedacos_e_ordenar_carrega_tudo() {
+    let banco = comum::banco_de_teste();
+    {
+        let conn = rusqlite::Connection::open(&banco.caminho).expect("abrir");
+        comum::popular_grande(&conn, 5_000);
+    }
+    let mut r = Real::novo(&banco.caminho);
+    r.abrir(Destino::Area(Area::Documentos));
+    let pedido = PedidoDeTabela::Area {
+        area: Area::Documentos,
+        filtro: Filtro::default(),
+    };
+    // Só o primeiro pedaço foi lido; a rolagem tem o tamanho do total.
+    let c = r
+        .casca
+        .app
+        .janela()
+        .primeiras(r.casca.app.consulta(), &pedido, 0)
+        .expect("pedaço");
+    assert_eq!(c.tabela.linhas.len(), sbf_janela::leitura::PEDACO);
+    assert!(c.total > sbf_janela::leitura::PEDACO, "total {}", c.total);
+    // Ordenar com a tabela pela metade: aviso num quadro, tudo carregado e ordenado no seguinte.
+    let chave = format!("area:{:?}", Area::Documentos);
+    r.casca
+        .app
+        .janela()
+        .centro
+        .tabelas
+        .entry(chave.clone())
+        .or_default()
+        .ordem_pendente = Some(Some((0, true)));
+    r.quadro();
+    r.quadro();
+    let estado = r
+        .casca
+        .app
+        .janela()
+        .centro
+        .tabelas
+        .get(&chave)
+        .cloned()
+        .expect("estado");
+    assert_eq!(estado.ordem, Some((0, true)));
+    assert!(estado.ordem_pendente.is_none());
+    let c = r
+        .casca
+        .app
+        .janela()
+        .primeiras(r.casca.app.consulta(), &pedido, 0)
+        .expect("tudo");
+    assert_eq!(c.tabela.linhas.len(), c.total);
+}

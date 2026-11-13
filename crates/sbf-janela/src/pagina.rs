@@ -414,23 +414,19 @@ pub fn desenhar(
                 de: alvo.clone(),
                 tipo: *tipo,
             };
-            match leitor.tabela(&pedido) {
-                Ok(t) => {
-                    let chave = format!("ligados:{alvo}:{tipo}");
-                    let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                    let altura = ui.available_height().max(200.0);
-                    tabela::desenhar(
-                        ui,
-                        &chave,
-                        &t,
-                        &mut estado,
-                        &mut vista.selecao,
-                        pedidos,
-                        Some(altura),
-                    );
-                    vista.tabelas.insert(chave, estado);
-                }
-                Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
+            let chave = format!("ligados:{alvo}:{tipo}");
+            let altura = ui.available_height().max(200.0);
+            if let Err(e) = tabela_em_pedacos(
+                ui,
+                leitor,
+                &pedido,
+                &chave,
+                vista,
+                pedidos,
+                Some(altura),
+                false,
+            ) {
+                componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
             }
         }
     }
@@ -487,6 +483,71 @@ fn cartao_de_valor(
                 }
             });
         });
+}
+
+/// Uma tabela lida em pedaços (`Consulta::tabela_paginada`): a rolagem tem o tamanho do
+/// total, e o pedaço seguinte é pedido quando a rolagem chega perto do fim do que já foi
+/// lido. Ordenar uma tabela ainda não toda lida carrega tudo antes, com um aviso.
+/// Devolve o total de linhas (para o "N linhas" do cabeçalho), ou o erro.
+#[allow(clippy::too_many_arguments)]
+pub fn tabela_em_pedacos(
+    ui: &mut Ui,
+    leitor: &mut Leitor<'_>,
+    pedido: &PedidoDeTabela,
+    chave: &str,
+    vista: &mut Vista,
+    pedidos: &mut Vec<Pedido>,
+    altura: Option<f32>,
+    teclado: bool,
+) -> Result<usize, String> {
+    let p = tema::paleta(ui.ctx());
+    let mut estado = vista.tabelas.remove(chave).unwrap_or_default();
+    estado.teclado = teclado;
+    let mut minimo = 0;
+    if estado.ordem_pendente.is_some() {
+        if estado.ordenar_agora {
+            minimo = usize::MAX;
+        } else {
+            let total = leitor.carregada(pedido, 0).map(|c| c.total).unwrap_or(0);
+            ui.label(
+                RichText::new(format!(
+                    "ordenando {} linhas…",
+                    formato::inteiro(total as i64)
+                ))
+                .size(12.0)
+                .color(p.tinta_suave),
+            );
+            estado.ordenar_agora = true;
+            ui.ctx().request_repaint();
+        }
+    }
+    let resultado = leitor.carregada(pedido, minimo).map(|c| {
+        if minimo == usize::MAX {
+            if let Some(o) = estado.ordem_pendente.take() {
+                estado.ordem = o;
+            }
+            estado.ordenar_agora = false;
+        }
+        let falta = tabela::desenhar_parcial(
+            ui,
+            chave,
+            &c.tabela,
+            c.total,
+            &mut estado,
+            &mut vista.selecao,
+            pedidos,
+            altura,
+        );
+        (c.total, falta)
+    });
+    vista.tabelas.insert(chave.to_owned(), estado);
+    let (total, falta) = resultado?;
+    if let Some(n) = falta {
+        // Perto do fim do que foi lido: o pedaço seguinte (mais um de folga).
+        leitor.carregada(pedido, n + 1 + crate::leitura::PEDACO)?;
+        ui.ctx().request_repaint();
+    }
+    Ok(total)
 }
 
 /// O texto extraído, em fonte mono, rolável.
@@ -774,25 +835,12 @@ pub fn desenhar_total(
         });
     }
     ui.add_space(8.0);
-    match leitor.tabela(pedido) {
-        Ok(t) => {
-            let chave = format!(
-                "total:{}",
-                serde_json::to_string(pedido).unwrap_or_default()
-            );
-            let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-            tabela::desenhar(
-                ui,
-                &chave,
-                &t,
-                &mut estado,
-                &mut vista.selecao,
-                pedidos,
-                None,
-            );
-            vista.tabelas.insert(chave, estado);
-        }
-        Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
+    let chave = format!(
+        "total:{}",
+        serde_json::to_string(pedido).unwrap_or_default()
+    );
+    if let Err(e) = tabela_em_pedacos(ui, leitor, pedido, &chave, vista, pedidos, None, false) {
+        componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
     }
 }
 

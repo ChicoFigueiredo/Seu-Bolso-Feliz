@@ -110,6 +110,7 @@ impl AppDoInventario {
                     Err(e) => f.erro_do_chaveiro = Some(e),
                 }
                 janela.ferramentas = Some(f);
+                janela.pre_carregar_visao_geral(inventario.caminho().to_path_buf());
                 if let Some(t) = aviso {
                     janela.mensagem = Some(sbf_janela::janela::Mensagem {
                         texto: t,
