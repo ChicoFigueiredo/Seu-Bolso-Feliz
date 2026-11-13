@@ -14,6 +14,7 @@ bancada-segredos = { workspace = true }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-inventario = { workspace = true }
 sbf-contrato = { path = "../sbf-contrato" }
+sbf-livro = { path = "../sbf-livro" }
 # Id das alterações (UUID v4, como o contrato pede) (MIT OR Apache-2.0).
 uuid = { version = "1", features = ["v4", "serde"] }
 rusqlite = { workspace = true }

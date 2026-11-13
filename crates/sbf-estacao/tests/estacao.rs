@@ -381,3 +381,64 @@ fn alteracao_de_ponta_a_ponta() {
             .any(|t| t.recusadas == 1)
     );
 }
+
+/// T9: a `Consulta` do livro-caixa e o `painel_da_area` sobre a cópia, com os números do
+/// `sbf-livro` e todo total clicável.
+#[test]
+fn consulta_do_livro_sobre_o_cache() {
+    use sbf_inventario::consulta::{Area, Celula, Consulta, Filtro, PedidoDeTabela};
+    let s = ServidorDoContrato::iniciar();
+    let pasta = tempfile::tempdir().unwrap();
+    let guarda = GuardaEmMemoria::default();
+    s.credencial_pronta(&guarda);
+    let mut estacao = EstacaoLocal::abrir(s.config(pasta.path(), &guarda)).unwrap();
+    assert!(estacao.esperar_troca(Duration::from_secs(20)));
+    let consulta = ConsultaDoLivro::do_cache(estacao.cache().unwrap())
+        .unwrap()
+        .com_hoje(sbf_livro::Data::nova(2026, 11, 13).unwrap());
+
+    let hoje = consulta
+        .painel_da_area(Area::Hoje, &Filtro::default())
+        .unwrap();
+    let disponivel = &hoje.indicadores[0];
+    assert_eq!(disponivel.rotulo, "Disponível agora");
+    assert!(disponivel.instantaneo);
+    assert!(matches!(
+        disponivel.valor,
+        Celula::Valor {
+            centavos: 123_456,
+            itens: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(hoje.secoes[0].titulo, "Para resolver");
+    // "Precisam de revisão" vem do /estado (documentos_a_revisar = 2).
+    assert!(hoje.secoes[0].tabela.linhas.iter().any(|l| matches!(
+        (&l.celulas[0], &l.celulas[1]),
+        (Celula::Texto(t), Celula::Contagem { n: 2, .. }) if t == "Precisam de revisão"
+    )));
+
+    let pedido = PedidoDeTabela::Area {
+        area: Area::Movimentacoes,
+        filtro: Filtro::default(),
+    };
+    let movs = consulta.tabela(&pedido).unwrap();
+    assert_eq!(movs.linhas.len(), 2);
+    let contas = consulta
+        .tabela(&PedidoDeTabela::Area {
+            area: Area::ContasECartoes,
+            filtro: Filtro::default(),
+        })
+        .unwrap();
+    // De uma conta se chega às movimentações dela.
+    let Celula::Valor {
+        itens: Some(itens), ..
+    } = &contas.linhas[0].celulas[3]
+    else {
+        panic!("saldo clicável");
+    };
+    assert_eq!(consulta.tabela(itens).unwrap().linhas.len(), 2);
+    let m = Ref::nova(Tipo::Movimentacao, id(1).to_string());
+    assert!(consulta.item(&m).unwrap().is_some());
+    assert_eq!(consulta.rastro(&m).unwrap().acima[0].papel, "na conta");
+}

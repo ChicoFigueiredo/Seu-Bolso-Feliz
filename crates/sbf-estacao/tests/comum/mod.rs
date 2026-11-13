@@ -257,6 +257,7 @@ fn tratar(estado: &Mutex<Estado_>, p: &PedidoRecebido) -> RespostaFalsa {
                 hora_do_servidor: "2026-11-13T12:00:00Z".into(),
                 dia_de_corte: 20,
                 fuso: "America/Sao_Paulo".into(),
+                documentos_a_revisar: 2,
                 estacao,
             })
         }

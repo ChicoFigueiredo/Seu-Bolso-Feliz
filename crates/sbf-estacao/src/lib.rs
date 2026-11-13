@@ -16,6 +16,7 @@
 
 mod alteracoes;
 mod cache;
+mod consulta;
 mod credencial;
 mod estacao;
 mod pareamento;
@@ -29,6 +30,7 @@ pub use cache::{
     ARQUIVO_DO_CACHE, CacheDoLivro, ErroDoCache, RegistroDeAlteracao, ResultadoDoCache,
     apagar_arquivos,
 };
+pub use consulta::ConsultaDoLivro;
 pub use credencial::{CredencialDaEstacao, GuardaDeCredencial, GuardaEmMemoria};
 pub use estacao::{ConfiguracaoDaEstacao, EstacaoLocal, INTERVALO_PADRAO};
 pub use pareamento::{CAMINHO_DO_RETORNO, ErroDePareamento, Pareador, sistema_atual};

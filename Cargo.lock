@@ -4172,6 +4172,7 @@ dependencies = [
  "sbf-chaveiro",
  "sbf-contrato",
  "sbf-inventario",
+ "sbf-livro",
  "serde",
  "serde_json",
  "tempfile",
