@@ -11,7 +11,9 @@
 pub mod ciclo;
 pub mod data;
 pub mod dinheiro;
+pub mod tipos;
 
 pub use ciclo::{Ciclo, DiaDeCorte};
 pub use data::Data;
 pub use dinheiro::{Centavos, ErroDeValor, Taxa};
+pub use tipos::*;
