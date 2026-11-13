@@ -3681,6 +3681,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-livro"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "sbf-contrato",
+ "sbf-inventario",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sbf-pdf"
 version = "0.1.0"
 dependencies = [
