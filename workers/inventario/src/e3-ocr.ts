@@ -144,7 +144,10 @@ async function main(): Promise<void> {
         WHERE estado = 'duvida'
           AND lower(extensao) IN (${EXTENSOES_OCR.map(() => "?").join(",")})
           AND notas LIKE '%precisa de OCR%'
-          AND NOT EXISTS (SELECT 1 FROM texto t WHERE t.content_hash = a.content_hash)
+          -- O e3-extrair grava "sem-extrator:<ext>" vazio para imagem; isso quer
+          -- dizer que ninguém leu a imagem ainda, não que ela não tem texto.
+          AND NOT EXISTS (SELECT 1 FROM texto t WHERE t.content_hash = a.content_hash
+                            AND t.metodo NOT LIKE 'sem-extrator:%')
         ORDER BY primeiro_visto_em DESC
         ${limite ? "LIMIT ?" : ""}`,
     )
@@ -156,7 +159,11 @@ async function main(): Promise<void> {
   const pendentes: Resultado[] = [];
   const gravar = db.transaction((lista: Resultado[]) => {
     const q = db.query(
-      "INSERT OR IGNORE INTO texto (content_hash, metodo, conteudo) VALUES (?, ?, ?)",
+      `INSERT INTO texto (content_hash, metodo, conteudo) VALUES (?, ?, ?)
+       ON CONFLICT (content_hash) DO UPDATE SET
+         metodo = excluded.metodo, conteudo = excluded.conteudo,
+         extraido_em = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE texto.metodo LIKE 'sem-extrator:%'`,
     );
     for (const r of lista) {
       const metodo = METODO[r.situacao];
