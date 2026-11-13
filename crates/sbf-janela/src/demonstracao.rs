@@ -883,6 +883,50 @@ impl Estado {
             }
         }
 
+        // Sugestões de conciliação: um registro de extrato (sem hash) e um de documento
+        // que descrevem o mesmo fato, com um dia de diferença.
+        for (desc_extrato, desc_documento, dia, v) in [
+            (
+                "Compra no débito · Farmácia Exemplo",
+                "Recibo · Farmácia Exemplo",
+                8,
+                -8790,
+            ),
+            (
+                "PIX enviado · Marcenaria Exemplo",
+                "Nota fiscal · Marcenaria Exemplo",
+                11,
+                -45000,
+            ),
+        ] {
+            let data = data_no_ciclo(CICLO_ATUAL, dia);
+            let dia_seguinte = data_no_ciclo(CICLO_ATUAL, dia + 1);
+            e.novo_registro(
+                "",
+                desc_extrato,
+                "Banco Alfa",
+                "Banco Alfa · corrente",
+                None,
+                "debito",
+                &data,
+                v,
+                "extraido",
+                None,
+            );
+            e.novo_registro(
+                "demo-sugestao",
+                desc_documento,
+                "Banco Alfa",
+                "Banco Alfa · corrente",
+                None,
+                "compra",
+                &dia_seguinte,
+                v,
+                "extraido",
+                None,
+            );
+        }
+
         // A triar: chegaram e nenhuma regra passou ainda.
         let a_triar: [(&str, &str, &'static str, i64, bool); 8] = [
             (
@@ -2038,6 +2082,30 @@ impl Estado {
         }
     }
 
+    /// Os pares óbvios entre os registros da demonstração, pela mesma regra do inventário.
+    fn sugestoes_de_conciliacao(&self) -> Tabela {
+        use sbf_inventario::conciliacao::{Candidato, achar_pares, tabela_de_pares};
+        let mut ja_unidos: BTreeSet<i64> = BTreeSet::new();
+        for r in self.registros.iter().filter(|r| !r.conciliados.is_empty()) {
+            ja_unidos.insert(r.id);
+            ja_unidos.extend(r.conciliados.iter().copied());
+        }
+        let candidatos: Vec<Candidato> = self
+            .registros
+            .iter()
+            .filter(|r| r.estado != "divergente" && !ja_unidos.contains(&r.id))
+            .map(|r| Candidato {
+                id: r.id,
+                data: r.data.clone(),
+                valor: r.valor,
+                conta: Some(r.conta.clone()),
+                de_conexao: r.hash.is_empty(),
+                descricao: Some(r.descricao.clone()),
+            })
+            .collect();
+        tabela_de_pares(&achar_pares(&candidatos))
+    }
+
     fn tabela_de_registros<'a>(&self, registros: impl Iterator<Item = &'a Registro>) -> Tabela {
         Tabela {
             colunas: vec![
@@ -2825,6 +2893,7 @@ impl Estado {
                     .map(|c| self.linha_da_coleta(c))
                     .collect(),
             },
+            A::SugestoesDeConciliacao => self.sugestoes_de_conciliacao(),
             A::Pendencias => Tabela {
                 colunas: vec![
                     col("Pergunta"),
@@ -3573,7 +3642,8 @@ impl Estado {
             }
             Tipo::Registro => {
                 let r = self.registro(&alvo.chave)?;
-                let a = self.achado(&r.hash)?;
+                // Registro de extrato (sem hash) não tem achado: o rastro começa na decisão.
+                let a = self.achado(&r.hash);
                 let aprov = self
                     .decisoes
                     .iter()
@@ -3587,18 +3657,19 @@ impl Estado {
                         Some(&d.em),
                     ));
                 }
-                acima.push(self.elo_de(
-                    &Self::ref_do_achado(a),
-                    "extraído de",
-                    Some("regras@2"),
-                    None,
-                ));
-                acima.extend(self.acima_do_achado(a));
-                for l in self
-                    .lotes_com(alvo)
-                    .into_iter()
-                    .chain(self.lotes_com(&Self::ref_do_achado(a)))
-                {
+                if let Some(a) = a {
+                    acima.push(self.elo_de(
+                        &Self::ref_do_achado(a),
+                        "extraído de",
+                        Some("regras@2"),
+                        None,
+                    ));
+                    acima.extend(self.acima_do_achado(a));
+                }
+                for l in self.lotes_com(alvo).into_iter().chain(
+                    a.into_iter()
+                        .flat_map(|a| self.lotes_com(&Self::ref_do_achado(a))),
+                ) {
                     let papel = if l.aprovado_em.is_some() {
                         "aprovado no lote"
                     } else {

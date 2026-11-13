@@ -540,6 +540,19 @@ impl AppCasca for AppSbf {
             }
             vec![item]
         };
+        let sugestoes = {
+            let mut j = self.janela.borrow_mut();
+            j.primeiras(
+                self.consulta.as_ref(),
+                &PedidoDeTabela::Area {
+                    area: Area::SugestoesDeConciliacao,
+                    filtro: Filtro::default(),
+                },
+                1000,
+            )
+            .map(|c| c.total as i64)
+            .unwrap_or(0)
+        };
         let inventario = areas::AREAS_DO_INVENTARIO
             .iter()
             .map(|a| {
@@ -554,6 +567,7 @@ impl AppCasca for AppSbf {
                     Area::Documentos => Some(c.documentos),
                     _ => None,
                 });
+                let n = n.or((*a == Area::SugestoesDeConciliacao).then_some(sugestoes));
                 if let Some(n) = n {
                     item = item.contagem(n.max(0) as u64);
                 }

@@ -74,7 +74,7 @@ pub fn area_futura(id: &str) -> Option<&'static AreaFutura> {
 }
 
 /// As áreas do grupo Inventário, na ordem do painel.
-pub const AREAS_DO_INVENTARIO: [Area; 14] = [
+pub const AREAS_DO_INVENTARIO: [Area; 15] = [
     Area::VisaoGeral,
     Area::ATriar,
     Area::EmDuvida,
@@ -89,6 +89,7 @@ pub const AREAS_DO_INVENTARIO: [Area; 14] = [
     Area::Coletas,
     Area::Pendencias,
     Area::Lotes,
+    Area::SugestoesDeConciliacao,
 ];
 
 /// As áreas de Dinheiro, na ordem do painel (o livro-caixa).
@@ -123,6 +124,7 @@ pub fn rota_da_area(area: Area) -> &'static str {
         Area::Coletas => "coleta",
         Area::Pendencias => "pendencia",
         Area::Lotes => "lote",
+        Area::SugestoesDeConciliacao => "sugestoes-conciliacao",
         Area::Relatorios => "relatorios",
         Area::Hoje => "hoje",
         Area::Movimentacoes => "mov",
@@ -161,6 +163,7 @@ pub fn rotulo_da_area(area: Area) -> &'static str {
         Area::Coletas => "Coletas",
         Area::Pendencias => "Pendências",
         Area::Lotes => "Lotes",
+        Area::SugestoesDeConciliacao => "Sugestões de conciliação",
         Area::Relatorios => "Relatórios",
         Area::Hoje => "Hoje",
         Area::Movimentacoes => "Movimentações",
@@ -190,6 +193,7 @@ pub fn icone_da_area(area: Area) -> &'static str {
         Area::Coletas => "sync_saved_locally",
         Area::Pendencias => "flag",
         Area::Lotes => "inventory_2",
+        Area::SugestoesDeConciliacao => "call_merge",
         Area::Relatorios => "query_stats",
         Area::Hoje => "today",
         Area::Movimentacoes => "swap_vert",
@@ -227,6 +231,9 @@ pub fn descricao_da_area(area: Area) -> &'static str {
             "Perguntas que travam um achado, um registro ou um lote até você responder."
         }
         Area::Lotes => "Conjuntos de documentos e registros que você aprova junto para promoção.",
+        Area::SugestoesDeConciliacao => {
+            "Pares de registros que parecem o mesmo fato. Nada muda até você confirmar."
+        }
         Area::Relatorios => "As perguntas do §11 respondidas com os registros do inventário.",
         Area::Hoje => "Quanto eu tenho, quanto é meu, o que vence e como está o ciclo.",
         Area::Movimentacoes => "O que entrou e o que saiu, do livro-caixa.",
