@@ -26,7 +26,7 @@ pub type Centavos = i64;
 pub enum Fonte {
     /// Os registros do inventário. Todo número leva "a conferir".
     Inventario,
-    /// As movimentações. Desabilitada até a fatia 2.
+    /// As movimentações e o resto do livro-caixa (fatia 2), lidos da cópia local.
     LivroCaixa,
 }
 
@@ -110,7 +110,8 @@ pub struct Tabela {
     pub linhas: Vec<Linha>,
 }
 
-/// As áreas do grupo Inventário mais Relatórios (spec 06, "Áreas e vistas").
+/// As áreas do grupo Inventário mais Relatórios (spec 06, "Áreas e vistas"), as de
+/// Dinheiro e a Sincronização (spec 07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Area {
     VisaoGeral,
@@ -134,6 +135,41 @@ pub enum Area {
     Pendencias,
     Lotes,
     Relatorios,
+    // Dinheiro (fatia 2): leem o livro-caixa (`Fonte::LivroCaixa`).
+    /// Painel: Disponível agora, Livre após compromissos, Resultado do mês, Para
+    /// resolver. Sem tabela principal: use [`Consulta::painel_da_area`].
+    Hoje,
+    Movimentacoes,
+    /// Contas (tabela principal) e cartões com a fatura atual (seção do painel).
+    ContasECartoes,
+    Dividas,
+    Recorrentes,
+    /// Centros (tabela principal) e o Não alocado do ciclo (seção do painel).
+    Centros,
+    /// Os fornecedores do livro-caixa. A área `Fornecedores` continua sendo a do
+    /// inventário (registros a conferir): as duas fontes nunca se somam.
+    FornecedoresDoLivro,
+    // Estação (fatia 2)
+    /// Lida pelo trait [`crate::alteracao::Sincronizacao`], não pela `Consulta`.
+    Sincronizacao,
+}
+
+impl Area {
+    /// As áreas de Dinheiro, na ordem do painel de navegação.
+    pub const DO_LIVRO_CAIXA: [Area; 7] = [
+        Area::Hoje,
+        Area::Movimentacoes,
+        Area::ContasECartoes,
+        Area::Dividas,
+        Area::Recorrentes,
+        Area::Centros,
+        Area::FornecedoresDoLivro,
+    ];
+
+    /// A área lê o livro-caixa (e não o inventário)?
+    pub fn e_do_livro_caixa(self) -> bool {
+        Area::DO_LIVRO_CAIXA.contains(&self)
+    }
 }
 
 /// Os filtros da aba Início do Ribbon.
@@ -227,6 +263,38 @@ pub struct Secao {
 pub struct Painel {
     pub secoes: Vec<Secao>,
     /// Avisos no topo (por exemplo, fontes planejadas sem coleta).
+    pub avisos: Vec<String>,
+}
+
+/// Um número de destaque no topo de uma área de Dinheiro ("Disponível agora",
+/// "Resultado do mês"…).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Indicador {
+    pub rotulo: String,
+    /// Em geral [`Celula::Valor`] clicável (abre o que soma o número).
+    pub valor: Celula,
+    /// Texto curto sob o número ("de 20/out a 19/nov", "3 contas").
+    pub nota: Option<String>,
+    /// `Some(premissa)` quando o número é estimativa (grill: "Livre após
+    /// compromissos" com ocorrência sem valor esperado). A janela põe a marca.
+    pub estimativa: Option<String>,
+    /// O número vale "neste instante" (Disponível agora): offline, a janela mostra a
+    /// hora da cópia ao lado dele (grill Q13).
+    pub instantaneo: bool,
+}
+
+/// O painel de uma área de Dinheiro: os números do topo e as seções que não são a
+/// tabela principal (a tabela principal vem de [`Consulta::tabela`] com
+/// [`PedidoDeTabela::Area`], para virtualizar e selecionar).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PainelDeArea {
+    /// O ciclo a que os números se referem (`AAAA-MM`), quando há um.
+    pub ciclo: Option<String>,
+    pub indicadores: Vec<Indicador>,
+    /// Na Hoje, a primeira é **Para resolver** (grill Q16): uma linha por tipo de coisa
+    /// (vencidos, sem categoria, não alocadas, não confirmadas, documentos a revisar),
+    /// com a [`Celula::Contagem`] clicável.
+    pub secoes: Vec<Secao>,
     pub avisos: Vec<String>,
 }
 
@@ -336,6 +404,15 @@ pub trait Consulta {
         filtro: &Filtro,
     ) -> ResultadoDeConsulta<Painel>;
     fn contagens(&self) -> ResultadoDeConsulta<Contagens>;
+
+    /// Os números e as seções de uma área de Dinheiro (fatia 2). O inventário não tem
+    /// e devolve `NaoSuportado`.
+    fn painel_da_area(&self, area: Area, filtro: &Filtro) -> ResultadoDeConsulta<PainelDeArea> {
+        let _ = filtro;
+        Err(ErroDeConsulta::NaoSuportado(format!(
+            "a área {area:?} não tem painel nesta fonte"
+        )))
+    }
     /// O texto extraído de um achado (painel Texto).
     fn texto(&self, achado: &Ref) -> ResultadoDeConsulta<Option<String>>;
 }

@@ -1908,6 +1908,10 @@ pub fn tabela_da_area(
         Area::VisaoGeral | Area::Relatorios | Area::Pendencias | Area::Lotes => Err(
             ErroDeConsulta::NaoSuportado(format!("a área {area:?} não é uma vista simples")),
         ),
+        // Dinheiro e Sincronização (fatia 2) não leem o inventário.
+        _ => Err(ErroDeConsulta::NaoSuportado(format!(
+            "a área {area:?} não é do inventário"
+        ))),
     }
 }
 
