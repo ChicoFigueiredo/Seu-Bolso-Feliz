@@ -272,7 +272,9 @@ pub fn desenhar(
         .iter()
         .partition(|c| matches!(c.valor, Celula::Estado { .. }));
     for c in &estados {
-        ui.horizontal(|ui| componentes::celula(ui, &c.valor, pedidos));
+        if let Celula::Estado { rotulo, quem } = &c.valor {
+            ui.horizontal(|ui| componentes::estado(ui, rotulo, quem.as_ref()));
+        }
     }
 
     // Os valores em cartões (o primeiro em destaque), com o gráfico por ciclo ao lado,
@@ -412,23 +414,19 @@ pub fn desenhar(
                 de: alvo.clone(),
                 tipo: *tipo,
             };
-            match leitor.tabela(&pedido) {
-                Ok(t) => {
-                    let chave = format!("ligados:{alvo}:{tipo}");
-                    let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                    let altura = ui.available_height().max(200.0);
-                    tabela::desenhar(
-                        ui,
-                        &chave,
-                        &t,
-                        &mut estado,
-                        &mut vista.selecao,
-                        pedidos,
-                        Some(altura),
-                    );
-                    vista.tabelas.insert(chave, estado);
-                }
-                Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
+            let chave = format!("ligados:{alvo}:{tipo}");
+            let altura = ui.available_height().max(200.0);
+            if let Err(e) = tabela_em_pedacos(
+                ui,
+                leitor,
+                &pedido,
+                &chave,
+                vista,
+                pedidos,
+                Some(altura),
+                false,
+            ) {
+                componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
             }
         }
     }
@@ -487,6 +485,71 @@ fn cartao_de_valor(
         });
 }
 
+/// Uma tabela lida em pedaços (`Consulta::tabela_paginada`): a rolagem tem o tamanho do
+/// total, e o pedaço seguinte é pedido quando a rolagem chega perto do fim do que já foi
+/// lido. Ordenar uma tabela ainda não toda lida carrega tudo antes, com um aviso.
+/// Devolve o total de linhas (para o "N linhas" do cabeçalho), ou o erro.
+#[allow(clippy::too_many_arguments)]
+pub fn tabela_em_pedacos(
+    ui: &mut Ui,
+    leitor: &mut Leitor<'_>,
+    pedido: &PedidoDeTabela,
+    chave: &str,
+    vista: &mut Vista,
+    pedidos: &mut Vec<Pedido>,
+    altura: Option<f32>,
+    teclado: bool,
+) -> Result<usize, String> {
+    let p = tema::paleta(ui.ctx());
+    let mut estado = vista.tabelas.remove(chave).unwrap_or_default();
+    estado.teclado = teclado;
+    let mut minimo = 0;
+    if estado.ordem_pendente.is_some() {
+        if estado.ordenar_agora {
+            minimo = usize::MAX;
+        } else {
+            let total = leitor.carregada(pedido, 0).map(|c| c.total).unwrap_or(0);
+            ui.label(
+                RichText::new(format!(
+                    "ordenando {} linhas…",
+                    formato::inteiro(total as i64)
+                ))
+                .size(12.0)
+                .color(p.tinta_suave),
+            );
+            estado.ordenar_agora = true;
+            ui.ctx().request_repaint();
+        }
+    }
+    let resultado = leitor.carregada(pedido, minimo).map(|c| {
+        if minimo == usize::MAX {
+            if let Some(o) = estado.ordem_pendente.take() {
+                estado.ordem = o;
+            }
+            estado.ordenar_agora = false;
+        }
+        let falta = tabela::desenhar_parcial(
+            ui,
+            chave,
+            &c.tabela,
+            c.total,
+            &mut estado,
+            &mut vista.selecao,
+            pedidos,
+            altura,
+        );
+        (c.total, falta)
+    });
+    vista.tabelas.insert(chave.to_owned(), estado);
+    let (total, falta) = resultado?;
+    if let Some(n) = falta {
+        // Perto do fim do que foi lido: o pedaço seguinte (mais um de folga).
+        leitor.carregada(pedido, n + 1 + crate::leitura::PEDACO)?;
+        ui.ctx().request_repaint();
+    }
+    Ok(total)
+}
+
 /// O texto extraído, em fonte mono, rolável.
 pub fn texto_extraido(ui: &mut Ui, texto: Option<&str>) {
     let p = tema::paleta(ui.ctx());
@@ -512,6 +575,18 @@ pub fn texto_extraido(ui: &mut Ui, texto: Option<&str>) {
             ui.label(RichText::new("Sem texto extraído para este achado.").color(p.tinta_suave));
         }
     }
+}
+
+/// Altura útil das barras do gráfico por ciclo.
+pub const ALTURA_DO_GRAFICO: f32 = 64.0;
+
+/// Altura de uma barra: proporcional ao valor absoluto (o maior ocupa `altura`), com um
+/// mínimo visível de 3 px para valor diferente de zero.
+pub fn altura_da_barra(centavos: i64, maximo: f32, altura: f32) -> f32 {
+    if centavos == 0 {
+        return 0.0;
+    }
+    (centavos.unsigned_abs() as f32 / maximo.max(1.0) * altura).max(3.0)
 }
 
 /// As barras dos últimos ciclos, cada uma clicável (abre o que soma o ciclo).
@@ -551,19 +626,19 @@ pub fn grafico_por_ciclo(ui: &mut Ui, totais: &[TotalDoCiclo], pedidos: &mut Vec
                             )
                             .extend(),
                         );
-                        let (rect, r) = ui
-                            .allocate_exact_size(vec2(largura_barra - 12.0, 44.0), Sense::click());
-                        let h = (t.centavos.unsigned_abs() as f32 / maximo * 40.0).max(2.0);
+                        let (rect, r) = ui.allocate_exact_size(
+                            vec2(largura_barra - 12.0, ALTURA_DO_GRAFICO),
+                            Sense::click(),
+                        );
+                        let h = altura_da_barra(t.centavos, maximo, ALTURA_DO_GRAFICO);
                         let barra = egui::Rect::from_min_max(
                             egui::pos2(rect.left(), rect.bottom() - h),
                             rect.max,
                         );
-                        let cor = if ultimo {
+                        let cor = if ultimo || r.hovered() {
                             p.destaque
-                        } else if r.hovered() {
-                            p.destaque_borda
                         } else {
-                            p.destaque_sutil
+                            p.destaque_borda
                         };
                         ui.painter().rect_filled(barra, CornerRadius::same(2), cor);
                         let mut texto = RichText::new(&t.ciclo).size(11.0).color(p.tinta_suave);
@@ -760,25 +835,12 @@ pub fn desenhar_total(
         });
     }
     ui.add_space(8.0);
-    match leitor.tabela(pedido) {
-        Ok(t) => {
-            let chave = format!(
-                "total:{}",
-                serde_json::to_string(pedido).unwrap_or_default()
-            );
-            let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-            tabela::desenhar(
-                ui,
-                &chave,
-                &t,
-                &mut estado,
-                &mut vista.selecao,
-                pedidos,
-                None,
-            );
-            vista.tabelas.insert(chave, estado);
-        }
-        Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
+    let chave = format!(
+        "total:{}",
+        serde_json::to_string(pedido).unwrap_or_default()
+    );
+    if let Err(e) = tabela_em_pedacos(ui, leitor, pedido, &chave, vista, pedidos, None, false) {
+        componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
     }
 }
 
@@ -823,6 +885,22 @@ mod testes {
             .find(|a| a.rotulo == "Compromissos e recorrentes")
             .expect("aba");
         assert!(comp.motivo.is_some());
+    }
+
+    #[test]
+    fn barras_proporcionais_ao_valor_absoluto() {
+        let maximo = 31244.0;
+        let a = altura_da_barra(-22870, maximo, 64.0);
+        let b = altura_da_barra(-28710, maximo, 64.0);
+        let c = altura_da_barra(-31244, maximo, 64.0);
+        assert!((c - 64.0).abs() < 0.01);
+        assert!((a / c - 22870.0 / 31244.0).abs() < 0.01);
+        assert!(
+            b - a > 10.0,
+            "a diferença de R$ 58 tem que aparecer: {a} {b}"
+        );
+        assert_eq!(altura_da_barra(-1, maximo, 64.0), 3.0);
+        assert_eq!(altura_da_barra(0, maximo, 64.0), 0.0);
     }
 
     #[test]

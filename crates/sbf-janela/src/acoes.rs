@@ -21,6 +21,23 @@ pub enum IdAcao {
     PeriodoAtual,
     PeriodoAnterior,
     PeriodoTodos,
+    /// Estado do achado (menu).
+    EstadoDoAchado,
+    EstadoTodos,
+    EstadoATriar,
+    EstadoDocumento,
+    EstadoEmDuvida,
+    EstadoDescartado,
+    /// Tipo de documento (menu).
+    TipoDoDocumento,
+    TipoTodos,
+    TipoBoleto,
+    TipoFatura,
+    TipoExtrato,
+    TipoComprovante,
+    TipoNotaFiscal,
+    TipoFoto,
+    TipoOutro,
     /// Quem decidiu (menu): você, as regras ou todos.
     QuemDecidiu,
     QuemTodos,
@@ -323,6 +340,156 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         B::Inicio,
         "Período",
         "Sem filtro de ciclo",
+    ),
+    a(
+        I::EstadoDoAchado,
+        "inicio.estado",
+        "Estado do achado",
+        "filter_alt",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os achados num estado",
+    ),
+    a(
+        I::EstadoTodos,
+        "inicio.estado.todos",
+        "Todos os estados",
+        "list_alt",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Sem filtro de estado",
+    ),
+    a(
+        I::EstadoATriar,
+        "inicio.estado.a-triar",
+        "A triar",
+        "schedule",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os achados a triar",
+    ),
+    a(
+        I::EstadoDocumento,
+        "inicio.estado.documento",
+        "Documento",
+        "task_alt",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os documentos",
+    ),
+    a(
+        I::EstadoEmDuvida,
+        "inicio.estado.em-duvida",
+        "Em dúvida",
+        "help",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os achados em dúvida",
+    ),
+    a(
+        I::EstadoDescartado,
+        "inicio.estado.descartado",
+        "Descartado",
+        "block",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os descartados",
+    ),
+    a(
+        I::TipoDoDocumento,
+        "inicio.tipo",
+        "Tipo",
+        "label",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só um tipo de documento",
+    ),
+    a(
+        I::TipoTodos,
+        "inicio.tipo.todos",
+        "Todos os tipos",
+        "list_alt",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Sem filtro de tipo",
+    ),
+    a(
+        I::TipoBoleto,
+        "inicio.tipo.boleto",
+        "Boleto",
+        "receipt_long",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só boletos",
+    ),
+    a(
+        I::TipoFatura,
+        "inicio.tipo.fatura",
+        "Fatura de cartão",
+        "credit_card",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só faturas de cartão",
+    ),
+    a(
+        I::TipoExtrato,
+        "inicio.tipo.extrato",
+        "Extrato",
+        "account_balance",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só extratos",
+    ),
+    a(
+        I::TipoComprovante,
+        "inicio.tipo.comprovante",
+        "Comprovante",
+        "description",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só comprovantes",
+    ),
+    a(
+        I::TipoNotaFiscal,
+        "inicio.tipo.nota-fiscal",
+        "Nota fiscal",
+        "list_alt",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só notas fiscais",
+    ),
+    a(
+        I::TipoFoto,
+        "inicio.tipo.foto",
+        "Foto",
+        "find_in_page",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só fotos",
+    ),
+    a(
+        I::TipoOutro,
+        "inicio.tipo.outro",
+        "Outro",
+        "category",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só os de tipo outro",
     ),
     a(
         I::QuemDecidiu,
@@ -777,6 +944,11 @@ pub struct ContextoDasAcoes {
     pub estante_ligada: bool,
     /// Há um cofre aberto (o modo demonstração não tem).
     pub cofre_aberto: bool,
+    /// Destinos configurados em Opções.
+    pub destino_da_estante: bool,
+    pub destino_da_copia: bool,
+    /// Uma ferramenta lenta já está rodando.
+    pub ferramenta_ocupada: bool,
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -805,6 +977,24 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         I::Atualizar | I::Pesquisar | I::Desfazer | I::VerDecisoes | I::NovoLote => Habilitada,
         I::Periodo | I::PeriodoAtual | I::PeriodoAnterior | I::PeriodoTodos => Habilitada,
         I::QuemDecidiu | I::QuemTodos | I::QuemVoce | I::QuemRegras => Habilitada,
+        I::EstadoDoAchado
+        | I::EstadoTodos
+        | I::EstadoATriar
+        | I::EstadoDocumento
+        | I::EstadoEmDuvida
+        | I::EstadoDescartado
+        | I::TipoDoDocumento
+        | I::TipoTodos
+        | I::TipoBoleto
+        | I::TipoFatura
+        | I::TipoExtrato
+        | I::TipoComprovante
+        | I::TipoNotaFiscal
+        | I::TipoFoto
+        | I::TipoOutro => Habilitada,
+        id if e_filtro_de_menu(id) || matches!(id, I::EstadoDoAchado | I::TipoDoDocumento) => {
+            Habilitada
+        }
         I::PainelDetalhe | I::PainelOrigens | I::PainelTexto | I::PainelHistorico => Habilitada,
         I::TrocarTema => Habilitada,
         I::Documento | I::Descartar | I::EmDuvida => {
@@ -863,9 +1053,26 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         }
         I::AprovarLote | I::DesaprovarLote => exige(c.lote_atual.is_some(), "Escolha um lote"),
         I::EnviarAoServidor => Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned()),
-        I::AbrirPdfProtegido | I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
+        I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
+        I::AbrirPdfProtegido if c.ferramenta_ocupada => {
+            Desabilitada("Outra ferramenta está rodando".to_owned())
+        }
+        I::AbrirPdfProtegido => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
         I::AtualizarEstante | I::FazerCopiaDeSeguranca => {
-            exige(c.estante_ligada, MOTIVO_NAO_LIGADO)
+            let destino = if id == I::AtualizarEstante {
+                c.destino_da_estante
+            } else {
+                c.destino_da_copia
+            };
+            if !c.estante_ligada {
+                Desabilitada(MOTIVO_NAO_LIGADO.to_owned())
+            } else if !destino {
+                Desabilitada(crate::ferramentas::MOTIVO_SEM_DESTINO.to_owned())
+            } else if c.ferramenta_ocupada {
+                Desabilitada("Outra ferramenta está rodando".to_owned())
+            } else {
+                Habilitada
+            }
         }
         I::AbrirOriginal | I::MostrarNoCofre => {
             if !(sel.len() == 1 && todos_de(sel, ACHADOS)) {
@@ -888,6 +1095,38 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         I::AbrirEmPainelFlutuante => exige(sel.len() == 1, "Selecione um item"),
         I::CopiarRastro => exige(c.item_aberto.is_some(), "Abra a página de um item"),
     }
+}
+
+/// O filtro de estado de uma Ação do menu "Estado do achado": `Some(None)` = todos.
+pub fn filtro_de_estado(id: IdAcao) -> Option<Option<&'static str>> {
+    Some(match id {
+        I::EstadoTodos => None,
+        I::EstadoATriar => Some("novo"),
+        I::EstadoDocumento => Some("documento"),
+        I::EstadoEmDuvida => Some("duvida"),
+        I::EstadoDescartado => Some("descartado"),
+        _ => return None,
+    })
+}
+
+/// O filtro de tipo de uma Ação do menu "Tipo": `Some(None)` = todos.
+pub fn filtro_de_tipo(id: IdAcao) -> Option<Option<&'static str>> {
+    Some(match id {
+        I::TipoTodos => None,
+        I::TipoBoleto => Some("boleto"),
+        I::TipoFatura => Some("fatura_cartao"),
+        I::TipoExtrato => Some("extrato"),
+        I::TipoComprovante => Some("comprovante"),
+        I::TipoNotaFiscal => Some("nota_fiscal"),
+        I::TipoFoto => Some("foto"),
+        I::TipoOutro => Some("outro"),
+        _ => return None,
+    })
+}
+
+/// As Ações de dentro dos menus de filtro (Estado do achado e Tipo).
+pub fn e_filtro_de_menu(id: IdAcao) -> bool {
+    filtro_de_estado(id).is_some() || filtro_de_tipo(id).is_some()
 }
 
 /// A Ação cujo atalho foi apertado neste quadro, se houver. Consome a tecla.
@@ -930,6 +1169,21 @@ mod testes {
         I::PeriodoAtual,
         I::PeriodoAnterior,
         I::PeriodoTodos,
+        I::EstadoDoAchado,
+        I::EstadoTodos,
+        I::EstadoATriar,
+        I::EstadoDocumento,
+        I::EstadoEmDuvida,
+        I::EstadoDescartado,
+        I::TipoDoDocumento,
+        I::TipoTodos,
+        I::TipoBoleto,
+        I::TipoFatura,
+        I::TipoExtrato,
+        I::TipoComprovante,
+        I::TipoNotaFiscal,
+        I::TipoFoto,
+        I::TipoOutro,
         I::QuemDecidiu,
         I::QuemTodos,
         I::QuemVoce,

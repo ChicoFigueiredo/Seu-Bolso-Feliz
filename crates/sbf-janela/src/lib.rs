@@ -12,6 +12,7 @@ pub mod areas;
 pub mod componentes;
 pub mod demonstracao;
 pub mod dock;
+pub mod ferramentas;
 pub mod formato;
 pub mod icones;
 pub mod janela;

@@ -109,6 +109,12 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
             casca.estado.ribbon.bastidores_abertos = true;
             casca.estado.secao_bastidores = Some("opcoes".into());
         }
+        "regras" => bancada_casca::executar(ctx, "ferramentas.regras-de-senha"),
+        "pdf" => bancada_casca::executar(ctx, "ferramentas.pdf-protegido"),
+        "chaveiro" => {
+            casca.estado.ribbon.bastidores_abertos = true;
+            casca.estado.secao_bastidores = Some("chaveiro".into());
+        }
         "flutuante" => {
             bancada_casca::abrir_flutuante(ctx, "fornecedor:Água Sigma");
         }

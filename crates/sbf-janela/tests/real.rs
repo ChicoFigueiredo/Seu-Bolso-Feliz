@@ -184,3 +184,139 @@ fn gerar_banco_de_exemplo() {
     std::fs::create_dir_all(&pasta).expect("pasta");
     std::fs::copy(&banco.caminho, &destino).expect("copiar");
 }
+
+#[test]
+fn ferramentas_ligadas_ao_banco_real() {
+    use bancada_segredos::ParametrosDeDerivacao;
+    use bancada_segredos::testes::ChaveiroEmMemoria;
+    use sbf_janela::ferramentas::{Ferramentas, MOTIVO_SEM_DESTINO};
+
+    let banco = comum::banco_de_teste();
+    let cofre = tempfile::tempdir().expect("cofre");
+    let pasta_do_chaveiro = tempfile::tempdir().expect("chaveiro");
+    let mut r = Real::novo(&banco.caminho);
+    let mut f = Ferramentas::nova(banco.caminho.clone(), cofre.path().to_path_buf());
+    f.chaveiro = Some(
+        sbf_chaveiro::Chaveiro::abrir_com_chaveiro(
+            pasta_do_chaveiro.path(),
+            std::sync::Arc::new(ChaveiroEmMemoria::novo()),
+            ParametrosDeDerivacao::rapidos_para_testes(),
+        )
+        .expect("chaveiro"),
+    );
+    r.casca.app.janela().ferramentas = Some(f);
+
+    // Sem destino, estante e cópia ficam desabilitadas com o motivo.
+    let acoes = bancada_casca::AppCasca::acoes(&r.casca.app);
+    for id in ["ferramentas.estante", "ferramentas.copia"] {
+        let a = acoes.iter().find(|a| a.id == id).expect("ação");
+        assert_eq!(a.motivo(), Some(MOTIVO_SEM_DESTINO));
+    }
+
+    // Regras de senha: só leitura, sem senha nenhuma.
+    r.executar(IdAcao::RegrasDeSenha);
+    let resumo = r
+        .casca
+        .app
+        .janela()
+        .ferramentas
+        .as_ref()
+        .and_then(|f| f.resumo());
+    assert!(
+        resumo.as_deref().is_some_and(|t| t.starts_with("regras:")),
+        "{resumo:?}"
+    );
+
+    // PDF protegido: a rodada roda numa thread e o resultado volta à janela.
+    r.executar(IdAcao::AbrirPdfProtegido);
+    let ctx = r.ctx.clone();
+    let terminou = r
+        .casca
+        .app
+        .janela()
+        .ferramentas
+        .as_mut()
+        .is_some_and(|f| f.esperar(&ctx, Duration::from_secs(60)));
+    assert!(terminou, "a rodada não terminou");
+    r.quadro();
+    let resumo = r
+        .casca
+        .app
+        .janela()
+        .ferramentas
+        .as_ref()
+        .and_then(|f| f.resumo());
+    assert!(
+        resumo
+            .as_deref()
+            .is_some_and(|t| t.starts_with("pdf:") || t.starts_with("erro:")),
+        "{resumo:?}"
+    );
+
+    // Abrir original de achado sem cópia no acervo dá um erro claro, sem pânico.
+    let achado = sbf_inventario::Ref::nova(sbf_inventario::Tipo::Achado, "nao-existe");
+    r.casca.app.janela().centro.selecao.so(achado);
+    r.executar(IdAcao::AbrirOriginal);
+    assert!(
+        r.casca
+            .app
+            .janela()
+            .mensagem
+            .as_ref()
+            .is_some_and(|m| m.erro)
+    );
+}
+
+#[test]
+fn areas_grandes_carregam_em_pedacos_e_ordenar_carrega_tudo() {
+    let banco = comum::banco_de_teste();
+    {
+        let conn = rusqlite::Connection::open(&banco.caminho).expect("abrir");
+        comum::popular_grande(&conn, 5_000);
+    }
+    let mut r = Real::novo(&banco.caminho);
+    r.abrir(Destino::Area(Area::Documentos));
+    let pedido = PedidoDeTabela::Area {
+        area: Area::Documentos,
+        filtro: Filtro::default(),
+    };
+    // Só o primeiro pedaço foi lido; a rolagem tem o tamanho do total.
+    let c = r
+        .casca
+        .app
+        .janela()
+        .primeiras(r.casca.app.consulta(), &pedido, 0)
+        .expect("pedaço");
+    assert_eq!(c.tabela.linhas.len(), sbf_janela::leitura::PEDACO);
+    assert!(c.total > sbf_janela::leitura::PEDACO, "total {}", c.total);
+    // Ordenar com a tabela pela metade: aviso num quadro, tudo carregado e ordenado no seguinte.
+    let chave = format!("area:{:?}", Area::Documentos);
+    r.casca
+        .app
+        .janela()
+        .centro
+        .tabelas
+        .entry(chave.clone())
+        .or_default()
+        .ordem_pendente = Some(Some((0, true)));
+    r.quadro();
+    r.quadro();
+    let estado = r
+        .casca
+        .app
+        .janela()
+        .centro
+        .tabelas
+        .get(&chave)
+        .cloned()
+        .expect("estado");
+    assert_eq!(estado.ordem, Some((0, true)));
+    assert!(estado.ordem_pendente.is_none());
+    let c = r
+        .casca
+        .app
+        .janela()
+        .primeiras(r.casca.app.consulta(), &pedido, 0)
+        .expect("tudo");
+    assert_eq!(c.tabela.linhas.len(), c.total);
+}

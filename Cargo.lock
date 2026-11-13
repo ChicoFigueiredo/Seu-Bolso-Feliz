@@ -3576,10 +3576,14 @@ name = "sbf-janela"
 version = "0.1.0"
 dependencies = [
  "bancada-casca",
+ "bancada-segredos",
  "egui",
  "egui_extras",
  "rusqlite",
+ "sbf-chaveiro",
+ "sbf-estante",
  "sbf-inventario",
+ "sbf-pdf",
  "serde",
  "serde_json",
  "tempfile",

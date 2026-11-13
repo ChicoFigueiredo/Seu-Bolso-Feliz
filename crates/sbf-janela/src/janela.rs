@@ -80,6 +80,9 @@ pub struct Janela {
     pub periodo: Periodo,
     /// Filtro "Quem decidiu" (aba Início): `None` = todos.
     pub quem_decidiu: Option<sbf_inventario::consulta::Quem>,
+    /// Filtros "Estado do achado" e "Tipo" (aba Início): `None` = todos.
+    pub estado_do_achado: Option<String>,
+    pub tipo_do_documento: Option<String>,
     focar_pesquisa: bool,
     relatorios: EstadoDosRelatorios,
     pub lote_atual: Option<Ref>,
@@ -95,6 +98,11 @@ pub struct Janela {
     /// Dentro da `bancada-casca`: a navegação é da casca, e os pedidos de navegação vão
     /// para a fila dela.
     pub na_casca: bool,
+    /// As Ferramentas do inventário real (PDF protegido, estante, cópia, chaveiro).
+    /// `None` no modo demonstração.
+    pub ferramentas: Option<crate::ferramentas::Ferramentas>,
+    visao_geral_pendente:
+        Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
 }
 
 impl Default for Janela {
@@ -113,6 +121,8 @@ impl Janela {
             pesquisa: String::new(),
             periodo: Periodo::default(),
             quem_decidiu: None,
+            estado_do_achado: None,
+            tipo_do_documento: None,
             focar_pesquisa: false,
             relatorios: EstadoDosRelatorios::default(),
             lote_atual: None,
@@ -125,6 +135,8 @@ impl Janela {
             ligacoes: Ligacoes::default(),
             hoje: hoje_em_sao_paulo(),
             na_casca: false,
+            ferramentas: None,
+            visao_geral_pendente: None,
         }
     }
 
@@ -141,6 +153,42 @@ impl Janela {
     /// As decisões que você tomou nesta sessão.
     pub fn decisoes_da_sessao(&self) -> &[IdDecisao] {
         &self.decisoes_da_sessao
+    }
+
+    /// A janela das Ferramentas (andamento e resultado). Quando uma tarefa termina, relê o
+    /// inventário: a rodada de PDF e a aceitação de uma regra mudam o banco.
+    pub fn ferramentas_ui(&mut self, ctx: &Context) {
+        let Some(f) = self.ferramentas.as_mut() else {
+            return;
+        };
+        let terminou = f.sondar(ctx);
+        f.janela_ui(ctx, &mut self.pedidos);
+        if terminou {
+            self.atualizar();
+        }
+    }
+
+    /// As primeiras `n` linhas de uma tabela, lida em pedaços (a Paleta usa).
+    pub fn primeiras(
+        &mut self,
+        consulta: &dyn Consulta,
+        pedido: &PedidoDeTabela,
+        n: usize,
+    ) -> Result<crate::leitura::Carregada, String> {
+        Leitor::novo(consulta, &mut self.cache).carregada(pedido, n)
+    }
+
+    /// Lê a Visão geral numa thread, com uma conexão própria, para a janela abrir sem
+    /// esperar (no inventário real ela leva meio segundo).
+    pub fn pre_carregar_visao_geral(&mut self, banco: std::path::PathBuf) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = sbf_inventario::leitor::LeitorSqlite::abrir(&banco)
+                .and_then(|l| l.visao_geral())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+        self.visao_geral_pendente = Some(rx);
     }
 
     /// Uma tabela pela leitura com cache (a Paleta usa).
@@ -211,9 +259,18 @@ impl Janela {
             pode_voltar: self.navegacao.pode_voltar(),
             pode_avancar: self.navegacao.pode_avancar(),
             item_aberto: self.item_aberto().cloned(),
-            pdf_ligado: self.ligacoes.pdf,
-            estante_ligada: self.ligacoes.estante,
-            cofre_aberto: self.ligacoes.cofre,
+            pdf_ligado: self.ligacoes.pdf || self.ferramentas.is_some(),
+            estante_ligada: self.ligacoes.estante || self.ferramentas.is_some(),
+            cofre_aberto: self.ligacoes.cofre || self.ferramentas.is_some(),
+            destino_da_estante: self
+                .ferramentas
+                .as_ref()
+                .is_some_and(|f| !f.destino_da_estante.trim().is_empty()),
+            destino_da_copia: self
+                .ferramentas
+                .as_ref()
+                .is_some_and(|f| !f.destino_da_copia.trim().is_empty()),
+            ferramenta_ocupada: self.ferramentas.as_ref().is_some_and(|f| f.ocupada()),
         }
     }
 
@@ -237,6 +294,8 @@ impl Janela {
             texto: Some(self.pesquisa.trim().to_owned()).filter(|t| !t.is_empty()),
             ciclos,
             quem_decidiu: self.quem_decidiu.clone(),
+            estados: self.estado_do_achado.iter().cloned().collect(),
+            tipos: self.tipo_do_documento.iter().cloned().collect(),
             ..Filtro::default()
         }
     }
@@ -399,6 +458,26 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
+                if let Some(rx) = &self.visao_geral_pendente {
+                    match rx.try_recv() {
+                        Ok(r) => {
+                            leitor.guardar_visao_geral(r);
+                            self.visao_geral_pendente = None;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new());
+                                ui.label("Carregando a Visão geral…");
+                            });
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(100));
+                            return;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            self.visao_geral_pendente = None;
+                        }
+                    }
+                }
                 painel::visao_geral(ui, &mut leitor, vista, pedidos);
             }
             Destino::Area(Area::Relatorios) => {
@@ -435,25 +514,20 @@ impl Janela {
                         filtro: filtro.clone(),
                     };
                     componentes::rotulo_de_secao(ui, areas::rotulo_da_area(outra));
-                    match leitor.tabela(&pedido) {
-                        Ok(t) => {
-                            let chave = format!("area:{outra:?}");
-                            let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                            let altura = (t.linhas.len() as f32 * 26.0 + 30.0).min(200.0);
-                            tabela::desenhar(
-                                ui,
-                                &chave,
-                                &t,
-                                &mut estado,
-                                &mut vista.selecao,
-                                pedidos,
-                                Some(altura),
-                            );
-                            vista.tabelas.insert(chave, estado);
-                        }
-                        Err(e) => {
-                            componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
-                        }
+                    let chave = format!("area:{outra:?}");
+                    let n = leitor.carregada(&pedido, 0).map(|c| c.total).unwrap_or(0);
+                    let altura = (n as f32 * 26.0 + 30.0).min(200.0);
+                    if let Err(e) = pagina::tabela_em_pedacos(
+                        ui,
+                        &mut leitor,
+                        &pedido,
+                        &chave,
+                        vista,
+                        pedidos,
+                        Some(altura),
+                        false,
+                    ) {
+                        componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
                     }
                     ui.add_space(6.0);
                     componentes::rotulo_de_secao(ui, areas::rotulo_da_area(*area));
@@ -462,10 +536,10 @@ impl Janela {
                     area: *area,
                     filtro,
                 };
-                match leitor.tabela(&pedido) {
-                    Ok(t) => {
+                match leitor.carregada(&pedido, 0) {
+                    Ok(c) => {
                         ui.horizontal(|ui| {
-                            let n = t.linhas.len();
+                            let n = c.total;
                             let sel = vista.selecao.itens.len();
                             let mut texto = format!("{} {}", formato::inteiro(n as i64), if n == 1 { "linha" } else { "linhas" });
                             if sel > 0 {
@@ -479,18 +553,18 @@ impl Janela {
                             );
                         });
                         let chave = format!("area:{area:?}");
-                        let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
-                        estado.teclado = true;
-                        tabela::desenhar(
+                        if let Err(e) = pagina::tabela_em_pedacos(
                             ui,
+                            &mut leitor,
+                            &pedido,
                             &chave,
-                            &t,
-                            &mut estado,
-                            &mut vista.selecao,
+                            vista,
                             pedidos,
                             None,
-                        );
-                        vista.tabelas.insert(chave, estado);
+                            true,
+                        ) {
+                            componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
+                        }
                     }
                     Err(e) => {
                         componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
@@ -889,7 +963,29 @@ impl Janela {
                 });
             }
             IdAcao::Pesquisar => self.focar_pesquisa = true,
-            IdAcao::Periodo | IdAcao::QuemDecidiu => {}
+            IdAcao::Periodo
+            | IdAcao::QuemDecidiu
+            | IdAcao::EstadoDoAchado
+            | IdAcao::TipoDoDocumento => {}
+            IdAcao::EstadoTodos
+            | IdAcao::EstadoATriar
+            | IdAcao::EstadoDocumento
+            | IdAcao::EstadoEmDuvida
+            | IdAcao::EstadoDescartado
+            | IdAcao::TipoTodos
+            | IdAcao::TipoBoleto
+            | IdAcao::TipoFatura
+            | IdAcao::TipoExtrato
+            | IdAcao::TipoComprovante
+            | IdAcao::TipoNotaFiscal
+            | IdAcao::TipoFoto
+            | IdAcao::TipoOutro => {
+                if let Some(f) = acoes::filtro_de_estado(id) {
+                    self.estado_do_achado = f.map(str::to_owned);
+                } else if let Some(f) = acoes::filtro_de_tipo(id) {
+                    self.tipo_do_documento = f.map(str::to_owned);
+                }
+            }
             IdAcao::PeriodoAtual => self.periodo = Periodo::CicloAtual,
             IdAcao::PeriodoAnterior => self.periodo = Periodo::CicloAnterior,
             IdAcao::PeriodoTodos => self.periodo = Periodo::TodosOsCiclos,
@@ -1044,6 +1140,43 @@ impl Janela {
                         }
                         Err(e) => self.erro(e),
                     }
+                }
+            }
+            IdAcao::AbrirPdfProtegido
+            | IdAcao::AbrirProtegido
+            | IdAcao::RegrasDeSenha
+            | IdAcao::AtualizarEstante
+            | IdAcao::FazerCopiaDeSeguranca
+            | IdAcao::AbrirOriginal
+            | IdAcao::MostrarNoCofre
+                if self.ferramentas.is_some() =>
+            {
+                let hash = sel.first().map(|r| r.chave.clone()).unwrap_or_default();
+                let Some(f) = self.ferramentas.as_mut() else {
+                    return;
+                };
+                let r = match id {
+                    IdAcao::AbrirPdfProtegido | IdAcao::AbrirProtegido => {
+                        f.abrir_pdf_protegido();
+                        Ok(())
+                    }
+                    IdAcao::RegrasDeSenha => {
+                        f.regras_de_senha();
+                        Ok(())
+                    }
+                    IdAcao::AtualizarEstante => {
+                        f.atualizar_estante();
+                        Ok(())
+                    }
+                    IdAcao::FazerCopiaDeSeguranca => {
+                        f.pedir_copia();
+                        Ok(())
+                    }
+                    IdAcao::AbrirOriginal => f.abrir_original(&hash),
+                    _ => f.mostrar_no_cofre(&hash),
+                };
+                if let Err(e) = r {
+                    self.erro(e);
                 }
             }
             IdAcao::EnviarAoServidor

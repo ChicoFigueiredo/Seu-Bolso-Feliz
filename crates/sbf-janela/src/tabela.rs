@@ -51,6 +51,10 @@ pub struct EstadoDaTabela {
     /// A tabela do centro responde ao teclado: ↑/↓ movem a seleção, Shift estende,
     /// Enter abre a página do item.
     pub teclado: bool,
+    /// Ordem pedida numa tabela ainda não toda carregada: quem chama carrega tudo e aplica.
+    pub ordem_pendente: Option<Option<(usize, bool)>>,
+    /// O aviso "ordenando…" já apareceu: neste quadro, carrega tudo e ordena.
+    pub ordenar_agora: bool,
     indices: Vec<usize>,
     assinatura: Option<Assinatura>,
 }
@@ -125,6 +129,7 @@ fn larguras_das_colunas(tabela: &Tabela) -> Vec<f32> {
                         Celula::Valor { centavos, .. } => {
                             formato::dinheiro(*centavos).chars().count()
                         }
+                        Celula::Estado { rotulo, .. } => rotulo.chars().count() + 4,
                         outra => formato::texto_da_celula(outra).chars().count(),
                     };
                     maior = maior.max(n + extra);
@@ -145,11 +150,32 @@ pub fn desenhar(
     pedidos: &mut Vec<Pedido>,
     altura: Option<f32>,
 ) {
+    let total = tabela.linhas.len();
+    desenhar_parcial(ui, id, tabela, total, estado, selecao, pedidos, altura);
+}
+
+/// Desenha uma tabela carregada em pedaços: `total` linhas na rolagem, só as primeiras
+/// `tabela.linhas` já lidas. Devolve a maior linha visível ainda não carregada (quem chama
+/// pede o pedaço seguinte, sem paginação visível).
+#[allow(clippy::too_many_arguments)]
+pub fn desenhar_parcial(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    tabela: &Arc<Tabela>,
+    total: usize,
+    estado: &mut EstadoDaTabela,
+    selecao: &mut Selecao,
+    pedidos: &mut Vec<Pedido>,
+    altura: Option<f32>,
+) -> Option<usize> {
     let p = tema::paleta(ui.ctx());
-    if tabela.linhas.is_empty() {
+    let carregadas = tabela.linhas.len();
+    let total = total.max(carregadas);
+    let mut falta: Option<usize> = None;
+    if tabela.linhas.is_empty() && total == 0 {
         ui.add_space(8.0);
         ui.label(RichText::new("Nada aqui.").color(p.tinta_suave));
-        return;
+        return None;
     }
     let n_colunas = tabela.colunas.len().max(1);
     let indices = estado.indices(tabela).to_vec();
@@ -163,15 +189,25 @@ pub fn desenhar(
     // Cabe na largura disponível: um teto comum para as colunas mais largas (as
     // estreitas, como data e valor, ficam inteiras).
     let disponivel = ui.available_width() - 8.0 * n_colunas as f32;
+    // Números e estados não encolhem (o estado leva o selo e o ícone de quem decidiu).
+    let fixas: Vec<bool> = (0..n_colunas)
+        .map(|i| {
+            tabela.colunas.get(i).is_some_and(|c| c.numerica)
+                || tabela
+                    .linhas
+                    .iter()
+                    .take(16)
+                    .any(|l| matches!(l.celulas.get(i), Some(Celula::Estado { .. })))
+        })
+        .collect();
     if larguras.iter().sum::<f32>() > disponivel {
         let (mut baixo, mut alto) = (48.0f32, 360.0f32);
         for _ in 0..24 {
             let meio = (baixo + alto) / 2.0;
-            let total: f32 = tabela
-                .colunas
+            let total: f32 = fixas
                 .iter()
                 .zip(&larguras)
-                .map(|(c, l)| if c.numerica { *l } else { l.min(meio) })
+                .map(|(fixa, l)| if *fixa { *l } else { l.min(meio) })
                 .sum();
             if total > disponivel {
                 alto = meio;
@@ -179,8 +215,8 @@ pub fn desenhar(
                 baixo = meio;
             }
         }
-        for (c, l) in tabela.colunas.iter().zip(larguras.iter_mut()) {
-            if !c.numerica {
+        for (fixa, l) in fixas.iter().zip(larguras.iter_mut()) {
+            if !*fixa {
                 *l = l.min(baixo);
             }
         }
@@ -300,9 +336,23 @@ pub fn desenhar(
                 }
             })
             .body(|corpo| {
-                corpo.rows(ALTURA_DA_LINHA, indices.len(), |mut linha_ui| {
+                corpo.rows(ALTURA_DA_LINHA, total, |mut linha_ui| {
                     let pos = linha_ui.index();
-                    let linha = &tabela.linhas[indices[pos]];
+                    let Some(linha) = indices.get(pos).and_then(|i| tabela.linhas.get(*i)) else {
+                        // Ainda não carregada: um marcador, e o pedido do próximo pedaço.
+                        falta = Some(falta.map_or(pos, |f| f.max(pos)));
+                        linha_ui.col(|ui| {
+                            ui.label(
+                                RichText::new("carregando…")
+                                    .size(12.0)
+                                    .color(p.tinta_desabilitada),
+                            );
+                        });
+                        for _ in 1..n_colunas {
+                            linha_ui.col(|_| {});
+                        }
+                        return;
+                    };
                     let selecionada = linha.alvo.as_ref().is_some_and(|a| selecao.contem(a));
                     linha_ui.set_selected(selecionada);
                     for (i, c) in linha.celulas.iter().enumerate().take(n_colunas) {
@@ -328,7 +378,11 @@ pub fn desenhar(
     }
 
     if let Some(o) = ordem_nova {
-        estado.ordem = o;
+        if total > carregadas {
+            estado.ordem_pendente = Some(o);
+        } else {
+            estado.ordem = o;
+        }
     }
     if let Some((pos, ctrl, shift, duplo)) = clique {
         let alvo_de = |pos: usize| {
@@ -361,4 +415,5 @@ pub fn desenhar(
             }
         }
     }
+    falta
 }

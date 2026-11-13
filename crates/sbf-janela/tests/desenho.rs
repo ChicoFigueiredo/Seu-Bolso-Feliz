@@ -324,3 +324,69 @@ fn filtros_da_aba_inicio_chegam_na_consulta() {
     b.executar(IdAcao::PeriodoTodos);
     assert_eq!(b.casca.app.janela().filtro(), Filtro::default());
 }
+
+fn conferir_keytips(app: &AppSbf) {
+    use bancada_casca::AppCasca;
+    let abas = app.abas();
+    let mut acoes = app.acoes();
+    // As Ações da casca (painéis, modos do Ribbon) entram como estão, sem KeyTip.
+    let faltando: Vec<String> = abas
+        .iter()
+        .flat_map(|a| a.acoes().map(str::to_owned).collect::<Vec<_>>())
+        .filter(|id| !acoes.iter().any(|x| &x.id == id))
+        .collect();
+    for id in faltando {
+        acoes.push(bancada_casca::Acao::nova(id.clone(), id));
+    }
+    let lista = bancada_casca::ListaDeAcoes::nova(acoes).expect("lista única");
+    bancada_casca::ribbon::validar_abas(&abas, &lista).expect("abas e KeyTips sem ambiguidade");
+}
+
+#[test]
+fn keytips_sem_ambiguidade_em_todas_as_abas() {
+    let mut b = Banco::novo();
+    conferir_keytips(&b.casca.app);
+    // Com as abas contextuais visíveis: um achado selecionado numa página aberta.
+    b.abrir(Destino::Item(Ref::nova(
+        Tipo::Fornecedor,
+        "Energia Exemplo",
+    )));
+    let t = b
+        .consulta
+        .tabela(&PedidoDeTabela::Area {
+            area: Area::ATriar,
+            filtro: Filtro::default(),
+        })
+        .expect("tabela");
+    let achado = t.linhas[0].alvo.clone().expect("alvo");
+    b.casca.app.janela().centro.selecao.so(achado);
+    b.quadro();
+    conferir_keytips(&b.casca.app);
+    assert!(
+        b.casca.estado.erros.is_empty(),
+        "{:?}",
+        b.casca.estado.erros
+    );
+}
+
+#[test]
+fn na_area_a_triar_o_ribbon_abre_na_triagem_e_inicio_tem_os_filtros() {
+    use bancada_casca::AppCasca;
+    let mut b = Banco::novo();
+    b.abrir(Destino::Area(Area::ATriar));
+    b.quadro();
+    assert_eq!(b.casca.estado.ribbon.aba_ativa.as_deref(), Some("triagem"));
+    let abas = b.casca.app.abas();
+    let inicio = abas.iter().find(|a| a.id == "inicio").expect("início");
+    let ids: Vec<&str> = inicio.acoes().collect();
+    for id in [
+        "inicio.pesquisar",
+        "inicio.periodo",
+        "inicio.estado",
+        "inicio.tipo",
+        "inicio.quem-decidiu",
+        "dados.atualizar",
+    ] {
+        assert!(ids.contains(&id), "falta {id} em Início: {ids:?}");
+    }
+}
