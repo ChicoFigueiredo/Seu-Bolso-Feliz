@@ -150,7 +150,7 @@ Runs as a stdio MCP server (`apps/mcp-server/`). Exposes 10 tools for AI agents:
 
 The `docs/` tree (~54 files: `refinos/`, `checklists/`, `planejamento/`, `passo-a-passo/`, `adrs/`, `veronica/`) was produced by an AI "team roleplay" process and **has drifted badly from the code**. Several checklists mark as "not started" features that are fully implemented (e.g. `004-consolidado-gaps-pendentes.md` claims the ingestion UI and OpenAI integration are 0% done — both exist and work). **Treat docs as historical intent, not ground truth. Always verify a claim against the code before acting on it.** ADRs are the most reliable: ADR-002 to ADR-009 live inside `docs/arquitetura/2026-07-27-arquitetura-hibrida-alvo.md`, and ADR-010 onward are one file each in `docs/arquitetura/` (`AAAA-MM-DD-adr-NNN-slug.md`). The newest ADR on a subject is canonical. The domain glossary is `CONTEXT.md` at the root — use its terms in UI, code comments and docs.
 
-## Rust desktop (in design, 2026-11-12)
+## Rust desktop (slice 1 implemented, 2026-11-13)
 
 The system is moving to a Rust core by strangling the TS one rule at a time (ADR-012):
 one `sbf` binary (window / `worker` / `servidor` / `mcp`), an authoritative Rust API on
@@ -160,13 +160,41 @@ read and download (ADR-016), read-only WhatsApp on Linux (ADR-017), and an egui 
 shared with Chess Studio in its own repo (ADR-018). Read those ADRs before touching any
 of it. When a rule is ported to Rust, the TS version is deleted in the same PR.
 
+Slice 1 (inventory on the desktop) follows `docs/specs/06-desktop-fatia-1-inventario.md`;
+its acceptance report is `docs/specs/06-desktop-fatia-1-aceite.md`. Identifiers are all
+in Portuguese without accents (ADR-018), including mechanical ones.
+
+| Crate | What it is |
+|---|---|
+| `crates/sbf-inventario` | Owns `inventario.sqlite`: migrations (Bun schema "2" = migration 1), append-only decision log, projection, undo, `reprojetar`, lots, the 12 views, §11 reports, relations, totals and rastro. Seams: `referencia.rs` (`Tipo`, `Ref`), `consulta.rs` (`Consulta`), `comando.rs` (`Comandos`). |
+| `crates/sbf-janela` | The window content on top of `bancada-casca`: areas, item pages, links, Rastro, §10 actions, lots, reports, tools. `demonstracao` is a fictional in-memory dataset. |
+| `crates/sbf` | The binary: `sbf --demonstracao` or `sbf --inventario <vault-folder>`. |
+| `crates/sbf-chaveiro`, `crates/sbf-pdf` | Keyring import of the old `cofre.enc`; protected PDFs decrypted in memory (never a decrypted copy on disk, never a password in argv). |
+| `crates/sbf-estante`, `crates/sbf-disco` | Drive shelf and encrypted backup via rclone; unencrypted-disk warning. |
+
+The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (`bancada-casca`,
+`bancada-armazem`, `bancada-segredos`), used by path (`../bancada/crates/...`), so the
+SBF worktree must be a sibling of it.
+
+```bash
+cargo test --workspace            # all Rust tests (fixtures only, never real data)
+cargo clippy --workspace --all-targets -- -D warnings
+cargo deny check
+scripts/desktop/conferir.sh       # fmt, clippy, tests, Bun tests and release build
+WAYLAND_DISPLAY= cargo run -p sbf -- --demonstracao   # XWayland; native Wayland is unverified
+cargo run --release -p sbf-inventario --example medir -- <copy.sqlite>  # timings on a COPY
+```
+
+Each `target/` is 7 to 18 GB and `/mnt/d` also holds the real vault: run `cargo clean`
+in worktrees you are done with. Tests never touch `/mnt/d/Chico/financas/`.
+
 ## Commit convention
 
 Conventional commits are enforced via commitlint (husky `commit-msg` hook). Subject must be lower-case, no sentence-case; type must be one of the allowed list. Do not bypass hooks.
 
 **Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `perf`, `migration`
 
-**Scopes:** `web`, `mobile`, `domain`, `types`, `validation`, `ci`, `docs`, `config`, `tokens`, `gmail-scanner`, `ingestion`, `mcp-server`, `local-scanner`, `db`
+**Scopes:** `web`, `mobile`, `domain`, `types`, `validation`, `ci`, `docs`, `config`, `tokens`, `gmail-scanner`, `ingestion`, `mcp-server`, `local-scanner`, `db`, `desktop`, `inventario`
 
 Example: `feat(ingestion): add field-consensus resolver`
 
