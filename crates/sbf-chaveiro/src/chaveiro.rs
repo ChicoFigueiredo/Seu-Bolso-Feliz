@@ -18,6 +18,9 @@ pub const SERVICO: &str = "Seu Bolso Feliz";
 pub const CHAVE_DO_CPF: &str = "cpf";
 /// O prefixo das senhas próprias: a chave de `<rotulo>` é `senha:<rotulo>`.
 pub const PREFIXO_DE_SENHA: &str = "senha:";
+/// O prefixo da credencial de estação (spec 07, "Autenticação da estação"): a chave do
+/// servidor `<servidor>` é `estacao:<servidor>`.
+pub const PREFIXO_DE_ESTACAO: &str = "estacao:";
 
 /// O que a importação trouxe, sem nenhum valor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,6 +188,52 @@ impl Chaveiro {
     /// A senha própria do rótulo, em claro. Só a abertura de PDF protegido chama isto.
     pub fn senha(&self, rotulo: &str) -> Result<Segredo, ErroDoChaveiro> {
         Ok(self.guarda.ler(&chave_de_senha(rotulo)?)?)
+    }
+
+    // ---------------- Credencial de estação ----------------
+
+    /// A chave `estacao:<servidor>`, se `servidor` serve de rótulo.
+    fn chave_de_estacao(servidor: &str) -> Result<String, ErroDoChaveiro> {
+        if servidor.is_empty()
+            || PREFIXO_DE_ESTACAO.len() + servidor.len() > TAMANHO_MAXIMO_DO_ROTULO
+            || servidor.chars().any(char::is_control)
+        {
+            return Err(ErroDoChaveiro::RotuloInvalido);
+        }
+        Ok(format!("{PREFIXO_DE_ESTACAO}{servidor}"))
+    }
+
+    /// Guarda (ou troca) a credencial desta estação perante `servidor` (o host do servidor).
+    /// Só o pareamento chama isto.
+    pub fn guardar_credencial_de_estacao(
+        &self,
+        servidor: &str,
+        credencial: Segredo,
+    ) -> Result<(), ErroDoChaveiro> {
+        Ok(self
+            .guarda
+            .gravar(&Self::chave_de_estacao(servidor)?, credencial)?)
+    }
+
+    /// A credencial desta estação perante `servidor`, em claro. Só o portão de rede chama
+    /// isto, para montar o cabeçalho de cada pedido.
+    pub fn credencial_de_estacao(&self, servidor: &str) -> Result<Segredo, ErroDoChaveiro> {
+        Ok(self.guarda.ler(&Self::chave_de_estacao(servidor)?)?)
+    }
+
+    /// Há credencial guardada para `servidor` (sem ler o valor).
+    pub fn tem_credencial_de_estacao(&self, servidor: &str) -> bool {
+        Self::chave_de_estacao(servidor)
+            .is_ok_and(|chave| self.guarda.rotulos().contains(&chave))
+    }
+
+    /// Apaga a credencial de `servidor` (estação revogada). Apagar o que não existe não é
+    /// erro.
+    pub fn apagar_credencial_de_estacao(&self, servidor: &str) -> Result<(), ErroDoChaveiro> {
+        match self.guarda.apagar(&Self::chave_de_estacao(servidor)?) {
+            Ok(()) | Err(bancada_segredos::ErroDeSegredo::NaoEncontrado) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ---------------- O cofre.enc antigo ----------------
