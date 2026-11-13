@@ -504,6 +504,7 @@ impl Janela {
         let p = tema::paleta(ui.ctx());
         let filtro = self.filtro();
         let banco = self.ferramentas.as_ref().map(|f| f.banco.clone());
+        let descricao_do_filtro_atual = descricao_do_filtro(&filtro, &self.ciclo_atual());
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
         let pendentes = &mut self.pedacos_pendentes;
@@ -584,7 +585,7 @@ impl Janela {
                     } else {
                         0
                     };
-                    let altura = (n as f32 * 26.0 + 30.0).min(200.0);
+                    let altura = tabela::altura_para(ui, n, 220.0);
                     if let Err(e) = pagina::tabela_em_pedacos(
                         ui,
                         &mut leitor,
@@ -617,12 +618,11 @@ impl Janela {
                             if sel > 0 {
                                 texto.push_str(&format!(" · {sel} selecionada{}", if sel == 1 { "" } else { "s" }));
                             }
-                            ui.label(RichText::new(texto).size(12.0).color(p.tinta_suave));
-                            ui.label(
-                                RichText::new("Clique seleciona, Ctrl+clique soma à seleção, Shift+clique seleciona o intervalo, duplo clique abre.")
-                                    .size(12.0)
-                                    .color(p.tinta_desabilitada),
-                            );
+                            ui.label(RichText::new(&descricao_do_filtro_atual).size(12.0).color(p.tinta_suave));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(texto).size(12.0).color(p.tinta_suave))
+                                    .on_hover_text("Clique seleciona, Ctrl+clique soma à seleção, Shift+clique seleciona o intervalo, duplo clique abre, ↑/↓ movem.");
+                            });
                         });
                         let chave = format!("area:{area:?}");
                         if let Err(e) = pagina::tabela_em_pedacos(
@@ -1438,6 +1438,43 @@ pub fn hoje_em_sao_paulo() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// O filtro em uso, em palavras ("Ciclo 2026-10 · decidido por você"), ou o convite.
+pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
+    let mut partes = Vec::new();
+    if let Some((de, ate)) = &f.ciclos {
+        partes.push(if de == ate {
+            if de == ciclo_atual {
+                format!("ciclo atual ({de})")
+            } else {
+                format!("ciclo {de}")
+            }
+        } else {
+            format!("ciclos {de} a {ate}")
+        });
+    }
+    for e in &f.estados {
+        partes.push(match e.as_str() {
+            "novo" => "a triar".to_owned(),
+            "duvida" => "em dúvida".to_owned(),
+            outro => outro.to_owned(),
+        });
+    }
+    for t in &f.tipos {
+        partes.push(format!("tipo {}", t.replace('_', " ")));
+    }
+    if let Some(q) = &f.quem_decidiu {
+        partes.push(format!("decidido por {}", q.rotulo()));
+    }
+    if let Some(t) = &f.texto {
+        partes.push(format!("\u{201c}{t}\u{201d}"));
+    }
+    if partes.is_empty() {
+        "Sem filtros. Use Início › Período e Filtros, ou pesquise.".to_owned()
+    } else {
+        format!("Filtro: {}", partes.join(" · "))
+    }
+}
+
 fn cabecalho_da_area(
     ui: &mut Ui,
     area: Area,
@@ -1468,12 +1505,8 @@ fn cabecalho_da_area(
                 }
                 ui.label(icones::icone_cor("search", 16.0, p.tinta_suave));
             }
-            if area != Area::VisaoGeral {
-                ui.separator();
-                ui.selectable_value(periodo, Periodo::TodosOsCiclos, "Todos os ciclos");
-                ui.selectable_value(periodo, Periodo::CicloAnterior, "Ciclo anterior");
-                ui.selectable_value(periodo, Periodo::CicloAtual, "Ciclo atual");
-            }
+            // Período e filtros ficam no Ribbon (aba Início), como no protótipo.
+            let _ = periodo;
         });
     });
     ui.add_space(4.0);
@@ -1514,6 +1547,21 @@ fn faixa_do_lote(
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn filtro_em_palavras() {
+        assert!(descricao_do_filtro(&Filtro::default(), "2026-10").starts_with("Sem filtros"));
+        let f = Filtro {
+            ciclos: Some(("2026-10".into(), "2026-10".into())),
+            estados: vec!["duvida".into()],
+            quem_decidiu: Some(sbf_inventario::consulta::Quem::Usuario),
+            ..Filtro::default()
+        };
+        assert_eq!(
+            descricao_do_filtro(&f, "2026-10"),
+            "Filtro: ciclo atual (2026-10) · em dúvida · decidido por você"
+        );
+    }
 
     #[test]
     fn ciclo_pelo_dia_de_corte() {

@@ -253,6 +253,64 @@ fn ferramentas_ligadas_ao_banco_real() {
         "{resumo:?}"
     );
 
+    // Cópia de segurança: sem senha no chaveiro, gera uma, guarda e mostra uma vez.
+    r.casca
+        .app
+        .janela()
+        .ferramentas
+        .as_mut()
+        .expect("ferramentas")
+        .destino_da_copia = "destino-de-teste:SBF/Copia".into();
+    r.casca
+        .app
+        .janela()
+        .ferramentas
+        .as_mut()
+        .expect("ferramentas")
+        .pedir_copia();
+    {
+        let j = r.casca.app.janela();
+        let f = j.ferramentas.as_ref().expect("ferramentas");
+        assert_eq!(
+            f.resumo().as_deref(),
+            Some("cópia: senha nova mostrada uma vez")
+        );
+        let rotulos = f.chaveiro.as_ref().expect("chaveiro").rotulos_de_senha();
+        assert!(
+            rotulos.iter().any(|r| r == "copia-de-seguranca"),
+            "{rotulos:?}"
+        );
+    }
+    // Com a senha no chaveiro, a próxima cópia já começa (aqui o rclone falha: erro claro).
+    r.casca
+        .app
+        .janela()
+        .ferramentas
+        .as_mut()
+        .expect("ferramentas")
+        .pedir_copia();
+    let terminou = r
+        .casca
+        .app
+        .janela()
+        .ferramentas
+        .as_mut()
+        .is_some_and(|f| f.esperar(&ctx, Duration::from_secs(60)));
+    assert!(terminou);
+    let resumo = r
+        .casca
+        .app
+        .janela()
+        .ferramentas
+        .as_ref()
+        .and_then(|f| f.resumo());
+    assert!(
+        resumo
+            .as_deref()
+            .is_some_and(|t| t.starts_with("erro:") || t.starts_with("cópia:")),
+        "{resumo:?}"
+    );
+
     // Abrir original de achado sem cópia no acervo dá um erro claro, sem pânico.
     let achado = sbf_inventario::Ref::nova(sbf_inventario::Tipo::Achado, "nao-existe");
     r.casca.app.janela().centro.selecao.so(achado);

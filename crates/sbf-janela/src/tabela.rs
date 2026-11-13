@@ -93,6 +93,13 @@ impl EstadoDaTabela {
 
 const ALTURA_DA_LINHA: f32 = 26.0;
 
+/// A altura que `n` linhas ocupam de fato (com o espaçamento do tema e o cabeçalho), para
+/// tabelas que devem aparecer inteiras até `maximo`.
+pub fn altura_para(ui: &Ui, n: usize, maximo: f32) -> f32 {
+    let passo = ALTURA_DA_LINHA + ui.spacing().item_spacing.y;
+    ((n as f32 + 1.0) * passo + 8.0).min(maximo)
+}
+
 fn coluna_do_inventario(tabela: &Tabela, col: usize) -> bool {
     tabela.linhas.iter().take(64).any(|l| {
         matches!(
@@ -192,12 +199,15 @@ pub fn desenhar_parcial(
     // Números e estados não encolhem (o estado leva o selo e o ícone de quem decidiu).
     let fixas: Vec<bool> = (0..n_colunas)
         .map(|i| {
-            tabela.colunas.get(i).is_some_and(|c| c.numerica)
-                || tabela
-                    .linhas
-                    .iter()
-                    .take(16)
-                    .any(|l| matches!(l.celulas.get(i), Some(Celula::Estado { .. })))
+            // A primeira coluna é o nome do item: fica inteira se couber razoavelmente.
+            (i == 0 && larguras[0] <= 260.0 && disponivel > 700.0)
+                || tabela.colunas.get(i).is_some_and(|c| c.numerica)
+                || tabela.linhas.iter().take(16).any(|l| {
+                    matches!(
+                        l.celulas.get(i),
+                        Some(Celula::Estado { .. } | Celula::Data(_))
+                    )
+                })
         })
         .collect();
     if larguras.iter().sum::<f32>() > disponivel {
