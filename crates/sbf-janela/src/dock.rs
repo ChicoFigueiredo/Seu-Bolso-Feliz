@@ -1,5 +1,5 @@
-//! Os painéis do dock como conteúdo: Detalhe, Origens, Texto extraído e Histórico de
-//! decisões. Cada um mostra o item em foco (a última linha clicada, ou a página aberta).
+//! Os painéis do dock como conteúdo: Detalhe, Prévia, Origens, Texto extraído e Histórico
+//! de decisões. Cada um mostra o item em foco (a última linha clicada, ou a página aberta).
 //! Quem arruma os painéis (egui_tiles, abas, fechar) é a casca; aqui só o conteúdo.
 
 use egui::{RichText, Ui};
@@ -21,7 +21,8 @@ pub enum PainelDoDock {
     Origens,
     Texto,
     Historico,
-    /// A prévia do achado: o texto extraído, ou os metadados. Nunca o arquivo decifrado.
+    /// A prévia do arquivo do item em foco (a miniatura; [`crate::previa`]). Visível por
+    /// padrão, embaixo do Detalhe.
     Previa,
 }
 
@@ -88,28 +89,8 @@ pub fn desenhar(
             None => vazio(ui, "Selecione um achado para ver o texto extraído."),
         },
         PainelDoDock::Historico => historico(ui, leitor, foco, decisoes_da_sessao, pedidos),
-        PainelDoDock::Previa => previa(ui, leitor, foco, pedidos),
-    }
-}
-
-fn previa(ui: &mut Ui, leitor: &mut Leitor<'_>, foco: Option<&Ref>, pedidos: &mut Vec<Pedido>) {
-    let Some(alvo) = foco.filter(|r| e_achado(r)) else {
-        vazio(ui, "Selecione um achado para ver a prévia.");
-        return;
-    };
-    match leitor.texto(alvo) {
-        Ok(t) if t.as_deref().is_some_and(|t| !t.trim().is_empty()) => {
-            pagina::texto_extraido(ui, t.as_deref());
-        }
-        _ => {
-            let p = tema::paleta(ui.ctx());
-            ui.label(
-                RichText::new("Sem texto extraído: os dados do achado.")
-                    .size(12.0)
-                    .color(p.tinta_suave),
-            );
-            detalhe(ui, leitor, Some(alvo), pedidos);
-        }
+        // A prévia precisa do estado da janela (a fila de fundo): `Janela::dock_ui`.
+        PainelDoDock::Previa => vazio(ui, "Selecione um achado ou documento."),
     }
 }
 

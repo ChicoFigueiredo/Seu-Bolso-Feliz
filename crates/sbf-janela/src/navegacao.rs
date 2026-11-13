@@ -91,6 +91,11 @@ pub enum Pedido {
     Copiar(String),
     /// Período › Intervalo…: do ciclo `AAAA-MM` ao ciclo `AAAA-MM`.
     Intervalo(String, String),
+    /// Nova regra de senha já com o fornecedor e o tipo (a prévia de um PDF protegido).
+    NovaRegra {
+        fornecedor: String,
+        tipo_de_documento: String,
+    },
 }
 
 impl Pedido {

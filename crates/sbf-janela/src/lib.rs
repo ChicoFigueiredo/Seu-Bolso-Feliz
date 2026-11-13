@@ -6,6 +6,7 @@
 //! `&mut dyn Comandos`. Roda dentro da `bancada-casca` pelo [`AppSbf`] (o `AppCasca` do
 //! SBF, com [`config_da_casca`]); a [`moldura`] provisória fica de reserva, sem a casca.
 
+pub mod acervo_ficticio;
 pub mod acoes;
 pub mod app;
 pub mod areas;
@@ -21,6 +22,7 @@ pub mod moldura;
 pub mod navegacao;
 pub mod pagina;
 pub mod painel;
+pub mod previa;
 pub mod tabela;
 pub mod tema;
 
@@ -30,3 +32,4 @@ pub use dock::PainelDoDock;
 pub use janela::{Janela, Ligacoes};
 pub use moldura::{EstadoDaBarra, MolduraProvisoria};
 pub use navegacao::{Destino, Navegacao, Pedido};
+pub use previa::Previas;

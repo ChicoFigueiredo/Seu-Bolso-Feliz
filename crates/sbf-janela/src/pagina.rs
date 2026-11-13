@@ -42,6 +42,8 @@ pub enum ConteudoDaAba {
     Texto,
     /// A cadeia de proveniência.
     Rastro,
+    /// A prévia do arquivo do item (o do achado, ou o documento da origem e do registro).
+    Arquivo,
 }
 
 /// Uma aba de página. Desabilitada traz o motivo (as abas do livro-caixa nesta fatia).
@@ -85,6 +87,7 @@ pub fn abas_de(tipo: Tipo) -> Vec<AbaDePagina> {
             aba("Regras de senha", T::RegraDeSenha),
         ],
         T::Achado | T::Documento => vec![
+            aba_especial("Arquivo", ConteudoDaAba::Arquivo),
             aba("Origens", T::Origem),
             aba_especial("Texto extraído", ConteudoDaAba::Texto),
             aba("Registros que saíram dele", T::Registro),
@@ -95,11 +98,13 @@ pub fn abas_de(tipo: Tipo) -> Vec<AbaDePagina> {
         ],
         T::Origem => vec![
             aba("Achado", T::Achado),
+            aba_especial("Arquivo", ConteudoDaAba::Arquivo),
             aba("Coleta", T::Coleta),
             aba("Conexão", T::Conexao),
         ],
         T::Registro => vec![
             aba("Documento", T::Documento),
+            aba_especial("Arquivo", ConteudoDaAba::Arquivo),
             aba("Decisões", T::Decisao),
             aba("Conciliados", T::Registro),
             aba("Lotes", T::Lote),
@@ -203,6 +208,7 @@ pub fn texto_do_rastro(alvo: &Ref, rotulo: &str, rastro: &Rastro) -> String {
 pub fn desenhar(
     ui: &mut Ui,
     leitor: &mut Leitor<'_>,
+    previas: &mut crate::previa::Previas,
     alvo: &Ref,
     vista: &mut Vista,
     pedidos: &mut Vec<Pedido>,
@@ -358,10 +364,10 @@ pub fn desenhar(
             if ativa {
                 texto = texto.strong();
             }
-            let icone = if a.conteudo == ConteudoDaAba::Rastro {
-                Some("account_tree")
-            } else {
-                None
+            let icone = match a.conteudo {
+                ConteudoDaAba::Rastro => Some("account_tree"),
+                ConteudoDaAba::Arquivo => Some("description"),
+                _ => None,
             };
             let r = ui.add_enabled(
                 a.motivo.is_none(),
@@ -405,6 +411,13 @@ pub fn desenhar(
             Ok(r) => desenhar_rastro(ui, alvo, &item.rotulo, &r, pedidos),
             Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
         },
+        ConteudoDaAba::Arquivo => {
+            // PageUp/PageDown só no centro e sem campo de texto em foco.
+            let teclado = !crate::navegacao::na_casca(ui.ctx())
+                || bancada_casca::pedidos::local_atual(ui.ctx()) == bancada_casca::Local::Centro;
+            let teclado = teclado && ui.ctx().memory(|m| m.focused().is_none());
+            previas.aba_ui(ui, leitor, alvo, pedidos, teclado);
+        }
         ConteudoDaAba::Texto => match leitor.texto(alvo) {
             Ok(t) => texto_extraido(ui, t.as_deref()),
             Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),

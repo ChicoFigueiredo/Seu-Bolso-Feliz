@@ -51,8 +51,21 @@ pub fn link_para(
 }
 
 /// Link para a página de um item.
+///
+/// O nome de um achado ou documento, com o mouse parado meio segundo, mostra a dica com a
+/// miniatura do arquivo (a janela desenha, [`crate::previa`]).
 pub fn link_item(ui: &mut Ui, alvo: &Ref, texto: &str, pedidos: &mut Vec<Pedido>) -> Response {
-    link_para(ui, texto, Destino::Item(alvo.clone()), pedidos).on_hover_text(format!(
+    let r = link_para(ui, texto, Destino::Item(alvo.clone()), pedidos);
+    if matches!(
+        alvo.tipo,
+        sbf_inventario::Tipo::Achado | sbf_inventario::Tipo::Documento
+    ) {
+        if r.hovered() {
+            crate::previa::marcar_sob_o_mouse(ui.ctx(), alvo, r.rect);
+        }
+        return r;
+    }
+    r.on_hover_text(format!(
         "{} · clique abre, Ctrl+clique abre ao lado",
         alvo.tipo.singular()
     ))
