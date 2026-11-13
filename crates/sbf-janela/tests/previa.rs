@@ -39,7 +39,7 @@ fn abridor_falso(abertos: Abertos, espera: Duration, erro: fn() -> ErroDaPrevia)
         }
         std::thread::sleep(espera);
         match p.extensao {
-            "pdf" | "png" => Ok(Conteudo::Imagem(imagem_ficticia())),
+            "pdf" | "png" | "jpg" => Ok(Conteudo::Imagem(imagem_ficticia())),
             "eml" => Ok(Conteudo::Email(Email {
                 de: "administracao@kappa.example".into(),
                 para: "cliente@exemplo.example".into(),
@@ -494,7 +494,7 @@ fn sem_previa_e_sem_copia_no_acervo_mostram_o_motivo() {
     b.focar(&foto);
     let texto = b.quadro();
     assert!(
-        texto.contains("Este achado ainda não tem cópia no acervo."),
+        texto.contains("Sem cópia no acervo e sem origem local."),
         "{texto}"
     );
 }
@@ -687,4 +687,96 @@ fn com_o_desenho_real_o_pdf_e_o_email_da_demonstracao_aparecem() {
         b.casca.app.janela().previas.resumo(&eml.chave)
     );
     assert!(texto.contains("Anexos (1)"), "{texto}");
+}
+
+/// O caminho da primeira origem local de um achado, como a tabela de origens o mostra.
+fn caminho_da_origem(b: &Banco, achado: &Ref) -> std::path::PathBuf {
+    let t = b
+        .consulta
+        .tabela(&PedidoDeTabela::Ligados {
+            de: achado.clone(),
+            tipo: Tipo::Origem,
+        })
+        .expect("origens");
+    let coluna = t
+        .colunas
+        .iter()
+        .position(|c| c.rotulo.starts_with("Caminho"))
+        .expect("coluna do caminho");
+    std::path::PathBuf::from(sbf_janela::formato::texto_da_celula(
+        &t.linhas[0].celulas[coluna],
+    ))
+}
+
+#[test]
+fn sem_copia_no_acervo_a_previa_le_o_original_da_origem_local() {
+    let aberto = abertos();
+    let mut b = Banco::novo(abridor_falso(
+        aberto.clone(),
+        Duration::ZERO,
+        nao_implementado,
+    ));
+    b.abrir(Area::EmDuvida);
+    let foto = b.achado_chamado("IMG_20261102_celular.jpg");
+    let original = caminho_da_origem(&b, &foto);
+    assert!(original.is_absolute() && original.is_file(), "{original:?}");
+    b.focar(&foto);
+    b.ate(Duration::from_secs(5), |b| {
+        b.casca.app.janela().previas.resumo(&foto.chave).is_some()
+    });
+    // Abriu pelo original da origem, e o selo aparece no canto.
+    assert!(
+        aberto
+            .lock()
+            .expect("trava")
+            .iter()
+            .any(|n| n == "IMG_20261102_celular.jpg")
+    );
+    let texto = b.quadro();
+    assert!(texto.contains("lido da origem"), "{texto}");
+    assert!(!texto.contains("Sem prévia"), "{texto}");
+    // O arquivo continua intacto e nada foi criado ao lado dele.
+    let pasta = original.parent().expect("pasta");
+    assert_eq!(std::fs::read_dir(pasta).expect("pasta").count(), 1);
+    // Na aba Arquivo também.
+    let texto = b.abrir_item(&foto);
+    assert!(texto.contains("lido da origem"), "{texto}");
+}
+
+#[test]
+fn o_cartao_mostra_o_tamanho_e_a_data_chave_do_original_da_origem() {
+    let sem_previa: Abridor = Arc::new(|_p: sbf_previa::Pedido<'_>| {
+        Ok(Conteudo::SemPrevia {
+            motivo: "Sem prévia para este tipo de arquivo.".into(),
+        })
+    });
+    let mut b = Banco::novo(sem_previa);
+    b.abrir(Area::EmDuvida);
+    let foto = b.achado_chamado("IMG_20261102_celular.jpg");
+    let bytes = std::fs::metadata(caminho_da_origem(&b, &foto))
+        .expect("original")
+        .len();
+    let texto = b.abrir_item(&foto);
+    b.ate(Duration::from_secs(5), |b| {
+        b.casca.app.janela().previas.resumo(&foto.chave).is_some()
+    });
+    let texto = format!("{texto}{}", b.quadro());
+    assert!(texto.contains(&previa::tamanho_legivel(bytes)), "{texto}");
+    assert!(texto.contains("15/09/2026"), "{texto}");
+    assert!(texto.contains("lido da origem"), "{texto}");
+}
+
+#[test]
+fn origem_apagada_diz_que_o_arquivo_da_origem_nao_existe_mais() {
+    let mut b = Banco::novo(abridor_falso(abertos(), Duration::ZERO, nao_implementado));
+    b.abrir(Area::EmDuvida);
+    let foto = b.achado_chamado("IMG_20261102_celular.jpg");
+    std::fs::remove_file(caminho_da_origem(&b, &foto)).expect("apagar");
+    b.focar(&foto);
+    let texto = b.quadro();
+    assert!(
+        texto.contains("o arquivo da origem não existe mais"),
+        "{texto}"
+    );
+    assert!(!texto.contains("lido da origem"), "{texto}");
 }
