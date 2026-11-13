@@ -13,6 +13,7 @@ pub mod ciclo;
 pub mod data;
 pub mod dinheiro;
 pub mod rateio;
+pub mod recorrencia;
 pub mod tipos;
 
 pub use ciclo::{Ciclo, DiaDeCorte};

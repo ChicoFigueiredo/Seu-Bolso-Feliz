@@ -12,3 +12,4 @@ TZ=America/Sao_Paulo bun ciclo.ts > fixtures/ciclo-sao-paulo.json
 TZ=UTC bun ciclo.ts > fixtures/ciclo-utc.json
 bun rateio.ts > fixtures/rateio.json
 bun amortizacao.ts > fixtures/amortizacao.json
+bun --preload ./preparo.ts recorrencia.ts > fixtures/recorrencia.json
