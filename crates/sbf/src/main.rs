@@ -6,6 +6,7 @@
 //! - `sbf --versao`.
 
 mod captura;
+mod inventario;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -74,6 +75,28 @@ fn abrir_para_captura(moldura: &mut MolduraProvisoria, alvo: &str) {
     moldura.janela.pedir(Pedido::Abrir(destino));
 }
 
+fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
+    let opcoes = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Seu Bolso Feliz — inventário")
+            .with_inner_size([900.0, 620.0]),
+        ..Default::default()
+    };
+    let criar = Box::new(|cc: &eframe::CreationContext<'_>| {
+        // As fontes valem do quadro seguinte em diante: instale antes do primeiro.
+        sbf_janela::tema::instalar_fontes(&cc.egui_ctx);
+        sbf_janela::tema::aplicar(&cc.egui_ctx, sbf_janela::tema::TEMA_PADRAO);
+        Ok(app)
+    });
+    match eframe::run_native("Seu Bolso Feliz", opcoes, criar) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("sbf: não deu para abrir a janela: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn abrir_janela(app: App) -> ExitCode {
     let opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -128,13 +151,13 @@ fn main() -> ExitCode {
                 eprintln!("sbf: falta a pasta do cofre.\n{AJUDA}");
                 return ExitCode::from(2);
             };
-            eprintln!(
-                "sbf: o modo inventário ainda não está ligado nesta versão.\n\
-                 A pasta {pasta} não foi aberta nem tocada.\n\
-                 A leitura (LeitorSqlite) e os comandos (Inventario) estão sendo ligados à janela; \
-                 até lá, use `sbf --demonstracao` para ver a janela com dados fictícios."
-            );
-            ExitCode::from(3)
+            match inventario::abrir(std::path::Path::new(pasta)) {
+                Ok(app) => abrir_janela_de(Box::new(app)),
+                Err(e) => {
+                    eprintln!("sbf: não deu para abrir o inventário: {e}");
+                    ExitCode::from(3)
+                }
+            }
         }
         _ => {
             eprintln!("{AJUDA}");
