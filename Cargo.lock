@@ -412,6 +412,13 @@ name = "sbf"
 version = "0.1.0"
 
 [[package]]
+name = "sbf-disco"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "sbf-inventario"
 version = "0.1.0"
 dependencies = [
