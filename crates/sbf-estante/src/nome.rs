@@ -2,6 +2,14 @@
 //! (`trechoDeNome`, `nomeNaVista`) e de `PASTA_DO_TIPO` de `vista-ciclos.ts`.
 //!
 //! O teste `tests/nomes_ts.rs` compara com saídas geradas pelo próprio TypeScript (Bun).
+//!
+//! # Campos do banco que viram caminho
+//!
+//! O fornecedor e o nome original passam por [`trecho_de_nome`]. A data-chave, o ciclo e a
+//! extensão entram no caminho como estão, então só entram **no formato** (achado A1 da
+//! revisão de segurança da fatia 1): data `AAAA-MM-DD`, ciclo `AAAA-MM` e extensão
+//! `[a-z0-9]{1,10}`. Fora do formato, a data sai do nome, o ciclo vira `a-classificar` e a
+//! extensão some. Para todo valor válido o nome é o mesmo do TypeScript.
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -43,6 +51,42 @@ pub fn trecho_de_nome(texto: Option<&str>, max: usize) -> String {
 #[must_use]
 pub fn trecho_padrao(texto: Option<&str>) -> String {
     trecho_de_nome(texto, 40)
+}
+
+/// `n` dígitos ASCII.
+fn digitos(texto: &str) -> bool {
+    !texto.is_empty() && texto.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Partes de tamanho fixo, só de dígitos, separadas por hífen.
+fn no_formato(texto: &str, tamanhos: &[usize]) -> bool {
+    let partes: Vec<&str> = texto.split('-').collect();
+    partes.len() == tamanhos.len()
+        && partes
+            .iter()
+            .zip(tamanhos)
+            .all(|(parte, tamanho)| parte.len() == *tamanho && digitos(parte))
+}
+
+/// `AAAA-MM-DD`.
+#[must_use]
+pub fn data_no_formato(data: &str) -> bool {
+    no_formato(data, &[4, 2, 2])
+}
+
+/// `AAAA-MM`.
+#[must_use]
+pub fn ciclo_no_formato(ciclo: &str) -> bool {
+    no_formato(ciclo, &[4, 2])
+}
+
+/// `[a-z0-9]{1,10}`.
+#[must_use]
+pub fn extensao_no_formato(extensao: &str) -> bool {
+    (1..=10).contains(&extensao.len())
+        && extensao
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
 /// O que o nome do arquivo usa de um achado.
@@ -92,7 +136,9 @@ pub fn nome_na_vista(d: &DadosDoNome<'_>) -> String {
         format!("{},{:02}", absoluto / 100, absoluto % 100)
     });
     let partes: Vec<String> = [
-        d.data_chave.map(str::to_owned),
+        d.data_chave
+            .filter(|data| data_no_formato(data))
+            .map(str::to_owned),
         Some(fornecedor),
         valor,
         Some(oito(d.content_hash)),
@@ -103,7 +149,7 @@ pub fn nome_na_vista(d: &DadosDoNome<'_>) -> String {
     .collect();
     let extensao = d
         .extensao
-        .filter(|e| !e.is_empty())
+        .filter(|e| extensao_no_formato(e))
         .map(|e| format!(".{e}"))
         .unwrap_or_default();
     format!("{}{extensao}", partes.join("_"))
@@ -129,9 +175,41 @@ pub fn pasta_do_tipo(tipo: Option<&str>) -> &'static str {
     }
 }
 
-/// Pasta da estante onde o documento mora: `<ciclo>/<tipo>` ou `a-classificar/<tipo>`.
+/// Pasta da estante onde o documento mora: `<ciclo>/<tipo>` ou `a-classificar/<tipo>` (sem
+/// ciclo, ou com um ciclo fora do formato `AAAA-MM`).
 #[must_use]
 pub fn pasta_na_estante(ciclo: Option<&str>, tipo: Option<&str>) -> String {
-    let raiz = ciclo.filter(|c| !c.is_empty()).unwrap_or("a-classificar");
+    let raiz = ciclo
+        .filter(|c| ciclo_no_formato(c))
+        .unwrap_or("a-classificar");
     format!("{raiz}/{}", pasta_do_tipo(tipo))
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn formatos_de_data_ciclo_e_extensao() {
+        assert!(data_no_formato("2026-10-25"));
+        assert!(ciclo_no_formato("2026-10"));
+        assert!(extensao_no_formato("pdf"));
+        assert!(extensao_no_formato("jpeg2000"));
+        for ruim in [
+            "",
+            "2026-10",
+            "2026-10-2",
+            "2026-10-25/..",
+            "../../FORA",
+            "２０２６-10-25",
+        ] {
+            assert!(!data_no_formato(ruim), "{ruim}");
+        }
+        for ruim in ["", "2026", "2026-1", "2026-10-25", "../../..", "2026-1a"] {
+            assert!(!ciclo_no_formato(ruim), "{ruim}");
+        }
+        for ruim in ["", "PDF", "p.df", "../x", "abcdefghijk", "pdf/", "pdf "] {
+            assert!(!extensao_no_formato(ruim), "{ruim}");
+        }
+    }
 }

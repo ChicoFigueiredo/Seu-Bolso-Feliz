@@ -26,12 +26,23 @@ use zeroize::Zeroizing;
 /// Os argumentos do `pdftotext`, iguais aos do `e3-extrair.ts`, com o PDF pela entrada padrão.
 pub const ARGUMENTOS_DO_PDFTOTEXT: [&str; 5] = ["-layout", "-l", "3", "-", "-"];
 
+/// O maior PDF que a abertura lê para a memória (achado A10 da revisão de segurança da fatia
+/// 1). Fatura e boleto têm poucos MiB; acima disto é um anexo hostil ou não é documento.
+pub const TAMANHO_MAXIMO_DO_PDF: u64 = 50 * 1024 * 1024;
+
 /// As ferramentas externas e o limite de tempo de cada chamada.
+///
+/// O padrão resolve cada uma **uma vez**, por caminho absoluto nas pastas do sistema
+/// ([`crate::ferramenta::localizar`]), nunca pelo `PATH`. Os campos são o lugar da
+/// configuração explícita (Opções), e são o caminho a mostrar em Opções e Bastidores. Um
+/// caminho relativo, ausente ou em pasta gravável por outros não roda: dá
+/// [`FalhaDeFerramenta::NaoEncontrada`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ferramentas {
-    /// O `pdftotext` (poppler). Padrão: `pdftotext` no PATH.
+    /// O `pdftotext` (poppler). Padrão: o de `/usr/bin` ou `/usr/local/bin`.
     pub pdftotext: PathBuf,
-    /// O `qpdf` do fallback, ou `None` para não usar. Padrão: `qpdf` no PATH.
+    /// O `qpdf` do fallback, ou `None` para não usar. Padrão: o de `/usr/bin` ou
+    /// `/usr/local/bin`.
     pub qpdf: Option<PathBuf>,
     /// O limite de cada processo (o `TIMEOUT_PDF_MS` do `e3-extrair.ts`: 30 s).
     pub limite_de_tempo: Duration,
@@ -40,8 +51,8 @@ pub struct Ferramentas {
 impl Default for Ferramentas {
     fn default() -> Self {
         Self {
-            pdftotext: PathBuf::from("pdftotext"),
-            qpdf: Some(PathBuf::from("qpdf")),
+            pdftotext: crate::ferramenta::localizar_ou_nome("pdftotext"),
+            qpdf: Some(crate::ferramenta::localizar_ou_nome("qpdf")),
             limite_de_tempo: Duration::from_secs(30),
         }
     }
@@ -194,8 +205,25 @@ fn pdftotext(
 
 impl PdfProtegido {
     /// Lê o original para a memória (e guarda o caminho para o fallback do `qpdf`).
+    ///
+    /// # Errors
+    /// Falha de leitura, ou [`std::io::ErrorKind::FileTooLarge`] acima de
+    /// [`TAMANHO_MAXIMO_DO_PDF`] (o arquivo nem é lido).
     pub fn ler(caminho: &Path) -> std::io::Result<Self> {
-        let bytes = std::fs::read(caminho)?;
+        use std::io::Read as _;
+        let grande_demais = || std::io::Error::from(std::io::ErrorKind::FileTooLarge);
+        let arquivo = std::fs::File::open(caminho)?;
+        if arquivo.metadata()?.len() > TAMANHO_MAXIMO_DO_PDF {
+            return Err(grande_demais());
+        }
+        // O tamanho pode mudar entre o `metadata` e a leitura: o `take` é o teto de fato.
+        let mut bytes = Vec::new();
+        arquivo
+            .take(TAMANHO_MAXIMO_DO_PDF + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > TAMANHO_MAXIMO_DO_PDF {
+            return Err(grande_demais());
+        }
         Ok(Self::novo(bytes, Some(caminho.to_path_buf())))
     }
 
@@ -358,32 +386,36 @@ fn pipeline_do_qpdf(
     ferramentas: &Ferramentas,
 ) -> Result<Desfecho, FalhaDeFerramenta> {
     let prazo = Instant::now() + ferramentas.limite_de_tempo;
+    // Só caminho absoluto: um relativo começando com `-` ou `@` o qpdf leria como opção ou
+    // arquivo de argumentos (achado A14 da revisão de segurança da fatia 1).
+    if !original.is_absolute() {
+        return Err(FalhaDeFerramenta::NaoEncontrada);
+    }
     let caminho = original.to_str().ok_or(FalhaDeFerramenta::NaoEncontrada)?;
     let mut decifrador =
-        comando(qpdf, &["--password-file=-", "--decrypt", caminho, "-"]).spawn()?;
+        comando(qpdf, &["--password-file=-", "--decrypt", caminho, "-"])?.spawn()?;
     let pipe = decifrador
         .stdout
         .take()
         .map(Stdio::from)
         .unwrap_or_else(Stdio::null);
     let mut extrator = match comando(&ferramentas.pdftotext, &ARGUMENTOS_DO_PDFTOTEXT)
-        .stdin(pipe)
-        .spawn()
+        .and_then(|mut c| c.stdin(pipe).spawn().map_err(FalhaDeFerramenta::from))
     {
         Ok(filho) => filho,
         Err(erro) => {
             let _ = decifrador.kill();
             let _ = decifrador.wait();
-            return Err(erro.into());
+            return Err(erro);
         }
     };
     // A senha vai numa cópia zerável, pela entrada padrão do qpdf, e a entrada fecha (EOF).
     let mut senha = Zeroizing::new(Vec::with_capacity(candidata.expor().len()));
     senha.extend_from_slice(candidata.expor().as_bytes());
     let escrita = decifrador.stdin.take().map(|e| escrever_e_fechar(e, senha));
-    let erro_do_qpdf = ler_tudo(decifrador.stderr.take());
-    let texto = ler_tudo(extrator.stdout.take());
-    let erro_do_pdftotext = ler_tudo(extrator.stderr.take());
+    let erro_do_qpdf = ler_tudo(decifrador.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
+    let texto = ler_tudo(extrator.stdout.take(), processo::SAIDA_MAXIMA_DO_FILHO);
+    let erro_do_pdftotext = ler_tudo(extrator.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
 
     let status_do_qpdf = esperar(&mut decifrador, prazo);
     let status_do_pdftotext = match status_do_qpdf {

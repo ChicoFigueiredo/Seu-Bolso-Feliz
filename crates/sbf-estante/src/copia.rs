@@ -14,6 +14,21 @@
 //! contrário do `cmdline`, que qualquer um lê. O valor ofuscado equivale à senha para quem o
 //! ler, então vale o mesmo cuidado que ela.
 //!
+//! # A senha forte e o sal (achado A2 da revisão de segurança da fatia 1)
+//!
+//! - [`gerar_senha_da_copia`] gera a senha recomendada: 30 símbolos de um alfabeto de 32
+//!   (150 bits), em grupos de 5, sem `l`, `o`, `0` e `1`, para o chaveiro guardar e o
+//!   usuário anotar fora do computador ([`AVISO_DA_SENHA`]).
+//! - Uma senha escolhida pelo usuário precisa de [`MINIMO_DA_SENHA_ESCOLHIDA`] caracteres.
+//! - O rclone crypt deriva a chave por scrypt com a senha e o `PASSWORD2` (o sal). Sem
+//!   `PASSWORD2`, ele usa um sal fixo, igual para todo usuário do rclone, e uma tabela
+//!   pré-calculada serve para todos. Aqui cada destino tem um sal próprio: 32 bytes
+//!   aleatórios em hexadecimal, gravados **em claro** em [`NOME_DO_SAL`], ao lado da pasta
+//!   cifrada, na primeira cópia, e passados ofuscados em `RCLONE_CONFIG_SBFCOPIA_PASSWORD2`.
+//!   O sal não é segredo (só impede a pré-computação); guardá-lo junto da cópia faz a
+//!   restauração precisar só da senha, como o aviso promete. Um destino com arquivos e sem
+//!   sal é recusado ([`Erro::DestinoSemSal`]) em vez de misturado.
+//!
 //! # O banco
 //!
 //! O instantâneo sai da API de backup do SQLite (`bancada_armazem::copiar_banco`): consistente
@@ -22,14 +37,14 @@
 //! `banco/inventario-<AAAA-MM-DDTHHMMSSZ>-<sha256 16>.sqlite`, e a restauração confere.
 
 use crate::erro::{Erro, Resultado};
-use crate::rclone::{Rclone, VariavelDeAmbiente, validar_destino};
+use crate::rclone::{Rclone, VariavelDeAmbiente, juntar, validar_destino};
 use bancada_armazem::{copiar_banco, verificar_integridade_de_arquivo};
 use bancada_segredos::Segredo;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
 /// Texto para a tela (Ferramentas > Fazer cópia de segurança, e Opções).
@@ -37,6 +52,109 @@ pub const AVISO_DA_SENHA: &str = "Sem a senha da cópia de segurança, a cópia 
 nem você nem ninguém consegue abrir os arquivos. Guarde essa senha também fora deste \
 computador (num gerenciador de senhas ou num papel em lugar seguro). Se o computador e a \
 senha se perderem juntos, a cópia se perde com eles.";
+
+/// Idade a partir da qual uma pasta `<cofre>/tmp/copia-*` é sobra (achado A8 da revisão de
+/// segurança da fatia 1). Mais nova que isto pode ser de uma cópia rodando em outra janela.
+pub const IDADE_DA_SOBRA: Duration = Duration::from_secs(24 * 60 * 60);
+const PREFIXO_DA_PASTA_TEMPORARIA: &str = "copia-";
+
+/// Apaga as pastas `<cofre>/tmp/copia-*` mais velhas que `idade_minima`: o instantâneo em
+/// claro que uma cópia interrompida (SIGKILL, queda de energia) deixou. [`CopiaDeSeguranca::fazer`]
+/// chama com [`IDADE_DA_SOBRA`]; a abertura do app também deve chamar. Não segue link
+/// simbólico e não mexe no que não é da cópia. Devolve quantas apagou.
+///
+/// # Errors
+/// Falha de disco ao listar ou apagar.
+pub fn faxinar_sobras(cofre: &Path, idade_minima: Duration) -> Resultado<usize> {
+    let tmp = cofre.join("tmp");
+    let entradas = match std::fs::read_dir(&tmp) {
+        Ok(entradas) => entradas,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    let agora = SystemTime::now();
+    let mut apagadas = 0;
+    for entrada in entradas {
+        let entrada = entrada?;
+        let e_da_copia = entrada
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(PREFIXO_DA_PASTA_TEMPORARIA));
+        // `file_type` da entrada não segue link: um link `copia-x` não é apagado.
+        if !e_da_copia || !entrada.file_type()?.is_dir() {
+            continue;
+        }
+        let idade = entrada
+            .metadata()?
+            .modified()
+            .ok()
+            .and_then(|m| agora.duration_since(m).ok())
+            .unwrap_or(Duration::ZERO);
+        if idade >= idade_minima {
+            std::fs::remove_dir_all(entrada.path())?;
+            apagadas += 1;
+        }
+    }
+    Ok(apagadas)
+}
+
+/// O mínimo, em caracteres, de uma senha escolhida pelo usuário. A gerada tem 35.
+pub const MINIMO_DA_SENHA_ESCOLHIDA: usize = 16;
+
+/// O arquivo do sal, em claro, na raiz do destino (fora da pasta cifrada).
+pub const NOME_DO_SAL: &str = "sal-da-copia.txt";
+/// Bytes aleatórios do sal (64 hexadecimais).
+const BYTES_DO_SAL: usize = 32;
+/// Alfabeto da senha gerada: minúsculas sem `l` e `o`, dígitos sem `0` e `1`. São 32
+/// símbolos, então `byte % 32` é uniforme.
+const ALFABETO_DA_SENHA: &[u8; 32] = b"abcdefghijkmnpqrstuvwxyz23456789";
+const GRUPOS_DA_SENHA: usize = 6;
+const SIMBOLOS_POR_GRUPO: usize = 5;
+
+/// Gera a senha da cópia de segurança: `xxxxx-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx`, 150 bits.
+/// Quem chama guarda no chaveiro e mostra uma vez, com [`AVISO_DA_SENHA`].
+///
+/// # Errors
+/// [`Erro::Aleatorio`] se o sistema não entregar bytes aleatórios.
+pub fn gerar_senha_da_copia() -> Resultado<Segredo> {
+    let simbolos = GRUPOS_DA_SENHA * SIMBOLOS_POR_GRUPO;
+    let mut aleatorio = Zeroizing::new([0u8; GRUPOS_DA_SENHA * SIMBOLOS_POR_GRUPO]);
+    getrandom::fill(aleatorio.as_mut_slice()).map_err(|_| Erro::Aleatorio)?;
+    let mut senha = String::with_capacity(simbolos + GRUPOS_DA_SENHA - 1);
+    for (i, byte) in aleatorio.iter().enumerate() {
+        if i > 0 && i % SIMBOLOS_POR_GRUPO == 0 {
+            senha.push('-');
+        }
+        senha.push(char::from(ALFABETO_DA_SENHA[usize::from(*byte) % 32]));
+    }
+    Ok(Segredo::novo(senha))
+}
+
+/// Recusa senha vazia ou curta, antes de qualquer processo.
+fn conferir_senha(senha: &Segredo) -> Resultado<()> {
+    if senha.esta_vazio() {
+        return Err(Erro::SenhaVazia);
+    }
+    if senha.expor().chars().count() < MINIMO_DA_SENHA_ESCOLHIDA {
+        return Err(Erro::SenhaCurta {
+            minimo: MINIMO_DA_SENHA_ESCOLHIDA,
+        });
+    }
+    Ok(())
+}
+
+/// Um sal novo: 32 bytes aleatórios em hexadecimal.
+fn sal_novo() -> Resultado<Zeroizing<String>> {
+    let mut bytes = [0u8; BYTES_DO_SAL];
+    getrandom::fill(&mut bytes).map_err(|_| Erro::Aleatorio)?;
+    Ok(Zeroizing::new(
+        bytes.iter().map(|b| format!("{b:02x}")).collect(),
+    ))
+}
+
+fn sal_no_formato(sal: &str) -> bool {
+    sal.len() == BYTES_DO_SAL * 2 && sal.bytes().all(|b| b.is_ascii_hexdigit())
+}
 
 /// Nome do remoto crypt montado por variáveis de ambiente.
 const REMOTO: &str = "SBFCOPIA";
@@ -90,11 +208,66 @@ impl CopiaDeSeguranca {
         Ok(Self { rclone, destino })
     }
 
-    fn ambiente(&self, senha: &Segredo) -> Resultado<Vec<VariavelDeAmbiente>> {
-        if senha.esta_vazio() {
-            return Err(Erro::SenhaVazia);
+    /// O sal guardado no destino, se há. Lê no máximo um pouco além do tamanho certo.
+    fn sal_guardado(&self) -> Resultado<Option<Zeroizing<String>>> {
+        match self.rclone.executar(
+            [
+                "cat",
+                "--head",
+                "200",
+                juntar(&self.destino, NOME_DO_SAL).as_str(),
+            ],
+            &[],
+            None,
+        ) {
+            Ok(texto) => {
+                let sal = texto.trim();
+                if sal_no_formato(sal) {
+                    Ok(Some(Zeroizing::new(sal.to_owned())))
+                } else {
+                    Err(Erro::SalInvalido)
+                }
+            }
+            Err(Erro::Rclone {
+                codigo: Some(3 | 4),
+                ..
+            }) => Ok(None),
+            Err(outro) => Err(outro),
         }
+    }
+
+    /// O sal para fazer uma cópia: o guardado, ou um novo se o destino está vazio.
+    fn sal_para_fazer(&self) -> Resultado<Zeroizing<String>> {
+        if let Some(sal) = self.sal_guardado()? {
+            return Ok(sal);
+        }
+        let ocupado = match self.rclone.executar(
+            ["lsf", "--max-depth", "1", self.destino.as_str()],
+            &[],
+            None,
+        ) {
+            Ok(lista) => lista.lines().any(|l| !l.trim().is_empty()),
+            Err(Erro::Rclone {
+                codigo: Some(3), ..
+            }) => false,
+            Err(outro) => return Err(outro),
+        };
+        if ocupado {
+            return Err(Erro::DestinoSemSal);
+        }
+        let sal = sal_novo()?;
+        self.rclone.executar(
+            ["rcat", juntar(&self.destino, NOME_DO_SAL).as_str()],
+            &[],
+            Some(sal.as_str()),
+        )?;
+        Ok(sal)
+    }
+
+    fn ambiente(&self, senha: &Segredo, sal: &str) -> Resultado<Vec<VariavelDeAmbiente>> {
+        conferir_senha(senha)?;
         let ofuscada = self.rclone.ofuscar(senha.expor())?;
+        let sal_ofuscado = self.rclone.ofuscar(sal)?;
         let var = |nome: &str, valor: &str| -> VariavelDeAmbiente {
             (
                 format!("RCLONE_CONFIG_{REMOTO}_{nome}"),
@@ -107,7 +280,17 @@ impl CopiaDeSeguranca {
             var("FILENAME_ENCRYPTION", "standard"),
             var("DIRECTORY_NAME_ENCRYPTION", "true"),
             var("PASSWORD", &ofuscada),
+            var("PASSWORD2", &sal_ofuscado),
         ])
+    }
+
+    /// O ambiente de uma cópia que já existe; `None` se o destino não tem sal (sem cópia).
+    fn ambiente_existente(&self, senha: &Segredo) -> Resultado<Option<Vec<VariavelDeAmbiente>>> {
+        conferir_senha(senha)?;
+        match self.sal_guardado()? {
+            Some(sal) => Ok(Some(self.ambiente(senha, &sal)?)),
+            None => Ok(None),
+        }
     }
 
     fn cripto(caminho: &str) -> String {
@@ -117,20 +300,27 @@ impl CopiaDeSeguranca {
     /// Faz a cópia: acervo (só acrescenta, nunca apaga no destino) e instantâneo do banco.
     ///
     /// # Errors
-    /// Senha vazia, falha do banco, do disco ou do rclone.
+    /// Senha vazia ou curta, destino ocupado sem sal, sal adulterado, falha do banco, do
+    /// disco ou do rclone.
     pub fn fazer(
         &self,
         conexao: &Connection,
         cofre: &Path,
         senha: &Segredo,
     ) -> Resultado<RelatorioDaCopia> {
-        let ambiente = self.ambiente(senha)?;
+        conferir_senha(senha)?;
+        let sal = self.sal_para_fazer()?;
+        let ambiente = self.ambiente(senha, &sal)?;
         let quando = instante_utc(SystemTime::now());
 
         // 1. Instantâneo do banco, numa pasta temporária 0700 do cofre.
         let tmp = cofre.join("tmp");
         std::fs::create_dir_all(&tmp)?;
-        let pasta = tempfile::Builder::new().prefix("copia-").tempdir_in(&tmp)?;
+        // A faxina é melhor-esforço: uma sobra que não sai não impede a cópia.
+        let _ = faxinar_sobras(cofre, IDADE_DA_SOBRA);
+        let pasta = tempfile::Builder::new()
+            .prefix(PREFIXO_DA_PASTA_TEMPORARIA)
+            .tempdir_in(&tmp)?;
         let instantaneo = pasta.path().join("inventario.sqlite");
         copiar_banco(conexao, &instantaneo)?;
         verificar_integridade_de_arquivo(&instantaneo)?;
@@ -183,8 +373,10 @@ impl CopiaDeSeguranca {
     /// # Errors
     /// Senha vazia ou falha do rclone.
     pub fn instantaneos(&self, senha: &Segredo) -> Resultado<Vec<String>> {
-        let ambiente = self.ambiente(senha)?;
-        self.listar_bancos(&ambiente)
+        match self.ambiente_existente(senha)? {
+            Some(ambiente) => self.listar_bancos(&ambiente),
+            None => Ok(Vec::new()),
+        }
     }
 
     fn listar_bancos(&self, ambiente: &[VariavelDeAmbiente]) -> Resultado<Vec<String>> {
@@ -209,13 +401,16 @@ impl CopiaDeSeguranca {
     }
 
     /// Restaura o acervo e o banco mais recente em `para` (`para/acervo/`,
-    /// `para/inventario.sqlite`). Nunca sobrescreve: se `para/inventario.sqlite` existe, recusa.
+    /// `para/inventario.sqlite`). Nunca sobrescreve: se `para/inventario.sqlite` existe, recusa;
+    /// um arquivo do acervo que já esteja em `para/acervo/` fica como está (`--ignore-existing`).
     ///
     /// # Errors
     /// [`Erro::JaExiste`], [`Erro::SemInstantaneo`] (senha errada ou cópia vazia),
     /// [`Erro::HashDiferente`] ou falha do rclone/disco.
     pub fn restaurar(&self, senha: &Segredo, para: &Path) -> Resultado<RelatorioDaRestauracao> {
-        let ambiente = self.ambiente(senha)?;
+        let ambiente = self
+            .ambiente_existente(senha)?
+            .ok_or(Erro::SemInstantaneo)?;
         let banco_destino = para.join("inventario.sqlite");
         if banco_destino.exists() {
             return Err(Erro::JaExiste(banco_destino));
@@ -233,6 +428,8 @@ impl CopiaDeSeguranca {
                 acervo.clone().into_os_string(),
                 "--transfers".into(),
                 "4".into(),
+                // Nunca sobrescreve um arquivo que já esteja no destino (achado A9).
+                "--ignore-existing".into(),
             ],
             &ambiente,
             None,

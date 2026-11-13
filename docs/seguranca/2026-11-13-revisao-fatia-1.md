@@ -237,3 +237,77 @@ fictícios: `UsuarioFicticio1`, `senha-ficticia-1` e o CPF de documentação.
 - **S5:** o SQL de `gerar_sql_somente_acrescimo` num SQLite em memória, com
   `INSERT OR REPLACE`, `recursive_triggers` 0 e 1, com e sem o trigger `BEFORE INSERT`
   proposto (A4).
+
+## Correções de 2026-11-13
+
+Feitas na branch `feat/desktop-correcoes-seguranca` (a partir de `feat/desktop-rust`,
+`ec26179`), um commit por achado ou par de achados. Os testes de A1, A3, A4, A6 e A7 foram
+vistos falhando antes da correção; os de A2, A8, A9, A10, A14 e A15 usam API nova e não
+compilavam antes. Todos os testes usam dados fictícios gerados na hora. As sondas S1, S3 e S5
+viraram testes versionados (`seguranca_scrypt.rs`, `seguranca_destino.rs`,
+`seguranca_decisao.rs`).
+
+| # | Situação | Commit | Teste de regressão | O que mudou |
+| --- | --- | --- | --- | --- |
+| A1 | **Corrigido** | `0fb18e1` | `sbf-estante/tests/seguranca_destino.rs`; unit `destinos_que_sairiam_da_base_sao_recusados`, `formatos_de_data_ciclo_e_extensao` | `data_chave` só entra no nome no formato `AAAA-MM-DD`, `ciclo_id` só vira pasta no formato `AAAA-MM` (senão `a-classificar/`) e `extensao` só no formato `[a-z0-9]{1,10}` (senão o nome fica sem extensão). Antes de cada `copyto`, `moveto` e `deletefile`, o destino relativo passa por `destino_seguro` (sem barra inicial, componente vazio, `.`, `..`, `\` nem `:`), e o que falha vai para `falhas` sem chamar o rclone. Para valores válidos o nome é o mesmo do TS (`nomes_ts.rs` passa). |
+| A2 | **Corrigido** | `e49a476` | `sbf-estante/tests/seguranca_senha.rs` (e `copia.rs`, o INV-12, continua passando) | `gerar_senha_da_copia() -> Resultado<Segredo>`: 30 símbolos de um alfabeto de 32 (150 bits), em 6 grupos de 5, sem `l`, `o`, `0`, `1`. Senha escolhida abaixo de `MINIMO_DA_SENHA_ESCOLHIDA = 16` caracteres dá `Erro::SenhaCurta`. Cada destino ganha um `PASSWORD2` aleatório (32 bytes em hexadecimal), gravado **em claro** em `sal-da-copia.txt` na raiz do destino (fora da pasta cifrada) na primeira cópia, e passado ofuscado em `RCLONE_CONFIG_SBFCOPIA_PASSWORD2`. Destino com arquivos e sem sal dá `Erro::DestinoSemSal`; sal fora do formato dá `Erro::SalInvalido`. Ver "Decisões das correções", C1. |
+| A3 | **Corrigido** | `c1b192e` | `sbf-chaveiro/tests/seguranca_scrypt.rs`; unit `parametros_absurdos_sao_arquivo_invalido` | Aceita só N de 2¹⁰ a 2¹⁸, r de 1 a 16 e p de 1 a 4 (o `segredos.ts` gravava N=2¹⁷, r=8, p=1, e N=2¹⁰ nos testes), com tetos de 256 MiB para `128·N·r` **e** `128·r·p`, e de trabalho `N·r·p ≤ 2·2¹⁷·8`. O `cofre.enc` acima de 1 MiB nem é lido (`take`). Fora disso, o mesmo `SenhaOuArquivoInvalido`, em menos de 200 ms (o caso r=2¹⁸, p=16 levava 5,2 s antes). |
+| A4 | **Corrigido** | `70c4df5` | `sbf-inventario/tests/seguranca_decisao.rs` (conexão rusqlite crua, `recursive_triggers=0`) | Migração 2 ganha `GATILHO_QUE_RECUSA_SUBSTITUIR` (`decisao_recusa_substituir`, `BEFORE INSERT … WHEN EXISTS (… id = NEW.id)`). `INSERT OR REPLACE`, `REPLACE` e o upsert com `id` existente são recusados; o `INSERT` normal, com ou sem `id`, continua. A migração 2 foi editada em vez de criar a 3 porque ainda não foi aplicada em nenhum banco real (C4). O trigger ficou no SBF, não em `gerar_sql_somente_acrescimo` da bancada (fora do escopo deste agente; C5). |
+| A5 | **Parcial** | `3ea9bc7` | (sem teste automático; é resíduo em memória) | A saída do rclone (a senha ofuscada do `obscure`) agora vai para um `Zeroizing<String>` com 4 KiB reservados, sem realocar, e é zerada ao descartar. Ficam como limite conhecido: a cópia que o `Command::env` guarda, as do `lopdf` (`LoadOptions::with_password`, `EncryptionState`) e os core dumps. |
+| A6 | **Corrigido** | `f4c5bd8` (PDF), `ad3e891` (rclone) | `sbf-pdf/tests/seguranca_ferramentas.rs`, `sbf-estante/tests/seguranca_rclone.rs` | `pdftotext`, `qpdf` e `rclone` são resolvidos uma vez por caminho absoluto em `/usr/bin`, `/usr/local/bin`, `/bin` (macOS: mais `/opt/homebrew/bin`, `/opt/local/bin`; Windows: `%ProgramFiles%`), nunca pelo `PATH`. `Ferramentas` e `Rclone::com_binario` continuam como configuração explícita; `Rclone::binario()` e os campos de `Ferramentas` dão o caminho para Opções e Bastidores. Caminho relativo, ausente, ou com o arquivo ou a pasta graváveis por outros (ou pelo grupo, se o grupo não for o do root nem o grupo próprio do dono) não roda: `NaoEncontrada` ou `Erro::RcloneAusente`. Teste com executável falso na frente do `PATH`. |
+| A7 | **Corrigido** | `f4c5bd8` (PDF), `ad3e891` (rclone) | os mesmos de A6 | `env_clear()` em todo filho. PDF: só `PATH=/usr/bin:/bin`, `LANG`, `LC_ALL`, `LC_CTYPE` (e no Windows `SystemRoot` e afins). rclone: isso mais `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `TMPDIR`, `RCLONE_CONFIG`, `RCLONE_CONFIG_PASS`, proxies e `SSL_CERT_*`, e as `RCLONE_CONFIG_SBFCOPIA_*` do app. Nenhum outro `RCLONE_*` do shell passa (testado com `RCLONE_DRY_RUN=true` e um `PASSWORD2` alheio no ambiente do pai). |
+| A8 | **Corrigido** | `76f6d74` | `sbf-estante/tests/seguranca_sobras.rs` | `copia::faxinar_sobras(cofre, idade)` apaga `<cofre>/tmp/copia-*` mais velhas que `idade` (não segue link, não mexe em outra coisa). `fazer` chama com `IDADE_DA_SOBRA` (24 h) antes de criar o instantâneo novo. A abertura do app deve chamar também (costura). |
+| A9 | **Corrigido** | `76f6d74` | `sbf-estante/tests/seguranca_sobras.rs` | A restauração do acervo usa `--ignore-existing`. As chamadas curtas do rclone (listar, ler o sal, ofuscar, renomear, apagar) têm prazo de 5 min (`PRAZO_PADRAO`, `Rclone::com_prazo`), e passado o prazo o processo é morto e dá `Erro::TempoEsgotado`. `copy` e `copyto` ficam sem prazo de relógio, só com o `--timeout` do próprio rclone. |
+| A10 | **Corrigido** (menos o prazo do parse) | `a388359` | `sbf-pdf/tests/seguranca_limites.rs` | `PdfProtegido::ler` recusa acima de `TAMANHO_MAXIMO_DO_PDF` (50 MiB) com `ErrorKind::FileTooLarge`, e a rodada devolve `Situacao::GrandeDemais`. A saída guardada dos filhos para em `SAIDA_MAXIMA_DO_FILHO` (8 MiB), o stderr em 64 KiB, e o resto é drenado. **Falta:** o parse do `lopdf` continua sem prazo, porque uma thread não pode ser cancelada e o parse não tem ponto de parada. |
+| A11 | Aberto | — | — | Na bancada (`bancada-segredos`), fora do escopo deste agente. |
+| A12 | Aberto | — | — | Informativo; não houve tempo. |
+| A13 | Aberto | — | — | Informativo; depende da tela de pendência. |
+| A14 | **Corrigido** | `2649809` | `sbf-pdf/tests/seguranca_caminhos.rs` | `rodada::localizar` recusa `caminho_acervo` absoluto ou com `..`, e origem local relativa. O `qpdf` só recebe caminho absoluto. |
+| A15 | **Corrigido** | `2649809` | `sbf-pdf/tests/seguranca_caminhos.rs` | `CpfPrimeiros`/`CpfUltimos` fora de 1 a 11 dão `ErroDeFonte::EstrategiaInvalida` (variante nova; o enum já era `non_exhaustive`) em vez de pânico. |
+| A16 | Aberto | — | — | Um `panic::set_hook` é global; quem instala é a janela (costura). |
+| A17, A18 | Abertos | — | — | Na bancada e na CI, fora do escopo deste agente. |
+
+Na rodada final, `cargo test --workspace` passou com 232 testes, nenhuma falha e 4
+ignorados de propósito, e `cargo clippy --workspace --all-targets -D warnings` também
+passou. Uma rodada anterior travou 35 min em `copia.rs`
+(`senha_da_cripto_nao_aparece_no_cmdline_do_rclone`). Um pânico dentro do `scope` deixava
+o vigia de `/proc` girando para sempre. A causa provável é um ETXTBSY no script de
+embrulho, gravado enquanto outra thread fazia `fork`. O commit `2cf2ca6` faz o teste falhar
+em vez de travar e grava os scripts por um `sh` filho. Dez rodadas seguidas passaram.
+
+### Decisões das correções (para conferir)
+
+- **C1. Onde fica o sal da cópia.** A tarefa pedia o `PASSWORD2` "guardado no chaveiro
+  junto com a senha ou derivado de forma documentada". Ele ficou **em claro, ao lado da
+  cópia** (`sal-da-copia.txt` na raiz do destino). O sal não é segredo: o que ele precisa
+  ser é aleatório e único, para que nenhuma tabela pré-calculada sirva. Guardado no
+  chaveiro, ele se perderia junto com o computador e a cópia ficaria ilegível mesmo com a
+  senha, o que desmentiria o `AVISO_DA_SENHA`. Derivado da senha, ele seria igual para
+  todo usuário com a mesma senha, e a pré-computação voltaria. Quem adultera o arquivo no
+  Drive só consegue impedir a restauração, o que já poderia fazer apagando a cópia.
+- **C2. `gerar_senha_da_copia` devolve `Resultado<Segredo>`**, não `Segredo`: a falha do
+  gerador aleatório do sistema vira `Erro::Aleatorio` em vez de pânico.
+- **C3. Mínimo de 16 caracteres** para a senha escolhida, contados em caracteres, não em
+  bytes. A gerada tem 35.
+- **C4. A migração 2 foi editada** em vez de criar uma migração 3, porque o briefing diz
+  que ela ainda não foi aplicada em nenhum banco real. Se algum banco já estiver em
+  `user_version=2`, ele **não** recebe o trigger novo: aí é preciso uma migração 3 com o
+  mesmo `GATILHO_QUE_RECUSA_SUBSTITUIR` (é `CREATE TRIGGER IF NOT EXISTS`, então repetir
+  não faz mal).
+- **C5. O terceiro trigger ficou no SBF**, em `migracoes.rs`. O lugar natural é
+  `gerar_sql_somente_acrescimo` da bancada, que este agente não podia editar. Quando a
+  bancada ganhar o trigger com o mesmo nome, o `IF NOT EXISTS` evita a duplicata.
+- **C6. Grupo com escrita.** A regra de "pasta gravável por outros" aceita escrita do grupo
+  quando o grupo é o do root ou o grupo próprio do dono (gid igual ao uid, o "user private
+  group" do Ubuntu e do Fedora). Sem isso, qualquer executável na pasta pessoal seria
+  recusado, porque a umask do Ubuntu é 002. No Windows a std não lê ACL: vale só o caminho
+  absoluto em `%ProgramFiles%`.
+- **C7. Duplicação.** A resolução e o ambiente mínimo estão em `sbf-pdf/src/ferramenta.rs`
+  e repetidos em `sbf-estante/src/rclone.rs`, porque os dois crates não dependem um do
+  outro e este agente não podia criar crate novo nem mexer no `Cargo.toml` da raiz. Um
+  crate `sbf-ferramentas` resolveria.
+- **C8. Faxina com idade de 24 h** dentro de `fazer`, para não apagar o instantâneo de uma
+  cópia que esteja rodando em outra janela. Uma cópia que leve mais de 24 h ainda corre
+  esse risco.
+- **C9. `rclone` sem prazo de relógio nas transferências**, porque o acervo pode levar
+  horas. Fica valendo o `--timeout` do rclone (5 min sem tráfego).

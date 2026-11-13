@@ -5,8 +5,11 @@ use std::path::PathBuf;
 /// Falhas da estante e da cópia de segurança.
 #[derive(Debug, thiserror::Error)]
 pub enum Erro {
-    /// O programa `rclone` não foi encontrado.
-    #[error("o rclone não está instalado ou não está no PATH")]
+    /// O programa `rclone` não foi encontrado nas pastas do sistema, ou o configurado é
+    /// relativo ou está numa pasta gravável por outros.
+    #[error(
+        "o rclone não foi encontrado nas pastas do sistema, ou o configurado não é seguro (caminho relativo ou pasta gravável por outros)"
+    )]
     RcloneAusente,
     /// O rclone saiu com erro. `mensagem` é o fim do stderr dele (nunca a senha).
     #[error("rclone {comando} falhou (código {codigo:?}): {mensagem}")]
@@ -17,6 +20,12 @@ pub enum Erro {
         codigo: Option<i32>,
         /// Fim do stderr.
         mensagem: String,
+    },
+    /// Uma chamada curta ao rclone passou do prazo e foi encerrada.
+    #[error("rclone {comando} passou do limite de tempo e foi encerrado")]
+    TempoEsgotado {
+        /// Subcomando (`lsf`, `cat`...).
+        comando: String,
     },
     /// Falha de disco.
     #[error("falha de disco: {0}")]
@@ -30,6 +39,22 @@ pub enum Erro {
     /// A senha da cópia está vazia.
     #[error("a senha da cópia de segurança está vazia")]
     SenhaVazia,
+    /// A senha escolhida pelo usuário é curta demais.
+    #[error("a senha da cópia de segurança precisa de pelo menos {minimo} caracteres")]
+    SenhaCurta {
+        /// O mínimo ([`crate::copia::MINIMO_DA_SENHA_ESCOLHIDA`]).
+        minimo: usize,
+    },
+    /// O sistema não entregou bytes aleatórios para a senha ou o sal.
+    #[error("o sistema não entregou bytes aleatórios")]
+    Aleatorio,
+    /// O destino tem arquivos e não tem o sal: não é uma cópia deste app (ou é de antes do sal
+    /// próprio). A cópia não mistura.
+    #[error("o destino da cópia já tem arquivos e não tem o sal da cópia; escolha uma pasta vazia")]
+    DestinoSemSal,
+    /// O sal guardado no destino não está no formato (64 hexadecimais).
+    #[error("o sal guardado no destino da cópia está adulterado")]
+    SalInvalido,
     /// O destino não é aceitável (vazio ou começando com `-`).
     #[error("destino inválido: {0:?}")]
     DestinoInvalido(String),

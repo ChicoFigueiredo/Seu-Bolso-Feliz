@@ -122,6 +122,9 @@ pub enum Situacao {
     FaltouSegredo(ErroDeFonte),
     /// Nem o acervo nem a origem local têm o arquivo.
     SemArquivo,
+    /// O arquivo passa de [`crate::abertura::TAMANHO_MAXIMO_DO_PDF`]: nem foi lido nem
+    /// tentado (achado A10 da revisão de segurança da fatia 1).
+    GrandeDemais,
 }
 
 /// O resultado de um documento.
@@ -151,8 +154,15 @@ impl RelatorioDaRodada {
 
 /// O arquivo do alvo: a cópia do acervo, senão a origem local com o mesmo tamanho (como o
 /// `localizarArquivo` do `e3-extrair.ts`).
+///
+/// O `caminho_acervo` só vale relativo e sem `..` (não sai do cofre), e a origem local só vale
+/// absoluta (achado A14 da revisão de segurança da fatia 1).
 pub fn localizar(raiz_do_cofre: &Path, alvo: &AlvoProtegido) -> Option<PathBuf> {
-    if let Some(relativo) = &alvo.caminho_acervo {
+    if let Some(relativo) = alvo
+        .caminho_acervo
+        .as_deref()
+        .filter(|r| relativo_dentro(r))
+    {
         let p = raiz_do_cofre.join(relativo);
         if p.is_file() {
             return Some(p);
@@ -160,10 +170,23 @@ pub fn localizar(raiz_do_cofre: &Path, alvo: &AlvoProtegido) -> Option<PathBuf> 
     }
     alvo.caminhos_locais.iter().find_map(|(caminho, tamanho)| {
         let p = PathBuf::from(caminho);
+        if !p.is_absolute() {
+            return None;
+        }
         let metadata = std::fs::metadata(&p).ok()?;
         let confere = tamanho.is_none_or(|t| u64::try_from(t).ok() == Some(metadata.len()));
         (metadata.is_file() && confere).then_some(p)
     })
+}
+
+/// Relativo, não vazio, e só com componentes normais (sem `..`, `.` nem raiz).
+fn relativo_dentro(relativo: &str) -> bool {
+    let caminho = Path::new(relativo);
+    !relativo.is_empty()
+        && caminho.is_relative()
+        && caminho
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
 /// Roda a abertura em todos os alvos do inventário.
@@ -231,8 +254,15 @@ fn abrir_um(
     let Some(caminho) = localizar(raiz_do_cofre, alvo) else {
         return Ok(resultado);
     };
-    let Ok(pdf) = PdfProtegido::ler(&caminho) else {
-        return Ok(resultado);
+    let pdf = match PdfProtegido::ler(&caminho) {
+        Ok(pdf) => pdf,
+        Err(erro) if erro.kind() == std::io::ErrorKind::FileTooLarge => {
+            return Ok(ResultadoDoAlvo {
+                situacao: Situacao::GrandeDemais,
+                ..resultado
+            });
+        }
+        Err(_) => return Ok(resultado),
     };
     let ferramentas = &opcoes.ferramentas;
     let limite = opcoes.limite_de_falhas;

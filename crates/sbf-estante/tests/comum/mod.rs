@@ -4,7 +4,6 @@
 use rusqlite::{Connection, params};
 use sbf_estante::Rclone;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub const SQL_BASE: &str = include_str!("../../../sbf-inventario/sql/0001-base-bun-v2.sql");
@@ -82,9 +81,9 @@ pub fn rclone_com_registro(pasta: &Path) -> Embrulho {
     let cmdlines = pasta.join("cmdlines.log");
     let ambientes = pasta.join("ambientes.log");
     let script = pasta.join("rclone-registrado.sh");
-    fs::write(
+    escrever_executavel(
         &script,
-        format!(
+        &format!(
             "#!/bin/sh\n\
              tr '\\0' ' ' < /proc/$$/cmdline >> '{c}'; echo >> '{c}'\n\
              tr '\\0' '\\n' < /proc/$$/environ | grep '^RCLONE_CONFIG_' >> '{a}'\n\
@@ -92,14 +91,31 @@ pub fn rclone_com_registro(pasta: &Path) -> Embrulho {
             c = cmdlines.display(),
             a = ambientes.display()
         ),
-    )
-    .expect("script");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod");
+    );
     Embrulho {
         rclone: Rclone::com_binario(script),
         cmdlines,
         ambientes,
     }
+}
+
+/// Grava um script executável sem que este processo segure o arquivo aberto para escrita:
+/// quem grava é um `sh` filho. Assim um `fork` de outra thread do teste no meio da gravação
+/// não herda o descritor, e o `exec` do script não dá ETXTBSY ("Text file busy").
+pub fn escrever_executavel(caminho: &Path, conteudo: &str) {
+    use std::io::Write as _;
+    let mut sh = std::process::Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(caminho)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("sh");
+    sh.stdin
+        .take()
+        .expect("stdin")
+        .write_all(conteudo.as_bytes())
+        .expect("escrever");
+    assert!(sh.wait().expect("esperar").success(), "gravar {caminho:?}");
 }
 
 /// Lista (caminho relativo, bytes) de todos os arquivos sob `raiz`, ordenada.
