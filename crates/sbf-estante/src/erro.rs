@@ -30,6 +30,22 @@ pub enum Erro {
     /// A senha da cópia está vazia.
     #[error("a senha da cópia de segurança está vazia")]
     SenhaVazia,
+    /// A senha escolhida pelo usuário é curta demais.
+    #[error("a senha da cópia de segurança precisa de pelo menos {minimo} caracteres")]
+    SenhaCurta {
+        /// O mínimo ([`crate::copia::MINIMO_DA_SENHA_ESCOLHIDA`]).
+        minimo: usize,
+    },
+    /// O sistema não entregou bytes aleatórios para a senha ou o sal.
+    #[error("o sistema não entregou bytes aleatórios")]
+    Aleatorio,
+    /// O destino tem arquivos e não tem o sal: não é uma cópia deste app (ou é de antes do sal
+    /// próprio). A cópia não mistura.
+    #[error("o destino da cópia já tem arquivos e não tem o sal da cópia; escolha uma pasta vazia")]
+    DestinoSemSal,
+    /// O sal guardado no destino não está no formato (64 hexadecimais).
+    #[error("o sal guardado no destino da cópia está adulterado")]
+    SalInvalido,
     /// O destino não é aceitável (vazio ou começando com `-`).
     #[error("destino inválido: {0:?}")]
     DestinoInvalido(String),

@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 bancada-armazem = { workspace = true }
 bancada-segredos = { workspace = true }
+# Senha gerada e sal da cópia de segurança (MIT OR Apache-2.0); a mesma da bancada.
+getrandom = "0.4"
 rusqlite = { workspace = true }
 sha2 = "0.10"
 tempfile = { workspace = true }
