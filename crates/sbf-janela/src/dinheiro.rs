@@ -29,6 +29,27 @@ pub trait EstacaoDoLivro: Alteracoes + Sincronizacao {}
 
 impl<T: Alteracoes + Sincronizacao> EstacaoDoLivro for T {}
 
+/// Em que pé está o pareamento desta estação (login Google e `POST /estacoes/pareamento`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AndamentoDoPareamento {
+    /// Nada em andamento.
+    #[default]
+    Parado,
+    /// Rodando; o texto diz o passo ("esperando o login no navegador"…).
+    Pareando(String),
+    /// O último pareamento não deu certo; o texto diz por quê (sem credencial nem token).
+    Falhou(String),
+}
+
+/// O pareamento da estação, que roda fora do quadro. Quem liga a estação real (o binário)
+/// implementa; a janela só dispara e mostra o andamento.
+pub trait Pareamento: std::fmt::Debug {
+    /// Começa o pareamento (não bloqueia). Sem efeito se já está pareando.
+    fn iniciar(&mut self);
+    /// O andamento, lido a cada quadro.
+    fn andamento(&self) -> AndamentoDoPareamento;
+}
+
 /// A estação ligada à janela.
 pub struct EstacaoLigada(pub Box<dyn EstacaoDoLivro>);
 
@@ -566,11 +587,53 @@ pub fn cartao_da_recusa(ui: &mut Ui, a: &Alteracao, hoje: &str, pedidos: &mut Ve
 // A área Sincronização
 // ---------------------------------------------------------------------------
 
+/// "Parear esta estação", quando a estação não está pareada e há como parear; com o
+/// andamento (ou o motivo da falha) ao lado.
+fn botao_de_parear(
+    ui: &mut Ui,
+    pareamento: Option<&dyn Pareamento>,
+    precisa: bool,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let (true, Some(par)) = (precisa, pareamento) else {
+        return;
+    };
+    let p = tema::paleta(ui.ctx());
+    let andamento = par.andamento();
+    let ocupado = matches!(andamento, AndamentoDoPareamento::Pareando(_));
+    if ui
+        .add_enabled(
+            !ocupado,
+            egui::Button::new((
+                icones::icone_cor("key", 16.0, p.sobre_destaque),
+                RichText::new("Parear esta estação").color(p.sobre_destaque),
+            ))
+            .fill(p.destaque),
+        )
+        .clicked()
+    {
+        pedidos.push(Pedido::Parear);
+    }
+    match andamento {
+        AndamentoDoPareamento::Parado => {}
+        AndamentoDoPareamento::Pareando(passo) => {
+            ui.add(egui::Spinner::new());
+            ui.label(RichText::new(passo).color(p.tinta_suave));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        AndamentoDoPareamento::Falhou(motivo) => {
+            ui.label(RichText::new(motivo).color(p.perigo));
+        }
+    }
+}
+
 /// A área Sincronização: cabeçalho, Sincronizar agora, Aguardando, Recusadas lado a lado,
 /// Estações e o histórico de trocas.
 pub fn area_sincronizacao(
     ui: &mut Ui,
     estacao: Option<&dyn EstacaoDoLivro>,
+    pareamento: Option<&dyn Pareamento>,
     hoje: &str,
     vista: &mut Vista,
     pedidos: &mut Vec<Pedido>,
@@ -585,6 +648,7 @@ pub fn area_sincronizacao(
             p.info_borda,
             p.info,
         );
+        botao_de_parear(ui, pareamento, true, pedidos);
         return;
     };
     let estado = est.estado();
@@ -611,6 +675,11 @@ pub fn area_sincronizacao(
             .color(p.tinta_suave),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let precisa_parear = matches!(
+                estado.rede,
+                EstadoDaRede::NaoPareada | EstadoDaRede::EstacaoRevogada
+            );
+            botao_de_parear(ui, pareamento, precisa_parear, pedidos);
             let pode = !matches!(
                 estado.rede,
                 EstadoDaRede::EstacaoRevogada

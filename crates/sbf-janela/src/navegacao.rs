@@ -106,6 +106,8 @@ pub enum Pedido {
     DescartarAlteracao(String),
     /// "Sincronizar agora".
     Sincronizar,
+    /// "Parear esta estação".
+    Parear,
     /// Revogar uma estação (já confirmado).
     RevogarEstacao(Ref),
     /// Renomear uma estação.

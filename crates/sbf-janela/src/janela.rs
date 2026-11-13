@@ -151,6 +151,8 @@ pub struct Janela {
     /// A estação (alterações e sincronização do livro-caixa). `None`: esta máquina ainda
     /// não é uma estação; as áreas de Dinheiro mostram o motivo.
     pub estacao: Option<crate::dinheiro::EstacaoLigada>,
+    /// O pareamento da estação (login Google). `None`: a janela não sabe parear.
+    pub pareamento: Option<Box<dyn crate::dinheiro::Pareamento>>,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -248,12 +250,24 @@ impl Janela {
             visao_geral_pendente: None,
             pedacos_pendentes: HashMap::new(),
             estacao: None,
+            pareamento: None,
         }
     }
 
     /// Liga a estação (a real, ou o livro fictício da demonstração).
     pub fn ligar_estacao(&mut self, estacao: Box<dyn crate::dinheiro::EstacaoDoLivro>) {
         self.estacao = Some(crate::dinheiro::EstacaoLigada(estacao));
+    }
+
+    /// Esquece o que a janela guarda dos números e das tabelas: a próxima leitura vai à
+    /// `Consulta` (o livro-caixa mudou depois de uma troca da estação).
+    pub fn reler(&mut self) {
+        self.cache.limpar();
+    }
+
+    /// Liga o pareamento (o botão "Parear esta estação" da área Sincronização).
+    pub fn ligar_pareamento(&mut self, pareamento: Box<dyn crate::dinheiro::Pareamento>) {
+        self.pareamento = Some(pareamento);
     }
 
     /// O estado da sincronização, se há estação.
@@ -670,7 +684,14 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
-                crate::dinheiro::area_sincronizacao(ui, estacao, &hoje, vista, pedidos);
+                crate::dinheiro::area_sincronizacao(
+                    ui,
+                    estacao,
+                    self.pareamento.as_deref(),
+                    &hoje,
+                    vista,
+                    pedidos,
+                );
             }
             Destino::Area(area) if area.e_do_livro_caixa() => {
                 let pesquisa = if *area == Area::Hoje {
@@ -1346,6 +1367,11 @@ impl Janela {
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
                 Pedido::DescartarAlteracao(id) => self.descartar(&id),
                 Pedido::Sincronizar => self.sincronizar(),
+                Pedido::Parear => {
+                    if let Some(p) = self.pareamento.as_mut() {
+                        p.iniciar();
+                    }
+                }
                 Pedido::RevogarEstacao(r) => match self.estacao.as_mut().map(|e| e.0.revogar(&r)) {
                     Some(Ok(())) => self.ok(
                         "Estação revogada. O que ela já sincronizou continua no servidor."

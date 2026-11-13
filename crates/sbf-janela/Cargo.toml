@@ -25,6 +25,8 @@ serde_json = { workspace = true }
 bancada-segredos = { workspace = true, features = ["testes"] }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
+sbf-estacao = { path = "../sbf-estacao" }
+sbf-livro = { path = "../sbf-livro" }
 
 [lints]
 workspace = true
