@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use egui::{Align, Context, Id, Layout, PointerButton, RichText, Ui};
 use sbf_inventario::comando::{Acao, IdDecisao, PedidoDeDecisao};
-use sbf_inventario::consulta::{Area, Contagens, Filtro, PedidoDeTabela};
+use sbf_inventario::consulta::{Area, Celula, Contagens, Filtro, PedidoDeTabela};
 use sbf_inventario::{Comandos, Consulta, Ref, Tipo};
 
 use crate::acoes::{self, ContextoDasAcoes, IdAcao};
@@ -448,6 +448,10 @@ impl Janela {
             }),
             alteracao_recusada: self.alteracao_recusada_selecionada().is_some(),
             estacao_ativa: self.estacao_ativa_selecionada().is_some(),
+            nas_sugestoes: matches!(
+                self.navegacao.atual(),
+                Destino::Area(Area::SugestoesDeConciliacao)
+            ),
         }
     }
 
@@ -1426,6 +1430,66 @@ impl Janela {
         self.mensagem = Some(Mensagem { texto, erro: true });
     }
 
+    /// Confirma em lote os pares sugeridos cujo registro de extrato está selecionado: uma
+    /// decisão `UnirConciliados` por par, para que cada uma se desfaça sozinha.
+    fn confirmar_conciliacoes(
+        &mut self,
+        consulta: &dyn Consulta,
+        comandos: &mut dyn Comandos,
+        sel: &[Ref],
+    ) {
+        let tabela = match consulta.tabela(&PedidoDeTabela::Area {
+            area: Area::SugestoesDeConciliacao,
+            filtro: Filtro::default(),
+        }) {
+            Ok(t) => t,
+            Err(e) => return self.erro(e.to_string()),
+        };
+        let mut gravadas = 0;
+        for linha in &tabela.linhas {
+            let Some(extrato) = linha.alvo.as_ref().filter(|a| sel.contains(a)) else {
+                continue;
+            };
+            let Some(Celula::Link {
+                alvo: documento, ..
+            }) = linha.celulas.get(1)
+            else {
+                continue;
+            };
+            let pedido = PedidoDeDecisao {
+                acao: Acao::UnirConciliados {
+                    com: documento.clone(),
+                },
+                alvos: vec![extrato.clone()],
+                motivo: None,
+            };
+            match comandos.executar(&pedido) {
+                Ok(ids) => {
+                    self.decisoes_da_sessao.extend(ids.iter().copied());
+                    gravadas += 1;
+                }
+                Err(e) => {
+                    self.erro(format!("{gravadas} conciliações gravadas; parou: {e}"));
+                    return;
+                }
+            }
+        }
+        self.centro.selecao.itens.clear();
+        if gravadas == 0 {
+            self.erro("Nenhum par selecionado.".to_owned());
+        } else {
+            self.ok(format!(
+                "Confirmar conciliações: {gravadas} {} gravada{}. Desfazer: Ctrl+Z, uma por vez.",
+                if gravadas == 1 {
+                    "conciliação"
+                } else {
+                    "conciliações"
+                },
+                if gravadas == 1 { "" } else { "s" },
+            ));
+        }
+    }
+
     fn decidir(&mut self, comandos: &mut dyn Comandos, pedido: PedidoDeDecisao) {
         match comandos.executar(&pedido) {
             Ok(ids) => {
@@ -1645,6 +1709,7 @@ impl Janela {
                     );
                 }
             }
+            IdAcao::ConfirmarConciliacoes => self.confirmar_conciliacoes(consulta, comandos, &sel),
             IdAcao::ConfirmarRecorrencia => {
                 self.decidir(comandos, simples(Acao::ConfirmarRecorrencia))
             }
