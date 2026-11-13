@@ -1,0 +1,407 @@
+{
+ "trechos": [
+  {
+   "entrada": null,
+   "max": 40,
+   "saida": ""
+  },
+  {
+   "entrada": null,
+   "max": 10,
+   "saida": ""
+  },
+  {
+   "entrada": null,
+   "max": 1,
+   "saida": ""
+  },
+  {
+   "entrada": "",
+   "max": 40,
+   "saida": ""
+  },
+  {
+   "entrada": "",
+   "max": 10,
+   "saida": ""
+  },
+  {
+   "entrada": "",
+   "max": 1,
+   "saida": ""
+  },
+  {
+   "entrada": "Nu Pagamentos S.A.",
+   "max": 40,
+   "saida": "nu-pagamentos-s-a"
+  },
+  {
+   "entrada": "Nu Pagamentos S.A.",
+   "max": 10,
+   "saida": "nu-pagamen"
+  },
+  {
+   "entrada": "Nu Pagamentos S.A.",
+   "max": 1,
+   "saida": "n"
+  },
+  {
+   "entrada": "Condomínio do Edifício / YES Ltda.",
+   "max": 40,
+   "saida": "condominio-do-edificio-yes-ltda"
+  },
+  {
+   "entrada": "Condomínio do Edifício / YES Ltda.",
+   "max": 10,
+   "saida": "condominio"
+  },
+  {
+   "entrada": "Condomínio do Edifício / YES Ltda.",
+   "max": 1,
+   "saida": "c"
+  },
+  {
+   "entrada": "ÁÉÍÓÚ àèìòù ãõ âêô ç ü ñ",
+   "max": 40,
+   "saida": "aeiou-aeiou-ao-aeo-c-u-n"
+  },
+  {
+   "entrada": "ÁÉÍÓÚ àèìòù ãõ âêô ç ü ñ",
+   "max": 10,
+   "saida": "aeiou-aeio"
+  },
+  {
+   "entrada": "ÁÉÍÓÚ àèìòù ãõ âêô ç ü ñ",
+   "max": 1,
+   "saida": "a"
+  },
+  {
+   "entrada": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "max": 40,
+   "saida": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "entrada": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "max": 10,
+   "saida": "aaaaaaaaaa"
+  },
+  {
+   "entrada": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "max": 1,
+   "saida": "a"
+  },
+  {
+   "entrada": "  --Loja   da  Ana--  ",
+   "max": 40,
+   "saida": "loja-da-ana"
+  },
+  {
+   "entrada": "  --Loja   da  Ana--  ",
+   "max": 10,
+   "saida": "loja-da-an"
+  },
+  {
+   "entrada": "  --Loja   da  Ana--  ",
+   "max": 1,
+   "saida": "l"
+  },
+  {
+   "entrada": "São João & Filhos — Comércio",
+   "max": 40,
+   "saida": "sao-joao-filhos-comercio"
+  },
+  {
+   "entrada": "São João & Filhos — Comércio",
+   "max": 10,
+   "saida": "sao-joao-f"
+  },
+  {
+   "entrada": "São João & Filhos — Comércio",
+   "max": 1,
+   "saida": "s"
+  },
+  {
+   "entrada": "İstanbul Ürün",
+   "max": 40,
+   "saida": "istanbul-urun"
+  },
+  {
+   "entrada": "İstanbul Ürün",
+   "max": 10,
+   "saida": "istanbul-u"
+  },
+  {
+   "entrada": "İstanbul Ürün",
+   "max": 1,
+   "saida": "i"
+  },
+  {
+   "entrada": "日本語 テスト",
+   "max": 40,
+   "saida": ""
+  },
+  {
+   "entrada": "日本語 テスト",
+   "max": 10,
+   "saida": ""
+  },
+  {
+   "entrada": "日本語 テスト",
+   "max": 1,
+   "saida": ""
+  },
+  {
+   "entrada": "Mercado 24h 100%",
+   "max": 40,
+   "saida": "mercado-24h-100"
+  },
+  {
+   "entrada": "Mercado 24h 100%",
+   "max": 10,
+   "saida": "mercado-24"
+  },
+  {
+   "entrada": "Mercado 24h 100%",
+   "max": 1,
+   "saida": "m"
+  },
+  {
+   "entrada": "é (acento combinante)",
+   "max": 40,
+   "saida": "e-acento-combinante"
+  },
+  {
+   "entrada": "é (acento combinante)",
+   "max": 10,
+   "saida": "e-acento-c"
+  },
+  {
+   "entrada": "é (acento combinante)",
+   "max": 1,
+   "saida": "e"
+  },
+  {
+   "entrada": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-y-z",
+   "max": 40,
+   "saida": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "entrada": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-y-z",
+   "max": 10,
+   "saida": "xxxxxxxxxx"
+  },
+  {
+   "entrada": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-y-z",
+   "max": 1,
+   "saida": "x"
+  },
+  {
+   "entrada": "ß straße",
+   "max": 40,
+   "saida": "stra-e"
+  },
+  {
+   "entrada": "ß straße",
+   "max": 10,
+   "saida": "stra-e"
+  },
+  {
+   "entrada": "ß straße",
+   "max": 1,
+   "saida": "s"
+  },
+  {
+   "entrada": "K ELVIN",
+   "max": 40,
+   "saida": "k-elvin"
+  },
+  {
+   "entrada": "K ELVIN",
+   "max": 10,
+   "saida": "k-elvin"
+  },
+  {
+   "entrada": "K ELVIN",
+   "max": 1,
+   "saida": "k"
+  }
+ ],
+ "nomes": [
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": null,
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "nu-pagamentos-s-a_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": null,
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_fatura_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "Boleto Luz.final.PDF"
+   },
+   "saida": "2026-10-25_boleto-luz-final_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": null,
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": null
+   },
+   "saida": "2026-10-25_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": null,
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "semextensao"
+   },
+   "saida": "2026-10-25_semextensao_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": null,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": 0,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_0,00_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": 5,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_0,05_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": 100,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_1,00_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": 99999999999,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_999999999,99_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": 123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_1234,56_ab12cd34.pdf"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": null,
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_1234,56_ab12cd34"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Nu Pagamentos S.A.",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_nu-pagamentos-s-a_1234,56_ab12cd34"
+  },
+  {
+   "entrada": {
+    "data_chave": null,
+    "supplier_name_raw": null,
+    "valor_centavos": null,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": null,
+    "nome_original": null
+   },
+   "saida": "ab12cd34"
+  },
+  {
+   "entrada": {
+    "data_chave": "2026-10-25",
+    "supplier_name_raw": "Padaria Pão Quente Ltda",
+    "valor_centavos": -123456,
+    "content_hash": "ab12cd34ef567890",
+    "extensao": "pdf",
+    "nome_original": "fatura.pdf"
+   },
+   "saida": "2026-10-25_padaria-pao-quente-ltda_1234,56_ab12cd34.pdf"
+  }
+ ]
+}
