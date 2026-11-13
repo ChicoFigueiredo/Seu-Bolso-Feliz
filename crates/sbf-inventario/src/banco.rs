@@ -38,6 +38,21 @@ pub fn pragmas() -> Pragmas {
     }
 }
 
+/// Abre uma conexão **só de leitura** ao banco em `caminho`, com a mesma espera por lock,
+/// para a leitura da janela (WAL: não bloqueia o escritor). Não guarde um `SELECT` aberto
+/// entre quadros: ele fixa um snapshot.
+///
+/// # Errors
+/// Falha do SQLite ao abrir.
+pub fn abrir_leitura(caminho: impl AsRef<Path>) -> rusqlite::Result<Connection> {
+    let conexao = Connection::open_with_flags(
+        caminho,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conexao.busy_timeout(ESPERA_OCUPADO)?;
+    Ok(conexao)
+}
+
 /// O que [`Inventario::abrir`] encontrou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EstadoDoBanco {

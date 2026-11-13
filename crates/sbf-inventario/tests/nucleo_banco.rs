@@ -292,3 +292,22 @@ fn inv07_decisao_recusa_update_e_delete() {
     assert_eq!(valor(c, "SELECT COUNT(*) FROM decisao"), "1");
     assert_eq!(valor(c, "SELECT motivo FROM decisao"), "∅");
 }
+
+#[test]
+fn leitura_separada_ve_a_decisao_e_nao_escreve() {
+    let pasta = tempfile::tempdir().unwrap();
+    let mut inventario = inventario_migrado(pasta.path());
+    let leitura = sbf_inventario::banco::abrir_leitura(inventario.caminho()).unwrap();
+    inventario.executar(&marcar_documento(achado(1))).unwrap();
+    assert_eq!(
+        valor(
+            &leitura,
+            &format!(
+                "SELECT estado FROM achado WHERE content_hash = '{}'",
+                hash(1)
+            )
+        ),
+        "documento"
+    );
+    assert!(leitura.execute("DELETE FROM achado", []).is_err());
+}
