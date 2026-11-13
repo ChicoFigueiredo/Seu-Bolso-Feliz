@@ -340,7 +340,8 @@ pub fn selecao_do_filtro(ctx: &Contexto<'_>, filtro: &Filtro, alvo: Alvo) -> Sel
         s = match alvo {
             Alvo::Registro => s.onde(format!("r.fonte_id IN ({m})"), params),
             Alvo::Achado => s.onde(
-                format!("EXISTS (SELECT 1 FROM origem o WHERE o.content_hash = a.content_hash AND o.fonte_id IN ({m}))"),
+                // Subconsulta não correlacionada: o plano correlacionado varria `origem_fonte` por achado.
+                format!("a.content_hash IN (SELECT o.content_hash FROM origem o WHERE o.fonte_id IN ({m}))"),
                 params,
             ),
         };

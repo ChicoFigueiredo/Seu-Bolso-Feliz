@@ -868,18 +868,26 @@ fn possiveis_duplicidades(
             params.extend(filtro.fontes.iter().map(|f| texto(f.as_str())));
         }
     }
+    // Os valores repetidos em mais de uma combinação de tipo e fonte: só eles podem ter par.
+    params.push(texto(j.de.as_str()));
+    params.push(texto(j.ate.as_str()));
     let pares = consultar(
         ctx.conn,
         &format!(
             "SELECT r1.id, r2.id, r1.valor_centavos, r1.data, r2.data, r1.descricao_original, r2.descricao_original
              FROM registro r1 JOIN registro r2 ON r2.valor_centavos = r1.valor_centavos AND r2.id > r1.id
              WHERE r1.valor_centavos < 0 AND {m1} AND {m2}
-               AND abs(julianday(r2.data) - julianday(r1.data)) <= 5
+               AND r2.data BETWEEN date(r1.data, '-5 days') AND date(r1.data, '+5 days')
                AND (r1.tipo <> r2.tipo OR r1.fonte_id <> r2.fonte_id)
                AND r1.ciclo_id BETWEEN ? AND ?{filtro_de_fontes}
-             ORDER BY r1.valor_centavos, r1.data, r1.id LIMIT 100",
+               AND r1.valor_centavos IN (
+                     SELECT x.valor_centavos FROM registro x
+                      WHERE x.valor_centavos < 0 AND {m3} AND x.ciclo_id BETWEEN ? AND ?
+                      GROUP BY 1 HAVING count(DISTINCT x.tipo || '|' || x.fonte_id) > 1)
+             ORDER BY r1.id, r2.id LIMIT 100",
             m1 = movimento::sql_nao_e_movimento("r1."),
             m2 = movimento::sql_nao_e_movimento("r2."),
+            m3 = movimento::sql_nao_e_movimento("x."),
         ),
         &params,
         |l| {

@@ -1536,11 +1536,8 @@ pub fn popular_grande(conn: &Connection, n_achados: u32) {
         [],
     )
     .expect("varredura");
-    for ano in 2025..=2027 {
+    for ano in 2024..=2027 {
         for mes in 1..=12 {
-            if ano == 2025 && mes < 10 {
-                continue;
-            }
             let (ano_fim, mes_fim) = if mes == 12 {
                 (ano + 1, 1)
             } else {
