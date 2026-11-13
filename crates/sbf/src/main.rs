@@ -147,7 +147,34 @@ fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
 
 const AJUDA: &str = "uso: sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf --versao";
 
+/// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
+/// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
+/// dado do inventário.
+fn instalar_gancho_de_panico() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("{}", texto_do_panico(info.location()));
+    }));
+}
+
+fn texto_do_panico(local: Option<&std::panic::Location<'_>>) -> String {
+    match local {
+        Some(l) => format!(
+            "sbf: falha interna em {}:{}. A janela pode ter fechado; abra de novo. Os detalhes não são mostrados porque podem conter dados.",
+            l.file(),
+            l.line()
+        ),
+        None => "sbf: falha interna. Os detalhes não são mostrados porque podem conter dados."
+            .to_owned(),
+    }
+}
+
 fn main() -> ExitCode {
+    instalar_gancho_de_panico();
+    // Só para o teste do gancho: um pânico com um payload que não pode aparecer.
+    if std::env::var_os("SBF_TESTE_DO_GANCHO_DE_PANICO").is_some() {
+        let payload = String::from("payload-que-nao-pode-aparecer");
+        std::panic::panic_any(payload);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--versao") | Some("--version") => {
