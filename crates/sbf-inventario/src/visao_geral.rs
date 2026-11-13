@@ -15,7 +15,11 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::consulta::{Celula, Linha, Painel, PedidoDeTabela, ResultadoDeConsulta, Secao, Tabela};
+use rusqlite::Connection;
+
+use crate::consulta::{
+    Celula, ErroDeConsulta, Linha, Painel, PedidoDeTabela, ResultadoDeConsulta, Secao, Tabela,
+};
 use crate::referencia::{Ref, Tipo};
 use crate::vistas::{
     Contexto, c_contagem, c_contagem_solta, c_link, c_texto, c_texto_opt, coluna, coluna_num,
@@ -205,6 +209,93 @@ fn arredondar(valor: f64, casas: i32) -> f64 {
     (valor * f).round() / f
 }
 
+/// Fonte, quantas origens, e o período delas (`AAAA-MM-DD`).
+type PeriodoPorFonte = Vec<(String, i64, Option<String>, Option<String>)>;
+/// As contagens da tabela `achado`: total, copiados, bytes copiados, documentos,
+/// documentos com ciclo e dúvidas.
+type ContagemDeAchados = (i64, i64, i64, i64, i64, i64);
+
+fn periodo_das_origens(conn: &Connection) -> ResultadoDeConsulta<PeriodoPorFonte> {
+    consultar(
+        conn,
+        "SELECT fonte_id, count(*),
+                substr(min(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10),
+                substr(max(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10)
+           FROM origem WHERE coalesce(local_mtime, gmail_date) >= '1995' GROUP BY fonte_id",
+        &[],
+        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+    )
+}
+
+fn documentos_por_fonte(conn: &Connection) -> ResultadoDeConsulta<PeriodoPorFonte> {
+    consultar(
+        conn,
+        "SELECT x.fonte_id, count(DISTINCT a.content_hash), min(a.data_chave), max(a.data_chave)
+           FROM achado a CROSS JOIN origem x ON x.content_hash = a.content_hash
+          WHERE a.estado = 'documento' AND a.data_chave >= '1995' GROUP BY x.fonte_id",
+        &[],
+        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+    )
+}
+
+/// Uma só passada pelos achados: todas as contagens do resumo e da etapa E3.
+fn contar_achados(conn: &Connection) -> ResultadoDeConsulta<ContagemDeAchados> {
+    Ok(consultar(
+        conn,
+        "SELECT count(*),
+                coalesce(sum(caminho_acervo IS NOT NULL), 0),
+                coalesce(sum(CASE WHEN caminho_acervo IS NOT NULL THEN file_size_bytes END), 0),
+                coalesce(sum(estado = 'documento'), 0),
+                coalesce(sum(estado = 'documento' AND ciclo_id IS NOT NULL), 0),
+                coalesce(sum(estado = 'duvida'), 0)
+           FROM achado",
+        &[],
+        |l| {
+            Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+            ))
+        },
+    )?
+    .into_iter()
+    .next()
+    .unwrap_or_default())
+}
+
+/// As três varreduras grandes da Visão geral. Com banco em arquivo rodam em paralelo, cada
+/// uma numa conexão de leitura própria (o SQLite lê em paralelo); em memória, em sequência.
+fn varreduras_grandes(
+    conn: &Connection,
+) -> ResultadoDeConsulta<(PeriodoPorFonte, PeriodoPorFonte, ContagemDeAchados)> {
+    let Some(caminho) = conn
+        .path()
+        .filter(|p| !p.is_empty() && !p.contains(":memory:"))
+        .map(std::path::PathBuf::from)
+    else {
+        return Ok((
+            periodo_das_origens(conn)?,
+            documentos_por_fonte(conn)?,
+            contar_achados(conn)?,
+        ));
+    };
+    std::thread::scope(|escopo| {
+        let origens = escopo.spawn(|| periodo_das_origens(&crate::banco::abrir_leitura(&caminho)?));
+        let documentos =
+            escopo.spawn(|| documentos_por_fonte(&crate::banco::abrir_leitura(&caminho)?));
+        let achados = contar_achados(conn)?;
+        let falha = || ErroDeConsulta::Banco("a leitura em paralelo falhou".to_owned());
+        Ok((
+            origens.join().map_err(|_| falha())??,
+            documentos.join().map_err(|_| falha())??,
+            achados,
+        ))
+    })
+}
+
 /// Mede a Visão geral no banco. `hoje` é `AAAA-MM-DD`; `manual` traz o que o banco não sabe.
 pub fn medir(
     ctx: &Contexto<'_>,
@@ -252,46 +343,33 @@ pub fn medir(
         },
     )?;
 
-    let datas = consultar(
+    // As três varreduras grandes (origens, documentos por fonte e achados) não dependem uma da
+    // outra: rodam juntas, cada uma na sua conexão de leitura.
+    let (por_origem, por_documento, achados_contados) = varreduras_grandes(ctx.conn)?;
+    let por_registro = consultar(
         ctx.conn,
-        "WITH o AS (
-           SELECT fonte_id, count(*) AS origens,
-                  substr(min(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10) AS arq_de,
-                  substr(max(coalesce(nullif(local_mtime, ''), gmail_date)), 1, 10) AS arq_ate
-             FROM origem WHERE coalesce(local_mtime, gmail_date) >= '1995' GROUP BY fonte_id),
-         d AS (
-           SELECT x.fonte_id, count(DISTINCT a.content_hash) AS docs, min(a.data_chave) AS doc_de,
-                  max(a.data_chave) AS doc_ate
-             FROM origem x JOIN achado a ON a.content_hash = x.content_hash
-            WHERE a.estado = 'documento' AND a.data_chave >= '1995' GROUP BY x.fonte_id),
-         r AS (SELECT fonte_id, count(*) AS registros, min(data) AS reg_de, max(data) AS reg_ate
-                 FROM registro GROUP BY fonte_id)
-         SELECT f.id, o.origens, o.arq_de, o.arq_ate, d.docs, d.doc_de, d.doc_ate, r.registros, r.reg_de, r.reg_ate
-           FROM fonte f LEFT JOIN o ON o.fonte_id = f.id LEFT JOIN d ON d.fonte_id = f.id
-           LEFT JOIN r ON r.fonte_id = f.id",
+        "SELECT fonte_id, count(*), min(data), max(data) FROM registro GROUP BY fonte_id",
         &[],
         |l| {
             Ok((
                 l.get::<_, String>(0)?,
-                l.get::<_, Option<i64>>(1)?,
-                l.get::<_, Option<String>>(2)?,
-                l.get::<_, Option<String>>(3)?,
-                l.get::<_, Option<i64>>(4)?,
-                l.get::<_, Option<String>>(5)?,
-                l.get::<_, Option<String>>(6)?,
-                l.get::<_, Option<i64>>(7)?,
-                l.get::<_, Option<String>>(8)?,
-                l.get::<_, Option<String>>(9)?,
+                l.get::<_, i64>(1)?,
+                l.get::<_, String>(2)?,
+                l.get::<_, String>(3)?,
             ))
         },
     )?;
-    for (id, origens, arq_de, arq_ate, docs, doc_de, doc_ate, registros, reg_de, reg_ate) in datas {
-        if let Some(f) = fontes.iter_mut().find(|f| f.id == id) {
-            f.itens = origens.or(registros).unwrap_or(0);
-            f.periodo_itens = periodo(&arq_de.clone().or(reg_de), &arq_ate.clone().or(reg_ate));
-            f.documentos = docs.unwrap_or(0);
-            f.periodo_documentos = periodo(&doc_de, &doc_ate);
-        }
+    for f in &mut fontes {
+        let o = por_origem.iter().find(|x| x.0 == f.id);
+        let d = por_documento.iter().find(|x| x.0 == f.id);
+        let r = por_registro.iter().find(|x| x.0 == f.id);
+        // `origens ?? registros`, e o período dos itens vem do mesmo lado (`arq_de ?? reg_de`).
+        f.itens = o.map(|x| x.1).or(r.map(|x| x.1)).unwrap_or(0);
+        let de = o.and_then(|x| x.2.clone()).or(r.map(|x| x.2.clone()));
+        let ate = o.and_then(|x| x.3.clone()).or(r.map(|x| x.3.clone()));
+        f.periodo_itens = periodo(&de, &ate);
+        f.documentos = d.map_or(0, |x| x.1);
+        f.periodo_documentos = d.and_then(|x| periodo(&x.2, &x.3));
     }
 
     let areas = consultar(
@@ -355,10 +433,7 @@ pub fn medir(
         .filter(|f| f.id.starts_with("disco:"))
         .collect();
     let discos_concluidos = discos.iter().filter(|f| f.status == "concluida").count();
-    let docs = um("SELECT coalesce(sum(estado = 'documento'), 0) FROM achado")?;
-    let docs_com_ciclo =
-        um("SELECT coalesce(sum(estado = 'documento' AND ciclo_id IS NOT NULL), 0) FROM achado")?;
-    let duvidas = um("SELECT coalesce(sum(estado = 'duvida'), 0) FROM achado")?;
+    let (n_achados, copiados, acervo_bytes, docs, docs_com_ciclo, duvidas) = achados_contados;
     let etapas_base = [
         EtapaDaVisaoGeral {
             etapa: "E0".into(),
@@ -440,16 +515,13 @@ pub fn medir(
         });
     }
 
-    let acervo_bytes = um(
-        "SELECT coalesce(sum(file_size_bytes), 0) FROM achado WHERE caminho_acervo IS NOT NULL",
-    )?;
     let resumo = Resumo {
-        achados: um("SELECT count(*) FROM achado")?,
+        achados: n_achados,
         origens: um("SELECT count(*) FROM origem")?,
-        copiados: um("SELECT count(*) FROM achado WHERE caminho_acervo IS NOT NULL")?,
+        copiados,
         #[allow(clippy::cast_precision_loss)]
         acervo_gb: arredondar(acervo_bytes as f64 / 1024f64.powi(3), 2),
-        documentos: um("SELECT count(*) FROM achado WHERE estado = 'documento'")?,
+        documentos: docs,
         registros: um("SELECT count(*) FROM registro")?,
         pendencias: um("SELECT count(*) FROM pendencia WHERE resolvida_em IS NULL")?,
         fontes_concluidas: i64::try_from(fontes.iter().filter(|f| f.status == "concluida").count())

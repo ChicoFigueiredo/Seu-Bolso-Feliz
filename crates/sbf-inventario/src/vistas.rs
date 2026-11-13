@@ -1282,12 +1282,23 @@ pub struct LinhaDeArquivo {
 }
 
 pub fn arquivos(ctx: &Contexto<'_>, sel: &Selecao) -> ResultadoDeConsulta<Vec<LinhaDeArquivo>> {
+    // Em duas fases, como `achados`: a de dentro ordena e corta só as chaves, pelo índice
+    // `origem_local_mtime` e sem juntar `achado` (a menos que o filtro peça); a de fora monta
+    // as colunas para as linhas da página. Pular 500 mil linhas não custa uma junção cada.
+    let juncao = if sel.menciona("a.") {
+        " LEFT JOIN achado a ON a.content_hash = o.content_hash"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT o.id, o.content_hash, o.filename, o.local_filepath, o.file_size_bytes, substr(o.local_mtime, 1, 10),
            a.camada, a.estado, a.document_type, a.caminho_acervo, a.decidido_por
-         FROM origem o LEFT JOIN achado a ON a.content_hash = o.content_hash
-         WHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive'){sel}
-         ORDER BY o.local_mtime DESC, o.id DESC{limite}",
+         FROM (SELECT o.id AS oid, o.local_mtime AS lm FROM origem o{juncao}
+                WHERE o.origin_type IN ('local_file', 'onedrive', 'gdrive'){sel}
+                ORDER BY o.local_mtime DESC, o.id DESC{limite}) k
+           JOIN origem o ON o.id = k.oid
+           LEFT JOIN achado a ON a.content_hash = o.content_hash
+         ORDER BY k.lm DESC, k.oid DESC",
         sel = sel.sql_e(),
         limite = sel.sql_limite(),
     );
@@ -1376,7 +1387,7 @@ pub fn pastas_pessoais(
            count(DISTINCT o.content_hash) AS achados,
            coalesce(sum(a.estado = 'documento'), 0) AS documentos,
            coalesce(sum(a.estado = 'descartado'), 0) AS descartados
-         FROM origem o JOIN achado a ON a.content_hash = o.content_hash
+         FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash
          WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL{sel}
          GROUP BY 1 ORDER BY 2 DESC, 1{limite}",
         sel = sel.sql_e(),

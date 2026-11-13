@@ -360,22 +360,24 @@ impl Consulta for LeitorSqlite {
     }
 
     fn contagens(&self) -> ResultadoDeConsulta<Contagens> {
-        let linhas = consultar(
+        // Pelo índice `achado_estado`, sem ler as linhas.
+        let por_estado = consultar(
             &self.conn,
-            "SELECT count(*), coalesce(sum(estado = 'documento'), 0), coalesce(sum(estado = 'duvida'), 0),
-                    coalesce(sum(estado = 'novo'), 0)
-               FROM achado",
+            "SELECT estado, count(*) FROM achado GROUP BY estado",
             &[],
-            |l| {
-                Ok(Contagens {
-                    achados: l.get(0)?,
-                    documentos: l.get(1)?,
-                    em_duvida: l.get(2)?,
-                    a_triar: l.get(3)?,
-                })
-            },
+            |l| Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)?)),
         )?;
-        Ok(linhas.into_iter().next().unwrap_or_default())
+        let mut c = Contagens::default();
+        for (estado, n) in por_estado {
+            c.achados += n;
+            match estado.as_str() {
+                "documento" => c.documentos = n,
+                "duvida" => c.em_duvida = n,
+                "novo" => c.a_triar = n,
+                _ => {}
+            }
+        }
+        Ok(c)
     }
 
     fn texto(&self, achado: &Ref) -> ResultadoDeConsulta<Option<String>> {
