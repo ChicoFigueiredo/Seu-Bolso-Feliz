@@ -5,11 +5,13 @@
 //! | Módulo | Dono |
 //! |---|---|
 //! | `referencia`, `consulta`, `comando`, `esquema` | integrador (as costuras) |
+//! | `alteracao` | agente da janela de Dinheiro (o contrato), implementado pela estação |
 //! | `banco`, `migracoes`, `decisao`, `projecao`, `lote`, `pendencia` | agente do núcleo |
 //! | `movimento`, `vistas`, `visao_geral`, `relatorios`, `relacoes`, `rastro`, `leitor` | agente de leitura |
 //! | `protegidos` | agente do chaveiro e do PDF |
 //! | `manutencao` | comandos de linha de comando (`sbf reprojetar`) |
 
+pub mod alteracao;
 pub mod comando;
 pub mod consulta;
 pub mod esquema;
@@ -38,6 +40,7 @@ pub mod protegidos;
 // Manutenção pela linha de comando.
 pub mod manutencao;
 
+pub use alteracao::{Alteracoes, Sincronizacao};
 pub use comando::{Acao, Comandos, ErroDeComando, IdDecisao, PedidoDeDecisao};
 pub use consulta::{Consulta, ErroDeConsulta};
 pub use referencia::{Ref, Tipo};

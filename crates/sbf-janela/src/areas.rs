@@ -176,6 +176,14 @@ pub fn rota_da_area(area: Area) -> &'static str {
         Area::Pendencias => "pendencia",
         Area::Lotes => "lote",
         Area::Relatorios => "relatorios",
+        Area::Hoje => "hoje",
+        Area::Movimentacoes => "mov",
+        Area::ContasECartoes => "contas-cartoes",
+        Area::Dividas => "divida",
+        Area::Recorrentes => "recorrente",
+        Area::Centros => "centro",
+        Area::FornecedoresDoLivro => "fornecedores-cadastro",
+        Area::Sincronizacao => "sincronizacao",
     }
 }
 
@@ -206,6 +214,14 @@ pub fn rotulo_da_area(area: Area) -> &'static str {
         Area::Pendencias => "Pendências",
         Area::Lotes => "Lotes",
         Area::Relatorios => "Relatórios",
+        Area::Hoje => "Hoje",
+        Area::Movimentacoes => "Movimentações",
+        Area::ContasECartoes => "Contas e cartões",
+        Area::Dividas => "Dívidas",
+        Area::Recorrentes => "Recorrentes",
+        Area::Centros => "Centros",
+        Area::FornecedoresDoLivro => "Fornecedores",
+        Area::Sincronizacao => "Sincronização",
     }
 }
 
@@ -227,6 +243,14 @@ pub fn icone_da_area(area: Area) -> &'static str {
         Area::Pendencias => "flag",
         Area::Lotes => "inventory_2",
         Area::Relatorios => "query_stats",
+        Area::Hoje => "today",
+        Area::Movimentacoes => "swap_vert",
+        Area::ContasECartoes => "account_balance_wallet",
+        Area::Dividas => "request_quote",
+        Area::Recorrentes => "event_repeat",
+        Area::Centros => "donut_small",
+        Area::FornecedoresDoLivro => "storefront",
+        Area::Sincronizacao => "cloud_sync",
     }
 }
 
@@ -256,6 +280,20 @@ pub fn descricao_da_area(area: Area) -> &'static str {
         }
         Area::Lotes => "Conjuntos de documentos e registros que você aprova junto para promoção.",
         Area::Relatorios => "As perguntas do §11 respondidas com os registros do inventário.",
+        Area::Hoje => "Quanto eu tenho, quanto é meu, o que vence e como está o ciclo.",
+        Area::Movimentacoes => "O que entrou e o que saiu, do livro-caixa.",
+        Area::ContasECartoes => {
+            "Onde está o dinheiro e quanto devo no cartão. Disponível agora soma só as contas."
+        }
+        Area::Dividas => "Quanto falta e quando acaba.",
+        Area::Recorrentes => "Quanto do ciclo já está prometido.",
+        Area::Centros => "Quanto foi para cada centro e quanto não foi alocado.",
+        Area::FornecedoresDoLivro => {
+            "Quanto e com que frequência sai para cada fornecedor, no livro-caixa."
+        }
+        Area::Sincronizacao => {
+            "As estações, a última troca com o servidor e as alterações. O inventário não sincroniza."
+        }
     }
 }
 
