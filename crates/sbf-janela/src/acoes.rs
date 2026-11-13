@@ -228,6 +228,7 @@ pub struct DefinicaoDeAcao {
     pub dica: &'static str,
 }
 
+/// Uma entrada da lista única (os campos de [`DefinicaoDeAcao`], na ordem da tabela).
 #[allow(clippy::too_many_arguments)]
 const fn definir_acao(
     id: IdAcao,
