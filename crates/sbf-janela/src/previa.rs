@@ -308,6 +308,33 @@ impl Previas {
         self.temporaria = true;
     }
 
+    /// O modo demonstração: gera os arquivos fictícios numa pasta temporária só sua
+    /// (`$XDG_RUNTIME_DIR`, em memória, quando existe), apagada ao sair. Devolve quantos.
+    pub fn preparar_demonstracao(
+        &mut self,
+        consulta: &crate::demonstracao::ConsultaDemonstracao,
+    ) -> Result<usize, String> {
+        let base = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|p| p.is_dir())
+            .unwrap_or_else(std::env::temp_dir);
+        let pasta = base.join(format!("sbf-demonstracao-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        let mut construtor = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            construtor.mode(0o700);
+        }
+        construtor
+            .create(&pasta)
+            .map_err(|e| format!("não deu para criar a pasta da demonstração: {e}"))?;
+        self.definir_pasta_temporaria(pasta.clone());
+        consulta
+            .gerar_acervo(&pasta)
+            .map_err(|e| format!("não deu para gerar os arquivos fictícios: {e}"))
+    }
+
     pub fn pasta(&self) -> Option<&Path> {
         self.pasta.as_deref()
     }
@@ -510,13 +537,15 @@ impl Previas {
 
     // ---------------------------------------------------------------- vistas
 
-    /// O painel Prévia do dock: a miniatura do item em foco. Devolve o achado quando você
-    /// clica na miniatura (a janela abre a página dele na aba Arquivo).
+    /// O painel Prévia do dock: a miniatura do item em foco, do tamanho que cabe em
+    /// `altura` (a página inteira à vista). Devolve o achado quando você clica na miniatura
+    /// (a janela abre a página dele na aba Arquivo).
     pub fn painel_ui(
         &mut self,
         ui: &mut Ui,
         leitor: &mut Leitor<'_>,
         foco: Option<&Ref>,
+        altura: f32,
         pedidos: &mut Vec<Pedido>,
     ) -> Option<Ref> {
         let ctx = ui.ctx().clone();
@@ -574,7 +603,11 @@ impl Previas {
         if destacar {
             self.destacar(&arquivo.achado);
         }
-        let largura = (ui.available_width() - 24.0).clamp(80.0, 320.0);
+        // A página inteira à vista: cabe na largura e na altura do painel.
+        let pela_altura = (altura - 80.0) / PROPORCAO_A4;
+        let largura = (ui.available_width() - 24.0)
+            .min(pela_altura)
+            .clamp(80.0, 320.0);
         let mut abrir = None;
         moldura(ui, |ui| {
             let r = self.conteudo(

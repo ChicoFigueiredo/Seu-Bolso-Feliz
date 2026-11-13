@@ -24,6 +24,7 @@ struct App {
     casca: Casca<AppSbf>,
     captura: Option<PathBuf>,
     quadros: u32,
+    captura_pedida: bool,
 }
 
 impl App {
@@ -43,6 +44,7 @@ impl App {
             casca,
             captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
             quadros: 0,
+            captura_pedida: false,
         })
     }
 }
@@ -63,7 +65,10 @@ impl eframe::App for App {
         if self.quadros == 1 {
             preparar_captura(&mut self.casca, &ctx);
         }
-        if self.quadros == 10 {
+        // A prévia carrega numa thread: espera ela terminar (até uns 10 s).
+        let previa_ocupada = self.casca.app.janela().previas.ocupada();
+        if self.quadros >= 10 && !self.captura_pedida && (!previa_ocupada || self.quadros > 600) {
+            self.captura_pedida = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
         let imagem = ctx.input(|i| {
@@ -84,10 +89,19 @@ impl eframe::App for App {
 }
 
 /// `SBF_CAPTURA_ABRIR` (uma rota: `a-triar`, `fornecedor:Energia Exemplo`…),
-/// `SBF_CAPTURA_ABA` (o índice da aba da página) e `SBF_CENA` (`paleta`, `keytips`,
-/// `simples`, `bastidores`, `flutuante`).
+/// `SBF_CAPTURA_ABA` (o índice da aba da página), `SBF_CAPTURA_FOCO` (a rota do item em
+/// foco no dock: a prévia dele no painel) e `SBF_CENA` (`paleta`, `keytips`, `simples`,
+/// `bastidores`, `flutuante`, `previa-destacada`).
 fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     use sbf_janela::Destino;
+    if let Ok(rota) = std::env::var("SBF_CAPTURA_FOCO")
+        && let Some(Destino::Item(r)) = Destino::da_rota(&rota)
+    {
+        if std::env::var("SBF_CENA").as_deref() == Ok("previa-destacada") {
+            casca.app.janela().previas.destacar(&r);
+        }
+        casca.app.janela().centro.selecao.foco = Some(r);
+    }
     if let Ok(rota) = std::env::var("SBF_CAPTURA_ABRIR") {
         if let (Some(Destino::Item(r)), Some(aba)) = (
             Destino::da_rota(&rota),
@@ -157,13 +171,13 @@ fn app_de_demonstracao() -> Result<App, String> {
         selo: Some("Demonstração · dados fictícios".to_owned()),
         ..Default::default()
     };
-    App::novo(
-        Janela::nova(),
-        Box::new(consulta),
-        Box::new(comandos),
-        barra,
-    )
-    .map_err(|e| format!("os temas não carregaram: {e}"))
+    let mut janela = Janela::nova();
+    // A prévia precisa de arquivos: fictícios, numa pasta temporária apagada ao sair.
+    if let Err(e) = janela.previas.preparar_demonstracao(&consulta) {
+        eprintln!("sbf: {e}");
+    }
+    App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
+        .map_err(|e| format!("os temas não carregaram: {e}"))
 }
 
 const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf --versao";

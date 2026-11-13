@@ -182,15 +182,12 @@ fn extensao_de(nome: &str) -> String {
 }
 
 /// A cópia fictícia no acervo (relativa à pasta da demonstração), para os tipos que a
-/// demonstração gera: PDF não protegido, PNG, e-mail, CSV e XML. O resto não tem cópia (a
-/// prévia mostra os metadados e o motivo).
+/// demonstração gera: PDF, PNG, e-mail, CSV e XML. O resto não tem cópia (a prévia mostra
+/// os metadados e o motivo). O PDF "protegido" da demonstração não é cifrado de verdade,
+/// mas a prévia nem tenta abrir: sem chaveiro, mostra "Protegido por senha".
 fn no_cofre(a: &Achado) -> Option<String> {
     let ext = extensao_de(&a.nome);
-    let gera = match ext.as_str() {
-        "pdf" => !a.protegido,
-        "png" | "eml" | "csv" | "xml" => true,
-        _ => false,
-    };
+    let gera = matches!(ext.as_str(), "pdf" | "png" | "eml" | "csv" | "xml");
     gera.then(|| {
         format!(
             "acervo/{}/{}.{ext}",

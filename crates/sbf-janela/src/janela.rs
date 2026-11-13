@@ -731,15 +731,19 @@ impl Janela {
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
+            let altura = ui.available_height();
             egui::ScrollArea::vertical()
                 .id_salt("dock-previa")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     // Clicar na miniatura abre a página do item na aba Arquivo.
-                    if let Some(achado) =
-                        self.previas
-                            .painel_ui(ui, &mut leitor, foco.as_ref(), &mut self.pedidos)
-                    {
+                    if let Some(achado) = self.previas.painel_ui(
+                        ui,
+                        &mut leitor,
+                        foco.as_ref(),
+                        altura,
+                        &mut self.pedidos,
+                    ) {
                         let destino_ref = foco
                             .clone()
                             .filter(|f| {

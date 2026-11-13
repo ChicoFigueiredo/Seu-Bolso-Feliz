@@ -111,6 +111,16 @@ impl AppDoInventario {
                     Ok(c) => f.chaveiro = Some(c),
                     Err(e) => f.erro_do_chaveiro = Some(e),
                 }
+                // A prévia lê a cópia do acervo; PDF protegido só com o chaveiro aberto.
+                janela.previas.definir_pasta(self.pasta.clone());
+                if let Some(c) = f.chaveiro.clone() {
+                    janela
+                        .previas
+                        .definir_candidatas(sbf_janela::previa::gerador_do_inventario(
+                            inventario.caminho().to_path_buf(),
+                            c,
+                        ));
+                }
                 f.carregar_preferencias();
                 f.faxinar_sobras_em_segundo_plano();
                 janela.ferramentas = Some(f);
