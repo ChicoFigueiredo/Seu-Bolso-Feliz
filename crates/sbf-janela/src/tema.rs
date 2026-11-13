@@ -268,6 +268,24 @@ pub fn paleta(ctx: &Context) -> Paleta {
         .unwrap_or_else(|| paleta_do_tema(TEMA_PADRAO))
 }
 
+/// Dentro da `bancada-casca`, o tema é dela (Opções, Paleta): copia o tema ativo da casca
+/// para a paleta da janela. Barato; chame no começo de cada desenho.
+pub fn sincronizar_com_a_casca(ctx: &Context) {
+    let Some(ativo) = bancada_casca::TemaAtivo::do_contexto(ctx) else {
+        return;
+    };
+    let id = ativo.tema.id.clone();
+    let chave = egui::Id::new("sbf-janela/tema-da-casca");
+    let antes: Option<String> = ctx.data(|d| d.get_temp(chave));
+    if antes.as_deref() != Some(id.as_str()) {
+        let p = paleta_do_tema(&id);
+        ctx.data_mut(|d| {
+            d.insert_temp(id_da_paleta(), p);
+            d.insert_temp(chave, id);
+        });
+    }
+}
+
 /// Instala as fontes (Manrope, Instrument Serif e Material Symbols Rounded).
 /// Chame uma vez, antes do primeiro quadro.
 pub fn instalar_fontes(ctx: &Context) {

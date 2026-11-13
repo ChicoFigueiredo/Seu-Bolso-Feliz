@@ -188,7 +188,7 @@ pub fn relatorios(
             "Fica em Pontos de atenção, que chega na fatia 6. Esta fatia não julga gasto.",
         );
         if r.clicked() {
-            pedidos.push(Pedido::Abrir(Destino::AreaFutura("pontos")));
+            crate::navegacao::pedir_abrir(ui.ctx(), pedidos, Destino::AreaFutura("pontos"), false);
         }
     });
     ui.add_space(6.0);

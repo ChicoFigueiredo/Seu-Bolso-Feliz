@@ -11,7 +11,7 @@ use egui::{Align, Layout, RichText, Ui};
 use sbf_disco::Cifra;
 use sbf_inventario::banco::{Inventario, PlanoDeMigracao};
 use sbf_inventario::leitor::LeitorSqlite;
-use sbf_janela::{EstadoDaBarra, Janela, MolduraProvisoria, componentes, tema};
+use sbf_janela::{EstadoDaBarra, Janela, componentes, tema};
 
 /// O que a tela do inventário real mostra.
 enum Tela {
@@ -93,13 +93,14 @@ impl AppDoInventario {
                 };
                 let mut janela = Janela::nova();
                 janela.ligacoes.cofre = true;
-                self.janela = Some(crate::App {
-                    moldura: MolduraProvisoria::nova(janela, barra),
-                    consulta: Box::new(leitor),
-                    comandos: Box::new(inventario),
-                    captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
-                    quadros: 0,
-                });
+                match crate::App::novo(janela, Box::new(leitor), Box::new(inventario), barra) {
+                    Ok(app) => self.janela = Some(app),
+                    Err(e) => {
+                        self.tela = Tela::Pronto {
+                            aviso: format!("Os temas não carregaram: {e}"),
+                        }
+                    }
+                }
             }
             Err(e) => {
                 self.tela = Tela::Pronto {
@@ -223,7 +224,7 @@ impl eframe::App for AppDoInventario {
             };
             self.ligar();
             if let Some(app) = &mut self.janela {
-                app.moldura.janela.mensagem = Some(sbf_janela::janela::Mensagem {
+                app.casca.app.janela().mensagem = Some(sbf_janela::janela::Mensagem {
                     texto: aviso,
                     erro: false,
                 });

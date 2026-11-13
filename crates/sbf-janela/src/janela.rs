@@ -90,6 +90,9 @@ pub struct Janela {
     pub ligacoes: Ligacoes,
     /// "Hoje" em `AAAA-MM-DD` (o ciclo atual sai daqui). Fixável para teste.
     pub hoje: String,
+    /// Dentro da `bancada-casca`: a navegação é da casca, e os pedidos de navegação vão
+    /// para a fila dela.
+    pub na_casca: bool,
 }
 
 impl Default for Janela {
@@ -118,6 +121,7 @@ impl Janela {
             tema: tema::TEMA_PADRAO.to_owned(),
             ligacoes: Ligacoes::default(),
             hoje: hoje_em_sao_paulo(),
+            na_casca: false,
         }
     }
 
@@ -134,6 +138,34 @@ impl Janela {
     /// As decisões que você tomou nesta sessão.
     pub fn decisoes_da_sessao(&self) -> &[IdDecisao] {
         &self.decisoes_da_sessao
+    }
+
+    /// Uma tabela pela leitura com cache (a Paleta usa).
+    pub fn tabela(
+        &mut self,
+        consulta: &dyn Consulta,
+        pedido: &PedidoDeTabela,
+    ) -> crate::leitura::Lido<sbf_inventario::consulta::Tabela> {
+        Leitor::novo(consulta, &mut self.cache).tabela(pedido)
+    }
+
+    /// O nome de um item (trilha, títulos).
+    pub fn rotulo(&mut self, consulta: &dyn Consulta, alvo: &Ref) -> String {
+        Leitor::novo(consulta, &mut self.cache).rotulo(alvo)
+    }
+
+    /// A casca abriu um destino no centro (clique, Voltar, Paleta…): acompanha o histórico
+    /// da casca, limpa a seleção e, num lote, faz dele o lote atual.
+    pub fn ao_abrir_no_centro(&mut self, destino: Destino) {
+        if *self.navegacao.atual() != destino {
+            self.navegacao.abrir(destino.clone());
+            self.centro.selecao.limpar();
+        }
+        if let Destino::Item(r) = &destino
+            && r.tipo == Tipo::Lote
+        {
+            self.lote_atual = Some(r.clone());
+        }
     }
 
     /// O nome do lote atual, para a faixa de Lotes.
@@ -304,8 +336,15 @@ impl Janela {
 
     /// O centro: a área, a página do item ou a lista de um total.
     pub fn centro_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta) {
-        let p = tema::paleta(ui.ctx());
         self.trilha_ui(ui, consulta);
+        self.mensagem_ui(ui);
+        let atual = self.navegacao.atual().clone();
+        self.desenhar_destino(ui, consulta, &atual, None);
+    }
+
+    /// A mensagem da última Ação, no topo da página.
+    pub fn mensagem_ui(&mut self, ui: &mut Ui) {
+        let p = tema::paleta(ui.ctx());
         if let Some(m) = &self.mensagem {
             let (fundo, borda, cor, icone) = if m.erro {
                 (p.perigo_sutil, p.borda, p.perigo, "error")
@@ -315,11 +354,39 @@ impl Janela {
             componentes::aviso(ui, icone, &m.texto, fundo, borda, cor);
         }
         ui.add_space(4.0);
-        let atual = self.navegacao.atual().clone();
+    }
+
+    /// Desenha um destino: a área, a página do item ou a lista de um total. `vista` é a de
+    /// um painel flutuante; `None` é o centro (cuja seleção as Ações usam).
+    pub fn desenhar_destino(
+        &mut self,
+        ui: &mut Ui,
+        consulta: &dyn Consulta,
+        destino: &Destino,
+        vista: Option<&mut Vista>,
+    ) {
+        match vista {
+            Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
+            None => {
+                let mut centro = std::mem::take(&mut self.centro);
+                self.desenhar_destino_em(ui, consulta, destino, &mut centro);
+                self.centro = centro;
+            }
+        }
+    }
+
+    fn desenhar_destino_em(
+        &mut self,
+        ui: &mut Ui,
+        consulta: &dyn Consulta,
+        destino: &Destino,
+        vista: &mut Vista,
+    ) {
+        let p = tema::paleta(ui.ctx());
         let filtro = self.filtro();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
-        match &atual {
+        match destino {
             Destino::Area(Area::VisaoGeral) => {
                 cabecalho_da_area(
                     ui,
@@ -328,7 +395,7 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
-                painel::visao_geral(ui, &mut leitor, &mut self.centro, pedidos);
+                painel::visao_geral(ui, &mut leitor, vista, pedidos);
             }
             Destino::Area(Area::Relatorios) => {
                 cabecalho_da_area(
@@ -343,7 +410,7 @@ impl Janela {
                     &mut leitor,
                     &mut self.relatorios,
                     &filtro,
-                    &mut self.centro,
+                    vista,
                     pedidos,
                 );
             }
@@ -367,18 +434,18 @@ impl Janela {
                     match leitor.tabela(&pedido) {
                         Ok(t) => {
                             let chave = format!("area:{outra:?}");
-                            let mut estado = self.centro.tabelas.remove(&chave).unwrap_or_default();
+                            let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
                             let altura = (t.linhas.len() as f32 * 26.0 + 30.0).min(200.0);
                             tabela::desenhar(
                                 ui,
                                 &chave,
                                 &t,
                                 &mut estado,
-                                &mut self.centro.selecao,
+                                &mut vista.selecao,
                                 pedidos,
                                 Some(altura),
                             );
-                            self.centro.tabelas.insert(chave, estado);
+                            vista.tabelas.insert(chave, estado);
                         }
                         Err(e) => {
                             componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
@@ -395,7 +462,7 @@ impl Janela {
                     Ok(t) => {
                         ui.horizontal(|ui| {
                             let n = t.linhas.len();
-                            let sel = self.centro.selecao.itens.len();
+                            let sel = vista.selecao.itens.len();
                             let mut texto = format!("{} {}", formato::inteiro(n as i64), if n == 1 { "linha" } else { "linhas" });
                             if sel > 0 {
                                 texto.push_str(&format!(" · {sel} selecionada{}", if sel == 1 { "" } else { "s" }));
@@ -408,18 +475,18 @@ impl Janela {
                             );
                         });
                         let chave = format!("area:{area:?}");
-                        let mut estado = self.centro.tabelas.remove(&chave).unwrap_or_default();
+                        let mut estado = vista.tabelas.remove(&chave).unwrap_or_default();
                         estado.teclado = true;
                         tabela::desenhar(
                             ui,
                             &chave,
                             &t,
                             &mut estado,
-                            &mut self.centro.selecao,
+                            &mut vista.selecao,
                             pedidos,
                             None,
                         );
-                        self.centro.tabelas.insert(chave, estado);
+                        vista.tabelas.insert(chave, estado);
                     }
                     Err(e) => {
                         componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
@@ -436,11 +503,11 @@ impl Janela {
                     .id_salt("pagina")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        pagina::desenhar(ui, &mut leitor, r, &mut self.centro, pedidos)
+                        pagina::desenhar(ui, &mut leitor, r, vista, pedidos)
                     });
             }
             Destino::Total { titulo, pedido } => {
-                pagina::desenhar_total(ui, &mut leitor, titulo, pedido, &mut self.centro, pedidos);
+                pagina::desenhar_total(ui, &mut leitor, titulo, pedido, vista, pedidos);
             }
         }
     }
@@ -671,6 +738,9 @@ impl Janela {
         }
         let pedidos = std::mem::take(&mut self.pedidos);
         for pedido in pedidos {
+            if self.na_casca && self.encaminhar_para_a_casca(ctx, &pedido) {
+                continue;
+            }
             let antes = self.navegacao.atual().clone();
             if self.navegacao.aplicar(&pedido) {
                 let depois = self.navegacao.atual().clone();
@@ -721,6 +791,24 @@ impl Janela {
                 | Pedido::Avancar => {}
             }
         }
+    }
+
+    /// Na casca, os pedidos de navegação vão para a fila dela.
+    fn encaminhar_para_a_casca(&mut self, ctx: &Context, pedido: &Pedido) -> bool {
+        use bancada_casca::{Local, Pedido as P, Rota};
+        let p = match pedido {
+            Pedido::Abrir(d) => P::Abrir {
+                rota: Rota::nova(d.rota()),
+                local: Local::Centro,
+            },
+            Pedido::AbrirFlutuante(d) => P::AbrirFlutuante(Rota::nova(d.rota())),
+            Pedido::Voltar => P::Voltar(Local::Centro),
+            Pedido::Avancar => P::Avancar(Local::Centro),
+            Pedido::FecharFlutuante(_) => return true,
+            _ => return false,
+        };
+        bancada_casca::pedir(ctx, p);
+        true
     }
 
     fn ok(&mut self, texto: String) {
@@ -799,7 +887,11 @@ impl Janela {
             IdAcao::Pesquisar => self.focar_pesquisa = true,
             IdAcao::AbrirEmPainelFlutuante => {
                 if let Some(r) = sel.first() {
-                    self.navegacao.abrir_flutuante(Destino::Item(r.clone()));
+                    if self.na_casca {
+                        bancada_casca::abrir_flutuante(ctx, Destino::Item(r.clone()).rota());
+                    } else {
+                        self.navegacao.abrir_flutuante(Destino::Item(r.clone()));
+                    }
                 }
             }
             IdAcao::Documento => self.decidir(comandos, simples(Acao::MarcarDocumento)),

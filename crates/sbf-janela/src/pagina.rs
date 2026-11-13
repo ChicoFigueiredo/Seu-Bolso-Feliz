@@ -260,7 +260,7 @@ pub fn desenhar(
             if componentes::botao_icone(ui, "picture_in_picture", "Abrir em painel flutuante", true)
                 .clicked()
             {
-                pedidos.push(Pedido::AbrirFlutuante(Destino::Item(alvo.clone())));
+                crate::navegacao::pedir_abrir(ui.ctx(), pedidos, Destino::Item(alvo.clone()), true);
             }
         });
     });
@@ -580,7 +580,10 @@ pub fn grafico_por_ciclo(ui: &mut Ui, totais: &[TotalDoCiclo], pedidos: &mut Vec
                                     formato::dinheiro(t.centavos)
                                 ));
                             if r.clicked() {
-                                pedidos.push(Pedido::abrir(
+                                let flutuante = componentes::ctrl(ui);
+                                crate::navegacao::pedir_abrir(
+                                    ui.ctx(),
+                                    pedidos,
                                     Destino::Total {
                                         titulo: format!(
                                             "Ciclo {} · {}",
@@ -589,8 +592,8 @@ pub fn grafico_por_ciclo(ui: &mut Ui, totais: &[TotalDoCiclo], pedidos: &mut Vec
                                         ),
                                         pedido: (**itens).clone(),
                                     },
-                                    componentes::ctrl(ui),
-                                ));
+                                    flutuante,
+                                );
                             }
                         }
                     });

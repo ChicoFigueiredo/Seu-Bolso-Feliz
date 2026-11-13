@@ -155,6 +155,38 @@ pub fn areas_da_fatia() -> Vec<Area> {
     v
 }
 
+/// A rota da área na casca. Onde dá, é o código do tipo principal, para a navegação
+/// acender a área também na página do item (`fornecedor` acende em `fornecedor:x`).
+pub fn rota_da_area(area: Area) -> &'static str {
+    match area {
+        Area::VisaoGeral => "visao-geral",
+        Area::ATriar => "a-triar",
+        Area::EmDuvida => "em-duvida",
+        Area::Documentos => "documento",
+        Area::Registros => "registro",
+        Area::Ciclos => "ciclo",
+        Area::Fornecedores => "fornecedor",
+        Area::Faturas => "fatura",
+        Area::ContasLacunas => "conta",
+        Area::Emails => "emails",
+        Area::EmailsPorRemetente => "emails-por-remetente",
+        Area::ArquivosEPastas => "origem",
+        Area::PastasPessoais => "pastas-pessoais",
+        Area::Coletas => "coleta",
+        Area::Pendencias => "pendencia",
+        Area::Lotes => "lote",
+        Area::Relatorios => "relatorios",
+    }
+}
+
+/// O inverso de [`rota_da_area`].
+pub fn area_da_rota(rota: &str) -> Option<Area> {
+    let mut todas = areas_da_fatia();
+    todas.push(Area::EmailsPorRemetente);
+    todas.push(Area::PastasPessoais);
+    todas.into_iter().find(|a| rota_da_area(*a) == rota)
+}
+
 pub fn rotulo_da_area(area: Area) -> &'static str {
     match area {
         Area::VisaoGeral => "Visão geral",

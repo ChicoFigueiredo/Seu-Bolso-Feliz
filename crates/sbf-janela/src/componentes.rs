@@ -42,7 +42,10 @@ pub fn link_para(
         );
     }
     if resposta.clicked() {
-        pedidos.push(Pedido::abrir(destino, ctrl(ui)));
+        let flutuante = ctrl(ui);
+        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, flutuante);
+    } else if resposta.middle_clicked() {
+        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, true);
     }
     resposta
 }
@@ -220,13 +223,16 @@ pub fn total_rico(
                 x += 4.0;
             }
             if r.clicked() {
-                pedidos.push(Pedido::abrir(
+                let flutuante = ctrl(ui);
+                crate::navegacao::pedir_abrir(
+                    ui.ctx(),
+                    pedidos,
                     Destino::Total {
                         titulo: format!("O que soma {texto}"),
                         pedido: pedido.clone(),
                     },
-                    ctrl(ui),
-                ));
+                    flutuante,
+                );
             }
             r
         }

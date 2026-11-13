@@ -1,11 +1,12 @@
-//! Testes sem janela (INV-14/19, parcial): desenham com `egui::Context::run_ui` a moldura,
-//! toda área, a página de todo `Tipo` e os destinos de total com os dados de
-//! demonstração, sem pânico.
+//! Testes sem janela (INV-14/19, parcial): a janela dentro da `bancada-casca`, desenhada com
+//! `egui::Context::run_ui`, com os dados de demonstração. Toda área, a página de todo `Tipo`
+//! em todas as abas, totais, flutuantes, diálogos, temas, Ações e lotes, sem pânico.
 
+use bancada_casca::{Casca, Local, Pedido as PedidoCasca};
 use sbf_inventario::consulta::{Area, Celula, Filtro, Fonte, PedidoDeTabela};
 use sbf_inventario::{Consulta, Ref, Tipo};
-use sbf_janela::demonstracao::{self, ComandosDemonstracao, ConsultaDemonstracao};
-use sbf_janela::{Destino, EstadoDaBarra, IdAcao, Janela, MolduraProvisoria, Pedido};
+use sbf_janela::demonstracao::{self, ConsultaDemonstracao};
+use sbf_janela::{AppSbf, Destino, EstadoDaBarra, IdAcao, Janela, MolduraProvisoria, Pedido};
 
 fn entrada() -> egui::RawInput {
     egui::RawInput {
@@ -19,51 +20,79 @@ fn entrada() -> egui::RawInput {
 
 struct Banco {
     ctx: egui::Context,
-    moldura: MolduraProvisoria,
+    casca: Casca<AppSbf>,
     consulta: ConsultaDemonstracao,
-    comandos: ComandosDemonstracao,
 }
 
 impl Banco {
     fn novo() -> Self {
         let (consulta, comandos) = demonstracao::nova();
         let ctx = egui::Context::default();
+        sbf_janela::tema::instalar_fontes(&ctx);
         let mut janela = Janela::nova();
         janela.hoje = "2026-11-13".into();
-        let moldura = MolduraProvisoria::nova(janela, EstadoDaBarra::default());
-        moldura.preparar(&ctx);
-        Self {
+        let app = AppSbf::novo(
+            janela,
+            Box::new(consulta.clone()),
+            Box::new(comandos),
+            EstadoDaBarra::default(),
+        );
+        let casca = Casca::nova(app, sbf_janela::config_da_casca()).expect("temas");
+        let mut b = Self {
             ctx,
-            moldura,
+            casca,
             consulta,
-            comandos,
-        }
+        };
+        b.quadro();
+        b
     }
 
     fn quadro(&mut self) {
-        let Banco {
-            ctx,
-            moldura,
-            consulta,
-            comandos,
-        } = self;
-        let mut saida = ctx.run_ui(entrada(), |ui| moldura.ui(ui, consulta, comandos));
+        let Banco { ctx, casca, .. } = self;
+        let mut saida = ctx.run_ui(entrada(), |ui| casca.desenhar(ui));
         saida.textures_delta.clear();
     }
 
     fn abrir(&mut self, destino: Destino) {
-        self.moldura.janela.pedir(Pedido::Abrir(destino.clone()));
+        bancada_casca::abrir(&self.ctx, destino.rota());
         self.quadro();
-        assert_eq!(self.moldura.janela.navegacao.atual(), &destino);
+        self.quadro();
+        assert_eq!(
+            self.casca.estado.historico.atual().como_texto(),
+            destino.rota()
+        );
+        assert_eq!(self.casca.app.janela().navegacao.atual(), &destino);
+    }
+
+    fn executar(&mut self, id: IdAcao) {
+        bancada_casca::executar(&self.ctx, sbf_janela::acoes::definicao(id).codigo);
         self.quadro();
     }
 }
 
 #[test]
-fn varios_quadros_seguidos_nao_travam() {
+fn varios_quadros_seguidos_nao_travam_e_a_lista_de_acoes_vale() {
     let mut b = Banco::novo();
     for _ in 0..5 {
         b.quadro();
+    }
+    // A lista única entra inteira na casca, sem id repetido nem atalho em conflito.
+    let acoes = bancada_casca::AppCasca::acoes(&b.casca.app);
+    assert!(bancada_casca::ListaDeAcoes::nova(acoes).is_ok());
+    // A casca não acusa erro (id, atalho, KeyTip ou aba inválidos).
+    assert!(
+        b.casca.estado.erros.is_empty(),
+        "{:?}",
+        b.casca.estado.erros
+    );
+    // E em toda área (as abas contextuais mudam com a seleção e a página).
+    for area in sbf_janela::areas::areas_da_fatia() {
+        b.abrir(Destino::Area(area));
+        assert!(
+            b.casca.estado.erros.is_empty(),
+            "{area:?}: {:?}",
+            b.casca.estado.erros
+        );
     }
 }
 
@@ -122,18 +151,18 @@ fn a_pagina_de_todo_tipo_desenha_em_todas_as_abas() {
         b.abrir(Destino::Item(r.clone()));
         let abas = sbf_janela::pagina::abas_de(r.tipo);
         for i in 0..abas.len() {
-            b.moldura.janela.centro.abas.insert(r.clone(), i);
+            b.casca.app.janela().centro.abas.insert(r.clone(), i);
             b.quadro();
         }
     }
 }
 
 #[test]
-fn totais_flutuantes_e_dialogos_desenham() {
+fn totais_voltar_flutuantes_dialogos_e_temas() {
     let mut b = Banco::novo();
     let f = Ref::nova(Tipo::Fornecedor, "Energia Exemplo");
     b.abrir(Destino::Item(f.clone()));
-    b.abrir(Destino::Total {
+    let total = Destino::Total {
         titulo: "Total".into(),
         pedido: PedidoDeTabela::ItensDoTotal {
             de: f.clone(),
@@ -141,20 +170,33 @@ fn totais_flutuantes_e_dialogos_desenham() {
             ciclo: None,
             recorte: None,
         },
-    });
-    b.moldura
-        .janela
-        .pedir(Pedido::AbrirFlutuante(Destino::Item(Ref::nova(
-            Tipo::Ciclo,
-            "2026-10",
-        ))));
+    };
+    b.abrir(total);
+    // Voltar refaz o caminho (o histórico é o da casca; a janela acompanha).
+    bancada_casca::pedir(&b.ctx, PedidoCasca::Voltar(Local::Centro));
     b.quadro();
-    assert_eq!(b.moldura.janela.navegacao.flutuantes().len(), 1);
     b.quadro();
+    assert_eq!(
+        b.casca.app.janela().navegacao.atual(),
+        &Destino::Item(f.clone())
+    );
+    // Ctrl+clique: painel flutuante, sem mexer no centro.
+    bancada_casca::abrir_flutuante(
+        &b.ctx,
+        Destino::Item(Ref::nova(Tipo::Ciclo, "2026-10")).rota(),
+    );
+    b.quadro();
+    b.quadro();
+    assert_eq!(b.casca.estado.flutuantes.len(), 1);
+    assert_eq!(
+        b.casca.estado.historico.atual().como_texto(),
+        Destino::Item(f).rota()
+    );
     // Diálogos.
     b.abrir(Destino::Area(Area::Registros));
-    b.moldura
-        .janela
+    b.casca
+        .app
+        .janela()
         .centro
         .selecao
         .so(Ref::nova(Tipo::Registro, "1"));
@@ -164,21 +206,21 @@ fn totais_flutuantes_e_dialogos_desenham() {
         IdAcao::NovoLote,
         IdAcao::Sinalizar,
     ] {
-        b.moldura.janela.executar(id);
+        b.executar(id);
         b.quadro();
-        assert!(b.moldura.janela.dialogo.is_some(), "{id:?} sem diálogo");
-        b.quadro();
-        b.moldura.janela.dialogo = None;
+        assert!(b.casca.app.janela().dialogo.is_some(), "{id:?} sem diálogo");
+        b.casca.app.janela().dialogo = None;
     }
     // Todos os temas desenham.
     for t in sbf_janela::tema::temas() {
-        sbf_janela::tema::aplicar(&b.ctx, &t.id);
+        bancada_casca::pedir(&b.ctx, PedidoCasca::Tema(t.id.clone()));
+        b.quadro();
         b.quadro();
     }
 }
 
 #[test]
-fn acoes_pela_janela_gravam_e_desfazem() {
+fn acoes_pela_casca_gravam_e_desfazem() {
     let mut b = Banco::novo();
     b.abrir(Destino::Area(Area::ATriar));
     let antes = b.consulta.contagens().expect("contagens");
@@ -190,36 +232,39 @@ fn acoes_pela_janela_gravam_e_desfazem() {
         })
         .expect("tabela");
     let alvo = t.linhas[0].alvo.clone().expect("alvo");
-    b.moldura.janela.centro.selecao.so(alvo);
-    b.moldura.janela.executar(IdAcao::Documento);
-    b.quadro();
+    b.casca.app.janela().centro.selecao.so(alvo);
+    b.executar(IdAcao::Documento);
     assert_eq!(
         b.consulta.contagens().expect("contagens").a_triar,
         antes.a_triar - 1
     );
-    assert_eq!(b.moldura.janela.decisoes_da_sessao().len(), 1);
-    b.moldura.janela.executar(IdAcao::Desfazer);
-    b.quadro();
+    assert_eq!(b.casca.app.janela().decisoes_da_sessao().len(), 1);
+    b.executar(IdAcao::Desfazer);
     assert_eq!(b.consulta.contagens().expect("contagens"), antes);
-    // Enviar ao servidor nunca roda.
-    b.moldura.janela.executar(IdAcao::EnviarAoServidor);
-    b.quadro();
-    assert!(b.moldura.janela.mensagem.as_ref().is_some_and(|m| m.erro));
+    // Enviar ao servidor fica desabilitado na lista e nunca roda.
+    let acoes = bancada_casca::AppCasca::acoes(&b.casca.app);
+    let enviar = acoes
+        .iter()
+        .find(|a| a.id == "lotes.enviar")
+        .expect("enviar");
+    assert_eq!(
+        enviar.motivo(),
+        Some("Chega na fatia 3, com a caixa de entrada")
+    );
 }
 
 #[test]
 fn lote_pela_janela_cria_adiciona_e_aprova() {
     let mut b = Banco::novo();
-    b.moldura
-        .janela
+    b.casca
+        .app
+        .janela()
         .pedir(Pedido::CriarLote("Teste da janela".into()));
-    b.quadro();
-    let lote = b.moldura.janela.lote_atual.clone().expect("lote atual");
     b.abrir(Destino::Area(Area::Registros));
+    let lote = b.casca.app.janela().lote_atual.clone().expect("lote atual");
     let reg = Ref::nova(Tipo::Registro, "70");
-    b.moldura.janela.centro.selecao.so(reg.clone());
-    b.moldura.janela.executar(IdAcao::AdicionarSelecao);
-    b.quadro();
+    b.casca.app.janela().centro.selecao.so(reg.clone());
+    b.executar(IdAcao::AdicionarSelecao);
     let itens = b
         .consulta
         .tabela(&PedidoDeTabela::Ligados {
@@ -228,13 +273,26 @@ fn lote_pela_janela_cria_adiciona_e_aprova() {
         })
         .expect("tabela");
     assert_eq!(itens.linhas.len(), 1);
-    b.moldura.janela.executar(IdAcao::AprovarLote);
-    b.quadro();
+    b.executar(IdAcao::AprovarLote);
     let item = b.consulta.item(&reg).expect("item").expect("existe");
     assert!(matches!(&item.campos[0].valor, Celula::Estado { rotulo, .. } if rotulo == "Aprovado"));
     // Clicar noutro lote troca o lote atual.
     let outro = Ref::nova(Tipo::Lote, "1");
-    b.moldura.janela.centro.selecao.so(outro.clone());
+    b.casca.app.janela().centro.selecao.so(outro.clone());
     b.quadro();
-    assert_eq!(b.moldura.janela.lote_atual, Some(outro));
+    assert_eq!(b.casca.app.janela().lote_atual, Some(outro));
+}
+
+/// A moldura provisória continua de pé (reserva, sem a casca).
+#[test]
+fn moldura_provisoria_ainda_desenha() {
+    let (consulta, mut comandos) = demonstracao::nova();
+    let ctx = egui::Context::default();
+    let moldura = MolduraProvisoria::nova(Janela::nova(), EstadoDaBarra::default());
+    moldura.preparar(&ctx);
+    let mut moldura = moldura;
+    for _ in 0..3 {
+        let mut saida = ctx.run_ui(entrada(), |ui| moldura.ui(ui, &consulta, &mut comandos));
+        saida.textures_delta.clear();
+    }
 }

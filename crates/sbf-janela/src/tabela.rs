@@ -208,7 +208,7 @@ pub fn desenhar(
                 });
                 if enter {
                     if let Some(f) = selecao.foco.clone() {
-                        pedidos.push(Pedido::Abrir(Destino::Item(f)));
+                        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, Destino::Item(f), false);
                     }
                 } else {
                     let nova = match (atual, baixo) {
@@ -339,7 +339,7 @@ pub fn desenhar(
         };
         if let Some(alvo) = alvo_de(pos) {
             if duplo {
-                pedidos.push(Pedido::abrir(Destino::Item(alvo.clone()), ctrl));
+                crate::navegacao::pedir_abrir(ui.ctx(), pedidos, Destino::Item(alvo.clone()), ctrl);
                 selecao.so(alvo);
                 selecao.ancora = Some(pos);
             } else if shift {

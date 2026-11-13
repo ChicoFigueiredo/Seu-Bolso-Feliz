@@ -10,6 +10,7 @@ publish.workspace = true
 sbf-inventario = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
+bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

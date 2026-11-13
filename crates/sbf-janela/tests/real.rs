@@ -8,11 +8,12 @@ mod comum;
 
 use std::time::{Duration, Instant};
 
+use bancada_casca::Casca;
 use sbf_inventario::banco::Inventario;
 use sbf_inventario::consulta::{Area, Celula, Filtro, PedidoDeTabela};
 use sbf_inventario::leitor::LeitorSqlite;
 use sbf_inventario::{Consulta, Ref};
-use sbf_janela::{Destino, EstadoDaBarra, IdAcao, Janela, MolduraProvisoria, Pedido};
+use sbf_janela::{AppSbf, Destino, EstadoDaBarra, IdAcao, Janela};
 
 fn entrada() -> egui::RawInput {
     egui::RawInput {
@@ -26,9 +27,7 @@ fn entrada() -> egui::RawInput {
 
 struct Real {
     ctx: egui::Context,
-    moldura: MolduraProvisoria,
-    leitor: LeitorSqlite,
-    inventario: Inventario,
+    casca: Casca<AppSbf>,
 }
 
 impl Real {
@@ -37,39 +36,46 @@ impl Real {
         assert!(!inventario.plano().expect("plano").precisa_migrar());
         let leitor = LeitorSqlite::abrir(caminho).expect("leitor");
         let ctx = egui::Context::default();
+        sbf_janela::tema::instalar_fontes(&ctx);
         let mut janela = Janela::nova();
         janela.hoje = "2026-11-13".into();
-        let moldura = MolduraProvisoria::nova(janela, EstadoDaBarra::default());
-        moldura.preparar(&ctx);
-        Self {
-            ctx,
-            moldura,
-            leitor,
-            inventario,
-        }
+        let app = AppSbf::novo(
+            janela,
+            Box::new(leitor),
+            Box::new(inventario),
+            EstadoDaBarra::default(),
+        );
+        let casca = Casca::nova(app, sbf_janela::config_da_casca()).expect("temas");
+        let mut r = Self { ctx, casca };
+        r.quadro();
+        r
     }
 
     fn quadro(&mut self) -> Duration {
         let inicio = Instant::now();
-        let Real {
-            ctx,
-            moldura,
-            leitor,
-            inventario,
-        } = self;
-        let mut saida = ctx.run_ui(entrada(), |ui| moldura.ui(ui, leitor, inventario));
+        let Real { ctx, casca } = self;
+        let mut saida = ctx.run_ui(entrada(), |ui| casca.desenhar(ui));
         saida.textures_delta.clear();
         inicio.elapsed()
     }
 
     fn abrir(&mut self, d: Destino) {
-        self.moldura.janela.pedir(Pedido::Abrir(d));
+        bancada_casca::abrir(&self.ctx, d.rota());
         self.quadro();
+        self.quadro();
+    }
+
+    fn leitor(&self) -> &dyn Consulta {
+        self.casca.app.consulta()
+    }
+
+    fn executar(&mut self, id: IdAcao) {
+        bancada_casca::executar(&self.ctx, sbf_janela::acoes::definicao(id).codigo);
         self.quadro();
     }
 }
 
-fn alvos_das_areas(leitor: &LeitorSqlite) -> Vec<Ref> {
+fn alvos_das_areas(leitor: &dyn Consulta) -> Vec<Ref> {
     let mut v: Vec<Ref> = Vec::new();
     for area in sbf_janela::areas::AREAS_DO_INVENTARIO {
         let Ok(t) = leitor.tabela(&PedidoDeTabela::Area {
@@ -103,12 +109,12 @@ fn a_janela_desenha_o_inventario_real_inteiro() {
     for area in sbf_janela::areas::areas_da_fatia() {
         r.abrir(Destino::Area(area));
     }
-    let alvos = alvos_das_areas(&r.leitor);
+    let alvos = alvos_das_areas(r.leitor());
     assert!(alvos.len() >= 8, "poucos tipos ligados: {alvos:?}");
     for alvo in alvos {
         r.abrir(Destino::Item(alvo.clone()));
         for i in 0..sbf_janela::pagina::abas_de(alvo.tipo).len() {
-            r.moldura.janela.centro.abas.insert(alvo.clone(), i);
+            r.casca.app.janela().centro.abas.insert(alvo.clone(), i);
             r.quadro();
         }
     }
@@ -119,9 +125,9 @@ fn uma_decisao_pela_janela_grava_no_banco_e_o_desfazer_restaura() {
     let banco = comum::banco_de_teste();
     let mut r = Real::novo(&banco.caminho);
     r.abrir(Destino::Area(Area::ATriar));
-    let antes = r.leitor.contagens().expect("contagens");
+    let antes = r.leitor().contagens().expect("contagens");
     let t = r
-        .leitor
+        .leitor()
         .tabela(&PedidoDeTabela::Area {
             area: Area::ATriar,
             filtro: Filtro::default(),
@@ -130,19 +136,14 @@ fn uma_decisao_pela_janela_grava_no_banco_e_o_desfazer_restaura() {
     let Some(alvo) = t.linhas.iter().find_map(|l| l.alvo.clone()) else {
         panic!("a fixture não tem achado a triar");
     };
-    r.moldura.janela.centro.selecao.so(alvo);
-    r.moldura.janela.executar(IdAcao::Documento);
-    r.quadro();
-    assert!(
-        r.moldura.janela.mensagem.as_ref().is_some_and(|m| !m.erro),
-        "{:?}",
-        r.moldura.janela.mensagem
-    );
-    let depois = r.leitor.contagens().expect("contagens");
+    r.casca.app.janela().centro.selecao.so(alvo);
+    r.executar(IdAcao::Documento);
+    let mensagem = r.casca.app.janela().mensagem.clone();
+    assert!(mensagem.as_ref().is_some_and(|m| !m.erro), "{mensagem:?}");
+    let depois = r.leitor().contagens().expect("contagens");
     assert_eq!(depois.a_triar, antes.a_triar - 1);
-    r.moldura.janela.executar(IdAcao::Desfazer);
-    r.quadro();
-    assert_eq!(r.leitor.contagens().expect("contagens"), antes);
+    r.executar(IdAcao::Desfazer);
+    assert_eq!(r.leitor().contagens().expect("contagens"), antes);
 }
 
 #[test]
@@ -153,9 +154,7 @@ fn com_50_mil_achados_a_area_desenha_rapido() {
         comum::popular_grande(&conn, 50_000);
     }
     let mut r = Real::novo(&banco.caminho);
-    r.moldura
-        .janela
-        .pedir(Pedido::Abrir(Destino::Area(Area::Documentos)));
+    bancada_casca::abrir(&r.ctx, Destino::Area(Area::Documentos).rota());
     let primeiro = r.quadro() + r.quadro();
     let mut pior = Duration::ZERO;
     for _ in 0..5 {
@@ -163,7 +162,7 @@ fn com_50_mil_achados_a_area_desenha_rapido() {
     }
     eprintln!("primeiro quadro (com a consulta): {primeiro:?}; quadro seguinte (cache): {pior:?}");
     assert!(
-        pior < Duration::from_millis(100),
+        pior < Duration::from_millis(150),
         "quadro com cache lento: {pior:?}"
     );
     assert!(

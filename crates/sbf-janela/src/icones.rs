@@ -26,6 +26,11 @@ fn mapa() -> &'static HashMap<&'static str, char> {
     })
 }
 
+/// Todos os ícones do subconjunto, pelo nome.
+pub fn todos() -> impl Iterator<Item = (&'static str, char)> {
+    mapa().iter().map(|(n, c)| (*n, *c))
+}
+
 /// O caractere do ícone, ou `None` se ele não está no subconjunto.
 pub fn caractere(nome: &str) -> Option<char> {
     mapa().get(nome).copied()
