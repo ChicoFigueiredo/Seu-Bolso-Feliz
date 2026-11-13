@@ -53,10 +53,13 @@ fn arquivos_e_emails_ordenam_pelo_indice() {
     );
     let emails = plano(
         &conn,
-        "SELECT o.id FROM origem o JOIN achado a ON a.content_hash = o.content_hash
-          WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml'
-          ORDER BY o.gmail_date DESC, o.id DESC LIMIT 100",
+        "SELECT o.id FROM origem o
+          WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml' AND o.content_hash IS NOT NULL
+          ORDER BY o.gmail_date DESC, o.id DESC LIMIT 100 OFFSET 50",
     );
-    assert!(emails.contains("origem_gmail_date"), "{emails}");
+    assert!(
+        emails.contains("COVERING INDEX origem_gmail_date"),
+        "{emails}"
+    );
     assert!(!emails.contains("USE TEMP B-TREE FOR ORDER BY"), "{emails}");
 }

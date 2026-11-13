@@ -1700,9 +1700,9 @@ pub fn popular_escala(conn: &Connection, achados: u32, origens: u32, emails: u32
                 100,
                 "local_file",
                 format!("local:{i}"),
-                format!("/g/p{}/a{i}.pdf", i % 80_000),
+                format!("{}/{}", pasta_profunda((i / 3) % 81_000), nome_longo(i)),
                 format!("{data}T10:00:00Z"),
-                format!("a{i}.pdf"),
+                nome_longo(i),
                 Option::<String>::None,
                 Option::<String>::None,
                 Option::<String>::None,
@@ -1776,4 +1776,27 @@ pub fn popular_escala(conn: &Connection, achados: u32, origens: u32, emails: u32
         .expect("registro");
     }
     conn.execute_batch("COMMIT").expect("commit");
+}
+
+/// Uma pasta de 6 a 12 níveis com nomes longos, como as de um disco pessoal de verdade.
+pub fn pasta_profunda(k: u32) -> String {
+    let niveis = 6 + (k % 7) as usize;
+    let mut caminho = String::from("/mnt/d/Pessoal/Arquivos antigos do computador");
+    for n in 0..niveis {
+        // O último nível é único por pasta: com `k` até 81 mil, são 81 mil pastas distintas.
+        let parte = if n + 1 == niveis {
+            k
+        } else {
+            (k / 3u32.pow(n as u32 % 6)) % 11
+        };
+        caminho.push_str(&format!(
+            "/Pasta numero {n} com nome comprido {parte} e mais um pouco"
+        ));
+    }
+    caminho
+}
+
+/// Um nome de arquivo longo e único.
+pub fn nome_longo(i: u32) -> String {
+    format!("Documento escaneado da familia com nome bem comprido numero {i}.pdf")
 }

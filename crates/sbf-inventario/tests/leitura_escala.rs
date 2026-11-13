@@ -111,6 +111,30 @@ fn medidas_na_escala_do_inventario_real() {
         let conn = Connection::open(&banco.caminho).expect("conexão");
         let sqls = [
             (
+                "pastas: SQL original completa",
+                "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1) AS pasta, count(DISTINCT o.content_hash) AS achados, coalesce(sum(a.estado = 'documento'), 0), coalesce(sum(a.estado = 'descartado'), 0) FROM origem o JOIN achado a ON a.content_hash = o.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1",
+            ),
+            (
+                "pastas: só ler (pasta, hash, estado)",
+                "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1), o.content_hash, a.estado FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL",
+            ),
+            (
+                "pastas: só ler (caminho e nome, sem substr)",
+                "SELECT o.local_filepath, o.filename, o.content_hash, a.estado FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL",
+            ),
+            (
+                "pastas: só o agrupamento",
+                "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1) AS pasta, count(*) FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL GROUP BY 1",
+            ),
+            (
+                "pastas: com count(DISTINCT)",
+                "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1) AS pasta, count(DISTINCT o.content_hash) FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL GROUP BY 1",
+            ),
+            (
+                "pastas: só a junção (sem agrupar)",
+                "SELECT count(*) FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL",
+            ),
+            (
                 "achados (uma passada)",
                 "SELECT count(*), sum(caminho_acervo IS NOT NULL), sum(estado='documento') FROM achado",
             ),
