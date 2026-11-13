@@ -1,0 +1,756 @@
+{
+ "fonte": [
+  "apps/web/src/app/actions/painel-hoje.ts",
+  "apps/web/src/app/actions/painel-centros.ts",
+  "apps/web/src/app/actions/painel-recorrentes.ts"
+ ],
+ "tz": "America/Sao_Paulo",
+ "instante": "2026-11-13T10:00:00-03:00",
+ "hoje": {
+  "periodo": {
+   "inicio": "2026-10-20",
+   "fim": "2026-11-19",
+   "rotulo": "20/10/2026 a 19/11/2026"
+  },
+  "disponivelAgora": 6234.660000000001,
+  "livreAposCompromissos": 3621.850000000001,
+  "estimativaIncompleta": true,
+  "contas": [
+   {
+    "id": "00000000-0000-4000-8000-000000000200",
+    "nome": "Conta Alfa",
+    "instituicao": "Banco Exemplo",
+    "saldo": 5234.56
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000201",
+    "nome": "Poupanca Beta",
+    "instituicao": "Banco Exemplo",
+    "saldo": 1000.1
+   }
+  ],
+  "cartoes": [
+   {
+    "id": "00000000-0000-4000-8000-000000000202",
+    "nome": "Cartao Gama",
+    "instituicao": "Banco Exemplo",
+    "faturaAtual": 812.34,
+    "limiteTotal": 8000,
+    "limiteLivre": 7187.66,
+    "fechamento": "2026-11-24",
+    "vencimento": "2026-12-05"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000203",
+    "nome": "Cartao Delta",
+    "instituicao": "Banco Exemplo",
+    "faturaAtual": 0,
+    "limiteTotal": 3000,
+    "limiteLivre": 3000,
+    "fechamento": "2026-11-08",
+    "vencimento": "2026-11-15"
+   }
+  ],
+  "dividaTotal": 6500,
+  "compromissoMensalDividas": 464.2857142857143,
+  "proximos": [
+   {
+    "id": "00000000-0000-4000-8000-000000000402",
+    "descricao": "Fatura Cartao Gama",
+    "valor": 200,
+    "data": "2026-10-05",
+    "origem": "fatura",
+    "produto": "Cartao Gama",
+    "vencido": true,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000802",
+    "descricao": "Assinatura Video",
+    "valor": 39.9,
+    "data": "2026-10-15",
+    "origem": "recorrente",
+    "produto": null,
+    "vencido": true,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-00000000100a",
+    "descricao": "Movimentacao 10",
+    "valor": 75,
+    "data": "2026-11-01",
+    "origem": "movimentacao",
+    "produto": "Conta Alfa",
+    "vencido": true,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001010",
+    "descricao": "Movimentacao 16",
+    "valor": 45.67,
+    "data": "2026-11-13",
+    "origem": "movimentacao",
+    "produto": "Poupanca Beta",
+    "vencido": false,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000800",
+    "descricao": "Assinatura Video",
+    "valor": 39.9,
+    "data": "2026-11-15",
+    "origem": "recorrente",
+    "produto": null,
+    "vencido": false,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001009",
+    "descricao": "Movimentacao 9",
+    "valor": 200,
+    "data": "2026-11-16",
+    "origem": "movimentacao",
+    "produto": "Conta Alfa",
+    "vencido": false,
+    "valorEstimado": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000801",
+    "descricao": "Conta de Luz",
+    "valor": 0,
+    "data": "2026-11-17",
+    "origem": "recorrente",
+    "produto": null,
+    "vencido": false,
+    "valorEstimado": true
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000807",
+    "descricao": "Seguro Anual",
+    "valor": 1200,
+    "data": "2026-11-19",
+    "origem": "recorrente",
+    "produto": null,
+    "vencido": false,
+    "valorEstimado": false
+   }
+  ],
+  "faltaAteFimDoPeriodo": 0,
+  "mes": {
+   "entrou": 4050.25,
+   "saiu": 2509.15,
+   "noCartao": 97.23,
+   "aindaVaiSair": 1485.57,
+   "livreProjetado": 4749.090000000001
+  },
+  "pendencias": [
+   {
+    "rotulo": "Vencidas",
+    "quantidade": 3,
+    "rota": "/dashboard/movimentacoes?filtro=vencidas"
+   },
+   {
+    "rotulo": "Sem categoria",
+    "quantidade": 3,
+    "rota": "/dashboard/movimentacoes?filtro=sem-categoria"
+   },
+   {
+    "rotulo": "Não alocadas",
+    "quantidade": 13,
+    "rota": "/dashboard/movimentacoes?filtro=sem-centro"
+   },
+   {
+    "rotulo": "Não confirmadas",
+    "quantidade": 7,
+    "rota": "/dashboard/movimentacoes?filtro=nao-confirmadas"
+   }
+  ],
+  "centros": [
+   {
+    "id": "00000000-0000-4000-8000-000000000900",
+    "nome": "Alfa Projeto",
+    "icone": null,
+    "gastoNoMes": 470.4,
+    "saldo": -850.4
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "nome": "Beta Pessoa",
+    "icone": null,
+    "gastoNoMes": 0,
+    "saldo": 2367
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000903",
+    "nome": "Delta Vazio",
+    "icone": null,
+    "gastoNoMes": 0,
+    "saldo": 0
+   }
+  ]
+ },
+ "centros": {
+  "periodo": {
+   "inicio": "2026-10-20",
+   "fim": "2026-11-19",
+   "rotulo": "20/10/2026 a 19/11/2026",
+   "rotuloCurto": "20/10 a 19/11"
+  },
+  "centrosAtivos": [
+   {
+    "id": "00000000-0000-4000-8000-000000000900",
+    "nome": "Alfa Projeto",
+    "tipo": "projeto",
+    "status": "active",
+    "descricao": null,
+    "icone": null,
+    "cor": null,
+    "saldo": -850.4,
+    "entrouNoPeriodo": 20,
+    "saiuNoPeriodo": 470.4,
+    "resultadoNoPeriodo": -450.4,
+    "rateios": 5
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000901",
+    "nome": "Beta Pessoa",
+    "tipo": "pessoa",
+    "status": "active",
+    "descricao": null,
+    "icone": null,
+    "cor": null,
+    "saldo": 2367,
+    "entrouNoPeriodo": 0,
+    "saiuNoPeriodo": 33,
+    "resultadoNoPeriodo": -33,
+    "rateios": 3
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000903",
+    "nome": "Delta Vazio",
+    "tipo": "negocio",
+    "status": "active",
+    "descricao": null,
+    "icone": null,
+    "cor": null,
+    "saldo": 0,
+    "entrouNoPeriodo": 0,
+    "saiuNoPeriodo": 0,
+    "resultadoNoPeriodo": 0,
+    "rateios": 0
+   }
+  ],
+  "centrosArquivados": [
+   {
+    "id": "00000000-0000-4000-8000-000000000902",
+    "nome": "Gama Arquivado",
+    "tipo": "projeto",
+    "status": "archived",
+    "descricao": null,
+    "icone": null,
+    "cor": null,
+    "saldo": 0,
+    "entrouNoPeriodo": 0,
+    "saiuNoPeriodo": 0,
+    "resultadoNoPeriodo": 0,
+    "rateios": 0
+   }
+  ],
+  "naoAlocado": {
+   "total": 1466.65,
+   "saidasDoPeriodo": 1970.05,
+   "movimentacoes": 12
+  },
+  "pendentes": [
+   {
+    "id": "00000000-0000-4000-8000-00000000100b",
+    "descricao": "Movimentacao 11",
+    "data": "2026-11-18",
+    "tipo": "liability_payment",
+    "valor": 450,
+    "alocado": 0,
+    "naoAlocado": 450,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001009",
+    "descricao": "Movimentacao 9",
+    "data": "2026-11-16",
+    "tipo": "expense",
+    "valor": 200,
+    "alocado": 0,
+    "naoAlocado": 200,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001010",
+    "descricao": "Movimentacao 16",
+    "data": "2026-11-13",
+    "tipo": "expense",
+    "valor": 45.67,
+    "alocado": 0,
+    "naoAlocado": 45.67,
+    "produto": "Poupanca Beta"
+   },
+   {
+    "id": "00000000-0000-4000-8000-00000000100c",
+    "descricao": "Movimentacao 12",
+    "data": "2026-11-12",
+    "tipo": "expense",
+    "valor": 60,
+    "alocado": 0,
+    "naoAlocado": 60,
+    "produto": "Cartao Gama"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001013",
+    "descricao": "Movimentacao 19",
+    "data": "2026-11-11",
+    "tipo": "expense",
+    "valor": 0.1,
+    "alocado": 0,
+    "naoAlocado": 0.1,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001014",
+    "descricao": "Movimentacao 20",
+    "data": "2026-11-11",
+    "tipo": "expense",
+    "valor": 0.2,
+    "alocado": 0,
+    "naoAlocado": 0.2,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001006",
+    "descricao": "Movimentacao 6",
+    "data": "2026-11-10",
+    "tipo": "fee",
+    "valor": 15,
+    "alocado": 0,
+    "naoAlocado": 15,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001008",
+    "descricao": "Movimentacao 8",
+    "data": "2026-11-09",
+    "tipo": "liability_payment",
+    "valor": 450,
+    "alocado": 0,
+    "naoAlocado": 450,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001007",
+    "descricao": "Movimentacao 7",
+    "data": "2026-11-08",
+    "tipo": "interest_charge",
+    "valor": 7.33,
+    "alocado": 0,
+    "naoAlocado": 7.33,
+    "produto": "Cartao Gama"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001016",
+    "descricao": "Compra no cartao sem fatura",
+    "data": "2026-11-06",
+    "tipo": "expense",
+    "valor": 123.45,
+    "alocado": 0,
+    "naoAlocado": 123.45,
+    "produto": "Cartao Delta"
+   },
+   {
+    "id": "00000000-0000-4000-8000-00000000100a",
+    "descricao": "Movimentacao 10",
+    "data": "2026-11-01",
+    "tipo": "expense",
+    "valor": 75,
+    "alocado": 0,
+    "naoAlocado": 75,
+    "produto": "Conta Alfa"
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000001004",
+    "descricao": "Movimentacao 4",
+    "data": "2026-10-30",
+    "tipo": "expense",
+    "valor": 89.9,
+    "alocado": 50,
+    "naoAlocado": 39.900000000000006,
+    "produto": "Cartao Gama"
+   }
+  ]
+ },
+ "recorrentes": {
+  "periodo": {
+   "inicio": "2026-10-20",
+   "fim": "2026-11-19",
+   "rotulo": "20/10/2026 a 19/11/2026"
+  },
+  "totalMensalComprometido": 969.9,
+  "totalMensalEstimado": true,
+  "contagem": {
+   "ativos": 7,
+   "pausados": 1
+  },
+  "recorrentes": [
+   {
+    "id": "00000000-0000-4000-8000-000000000700",
+    "nome": "Assinatura Video",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": 39.9,
+    "variavel": false,
+    "frequencia": "monthly",
+    "frequenciaLabel": "Mensal · todo dia 15",
+    "diaDoMes": 15,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": {
+     "id": "00000000-0000-4000-8000-000000000802",
+     "data": "2026-10-15",
+     "valor": 39.9,
+     "vencida": true
+    },
+    "precisaGerarInstancias": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000703",
+    "nome": "Academia Pausada",
+    "tipo": "expense",
+    "ativo": false,
+    "valor": 99,
+    "variavel": false,
+    "frequencia": "monthly",
+    "frequenciaLabel": "Mensal",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": {
+     "id": "00000000-0000-4000-8000-000000000804",
+     "data": "2026-11-16",
+     "valor": 99,
+     "vencida": false
+    },
+    "precisaGerarInstancias": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000701",
+    "nome": "Conta de Luz",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": 180,
+    "variavel": true,
+    "frequencia": "monthly",
+    "frequenciaLabel": "Mensal · todo dia 17",
+    "diaDoMes": 17,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": {
+     "id": "00000000-0000-4000-8000-000000000801",
+     "data": "2026-11-17",
+     "valor": null,
+     "vencida": false
+    },
+    "precisaGerarInstancias": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000702",
+    "nome": "Seguro Anual",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": 1200,
+    "variavel": false,
+    "frequencia": "annual",
+    "frequenciaLabel": "Anual",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": {
+     "id": "00000000-0000-4000-8000-000000000807",
+     "data": "2026-11-19",
+     "valor": 1200,
+     "vencida": false
+    },
+    "precisaGerarInstancias": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000705",
+    "nome": "Feira",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": 150,
+    "variavel": false,
+    "frequencia": "weekly",
+    "frequenciaLabel": "Semanal",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": null,
+    "precisaGerarInstancias": true
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000706",
+    "nome": "Personalizada Sem Intervalo",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": 50,
+    "variavel": false,
+    "frequencia": "custom",
+    "frequenciaLabel": "Personalizada",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": null,
+    "precisaGerarInstancias": true
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000704",
+    "nome": "Salario",
+    "tipo": "income",
+    "ativo": true,
+    "valor": 4000,
+    "variavel": false,
+    "frequencia": "monthly",
+    "frequenciaLabel": "Mensal",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": null,
+    "precisaGerarInstancias": true
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000707",
+    "nome": "Sem Valor",
+    "tipo": "expense",
+    "ativo": true,
+    "valor": null,
+    "variavel": false,
+    "frequencia": "monthly",
+    "frequenciaLabel": "Mensal",
+    "diaDoMes": null,
+    "intervaloDiasCustom": null,
+    "prioridade": null,
+    "categoria": null,
+    "fornecedor": null,
+    "produtoFinanceiro": "Conta Alfa",
+    "notas": null,
+    "iniciaEm": "2026-01-01",
+    "terminaEm": null,
+    "proximaInstancia": null,
+    "precisaGerarInstancias": true
+   }
+  ],
+  "instancias": [
+   {
+    "id": "00000000-0000-4000-8000-000000000805",
+    "templateId": "00000000-0000-4000-8000-000000000705",
+    "templateNome": "Feira",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-09",
+    "valorEsperado": 150,
+    "valorReal": null,
+    "status": "paid",
+    "dataPagamento": null,
+    "conciliada": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000806",
+    "templateId": "00000000-0000-4000-8000-000000000705",
+    "templateNome": "Feira",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-11",
+    "valorEsperado": 150,
+    "valorReal": null,
+    "status": "pending",
+    "dataPagamento": null,
+    "conciliada": true
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000800",
+    "templateId": "00000000-0000-4000-8000-000000000700",
+    "templateNome": "Assinatura Video",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-15",
+    "valorEsperado": 39.9,
+    "valorReal": null,
+    "status": "pending",
+    "dataPagamento": null,
+    "conciliada": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000804",
+    "templateId": "00000000-0000-4000-8000-000000000703",
+    "templateNome": "Academia Pausada",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-16",
+    "valorEsperado": 99,
+    "valorReal": null,
+    "status": "pending",
+    "dataPagamento": null,
+    "conciliada": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000801",
+    "templateId": "00000000-0000-4000-8000-000000000701",
+    "templateNome": "Conta de Luz",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-17",
+    "valorEsperado": null,
+    "valorReal": null,
+    "status": "pending",
+    "dataPagamento": null,
+    "conciliada": false
+   },
+   {
+    "id": "00000000-0000-4000-8000-000000000807",
+    "templateId": "00000000-0000-4000-8000-000000000702",
+    "templateNome": "Seguro Anual",
+    "tipo": "expense",
+    "dataEsperada": "2026-11-19",
+    "valorEsperado": 1200,
+    "valorReal": null,
+    "status": "pending",
+    "dataPagamento": null,
+    "conciliada": false
+   }
+  ],
+  "resumoInstancias": {
+   "previstas": 5,
+   "pagas": 1,
+   "conciliadas": 1
+  }
+ },
+ "gastosPorDia": [
+  {
+   "data": "2026-09-01",
+   "valor": "300.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-09-15",
+   "valor": "1000.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-10-28",
+   "valor": "120.40",
+   "vezes": 1
+  },
+  {
+   "data": "2026-10-30",
+   "valor": "89.90",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-01",
+   "valor": "75.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-04",
+   "valor": "300.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-06",
+   "valor": "123.45",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-07",
+   "valor": "43.21",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-08",
+   "valor": "7.33",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-09",
+   "valor": "450.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-10",
+   "valor": "15.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-11",
+   "valor": "0.30",
+   "vezes": 2
+  },
+  {
+   "data": "2026-11-12",
+   "valor": "60.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-13",
+   "valor": "45.67",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-16",
+   "valor": "200.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-18",
+   "valor": "450.00",
+   "vezes": 1
+  },
+  {
+   "data": "2026-11-20",
+   "valor": "10.00",
+   "vezes": 1
+  }
+ ]
+}

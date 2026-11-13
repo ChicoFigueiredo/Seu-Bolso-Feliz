@@ -381,19 +381,11 @@ pub struct Tag {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fornecedor {
     pub id: Id,
+    /// `name`: o nome que a tela mostra.
+    pub nome: String,
     pub nome_fantasia: Option<String>,
     pub razao_social: Option<String>,
     pub ativo: bool,
-}
-
-impl Fornecedor {
-    /// O nome que a tela mostra: o fantasia, senão a razão social.
-    pub fn nome(&self) -> &str {
-        self.nome_fantasia
-            .as_deref()
-            .or(self.razao_social.as_deref())
-            .unwrap_or("Sem nome")
-    }
 }
 
 /// O livro-caixa de um dono, inteiro (grill Q10): o que o cache da estação guarda e o que
@@ -447,16 +439,5 @@ mod testes {
     fn serializa_com_o_codigo_do_banco() {
         let json = serde_json::to_string(&TipoDeMovimentacao::PagamentoDeFatura).expect("json");
         assert_eq!(json, "\"statement_payment\"");
-    }
-
-    #[test]
-    fn fornecedor_sem_fantasia_usa_a_razao_social() {
-        let f = Fornecedor {
-            id: "f".into(),
-            nome_fantasia: None,
-            razao_social: Some("Padaria Exemplo Ltda".into()),
-            ativo: true,
-        };
-        assert_eq!(f.nome(), "Padaria Exemplo Ltda");
     }
 }

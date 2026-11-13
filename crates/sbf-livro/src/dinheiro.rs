@@ -5,7 +5,7 @@
 
 use std::fmt;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Neg, Sub, SubAssign};
 
 use serde::{Deserialize, Serialize};
 
@@ -171,6 +171,78 @@ impl Taxa {
     }
 }
 
+/// Uma quantia de centavos fracionária e exata: `numerador / denominador`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fracao {
+    numerador: i128,
+    denominador: i128,
+}
+
+fn mdc(a: i128, b: i128) -> i128 {
+    let (mut a, mut b) = (a.abs(), b.abs());
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
+}
+
+impl Fracao {
+    pub const ZERO: Fracao = Fracao {
+        numerador: 0,
+        denominador: 1,
+    };
+
+    /// `numerador / denominador` centavos, já simplificada.
+    pub fn nova(numerador: i128, denominador: i128) -> Fracao {
+        let sinal = if denominador < 0 { -1 } else { 1 };
+        let d = mdc(numerador, denominador);
+        Fracao {
+            numerador: sinal * numerador / d,
+            denominador: sinal * denominador / d,
+        }
+    }
+
+    pub fn de_centavos(c: Centavos) -> Fracao {
+        Fracao::nova(i128::from(c.0), 1)
+    }
+
+    /// O centavo mais próximo; meio centavo arredonda para longe do zero.
+    pub fn arredondar(self) -> Centavos {
+        let n = self.numerador;
+        let d = self.denominador;
+        let arredondado = if n >= 0 {
+            (2 * n + d) / (2 * d)
+        } else {
+            -((-2 * n + d) / (2 * d))
+        };
+        Centavos(i64::try_from(arredondado).unwrap_or(i64::MAX))
+    }
+
+    /// Para exibir ou comparar, nunca para somar.
+    #[allow(clippy::cast_precision_loss)]
+    pub fn como_f64(self) -> f64 {
+        self.numerador as f64 / self.denominador as f64
+    }
+}
+
+impl Add for Fracao {
+    type Output = Fracao;
+    fn add(self, outra: Fracao) -> Fracao {
+        Fracao::nova(
+            self.numerador * outra.denominador + outra.numerador * self.denominador,
+            self.denominador * outra.denominador,
+        )
+    }
+}
+
+impl Div<i64> for Centavos {
+    type Output = Fracao;
+    /// A divisão exata em centavos fracionários (ex.: saldo ÷ parcelas restantes).
+    fn div(self, divisor: i64) -> Fracao {
+        Fracao::nova(i128::from(self.0), i128::from(divisor))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -218,6 +290,17 @@ mod testes {
         assert_eq!(total, Centavos(-10));
         assert_eq!(total.abs(), Centavos(10));
         assert_eq!(-total, Centavos(10));
+    }
+
+    #[test]
+    fn fracao_arredonda_meio_centavo_para_longe_do_zero() {
+        assert_eq!(Fracao::nova(5, 2).arredondar(), Centavos(3));
+        assert_eq!(Fracao::nova(-5, 2).arredondar(), Centavos(-3));
+        assert_eq!(Fracao::nova(7, 3).arredondar(), Centavos(2));
+        assert_eq!(
+            (Centavos(10_000) / 7 + Centavos(1) / 7).arredondar(),
+            Centavos(1429)
+        );
     }
 
     #[test]

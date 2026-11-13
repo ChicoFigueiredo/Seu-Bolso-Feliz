@@ -6,76 +6,11 @@
 //! a soma é de frações exatas de centavo e só o total é arredondado.
 //! Teste de ouro: `tests/ouro_recorrencia.rs` (e o total em `tests/ouro_paineis.rs`).
 
-use std::ops::Add;
-
-use crate::dinheiro::Centavos;
+use crate::dinheiro::{Centavos, Fracao};
 use crate::tipos::{Frequencia, Recorrente, TipoDeMovimentacao};
 
 /// Média de dias por mês (365,25 ÷ 12) do TS, em décimos de milésimo: 30,4368.
 const DIAS_POR_MES_DEZ_MILESIMOS: i128 = 304_368;
-
-/// Uma quantia de centavos fracionária e exata: `numerador / denominador`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Fracao {
-    numerador: i128,
-    denominador: i128,
-}
-
-fn mdc(a: i128, b: i128) -> i128 {
-    let (mut a, mut b) = (a.abs(), b.abs());
-    while b != 0 {
-        (a, b) = (b, a % b);
-    }
-    a.max(1)
-}
-
-impl Fracao {
-    pub const ZERO: Fracao = Fracao {
-        numerador: 0,
-        denominador: 1,
-    };
-
-    fn nova(numerador: i128, denominador: i128) -> Fracao {
-        let sinal = if denominador < 0 { -1 } else { 1 };
-        let d = mdc(numerador, denominador);
-        Fracao {
-            numerador: sinal * numerador / d,
-            denominador: sinal * denominador / d,
-        }
-    }
-
-    pub fn de_centavos(c: Centavos) -> Fracao {
-        Fracao::nova(i128::from(c.0), 1)
-    }
-
-    /// O centavo mais próximo; meio centavo arredonda para longe do zero.
-    pub fn arredondar(self) -> Centavos {
-        let n = self.numerador;
-        let d = self.denominador;
-        let arredondado = if n >= 0 {
-            (2 * n + d) / (2 * d)
-        } else {
-            -((-2 * n + d) / (2 * d))
-        };
-        Centavos(i64::try_from(arredondado).unwrap_or(i64::MAX))
-    }
-
-    /// Para exibir ou comparar, nunca para somar.
-    #[allow(clippy::cast_precision_loss)]
-    pub fn como_f64(self) -> f64 {
-        self.numerador as f64 / self.denominador as f64
-    }
-}
-
-impl Add for Fracao {
-    type Output = Fracao;
-    fn add(self, outra: Fracao) -> Fracao {
-        Fracao::nova(
-            self.numerador * outra.denominador + outra.numerador * self.denominador,
-            self.denominador * outra.denominador,
-        )
-    }
-}
 
 /// Quanto um valor recorrente pesa por mês. `None` na personalizada sem intervalo
 /// válido: melhor admitir que não se sabe do que inventar um número.
@@ -162,12 +97,5 @@ mod testes {
                 .map(Fracao::arredondar),
             Some(Centavos(30_437))
         );
-    }
-
-    #[test]
-    fn arredonda_meio_centavo_para_longe_do_zero() {
-        assert_eq!(Fracao::nova(5, 2).arredondar(), Centavos(3));
-        assert_eq!(Fracao::nova(-5, 2).arredondar(), Centavos(-3));
-        assert_eq!(Fracao::nova(7, 3).arredondar(), Centavos(2));
     }
 }

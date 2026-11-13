@@ -9,14 +9,16 @@
 //! (ver [`amortizacao`]).
 
 pub mod amortizacao;
+pub mod centros;
 pub mod ciclo;
 pub mod data;
 pub mod dinheiro;
+pub mod hoje;
 pub mod rateio;
 pub mod recorrencia;
 pub mod tipos;
 
 pub use ciclo::{Ciclo, DiaDeCorte};
 pub use data::Data;
-pub use dinheiro::{Centavos, ErroDeValor, Taxa};
+pub use dinheiro::{Centavos, ErroDeValor, Fracao, Taxa};
 pub use tipos::*;
