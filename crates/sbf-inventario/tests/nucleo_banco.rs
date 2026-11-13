@@ -414,3 +414,44 @@ fn inv01_reabrir_banco_migrado_e_decidir_abre_a_escrita_na_hora() {
         "1"
     );
 }
+
+#[test]
+fn inv01_copia_nunca_sobrescreve_e_sem_copia_nao_migra() {
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = banco_do_bun(pasta.path());
+    let antes = bytes(&caminho);
+    let ocupado = pasta.path().join("ja-existe.sqlite");
+    std::fs::write(&ocupado, b"outro arquivo").unwrap();
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    assert!(inventario.migrar(&ocupado).is_err());
+    assert_eq!(std::fs::read(&ocupado).unwrap(), b"outro arquivo");
+    assert_eq!(inventario.estado(), EstadoDoBanco::DoBun);
+    drop(inventario);
+    assert_eq!(bytes(&caminho), antes);
+    let sobras: Vec<_> = std::fs::read_dir(pasta.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".parcial-"))
+        .collect();
+    assert!(sobras.is_empty());
+}
+
+#[test]
+fn inv01_copia_feita_com_outro_processo_gravando() {
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = banco_do_bun(pasta.path());
+    // Um "script" com uma escrita no WAL ainda não consolidada no arquivo principal.
+    let script = Connection::open(&caminho).unwrap();
+    script
+        .execute_batch("PRAGMA wal_autocheckpoint = 0; UPDATE achado SET notas = 'do script'")
+        .unwrap();
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    let copia = pasta.path().join("antes.sqlite");
+    inventario.migrar(&copia).unwrap();
+    let c = Connection::open(&copia).unwrap();
+    assert_eq!(
+        valor(&c, "SELECT COUNT(*) FROM achado WHERE notas = 'do script'"),
+        "4"
+    );
+    drop(script);
+}

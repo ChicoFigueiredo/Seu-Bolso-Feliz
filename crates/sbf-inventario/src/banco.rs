@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bancada_armazem::{
-    Armazem, Pragmas, Sincronizacao, copiar_banco, pendentes, verificar_integridade_de_arquivo,
+    Armazem, Pragmas, Sincronizacao, pendentes, verificar_integridade_de_arquivo,
 };
 use rusqlite::{Connection, OptionalExtension};
 
@@ -155,6 +155,51 @@ pub struct Inventario {
     leitura: Connection,
     /// A conexão de escrita, aberta na primeira escrita.
     armazem: Option<Armazem>,
+}
+
+/// Copia o banco para `destino` pela API de backup, num passo só.
+///
+/// Difere de `bancada_armazem::copiar_banco` (128 páginas por passo, 2 ms entre passos)
+/// porque, com os scripts Bun gravando, cada escrita entre dois passos recomeça o backup;
+/// num passo só, a cópia é um retrato de uma transação de leitura, e em WAL ela não
+/// bloqueia quem escreve. Num inventário sintético de 400 MB, as pausas eram 70% do tempo
+/// da cópia. Mesmas garantias: grava em `<destino>.parcial-<pid>`, renomeia no fim, nunca
+/// sobrescreve e sai um arquivo só (sem `-wal`).
+fn copiar_de_uma_vez(origem: &Connection, destino: &Path) -> Result<(), ErroDoBanco> {
+    use rusqlite::backup::{Backup, StepResult};
+
+    if destino.exists() {
+        return Err(bancada_armazem::Erro::DestinoJaExiste(destino.to_path_buf()).into());
+    }
+    let mut nome = destino.as_os_str().to_owned();
+    nome.push(format!(".parcial-{}", std::process::id()));
+    let parcial = PathBuf::from(nome);
+    let copiar = || -> Result<(), ErroDoBanco> {
+        let mut copia = Connection::open(&parcial)?;
+        {
+            let backup = Backup::new(origem, &mut copia)?;
+            loop {
+                match backup.step(-1)? {
+                    StepResult::Done => break,
+                    StepResult::More => {}
+                    _ => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        }
+        copia.query_row("PRAGMA journal_mode = DELETE", [], |_| Ok(()))?;
+        copia.close().map_err(|(_, e)| ErroDoBanco::Sqlite(e))?;
+        std::fs::rename(&parcial, destino)
+            .map_err(|e| ErroDoBanco::Armazem(bancada_armazem::Erro::Io(e)))
+    };
+    let resultado = copiar();
+    if resultado.is_err() {
+        for sufixo in ["", "-wal", "-shm", "-journal"] {
+            let mut nome = parcial.as_os_str().to_owned();
+            nome.push(sufixo);
+            let _ = std::fs::remove_file(PathBuf::from(nome));
+        }
+    }
+    resultado
 }
 
 fn abrir_reconhecimento(caminho: &Path) -> rusqlite::Result<Connection> {
@@ -355,7 +400,7 @@ impl Inventario {
         let copia = if plano.faz_copia {
             let destino = copia.as_ref().to_path_buf();
             andamento(EtapaDaMigracao::Copia);
-            copiar_banco(&self.leitura, &destino)?;
+            copiar_de_uma_vez(&self.leitura, &destino)?;
             andamento(EtapaDaMigracao::ConferenciaDaCopia);
             verificar_integridade_de_arquivo(&destino)?;
             Some(destino)
