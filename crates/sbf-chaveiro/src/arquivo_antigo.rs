@@ -26,10 +26,21 @@ use zeroize::Zeroizing;
 /// O dado associado do GCM, igual ao de `segredos.ts`.
 const AAD: &[u8] = b"sbf-inventario-segredos-v1";
 /// O teto de memória do scrypt, igual ao `maxmem` de `segredos.ts` (256 MiB): um arquivo que
-/// peça mais é tratado como adulterado, e não trava a máquina.
+/// peça mais é tratado como adulterado, e não trava a máquina. Vale para os dois blocos que
+/// o scrypt aloca: `V = 128·N·r` e `B = 128·r·p`.
 const MEMORIA_MAXIMA_DO_SCRYPT: u64 = 256 * 1024 * 1024;
-/// Paralelismo máximo aceito do scrypt (o `segredos.ts` grava 1).
-const PARALELISMO_MAXIMO: u32 = 16;
+/// As faixas aceitas (achado A3 da revisão de segurança da fatia 1). O `segredos.ts` gravava
+/// `N=2^17, r=8, p=1` (e `N=2^10` nos testes); a folga cobre um `N` dobrado, `r` dobrado e
+/// `p` até 4, mas nunca a combinação: o teto de trabalho limita o tempo.
+const LOG_N_MINIMO: u8 = 10;
+const LOG_N_MAXIMO: u8 = 18;
+const R_MAXIMO: u32 = 16;
+const PARALELISMO_MAXIMO: u32 = 4;
+/// Teto de trabalho `N·r·p` (o tempo do scrypt é proporcional a ele): o dobro do padrão do
+/// `segredos.ts` (`2^17·8·1`), uns poucos segundos numa máquina comum.
+const TRABALHO_MAXIMO: u64 = 2 * (1 << 17) * 8;
+/// O `cofre.enc` real tem poucos KiB; acima disto nem é lido.
+const TAMANHO_MAXIMO_DO_ARQUIVO: u64 = 1024 * 1024;
 
 /// O que o `cofre.enc` guardava. O `Debug` mostra só os rótulos.
 #[derive(Debug)]
@@ -139,15 +150,24 @@ fn log2_exato(n: u64) -> Option<u8> {
 }
 
 fn parametros(kdf: &Kdf) -> Result<scrypt::Params, ErroDoChaveiro> {
-    if kdf.alg != "scrypt" || kdf.p == 0 || kdf.p > PARALELISMO_MAXIMO || kdf.r == 0 {
+    if kdf.alg != "scrypt"
+        || !(1..=PARALELISMO_MAXIMO).contains(&kdf.p)
+        || !(1..=R_MAXIMO).contains(&kdf.r)
+    {
         return Err(ErroDoChaveiro::SenhaOuArquivoInvalido);
     }
-    let log_n = log2_exato(kdf.n).ok_or(ErroDoChaveiro::SenhaOuArquivoInvalido)?;
-    let memoria = 128u64
-        .checked_mul(kdf.n)
-        .and_then(|m| m.checked_mul(u64::from(kdf.r)))
+    let log_n = log2_exato(kdf.n)
+        .filter(|l| (LOG_N_MINIMO..=LOG_N_MAXIMO).contains(l))
         .ok_or(ErroDoChaveiro::SenhaOuArquivoInvalido)?;
-    if memoria > MEMORIA_MAXIMA_DO_SCRYPT {
+    let (r, p) = (u64::from(kdf.r), u64::from(kdf.p));
+    let memoria_v = 128u64.checked_mul(kdf.n).and_then(|m| m.checked_mul(r));
+    let memoria_b = 128u64.checked_mul(r).and_then(|m| m.checked_mul(p));
+    let trabalho = kdf.n.checked_mul(r).and_then(|t| t.checked_mul(p));
+    let dentro = |valor: Option<u64>, teto: u64| valor.is_some_and(|v| v <= teto);
+    if !dentro(memoria_v, MEMORIA_MAXIMA_DO_SCRYPT)
+        || !dentro(memoria_b, MEMORIA_MAXIMA_DO_SCRYPT)
+        || !dentro(trabalho, TRABALHO_MAXIMO)
+    {
         return Err(ErroDoChaveiro::SenhaOuArquivoInvalido);
     }
     scrypt::Params::new(log_n, kdf.r, kdf.p).map_err(invalido)
@@ -202,7 +222,17 @@ pub(crate) fn ler(
     caminho: &Path,
     senha_mestra: &Segredo,
 ) -> Result<SegredosAntigos, ErroDoChaveiro> {
-    let bytes = std::fs::read(caminho).map_err(|e| ErroDoChaveiro::disco(&e))?;
+    use std::io::Read as _;
+    let arquivo = std::fs::File::open(caminho).map_err(|e| ErroDoChaveiro::disco(&e))?;
+    // Lê no máximo um byte além do teto: se vier, o arquivo é grande demais.
+    let mut bytes = Vec::new();
+    arquivo
+        .take(TAMANHO_MAXIMO_DO_ARQUIVO + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| ErroDoChaveiro::disco(&e))?;
+    if bytes.len() as u64 > TAMANHO_MAXIMO_DO_ARQUIVO {
+        return Err(ErroDoChaveiro::SenhaOuArquivoInvalido);
+    }
     decifrar(&bytes, senha_mestra)
 }
 
@@ -235,6 +265,8 @@ mod testes {
             base(1024, 0, 1),
             base(1024, 8, 0),
             base(1024, 8, 99),
+            base(2, 1 << 20, 16), // sonda S1 da revisão: B = 128·r·p = 2 GiB
+            base(1 << 17, 16, 2), // trabalho acima do teto
         ] {
             assert_eq!(
                 parametros(&kdf).err(),
