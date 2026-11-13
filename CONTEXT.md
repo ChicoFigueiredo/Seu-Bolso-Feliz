@@ -157,6 +157,12 @@ ser desfeita por outra decisão; o estado atual é o resultado de todas elas. N�
 servidor: o que vai é a promoção.
 _Avoid_: veredito, ajuste, edição, alteração
 
+**Pendência**:
+Uma pergunta do sistema que trava um achado, um registro ou um lote até o usuário
+responder, como "PDF protegido sem regra". Só vale nesse sentido: um compromisso ou uma
+alteração nunca é chamado de pendência.
+_Avoid_: dúvida, tarefa, alerta, bloqueio
+
 **Promoção**:
 A passagem de um lote de achados aprovados do inventário para a caixa de entrada do
 servidor. É o único caminho de uma fonte em massa até o livro-caixa.
