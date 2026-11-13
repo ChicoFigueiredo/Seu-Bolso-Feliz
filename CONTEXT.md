@@ -41,6 +41,11 @@ se moveu; uma compra no cartão, no ciclo da data da compra — o pagamento da f
 outro registro. O período de uma fatura de cartão não é um ciclo: chama-se fatura.
 _Avoid_: mês (quando se quer dizer ciclo), período, competência, ciclo da fatura
 
+**Para resolver**:
+A lista da tela Hoje com o que pede atenção no livro-caixa: compromissos vencidos,
+movimentações sem categoria, não alocadas ou não confirmadas e documentos a revisar.
+_Avoid_: pendências (reservado ao inventário), a revisar
+
 ## Classificação
 
 Três eixos independentes. Uma movimentação pode ter os três ao mesmo tempo, e nenhum

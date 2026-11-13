@@ -410,6 +410,13 @@ são configurados em Opções.
 - **A coleta do Drive ignora `SBF/`.** O `coletar-nuvem.ts` ganha essa exclusão nesta
   fatia, como mudança transitória até ser portado.
 
+### Destinos da Estante (decidido com o CEO em 2026-11-13)
+
+A Estante pode ter **vários destinos ao mesmo tempo**, com a mesma organização: Google
+Drive, OneDrive e uma pasta local. A pasta local é indicada na primeira abertura (o padrão
+é a que já estiver em uso). Descartar um achado **nunca apaga** nada: nem o original nem a
+cópia do cofre; ele só sai das áreas de trabalho.
+
 ### Cópia de segurança (`SBF/Copia-de-seguranca/`)
 
 - **O que vai:** o acervo inteiro e um instantâneo do `inventario.sqlite`, tirado pela
