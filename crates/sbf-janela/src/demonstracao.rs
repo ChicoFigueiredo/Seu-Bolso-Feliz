@@ -48,7 +48,7 @@ struct Achado {
     /// `novo`, `documento`, `descartado`, `duvida`.
     estado: String,
     decidido_por: Option<String>,
-    document_type: String,
+    tipo_de_documento: String,
     fornecedor: Option<String>,
     data: Option<String>,
     valor: Option<i64>,
@@ -126,7 +126,7 @@ struct Pendencia {
 struct RegraDeSenha {
     id: i64,
     fornecedor: String,
-    document_type: String,
+    tipo_de_documento: String,
     estrategia: String,
     criada_em: String,
 }
@@ -825,7 +825,7 @@ impl Estado {
                 nome: nome.into(),
                 estado: "novo".into(),
                 decidido_por: None,
-                document_type: tipo.into(),
+                tipo_de_documento: tipo.into(),
                 fornecedor: None,
                 data: Some("2026-11-12".into()),
                 valor: None,
@@ -882,7 +882,7 @@ impl Estado {
         // Um lote em montagem com os boletos de outubro.
         let mut itens = Vec::new();
         for a in &e.achados {
-            if a.document_type == "boleto"
+            if a.tipo_de_documento == "boleto"
                 && a.estado == "documento"
                 && a.data
                     .as_deref()
@@ -955,7 +955,7 @@ impl Estado {
         e.regras.push(RegraDeSenha {
             id: 1,
             fornecedor: "Banco Ômega".into(),
-            document_type: "fatura_cartao".into(),
+            tipo_de_documento: "fatura_cartao".into(),
             estrategia: "Os 5 primeiros dígitos do CPF".into(),
             criada_em: "2026-10-05T10:00:00".into(),
         });
@@ -1077,7 +1077,7 @@ impl Estado {
             nome: nome.into(),
             estado: "documento".into(),
             decidido_por: Some("regras@2".into()),
-            document_type: tipo.into(),
+            tipo_de_documento: tipo.into(),
             fornecedor: fornecedor.map(str::to_owned),
             data: data.map(str::to_owned),
             valor,
@@ -1119,7 +1119,7 @@ impl Estado {
             nome: nome.into(),
             estado: estado.into(),
             decidido_por: Some(autor.into()),
-            document_type: tipo.into(),
+            tipo_de_documento: tipo.into(),
             fornecedor: None,
             data: Some("2026-09-15".into()),
             valor: None,
@@ -1275,7 +1275,13 @@ impl Estado {
                 .find(|x| x.id.to_string() == r.chave)
                 .map_or_else(
                     || r.chave.clone(),
-                    |x| format!("{} · {}", x.fornecedor, rotulo_tipo_doc(&x.document_type)),
+                    |x| {
+                        format!(
+                            "{} · {}",
+                            x.fornecedor,
+                            rotulo_tipo_doc(&x.tipo_de_documento)
+                        )
+                    },
                 ),
             Tipo::Conexao => self.nome_conexao(&r.chave).to_owned(),
             Tipo::Coleta => self
@@ -1508,7 +1514,9 @@ impl Estado {
                     v.extend(
                         self.regras
                             .iter()
-                            .filter(|r| &r.fornecedor == f && r.document_type == a.document_type)
+                            .filter(|r| {
+                                &r.fornecedor == f && r.tipo_de_documento == a.tipo_de_documento
+                            })
                             .map(|r| Ref::nova(Tipo::RegraDeSenha, r.id.to_string())),
                     );
                 }
@@ -1646,7 +1654,7 @@ impl Estado {
                             .iter()
                             .filter(|a| {
                                 a.fornecedor.as_deref() == Some(r.fornecedor.as_str())
-                                    && a.document_type == r.document_type
+                                    && a.tipo_de_documento == r.tipo_de_documento
                             })
                             .map(Self::ref_do_achado),
                     );
@@ -1796,7 +1804,7 @@ impl Estado {
                 },
                 txt(format!(
                     "{}{}",
-                    rotulo_tipo_doc(&a.document_type),
+                    rotulo_tipo_doc(&a.tipo_de_documento),
                     if a.protegido { " · protegido" } else { "" }
                 )),
                 a.fornecedor.as_ref().map_or(Celula::Vazia, |f| {
@@ -2087,7 +2095,7 @@ impl Estado {
                                     Ref::nova(Tipo::Fornecedor, x.fornecedor.clone()),
                                     x.fornecedor.clone(),
                                 ),
-                                txt(rotulo_tipo_doc(&x.document_type)),
+                                txt(rotulo_tipo_doc(&x.tipo_de_documento)),
                                 txt(x.estrategia.clone()),
                                 Celula::Data(x.criada_em.clone()),
                             ],
@@ -2339,7 +2347,7 @@ impl Estado {
                 &[
                     &a.nome,
                     a.fornecedor.as_deref().unwrap_or(""),
-                    &a.document_type,
+                    &a.tipo_de_documento,
                 ],
             ) && a
                 .data
@@ -2347,7 +2355,7 @@ impl Estado {
                 .is_none_or(|d| Self::ciclo_no_filtro(filtro, &ciclo_da_data(d)))
                 && Self::quem_no_filtro(filtro, a.decidido_por.as_deref())
                 && (filtro.estados.is_empty() || filtro.estados.contains(&a.estado))
-                && (filtro.tipos.is_empty() || filtro.tipos.contains(&a.document_type))
+                && (filtro.tipos.is_empty() || filtro.tipos.contains(&a.tipo_de_documento))
                 && (filtro.fontes.is_empty()
                     || self
                         .origens_de(&a.hash)
@@ -2689,7 +2697,7 @@ impl Estado {
                         },
                     ),
                     campo("Hash", txt(a.hash.get(..12).unwrap_or(&a.hash).to_owned())),
-                    campo("Tipo", txt(rotulo_tipo_doc(&a.document_type))),
+                    campo("Tipo", txt(rotulo_tipo_doc(&a.tipo_de_documento))),
                     campo(
                         "Fornecedor",
                         a.fornecedor.as_ref().map_or(Celula::Vazia, |f| {
@@ -2737,7 +2745,7 @@ impl Estado {
                 if a.protegido {
                     let regra = self.regras.iter().find(|x| {
                         a.fornecedor.as_deref() == Some(x.fornecedor.as_str())
-                            && x.document_type == a.document_type
+                            && x.tipo_de_documento == a.tipo_de_documento
                     });
                     c.push(campo(
                         "Protegido por senha",
@@ -2997,7 +3005,10 @@ impl Estado {
                                 x.fornecedor.clone(),
                             ),
                         ),
-                        campo("Tipo de documento", txt(rotulo_tipo_doc(&x.document_type))),
+                        campo(
+                            "Tipo de documento",
+                            txt(rotulo_tipo_doc(&x.tipo_de_documento)),
+                        ),
                         campo("Estratégia", txt(x.estrategia.clone())),
                         campo("Senha", txt("fica no chaveiro, nunca aparece aqui")),
                         campo("Criada em", Celula::Data(x.criada_em.clone())),
@@ -4193,7 +4204,7 @@ impl Estado {
                 match campo {
                     "estado" => a.estado = texto(v).unwrap_or_else(|| "novo".into()),
                     "fornecedor" => a.fornecedor = texto(v),
-                    "document_type" => a.document_type = texto(v).unwrap_or_default(),
+                    "document_type" => a.tipo_de_documento = texto(v).unwrap_or_default(),
                     "data_e_valor" => {
                         a.data = v.get("data").and_then(Value::as_str).map(str::to_owned);
                         a.valor = v.get("valor_centavos").and_then(Value::as_i64);
@@ -4253,7 +4264,7 @@ impl Estado {
                         self.regras.push(RegraDeSenha {
                             id,
                             fornecedor: alvo.chave.clone(),
-                            document_type: v
+                            tipo_de_documento: v
                                 .get("document_type")
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
@@ -4342,7 +4353,7 @@ impl Estado {
                 Some(a) => match campo {
                     "estado" => json!(a.estado),
                     "fornecedor" => json!(a.fornecedor),
-                    "document_type" => json!(a.document_type),
+                    "document_type" => json!(a.tipo_de_documento),
                     "data_e_valor" => json!({"data": a.data, "valor_centavos": a.valor}),
                     "decidido_por" => json!(a.decidido_por),
                     _ => Value::Null,
@@ -4598,7 +4609,7 @@ impl Estado {
                     id
                 }
                 Acao::GuardarRegraDeSenha {
-                    tipo_de_documento: document_type,
+                    tipo_de_documento,
                     estrategia,
                     ..
                 } => {
@@ -4606,7 +4617,7 @@ impl Estado {
                         return Err(nao_se_aplica(alvo));
                     }
                     let nova = self.regras.iter().map(|r| r.id).max().unwrap_or(0) + 1;
-                    let depois = json!({"id": nova, "document_type": document_type, "estrategia": estrategia});
+                    let depois = json!({"id": nova, "document_type": tipo_de_documento, "estrategia": estrategia});
                     let id = self.registrar(
                         alvo.clone(),
                         "regra_senha",

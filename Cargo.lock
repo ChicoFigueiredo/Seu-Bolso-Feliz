@@ -3587,6 +3587,7 @@ dependencies = [
  "sbf-estante",
  "sbf-inventario",
  "sbf-pdf",
+ "sbf-processo",
  "serde",
  "serde_json",
  "tempfile",

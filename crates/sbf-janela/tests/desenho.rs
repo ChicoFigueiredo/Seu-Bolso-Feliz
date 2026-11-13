@@ -463,6 +463,7 @@ fn intervalo_conexao_tema_previa_e_nova_regra() {
         fornecedor: "Banco Beta".into(),
         tipo_de_documento: "fatura_cartao".into(),
         estrategia: "cpf_ultimos:5".into(),
+        prioridade: "50".into(),
         erro: None,
     };
     assert!(
@@ -470,6 +471,7 @@ fn intervalo_conexao_tema_previa_e_nova_regra() {
             fornecedor: "Banco Beta".into(),
             tipo_de_documento: "fatura".into(),
             estrategia: "palpite".into(),
+            prioridade: "100".into(),
             erro: None
         })
         .is_err()
@@ -488,4 +490,15 @@ fn intervalo_conexao_tema_previa_e_nova_regra() {
         })
         .expect("regras");
     assert_eq!(regras.linhas.len(), 1);
+    // Prioridade que não é número não passa.
+    assert!(
+        confirmar_dialogo(&Dialogo::NovaRegra {
+            fornecedor: "Banco Beta".into(),
+            tipo_de_documento: "fatura".into(),
+            estrategia: "cpf_completo".into(),
+            prioridade: "alta".into(),
+            erro: None
+        })
+        .is_err()
+    );
 }

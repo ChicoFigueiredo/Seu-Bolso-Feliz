@@ -230,6 +230,14 @@ impl Ferramentas {
 
     /// Ferramentas › Abrir PDF protegido: a rodada numa thread, com conexão própria.
     pub fn abrir_pdf_protegido(&mut self) {
+        self.abrir_pdf_protegido_de(None);
+    }
+
+    /// Aba Achado › Abrir protegido: a rodada só com os achados selecionados.
+    pub fn abrir_pdf_protegido_de(
+        &mut self,
+        so_os_achados: Option<std::collections::BTreeSet<String>>,
+    ) {
         let Some(chaveiro) = self.chaveiro.clone() else {
             self.resultado = Some(Resultado::Erro(format!(
                 "O chaveiro não abriu: {}",
@@ -240,6 +248,7 @@ impl Ferramentas {
         let (banco, cofre) = (self.banco.clone(), self.cofre.clone());
         let opcoes = OpcoesDaRodada {
             tentar_estrategias_padrao: self.tentar_estrategias_padrao,
+            so_os_achados,
             ..OpcoesDaRodada::default()
         };
         self.comecar("Abrir PDF protegido", move |andamento| {
@@ -531,7 +540,7 @@ impl Ferramentas {
                 }
                 match &mut self.resultado {
                     Some(Resultado::Pdf { relatorio, propostas }) => {
-                        resumo_do_pdf(ui, relatorio);
+                        resumo_do_pdf(ui, relatorio, pedidos);
                         let mut aceitas = Vec::new();
                         let mut recusadas = Vec::new();
                         for (i, proposta) in propostas.iter().enumerate() {
@@ -839,13 +848,14 @@ struct PreferenciasDasFerramentas {
     tentar_estrategias_padrao: bool,
 }
 
-fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
+fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada, pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
     let mut abertos = 0;
     let mut sem_texto = 0;
     let mut pendencias = 0;
     let mut nao_abriu = 0;
     let mut grandes = 0;
+    let mut sem_regra = 0;
     let mut outros = 0;
     for x in &r.resultados {
         match x.situacao {
@@ -854,15 +864,32 @@ fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
             SituacaoDoPdf::Pendencia { .. } => pendencias += 1,
             SituacaoDoPdf::NaoAbriu => nao_abriu += 1,
             SituacaoDoPdf::GrandeDemais => grandes += 1,
+            SituacaoDoPdf::SemRegra => sem_regra += 1,
             _ => outros += 1,
         }
     }
     ui.label(format!(
-        "{} PDFs protegidos: {abertos} abertos, {sem_texto} sem texto (OCR numa fatia futura), {pendencias} viraram pendência, {nao_abriu} ainda não abriram, {grandes} grandes demais (acima de 50 MiB), {outros} com falha ou sem arquivo.",
+        "{} PDFs protegidos: {abertos} abertos, {sem_texto} sem texto (OCR numa fatia futura), {pendencias} viraram pendência, {nao_abriu} ainda não abriram, {sem_regra} sem regra, {grandes} grandes demais (acima de 50 MiB), {outros} com falha ou sem arquivo.",
         r.resultados.len()
     ));
     if r.resultados.is_empty() {
         ui.label(RichText::new("Nenhum PDF protegido esperando.").color(p.tinta_suave));
+    }
+    let n = r.sem_regra();
+    if n > 0 {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{n} PDF{} sem regra",
+                    if n == 1 { "" } else { "s" }
+                ))
+                .strong()
+                .color(p.aviso),
+            );
+            if ui.button("Nova regra").clicked() {
+                pedidos.push(Pedido::Executar(crate::acoes::IdAcao::NovaRegraDeSenha));
+            }
+        });
     }
     if !r.estrategias_desconhecidas.is_empty() {
         ui.label(
@@ -875,36 +902,12 @@ fn resumo_do_pdf(ui: &mut Ui, r: &RelatorioDaRodada) {
     }
 }
 
-/// Abre o arquivo (ou a pasta dele) com o programa padrão do sistema, sem esperar.
+/// Abre o arquivo (ou a pasta dele) com o programa do sistema, pelo `sbf-processo` (que
+/// não confia no PATH e exige caminho absoluto).
 fn abrir_no_sistema(caminho: &Path, so_a_pasta: bool) -> Result<(), String> {
-    let alvo = if so_a_pasta {
-        caminho.parent().unwrap_or(caminho).to_path_buf()
-    } else {
-        caminho.to_path_buf()
-    };
-    let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = std::process::Command::new("explorer");
-        if so_a_pasta {
-            c.arg(format!("/select,{}", caminho.display()));
-        } else {
-            c.arg(&alvo);
-        }
-        c
-    } else if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        if so_a_pasta {
-            c.arg("-R").arg(caminho);
-        } else {
-            c.arg(&alvo);
-        }
-        c
-    } else {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(&alvo);
-        c
-    };
-    cmd.spawn()
-        .map(|_| ())
+    let absoluto =
+        std::fs::canonicalize(caminho).map_err(|e| format!("não achei o arquivo: {e}"))?;
+    sbf_processo::abrir_no_sistema(&absoluto, so_a_pasta)
         .map_err(|e| format!("não deu para abrir: {e}"))
 }
 
