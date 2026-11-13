@@ -270,12 +270,24 @@ Regras:
 3. **Tentativa:**
    - O candidato é gerado só em memória, com zeroize.
    - **A senha nunca vai num argumento de linha de comando**, porque fica visível no
-     `ps`. Um spike no ticket decide entre abrir dentro do processo (`lopdf`) e
-     `qpdf --password-file=-` pela entrada padrão.
-4. **Cópia decifrada:**
-   - Fica numa pasta temporária 0700 dentro da pasta de dados do app, fora do cofre e
-     fora de qualquer pasta sincronizada.
-   - É apagada por guarda RAII, mesmo quando a extração falha no meio.
+     `ps`.
+   - **Como abrir** (decidido pelo spike `docs/specs/spikes/2026-11-12-pdf-protegido.md`):
+     - O `lopdf` 0.47 (MIT) decifra o original em memória.
+     - O PDF decifrado vai pela entrada padrão para `pdftotext -layout -l 3 - -`. Nos
+       testes, o texto saiu idêntico byte a byte ao que o inventário produz hoje.
+     - A senha não sai do processo.
+     - Senha errada é um erro tipado (`InvalidPassword`).
+     - PDF "reparado e sem nenhuma letra" é tratado como corrompido.
+   - **Fallback**, para cifra que o `lopdf` não implementa: `qpdf --password-file=-
+     --decrypt <original> -` em pipe para o `pdftotext`, nunca com cópia em disco.
+4. **Nenhuma cópia decifrada no disco.** O caminho principal não cria arquivo. O único
+   caso que vai precisar de pasta temporária é o OCR de PDF protegido escaneado, que
+   fica para quando a E3 for portada. Nesse caso valem:
+   - pasta 0700 com guarda RAII;
+   - faxina das sobras na abertura do app, porque abort, SIGKILL e queda de energia
+     deixam sobra;
+   - a restrição de AppArmor do `qpdf` no Ubuntu, que só aceita `*.pdf` fora de pastas
+     ocultas.
 5. **Registro:**
    - O texto vai para `texto` e o `canonical_fingerprint` é preenchido.
    - Cada tentativa grava `tentativa_senha` com a estratégia e o resultado, nunca a
@@ -376,7 +388,7 @@ Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (r
 | INV-06 | O `e3-triar` rodado depois de uma decisão sua não muda o achado.                                                                                                                                                                                         |
 | INV-07 | `decisao` recusa UPDATE e DELETE.                                                                                                                                                                                                                        |
 | INV-08 | O chaveiro importa um `cofre.enc` de teste (N=2^10). Senha errada e arquivo adulterado dão o mesmo erro. O valor de teste não aparece em nenhum arquivo, log ou banco tocado (busca pelo valor).                                                         |
-| INV-09 | O PDF de teste abre pela regra, e a senha não aparece no argv (conferido por `/proc` durante a execução) nem em log. A cópia decifrada some mesmo com pânico injetado. Depois de N falhas o achado vira pendência. A regra só é gravada com confirmação. |
+| INV-09 | O PDF de teste abre pela regra, e a senha não aparece no argv (conferido por `/proc` durante a execução) nem em log. Nenhum arquivo decifrado é criado (conferido com `strace`). O texto sai igual ao do `pdftotext` sobre o original decifrado. Depois de N falhas o achado vira pendência. A regra só é gravada com confirmação. |
 | INV-10 | Aprovar um lote marca os itens. Enviar fica desabilitado, com o motivo.                                                                                                                                                                                  |
 | INV-11 | A estante tem só documentos, com o nome de `vista-nome`. Um PDF protegido chega protegido. A coleta do Drive ignora `SBF/`.                                                                                                                              |
 | INV-12 | Restaurar a partir da cópia cifrada reproduz o acervo e o banco com o mesmo hash.                                                                                                                                                                        |
