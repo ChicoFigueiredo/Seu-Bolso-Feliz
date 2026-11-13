@@ -303,6 +303,13 @@ mod testes {
         );
     }
 
+    proptest::proptest! {
+        #[test]
+        fn texto_do_numeric_volta_ao_mesmo_valor(c in -99_999_999_999_999_i64..=99_999_999_999_999) {
+            proptest::prop_assert_eq!(Centavos::de_texto(&Centavos(c).to_string()), Ok(Centavos(c)));
+        }
+    }
+
     #[test]
     fn taxa_le_seis_casas() {
         assert_eq!(

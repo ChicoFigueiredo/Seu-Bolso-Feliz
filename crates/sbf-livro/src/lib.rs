@@ -11,6 +11,8 @@
 pub mod amortizacao;
 pub mod centros;
 pub mod ciclo;
+#[cfg(feature = "contrato")]
+pub mod contrato;
 pub mod data;
 pub mod dinheiro;
 pub mod gastos;

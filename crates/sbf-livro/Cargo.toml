@@ -7,15 +7,18 @@ rust-version.workspace = true
 publish.workspace = true
 
 [features]
-default = ["relatorios"]
+default = ["relatorios", "contrato"]
 # Implementa o `FonteDeGastos` do `sbf-inventario` sobre o livro-caixa. O servidor pode
 # desligar (`default-features = false`) para não puxar o inventário.
 relatorios = ["dep:sbf-inventario"]
+# Converte as linhas do contrato HTTP (`sbf-contrato`) nos tipos do livro.
+contrato = ["dep:sbf-contrato"]
 
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
 sbf-inventario = { workspace = true, optional = true }
+sbf-contrato = { path = "../sbf-contrato", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
