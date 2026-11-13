@@ -192,12 +192,15 @@ pub fn desenhar_parcial(
     // Números e estados não encolhem (o estado leva o selo e o ícone de quem decidiu).
     let fixas: Vec<bool> = (0..n_colunas)
         .map(|i| {
-            tabela.colunas.get(i).is_some_and(|c| c.numerica)
-                || tabela
-                    .linhas
-                    .iter()
-                    .take(16)
-                    .any(|l| matches!(l.celulas.get(i), Some(Celula::Estado { .. })))
+            // A primeira coluna é o nome do item: fica inteira se couber razoavelmente.
+            (i == 0 && larguras[0] <= 260.0 && disponivel > 700.0)
+                || tabela.colunas.get(i).is_some_and(|c| c.numerica)
+                || tabela.linhas.iter().take(16).any(|l| {
+                    matches!(
+                        l.celulas.get(i),
+                        Some(Celula::Estado { .. } | Celula::Data(_))
+                    )
+                })
         })
         .collect();
     if larguras.iter().sum::<f32>() > disponivel {
