@@ -8,13 +8,14 @@
 //!   para `pdftotext -layout -l 3 - -`; fallback `qpdf --password-file=-` em pipe. **A senha
 //!   nunca vai em argumento de linha de comando, e nenhuma cópia decifrada vai para o
 //!   disco.** O original nunca muda.
-//! - `rodada` (a seguir): a rodada sobre o inventário (alvos, regras em ordem, tentativas, limite de
+//! - [`rodada`]: a rodada sobre o inventário (alvos, regras em ordem, tentativas, limite de
 //!   falhas, pendência e a proposta de regra), gravada por `sbf_inventario::protegidos`.
 
 pub mod abertura;
 pub mod estrategia;
 pub mod fonte;
 pub mod processo;
+pub mod rodada;
 pub mod texto;
 
 pub use abertura::{
@@ -24,4 +25,7 @@ pub use abertura::{
 pub use estrategia::{Candidata, Estrategia, EstrategiaDesconhecida};
 pub use fonte::{ErroDeFonte, FonteDeSegredos};
 pub use processo::FalhaDeFerramenta;
+pub use rodada::{
+    OpcoesDaRodada, PropostaDeRegra, RelatorioDaRodada, ResultadoDoAlvo, Situacao, abrir_protegidos,
+};
 pub use texto::impressao_canonica;
