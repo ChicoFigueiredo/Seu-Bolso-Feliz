@@ -21,6 +21,7 @@ import { ehSoZeros, NOTA_ZERADO } from "./arquivo-zerado";
 import { abrirBanco } from "./banco";
 import { cicloDe, limitesDoCiclo } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
+import { condicaoDoUsuario } from "./decisao";
 import {
   escolherDataChave,
   extrairCampos,
@@ -41,7 +42,7 @@ const PAGINAS = 3;
 /** Texto de PDF com menos letras que isso é tratado como imagem. */
 const MIN_LETRAS = 15;
 
-interface Alvo {
+export interface Alvo {
   content_hash: string;
   extensao: string | null;
   caminho_acervo: string | null;
@@ -63,7 +64,7 @@ interface OrigemInfo {
 type Situacao =
   "texto" | "protegido" | "sem-texto" | "sem-arquivo" | "sem-extrator" | "zerado" | "erro";
 
-interface Resultado {
+export interface Resultado {
   alvo: Alvo;
   situacao: Situacao;
   metodo?: string;
@@ -337,7 +338,7 @@ async function pool<T>(
 /** Datas reais (pagamento, vencimento, emissão, compra) valem mais que 'arquivo'/'mensagem'. */
 const DATA_FRACA: ReadonlySet<TipoDataChave> = new Set(["arquivo", "mensagem"]);
 
-function gravar(db: Database, r: Resultado): void {
+export function gravar(db: Database, r: Resultado): void {
   const { alvo } = r;
   if (r.situacao === "protegido") {
     db.query("UPDATE achado SET protegido_senha = 1 WHERE content_hash = ?").run(alvo.content_hash);
@@ -384,14 +385,19 @@ function gravar(db: Database, r: Resultado): void {
       l.fim,
     );
   }
+  // Com decisão do usuário, o que ele já tem (data, valor, fornecedor) fica; só se
+  // preenche o que está vazio.
+  const usuario = condicaoDoUsuario(db, "achado");
   db.query(
     `UPDATE achado SET
        protegido_senha = CASE WHEN ? = 'pdf' THEN 0 ELSE protegido_senha END,
        canonical_fingerprint = ?,
        document_type = COALESCE(document_type, ?),
-       data_chave = ?, data_chave_tipo = ?, ciclo_id = ?,
-       valor_centavos = COALESCE(?, valor_centavos),
-       supplier_name_raw = COALESCE(?, supplier_name_raw)
+       data_chave = CASE WHEN ${usuario} AND data_chave IS NOT NULL THEN data_chave ELSE ? END,
+       data_chave_tipo = CASE WHEN ${usuario} AND data_chave IS NOT NULL THEN data_chave_tipo ELSE ? END,
+       ciclo_id = CASE WHEN ${usuario} AND data_chave IS NOT NULL THEN ciclo_id ELSE ? END,
+       valor_centavos = CASE WHEN ${usuario} THEN COALESCE(valor_centavos, ?) ELSE COALESCE(?, valor_centavos) END,
+       supplier_name_raw = CASE WHEN ${usuario} THEN COALESCE(supplier_name_raw, ?) ELSE COALESCE(?, supplier_name_raw) END
      WHERE content_hash = ?`,
   ).run(
     (alvo.extensao ?? "").toLowerCase(),
@@ -401,6 +407,8 @@ function gravar(db: Database, r: Resultado): void {
     dataTipo,
     ciclo,
     r.valorCentavos ?? null,
+    r.valorCentavos ?? null,
+    r.fornecedor ?? null,
     r.fornecedor ?? null,
     alvo.content_hash,
   );
@@ -507,4 +515,4 @@ async function main(): Promise<void> {
   db.close();
 }
 
-await main();
+if (import.meta.main) await main();
