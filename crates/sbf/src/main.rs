@@ -24,6 +24,7 @@ struct App {
     casca: Casca<AppSbf>,
     captura: Option<PathBuf>,
     quadros: u32,
+    captura_pedida: bool,
 }
 
 impl App {
@@ -43,6 +44,7 @@ impl App {
             casca,
             captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
             quadros: 0,
+            captura_pedida: false,
         })
     }
 }
@@ -63,7 +65,14 @@ impl eframe::App for App {
         if self.quadros == 1 {
             preparar_captura(&mut self.casca, &ctx);
         }
-        if self.quadros == 10 {
+        // O foco depois da navegação (abrir uma área limpa a seleção).
+        if self.quadros == 4 {
+            focar_para_captura(&mut self.casca, &ctx);
+        }
+        // A prévia carrega numa thread: espera ela terminar (até uns 10 s).
+        let previa_ocupada = self.casca.app.janela().previas.ocupada();
+        if self.quadros >= 10 && !self.captura_pedida && (!previa_ocupada || self.quadros > 600) {
+            self.captura_pedida = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
         let imagem = ctx.input(|i| {
@@ -84,8 +93,9 @@ impl eframe::App for App {
 }
 
 /// `SBF_CAPTURA_ABRIR` (uma rota: `a-triar`, `fornecedor:Energia Exemplo`…),
-/// `SBF_CAPTURA_ABA` (o índice da aba da página) e `SBF_CENA` (`paleta`, `keytips`,
-/// `simples`, `bastidores`, `flutuante`).
+/// `SBF_CAPTURA_ABA` (o índice da aba da página), `SBF_CAPTURA_FOCO` (a rota do item em
+/// foco no dock: a prévia dele no painel) e `SBF_CENA` (`paleta`, `keytips`, `simples`,
+/// `bastidores`, `flutuante`, `previa-destacada`).
 fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     use sbf_janela::Destino;
     if let Ok(rota) = std::env::var("SBF_CAPTURA_ABRIR") {
@@ -126,7 +136,30 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     }
 }
 
+/// `SBF_CAPTURA_FOCO`: o item em foco no dock (a prévia dele no canto), com as cenas
+/// `previa-destacada` e `previa-dica`.
+fn focar_para_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
+    use sbf_janela::Destino;
+    if let Ok(rota) = std::env::var("SBF_CAPTURA_FOCO")
+        && let Some(Destino::Item(r)) = Destino::da_rota(&rota)
+    {
+        if std::env::var("SBF_CENA").as_deref() == Ok("previa-destacada") {
+            // A captura só pega a janela principal: a destacada aparece embutida.
+            ctx.set_embed_viewports(true);
+            casca.app.janela().previas.destacar(&r);
+        }
+        if std::env::var("SBF_CENA").as_deref() == Ok("previa-dica") {
+            let perto =
+                egui::Rect::from_min_size(egui::pos2(260.0, 300.0), egui::vec2(180.0, 18.0));
+            casca.app.janela().previas.fixar_dica(r.clone(), perto);
+        }
+        casca.app.janela().centro.selecao.foco = Some(r);
+    }
+}
+
 fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
+    // As sobras da conversão do Office de uma sessão interrompida (pasta 0700 em tmpfs).
+    sbf_janela::previa::faxinar_sobras_em_segundo_plano();
     let opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Seu Bolso Feliz")
@@ -157,13 +190,13 @@ fn app_de_demonstracao() -> Result<App, String> {
         selo: Some("Demonstração · dados fictícios".to_owned()),
         ..Default::default()
     };
-    App::novo(
-        Janela::nova(),
-        Box::new(consulta),
-        Box::new(comandos),
-        barra,
-    )
-    .map_err(|e| format!("os temas não carregaram: {e}"))
+    let mut janela = Janela::nova();
+    // A prévia precisa de arquivos: fictícios, numa pasta temporária apagada ao sair.
+    if let Err(e) = janela.previas.preparar_demonstracao(&consulta) {
+        eprintln!("sbf: {e}");
+    }
+    App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
+        .map_err(|e| format!("os temas não carregaram: {e}"))
 }
 
 const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf --versao";

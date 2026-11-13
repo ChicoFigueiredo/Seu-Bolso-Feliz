@@ -122,6 +122,9 @@ pub struct Janela {
     /// As Ferramentas do inventário real (PDF protegido, estante, cópia, chaveiro).
     /// `None` no modo demonstração.
     pub ferramentas: Option<crate::ferramentas::Ferramentas>,
+    /// A prévia do arquivo (painel, aba Arquivo, destacadas e a dica).
+    pub previas: crate::previa::Previas,
+    chaveiro_trancado: bool,
     visao_geral_pendente:
         Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
     /// Primeiros pedaços de áreas pedidos numa thread (no inventário real), por pedido.
@@ -204,7 +207,11 @@ impl Janela {
             focar_pesquisa: false,
             relatorios: EstadoDosRelatorios::default(),
             lote_atual: None,
-            paineis_visiveis: vec![PainelDoDock::Detalhe, PainelDoDock::Historico],
+            paineis_visiveis: vec![
+                PainelDoDock::Detalhe,
+                PainelDoDock::Previa,
+                PainelDoDock::Historico,
+            ],
             pedidos: Vec::new(),
             dialogo: None,
             mensagem: None,
@@ -214,6 +221,8 @@ impl Janela {
             hoje: hoje_em_sao_paulo(),
             na_casca: false,
             ferramentas: None,
+            previas: crate::previa::Previas::nova(),
+            chaveiro_trancado: false,
             visao_geral_pendente: None,
             pedacos_pendentes: HashMap::new(),
         }
@@ -241,6 +250,15 @@ impl Janela {
             return;
         };
         let terminou = f.sondar(ctx);
+        // Chaveiro trancado: a prévia esquece o PDF decifrado (memória e texturas).
+        let trancado = f
+            .chaveiro
+            .as_ref()
+            .is_some_and(|c| c.situacao() == sbf_chaveiro::Situacao::ArquivoTrancado);
+        if trancado && !self.chaveiro_trancado {
+            self.previas.esquecer_tudo();
+        }
+        self.chaveiro_trancado = trancado;
         f.janela_ui(ctx, &mut self.pedidos);
         if terminou {
             self.atualizar();
@@ -408,6 +426,14 @@ impl Janela {
     /// algo que os outros crates mudaram no banco).
     pub fn atualizar(&mut self) {
         self.cache.limpar();
+        self.previas.limpar();
+    }
+
+    /// As prévias destacadas em janela própria e a dica com a miniatura. Uma vez por quadro,
+    /// depois do centro.
+    pub fn previas_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
+        let mut leitor = Leitor::novo(consulta, &mut self.cache);
+        self.previas.janelas_ui(ctx, &mut leitor, &mut self.pedidos);
     }
 
     /// As contagens da barra de status.
@@ -555,6 +581,7 @@ impl Janela {
         let descricao_do_filtro_atual = descricao_do_filtro(&filtro, &self.ciclo_atual());
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
+        let previas = &mut self.previas;
         let pendentes = &mut self.pedacos_pendentes;
         match destino {
             Destino::Area(Area::VisaoGeral) => {
@@ -701,7 +728,7 @@ impl Janela {
                     .id_salt("pagina")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        pagina::desenhar(ui, &mut leitor, r, vista, pedidos)
+                        pagina::desenhar(ui, &mut leitor, previas, r, vista, pedidos)
                     });
             }
             Destino::Total { titulo, pedido } => {
@@ -714,6 +741,44 @@ impl Janela {
     pub fn dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta, painel: PainelDoDock) {
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
+        if painel == PainelDoDock::Previa {
+            let altura = ui.available_height();
+            egui::ScrollArea::vertical()
+                .id_salt("dock-previa")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Clicar na miniatura abre a página do item na aba Arquivo.
+                    if let Some(achado) = self.previas.painel_ui(
+                        ui,
+                        &mut leitor,
+                        foco.as_ref(),
+                        altura,
+                        &mut self.pedidos,
+                    ) {
+                        let destino_ref = foco
+                            .clone()
+                            .filter(|f| {
+                                pagina::abas_de(f.tipo)
+                                    .iter()
+                                    .any(|a| a.conteudo == pagina::ConteudoDaAba::Arquivo)
+                            })
+                            .unwrap_or(achado);
+                        if let Some(i) = pagina::abas_de(destino_ref.tipo)
+                            .iter()
+                            .position(|a| a.conteudo == pagina::ConteudoDaAba::Arquivo)
+                        {
+                            self.centro.abas.insert(destino_ref.clone(), i);
+                        }
+                        crate::navegacao::pedir_abrir(
+                            ui.ctx(),
+                            &mut self.pedidos,
+                            Destino::Item(destino_ref),
+                            false,
+                        );
+                    }
+                });
+            return;
+        }
         dock::desenhar(
             ui,
             painel,
@@ -737,6 +802,7 @@ impl Janela {
             let mut aberto = true;
             let vista = self.flutuantes.entry(f.id).or_default();
             let pedidos = &mut self.pedidos;
+            let previas = &mut self.previas;
             egui::Window::new(RichText::new(titulo).strong())
                 .id(Id::new(("flutuante", f.id)))
                 .open(&mut aberto)
@@ -749,7 +815,7 @@ impl Janela {
                         .auto_shrink([false, false])
                         .show(ui, |ui| match &f.destino {
                             Destino::Item(r) => {
-                                pagina::desenhar(ui, &mut leitor, r, vista, pedidos)
+                                pagina::desenhar(ui, &mut leitor, previas, r, vista, pedidos)
                             }
                             Destino::Total { titulo, pedido } => pagina::desenhar_total(
                                 ui,
@@ -1023,6 +1089,18 @@ impl Janela {
                     Err(e) => self.erro(e.to_string()),
                 },
                 Pedido::EscolherLote(r) => self.lote_atual = Some(r),
+                Pedido::NovaRegra {
+                    fornecedor,
+                    tipo_de_documento,
+                } => {
+                    self.dialogo = Some(Dialogo::NovaRegra {
+                        fornecedor,
+                        tipo_de_documento,
+                        estrategia: ESTRATEGIAS_SUGERIDAS[0].to_owned(),
+                        prioridade: "100".to_owned(),
+                        erro: None,
+                    });
+                }
                 Pedido::Intervalo(de, ate) => {
                     self.intervalo = Some((de, ate));
                     self.periodo = Periodo::Intervalo;

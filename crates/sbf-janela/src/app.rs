@@ -151,7 +151,10 @@ impl AppSbf {
             .map(|p| {
                 (
                     id_do_painel(p).to_owned(),
-                    matches!(p, PainelDoDock::Detalhe | PainelDoDock::Historico),
+                    matches!(
+                        p,
+                        PainelDoDock::Detalhe | PainelDoDock::Previa | PainelDoDock::Historico
+                    ),
                 )
             })
             .collect();
@@ -643,6 +646,7 @@ impl AppCasca for AppSbf {
                 janela.desenhar_destino(ui, consulta.as_ref(), &destino, None);
                 janela.dialogos_ui(&ctx);
                 janela.ferramentas_ui(&ctx);
+                janela.previas_ui(&ctx, consulta.as_ref());
             }
             Local::Flutuante(id) => {
                 let vista = vistas_flutuantes.entry(id).or_default();
@@ -658,12 +662,15 @@ impl AppCasca for AppSbf {
         PainelDoDock::TODOS
             .into_iter()
             .map(|p| {
-                let pilha = if p == PainelDoDock::Historico { 1 } else { 0 };
+                // Três pilhas, uma embaixo da outra: Detalhe (com Origens e Texto), Prévia
+                // e Histórico.
+                let pilha = match p {
+                    PainelDoDock::Previa => 1,
+                    PainelDoDock::Historico => 2,
+                    _ => 0,
+                };
                 let mut d = PainelDock::novo(id_do_painel(p), p.titulo(), pilha).icone(p.icone());
-                if matches!(
-                    p,
-                    PainelDoDock::Origens | PainelDoDock::Texto | PainelDoDock::Previa
-                ) {
+                if matches!(p, PainelDoDock::Origens | PainelDoDock::Texto) {
                     d = d.escondido();
                 }
                 d
@@ -830,6 +837,8 @@ impl AppCasca for AppSbf {
             "opcoes" => {
                 componentes::titulo(ui, "Opções", 18.0);
                 bancada_casca::vista::opcoes_de_aparencia(ui, &self.textos);
+                ui.add_space(12.0);
+                opcoes_da_previa(ui, &mut self.janela.get_mut().previas);
             }
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);
@@ -918,6 +927,43 @@ impl AppCasca for AppSbf {
         if id == "a-triar" {
             bancada_casca::abrir(ctx, Destino::Area(Area::ATriar).rota());
         }
+    }
+}
+
+/// Opções › Prévia do arquivo: os limites do cache (só em memória).
+pub fn opcoes_da_previa(ui: &mut Ui, previas: &mut crate::previa::Previas) {
+    let p = tema::paleta(ui.ctx());
+    componentes::rotulo_de_secao(ui, "Prévia do arquivo");
+    ui.label(
+        RichText::new(
+            "As prévias abertas ficam só na memória, nunca em disco. Guarda as últimas N ou até o limite de memória, o que vier primeiro.",
+        )
+        .color(p.tinta_suave),
+    );
+    let (mut documentos, bytes) = previas.limites();
+    let mut mb = (bytes / (1024 * 1024)) as u32;
+    let mut mudou = false;
+    egui::Grid::new("opcoes-da-previa")
+        .num_columns(2)
+        .spacing(egui::vec2(12.0, 6.0))
+        .show(ui, |ui| {
+            ui.label("Prévias guardadas");
+            mudou |= ui
+                .add(
+                    egui::DragValue::new(&mut documentos)
+                        .range(1..=500)
+                        .suffix(" documentos"),
+                )
+                .changed();
+            ui.end_row();
+            ui.label("Memória das prévias");
+            mudou |= ui
+                .add(egui::DragValue::new(&mut mb).range(16..=4096).suffix(" MB"))
+                .changed();
+            ui.end_row();
+        });
+    if mudou {
+        previas.definir_limites(documentos, mb as usize * 1024 * 1024);
     }
 }
 

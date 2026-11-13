@@ -175,6 +175,89 @@ pub fn nova() -> (ConsultaDemonstracao, ComandosDemonstracao) {
     )
 }
 
+fn extensao_de(nome: &str) -> String {
+    nome.rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// A cópia fictícia no acervo (relativa à pasta da demonstração), para os tipos que a
+/// demonstração gera: PDF, PNG, e-mail, CSV e XML. O resto não tem cópia (a prévia mostra
+/// os metadados e o motivo). O PDF "protegido" da demonstração não é cifrado de verdade,
+/// mas a prévia nem tenta abrir: sem chaveiro, mostra "Protegido por senha".
+fn no_cofre(a: &Achado) -> Option<String> {
+    let ext = extensao_de(&a.nome);
+    let gera = matches!(ext.as_str(), "pdf" | "png" | "eml" | "csv" | "xml");
+    gera.then(|| {
+        format!(
+            "acervo/{}/{}.{ext}",
+            a.hash.get(..2).unwrap_or("00"),
+            a.hash
+        )
+    })
+}
+
+fn dados_do_documento(a: &Achado) -> crate::acervo_ficticio::DadosDoDocumento {
+    crate::acervo_ficticio::DadosDoDocumento {
+        nome: a.nome.clone(),
+        fornecedor: a.fornecedor.clone(),
+        tipo: a.tipo_de_documento.clone(),
+        data: a.data.clone(),
+        valor: a.valor,
+    }
+}
+
+impl ConsultaDemonstracao {
+    /// Grava em `pasta` os arquivos fictícios do acervo da demonstração (o campo "No cofre"
+    /// de cada achado é relativo a ela). Devolve quantos gravou.
+    pub fn gerar_acervo(&self, pasta: &std::path::Path) -> std::io::Result<usize> {
+        use crate::acervo_ficticio as f;
+        let estado = self.0.borrow();
+        let mut n = 0;
+        for a in &estado.achados {
+            let Some(rel) = no_cofre(a) else { continue };
+            let bytes = match extensao_de(&a.nome).as_str() {
+                "pdf" => f::pdf_do_documento(&dados_do_documento(a)),
+                "png" => f::png_do_comprovante(
+                    a.valor.unwrap_or(-12500),
+                    &format!(
+                        "{} 14:32",
+                        crate::formato::data(a.data.as_deref().unwrap_or("2026-11-12"))
+                    ),
+                ),
+                "eml" => {
+                    let anexo = estado
+                        .achados
+                        .iter()
+                        .find(|x| x.nome == "boleto-kappa-dez.pdf")
+                        .map(|x| f::pdf_do_documento(&dados_do_documento(x)))
+                        .unwrap_or_default();
+                    let (de, assunto) = a
+                        .email
+                        .clone()
+                        .unwrap_or_else(|| ("avisos@exemplo.example".into(), a.nome.clone()));
+                    f::eml(
+                        &de,
+                        &assunto,
+                        "Olá,\r\n\r\nSegue o boleto do condomínio de dezembro, com vencimento em 15/12/2026.\r\nValor: R$ 980,00.\r\n\r\nAtenciosamente,\r\nAdministração do Condomínio Kappa (fictício)",
+                        "boleto-kappa-dez.pdf",
+                        &anexo,
+                    )
+                }
+                "csv" => f::csv_do_extrato(),
+                _ => f::xml_da_nota(),
+            };
+            let caminho = pasta.join(rel);
+            if let Some(pai) = caminho.parent() {
+                std::fs::create_dir_all(pai)?;
+            }
+            std::fs::write(caminho, bytes)?;
+            n += 1;
+        }
+        Ok(n)
+    }
+}
+
 /// Movimento entre contas não conta como gasto (a função única da spec).
 pub fn e_movimento_entre_contas(tipo: &str) -> bool {
     matches!(
@@ -850,6 +933,81 @@ impl Estado {
             a.data = Some("2026-10-28".into());
             a.valor = Some(-31244);
             a.texto = Some("ENERGIA EXEMPLO S/A\nConta de energia · referência out/2026\nTotal a pagar R$ 312,44\nVencimento 28/10/2026".into());
+        }
+
+        // Para a prévia: um e-mail com o boleto anexado (o anexo também é um achado, de
+        // mesmo content_hash) e um extrato em CSV.
+        {
+            let mut anexo = Achado {
+                hash: String::new(),
+                nome: "boleto-kappa-dez.pdf".into(),
+                estado: "novo".into(),
+                decidido_por: None,
+                tipo_de_documento: "boleto".into(),
+                fornecedor: Some("Condomínio Kappa".into()),
+                data: Some("2026-12-15".into()),
+                valor: Some(-98000),
+                texto: Some("CONDOMÍNIO KAPPA\nBoleto de cobrança\nTotal R$ 980,00".into()),
+                protegido: false,
+                duplicidades: BTreeSet::new(),
+                email: Some((
+                    "administracao@kappa.example".into(),
+                    "Boleto do condomínio · dezembro".into(),
+                )),
+            };
+            anexo.hash = crate::acervo_ficticio::sha256_hex(
+                &crate::acervo_ficticio::pdf_do_documento(&dados_do_documento(&anexo)),
+            );
+            let h = anexo.hash.clone();
+            e.achados.push(anexo);
+            e.nova_origem(
+                &h,
+                "gmail:pessoal",
+                "administracao@kappa.example/anexo boleto-kappa-dez.pdf",
+                3,
+            );
+            let nome = "cobranca-condominio-kappa.eml";
+            let h = hash_de(nome);
+            e.achados.push(Achado {
+                hash: h.clone(),
+                nome: nome.into(),
+                estado: "novo".into(),
+                decidido_por: None,
+                tipo_de_documento: "outro".into(),
+                fornecedor: Some("Condomínio Kappa".into()),
+                data: Some("2026-11-11".into()),
+                valor: None,
+                texto: Some("Boleto do condomínio · dezembro".into()),
+                protegido: false,
+                duplicidades: BTreeSet::new(),
+                email: Some((
+                    "administracao@kappa.example".into(),
+                    "Boleto do condomínio · dezembro".into(),
+                )),
+            });
+            e.nova_origem(&h, "gmail:pessoal", &format!("Recebidos/{nome}"), 3);
+            let nome = "extrato-alfa-2026-10.csv";
+            let h = hash_de(nome);
+            e.achados.push(Achado {
+                hash: h.clone(),
+                nome: nome.into(),
+                estado: "novo".into(),
+                decidido_por: None,
+                tipo_de_documento: "extrato".into(),
+                fornecedor: Some("Banco Alfa".into()),
+                data: Some("2026-10-31".into()),
+                valor: None,
+                texto: None,
+                protegido: false,
+                duplicidades: BTreeSet::new(),
+                email: None,
+            });
+            e.nova_origem(
+                &h,
+                "onedrive:pessoal",
+                &format!("OneDrive/Bancos/Alfa/{nome}"),
+                5,
+            );
         }
 
         // Em dúvida e descartados, com quem decidiu.
@@ -2742,6 +2900,13 @@ impl Estado {
                         Celula::Links(lotes)
                     },
                 ));
+                let extensao = extensao_de(&a.nome);
+                if !extensao.is_empty() {
+                    c.push(campo("Extensão", txt(extensao)));
+                }
+                if let Some(rel) = no_cofre(a) {
+                    c.push(campo("No cofre", txt(rel)));
+                }
                 if a.protegido {
                     let regra = self.regras.iter().find(|x| {
                         a.fornecedor.as_deref() == Some(x.fornecedor.as_str())

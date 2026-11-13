@@ -3662,9 +3662,11 @@ dependencies = [
  "sbf-estante",
  "sbf-inventario",
  "sbf-pdf",
+ "sbf-previa",
  "sbf-processo",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tempfile",
 ]
 
