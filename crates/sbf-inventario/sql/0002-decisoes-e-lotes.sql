@@ -41,6 +41,12 @@ CREATE INDEX IF NOT EXISTS origem_gmail_message ON origem(gmail_message_id);
 CREATE INDEX IF NOT EXISTS origem_local_filepath ON origem(local_filepath);
 -- A área Registros ordena por data (medido pela leitura: 358 ms → 228 ms com 100 mil).
 CREATE INDEX IF NOT EXISTS registro_data ON registro(data);
+-- As áreas Arquivos e pastas (por `local_mtime`) e E-mails (por `gmail_date`) mostram o mais
+-- novo primeiro. Com o índice a página sai da ponta dele; sem, o SQLite ordena as 600 mil
+-- origens a cada página.
+-- `origin_type` entra no índice para o filtro não obrigar a ler a linha ao pular páginas.
+CREATE INDEX IF NOT EXISTS origem_local_mtime ON origem(local_mtime, origin_type);
+CREATE INDEX IF NOT EXISTS origem_gmail_date ON origem(gmail_date);
 
 -- O que desfaz o quê: "já foi desfeita?" e "Desfazer decisão" consultam por aqui.
 CREATE INDEX decisao_desfaz ON decisao(desfaz);

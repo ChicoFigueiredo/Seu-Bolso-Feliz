@@ -1599,3 +1599,181 @@ pub fn popular_grande(conn: &Connection, n_achados: u32) {
     }
     conn.execute_batch("COMMIT").expect("commit");
 }
+
+/// A ordem de grandeza do inventário real (medida em 2026-11-13): 300 mil achados, 600 mil
+/// origens, 57 mil e-mails de cerca de 1.000 remetentes, 4 mil registros. Só números: nenhum
+/// dado real. Leva alguns segundos.
+pub fn popular_escala_real(conn: &Connection) {
+    popular_escala(conn, 300_000, 600_000, 57_000, 1_000);
+}
+
+/// Como [`popular_escala_real`], com os tamanhos à escolha.
+pub fn popular_escala(conn: &Connection, achados: u32, origens: u32, emails: u32, remetentes: u32) {
+    conn.execute_batch("BEGIN").expect("transação");
+    for (id, tipo) in [
+        ("disco:g", "disco"),
+        ("disco:h", "disco"),
+        ("gmail", "email"),
+        ("conexao:pluggy", "banco"),
+    ] {
+        conn.execute(
+            "INSERT OR IGNORE INTO fonte (id, tipo, descricao) VALUES (?1, ?2, ?3)",
+            params![id, tipo, format!("Fonte {id}")],
+        )
+        .expect("fonte");
+    }
+    for (id, fonte) in [(100, "disco:g"), (101, "disco:h"), (102, "gmail")] {
+        conn.execute(
+            "INSERT INTO varredura (id, fonte_id, etapa, escopo, responsavel, status, vistos, novos) VALUES (?1, ?2, 'E1', 'raiz', 'scan@1', 'concluida', 10, 10)",
+            params![id, fonte],
+        )
+        .expect("varredura");
+    }
+    for ano in 2024..=2027 {
+        for mes in 1..=12 {
+            let (ano_fim, mes_fim) = if mes == 12 {
+                (ano + 1, 1)
+            } else {
+                (ano, mes + 1)
+            };
+            conn.execute(
+                "INSERT OR IGNORE INTO ciclo (id, inicio, fim) VALUES (?1, ?2, ?3)",
+                params![
+                    format!("{ano:04}-{mes:02}"),
+                    format!("{ano:04}-{mes:02}-20"),
+                    format!("{ano_fim:04}-{mes_fim:02}-19")
+                ],
+            )
+            .expect("ciclo");
+        }
+    }
+    let mut achado = conn
+        .prepare(
+            "INSERT INTO achado (content_hash, file_size_bytes, camada, estado, document_type, supplier_name_raw,
+               data_chave, ciclo_id, valor_centavos, classificado_por, decidido_por, caminho_acervo, notas, extensao)
+             VALUES (?1, 1000, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'regras@2', 'regras@2', ?9, 'nota', 'pdf')",
+        )
+        .expect("preparar achado");
+    let mut origem = conn
+        .prepare(
+            "INSERT INTO origem (content_hash, fonte_id, varredura_id, origin_type, origin_key, local_filepath, local_mtime,
+               filename, file_size_bytes, gmail_message_id, gmail_from, gmail_subject, gmail_date, mensagem_ref)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 100, ?9, ?10, ?11, ?12, ?13)",
+        )
+        .expect("preparar origem");
+    let data_de = |i: u32| {
+        let mes = 1 + (i / 28) % 12;
+        format!("2026-{mes:02}-{:02}", 1 + i % 28)
+    };
+    let mut n_origens = 0u32;
+    for i in 0..achados {
+        let h = format!("{i:064x}");
+        let estado = if i % 25 == 0 {
+            "documento"
+        } else if i % 8 == 0 {
+            "duvida"
+        } else if i % 97 == 0 {
+            "novo"
+        } else {
+            "descartado"
+        };
+        let data = data_de(i);
+        let doc = estado == "documento";
+        achado
+            .execute(params![
+                h,
+                if i % 3 == 0 { "A" } else { "B" },
+                estado,
+                doc.then_some("fatura"),
+                doc.then(|| format!("Fornecedor {}", i % 400)),
+                doc.then_some(data.clone()),
+                doc.then(|| ciclo_de(&data)),
+                doc.then_some(-(1000 + i64::from(i % 5000))),
+                (i % 4 == 0).then_some("acervo/x"),
+            ])
+            .expect("achado");
+        // A origem local.
+        origem
+            .execute(params![
+                h,
+                "disco:g",
+                100,
+                "local_file",
+                format!("local:{i}"),
+                format!("/g/p{}/a{i}.pdf", i % 80_000),
+                format!("{data}T10:00:00Z"),
+                format!("a{i}.pdf"),
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+            ])
+            .expect("origem");
+        n_origens += 1;
+    }
+    // E-mails: `emails` mensagens de `remetentes` remetentes, em achados espalhados.
+    let passo = (achados / emails.max(1)).max(1);
+    for k in 0..emails {
+        let i = (k * passo) % achados;
+        let h = format!("{i:064x}");
+        let r = k % remetentes.max(1);
+        origem
+            .execute(params![
+                h,
+                "gmail",
+                102,
+                "gmail",
+                format!("gmail:{k}:eml"),
+                Option::<String>::None,
+                Option::<String>::None,
+                format!("mensagem {k}.eml"),
+                format!("msg{k}"),
+                format!("Remetente {r} <u{r}@dominio{r}.com.br>"),
+                format!("Assunto {k}"),
+                format!("{}T08:00:00Z", data_de(k)),
+                "eml",
+            ])
+            .expect("e-mail");
+        n_origens += 1;
+    }
+    // O resto das origens: o mesmo conteúdo achado em outro disco.
+    let mut k = 0u32;
+    while n_origens < origens {
+        let i = (k * 7) % achados;
+        let h = format!("{i:064x}");
+        let data = data_de(i + 3);
+        origem
+            .execute(params![
+                h,
+                "disco:h",
+                101,
+                "local_file",
+                format!("local:h:{k}"),
+                format!("/h/q{}/b{k}.pdf", k % 5_000),
+                format!("{data}T11:00:00Z"),
+                format!("b{k}.pdf"),
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+            ])
+            .expect("origem extra");
+        n_origens += 1;
+        k += 1;
+    }
+    drop(achado);
+    drop(origem);
+    for j in 0..4_000u32 {
+        let data = data_de(j);
+        conn.execute(
+            "INSERT INTO registro (fonte_id, tipo, data, data_tipo, ciclo_id, valor_centavos, descricao_original,
+               fornecedor_normalizado, categoria_provavel, conta_provavel, extraido_por, decidido_por)
+             VALUES ('conexao:pluggy', ?1, ?2, 'pagamento', ?3, ?4, 'Registro', ?5, 'Categoria', 'Conta G', 'pluggy@1', 'pluggy@1')",
+            params![if j % 17 == 0 { "pagamento_fatura" } else { "compra" }, data, ciclo_de(&data), -(500 + i64::from(j % 900)), format!("Fornecedor {}", j % 400)],
+        )
+        .expect("registro");
+    }
+    conn.execute_batch("COMMIT").expect("commit");
+}
