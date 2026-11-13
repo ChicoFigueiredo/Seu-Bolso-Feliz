@@ -46,6 +46,8 @@ Bevy.
     a família de ícones de cada app.
   - A navegação é feita por um painel de áreas à esquerda, como no Outlook. O Ribbon
     mostra as Ações da área aberta.
+  - Todo nome é link para a página do item, com Voltar e Avançar, e Ctrl+clique abre a
+    página num painel flutuante. É regra da shell, não de tela.
   - Cada tela nasce como protótipo navegável e só vira egui depois de aprovada.
 
 ## Opções descartadas

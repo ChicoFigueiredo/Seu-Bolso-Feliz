@@ -121,6 +121,32 @@ de cima para baixo:
 Os estados do achado aparecem como **A triar, Documento, Descartado e Em dúvida**, sempre
 com quem decidiu: "você" ou "regras@2".
 
+### Navegação relacional: todo nome é link
+
+Regra da shell, decidida em 2026-11-12, que vale para o produto inteiro e não tela a
+tela. O web de hoje não tem isso: a página de fornecedor das telas antigas não lista as
+movimentações dele.
+
+- **Todo nome é link:** fornecedor, conta, cartão, fatura, centro, categoria, tag,
+  ciclo, documento, achado, registro, compromisso, recorrente, dívida, conexão, lote e
+  estação. Clicar abre a **página** daquele item no centro.
+- **A página de um item** tem um cabeçalho com o resumo e abas com tudo o que se liga a
+  ele. O fornecedor, por exemplo:
+  - **Cabeçalho:** total por ciclo, se é recorrente, apelidos e contratos.
+  - **Abas:** Movimentações, Registros · a conferir, Documentos, Compromissos e
+    recorrentes.
+- **Duas fontes, nunca somadas:** "Movimentações" vem do livro-caixa (fatia 2) e
+  "Registros · a conferir" vem do inventário (fatia 1). Um registro já promovido mostra
+  o link da movimentação em que virou. Nesta fatia, as abas do livro-caixa aparecem
+  desabilitadas, com o motivo.
+- **Histórico:** Voltar e Avançar (Alt+←/→ e os botões laterais do mouse), com a trilha
+  "Fornecedores › Energia Exemplo".
+- **Em paralelo:** Ctrl+clique abre a página num painel flutuante, que pode ser
+  destacado em janela do sistema, para comparar lado a lado. O clique normal continua
+  abrindo no centro.
+- **Nesta fatia:** as páginas de achado, registro, fornecedor, ciclo, conta, fatura,
+  lote, pendência e coleta funcionam; as outras nascem com o livro-caixa.
+
 ### O produto inteiro na navegação
 
 O desktop cobre tudo o que o web faz: as áreas da `nova-ia`, mais Fornecedores e
@@ -398,6 +424,7 @@ Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (r
 | INV-16 | Com o inventário real, abre em menos de 3 s e filtra em menos de 300 ms nas vistas principais. As tabelas são virtualizadas, sem paginação visível.                                                                                                      |
 | INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                          |
 | INV-18 | Cada resposta do §11 bate com uma consulta de referência sobre o banco de teste e leva "a conferir". Nenhum termo do livro-caixa aparece na fatia.                                                                                                       |
+| INV-19 | Todo nome visível é link para a página do item. A página do fornecedor lista os registros dele e os documentos, com as abas do livro-caixa desabilitadas com o motivo. Voltar e Avançar refazem o caminho. Ctrl+clique abre em painel flutuante. |
 
 ## Tickets e paralelização
 
@@ -411,13 +438,13 @@ visual, UX ou segurança leva `ready-for-human` e espera o OK do CEO.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
 | A    | T1 `bancada`: criar o repo e extrair `bancada-armazem`                                                                              | Sonnet           | —          |
 | A    | T2 `bancada-segredos`, a partir do `chess-vault`                                                                                    | Opus (segurança) | T1 (repo)  |
-| A    | T3 `bancada-casca`: Ribbon, Ações, Paleta, KeyTips, painel de navegação, dock, status, temas, Fluent, ícones plugáveis              | Opus             | T1 (repo)  |
+| A    | T3 `bancada-casca`: Ribbon, Ações, Paleta, KeyTips, painel de navegação, histórico Voltar/Avançar, link de item e página em painel flutuante, dock, status, temas, Fluent, ícones plugáveis              | Opus             | T1 (repo)  |
 | A    | T4 `sbf-inventario`: migrações 1 e 2, log de decisões, projeção, desfazer, e as mudanças transitórias em `banco.ts` e `e3-triar.ts` | Opus             | —          |
 | A    | T5 `sbf-inventario`: as 12 vistas e a Visão geral, com fixture contra o Datasette                                                   | Sonnet           | T4         |
 | A    | T6 Tokens dos 7 temas do SBF (`packages/design-system/src/tokens.css`) em JSON para a casca                                         | Haiku            | —          |
 | B    | T7 `sbf-chaveiro`: importar o `cofre.enc` e apagar `segredos.ts`                                                                    | Opus             | T2         |
 | B    | T8 `sbf-pdf`: PDF protegido, com o spike `lopdf` × `qpdf`                                                                           | Opus             | T4, T7     |
-| B    | T9 `sbf-janela`: áreas, Ações do §10 e Histórico de decisões                                                                        | Sonnet           | T3, T5     |
+| B    | T9 `sbf-janela`: áreas, páginas de item, Ações do §10 e Histórico de decisões                                                                        | Sonnet           | T3, T5     |
 | B    | T10 Lotes                                                                                                                           | Sonnet           | T4, T9     |
 | B    | T11 `sbf-estante`: estante, cópia de segurança e exclusão na coleta do Drive                                                        | Sonnet           | T4, T7     |
 | B    | T12 Aviso de disco sem cifra nos 3 SOs                                                                                              | Haiku            | T3         |
