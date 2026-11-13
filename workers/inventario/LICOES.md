@@ -35,6 +35,15 @@ worker segue estas regras; cada uma custou uma falha real.
   veio por um espelho.
 - **Pasta sendo escrita por outro processo fica de fora** (`--pular`) até
   terminar, ou o hash pega arquivo pela metade.
+- **Pasta do OneDrive no disco pode ter só marcadores:** arquivo "disponível na
+  nuvem" aparece com o tamanho real e todos os bytes zero (lido pelo ntfs3). O
+  hash é de zeros, o pdftotext falha e o documento parece inventariado sem
+  estar. Em 13/11 eram ~1.070 documentos e dúvidas de `$Nuvem/OneDrive` no P2.
+  O `e3-extrair` marca `arquivo-zerado` com nota; o conteúdo real só vem pelo
+  OneDrive ao vivo (rclone). Erro de extração que se repete toda rodada é
+  sinal para olhar os bytes (`xxd`, `file`), não para tentar de novo.
+- **Extensão nem sempre diz o tipo:** entre os PDFs ilegíveis havia PostScript,
+  PNG, resíduo `._` do Mac (AppleDouble), PDF em base64 e PDF com DRM da Adobe.
 
 ## Processos
 
