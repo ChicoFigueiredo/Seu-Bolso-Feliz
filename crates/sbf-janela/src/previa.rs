@@ -14,7 +14,8 @@
 //! só das prévias desenhadas no quadro.
 //!
 //! O arquivo vem da cópia do acervo (`achado.caminho_acervo`, campo "No cofre" do item,
-//! relativo à pasta do cofre). PDF protegido só abre com as candidatas das regras de senha,
+//! relativo à pasta do cofre); sem cópia, do original da primeira origem local acessível
+//! (só leitura, com o selo "lido da origem"). PDF protegido só abre com as candidatas das regras de senha,
 //! montadas em memória a partir do chaveiro aberto; sem regra, mostra "Protegido por senha"
 //! e o atalho Nova regra.
 
@@ -92,8 +93,10 @@ pub struct ArquivoDaPrevia {
     pub tipo: Option<String>,
     pub fornecedor: Option<String>,
     pub data_chave: Option<String>,
-    /// O caminho absoluto no acervo, ou por que não há.
+    /// O caminho absoluto do arquivo (cópia do acervo ou original da origem), ou por que não há.
     pub caminho: Result<PathBuf, String>,
+    /// O arquivo é o original da origem local (sem cópia no acervo): só leitura.
+    pub da_origem: bool,
     pub tamanho: Option<u64>,
     /// O item diz que é protegido por senha.
     pub protegido: bool,
@@ -621,11 +624,14 @@ impl Previas {
                 });
             });
         });
-        ui.label(
-            RichText::new(linha_do_tipo(&arquivo, resumo.as_ref(), 1))
-                .size(11.5)
-                .color(p.tinta_suave),
-        );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(linha_do_tipo(&arquivo, resumo.as_ref(), 1))
+                    .size(11.5)
+                    .color(p.tinta_suave),
+            );
+            selo_da_origem(ui, &arquivo);
+        });
         ui.add_space(4.0);
         if destacar {
             self.destacar(&arquivo.achado);
@@ -998,6 +1004,7 @@ impl Previas {
                             destacar = true;
                         }
                         let pode = arquivo.caminho.is_ok();
+                        selo_da_origem(ui, arquivo);
                         if componentes::botao_icone(
                             ui,
                             "open_in_new",
@@ -1418,6 +1425,88 @@ fn campo(item: &sbf_inventario::consulta::Item, rotulo: &str) -> Option<String> 
         .filter(|t| !t.trim().is_empty())
 }
 
+/// O motivo quando não há cópia no acervo nem origem local.
+pub const MOTIVO_SEM_COPIA_E_SEM_ORIGEM: &str = "Sem cópia no acervo e sem origem local.";
+/// O motivo quando o disco da origem não está montado.
+pub const MOTIVO_DISCO_DESMONTADO: &str =
+    "Sem cópia no acervo, e o disco da origem não está montado.";
+/// O motivo quando o arquivo da origem sumiu (ou não dá para ler).
+pub const MOTIVO_ORIGEM_SUMIU: &str = "Sem cópia no acervo, e o arquivo da origem não existe mais.";
+
+/// Os rótulos da coluna com o caminho, na tabela de origens (consulta real e demonstração).
+const COLUNAS_DO_CAMINHO: [&str; 3] = ["Onde", "Caminho · anexo · conversa", "Caminho · assunto"];
+
+/// O disco está desmontado: do caminho, nada além da raiz (ou de uma pasta de montagem
+/// vazia, como `/mnt/d`) existe.
+fn disco_desmontado(caminho: &Path) -> bool {
+    let Some(existente) = caminho.ancestors().find(|a| a.exists()) else {
+        return true;
+    };
+    let nomes = existente
+        .components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count();
+    nomes == 0 || (nomes <= 2 && std::fs::read_dir(existente).is_ok_and(|mut d| d.next().is_none()))
+}
+
+/// O original da primeira origem local cujo arquivo existe e é legível (só leitura). `Err(None)`:
+/// o achado não tem origem local; `Err(Some(motivo))`: tem, mas nenhuma está acessível.
+fn origem_local(leitor: &mut Leitor<'_>, achado: &Ref) -> Result<PathBuf, Option<String>> {
+    let pedido = PedidoDeTabela::Ligados {
+        de: achado.clone(),
+        tipo: Tipo::Origem,
+    };
+    let tabela = leitor.tabela(&pedido).map_err(|_| None::<String>)?;
+    let Some(coluna) = tabela
+        .colunas
+        .iter()
+        .position(|c| COLUNAS_DO_CAMINHO.contains(&c.rotulo.as_str()))
+    else {
+        return Err(None);
+    };
+    let locais: Vec<PathBuf> = tabela
+        .linhas
+        .iter()
+        .filter_map(|l| l.celulas.get(coluna))
+        .map(formato::texto_da_celula)
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .collect();
+    if locais.is_empty() {
+        return Err(None);
+    }
+    if let Some(ok) = locais
+        .iter()
+        .find(|p| p.is_file() && std::fs::File::open(p).is_ok())
+    {
+        return Ok(ok.clone());
+    }
+    Err(Some(if locais.iter().all(|p| disco_desmontado(p)) {
+        MOTIVO_DISCO_DESMONTADO.to_owned()
+    } else {
+        MOTIVO_ORIGEM_SUMIU.to_owned()
+    }))
+}
+
+/// O selo "lido da origem": o arquivo não é a cópia do cofre, é o original, só leitura.
+fn selo_da_origem(ui: &mut Ui, arquivo: &ArquivoDaPrevia) {
+    if !arquivo.da_origem {
+        return;
+    }
+    let p = tema::paleta(ui.ctx());
+    let dica = match &arquivo.caminho {
+        Ok(c) => format!("Lido da origem (só leitura): {}", c.display()),
+        Err(_) => "Lido da origem (só leitura)".to_owned(),
+    };
+    ui.label(
+        RichText::new("lido da origem")
+            .size(11.0)
+            .italics()
+            .color(p.tinta_suave),
+    )
+    .on_hover_text(dica);
+}
+
 /// Um caminho relativo só de nomes (sem `..`, sem raiz): o acervo não sai do cofre.
 fn relativo_seguro(rel: &str) -> bool {
     let p = Path::new(rel);
@@ -1450,7 +1539,7 @@ fn resolver(
         .unwrap_or_default()
         .trim_start_matches('.')
         .to_ascii_lowercase();
-    let caminho = match (pasta, campo(item, "No cofre")) {
+    let acervo = match (pasta, campo(item, "No cofre")) {
         (None, _) => Err("Sem a pasta do cofre: abra um inventário para ver o arquivo.".to_owned()),
         (_, None) => Err("Este achado ainda não tem cópia no acervo.".to_owned()),
         (Some(_), Some(rel)) if !relativo_seguro(&rel) => {
@@ -1464,6 +1553,17 @@ fn resolver(
                 Err(format!("O arquivo não está no acervo ({rel})."))
             }
         }
+    };
+    let tinha_copia = campo(item, "No cofre").is_some();
+    let (caminho, da_origem) = match acervo {
+        Ok(c) => (Ok(c), false),
+        Err(e) => match origem_local(leitor, &achado) {
+            Ok(c) => (Ok(c), true),
+            // Sem origem local nenhuma: vale o motivo do acervo, se havia cópia; senão o geral.
+            Err(None) if tinha_copia || pasta.is_none() => (Err(e), false),
+            Err(None) => (Err(MOTIVO_SEM_COPIA_E_SEM_ORIGEM.to_owned()), false),
+            Err(Some(motivo)) => (Err(motivo), false),
+        },
     };
     let tamanho = caminho
         .as_ref()
@@ -1481,6 +1581,7 @@ fn resolver(
         fornecedor: campo(item, "Fornecedor"),
         data_chave: campo(item, "Data"),
         caminho,
+        da_origem,
         tamanho,
         protegido,
     })
@@ -1817,6 +1918,7 @@ fn metadados(
                     ui.label(RichText::new(titulo).strong().size(if grande { 16.0 } else { 13.5 }).color(p.tinta));
                 });
                 ui.add(egui::Label::new(RichText::new(motivo).color(p.tinta_suave)).wrap());
+                selo_da_origem(ui, arquivo);
                 ui.add_space(6.0);
                 egui::Grid::new(("previa-metadados", &arquivo.hash, grande))
                     .num_columns(2)
@@ -2045,6 +2147,14 @@ mod testes {
         assert_eq!(tamanho_legivel(812), "812 B");
         assert_eq!(tamanho_legivel(34 * 1024), "34 KB");
         assert_eq!(tamanho_legivel(1_258_291), "1,2 MB");
+    }
+
+    #[test]
+    fn disco_desmontado_so_quando_nem_a_raiz_da_montagem_existe() {
+        assert!(disco_desmontado(Path::new("/nao-montado-sbf/x/a.jpg")));
+        let pasta = tempfile::tempdir().expect("pasta");
+        std::fs::write(pasta.path().join("outro.txt"), b"x").expect("arquivo");
+        assert!(!disco_desmontado(&pasta.path().join("sumiu/a.jpg")));
     }
 
     #[test]
