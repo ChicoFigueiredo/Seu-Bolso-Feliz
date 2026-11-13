@@ -211,6 +211,19 @@ pub(crate) fn efeitos_da_acao(
     motivo: Option<&str>,
     em: &str,
 ) -> ResultadoDeComando<Vec<Efeito>> {
+    // Sinalizar vale para qualquer item com página; os que têm tabela aqui são conferidos.
+    if let Acao::Sinalizar { pergunta } = acao {
+        let conferivel = matches!(
+            alvo.tipo,
+            Tipo::Achado | Tipo::Documento | Tipo::Registro | Tipo::Lote | Tipo::Pendencia
+        );
+        if conferivel {
+            resolver_alvo(tx, alvo)?;
+        } else if alvo.chave.trim().is_empty() {
+            return Err(ErroDeComando::NaoEncontrado(alvo.clone()));
+        }
+        return Ok(vec![pendencia::sinalizar(tx, alvo, pergunta, em)?]);
+    }
     let tipo = resolver_alvo(tx, alvo)?;
     let id = alvo.chave.as_str();
     let nao = || nao_se_aplica(acao, alvo);
@@ -296,9 +309,6 @@ pub(crate) fn efeitos_da_acao(
                 "divergente"
             };
             um(campo::ESTADO, json!({"estado": estado}))
-        }
-        (Acao::Sinalizar { pergunta }, _) => {
-            Ok(vec![pendencia::sinalizar(tx, alvo, pergunta, em)?])
         }
         (Acao::Responder { resposta }, AlvoTipo::Pendencia) => {
             Ok(vec![pendencia::responder(id, resposta, em)])

@@ -445,3 +445,36 @@ fn inv05_desfazer_decisao_inexistente() {
         Err(ErroDeComando::NadaADesfazer(42))
     ));
 }
+
+#[test]
+fn inv05_sinalizar_vale_para_qualquer_item_com_pagina() {
+    let (_p, mut inv) = novo();
+    inv.executar(&pedido(
+        Acao::Sinalizar {
+            pergunta: "Esta conexão ainda vale?".into(),
+        },
+        vec![
+            Ref::nova(Tipo::Conexao, "disco:teste"),
+            fornecedor("Energia Exemplo"),
+        ],
+    ))
+    .unwrap();
+    let c = inv.conexao();
+    assert_eq!(
+        valor(
+            c,
+            "SELECT group_concat(referencia, ',') FROM pendencia WHERE tipo = 'sinalizada'"
+        ),
+        "conexao:disco:teste,fornecedor:Energia Exemplo"
+    );
+    // Um achado que não existe não ganha pendência.
+    assert!(matches!(
+        inv.executar(&pedido(
+            Acao::Sinalizar {
+                pergunta: "?".into()
+            },
+            vec![achado(77)]
+        )),
+        Err(ErroDeComando::NaoEncontrado(_))
+    ));
+}
