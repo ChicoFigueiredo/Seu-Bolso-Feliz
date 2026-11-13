@@ -32,7 +32,6 @@
     "worker:gmail": "bun run workers/gmail-scanner/src/index.ts",
     "worker:local": "bun run workers/local-scanner/src/index.ts",
     "inventario:init": "bun run workers/inventario/src/init.ts",
-    "inventario:ver": "uvx datasette serve /mnt/d/Chico/financas/inventario.sqlite --metadata workers/inventario/datasette/metadata.json --host 127.0.0.1 --port 8001 --setting sql_time_limit_ms 30000 --setting max_returned_rows 2000",
     "--- PIPELINE: Passo-a-Passo para dados no Dashboard ---": "",
     "pipeline:passo01:scan-gmail": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50",
     "pipeline:passo01:scan-gmail:dry": "bun run workers/gmail-scanner/src/index.ts --label Comprovantes --limit 50 --dry-run",

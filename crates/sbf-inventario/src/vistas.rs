@@ -1,4 +1,4 @@
-//! As 12 consultas do Datasette (`workers/inventario/datasette/metadata.json`) como
+//! As 12 consultas do Datasette (congeladas em `tests/fixtures/datasette-metadata.json`) como
 //! funções com linhas tipadas, mais a conversão de cada uma para [`Tabela`].
 //!
 //! - INV-03: cada vista devolve as mesmas linhas que a SQL original sobre o mesmo banco

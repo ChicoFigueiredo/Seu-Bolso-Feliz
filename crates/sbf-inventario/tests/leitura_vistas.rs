@@ -1,6 +1,7 @@
 //! INV-03: cada uma das 12 vistas devolve as mesmas linhas que a consulta do Datasette
 //! correspondente, sobre o banco de teste. O teste roda a SQL original do
-//! `workers/inventario/datasette/metadata.json` e compara.
+//! `tests/fixtures/datasette-metadata.json` (a cópia congelada do
+//! `workers/inventario/datasette/metadata.json`, que saiu com o aceite do INV-03) e compara.
 
 mod comum;
 
@@ -14,7 +15,7 @@ use sbf_inventario::vistas::{self, Contexto};
 fn sql_do_datasette(consulta: &str) -> String {
     let caminho = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../workers/inventario/datasette/metadata.json"
+        "/tests/fixtures/datasette-metadata.json"
     );
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(caminho).expect("metadata.json"))
@@ -454,7 +455,7 @@ fn contas_buracos_igual_ao_datasette() {
 fn doze_consultas_do_datasette_estao_cobertas() {
     let caminho = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../workers/inventario/datasette/metadata.json"
+        "/tests/fixtures/datasette-metadata.json"
     );
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(caminho).expect("metadata.json"))
