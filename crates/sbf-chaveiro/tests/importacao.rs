@@ -495,3 +495,50 @@ fn o_crate_nao_loga() {
         }
     }
 }
+
+#[test]
+fn o_chaveiro_e_a_fonte_de_segredos_do_pdf() {
+    use sbf_pdf::{ErroDeFonte, Estrategia};
+    let cenario = Cenario::novo(ChaveiroEmMemoria::novo(), FIXTURE);
+    let chaveiro = cenario.chaveiro();
+    assert_eq!(
+        Estrategia::CpfCompleto
+            .candidata(&chaveiro)
+            .expect_err("sem cpf"),
+        ErroDeFonte::SemCpf
+    );
+    chaveiro
+        .importar(&cenario.cofre_enc(), &mestra())
+        .expect("importar");
+    let c = |e: Estrategia| {
+        e.candidata(&chaveiro)
+            .expect("candidata")
+            .expor()
+            .to_owned()
+    };
+    assert_eq!(c(Estrategia::CpfUltimos(5)), "24725");
+    assert_eq!(
+        c(Estrategia::SenhaPropria("condominio-qnl".into())),
+        SENHA_QNL
+    );
+    assert_eq!(
+        Estrategia::SenhaPropria("nao-existe".into())
+            .candidata(&chaveiro)
+            .expect_err("ausente"),
+        ErroDeFonte::SemSenhaPropria
+    );
+
+    // Arquivo de fallback trancado: a fonte diz que está trancado.
+    let sem_keyring = Cenario::novo(ChaveiroEmMemoria::indisponivel(), FIXTURE);
+    sem_keyring
+        .chaveiro()
+        .importar(&sem_keyring.cofre_enc(), &mestra())
+        .expect("importar");
+    let trancado = sem_keyring.chaveiro();
+    assert_eq!(
+        Estrategia::CpfCompleto
+            .candidata(&trancado)
+            .expect_err("trancado"),
+        ErroDeFonte::Trancado
+    );
+}

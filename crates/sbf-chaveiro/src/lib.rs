@@ -32,6 +32,7 @@ mod arquivo_antigo;
 mod chaveiro;
 mod cpf;
 mod erro;
+mod fonte;
 mod pasta;
 
 pub use chaveiro::{

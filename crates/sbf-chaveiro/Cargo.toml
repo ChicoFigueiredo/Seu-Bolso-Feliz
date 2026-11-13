@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 bancada-segredos = { workspace = true }
+# Só pelo trait FonteDeSegredos, que o chaveiro implementa para a abertura de PDF protegido.
+sbf-pdf = { path = "../sbf-pdf" }
 zeroize = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
