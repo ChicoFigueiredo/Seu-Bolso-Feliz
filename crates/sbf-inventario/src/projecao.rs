@@ -528,6 +528,12 @@ fn aplicar_colunas(
         .ok_or_else(|| erro_de_banco("decisão sem colunas"))?;
     for (coluna, v) in objeto {
         conferir_coluna(alvo, coluna)?;
+        if alvo == AlvoTipo::Registro && coluna == "estado" && registro_promovido(tx, id)? {
+            // Promovido é terminal e vem de fora do log (o `importar-pluggy` marca o que já
+            // foi lançado no app). Nenhuma decisão, desfazer ou `reprojetar` tira um
+            // registro de promovido; Aprovar e Rejeitar já recusam antes de gravar.
+            continue;
+        }
         if coluna == "ciclo_id"
             && let Some(id_ciclo) = v.as_str()
         {
@@ -539,6 +545,16 @@ fn aplicar_colunas(
         )?;
     }
     Ok(())
+}
+
+/// Se o registro está promovido (já virou movimentação no app).
+fn registro_promovido(tx: &Transaction<'_>, id: &str) -> ResultadoDeComando<bool> {
+    let estado: Option<String> = tx
+        .query_row("SELECT estado FROM registro WHERE id = ?1", [id], |l| {
+            l.get(0)
+        })
+        .optional()?;
+    Ok(estado.as_deref() == Some("promovido"))
 }
 
 /// Cria a linha de `ciclo` que a chave estrangeira de `ciclo_id` exige.
