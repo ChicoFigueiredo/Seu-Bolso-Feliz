@@ -22,6 +22,10 @@ pub struct Estado {
     pub dia_de_corte: u8,
     /// O fuso em que o ciclo é calculado.
     pub fuso: String,
+    /// Quantos documentos do dono esperam revisão no servidor (`ingestion_jobs` em
+    /// `pending_review` ou `drafted`, como `contarPendencias` do web): "Precisam de
+    /// revisão" em Para resolver. Não é coleção porque a fila não sincroniza.
+    pub documentos_a_revisar: u32,
     /// A estação que chamou.
     pub estacao: Estacao,
 }

@@ -6,11 +6,13 @@
 //!   `Inventario`), com o plano de migração antes (só migra com o OK);
 //! - `sbf reprojetar --inventario <pasta-do-cofre>`: manutenção, refaz a projeção a partir
 //!   do log de decisões e imprime o resumo;
+//! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf --versao`.
 
 mod captura;
 mod entrada;
 mod inventario;
+mod servidor;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -199,7 +201,7 @@ fn app_de_demonstracao() -> Result<App, String> {
         .map_err(|e| format!("os temas não carregaram: {e}"))
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -243,6 +245,7 @@ fn main() -> ExitCode {
             }
         },
         None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
+        Some("servidor") => servidor::rodar(&args[1..]),
         Some("reprojetar") => {
             let (Some("--inventario"), Some(pasta)) =
                 (args.get(1).map(String::as_str), args.get(2))
