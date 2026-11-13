@@ -3611,6 +3611,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-previa"
+version = "0.1.0"
+dependencies = [
+ "sbf-pdf",
+ "sbf-processo",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "sbf-processo"
 version = "0.1.0"
 dependencies = [

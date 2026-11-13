@@ -1,0 +1,19 @@
+[package]
+name = "sbf-previa"
+description = "Prévia do arquivo de um documento: páginas de PDF, imagens, e-mail, texto, Office e zip, em memória. Sem egui."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-pdf = { path = "../sbf-pdf" }
+sbf-processo = { path = "../sbf-processo" }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -345,6 +345,43 @@ Regras:
    "PDF protegido sem regra" e as tentativas param.
 8. **O original nunca muda.** A estante recebe o PDF original, ainda protegido.
 
+## Prévia do arquivo
+
+Decidida com o CEO em 2026-11-13, depois do primeiro uso da janela ("faltou algo
+essencial: não tem preview").
+
+- **Onde:** em três lugares, com o mesmo conteúdo:
+  - no canto: o painel Prévia do dock, visível por padrão, com a miniatura do item
+    selecionado na tabela ou da página aberta;
+  - na aba **Arquivo** da página de achado e documento (e de origem e registro, que mostram
+    o documento deles), grande, com páginas e zoom;
+  - destacada: o botão Destacar abre a prévia numa janela própria do sistema.
+  - Ao parar o mouse meio segundo sobre o nome de um achado ou documento numa tabela, um
+    tooltip mostra a miniatura (~220 px).
+- **Tipos:**
+  - PDF, todas as páginas, desenhadas pelo `pdftoppm` lendo a entrada padrão;
+  - imagens (png, jpg, webp, gif, bmp, tiff) no próprio app, e HEIC pelo `ffmpeg` em
+    memória;
+  - e-mail (`.eml`, `.msg`): remetente, assunto, data, corpo em texto e anexos (link quando o
+    anexo é um achado);
+  - texto (xml, ofx, ofc, html, csv, txt) como texto;
+  - Office (xls, xlsx, xlsm, doc, docx, rtf) convertido em PDF pelo LibreOffice numa pasta
+    0700 em memória (`$XDG_RUNTIME_DIR`, tmpfs), apagada logo depois, com faxina das sobras
+    ao abrir;
+  - zip: a lista do que tem dentro, sem extrair;
+  - o resto: os metadados e "Abrir no programa do sistema".
+- **PDF protegido:** com o chaveiro aberto e uma regra que funcione, decifra em memória
+  (lopdf) e desenha. Sem regra, mostra "Protegido por senha" e o atalho Nova regra. Nunca
+  grava cópia decifrada.
+- **Cache:** só em memória, rotativo: guarda as últimas 30 prévias ou até 256 MB, o que vier
+  primeiro (ajustável em Opções). Nada do conteúdo vai para disco fora do cofre (ADR-015).
+- **Fonte do arquivo:** a cópia do acervo (`achado.caminho_acervo`, relativa à pasta do
+  cofre). Achado sem cópia no acervo mostra os metadados e o motivo.
+- **Limites:** o mesmo teto de 50 MiB do PDF protegido, imagens até 64 megapixels (reduzidas
+  para a tela), e prazo de 30 s por conversão; passou disso, mostra o motivo.
+- **Programas externos** (`pdftoppm`, `ffmpeg`, `soffice`) sempre pelo `sbf-processo`:
+  caminho absoluto, ambiente mínimo, sem senha em argumento.
+
 ## Lotes
 
 - **Montar:** você cria um lote com nome e adiciona achados em estado Documento e

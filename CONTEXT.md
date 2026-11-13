@@ -98,6 +98,11 @@ extrato — venha ele da câmera, de upload, do Gmail ou da pasta local. A orige
 atributo, não uma categoria à parte.
 _Avoid_: anexo, arquivo, source document
 
+**Prévia**:
+O arquivo de um documento ou achado mostrado dentro do app, como ele é: as páginas, a
+imagem ou o texto, pequeno num canto ou grande na página do item. Nunca muda o original.
+_Avoid_: preview, thumbnail, visualizador
+
 **Caixa de entrada**:
 A fila única de documentos recebidos e ainda não resolvidos, independente de origem.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
