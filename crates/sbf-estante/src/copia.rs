@@ -221,7 +221,6 @@ impl CopiaDeSeguranca {
             None,
         ) {
             Ok(texto) => {
-                let texto = Zeroizing::new(texto);
                 let sal = texto.trim();
                 if sal_no_formato(sal) {
                     Ok(Some(Zeroizing::new(sal.to_owned())))

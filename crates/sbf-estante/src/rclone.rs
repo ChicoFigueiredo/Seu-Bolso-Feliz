@@ -171,6 +171,8 @@ fn ambiente_minimo(comando: &mut Command) {
 /// (`copy`, `copyto`) não têm prazo de relógio, porque o acervo pode levar horas; nelas vale
 /// o `--timeout` do próprio rclone (5 min sem tráfego).
 pub const PRAZO_PADRAO: Duration = Duration::from_secs(5 * 60);
+/// Capacidade inicial do buffer da saída: cabe a senha ofuscada sem realocar.
+const CAPACIDADE_DA_SAIDA: usize = 4096;
 /// Subcomandos que transferem dados e ficam sem prazo de relógio.
 const TRANSFERENCIAS: &[&str] = &["copy", "copyto"];
 
@@ -228,7 +230,7 @@ impl Rclone {
         argumentos: I,
         ambiente: &[VariavelDeAmbiente],
         entrada: Option<&str>,
-    ) -> Resultado<String>
+    ) -> Resultado<Zeroizing<String>>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -280,9 +282,11 @@ impl Rclone {
             }
             texto
         });
+        // A saída pode ser a senha ofuscada (`obscure`): vai para um buffer zerável com
+        // capacidade reservada, para não deixar cópias ao crescer (achado A5).
         let mut stdout = filho.stdout.take();
         let leitor_da_saida = std::thread::spawn(move || {
-            let mut texto = String::new();
+            let mut texto = Zeroizing::new(String::with_capacity(CAPACIDADE_DA_SAIDA));
             if let Some(s) = stdout.as_mut() {
                 let _ = s.read_to_string(&mut texto);
             }
