@@ -23,8 +23,11 @@ pub struct EstadoDaBarra {
     pub inventario: String,
     /// "aberto" ou "fechado".
     pub chaveiro: Option<String>,
-    /// O aviso de disco sem cifra (ADR-015): `Some("não")` mostra o aviso.
+    /// Se o disco do cofre é cifrado: "sim", "não" ou "não se sabe" (ADR-015).
     pub disco_cifrado: Option<String>,
+    /// O texto do aviso de disco sem cifra (`sbf_disco::texto_do_aviso`). Com ele, a
+    /// barra mostra o aviso com ícone e texto, e o texto inteiro no tooltip.
+    pub aviso_de_disco: Option<String>,
     pub ultima_copia: Option<String>,
     /// Selo à direita do título ("Demonstração · dados fictícios").
     pub selo: Option<String>,
@@ -351,16 +354,27 @@ impl MolduraProvisoria {
                 format!("Chaveiro {}", traco(&self.barra.chaveiro)),
                 p.tinta_suave,
             );
-            let (icone, cor, texto) = match self.barra.disco_cifrado.as_deref() {
-                Some("não") => (
-                    "warning",
-                    p.aviso,
-                    "Disco cifrado: não — os dados do cofre estão em claro".to_owned(),
+            let disco = traco(&self.barra.disco_cifrado);
+            match &self.barra.aviso_de_disco {
+                Some(aviso) => {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.label(icones::icone_cor("warning", 14.0, p.aviso));
+                        ui.label(
+                            RichText::new(format!("Disco cifrado: {disco}"))
+                                .size(12.0)
+                                .color(p.aviso),
+                        )
+                        .on_hover_text(aviso.as_str());
+                    });
+                }
+                None => item(
+                    ui,
+                    "hard_drive",
+                    format!("Disco cifrado: {disco}"),
+                    p.tinta_suave,
                 ),
-                Some(s) => ("verified", p.tinta_suave, format!("Disco cifrado: {s}")),
-                None => ("hard_drive", p.tinta_suave, "Disco cifrado: —".to_owned()),
-            };
-            item(ui, icone, texto, cor);
+            }
             item(
                 ui,
                 "backup",

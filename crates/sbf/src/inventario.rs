@@ -2,14 +2,16 @@
 //!
 //! - Abrir não grava nada (INV-01). Se o banco precisa migrar, a janela mostra o plano e a
 //!   cópia que vai ser feita, e só migra com o seu OK.
-//! - A janela completa precisa do `LeitorSqlite` (a `Consulta` real), que o integrador
-//!   liga em [`janela_real`]. Até lá, a tela diz isso com clareza e não toca em nada.
+//! - Com o banco em dia, abre a janela completa: `LeitorSqlite` como `Consulta` (conexão
+//!   só de leitura) e o próprio `Inventario` como `Comandos`.
 
 use std::path::{Path, PathBuf};
 
 use egui::{Align, Layout, RichText, Ui};
+use sbf_disco::Cifra;
 use sbf_inventario::banco::{Inventario, PlanoDeMigracao};
-use sbf_janela::{componentes, tema};
+use sbf_inventario::leitor::LeitorSqlite;
+use sbf_janela::{EstadoDaBarra, Janela, MolduraProvisoria, componentes, tema};
 
 /// O que a tela do inventário real mostra.
 enum Tela {
@@ -24,8 +26,10 @@ enum Tela {
 }
 
 pub struct AppDoInventario {
-    inventario: Inventario,
+    inventario: Option<Inventario>,
+    pasta: PathBuf,
     tela: Tela,
+    janela: Option<crate::App>,
 }
 
 /// Abre o banco da pasta do cofre sem gravar nada.
@@ -47,18 +51,69 @@ pub fn abrir(pasta: &Path) -> Result<AppDoInventario, String> {
             aviso: format!("O inventário está em dia (versão {}).", plano.versao_atual),
         }
     };
-    Ok(AppDoInventario { inventario, tela })
+    let mut app = AppDoInventario {
+        inventario: Some(inventario),
+        pasta: pasta.to_path_buf(),
+        tela,
+        janela: None,
+    };
+    if matches!(app.tela, Tela::Pronto { .. }) {
+        app.ligar();
+    }
+    Ok(app)
 }
 
-/// Onde o integrador liga a janela completa: com o `LeitorSqlite` sobre
-/// `banco::abrir_leitura(inventario.caminho())` como `Consulta` e o próprio
-/// `Inventario` como `Comandos`, numa `MolduraProvisoria` (ou na casca).
-fn janela_real(_inventario: &Inventario) -> Option<()> {
-    None
+impl AppDoInventario {
+    /// Abre a leitura e troca esta tela pela janela completa.
+    fn ligar(&mut self) {
+        let Some(inventario) = self.inventario.take() else {
+            return;
+        };
+        match LeitorSqlite::abrir(inventario.caminho()) {
+            Ok(leitor) => {
+                let cifra = sbf_disco::cifra_do_volume(&self.pasta);
+                let barra = EstadoDaBarra {
+                    inventario: inventario.caminho().display().to_string(),
+                    disco_cifrado: Some(
+                        match cifra {
+                            Cifra::Cifrado => "sim",
+                            Cifra::NaoCifrado => "não",
+                            Cifra::Desconhecido => "não se sabe",
+                        }
+                        .to_owned(),
+                    ),
+                    aviso_de_disco: sbf_disco::texto_do_aviso(cifra).map(str::to_owned),
+                    ..Default::default()
+                };
+                let mut janela = Janela::nova();
+                janela.ligacoes.cofre = true;
+                self.janela = Some(crate::App {
+                    moldura: MolduraProvisoria::nova(janela, barra),
+                    consulta: Box::new(leitor),
+                    comandos: Box::new(inventario),
+                    captura: None,
+                    quadros: 0,
+                });
+            }
+            Err(e) => {
+                self.tela = Tela::Pronto {
+                    aviso: format!("O banco abriu, mas a leitura não: {e}"),
+                };
+                self.inventario = Some(inventario);
+            }
+        }
+    }
 }
 
 impl eframe::App for AppDoInventario {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        if let Some(app) = &mut self.janela {
+            app.ui(ui, frame);
+            return;
+        }
+        let Some(inventario) = &mut self.inventario else {
+            return;
+        };
         let p = tema::paleta(ui.ctx());
         let mut migrar = false;
         let mut sair = false;
@@ -69,7 +124,7 @@ impl eframe::App for AppDoInventario {
                     ui.set_max_width(640.0);
                     componentes::cartao(ui, |ui| {
                         ui.set_width(600.0);
-                        ui.label(RichText::new(self.inventario.caminho().display().to_string()).size(12.0).color(p.tinta_suave));
+                        ui.label(RichText::new(inventario.caminho().display().to_string()).size(12.0).color(p.tinta_suave));
                         ui.add_space(6.0);
                         match &self.tela {
                             Tela::Migrar { plano, copia, erro } => {
@@ -122,24 +177,29 @@ impl eframe::App for AppDoInventario {
                     });
                 });
             });
+        let mut migrou = None;
         if migrar && let Tela::Migrar { copia, .. } = &self.tela {
             let copia = copia.clone();
-            self.tela = match self.inventario.migrar(&copia) {
-                Ok(feita) => Tela::Pronto {
-                    aviso: format!(
-                        "Migrado da versão {} para a {}.{}",
-                        feita.versao_inicial,
-                        feita.versao_final,
-                        feita
-                            .copia
-                            .map(|c| format!(" A cópia de antes está em {}.", c.display()))
-                            .unwrap_or_default()
-                    ),
-                },
-                Err(e) => match self.inventario.plano() {
+            self.tela = match inventario.migrar(&copia) {
+                Ok(feita) => {
+                    let t = Tela::Pronto {
+                        aviso: format!(
+                            "Migrado da versão {} para a {}.{}",
+                            feita.versao_inicial,
+                            feita.versao_final,
+                            feita
+                                .copia
+                                .map(|c| format!(" A cópia de antes está em {}.", c.display()))
+                                .unwrap_or_default()
+                        ),
+                    };
+                    migrou = Some(());
+                    t
+                }
+                Err(e) => match inventario.plano() {
                     Ok(plano) => Tela::Migrar {
                         plano,
-                        copia: self.inventario.caminho_sugerido_da_copia(),
+                        copia: inventario.caminho_sugerido_da_copia(),
                         erro: Some(format!("A migração não foi feita: {e}")),
                     },
                     Err(e2) => Tela::Pronto {
@@ -150,7 +210,19 @@ impl eframe::App for AppDoInventario {
                 },
             };
         }
-        let _ = janela_real(&self.inventario);
+        if migrou.is_some() {
+            let aviso = match &self.tela {
+                Tela::Pronto { aviso } => aviso.clone(),
+                Tela::Migrar { .. } => String::new(),
+            };
+            self.ligar();
+            if let Some(app) = &mut self.janela {
+                app.moldura.janela.mensagem = Some(sbf_janela::janela::Mensagem {
+                    texto: aviso,
+                    erro: false,
+                });
+            }
+        }
         if sair {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }

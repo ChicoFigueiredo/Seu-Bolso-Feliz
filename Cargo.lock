@@ -3075,6 +3075,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "sbf-disco",
  "sbf-inventario",
  "sbf-janela",
 ]
@@ -3136,9 +3137,11 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui_extras",
+ "rusqlite",
  "sbf-inventario",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
