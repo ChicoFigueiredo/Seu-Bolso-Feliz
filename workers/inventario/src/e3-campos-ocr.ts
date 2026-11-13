@@ -8,10 +8,12 @@
  *
  * Usa as mesmas regras do e3-extrair (extrairCampos + escolherDataChave). Sem
  * data no texto, a data fraca é a do nome do arquivo (IMG-AAAAMMDD-WA…) e, por
- * último, a do arquivo no disco. Só preenche o que está vazio.
+ * último, a do arquivo no disco. Só preenche o que está vazio, e nunca em
+ * achado com decidido_por='usuario'.
  */
 import { cicloDe, limitesDoCiclo } from "./ciclo";
 import { abrirBanco, aplicarSchema } from "./banco";
+import { condicaoDoUsuario } from "./decisao";
 import { dataDoNome } from "./data-do-nome";
 import { escolherDataChave, extrairCampos, type Campos } from "./extrair";
 
@@ -24,6 +26,8 @@ interface Linha {
 const simular = process.argv.includes("--simular");
 const db = abrirBanco();
 aplicarSchema(db);
+// A decisão do usuário prevalece: achado que ele decidiu no desktop não muda.
+const doUsuario = condicaoDoUsuario(db, "achado", "a.");
 
 const linhas = db
   .query(
@@ -31,7 +35,8 @@ const linhas = db
        FROM achado a JOIN texto t USING (content_hash)
       WHERE a.estado = 'documento' AND t.metodo = 'ocr-por'
         -- Documento novo do OCR chega sem data; valor e fornecedor saem na mesma passada.
-        AND a.data_chave IS NULL`,
+        AND a.data_chave IS NULL
+        AND NOT ${doUsuario}`,
   )
   .all() as Linha[];
 const origens = db.query(
