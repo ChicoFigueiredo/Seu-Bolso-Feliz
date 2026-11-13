@@ -1,9 +1,9 @@
 # 06 — Spec: Desktop, fatia 1 — Inventário no desktop
 
-> **Estado: ⬜ proposta, aguardando o OK do CEO na spec e no protótipo.** Nenhum código
-> antes disso. Escrita em 2026-11-12 a partir do grill do mesmo dia. Decisões em
-> ADR-012 a ADR-018 (`docs/arquitetura/`), vocabulário em `CONTEXT.md`. Fatos do
-> inventário atual verificados contra o código de `workers/inventario/` no mesmo dia.
+> **Estado: ✅ aprovada pelo CEO em 2026-11-13, junto com o protótipo (versão 3).**
+> Implementação em andamento. Escrita em 2026-11-12 a partir do grill do mesmo dia.
+> Decisões em ADR-012 a ADR-018 (`docs/arquitetura/`), vocabulário em `CONTEXT.md`. Fatos
+> do inventário atual verificados contra o código de `workers/inventario/` no mesmo dia.
 
 ## Objetivo
 
