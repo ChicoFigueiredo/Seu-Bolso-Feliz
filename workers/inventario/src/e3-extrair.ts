@@ -11,11 +11,13 @@
  * protegido só ganha protegido_senha = 1), nada de OCR aqui (PDF de imagem
  * grava texto vazio com metodo 'pdf-sem-texto'), banco só pelo laço principal.
  * Idempotente: quem já tem linha em `texto` (ou protegido_senha = 1) não volta.
+ * Arquivo todo zero (marcador do OneDrive) grava metodo 'arquivo-zerado' e nota.
  */
 import type { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ehSoZeros, NOTA_ZERADO } from "./arquivo-zerado";
 import { abrirBanco } from "./banco";
 import { cicloDe, limitesDoCiclo } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
@@ -58,7 +60,8 @@ interface OrigemInfo {
   gmail_date: string | null;
 }
 
-type Situacao = "texto" | "protegido" | "sem-texto" | "sem-arquivo" | "sem-extrator" | "erro";
+type Situacao =
+  "texto" | "protegido" | "sem-texto" | "sem-arquivo" | "sem-extrator" | "zerado" | "erro";
 
 interface Resultado {
   alvo: Alvo;
@@ -283,6 +286,10 @@ async function processar(raiz: string, alvo: Alvo, origens: OrigemInfo[]): Promi
   const caminho = localizarArquivo(raiz, alvo, origens);
   if (!caminho) return { alvo, situacao: "sem-arquivo" };
   try {
+    // Marcador do OneDrive: sem isso o PDF dava erro e voltava toda rodada.
+    if (await ehSoZeros(caminho)) {
+      return { alvo, situacao: "zerado", metodo: "arquivo-zerado", texto: "" };
+    }
     const ext = await extrairDoArquivo(caminho, alvo.extensao ?? "", origens);
     if (ext.situacao !== "texto" || !ext.campos) {
       return { alvo, situacao: ext.situacao, metodo: ext.metodo, texto: "" };
@@ -343,6 +350,15 @@ function gravar(db: Database, r: Resultado): void {
     r.metodo ?? "desconhecido",
     (r.texto ?? "").slice(0, LIMITE_TEXTO),
   );
+  if (r.situacao === "zerado") {
+    db.query(
+      `UPDATE achado SET notas = CASE WHEN notas IS NULL OR notas = '' THEN ?1
+         WHEN instr(char(10) || notas || char(10), char(10) || ?1 || char(10)) > 0 THEN notas
+         ELSE notas || char(10) || ?1 END
+       WHERE content_hash = ?2`,
+    ).run(NOTA_ZERADO, alvo.content_hash);
+    return;
+  }
   if (r.situacao !== "texto") {
     if (r.metodo === "pdf-sem-texto") {
       db.query("UPDATE achado SET protegido_senha = 0 WHERE content_hash = ?").run(
@@ -471,6 +487,7 @@ async function main(): Promise<void> {
   console.log(`PDF só imagem / sem texto: ${n("sem-texto")}`);
   console.log(`sem arquivo localizável: ${n("sem-arquivo")}`);
   console.log(`sem extrator (imagem etc.): ${n("sem-extrator")}`);
+  console.log(`conteúdo todo zero (marcador de nuvem): ${n("zerado")}`);
   console.log(`erros: ${n("erro")}`);
   console.log(`data-chave por tipo: ${formatarMapa(porTipoData) || "-"}`);
   console.log(`tipo de documento: ${formatarMapa(porTipoDoc) || "-"}`);
