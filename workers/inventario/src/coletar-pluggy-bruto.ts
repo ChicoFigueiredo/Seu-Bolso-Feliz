@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { cicloDe, hojeIso, limitesDoCiclo } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
+import { prepararFatura } from "./gravar-pluggy";
 import {
   type FaturaPluggyBruta,
   type TransacaoPluggyBruta,
@@ -149,13 +150,7 @@ async function main(): Promise<void> {
          parcela_numero, parcela_total, confianca)
        VALUES (?, 'parcela', ?, ?, ?, ?, 1.0)`,
     ),
-    fatura: db.query(
-      `INSERT INTO registro (external_ref, fonte_id, tipo, data, data_tipo, ciclo_id, valor_centavos,
-         descricao_original, conta_provavel, confianca, extraido_por, estado)
-       VALUES (?, 'conexao:pluggy', 'fatura_cartao', ?, 'vencimento', ?, ?, ?, ?, 1.0, 'pluggy-bruto', 'extraido')
-       ON CONFLICT (external_ref) DO UPDATE SET valor_centavos = excluded.valor_centavos,
-         data = excluded.data, ciclo_id = excluded.ciclo_id`,
-    ),
+    fatura: prepararFatura(db),
     ciclo: db.query("INSERT OR IGNORE INTO ciclo (id, inicio, fim) VALUES (?, ?, ?)"),
   };
 
@@ -249,7 +244,9 @@ async function main(): Promise<void> {
   db.close();
 }
 
-main().catch((e: unknown) => {
-  console.error(e instanceof Error ? e.message : String(e));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e: unknown) => {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  });
+}

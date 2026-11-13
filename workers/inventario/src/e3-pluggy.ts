@@ -14,6 +14,7 @@
  */
 import { abrirBanco, aplicarSchema } from "./banco";
 import { caminhosDoCofre } from "./cofre";
+import { condicaoDoUsuario } from "./decisao";
 import { classificarMovimento, type EntradaMovimento } from "./pluggy-normalizar";
 
 interface Linha extends EntradaMovimento {
@@ -38,7 +39,8 @@ function main(): void {
               coalesce(tipo_original, tipo) AS tipo,
               tipo AS tipo_atual, valor_centavos, conta_provavel, categoria_provavel,
               fornecedor_normalizado
-         FROM registro WHERE fonte_id = 'conexao:pluggy' AND tipo <> 'fatura_cartao'`,
+         FROM registro WHERE fonte_id = 'conexao:pluggy' AND tipo <> 'fatura_cartao'
+           AND NOT ${condicaoDoUsuario(db, "registro")}`,
     )
     .all() as Linha[];
 
@@ -93,7 +95,7 @@ function main(): void {
 
   const atualizar = db.query(
     `UPDATE registro SET tipo = ?, tipo_original = coalesce(tipo_original, ?),
-       fornecedor_normalizado = ? WHERE id = ?`,
+       fornecedor_normalizado = ? WHERE id = ? AND NOT ${condicaoDoUsuario(db, "registro")}`,
   );
   db.transaction(() => {
     for (const m of mudancas) atualizar.run(m.tipo, m.original, m.fornecedor, m.id);
