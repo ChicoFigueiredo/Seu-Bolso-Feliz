@@ -3612,6 +3612,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-contrato"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "sbf-disco"
 version = "0.1.0"
 dependencies = [
