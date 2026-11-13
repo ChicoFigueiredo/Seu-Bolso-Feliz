@@ -376,7 +376,10 @@ essencial: não tem preview").
 - **Cache:** só em memória, rotativo: guarda as últimas 30 prévias ou até 256 MB, o que vier
   primeiro (ajustável em Opções). Nada do conteúdo vai para disco fora do cofre (ADR-015).
 - **Fonte do arquivo:** a cópia do acervo (`achado.caminho_acervo`, relativa à pasta do
-  cofre). Achado sem cópia no acervo mostra os metadados e o motivo.
+  cofre). Sem cópia no acervo (o inventário só copia o que já virou documento), lê o
+  original da primeira origem local acessível (`origem.local_filepath`), **só leitura**, com
+  o selo "lido da origem"; decidido com o CEO em 2026-11-13. Sem nenhuma das duas, mostra
+  os metadados e o motivo.
 - **Limites:** o mesmo teto de 50 MiB do PDF protegido, imagens até 64 megapixels (reduzidas
   para a tela), e prazo de 30 s por conversão; passou disso, mostra o motivo.
 - **Programas externos** (`pdftoppm`, `ffmpeg`, `soffice`) sempre pelo `sbf-processo`:
