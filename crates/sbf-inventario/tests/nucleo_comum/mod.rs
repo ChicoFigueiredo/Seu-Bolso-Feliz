@@ -87,7 +87,14 @@ pub fn semear(conexao: &Connection) {
              INSERT INTO pendencia (id, etapa, tipo, referencia, pergunta)
                VALUES (1, 'E3', 'senha', '{h3}', 'Qual a senha deste arquivo fictício?');
              INSERT INTO relacao (a, b, tipo, confianca, motivo)
-               VALUES ('{h1}', '{h4}', 'possivel_duplicidade', 0.5, 'mesmo texto');",
+               VALUES ('{h1}', '{h4}', 'possivel_duplicidade', 0.5, 'mesmo texto');
+             -- Instantes fixos: dois bancos semeados em momentos diferentes ficam iguais.
+             UPDATE achado SET primeiro_visto_em = '2026-11-01T00:00:00.000Z';
+             UPDATE origem SET visto_em = '2026-11-01T00:00:00.000Z';
+             UPDATE registro SET criado_em = '2026-11-01T00:00:00.000Z';
+             UPDATE pendencia SET criada_em = '2026-11-01T00:00:00.000Z';
+             UPDATE fonte SET criada_em = '2026-11-01T00:00:00.000Z';
+             UPDATE varredura SET iniciada_em = '2026-11-01T00:00:00.000Z';",
             h1 = hash(1),
             h2 = hash(2),
             h3 = hash(3),
