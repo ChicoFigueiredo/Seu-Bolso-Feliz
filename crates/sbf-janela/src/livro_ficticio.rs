@@ -2031,12 +2031,12 @@ impl Livro {
             Tipo::Movimentacao => vec![
                 col("Data"),
                 col("Movimentação"),
+                coln("Valor"),
                 col("Fornecedor"),
                 col("Categoria"),
                 col("Conta ou cartão"),
                 col("Centros"),
                 col("Situação"),
-                coln("Valor"),
             ],
             Tipo::Conta | Tipo::Produto => vec![
                 col("Conta"),
@@ -2172,6 +2172,7 @@ impl Livro {
                         alvo: r.clone(),
                         texto: m.descricao.clone(),
                     },
+                    valor(m.valor, None),
                     self.link_opt(Tipo::Fornecedor, &m.fornecedor),
                     match &m.categoria {
                         Some(c) => self.link(Tipo::Categoria, c),
@@ -2188,7 +2189,6 @@ impl Livro {
                         Celula::Links(centros)
                     },
                     estado(situacao),
-                    valor(m.valor, None),
                 ]
             }
             Tipo::Conta | Tipo::Produto => {

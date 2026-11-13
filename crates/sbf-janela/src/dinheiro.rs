@@ -307,12 +307,17 @@ pub fn indicadores(
 ) {
     let p = tema::paleta(ui.ctx());
     if !painel.indicadores.is_empty() {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-            for (n, i) in painel.indicadores.iter().enumerate() {
-                cartao_do_indicador(ui, i, n == 0, hora_da_copia, pedidos);
-            }
-        });
+        // Quebra em linhas pela largura: um cartão tem até 260 px.
+        let por_linha = ((ui.available_width() / 272.0).floor() as usize).max(1);
+        for (linha, cartoes) in painel.indicadores.chunks(por_linha).enumerate() {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+                for (n, i) in cartoes.iter().enumerate() {
+                    cartao_do_indicador(ui, i, linha == 0 && n == 0, hora_da_copia, pedidos);
+                }
+            });
+            ui.add_space(6.0);
+        }
         ui.add_space(8.0);
     }
     for a in &painel.avisos {
@@ -458,33 +463,39 @@ pub fn lado_a_lado(ui: &mut Ui, a: &Alteracao, recusa: &Recusa, pedidos: &mut Ve
                 .corner_radius(CornerRadius::same(6))
                 .inner_margin(Margin::same(10))
                 .show(ui, |ui| {
-                    ui.set_width(largura - 22.0);
-                    ui.label(
-                        RichText::new(titulo.to_uppercase())
-                            .font(FontId::new(11.5, familia_forte()))
-                            .color(p.tinta_suave),
-                    );
-                    ui.add_space(4.0);
-                    egui::Grid::new(("lado", &a.id, servidor))
-                        .num_columns(2)
-                        .spacing(vec2(12.0, 4.0))
-                        .show(ui, |ui| {
-                            for c in &recusa.campos {
-                                ui.label(RichText::new(&c.rotulo).color(p.tinta_suave));
-                                let v = if servidor { &c.servidor } else { &c.sua };
-                                if c.difere() {
-                                    ui.horizontal(|ui| {
-                                        ui.label(icones::icone_cor("difference", 14.0, p.aviso));
-                                        ui.label(RichText::new(v).color(p.aviso).strong());
-                                    })
-                                    .response
-                                    .on_hover_text("difere entre as duas versões");
-                                } else {
-                                    ui.label(RichText::new(v).color(p.tinta));
+                    ui.vertical(|ui| {
+                        ui.set_width(largura - 22.0);
+                        ui.label(
+                            RichText::new(titulo.to_uppercase())
+                                .font(FontId::new(11.5, familia_forte()))
+                                .color(p.tinta_suave),
+                        );
+                        ui.add_space(4.0);
+                        egui::Grid::new(("lado", &a.id, servidor))
+                            .num_columns(2)
+                            .spacing(vec2(12.0, 4.0))
+                            .show(ui, |ui| {
+                                for c in &recusa.campos {
+                                    ui.label(RichText::new(&c.rotulo).color(p.tinta_suave));
+                                    let v = if servidor { &c.servidor } else { &c.sua };
+                                    if c.difere() {
+                                        ui.horizontal(|ui| {
+                                            ui.label(icones::icone_cor(
+                                                "difference",
+                                                14.0,
+                                                p.aviso,
+                                            ));
+                                            ui.label(RichText::new(v).color(p.aviso).strong());
+                                        })
+                                        .response
+                                        .on_hover_text("difere entre as duas versões");
+                                    } else {
+                                        ui.label(RichText::new(v).color(p.tinta));
+                                    }
+                                    ui.end_row();
                                 }
-                                ui.end_row();
-                            }
-                        });
+                            });
+                    })
                 });
         }
     });
