@@ -8,6 +8,7 @@
 //! ponto flutuante, salvo dentro da amortização, onde a taxa de juros é fracionária
 //! (ver [`amortizacao`]).
 
+pub mod amortizacao;
 pub mod ciclo;
 pub mod data;
 pub mod dinheiro;
