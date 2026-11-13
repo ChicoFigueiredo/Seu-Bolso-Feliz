@@ -270,6 +270,38 @@ impl AppCasca for AppSbf {
             if let Some(m) = disp.motivo() {
                 a = a.desabilitada(m);
             }
+            let j = self.janela.borrow();
+            a = match d.id {
+                IdAcao::Periodo => a.menu(&[
+                    "inicio.periodo.atual",
+                    "inicio.periodo.anterior",
+                    "inicio.periodo.todos",
+                ]),
+                IdAcao::QuemDecidiu => a.menu(&[
+                    "inicio.quem.todos",
+                    "inicio.quem.voce",
+                    "inicio.quem.regras",
+                ]),
+                IdAcao::PeriodoAtual => {
+                    a.alternancia(j.periodo == crate::janela::Periodo::CicloAtual)
+                }
+                IdAcao::PeriodoAnterior => {
+                    a.alternancia(j.periodo == crate::janela::Periodo::CicloAnterior)
+                }
+                IdAcao::PeriodoTodos => {
+                    a.alternancia(j.periodo == crate::janela::Periodo::TodosOsCiclos)
+                }
+                IdAcao::QuemTodos => a.alternancia(j.quem_decidiu.is_none()),
+                IdAcao::QuemVoce => {
+                    a.alternancia(j.quem_decidiu == Some(sbf_inventario::consulta::Quem::Usuario))
+                }
+                IdAcao::QuemRegras => a.alternancia(matches!(
+                    j.quem_decidiu,
+                    Some(sbf_inventario::consulta::Quem::Automatico(_))
+                )),
+                _ => a,
+            };
+            drop(j);
             v.push(a);
         }
         v
@@ -290,7 +322,21 @@ impl AppCasca for AppSbf {
             }
             // Os grupos, na ordem da lista única.
             let mut grupos: Vec<(&str, Vec<&str>)> = Vec::new();
-            for d in ACOES.iter().filter(|d| d.aba == aba && !fica_de_fora(d.id)) {
+            let filho_de_menu = |id: IdAcao| {
+                matches!(
+                    id,
+                    IdAcao::PeriodoAtual
+                        | IdAcao::PeriodoAnterior
+                        | IdAcao::PeriodoTodos
+                        | IdAcao::QuemTodos
+                        | IdAcao::QuemVoce
+                        | IdAcao::QuemRegras
+                )
+            };
+            for d in ACOES
+                .iter()
+                .filter(|d| d.aba == aba && !fica_de_fora(d.id) && !filho_de_menu(d.id))
+            {
                 match grupos.iter_mut().find(|(g, _)| *g == d.grupo) {
                     Some((_, ids)) => ids.push(d.codigo),
                     None => grupos.push((d.grupo, vec![d.codigo])),

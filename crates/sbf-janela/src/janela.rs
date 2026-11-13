@@ -78,6 +78,8 @@ pub struct Janela {
     cache: Cache,
     pesquisa: String,
     pub periodo: Periodo,
+    /// Filtro "Quem decidiu" (aba Início): `None` = todos.
+    pub quem_decidiu: Option<sbf_inventario::consulta::Quem>,
     focar_pesquisa: bool,
     relatorios: EstadoDosRelatorios,
     pub lote_atual: Option<Ref>,
@@ -110,6 +112,7 @@ impl Janela {
             cache: Cache::default(),
             pesquisa: String::new(),
             periodo: Periodo::default(),
+            quem_decidiu: None,
             focar_pesquisa: false,
             relatorios: EstadoDosRelatorios::default(),
             lote_atual: None,
@@ -233,6 +236,7 @@ impl Janela {
         Filtro {
             texto: Some(self.pesquisa.trim().to_owned()).filter(|t| !t.is_empty()),
             ciclos,
+            quem_decidiu: self.quem_decidiu.clone(),
             ..Filtro::default()
         }
     }
@@ -885,6 +889,17 @@ impl Janela {
                 });
             }
             IdAcao::Pesquisar => self.focar_pesquisa = true,
+            IdAcao::Periodo | IdAcao::QuemDecidiu => {}
+            IdAcao::PeriodoAtual => self.periodo = Periodo::CicloAtual,
+            IdAcao::PeriodoAnterior => self.periodo = Periodo::CicloAnterior,
+            IdAcao::PeriodoTodos => self.periodo = Periodo::TodosOsCiclos,
+            IdAcao::QuemTodos => self.quem_decidiu = None,
+            IdAcao::QuemVoce => self.quem_decidiu = Some(sbf_inventario::consulta::Quem::Usuario),
+            IdAcao::QuemRegras => {
+                self.quem_decidiu = Some(sbf_inventario::consulta::Quem::Automatico(
+                    "regras@2".to_owned(),
+                ));
+            }
             IdAcao::AbrirEmPainelFlutuante => {
                 if let Some(r) = sel.first() {
                     if self.na_casca {

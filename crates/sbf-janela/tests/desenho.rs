@@ -296,3 +296,31 @@ fn moldura_provisoria_ainda_desenha() {
         saida.textures_delta.clear();
     }
 }
+
+#[test]
+fn filtros_da_aba_inicio_chegam_na_consulta() {
+    let mut b = Banco::novo();
+    b.abrir(Destino::Area(Area::EmDuvida));
+    b.executar(IdAcao::QuemVoce);
+    let filtro = b.casca.app.janela().filtro();
+    assert_eq!(
+        filtro.quem_decidiu,
+        Some(sbf_inventario::consulta::Quem::Usuario)
+    );
+    let t = b
+        .consulta
+        .tabela(&PedidoDeTabela::Area {
+            area: Area::EmDuvida,
+            filtro,
+        })
+        .expect("tabela");
+    assert_eq!(t.linhas.len(), 1);
+    b.executar(IdAcao::PeriodoAtual);
+    assert_eq!(
+        b.casca.app.janela().filtro().ciclos,
+        Some(("2026-10".into(), "2026-10".into()))
+    );
+    b.executar(IdAcao::QuemTodos);
+    b.executar(IdAcao::PeriodoTodos);
+    assert_eq!(b.casca.app.janela().filtro(), Filtro::default());
+}

@@ -2316,6 +2316,14 @@ impl Estado {
         }
     }
 
+    fn quem_no_filtro(filtro: &Filtro, autor: Option<&str>) -> bool {
+        match &filtro.quem_decidiu {
+            None => true,
+            Some(Quem::Usuario) => autor == Some("usuario"),
+            Some(Quem::Automatico(_)) => autor.is_some_and(|a| a != "usuario"),
+        }
+    }
+
     fn ciclo_no_filtro(filtro: &Filtro, ciclo: &str) -> bool {
         match &filtro.ciclos {
             None => true,
@@ -2337,6 +2345,7 @@ impl Estado {
                 .data
                 .as_deref()
                 .is_none_or(|d| Self::ciclo_no_filtro(filtro, &ciclo_da_data(d)))
+                && Self::quem_no_filtro(filtro, a.decidido_por.as_deref())
         };
         match area {
             A::ATriar => self.tabela_de_achados(
@@ -2367,6 +2376,7 @@ impl Estado {
                         r.categoria.as_deref().unwrap_or(""),
                     ],
                 ) && Self::ciclo_no_filtro(filtro, &r.ciclo)
+                    && Self::quem_no_filtro(filtro, Some(r.decidido_por.as_str()))
             })),
             A::Ciclos => Tabela {
                 colunas: vec![
