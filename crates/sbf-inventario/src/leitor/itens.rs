@@ -14,9 +14,9 @@ use crate::relacoes::{
 };
 use crate::visao_geral::ciclo_da_data;
 use crate::vistas::{
-    self, Contexto, Selecao, c_contagem, c_contagem_solta, c_data_opt, c_estado_achado,
-    c_estado_registro, c_link, c_link_opt, c_texto, c_texto_opt, c_valor, c_valor_opt, consultar,
-    rotulo_da_coleta, texto,
+    self, Contexto, Selecao, celula_contagem, celula_contagem_solta, celula_data_opt,
+    celula_estado_achado, celula_estado_registro, celula_link, celula_link_opt, celula_texto,
+    celula_texto_opt, celula_valor, celula_valor_opt, consultar, rotulo_da_coleta, texto,
 };
 
 fn campo(rotulo: &str, valor: Celula) -> Campo {
@@ -142,10 +142,10 @@ fn achado(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     let lotes = relacoes::lotes(ctx, &relacoes::selecao_de_lotes(alvo).unwrap_or_default())?;
     let de = Ref::nova(Tipo::Achado, hash);
     Ok(vec![
-        campo("Estado", c_estado_achado(&estado, &por)),
+        campo("Estado", celula_estado_achado(&estado, &por)),
         campo("Hash", Celula::Texto(hash.to_owned())),
-        campo("Tipo", c_texto_opt(&tipo)),
-        campo("Ciclo", c_link_opt(Tipo::Ciclo, &ciclo)),
+        campo("Tipo", celula_texto_opt(&tipo)),
+        campo("Ciclo", celula_link_opt(Tipo::Ciclo, &ciclo)),
         campo(
             "Data",
             data.as_ref().map_or(Celula::Vazia, |d| {
@@ -155,19 +155,19 @@ fn achado(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 })
             }),
         ),
-        campo("Valor", c_valor_opt(valor)),
-        campo("Fornecedor", c_link_opt(Tipo::Fornecedor, &fornecedor)),
+        campo("Valor", celula_valor_opt(valor)),
+        campo("Fornecedor", celula_link_opt(Tipo::Fornecedor, &fornecedor)),
         campo(
             "Origens",
-            c_contagem(origens, de.clone(), None, recorte::ORIGENS),
+            celula_contagem(origens, de.clone(), None, recorte::ORIGENS),
         ),
         campo(
             "Registros que saíram dele",
-            c_contagem(registros, de.clone(), None, recorte::REGISTROS),
+            celula_contagem(registros, de.clone(), None, recorte::REGISTROS),
         ),
         campo(
             "Decisões",
-            c_contagem(decisoes, de, None, recorte::DECISOES),
+            celula_contagem(decisoes, de, None, recorte::DECISOES),
         ),
         campo(
             "Lote",
@@ -191,10 +191,10 @@ fn achado(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             },
         ),
         campo("Confiança", confianca(conf)),
-        campo("Camada", c_texto(&camada)),
-        campo("Extensão", c_texto_opt(&ext)),
-        campo("No cofre", c_texto_opt(&acervo)),
-        campo("Motivo", c_texto_opt(&notas)),
+        campo("Camada", celula_texto(&camada)),
+        campo("Extensão", celula_texto_opt(&ext)),
+        campo("No cofre", celula_texto_opt(&acervo)),
+        campo("Motivo", celula_texto_opt(&notas)),
     ])
 }
 
@@ -239,10 +239,10 @@ fn origem(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         None => 0,
     };
     Ok(vec![
-        campo("Conexão", c_link(Tipo::Conexao, &fonte, &fonte)),
+        campo("Conexão", celula_link(Tipo::Conexao, &fonte, &fonte)),
         campo(
             "Coleta",
-            c_link(
+            celula_link(
                 Tipo::Coleta,
                 &varredura.to_string(),
                 &rotulo_da_coleta(etapa.as_deref().unwrap_or("?"), &fonte, varredura),
@@ -251,7 +251,7 @@ fn origem(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         campo(
             "Achado",
             hash.as_deref().map_or(Celula::Vazia, |h| {
-                c_link(
+                celula_link(
                     Tipo::Achado,
                     h,
                     &format!("Achado {}", vistas::hash_curto(h)),
@@ -262,15 +262,15 @@ fn origem(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             "Estado do achado",
             estado
                 .as_deref()
-                .map_or(Celula::Vazia, |e| c_estado_achado(e, &por)),
+                .map_or(Celula::Vazia, |e| celula_estado_achado(e, &por)),
         ),
-        campo("Tipo de origem", c_texto(&tipo)),
-        campo("Caminho · assunto", c_texto_opt(&onde)),
+        campo("Tipo de origem", celula_texto(&tipo)),
+        campo("Caminho · assunto", celula_texto_opt(&onde)),
         campo("Vista em", Celula::Data(visto)),
         campo(
             "Lugares onde o mesmo conteúdo foi achado",
             match &hash {
-                Some(h) => c_contagem(
+                Some(h) => celula_contagem(
                     outras + 1,
                     Ref::nova(Tipo::Achado, h.as_str()),
                     None,
@@ -279,7 +279,7 @@ fn origem(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 None => Celula::Vazia,
             },
         ),
-        campo("Erro", c_texto_opt(&erro)),
+        campo("Erro", celula_texto_opt(&erro)),
     ])
 }
 
@@ -341,21 +341,24 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     .next()
     .flatten();
     Ok(vec![
-        campo("Estado", c_estado_registro(&l.estado, &l.decidido_por)),
+        campo("Estado", celula_estado_registro(&l.estado, &l.decidido_por)),
         campo("Data", Celula::Data(l.data.clone())),
-        campo("Valor", c_valor(l.valor)),
-        campo("Tipo", c_texto(&l.tipo)),
-        campo("Fornecedor", c_link_opt(Tipo::Fornecedor, &nome_fornecedor)),
-        campo("Contraparte", c_texto_opt(&l.contraparte)),
-        campo("Categoria", c_texto_opt(&l.categoria)),
-        campo("Conta", c_link_opt(Tipo::Conta, &l.conta)),
-        campo("Ciclo", c_link_opt(Tipo::Ciclo, &l.ciclo)),
-        campo("Fatura", c_link_opt(Tipo::Fatura, &fatura)),
-        campo("Conexão", c_link(Tipo::Conexao, &l.fonte, &l.fonte)),
+        campo("Valor", celula_valor(l.valor)),
+        campo("Tipo", celula_texto(&l.tipo)),
+        campo(
+            "Fornecedor",
+            celula_link_opt(Tipo::Fornecedor, &nome_fornecedor),
+        ),
+        campo("Contraparte", celula_texto_opt(&l.contraparte)),
+        campo("Categoria", celula_texto_opt(&l.categoria)),
+        campo("Conta", celula_link_opt(Tipo::Conta, &l.conta)),
+        campo("Ciclo", celula_link_opt(Tipo::Ciclo, &l.ciclo)),
+        campo("Fatura", celula_link_opt(Tipo::Fatura, &fatura)),
+        campo("Conexão", celula_link(Tipo::Conexao, &l.fonte, &l.fonte)),
         campo(
             "Documento de origem",
             l.content_hash.as_deref().map_or(Celula::Vazia, |h| {
-                c_link(
+                celula_link(
                     Tipo::Documento,
                     h,
                     &format!("Documento {}", vistas::hash_curto(h)),
@@ -369,12 +372,12 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 .filter(|m| !m.is_empty())
                 .map_or_else(
                     || Celula::Texto("Ainda não é movimentação".to_owned()),
-                    |m| c_link(Tipo::Movimentacao, m, &format!("Movimentação {m}")),
+                    |m| celula_link(Tipo::Movimentacao, m, &format!("Movimentação {m}")),
                 ),
         ),
         campo(
             "Decisões",
-            c_contagem(decisoes, alvo.clone(), None, recorte::DECISOES),
+            celula_contagem(decisoes, alvo.clone(), None, recorte::DECISOES),
         ),
         campo(
             "Lote",
@@ -391,7 +394,7 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         ),
         campo("Extraído por", Celula::Texto(extraido_por)),
         campo("Confiança", confianca(conf)),
-        campo("Descrição", c_texto_opt(&l.descricao)),
+        campo("Descrição", celula_texto_opt(&l.descricao)),
     ])
 }
 
@@ -411,7 +414,7 @@ fn decisao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             texto: rotulo_ou_chave(ctx, &a)?,
             alvo: a,
         },
-        None => c_texto(&d.alvo_id),
+        None => celula_texto(&d.alvo_id),
     };
     let situacao = if d.desfeita_por.is_some() {
         "Desfeita"
@@ -420,7 +423,7 @@ fn decisao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     };
     Ok(vec![
         campo("Alvo", alvo_celula),
-        campo("Campo", c_texto(&d.campo)),
+        campo("Campo", celula_texto(&d.campo)),
         campo("Antes", Celula::Texto(texto_do_json(&d.antes))),
         campo("Depois", Celula::Texto(texto_do_json(&d.depois))),
         campo(
@@ -431,17 +434,17 @@ fn decisao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             },
         ),
         campo("Quando", Celula::Data(d.em.clone())),
-        campo("Motivo", c_texto_opt(&d.motivo)),
+        campo("Motivo", celula_texto_opt(&d.motivo)),
         campo(
             "Desfaz",
             d.desfaz.map_or(Celula::Vazia, |x| {
-                c_link(Tipo::Decisao, &x.to_string(), &format!("Decisão {x}"))
+                celula_link(Tipo::Decisao, &x.to_string(), &format!("Decisão {x}"))
             }),
         ),
         campo(
             "Desfeita por",
             d.desfeita_por.map_or(Celula::Vazia, |x| {
-                c_link(Tipo::Decisao, &x.to_string(), &format!("Decisão {x}"))
+                celula_link(Tipo::Decisao, &x.to_string(), &format!("Decisão {x}"))
             }),
         ),
     ])
@@ -466,19 +469,19 @@ fn lote(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             },
         ),
         campo("Criado em", Celula::Data(l.criado_em.clone())),
-        campo("Aprovado em", c_data_opt(&l.aprovado_em)),
-        campo("Promovido em", c_data_opt(&l.promovido_em)),
+        campo("Aprovado em", celula_data_opt(&l.aprovado_em)),
+        campo("Promovido em", celula_data_opt(&l.promovido_em)),
         campo(
             "Itens",
-            c_contagem(l.achados + l.registros, alvo.clone(), None, recorte::ITENS),
+            celula_contagem(l.achados + l.registros, alvo.clone(), None, recorte::ITENS),
         ),
         campo(
             "Achados",
-            c_contagem(l.achados, alvo.clone(), None, recorte::ACHADOS),
+            celula_contagem(l.achados, alvo.clone(), None, recorte::ACHADOS),
         ),
         campo(
             "Registros",
-            c_contagem(l.registros, alvo.clone(), None, recorte::REGISTROS),
+            celula_contagem(l.registros, alvo.clone(), None, recorte::REGISTROS),
         ),
         campo(
             "Valor dos registros",
@@ -502,7 +505,7 @@ fn pendencia(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> 
             texto: rotulo_ou_chave(ctx, &a)?,
             alvo: a,
         },
-        None => c_texto_opt(&p.referencia),
+        None => celula_texto_opt(&p.referencia),
     };
     let decisoes = contar(
         ctx,
@@ -522,16 +525,16 @@ fn pendencia(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> 
                 quem: p.resolvida_em.as_ref().map(|_| Quem::Usuario),
             },
         ),
-        campo("Pergunta", c_texto(&p.pergunta)),
+        campo("Pergunta", celula_texto(&p.pergunta)),
         campo("Item travado", travado),
-        campo("Etapa", c_texto(&p.etapa)),
-        campo("Tipo", c_texto(&p.tipo)),
+        campo("Etapa", celula_texto(&p.etapa)),
+        campo("Tipo", celula_texto(&p.tipo)),
         campo("Criada em", Celula::Data(p.criada_em.clone())),
-        campo("Respondida em", c_data_opt(&p.resolvida_em)),
-        campo("Resposta", c_texto_opt(&p.resposta)),
+        campo("Respondida em", celula_data_opt(&p.resolvida_em)),
+        campo("Resposta", celula_texto_opt(&p.resposta)),
         campo(
             "Decisões",
-            c_contagem(decisoes, alvo.clone(), None, recorte::DECISOES),
+            celula_contagem(decisoes, alvo.clone(), None, recorte::DECISOES),
         ),
     ])
 }
@@ -558,11 +561,11 @@ fn regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     Ok(vec![
         campo(
             "Fornecedor",
-            c_link(Tipo::Fornecedor, &r.fornecedor, &r.fornecedor),
+            celula_link(Tipo::Fornecedor, &r.fornecedor, &r.fornecedor),
         ),
-        campo("Tipo de documento", c_texto(&r.tipo_de_documento)),
-        campo("Estratégia", c_texto(&r.estrategia)),
-        campo("Prioridade", c_contagem_solta(r.prioridade)),
+        campo("Tipo de documento", celula_texto(&r.tipo_de_documento)),
+        campo("Estratégia", celula_texto(&r.estrategia)),
+        campo("Prioridade", celula_contagem_solta(r.prioridade)),
         campo(
             "Situação",
             Celula::Estado {
@@ -570,8 +573,8 @@ fn regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 quem: None,
             },
         ),
-        campo("Sucessos", c_contagem_solta(r.sucessos)),
-        campo("Falhas", c_contagem_solta(r.falhas)),
+        campo("Sucessos", celula_contagem_solta(r.sucessos)),
+        campo("Falhas", celula_contagem_solta(r.falhas)),
         campo(
             "Taxa de acerto",
             if total == 0 {
@@ -580,11 +583,11 @@ fn regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 Celula::Texto(format!("{}%", 100 * r.sucessos / total))
             },
         ),
-        campo("Último sucesso", c_data_opt(&r.ultimo_sucesso_em)),
-        campo("Última falha", c_data_opt(&r.ultima_falha_em)),
+        campo("Último sucesso", celula_data_opt(&r.ultimo_sucesso_em)),
+        campo("Última falha", celula_data_opt(&r.ultima_falha_em)),
         campo(
             "Tentativas",
-            c_contagem(
+            celula_contagem(
                 i64::try_from(tentativas.len()).unwrap_or(0),
                 alvo.clone(),
                 None,
@@ -617,10 +620,10 @@ fn conexao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         .transpose()?
         .and_then(|v| v.into_iter().next());
     Ok(vec![
-        campo("Descrição", c_texto(&c.descricao)),
-        campo("Tipo", c_texto(&c.tipo)),
-        campo("Escopo", c_texto(&c.escopo)),
-        campo("Motivo de estar fora", c_texto_opt(&c.motivo)),
+        campo("Descrição", celula_texto(&c.descricao)),
+        campo("Tipo", celula_texto(&c.tipo)),
+        campo("Escopo", celula_texto(&c.escopo)),
+        campo("Motivo de estar fora", celula_texto_opt(&c.motivo)),
         campo(
             "Situação",
             Celula::Texto(if c.escopo == "fora" {
@@ -629,30 +632,30 @@ fn conexao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 c.situacao.clone().unwrap_or_else(|| "ausente".to_owned())
             }),
         ),
-        campo("Raiz", c_texto_opt(&raiz.0)),
+        campo("Raiz", celula_texto_opt(&raiz.0)),
         campo(
             "Coletas",
-            c_contagem(c.coletas, alvo.clone(), None, recorte::COLETAS),
+            celula_contagem(c.coletas, alvo.clone(), None, recorte::COLETAS),
         ),
         campo(
             "Origens",
-            c_contagem(c.origens, alvo.clone(), None, recorte::ORIGENS),
+            celula_contagem(c.origens, alvo.clone(), None, recorte::ORIGENS),
         ),
         campo(
             "Registros",
-            c_contagem(c.registros, alvo.clone(), None, recorte::REGISTROS),
+            celula_contagem(c.registros, alvo.clone(), None, recorte::REGISTROS),
         ),
         campo(
             "Última coleta",
             ultima.map_or(Celula::Vazia, |u| {
-                c_link(
+                celula_link(
                     Tipo::Coleta,
                     &u.id.to_string(),
                     &rotulo_da_coleta(&u.etapa, &u.fonte_id, u.id),
                 )
             }),
         ),
-        campo("Criada em", c_data_opt(&Some(raiz.1))),
+        campo("Criada em", celula_data_opt(&Some(raiz.1))),
     ])
 }
 
@@ -672,21 +675,24 @@ fn coleta(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         vec![inteiro(id)],
     )?;
     Ok(vec![
-        campo("Conexão", c_link(Tipo::Conexao, &v.fonte_id, &v.fonte_id)),
-        campo("Etapa", c_texto(&v.etapa)),
-        campo("Situação", c_texto(&v.status)),
+        campo(
+            "Conexão",
+            celula_link(Tipo::Conexao, &v.fonte_id, &v.fonte_id),
+        ),
+        campo("Etapa", celula_texto(&v.etapa)),
+        campo("Situação", celula_texto(&v.status)),
         campo("Responsável", Celula::Texto(v.responsavel.clone())),
         campo("Iniciada em", Celula::Data(v.iniciada_em.clone())),
-        campo("Concluída em", c_data_opt(&v.concluida_em)),
-        campo("Escopo", c_texto(&v.escopo)),
-        campo("Vistos", c_contagem_solta(v.vistos)),
-        campo("Novos", c_contagem_solta(v.novos)),
-        campo("Repetidos", c_contagem_solta(v.repetidos)),
-        campo("Excluídos", c_contagem_solta(v.excluidos)),
-        campo("Erros", c_contagem_solta(v.erros)),
+        campo("Concluída em", celula_data_opt(&v.concluida_em)),
+        campo("Escopo", celula_texto(&v.escopo)),
+        campo("Vistos", celula_contagem_solta(v.vistos)),
+        campo("Novos", celula_contagem_solta(v.novos)),
+        campo("Repetidos", celula_contagem_solta(v.repetidos)),
+        campo("Excluídos", celula_contagem_solta(v.excluidos)),
+        campo("Erros", celula_contagem_solta(v.erros)),
         campo(
             "Origens",
-            c_contagem(origens, alvo.clone(), None, recorte::ORIGENS),
+            celula_contagem(origens, alvo.clone(), None, recorte::ORIGENS),
         ),
     ])
 }
@@ -765,11 +771,11 @@ fn fornecedor(ctx: &Contexto<'_>, alvo: &Ref, hoje: &str) -> ResultadoDeConsulta
         ),
         campo(
             "Documentos",
-            c_contagem(documentos, de_achados.clone(), None, recorte::DOCUMENTOS),
+            celula_contagem(documentos, de_achados.clone(), None, recorte::DOCUMENTOS),
         ),
         campo(
             "Achados",
-            c_contagem(achados, de_achados.clone(), None, recorte::ACHADOS),
+            celula_contagem(achados, de_achados.clone(), None, recorte::ACHADOS),
         ),
         campo(
             "Saiu · a conferir",
@@ -783,9 +789,9 @@ fn fornecedor(ctx: &Contexto<'_>, alvo: &Ref, hoje: &str) -> ResultadoDeConsulta
             &format!("Saiu no ciclo {anterior}"),
             valor_do_cabecalho(ctx, alvo, recorte::SAIDAS, Some(&anterior))?,
         ),
-        campo("Ciclos com saída", c_contagem_solta(ciclos_com_saida)),
-        campo("Primeiro registro", c_data_opt(&periodo.0)),
-        campo("Último registro", c_data_opt(&periodo.1)),
+        campo("Ciclos com saída", celula_contagem_solta(ciclos_com_saida)),
+        campo("Primeiro registro", celula_data_opt(&periodo.0)),
+        campo("Último registro", celula_data_opt(&periodo.1)),
         campo("Recorrente", sim_nao(recorrente)),
         campo(
             "Apelidos",
@@ -798,7 +804,7 @@ fn fornecedor(ctx: &Contexto<'_>, alvo: &Ref, hoje: &str) -> ResultadoDeConsulta
         campo("Contratos", Celula::Texto(CONTRATOS_NA_FATIA_2.to_owned())),
         campo(
             "Regras de senha",
-            c_contagem(regras, de_achados, None, recorte::REGRAS),
+            celula_contagem(regras, de_achados, None, recorte::REGRAS),
         ),
     ])
 }
@@ -907,11 +913,11 @@ fn ciclo(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         ),
         campo(
             "Documentos",
-            c_contagem(documentos, alvo.clone(), None, recorte::DOCUMENTOS),
+            celula_contagem(documentos, alvo.clone(), None, recorte::DOCUMENTOS),
         ),
         campo(
             "Achados",
-            c_contagem(achados, alvo.clone(), None, recorte::ACHADOS),
+            celula_contagem(achados, alvo.clone(), None, recorte::ACHADOS),
         ),
     ])
 }
@@ -962,9 +968,9 @@ fn conta(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
             "Movido entre contas",
             valor_do_cabecalho(ctx, alvo, recorte::MOVIDO, None)?,
         ),
-        campo("Primeiro registro", c_data_opt(&periodo.0)),
-        campo("Último registro", c_data_opt(&periodo.1)),
-        campo("Faturas", c_contagem_solta(faturas)),
+        campo("Primeiro registro", celula_data_opt(&periodo.0)),
+        campo("Último registro", celula_data_opt(&periodo.1)),
+        campo("Faturas", celula_contagem_solta(faturas)),
         campo(
             "Meses sem registro",
             if lacunas.is_empty() {
@@ -993,7 +999,7 @@ fn fatura(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         return Ok(Vec::new());
     };
     Ok(vec![
-        campo("Conta", c_link_opt(Tipo::Conta, &f.conta)),
+        campo("Conta", celula_link_opt(Tipo::Conta, &f.conta)),
         campo("Vencimento", Celula::Data(f.vencimento.clone())),
         campo(
             "Total da fatura",
@@ -1001,13 +1007,13 @@ fn fatura(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         ),
         campo(
             "Transações",
-            c_contagem(f.transacoes, alvo.clone(), None, recorte::TRANSACOES),
+            celula_contagem(f.transacoes, alvo.clone(), None, recorte::TRANSACOES),
         ),
         campo(
             "Soma das transações",
             valor_do_cabecalho(ctx, alvo, recorte::TRANSACOES, None)?,
         ),
-        campo("Diferença", c_valor(f.diferenca)),
-        campo("Situação", c_texto(&f.situacao)),
+        campo("Diferença", celula_valor(f.diferenca)),
+        campo("Situação", celula_texto(&f.situacao)),
     ])
 }

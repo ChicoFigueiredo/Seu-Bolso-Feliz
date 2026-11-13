@@ -22,8 +22,8 @@ use crate::consulta::{
 };
 use crate::referencia::{Ref, Tipo};
 use crate::vistas::{
-    Contexto, c_contagem, c_contagem_solta, c_link, c_texto, c_texto_opt, coluna, coluna_num,
-    consultar, pedido_total,
+    Contexto, celula_contagem, celula_contagem_solta, celula_link, celula_texto, celula_texto_opt,
+    coluna, coluna_num, consultar, pedido_total,
 };
 
 /// O ciclo (AAAA-MM do início) a que uma data `AAAA-MM-DD` pertence, com o dia de corte 20.
@@ -580,15 +580,15 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
         linhas: vec![
             linha_de_resumo(
                 "Achados",
-                c_contagem(r.achados, todos_achados.clone(), None, "achados"),
+                celula_contagem(r.achados, todos_achados.clone(), None, "achados"),
             ),
             linha_de_resumo(
                 "Origens",
-                c_contagem(r.origens, Ref::nova(Tipo::Origem, "*"), None, "origens"),
+                celula_contagem(r.origens, Ref::nova(Tipo::Origem, "*"), None, "origens"),
             ),
             linha_de_resumo(
                 "Copiados para o acervo",
-                c_contagem(r.copiados, todos_achados, None, "copiados"),
+                celula_contagem(r.copiados, todos_achados, None, "copiados"),
             ),
             linha_de_resumo(
                 "Acervo",
@@ -633,10 +633,10 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
             .map(|e| Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto(&e.etapa),
-                    c_texto(&e.nome),
-                    c_texto(&e.status),
-                    c_texto(&e.detalhe),
+                    celula_texto(&e.etapa),
+                    celula_texto(&e.nome),
+                    celula_texto(&e.status),
+                    celula_texto(&e.detalhe),
                 ],
             })
             .collect(),
@@ -665,20 +665,20 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Conexao, &f.id, &f.descricao),
-                        c_texto(&f.status),
-                        c_contagem_solta(f.vistos),
-                        c_contagem_solta(f.novos),
-                        f.copiados.map_or(Celula::Vazia, c_contagem_solta),
-                        c_contagem_solta(f.erros),
+                        celula_link(Tipo::Conexao, &f.id, &f.descricao),
+                        celula_texto(&f.status),
+                        celula_contagem_solta(f.vistos),
+                        celula_contagem_solta(f.novos),
+                        f.copiados.map_or(Celula::Vazia, celula_contagem_solta),
+                        celula_contagem_solta(f.erros),
                         f.atualizado
                             .as_ref()
                             .map_or(Celula::Vazia, |q| Celula::Data(q.clone())),
-                        c_contagem_solta(f.itens),
-                        c_texto_opt(&f.periodo_itens),
-                        c_contagem_solta(f.documentos),
-                        c_texto_opt(&f.periodo_documentos),
-                        c_texto_opt(&f.nota),
+                        celula_contagem_solta(f.itens),
+                        celula_texto_opt(&f.periodo_itens),
+                        celula_contagem_solta(f.documentos),
+                        celula_texto_opt(&f.periodo_documentos),
+                        celula_texto_opt(&f.nota),
                     ],
                 }
             })
@@ -698,9 +698,9 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
             .map(|a| Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto(&a.motivo),
-                    c_contagem_solta(a.areas),
-                    c_contagem_solta(a.arquivos),
+                    celula_texto(&a.motivo),
+                    celula_contagem_solta(a.areas),
+                    celula_contagem_solta(a.arquivos),
                     Celula::Texto(decimal(a.gb, 1)),
                 ],
             })
@@ -723,11 +723,11 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Ciclo, &c.ciclo, &c.ciclo),
-                        c_texto(&c.periodo),
-                        c_contagem(c.documentos, de.clone(), Some(&c.ciclo), "documentos"),
-                        c_contagem(c.registros, de, Some(&c.ciclo), "registros"),
-                        c_texto(&c.situacao),
+                        celula_link(Tipo::Ciclo, &c.ciclo, &c.ciclo),
+                        celula_texto(&c.periodo),
+                        celula_contagem(c.documentos, de.clone(), Some(&c.ciclo), "documentos"),
+                        celula_contagem(c.registros, de, Some(&c.ciclo), "registros"),
+                        celula_texto(&c.situacao),
                     ],
                 }
             })

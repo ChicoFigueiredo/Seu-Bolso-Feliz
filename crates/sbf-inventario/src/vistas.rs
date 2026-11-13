@@ -406,7 +406,7 @@ pub(crate) fn coluna_num(rotulo: &str) -> Coluna {
     }
 }
 
-pub(crate) fn c_texto(valor: &str) -> Celula {
+pub(crate) fn celula_texto(valor: &str) -> Celula {
     if valor.is_empty() {
         Celula::Vazia
     } else {
@@ -414,15 +414,15 @@ pub(crate) fn c_texto(valor: &str) -> Celula {
     }
 }
 
-pub(crate) fn c_texto_opt(valor: &Option<String>) -> Celula {
-    nao_vazio(valor).map_or(Celula::Vazia, c_texto)
+pub(crate) fn celula_texto_opt(valor: &Option<String>) -> Celula {
+    nao_vazio(valor).map_or(Celula::Vazia, celula_texto)
 }
 
-pub(crate) fn c_data_opt(valor: &Option<String>) -> Celula {
+pub(crate) fn celula_data_opt(valor: &Option<String>) -> Celula {
     nao_vazio(valor).map_or(Celula::Vazia, |d| Celula::Data(d.to_owned()))
 }
 
-pub(crate) fn c_link(tipo: Tipo, chave: &str, texto: &str) -> Celula {
+pub(crate) fn celula_link(tipo: Tipo, chave: &str, texto: &str) -> Celula {
     Celula::Link {
         alvo: Ref::nova(tipo, chave),
         texto: if texto.is_empty() {
@@ -434,11 +434,11 @@ pub(crate) fn c_link(tipo: Tipo, chave: &str, texto: &str) -> Celula {
 }
 
 /// Link para um nome (fornecedor, conta, ciclo, conexão…) quando há nome; vazio senão.
-pub(crate) fn c_link_opt(tipo: Tipo, nome: &Option<String>) -> Celula {
-    nao_vazio(nome).map_or(Celula::Vazia, |n| c_link(tipo, n, n))
+pub(crate) fn celula_link_opt(tipo: Tipo, nome: &Option<String>) -> Celula {
+    nao_vazio(nome).map_or(Celula::Vazia, |n| celula_link(tipo, n, n))
 }
 
-pub(crate) fn c_valor(centavos: Centavos) -> Celula {
+pub(crate) fn celula_valor(centavos: Centavos) -> Celula {
     Celula::Valor {
         centavos,
         fonte: Fonte::Inventario,
@@ -446,8 +446,8 @@ pub(crate) fn c_valor(centavos: Centavos) -> Celula {
     }
 }
 
-pub(crate) fn c_valor_opt(centavos: Option<Centavos>) -> Celula {
-    centavos.map_or(Celula::Vazia, c_valor)
+pub(crate) fn celula_valor_opt(centavos: Option<Centavos>) -> Celula {
+    centavos.map_or(Celula::Vazia, celula_valor)
 }
 
 /// `base` com o filtro da aba Início, para que o número de uma tabela filtrada abra os
@@ -472,7 +472,7 @@ pub(crate) fn pedido_total(de: Ref, ciclo: Option<&str>, recorte: &str) -> Box<P
 }
 
 /// Um valor em dinheiro clicável: abre os itens que o somam.
-pub(crate) fn c_valor_total(
+pub(crate) fn celula_valor_total(
     centavos: Centavos,
     de: Ref,
     ciclo: Option<&str>,
@@ -486,14 +486,14 @@ pub(crate) fn c_valor_total(
 }
 
 /// Uma contagem clicável: abre o que ela conta.
-pub(crate) fn c_contagem(n: i64, de: Ref, ciclo: Option<&str>, recorte: &str) -> Celula {
+pub(crate) fn celula_contagem(n: i64, de: Ref, ciclo: Option<&str>, recorte: &str) -> Celula {
     Celula::Contagem {
         n,
         itens: Some(pedido_total(de, ciclo, recorte)),
     }
 }
 
-pub(crate) fn c_contagem_solta(n: i64) -> Celula {
+pub(crate) fn celula_contagem_solta(n: i64) -> Celula {
     Celula::Contagem { n, itens: None }
 }
 
@@ -524,7 +524,7 @@ pub(crate) fn quem_de(decidido_por: &Option<String>) -> Option<Quem> {
     nao_vazio(decidido_por).map(Quem::de_texto)
 }
 
-pub(crate) fn c_estado_achado(estado: &str, decidido_por: &Option<String>) -> Celula {
+pub(crate) fn celula_estado_achado(estado: &str, decidido_por: &Option<String>) -> Celula {
     Celula::Estado {
         rotulo: rotulo_do_estado_do_achado(estado).to_owned(),
         // "A triar" ainda não foi decidido por ninguém.
@@ -536,7 +536,7 @@ pub(crate) fn c_estado_achado(estado: &str, decidido_por: &Option<String>) -> Ce
     }
 }
 
-pub(crate) fn c_estado_registro(estado: &str, decidido_por: &Option<String>) -> Celula {
+pub(crate) fn celula_estado_registro(estado: &str, decidido_por: &Option<String>) -> Celula {
     Celula::Estado {
         rotulo: rotulo_do_estado_do_registro(estado).to_owned(),
         quem: quem_de(decidido_por),
@@ -629,26 +629,26 @@ pub fn tabela_por_ciclo(linhas: &[LinhaDeCiclo], filtro: &Filtro) -> Tabela {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Ciclo, &l.ciclo, &l.ciclo),
-                        c_valor_total(
+                        celula_link(Tipo::Ciclo, &l.ciclo, &l.ciclo),
+                        celula_valor_total(
                             l.entrou,
                             de.clone(),
                             Some(&l.ciclo),
                             &recorte_com_filtro("entradas", filtro),
                         ),
-                        c_valor_total(
+                        celula_valor_total(
                             l.saiu,
                             de.clone(),
                             Some(&l.ciclo),
                             &recorte_com_filtro("saidas", filtro),
                         ),
-                        c_valor_total(
+                        celula_valor_total(
                             l.movido_entre_contas,
                             de.clone(),
                             Some(&l.ciclo),
                             &recorte_com_filtro("movido", filtro),
                         ),
-                        c_contagem(
+                        celula_contagem(
                             l.registros,
                             de,
                             Some(&l.ciclo),
@@ -745,11 +745,15 @@ pub fn tabela_fornecedores(linhas: &[LinhaDeFornecedor], filtro: &Filtro) -> Tab
                 let recorte = recorte_com_filtro(&format!("saidas:{}", l.tipo), filtro);
                 let (nome, vezes, saiu) = match &alvo {
                     Some(de) => (
-                        c_link(Tipo::Fornecedor, &de.chave, &de.chave),
-                        c_contagem(l.vezes, de.clone(), None, &recorte),
-                        c_valor_total(l.saiu, de.clone(), None, &recorte),
+                        celula_link(Tipo::Fornecedor, &de.chave, &de.chave),
+                        celula_contagem(l.vezes, de.clone(), None, &recorte),
+                        celula_valor_total(l.saiu, de.clone(), None, &recorte),
                     ),
-                    None => (Celula::Vazia, c_contagem_solta(l.vezes), c_valor(l.saiu)),
+                    None => (
+                        Celula::Vazia,
+                        celula_contagem_solta(l.vezes),
+                        celula_valor(l.saiu),
+                    ),
                 };
                 let mut ciclos = l.ciclos.clone();
                 ciclos.sort();
@@ -757,7 +761,7 @@ pub fn tabela_fornecedores(linhas: &[LinhaDeFornecedor], filtro: &Filtro) -> Tab
                     alvo,
                     celulas: vec![
                         nome,
-                        c_texto(&l.tipo),
+                        celula_texto(&l.tipo),
                         vezes,
                         saiu,
                         Celula::Data(l.primeira.clone()),
@@ -884,21 +888,21 @@ pub fn tabela_registros(linhas: &[LinhaDeRegistro]) -> Tabela {
                 alvo: Some(Ref::nova(Tipo::Registro, l.id.to_string())),
                 celulas: vec![
                     Celula::Data(l.data.clone()),
-                    c_link(
+                    celula_link(
                         Tipo::Registro,
                         &l.id.to_string(),
                         &rotulo_do_registro(l.id, &l.descricao),
                     ),
-                    c_valor(l.valor),
-                    c_texto(&l.tipo),
-                    c_link_opt(Tipo::Fornecedor, &l.fornecedor),
-                    c_texto_opt(&l.contraparte),
-                    c_data_opt(&l.data_compra),
-                    c_texto_opt(&l.categoria),
-                    c_link_opt(Tipo::Conta, &l.conta),
-                    c_link_opt(Tipo::Ciclo, &l.ciclo),
-                    c_estado_registro(&l.estado, &l.decidido_por),
-                    c_link(Tipo::Conexao, &l.fonte, &l.fonte),
+                    celula_valor(l.valor),
+                    celula_texto(&l.tipo),
+                    celula_link_opt(Tipo::Fornecedor, &l.fornecedor),
+                    celula_texto_opt(&l.contraparte),
+                    celula_data_opt(&l.data_compra),
+                    celula_texto_opt(&l.categoria),
+                    celula_link_opt(Tipo::Conta, &l.conta),
+                    celula_link_opt(Tipo::Ciclo, &l.ciclo),
+                    celula_estado_registro(&l.estado, &l.decidido_por),
+                    celula_link(Tipo::Conexao, &l.fonte, &l.fonte),
                 ],
             })
             .collect(),
@@ -1083,23 +1087,23 @@ pub fn tabela_de_achados(linhas: &[LinhaDeAchado], link: LinkDoAchado) -> Tabela
             .map(|l| {
                 let de = Ref::nova(Tipo::Achado, &l.hash);
                 let mut celulas = vec![
-                    c_link(tipo_link, &l.hash, &rotulo_do_achado(&l.nome, &l.hash)),
-                    c_estado_achado(&l.estado, &l.decidido_por),
-                    c_texto_opt(&l.tipo),
-                    c_data_opt(&l.data_chave),
-                    c_link_opt(Tipo::Ciclo, &l.ciclo),
-                    c_valor_opt(l.valor),
-                    c_link_opt(Tipo::Fornecedor, &l.fornecedor),
-                    c_contagem(l.origens, de, None, "origens"),
-                    c_texto_opt(&l.onde),
-                    c_texto_opt(&l.no_cofre),
+                    celula_link(tipo_link, &l.hash, &rotulo_do_achado(&l.nome, &l.hash)),
+                    celula_estado_achado(&l.estado, &l.decidido_por),
+                    celula_texto_opt(&l.tipo),
+                    celula_data_opt(&l.data_chave),
+                    celula_link_opt(Tipo::Ciclo, &l.ciclo),
+                    celula_valor_opt(l.valor),
+                    celula_link_opt(Tipo::Fornecedor, &l.fornecedor),
+                    celula_contagem(l.origens, de, None, "origens"),
+                    celula_texto_opt(&l.onde),
+                    celula_texto_opt(&l.no_cofre),
                 ];
                 celulas.push(if com_documento {
                     l.confianca.map_or(Celula::Vazia, |c| {
                         Celula::Texto(format!("{:.0}%", c * 100.0))
                     })
                 } else {
-                    c_texto_opt(&l.notas)
+                    celula_texto_opt(&l.notas)
                 });
                 Linha {
                     alvo: Some(Ref::nova(tipo_link, &l.hash)),
@@ -1166,10 +1170,10 @@ pub fn tabela_emails_por_remetente(linhas: &[LinhaDeRemetente]) -> Tabela {
             .map(|l| Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto_opt(&l.dominio),
-                    c_contagem_solta(l.emails),
-                    c_data_opt(&l.ultimo),
-                    c_texto_opt(&l.ultimo_assunto),
+                    celula_texto_opt(&l.dominio),
+                    celula_contagem_solta(l.emails),
+                    celula_data_opt(&l.ultimo),
+                    celula_texto_opt(&l.ultimo_assunto),
                 ],
             })
             .collect(),
@@ -1258,16 +1262,16 @@ pub fn tabela_emails(linhas: &[LinhaDeEmail]) -> Tabela {
             .map(|l| Linha {
                 alvo: Some(Ref::nova(Tipo::Origem, l.origem_id.to_string())),
                 celulas: vec![
-                    c_data_opt(&l.data),
-                    c_texto_opt(&l.de),
-                    c_link(
+                    celula_data_opt(&l.data),
+                    celula_texto_opt(&l.de),
+                    celula_link(
                         Tipo::Origem,
                         &l.origem_id.to_string(),
                         nao_vazio(&l.assunto).unwrap_or("(sem assunto)"),
                     ),
-                    c_contagem_solta(l.anexos),
-                    c_estado_achado(&l.estado, &l.decidido_por),
-                    c_texto_opt(&l.eml_no_cofre),
+                    celula_contagem_solta(l.anexos),
+                    celula_estado_achado(&l.estado, &l.decidido_por),
+                    celula_texto_opt(&l.eml_no_cofre),
                 ],
             })
             .collect(),
@@ -1362,16 +1366,16 @@ pub fn tabela_arquivos(linhas: &[LinhaDeArquivo]) -> Tabela {
             .map(|l| Linha {
                 alvo: Some(Ref::nova(Tipo::Origem, l.origem_id.to_string())),
                 celulas: vec![
-                    c_link(Tipo::Origem, &l.origem_id.to_string(), &l.nome),
-                    c_texto_opt(&l.caminho),
-                    l.bytes.map_or(Celula::Vazia, c_contagem_solta),
-                    c_data_opt(&l.data_arquivo),
-                    c_texto_opt(&l.camada),
+                    celula_link(Tipo::Origem, &l.origem_id.to_string(), &l.nome),
+                    celula_texto_opt(&l.caminho),
+                    l.bytes.map_or(Celula::Vazia, celula_contagem_solta),
+                    celula_data_opt(&l.data_arquivo),
+                    celula_texto_opt(&l.camada),
                     l.estado
                         .as_deref()
-                        .map_or(Celula::Vazia, |e| c_estado_achado(e, &l.decidido_por)),
-                    c_texto_opt(&l.tipo),
-                    c_texto_opt(&l.no_cofre),
+                        .map_or(Celula::Vazia, |e| celula_estado_achado(e, &l.decidido_por)),
+                    celula_texto_opt(&l.tipo),
+                    celula_texto_opt(&l.no_cofre),
                 ],
             })
             .collect(),
@@ -1512,10 +1516,10 @@ pub fn tabela_pastas_pessoais(linhas: &[LinhaDePasta]) -> Tabela {
             .map(|l| Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto_opt(&l.pasta),
-                    c_contagem_solta(l.achados),
-                    c_contagem_solta(l.documentos),
-                    c_contagem_solta(l.descartados),
+                    celula_texto_opt(&l.pasta),
+                    celula_contagem_solta(l.achados),
+                    celula_contagem_solta(l.documentos),
+                    celula_contagem_solta(l.descartados),
                 ],
             })
             .collect(),
@@ -1603,22 +1607,22 @@ pub fn tabela_varreduras(linhas: &[LinhaDeVarredura]) -> Tabela {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(
+                        celula_link(
                             Tipo::Coleta,
                             &l.id.to_string(),
                             &rotulo_da_coleta(&l.etapa, &l.fonte_id, l.id),
                         ),
-                        c_link(Tipo::Conexao, &l.fonte_id, &l.fonte_id),
-                        c_texto(&l.etapa),
-                        c_texto(&l.status),
+                        celula_link(Tipo::Conexao, &l.fonte_id, &l.fonte_id),
+                        celula_texto(&l.etapa),
+                        celula_texto(&l.status),
                         Celula::Data(l.iniciada_em.clone()),
-                        c_data_opt(&l.concluida_em),
-                        c_contagem_solta(l.vistos),
-                        c_contagem_solta(l.novos),
-                        c_contagem_solta(l.repetidos),
-                        c_contagem_solta(l.excluidos),
-                        c_contagem_solta(l.erros),
-                        c_texto(&l.escopo),
+                        celula_data_opt(&l.concluida_em),
+                        celula_contagem_solta(l.vistos),
+                        celula_contagem_solta(l.novos),
+                        celula_contagem_solta(l.repetidos),
+                        celula_contagem_solta(l.excluidos),
+                        celula_contagem_solta(l.erros),
+                        celula_texto(&l.escopo),
                         Celula::Texto(l.responsavel.clone()),
                     ],
                 }
@@ -1715,18 +1719,18 @@ pub fn tabela_faturas(linhas: &[LinhaDeFatura]) -> Tabela {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(
+                        celula_link(
                             Tipo::Fatura,
                             &l.fatura,
                             &rotulo_da_fatura(&l.conta, &l.vencimento),
                         ),
-                        c_link_opt(Tipo::Conta, &l.conta),
+                        celula_link_opt(Tipo::Conta, &l.conta),
                         Celula::Data(l.vencimento.clone()),
-                        c_valor_total(l.total, de.clone(), None, "fatura"),
-                        c_contagem(l.transacoes, de.clone(), None, "transacoes"),
-                        c_valor_total(l.soma_transacoes, de, None, "transacoes"),
-                        c_valor(l.diferenca),
-                        c_texto(&l.situacao),
+                        celula_valor_total(l.total, de.clone(), None, "fatura"),
+                        celula_contagem(l.transacoes, de.clone(), None, "transacoes"),
+                        celula_valor_total(l.soma_transacoes, de, None, "transacoes"),
+                        celula_valor(l.diferenca),
+                        celula_texto(&l.situacao),
                     ],
                 }
             })
@@ -1800,10 +1804,10 @@ pub fn tabela_contas_buracos(linhas: &[LinhaDeLacuna]) -> Tabela {
                 let alvo = nao_vazio(&l.conta).map(|c| Ref::nova(Tipo::Conta, c));
                 let (conta, transacoes) = match &alvo {
                     Some(de) => (
-                        c_link(Tipo::Conta, &de.chave, &de.chave),
-                        c_contagem(l.transacoes, de.clone(), None, "registros"),
+                        celula_link(Tipo::Conta, &de.chave, &de.chave),
+                        celula_contagem(l.transacoes, de.clone(), None, "registros"),
                     ),
-                    None => (Celula::Vazia, c_contagem_solta(l.transacoes)),
+                    None => (Celula::Vazia, celula_contagem_solta(l.transacoes)),
                 };
                 let mut meses = l.meses_sem_nada.clone();
                 meses.sort();
@@ -1812,9 +1816,9 @@ pub fn tabela_contas_buracos(linhas: &[LinhaDeLacuna]) -> Tabela {
                     celulas: vec![
                         conta,
                         transacoes,
-                        c_texto(&l.de),
-                        c_texto(&l.ate),
-                        c_contagem_solta(meses.len() as i64),
+                        celula_texto(&l.de),
+                        celula_texto(&l.ate),
+                        celula_contagem_solta(meses.len() as i64),
                         Celula::Links(
                             meses
                                 .iter()

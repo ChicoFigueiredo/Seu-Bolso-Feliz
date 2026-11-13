@@ -26,8 +26,9 @@ use crate::referencia::{Ref, Tipo};
 use crate::relacoes::{SQL_CATEGORIA_DO_REGISTRO, recorte};
 use crate::visao_geral::ciclo_da_data;
 use crate::vistas::{
-    self, Contexto, Selecao, c_contagem, c_data_opt, c_link, c_link_opt, c_texto, c_texto_opt,
-    c_valor, c_valor_total, coluna, coluna_num, consultar, mes_anterior, rotulo_do_registro, texto,
+    self, Contexto, Selecao, celula_contagem, celula_data_opt, celula_link, celula_link_opt,
+    celula_texto, celula_texto_opt, celula_valor, celula_valor_total, coluna, coluna_num,
+    consultar, mes_anterior, rotulo_do_registro, texto,
 };
 
 /// Quantos ciclos entram na janela padrão, além do atual.
@@ -237,7 +238,7 @@ fn ordenar_por_valor<T: Clone>(
 
 fn celula_de_fornecedor(nome: &Option<String>) -> Celula {
     match nome {
-        Some(n) if !n.is_empty() => c_link(Tipo::Fornecedor, n, n),
+        Some(n) if !n.is_empty() => celula_link(Tipo::Fornecedor, n, n),
         _ => Celula::Texto("(sem fornecedor)".to_owned()),
     }
 }
@@ -266,13 +267,13 @@ fn quanto_saiu(
         linhas: vec![Linha {
             alvo: Some(ciclo_atual.clone()),
             celulas: vec![
-                c_link(Tipo::Ciclo, &j.atual, &format!("Ciclo {}", j.atual)),
+                celula_link(Tipo::Ciclo, &j.atual, &format!("Ciclo {}", j.atual)),
                 Celula::Texto(format!(
                     "{} a {}, até hoje",
                     vistas::inicio_do_ciclo(&j.atual),
                     vistas::fim_do_ciclo(&j.atual)
                 )),
-                c_valor_total(atual, ciclo_atual, Some(&j.atual), recorte::SAIDAS),
+                celula_valor_total(atual, ciclo_atual, Some(&j.atual), recorte::SAIDAS),
             ],
         }],
     };
@@ -293,9 +294,9 @@ fn quanto_saiu(
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Ciclo, ciclo, &format!("Ciclo {ciclo}")),
-                        c_valor_total(*centavos, de.clone(), Some(ciclo), recorte::SAIDAS),
-                        c_contagem(vezes, de, Some(ciclo), recorte::SAIDAS),
+                        celula_link(Tipo::Ciclo, ciclo, &format!("Ciclo {ciclo}")),
+                        celula_valor_total(*centavos, de.clone(), Some(ciclo), recorte::SAIDAS),
+                        celula_contagem(vezes, de, Some(ciclo), recorte::SAIDAS),
                     ],
                 }
             })
@@ -340,11 +341,16 @@ fn maiores_fornecedores(
                 let alvo = alvo_de_fornecedor(&nome);
                 let (saiu, vezes) = match &alvo {
                     Some(de) => (
-                        c_valor_total(f.centavos, de.clone(), None, &j.recorte(recorte::SAIDAS)),
-                        c_contagem(f.vezes, de.clone(), None, &j.recorte(recorte::SAIDAS)),
+                        celula_valor_total(
+                            f.centavos,
+                            de.clone(),
+                            None,
+                            &j.recorte(recorte::SAIDAS),
+                        ),
+                        celula_contagem(f.vezes, de.clone(), None, &j.recorte(recorte::SAIDAS)),
                     ),
                     None => (
-                        c_valor(f.centavos),
+                        celula_valor(f.centavos),
                         Celula::Contagem {
                             n: f.vezes,
                             itens: None,
@@ -405,19 +411,22 @@ fn o_que_se_repete(
                 let n = i64::try_from(f.ciclos.len()).unwrap_or(1).max(1);
                 let ultimo = f.ciclos.iter().next_back().cloned().unwrap_or_default();
                 let total = match &alvo {
-                    Some(de) => {
-                        c_valor_total(f.centavos, de.clone(), None, &j.recorte(recorte::SAIDAS))
-                    }
-                    None => c_valor(f.centavos),
+                    Some(de) => celula_valor_total(
+                        f.centavos,
+                        de.clone(),
+                        None,
+                        &j.recorte(recorte::SAIDAS),
+                    ),
+                    None => celula_valor(f.centavos),
                 };
                 Linha {
                     alvo: alvo.clone(),
                     celulas: vec![
                         celula_de_fornecedor(nome),
                         Celula::Texto(format!("{} de {ciclos_da_janela}", f.ciclos.len())),
-                        c_valor(f.centavos / n),
+                        celula_valor(f.centavos / n),
                         total,
-                        c_link(Tipo::Ciclo, &ultimo, &ultimo),
+                        celula_link(Tipo::Ciclo, &ultimo, &ultimo),
                     ],
                 }
             })
@@ -457,14 +466,16 @@ fn o_que_se_repete(
             .map(|(nome, (ciclo, centavos))| {
                 let alvo = alvo_de_fornecedor(nome);
                 let valor = match &alvo {
-                    Some(de) => c_valor_total(*centavos, de.clone(), Some(ciclo), recorte::SAIDAS),
-                    None => c_valor(*centavos),
+                    Some(de) => {
+                        celula_valor_total(*centavos, de.clone(), Some(ciclo), recorte::SAIDAS)
+                    }
+                    None => celula_valor(*centavos),
                 };
                 Linha {
                     alvo,
                     celulas: vec![
                         celula_de_fornecedor(nome),
-                        c_link(Tipo::Ciclo, ciclo, ciclo),
+                        celula_link(Tipo::Ciclo, ciclo, ciclo),
                         valor,
                     ],
                 }
@@ -519,8 +530,8 @@ fn o_que_aumentou(
 
     let celula_do_ciclo =
         |nome: &Option<String>, valor: Centavos, ciclo: &str| match alvo_de_fornecedor(nome) {
-            Some(de) => c_valor_total(valor, de, Some(ciclo), recorte::SAIDAS),
-            None => c_valor(valor),
+            Some(de) => celula_valor_total(valor, de, Some(ciclo), recorte::SAIDAS),
+            None => celula_valor(valor),
         };
     let tabela_subiu = Tabela {
         colunas: vec![
@@ -599,8 +610,8 @@ fn onde_se_concentra(
             .map(|(categoria, v)| Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto(categoria),
-                    c_valor_total(
+                    celula_texto(categoria),
+                    celula_valor_total(
                         *v,
                         ref_de_todos_os_registros(),
                         None,
@@ -624,10 +635,13 @@ fn onde_se_concentra(
             .map(|(nome, f)| {
                 let alvo = alvo_de_fornecedor(&nome);
                 let valor = match &alvo {
-                    Some(de) => {
-                        c_valor_total(f.centavos, de.clone(), None, &j.recorte(recorte::SAIDAS))
-                    }
-                    None => c_valor(f.centavos),
+                    Some(de) => celula_valor_total(
+                        f.centavos,
+                        de.clone(),
+                        None,
+                        &j.recorte(recorte::SAIDAS),
+                    ),
+                    None => celula_valor(f.centavos),
                 };
                 Linha {
                     alvo,
@@ -714,21 +728,21 @@ fn nao_classificado(
             Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto("Registros sem fornecedor ou sem categoria"),
-                    c_contagem(
+                    celula_texto("Registros sem fornecedor ou sem categoria"),
+                    celula_contagem(
                         n,
                         todos.clone(),
                         None,
                         &j.recorte(recorte::NAO_CLASSIFICADOS),
                     ),
-                    c_valor_total(soma, todos, None, &j.recorte(recorte::NAO_CLASSIFICADOS)),
+                    celula_valor_total(soma, todos, None, &j.recorte(recorte::NAO_CLASSIFICADOS)),
                 ],
             },
             Linha {
                 alvo: None,
                 celulas: vec![
-                    c_texto("Achados ainda a triar"),
-                    c_contagem(
+                    celula_texto("Achados ainda a triar"),
+                    celula_contagem(
                         a_triar,
                         Ref::nova(Tipo::Achado, "*"),
                         None,
@@ -795,10 +809,10 @@ fn possiveis_duplicidades(
             alvo: Some(Ref::nova(Tipo::Achado, hash.as_str())),
             celulas: vec![
                 Celula::Texto(format!("Grupo {grupo}")),
-                c_link(Tipo::Achado, &hash, &vistas::rotulo_do_achado(&nome, &hash)),
-                c_link_opt(Tipo::Fornecedor, &fornecedor),
-                c_data_opt(&data),
-                valor.map_or(Celula::Vazia, c_valor),
+                celula_link(Tipo::Achado, &hash, &vistas::rotulo_do_achado(&nome, &hash)),
+                celula_link_opt(Tipo::Fornecedor, &fornecedor),
+                celula_data_opt(&data),
+                valor.map_or(Celula::Vazia, celula_valor),
             ],
         });
     }
@@ -846,13 +860,13 @@ fn possiveis_duplicidades(
             .map(|(a, b, tipo, confianca, motivo, nome_a, nome_b)| Linha {
                 alvo: Some(Ref::nova(Tipo::Achado, a.as_str())),
                 celulas: vec![
-                    c_link(Tipo::Achado, &a, &vistas::rotulo_do_achado(&nome_a, &a)),
-                    c_link(Tipo::Achado, &b, &vistas::rotulo_do_achado(&nome_b, &b)),
-                    c_texto(&tipo),
+                    celula_link(Tipo::Achado, &a, &vistas::rotulo_do_achado(&nome_a, &a)),
+                    celula_link(Tipo::Achado, &b, &vistas::rotulo_do_achado(&nome_b, &b)),
+                    celula_texto(&tipo),
                     confianca.map_or(Celula::Vazia, |c| {
                         Celula::Texto(format!("{:.0}%", c * 100.0))
                     }),
-                    c_texto_opt(&motivo),
+                    celula_texto_opt(&motivo),
                 ],
             })
             .collect(),
@@ -915,19 +929,19 @@ fn possiveis_duplicidades(
             .map(|(a, b, valor, data_a, data_b, desc_a, desc_b)| Linha {
                 alvo: Some(Ref::nova(Tipo::Registro, a.to_string())),
                 celulas: vec![
-                    c_link(
+                    celula_link(
                         Tipo::Registro,
                         &a.to_string(),
                         &rotulo_do_registro(a, &desc_a),
                     ),
                     Celula::Data(data_a),
-                    c_link(
+                    celula_link(
                         Tipo::Registro,
                         &b.to_string(),
                         &rotulo_do_registro(b, &desc_b),
                     ),
                     Celula::Data(data_b),
-                    c_valor(valor),
+                    celula_valor(valor),
                 ],
             })
             .collect(),
@@ -990,7 +1004,10 @@ fn o_que_falta_para_confiar(ctx: &Contexto<'_>) -> ResultadoDeConsulta<Painel> {
                 };
                 Some(Linha {
                     alvo: Some(Ref::nova(Tipo::Conexao, id.as_str())),
-                    celulas: vec![c_link(Tipo::Conexao, &id, &descricao), c_texto(situacao)],
+                    celulas: vec![
+                        celula_link(Tipo::Conexao, &id, &descricao),
+                        celula_texto(situacao),
+                    ],
                 })
             })
             .collect(),
@@ -1005,8 +1022,8 @@ fn o_que_falta_para_confiar(ctx: &Contexto<'_>) -> ResultadoDeConsulta<Painel> {
         linhas: vec![Linha {
             alvo: None,
             celulas: vec![
-                c_texto("Registros que você ainda não aprovou"),
-                c_contagem(
+                celula_texto("Registros que você ainda não aprovou"),
+                celula_contagem(
                     nao_aprovados,
                     ref_de_todos_os_registros(),
                     None,
