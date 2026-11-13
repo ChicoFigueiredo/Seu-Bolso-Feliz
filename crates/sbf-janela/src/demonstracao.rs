@@ -2857,6 +2857,8 @@ impl Estado {
                     .collect(),
             },
             A::VisaoGeral | A::Relatorios => Tabela::default(),
+            // Dinheiro e Sincronização: o livro-caixa fictício (`livro_ficticio`).
+            _ => Tabela::default(),
         }
     }
 

@@ -10,6 +10,7 @@
 //! e a raiz do cofre; nenhum depende de `sbf-inventario` nem de `sbf-chaveiro`.
 
 pub mod copia;
+pub mod destinos;
 pub mod erro;
 pub mod estante;
 pub mod nome;
@@ -17,6 +18,10 @@ mod rclone;
 
 pub use bancada_segredos::Segredo;
 pub use copia::{AVISO_DA_SENHA, CopiaDeSeguranca, RelatorioDaCopia, RelatorioDaRestauracao};
+pub use destinos::{
+    Destino, ListaDeDestinos, RelatorioDoDestino, TipoDeDestino, atualizar_destinos,
+    detectar_remotos, planejar_destinos,
+};
 pub use erro::{Erro, Resultado};
 pub use estante::{Andamento, Estante, Fase, Plano, RelatorioDaEstante};
 pub use rclone::{Rclone, SAIDA_MAXIMA_DO_RCLONE, VARIAVEIS_DO_RCLONE, localizar_rclone};
