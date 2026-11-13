@@ -486,6 +486,7 @@ fn toda_celula_de_nome_e_link_e_todo_total_tem_itens() {
     let ctx = Contexto::novo(&conn).expect("contexto");
     let tabela = vistas::tabela_por_ciclo(
         &vistas::por_ciclo(&ctx, &vistas::Selecao::nova()).expect("vista"),
+        &Filtro::default(),
     );
     assert!(!tabela.linhas.is_empty());
     for linha in &tabela.linhas {

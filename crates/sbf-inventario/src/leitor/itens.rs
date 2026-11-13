@@ -268,10 +268,10 @@ fn origem(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         campo("Caminho · assunto", c_texto_opt(&onde)),
         campo("Vista em", Celula::Data(visto)),
         campo(
-            "Outras origens do mesmo conteúdo",
+            "Lugares onde o mesmo conteúdo foi achado",
             match &hash {
                 Some(h) => c_contagem(
-                    outras,
+                    outras + 1,
                     Ref::nova(Tipo::Achado, h.as_str()),
                     None,
                     recorte::ORIGENS,
@@ -550,8 +550,7 @@ fn regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     let tentativas = relacoes::tentativas(
         ctx,
         &Selecao::nova().onde(
-            "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw
-               AND s.estrategia = t.estrategia AND (s.document_type = '*' OR s.document_type = a.document_type))",
+            "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw AND (s.document_type = '*' OR s.document_type = a.document_type))",
             vec![inteiro(id)],
         ),
     )?;
@@ -681,10 +680,7 @@ fn coleta(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         campo("Concluída em", c_data_opt(&v.concluida_em)),
         campo("Escopo", c_texto(&v.escopo)),
         campo("Vistos", c_contagem_solta(v.vistos)),
-        campo(
-            "Novos",
-            c_contagem(v.novos, alvo.clone(), None, recorte::ORIGENS),
-        ),
+        campo("Novos", c_contagem_solta(v.novos)),
         campo("Repetidos", c_contagem_solta(v.repetidos)),
         campo("Excluídos", c_contagem_solta(v.excluidos)),
         campo("Erros", c_contagem_solta(v.erros)),

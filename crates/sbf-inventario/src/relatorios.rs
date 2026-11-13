@@ -127,6 +127,8 @@ pub struct Janela {
     pub de: String,
     pub ate: String,
     pub atual: String,
+    /// As conexões escolhidas no filtro (vazio = todas).
+    pub fontes: Vec<String>,
 }
 
 impl Janela {
@@ -137,6 +139,7 @@ impl Janela {
                 de: de.clone(),
                 ate: ate.clone(),
                 atual,
+                fontes: filtro.fontes.clone(),
             },
             None => {
                 let mut de = atual.clone();
@@ -147,13 +150,20 @@ impl Janela {
                     de,
                     ate: atual.clone(),
                     atual,
+                    fontes: filtro.fontes.clone(),
                 }
             }
         }
     }
 
+    /// O recorte de um total da janela: o mesmo intervalo de ciclos e as mesmas conexões.
     fn recorte(&self, base: &str) -> String {
-        format!("{base}|ciclos={}..{}", self.de, self.ate)
+        let filtro = Filtro {
+            ciclos: Some((self.de.clone(), self.ate.clone())),
+            fontes: self.fontes.clone(),
+            ..Filtro::default()
+        };
+        vistas::recorte_com_filtro(base, &filtro)
     }
 }
 
@@ -594,7 +604,7 @@ fn onde_se_concentra(
                         *v,
                         ref_de_todos_os_registros(),
                         None,
-                        &format!("{}|categoria={categoria}", j.recorte(recorte::SAIDAS)),
+                        &j.recorte(&format!("{}|categoria={categoria}", recorte::SAIDAS)),
                     ),
                     Celula::Texto(percentual(*v, total)),
                 ],

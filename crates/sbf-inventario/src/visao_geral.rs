@@ -596,15 +596,15 @@ pub fn painel(visao: &VisaoGeral) -> Painel {
                         c_link(Tipo::Conexao, &f.id, &f.descricao),
                         c_texto(&f.status),
                         c_contagem_solta(f.vistos),
-                        c_contagem(f.novos, de.clone(), None, "origens"),
+                        c_contagem_solta(f.novos),
                         f.copiados.map_or(Celula::Vazia, c_contagem_solta),
                         c_contagem_solta(f.erros),
                         f.atualizado
                             .as_ref()
                             .map_or(Celula::Vazia, |q| Celula::Data(q.clone())),
-                        c_contagem(f.itens, de.clone(), None, "origens"),
+                        c_contagem_solta(f.itens),
                         c_texto_opt(&f.periodo_itens),
-                        c_contagem(f.documentos, de, None, "documentos"),
+                        c_contagem_solta(f.documentos),
                         c_texto_opt(&f.periodo_documentos),
                         c_texto_opt(&f.nota),
                     ],

@@ -487,7 +487,7 @@ fn rastro_da_decisao(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rast
     }
     let relacionadas = consultar(
         ctx.conn,
-        "SELECT d.id, d.campo, d.antes, d.depois, d.autor, d.em, (d.id = (SELECT desfaz FROM decisao WHERE id = ?1))
+        "SELECT d.id, d.campo, d.antes, d.depois, d.autor, d.em, coalesce(d.id = (SELECT desfaz FROM decisao WHERE id = ?1), 0)
          FROM decisao d
          WHERE d.id = (SELECT desfaz FROM decisao WHERE id = ?1) OR d.desfaz = ?1
          ORDER BY d.id",
@@ -607,8 +607,7 @@ fn rastro_da_regra(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rastro
         ctx,
         &crate::vistas::Selecao::nova()
             .onde(
-                "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw
-                   AND s.estrategia = t.estrategia AND (s.document_type = '*' OR s.document_type = a.document_type))",
+                "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw AND (s.document_type = '*' OR s.document_type = a.document_type))",
                 vec![Value::Integer(id)],
             )
             .com_limite(LIMITE_DE_ELOS),

@@ -36,7 +36,8 @@ use rusqlite::types::Value;
 
 use crate::consulta::ErroDeConsulta;
 use crate::consulta::{
-    Celula, Centavos, Fonte, Linha, PedidoDeTabela, Quem, ResultadoDeConsulta, Tabela, TotalDoCiclo,
+    Celula, Centavos, Filtro, Fonte, Linha, PedidoDeTabela, Quem, ResultadoDeConsulta, Tabela,
+    TotalDoCiclo,
 };
 use crate::movimento;
 use crate::referencia::{Ref, Tipo};
@@ -109,23 +110,31 @@ fn fora_da_fatia_1(tipo: Tipo) -> Option<ErroDeConsulta> {
     tipo.motivo_da_fatia().map(ErroDeConsulta::NaoSuportado)
 }
 
-/// O recorte pedido: `base[:tipo][|categoria=X][|ciclos=DE..ATE]`.
+/// O recorte pedido: `base[:tipo][|categoria=X][|ciclos=DE..ATE][|filtro=JSON]`.
 ///
 /// - `tipo` filtra `registro.tipo`;
 /// - `categoria` filtra a categoria provável (`Sem categoria` é a categoria vazia);
-/// - `ciclos` vale um intervalo de ciclos, para os totais dos relatórios que somam
-///   vários ciclos.
+/// - `ciclos` vale um intervalo de ciclos;
+/// - `filtro` é o [`Filtro`] em JSON, sempre o último modificador: um número que saiu de
+///   uma tabela filtrada abre os itens do mesmo filtro.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recorte {
     pub base: String,
     pub tipo: Option<String>,
     pub categoria: Option<String>,
     pub ciclos: Option<(String, String)>,
+    /// O filtro da aba Início que gerou o número (vale para os registros).
+    pub filtro: Option<Filtro>,
 }
 
 impl Recorte {
     pub fn ler(texto: Option<&str>) -> Recorte {
         let texto = texto.unwrap_or(recorte::REGISTROS);
+        // O filtro é o último modificador e pode conter `|`: separa antes.
+        let (texto, filtro) = match texto.split_once("|filtro=") {
+            Some((antes, json)) => (antes, serde_json::from_str::<Filtro>(json).ok()),
+            None => (texto, None),
+        };
         let mut partes = texto.split('|');
         let primeira = partes.next().unwrap_or(recorte::REGISTROS);
         let (base, tipo) = match primeira.split_once(':') {
@@ -137,6 +146,7 @@ impl Recorte {
             tipo,
             categoria: None,
             ciclos: None,
+            filtro,
         };
         for parte in partes {
             if let Some(c) = parte.strip_prefix("categoria=") {
@@ -163,6 +173,12 @@ impl Recorte {
         }
         if let Some((de, ate)) = &self.ciclos {
             t.push_str(&format!("|ciclos={de}..{ate}"));
+        }
+        if let Some(f) = &self.filtro
+            && let Ok(json) = serde_json::to_string(f)
+        {
+            t.push_str("|filtro=");
+            t.push_str(&json);
         }
         t
     }
@@ -1694,8 +1710,7 @@ pub fn tabela_ligados(ctx: &Contexto<'_>, de: &Ref, tipo: Tipo) -> ResultadoDeCo
         return match normalizar(tipo) {
             Tipo::Achado => {
                 let sel = Selecao::nova().onde(
-                    "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw
-                       AND s.estrategia = t.estrategia AND (s.document_type = '*' OR s.document_type = a.document_type))",
+                    "EXISTS (SELECT 1 FROM regra_senha s WHERE s.id = ? AND s.fornecedor = a.supplier_name_raw AND (s.document_type = '*' OR s.document_type = a.document_type))",
                     vec![inteiro(id)],
                 );
                 Ok(tabela_tentativas(&tentativas(ctx, &sel)?))
@@ -1821,6 +1836,9 @@ fn clausulas_de_recorte(ctx: &Contexto<'_>, rec: &Recorte, ciclo: Option<&str>) 
             "r.ciclo_id BETWEEN ? AND ?",
             vec![texto(de.as_str()), texto(ate.as_str())],
         );
+    }
+    if let Some(f) = &rec.filtro {
+        s = s.junta(vistas::selecao_do_filtro(ctx, f, vistas::Alvo::Registro));
     }
     if let Some(c) = ciclo {
         s = s.onde("r.ciclo_id = ?", vec![texto(c)]);

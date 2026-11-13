@@ -420,6 +420,18 @@ pub(crate) fn c_valor_opt(centavos: Option<Centavos>) -> Celula {
     centavos.map_or(Celula::Vazia, c_valor)
 }
 
+/// `base` com o filtro da aba Início, para que o número de uma tabela filtrada abra os
+/// itens do mesmo filtro. Filtro vazio não muda o recorte.
+pub fn recorte_com_filtro(base: &str, filtro: &Filtro) -> String {
+    if *filtro == Filtro::default() {
+        return base.to_owned();
+    }
+    match serde_json::to_string(filtro) {
+        Ok(json) => format!("{base}|filtro={json}"),
+        Err(_) => base.to_owned(),
+    }
+}
+
 pub(crate) fn pedido_total(de: Ref, ciclo: Option<&str>, recorte: &str) -> Box<PedidoDeTabela> {
     Box::new(PedidoDeTabela::ItensDoTotal {
         de,
@@ -571,7 +583,7 @@ pub fn por_ciclo_datasette(
     por_ciclo(ctx, &sel)
 }
 
-pub fn tabela_por_ciclo(linhas: &[LinhaDeCiclo]) -> Tabela {
+pub fn tabela_por_ciclo(linhas: &[LinhaDeCiclo], filtro: &Filtro) -> Tabela {
     Tabela {
         colunas: vec![
             coluna("Ciclo"),
@@ -588,10 +600,30 @@ pub fn tabela_por_ciclo(linhas: &[LinhaDeCiclo]) -> Tabela {
                     alvo: Some(de.clone()),
                     celulas: vec![
                         c_link(Tipo::Ciclo, &l.ciclo, &l.ciclo),
-                        c_valor_total(l.entrou, de.clone(), Some(&l.ciclo), "entradas"),
-                        c_valor_total(l.saiu, de.clone(), Some(&l.ciclo), "saidas"),
-                        c_valor_total(l.movido_entre_contas, de.clone(), Some(&l.ciclo), "movido"),
-                        c_contagem(l.registros, de, Some(&l.ciclo), "registros"),
+                        c_valor_total(
+                            l.entrou,
+                            de.clone(),
+                            Some(&l.ciclo),
+                            &recorte_com_filtro("entradas", filtro),
+                        ),
+                        c_valor_total(
+                            l.saiu,
+                            de.clone(),
+                            Some(&l.ciclo),
+                            &recorte_com_filtro("saidas", filtro),
+                        ),
+                        c_valor_total(
+                            l.movido_entre_contas,
+                            de.clone(),
+                            Some(&l.ciclo),
+                            &recorte_com_filtro("movido", filtro),
+                        ),
+                        c_contagem(
+                            l.registros,
+                            de,
+                            Some(&l.ciclo),
+                            &recorte_com_filtro("registros", filtro),
+                        ),
                     ],
                 }
             })
@@ -665,7 +697,7 @@ pub fn fornecedores_datasette(
     fornecedores(ctx, &sel)
 }
 
-pub fn tabela_fornecedores(linhas: &[LinhaDeFornecedor]) -> Tabela {
+pub fn tabela_fornecedores(linhas: &[LinhaDeFornecedor], filtro: &Filtro) -> Tabela {
     Tabela {
         colunas: vec![
             coluna("Fornecedor"),
@@ -680,7 +712,7 @@ pub fn tabela_fornecedores(linhas: &[LinhaDeFornecedor]) -> Tabela {
             .iter()
             .map(|l| {
                 let alvo = nao_vazio(&l.fornecedor).map(|n| Ref::nova(Tipo::Fornecedor, n));
-                let recorte = format!("saidas:{}", l.tipo);
+                let recorte = recorte_com_filtro(&format!("saidas:{}", l.tipo), filtro);
                 let (nome, vezes, saiu) = match &alvo {
                     Some(de) => (
                         c_link(Tipo::Fornecedor, &de.chave, &de.chave),
@@ -1427,7 +1459,7 @@ pub fn tabela_varreduras(linhas: &[LinhaDeVarredura]) -> Tabela {
                         Celula::Data(l.iniciada_em.clone()),
                         c_data_opt(&l.concluida_em),
                         c_contagem_solta(l.vistos),
-                        c_contagem(l.novos, de, None, "origens"),
+                        c_contagem_solta(l.novos),
                         c_contagem_solta(l.repetidos),
                         c_contagem_solta(l.excluidos),
                         c_contagem_solta(l.erros),
@@ -1668,8 +1700,8 @@ pub fn tabela_da_area(
             LinkDoAchado::Documento,
         )),
         Area::Registros => Ok(tabela_registros(&registros(ctx, &reg())?)),
-        Area::Ciclos => Ok(tabela_por_ciclo(&por_ciclo(ctx, &reg())?)),
-        Area::Fornecedores => Ok(tabela_fornecedores(&fornecedores(ctx, &reg())?)),
+        Area::Ciclos => Ok(tabela_por_ciclo(&por_ciclo(ctx, &reg())?, filtro)),
+        Area::Fornecedores => Ok(tabela_fornecedores(&fornecedores(ctx, &reg())?, filtro)),
         Area::Faturas => {
             let mut sel = Selecao::nova();
             if let Some((de, ate)) = &filtro.ciclos {
