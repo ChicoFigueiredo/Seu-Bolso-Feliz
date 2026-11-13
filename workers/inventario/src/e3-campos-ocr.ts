@@ -30,7 +30,8 @@ const linhas = db
     `SELECT a.content_hash, a.document_type, t.conteudo
        FROM achado a JOIN texto t USING (content_hash)
       WHERE a.estado = 'documento' AND t.metodo = 'ocr-por'
-        AND (a.data_chave IS NULL OR a.valor_centavos IS NULL OR a.supplier_name_raw IS NULL)`,
+        -- Documento novo do OCR chega sem data; valor e fornecedor saem na mesma passada.
+        AND a.data_chave IS NULL`,
   )
   .all() as Linha[];
 const origens = db.query(
