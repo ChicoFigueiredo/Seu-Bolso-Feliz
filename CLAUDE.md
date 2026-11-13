@@ -172,7 +172,8 @@ in Portuguese without accents (ADR-018), including mechanical ones.
 | `crates/sbf-chaveiro`, `crates/sbf-pdf` | Keyring import of the old `cofre.enc`; protected PDFs decrypted in memory (never a decrypted copy on disk, never a password in argv). |
 | `crates/sbf-estante`, `crates/sbf-disco` | Drive shelf and encrypted backup via rclone; unencrypted-disk warning. |
 
-The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (`bancada-casca`,
+The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (private on GitHub:
+`ChicoFigueiredo/bancada`; `bancada-casca`,
 `bancada-armazem`, `bancada-segredos`), used by path (`../bancada/crates/...`), so the
 SBF worktree must be a sibling of it.
 
