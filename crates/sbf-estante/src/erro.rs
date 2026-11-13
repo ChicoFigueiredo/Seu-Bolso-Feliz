@@ -5,8 +5,11 @@ use std::path::PathBuf;
 /// Falhas da estante e da cópia de segurança.
 #[derive(Debug, thiserror::Error)]
 pub enum Erro {
-    /// O programa `rclone` não foi encontrado.
-    #[error("o rclone não está instalado ou não está no PATH")]
+    /// O programa `rclone` não foi encontrado nas pastas do sistema, ou o configurado é
+    /// relativo ou está numa pasta gravável por outros.
+    #[error(
+        "o rclone não foi encontrado nas pastas do sistema, ou o configurado não é seguro (caminho relativo ou pasta gravável por outros)"
+    )]
     RcloneAusente,
     /// O rclone saiu com erro. `mensagem` é o fim do stderr dele (nunca a senha).
     #[error("rclone {comando} falhou (código {codigo:?}): {mensagem}")]

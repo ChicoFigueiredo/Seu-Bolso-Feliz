@@ -145,7 +145,7 @@ fn cada_copia_tem_sal_proprio_e_a_volta_usa_so_a_senha() {
         .map(|ofuscado| {
             assert!(!ofuscado.is_empty(), "PASSWORD2 vazio");
             let saida = std::process::Command::new("/usr/bin/rclone")
-                .args(["reveal", ofuscado])
+                .args(["reveal", "--", ofuscado])
                 .output()
                 .expect("reveal");
             String::from_utf8(saida.stdout)

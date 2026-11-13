@@ -19,4 +19,4 @@ pub use bancada_segredos::Segredo;
 pub use copia::{AVISO_DA_SENHA, CopiaDeSeguranca, RelatorioDaCopia, RelatorioDaRestauracao};
 pub use erro::{Erro, Resultado};
 pub use estante::{Andamento, Estante, Fase, Plano, RelatorioDaEstante};
-pub use rclone::Rclone;
+pub use rclone::{PASTAS_DO_SISTEMA, Rclone, confiavel, localizar_rclone};
