@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { abrirBanco, aplicarSchema } from "./banco";
 import { cicloDe, hojeIso } from "./ciclo";
 import { caminhosDoCofre } from "./cofre";
+import { prepararGravacao } from "./gravar-pluggy";
 
 interface Linha {
   external_ref: string;
@@ -84,14 +85,7 @@ async function main(): Promise<void> {
     .get() as { id: number };
 
   const existe = db.query("SELECT 1 FROM registro WHERE external_ref = ?");
-  const gravar = db.query(
-    `INSERT INTO registro (external_ref, fonte_id, tipo, data, data_tipo, ciclo_id, valor_centavos,
-       descricao_original, supplier_name_raw, categoria_provavel, conta_provavel, confianca,
-       extraido_por, estado, movimentacao_id)
-     VALUES (?, 'conexao:pluggy', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, 'pluggy-sync', ?, ?)
-     ON CONFLICT (external_ref) DO UPDATE SET estado = excluded.estado,
-       movimentacao_id = excluded.movimentacao_id, categoria_provavel = excluded.categoria_provavel`,
-  );
+  const gravar = prepararGravacao(db);
 
   let novos = 0;
   let repetidos = 0;
