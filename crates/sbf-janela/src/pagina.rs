@@ -740,7 +740,9 @@ pub fn desenhar_rastro(
             };
             componentes::rotulo_de_secao(ui, "De onde veio");
             if rastro.acima.is_empty() {
-                ui.label(RichText::new("Nada acima: este item é a origem.").color(p.tinta_suave));
+                let frase = sbf_inventario::rastro::motivo_sem_rastro(alvo.tipo)
+                    .unwrap_or("Nada acima: este item é a origem.");
+                ui.label(RichText::new(frase).color(p.tinta_suave));
             }
             for e in rastro.acima.iter().rev() {
                 desenhar_elo(ui, e, pedidos);

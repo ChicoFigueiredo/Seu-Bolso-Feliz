@@ -4,6 +4,8 @@
 //! - `sbf --demonstracao`: a janela com dados fictícios em memória;
 //! - `sbf --inventario <pasta-do-cofre>`: o inventário de verdade (`LeitorSqlite` e
 //!   `Inventario`), com o plano de migração antes (só migra com o OK);
+//! - `sbf reprojetar --inventario <pasta-do-cofre>`: manutenção, refaz a projeção a partir
+//!   do log de decisões e imprime o resumo;
 //! - `sbf --versao`.
 
 mod captura;
@@ -164,8 +166,7 @@ fn app_de_demonstracao() -> Result<App, String> {
     .map_err(|e| format!("os temas não carregaram: {e}"))
 }
 
-const AJUDA: &str =
-    "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -209,6 +210,24 @@ fn main() -> ExitCode {
             }
         },
         None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
+        Some("reprojetar") => {
+            let (Some("--inventario"), Some(pasta)) =
+                (args.get(1).map(String::as_str), args.get(2))
+            else {
+                eprintln!("sbf: uso: sbf reprojetar --inventario <pasta-do-cofre>\n{AJUDA}");
+                return ExitCode::from(2);
+            };
+            match sbf_inventario::manutencao::reprojetar_a_pasta(std::path::Path::new(pasta)) {
+                Ok(r) => {
+                    println!("{}", r.resumo());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("sbf: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Some("--inventario") => {
             let Some(pasta) = args.get(1) else {
                 eprintln!("sbf: falta a pasta do cofre.\n{AJUDA}");

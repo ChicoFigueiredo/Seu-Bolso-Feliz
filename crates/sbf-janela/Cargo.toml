@@ -14,6 +14,7 @@ bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
 sbf-pdf = { path = "../sbf-pdf" }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-estante = { path = "../sbf-estante" }
+sbf-processo = { path = "../sbf-processo" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

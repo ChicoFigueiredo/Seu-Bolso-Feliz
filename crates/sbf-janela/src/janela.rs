@@ -80,6 +80,8 @@ pub enum Dialogo {
         fornecedor: String,
         tipo_de_documento: String,
         estrategia: String,
+        /// Menor é tentada primeiro (padrão 100).
+        prioridade: String,
         erro: Option<String>,
     },
 }
@@ -855,6 +857,7 @@ impl Janela {
                     fornecedor,
                     tipo_de_documento,
                     estrategia,
+                    prioridade,
                     erro,
                 } => {
                     componentes::titulo(ui, "Nova regra de senha", 17.0);
@@ -880,6 +883,8 @@ impl Janela {
                             .hint_text("cpf_primeiros:5, cpf_ultimos:5, cpf_completo, senha_propria:<rótulo>")
                             .desired_width(f32::INFINITY),
                     );
+                    ui.label("Prioridade (menor é tentada primeiro; padrão 100)");
+                    ui.add(egui::TextEdit::singleline(prioridade).desired_width(120.0));
                     if let Some(e) = erro {
                         ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
                     }
@@ -1158,6 +1163,7 @@ impl Janela {
                     fornecedor,
                     tipo_de_documento: "fatura".to_owned(),
                     estrategia: ESTRATEGIAS_SUGERIDAS[0].to_owned(),
+                    prioridade: "100".to_owned(),
                     erro: None,
                 });
             }
@@ -1349,8 +1355,14 @@ impl Janela {
                     return;
                 };
                 let r = match id {
-                    IdAcao::AbrirPdfProtegido | IdAcao::AbrirProtegido => {
+                    IdAcao::AbrirPdfProtegido => {
                         f.abrir_pdf_protegido();
+                        Ok(())
+                    }
+                    IdAcao::AbrirProtegido => {
+                        let so: std::collections::BTreeSet<String> =
+                            sel.iter().map(|r| r.chave.clone()).collect();
+                        f.abrir_pdf_protegido_de(Some(so));
                         Ok(())
                     }
                     IdAcao::RegrasDeSenha => {
@@ -1495,8 +1507,17 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
             fornecedor,
             tipo_de_documento,
             estrategia,
+            prioridade,
             ..
         } => {
+            let prioridade: i64 = if prioridade.trim().is_empty() {
+                100
+            } else {
+                prioridade
+                    .trim()
+                    .parse()
+                    .map_err(|_| "A prioridade é um número inteiro (padrão 100).".to_owned())?
+            };
             let fornecedor = fornecedor.trim();
             if fornecedor.is_empty() {
                 return Err("Diga o fornecedor.".to_owned());
@@ -1513,7 +1534,7 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
             Ok(Pedido::Decidir(PedidoDeDecisao {
                 acao: Acao::GuardarRegraDeSenha {
                     tipo_de_documento: tipo,
-                    prioridade: None,
+                    prioridade: Some(prioridade),
                     estrategia: estrategia.to_owned(),
                 },
                 alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],
