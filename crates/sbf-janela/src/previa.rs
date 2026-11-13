@@ -218,6 +218,7 @@ pub struct Previas {
     proximo_id: u64,
     dica: Option<Dica>,
     dica_visivel: Option<Ref>,
+    dica_fixa: Option<(Ref, Rect)>,
     aviso: Option<String>,
     quadro: u64,
     /// Os `content_hash` que o trabalhador começou a abrir, em ordem (testes).
@@ -290,6 +291,7 @@ impl Previas {
             proximo_id: 0,
             dica: None,
             dica_visivel: None,
+            dica_fixa: None,
             aviso: None,
             quadro: 0,
             abertos: Vec::new(),
@@ -416,6 +418,11 @@ impl Previas {
 
     pub fn fechar_destacada(&mut self, id: u64) {
         self.destacadas.retain(|d| d.id != id);
+    }
+
+    /// Mostra a dica de um item perto de `perto_de` sem o mouse (a captura de tela usa).
+    pub fn fixar_dica(&mut self, alvo: Ref, perto_de: Rect) {
+        self.dica_fixa = Some((alvo, perto_de));
     }
 
     /// O nome cuja dica está aparecendo agora.
@@ -763,11 +770,17 @@ impl Previas {
         self.dica_visivel = None;
         let agora = ctx.input(|i| i.time);
         let passo = ctx.cumulative_pass_nr_for(egui::ViewportId::ROOT);
-        let marca = ctx
-            .data_mut(|d| d.remove_temp::<Option<(Ref, Rect, u64)>>(id_da_marca()))
-            .flatten();
+        let marca = self
+            .dica_fixa
+            .clone()
+            .map(|(r, ret)| (r, ret, passo))
+            .or_else(|| {
+                ctx.data_mut(|d| d.remove_temp::<Option<(Ref, Rect, u64)>>(id_da_marca()))
+                    .flatten()
+            });
         match marca {
             Some((alvo, ret, quando)) if quando + 1 >= passo => {
+                let fixa = self.dica_fixa.is_some();
                 let mesmo = self.dica.as_ref().is_some_and(|d| d.alvo == alvo);
                 if mesmo {
                     if let Some(d) = self.dica.as_mut() {
@@ -777,7 +790,7 @@ impl Previas {
                     self.dica = Some(Dica {
                         alvo,
                         retangulo: ret,
-                        desde: agora,
+                        desde: if fixa { agora - ESPERA_DA_DICA } else { agora },
                     });
                 }
             }
@@ -1077,6 +1090,12 @@ impl Previas {
         let ppp = ctx.pixels_per_point();
         let px = largura_em_px(largura, ppp);
         let resumo = self.resumos.get(&arquivo.hash).cloned();
+        // Texto (e-mail, texto, zip) não tem página: no canto, usa a largura toda.
+        let largura_do_texto = if grande {
+            largura
+        } else {
+            largura.max(ui.available_width() - 8.0)
+        };
         match resumo {
             None => {
                 self.pedir(&ctx, posto, arquivo, pagina, px);
@@ -1127,17 +1146,17 @@ impl Previas {
                 }
             }
             Some(Resumo::Email(e)) => {
-                folha_de_texto(ui, largura, grande, |ui| {
+                folha_de_texto(ui, largura_do_texto, grande, |ui| {
                     email_ui(ui, leitor, &e, grande, pedidos)
                 });
                 None
             }
             Some(Resumo::Texto(t)) => {
-                folha_de_texto(ui, largura, grande, |ui| texto_ui(ui, &t, grande));
+                folha_de_texto(ui, largura_do_texto, grande, |ui| texto_ui(ui, &t, grande));
                 None
             }
             Some(Resumo::ListaDoZip(l)) => {
-                folha_de_texto(ui, largura, grande, |ui| zip_ui(ui, &l, grande));
+                folha_de_texto(ui, largura_do_texto, grande, |ui| zip_ui(ui, &l, grande));
                 None
             }
             Some(Resumo::Protegido { motivo }) => {
@@ -1696,45 +1715,45 @@ fn email_ui(
                 ui.end_row();
             }
         });
+    // Os anexos logo depois do cabeçalho: os que são achados viram link.
+    if !e.anexos.is_empty() {
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(
+            RichText::new(format!("Anexos ({})", e.anexos.len()))
+                .size(tamanho)
+                .strong(),
+        );
+        for a in &e.anexos {
+            ui.horizontal(|ui| {
+                ui.label(icones::icone_cor("attach_file", tamanho + 2.0, suave));
+                // O anexo que também é um achado (mesmo content_hash) vira link.
+                let achado = a.sha256.as_ref().and_then(|h| {
+                    let r = Ref::nova(Tipo::Achado, h.clone());
+                    leitor.item(&r).ok().filter(|i| i.is_some()).map(|_| r)
+                });
+                match achado {
+                    Some(r) => {
+                        componentes::link_item(ui, &r, &a.nome, pedidos);
+                    }
+                    None => {
+                        ui.label(RichText::new(&a.nome).size(tamanho));
+                    }
+                }
+                ui.label(
+                    RichText::new(tamanho_legivel(a.bytes))
+                        .size(tamanho - 1.0)
+                        .color(suave),
+                );
+            });
+        }
+    }
     ui.add_space(4.0);
     ui.separator();
     let (corpo, cortado) = cortar(&e.corpo, if grande { TETO_DO_TEXTO } else { 900 });
     ui.add(egui::Label::new(RichText::new(corpo).size(tamanho)).wrap());
     if cortado {
         ui.label(RichText::new("…").size(tamanho));
-    }
-    if e.anexos.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    ui.separator();
-    ui.label(
-        RichText::new(format!("Anexos ({})", e.anexos.len()))
-            .size(tamanho)
-            .strong(),
-    );
-    for a in &e.anexos {
-        ui.horizontal(|ui| {
-            ui.label(icones::icone_cor("attach_file", tamanho + 2.0, suave));
-            // O anexo que também é um achado (mesmo content_hash) vira link.
-            let achado = a.sha256.as_ref().and_then(|h| {
-                let r = Ref::nova(Tipo::Achado, h.clone());
-                leitor.item(&r).ok().filter(|i| i.is_some()).map(|_| r)
-            });
-            match achado {
-                Some(r) => {
-                    componentes::link_item(ui, &r, &a.nome, pedidos);
-                }
-                None => {
-                    ui.label(RichText::new(&a.nome).size(tamanho));
-                }
-            }
-            ui.label(
-                RichText::new(tamanho_legivel(a.bytes))
-                    .size(tamanho - 1.0)
-                    .color(suave),
-            );
-        });
     }
 }
 

@@ -65,6 +65,10 @@ impl eframe::App for App {
         if self.quadros == 1 {
             preparar_captura(&mut self.casca, &ctx);
         }
+        // O foco depois da navegação (abrir uma área limpa a seleção).
+        if self.quadros == 4 {
+            focar_para_captura(&mut self.casca, &ctx);
+        }
         // A prévia carrega numa thread: espera ela terminar (até uns 10 s).
         let previa_ocupada = self.casca.app.janela().previas.ocupada();
         if self.quadros >= 10 && !self.captura_pedida && (!previa_ocupada || self.quadros > 600) {
@@ -94,14 +98,6 @@ impl eframe::App for App {
 /// `bastidores`, `flutuante`, `previa-destacada`).
 fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     use sbf_janela::Destino;
-    if let Ok(rota) = std::env::var("SBF_CAPTURA_FOCO")
-        && let Some(Destino::Item(r)) = Destino::da_rota(&rota)
-    {
-        if std::env::var("SBF_CENA").as_deref() == Ok("previa-destacada") {
-            casca.app.janela().previas.destacar(&r);
-        }
-        casca.app.janela().centro.selecao.foco = Some(r);
-    }
     if let Ok(rota) = std::env::var("SBF_CAPTURA_ABRIR") {
         if let (Some(Destino::Item(r)), Some(aba)) = (
             Destino::da_rota(&rota),
@@ -137,6 +133,27 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
             bancada_casca::abrir_flutuante(ctx, "fornecedor:Água Sigma");
         }
         _ => {}
+    }
+}
+
+/// `SBF_CAPTURA_FOCO`: o item em foco no dock (a prévia dele no canto), com as cenas
+/// `previa-destacada` e `previa-dica`.
+fn focar_para_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
+    use sbf_janela::Destino;
+    if let Ok(rota) = std::env::var("SBF_CAPTURA_FOCO")
+        && let Some(Destino::Item(r)) = Destino::da_rota(&rota)
+    {
+        if std::env::var("SBF_CENA").as_deref() == Ok("previa-destacada") {
+            // A captura só pega a janela principal: a destacada aparece embutida.
+            ctx.set_embed_viewports(true);
+            casca.app.janela().previas.destacar(&r);
+        }
+        if std::env::var("SBF_CENA").as_deref() == Ok("previa-dica") {
+            let perto =
+                egui::Rect::from_min_size(egui::pos2(260.0, 300.0), egui::vec2(180.0, 18.0));
+            casca.app.janela().previas.fixar_dica(r.clone(), perto);
+        }
+        casca.app.janela().centro.selecao.foco = Some(r);
     }
 }
 

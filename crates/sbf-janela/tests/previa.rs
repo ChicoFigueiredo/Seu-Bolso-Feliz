@@ -626,3 +626,65 @@ fn opcoes_mudam_os_limites_do_cache() {
     drop(p);
     assert!(!pasta.exists());
 }
+
+/// Com o desenho real do `sbf-previa` (precisa do `pdftoppm`): o PDF fictício da
+/// demonstração abre com as páginas, a página 2 desenha, e o e-mail liga o anexo ao achado.
+#[test]
+fn com_o_desenho_real_o_pdf_e_o_email_da_demonstracao_aparecem() {
+    if !std::path::Path::new("/usr/bin/pdftoppm").exists() {
+        eprintln!("sem pdftoppm: teste pulado");
+        return;
+    }
+    let mut b = Banco::novo(Arc::new(sbf_previa::abrir));
+    b.abrir(Area::Documentos);
+    let fatura = b.achado_chamado("fatura-beta-set.pdf");
+    b.focar(&fatura);
+    b.ate(Duration::from_secs(20), |b| {
+        b.casca.app.janela().previas.tem_imagem(&fatura.chave, 1)
+    });
+    assert_eq!(
+        b.casca.app.janela().previas.resumo(&fatura.chave),
+        Some(&Resumo::Paginas { total: 3 })
+    );
+    let texto = b.quadro();
+    assert!(texto.contains("pág. 1/3"), "{texto}");
+    // A aba Arquivo: PageDown vai para a página 2.
+    b.abrir_item(&fatura);
+    b.ate(Duration::from_secs(20), |b| {
+        !b.casca.app.janela().previas.ocupada()
+    });
+    b.quadro_com(vec![egui::Event::Key {
+        key: egui::Key::PageDown,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    b.ate(Duration::from_secs(20), |b| {
+        b.casca.app.janela().previas.tem_imagem(&fatura.chave, 2)
+    });
+    assert!(b.casca.app.janela().previas.tem_imagem(&fatura.chave, 2));
+    let texto = b.quadro();
+    assert!(texto.contains("2 / 3"), "{texto}");
+    // O e-mail: o anexo é um achado (mesmo content_hash) e vira link.
+    let eml = b.achado_chamado("cobranca-condominio-kappa.eml");
+    let texto = b.abrir_item(&eml);
+    let texto = if texto.contains("Anexos") {
+        texto
+    } else {
+        b.ate(Duration::from_secs(20), |b| {
+            b.casca.app.janela().previas.resumo(&eml.chave).is_some()
+        });
+        b.quadro()
+    };
+    assert!(
+        matches!(
+            b.casca.app.janela().previas.resumo(&eml.chave),
+            Some(Resumo::Email(e)) if e.anexos.len() == 1
+                && e.anexos[0].sha256.as_deref() == Some(b.achado_chamado("boleto-kappa-dez.pdf").chave.as_str())
+        ),
+        "{:?}",
+        b.casca.app.janela().previas.resumo(&eml.chave)
+    );
+    assert!(texto.contains("Anexos (1)"), "{texto}");
+}
