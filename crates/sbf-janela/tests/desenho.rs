@@ -390,3 +390,102 @@ fn na_area_a_triar_o_ribbon_abre_na_triagem_e_inicio_tem_os_filtros() {
         assert!(ids.contains(&id), "falta {id} em Início: {ids:?}");
     }
 }
+
+#[test]
+fn intervalo_conexao_tema_previa_e_nova_regra() {
+    use bancada_casca::AppCasca;
+    use sbf_janela::janela::{Dialogo, confirmar_dialogo};
+    let mut b = Banco::novo();
+    b.abrir(Destino::Area(Area::Documentos));
+    // Período › Intervalo…
+    b.executar(IdAcao::PeriodoIntervalo);
+    let d = b.casca.app.janela().dialogo.clone().expect("diálogo");
+    assert!(matches!(d, Dialogo::Intervalo { .. }));
+    let ruim = Dialogo::Intervalo {
+        de: "2026-10".into(),
+        ate: "2026-05".into(),
+        erro: None,
+    };
+    assert!(confirmar_dialogo(&ruim).is_err());
+    let bom = Dialogo::Intervalo {
+        de: "2026-08".into(),
+        ate: "2026-10".into(),
+        erro: None,
+    };
+    b.casca.app.janela().dialogo = None;
+    b.casca
+        .app
+        .janela()
+        .pedir(confirmar_dialogo(&bom).expect("pedido"));
+    b.quadro();
+    assert_eq!(
+        b.casca.app.janela().filtro().ciclos,
+        Some(("2026-08".into(), "2026-10".into()))
+    );
+    // Conexão: as Ações vêm das conexões das coletas.
+    let acoes = b.casca.app.acoes();
+    let disco = acoes
+        .iter()
+        .find(|a| a.id == "inicio.fonte.disco:d")
+        .expect("conexão Disco D");
+    assert_eq!(disco.rotulo, "Disco D");
+    assert!(
+        b.casca.estado.erros.is_empty(),
+        "{:?}",
+        b.casca.estado.erros
+    );
+    bancada_casca::executar(&b.ctx, "inicio.fonte.disco:d");
+    b.quadro();
+    let filtro = b.casca.app.janela().filtro();
+    assert_eq!(filtro.fontes, vec!["disco:d".to_owned()]);
+    let t = b
+        .consulta
+        .tabela(&PedidoDeTabela::Area {
+            area: Area::Documentos,
+            filtro,
+        })
+        .expect("tabela");
+    assert!(!t.linhas.is_empty());
+    // Tema por menu: os 7.
+    let acoes = b.casca.app.acoes();
+    assert_eq!(
+        acoes
+            .iter()
+            .filter(|a| a.id.starts_with("exibir.tema."))
+            .count(),
+        7
+    );
+    // Prévia: um painel a mais no dock.
+    assert!(b.casca.app.paineis().iter().any(|p| p.id == "previa"));
+    // Nova regra: grava pelos Comandos.
+    b.executar(IdAcao::NovaRegraDeSenha);
+    let nova = Dialogo::NovaRegra {
+        fornecedor: "Banco Beta".into(),
+        tipo_de_documento: "fatura_cartao".into(),
+        estrategia: "cpf_ultimos:5".into(),
+        erro: None,
+    };
+    assert!(
+        confirmar_dialogo(&Dialogo::NovaRegra {
+            fornecedor: "Banco Beta".into(),
+            tipo_de_documento: "fatura".into(),
+            estrategia: "palpite".into(),
+            erro: None
+        })
+        .is_err()
+    );
+    b.casca.app.janela().dialogo = None;
+    b.casca
+        .app
+        .janela()
+        .pedir(confirmar_dialogo(&nova).expect("pedido"));
+    b.quadro();
+    let regras = b
+        .consulta
+        .tabela(&PedidoDeTabela::Ligados {
+            de: Ref::nova(Tipo::Fornecedor, "Banco Beta"),
+            tipo: Tipo::RegraDeSenha,
+        })
+        .expect("regras");
+    assert_eq!(regras.linhas.len(), 1);
+}

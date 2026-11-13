@@ -21,6 +21,10 @@ pub enum IdAcao {
     PeriodoAtual,
     PeriodoAnterior,
     PeriodoTodos,
+    /// Período › Intervalo…: do ciclo inicial ao final.
+    PeriodoIntervalo,
+    /// Conexão (menu, com as conexões do inventário).
+    FonteDoAchado,
     /// Estado do achado (menu).
     EstadoDoAchado,
     EstadoTodos,
@@ -76,6 +80,7 @@ pub enum IdAcao {
     // Ferramentas
     AbrirPdfProtegido,
     RegrasDeSenha,
+    NovaRegraDeSenha,
     AtualizarEstante,
     FazerCopiaDeSeguranca,
     // Exibir
@@ -223,8 +228,9 @@ pub struct DefinicaoDeAcao {
     pub dica: &'static str,
 }
 
+/// Uma entrada da lista única (os campos de [`DefinicaoDeAcao`], na ordem da tabela).
 #[allow(clippy::too_many_arguments)]
-const fn a(
+const fn definir_acao(
     id: IdAcao,
     codigo: &'static str,
     rotulo: &'static str,
@@ -251,7 +257,7 @@ use IdAcao as I;
 
 /// A lista única, na ordem do Ribbon.
 pub const ACOES: &[DefinicaoDeAcao] = &[
-    a(
+    definir_acao(
         I::Voltar,
         "navegar.voltar",
         "Voltar",
@@ -261,7 +267,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Navegar",
         "Volta ao lugar anterior (também o botão lateral do mouse)",
     ),
-    a(
+    definir_acao(
         I::Avancar,
         "navegar.avancar",
         "Avançar",
@@ -271,7 +277,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Navegar",
         "Avança de novo no caminho",
     ),
-    a(
+    definir_acao(
         I::Desfazer,
         "historico.desfazer",
         "Desfazer decisão",
@@ -281,7 +287,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Histórico",
         "Desfaz a sua última decisão com uma nova decisão",
     ),
-    a(
+    definir_acao(
         I::Atualizar,
         "dados.atualizar",
         "Atualizar",
@@ -291,7 +297,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Dados",
         "Relê o inventário",
     ),
-    a(
+    definir_acao(
         I::Pesquisar,
         "inicio.pesquisar",
         "Pesquisar",
@@ -301,7 +307,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Pesquisa",
         "Pesquisa nesta área",
     ),
-    a(
+    definir_acao(
         I::Periodo,
         "inicio.periodo",
         "Período",
@@ -311,7 +317,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Período",
         "Ciclo atual, ciclo anterior ou todos os ciclos",
     ),
-    a(
+    definir_acao(
         I::PeriodoAtual,
         "inicio.periodo.atual",
         "Ciclo atual",
@@ -321,7 +327,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Período",
         "Só o ciclo atual",
     ),
-    a(
+    definir_acao(
         I::PeriodoAnterior,
         "inicio.periodo.anterior",
         "Ciclo anterior",
@@ -331,7 +337,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Período",
         "Só o ciclo anterior",
     ),
-    a(
+    definir_acao(
         I::PeriodoTodos,
         "inicio.periodo.todos",
         "Todos os ciclos",
@@ -341,7 +347,27 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Período",
         "Sem filtro de ciclo",
     ),
-    a(
+    definir_acao(
+        I::PeriodoIntervalo,
+        "inicio.periodo.intervalo",
+        "Intervalo…",
+        "date_range",
+        None,
+        B::Inicio,
+        "Período",
+        "Do ciclo inicial ao ciclo final",
+    ),
+    definir_acao(
+        I::FonteDoAchado,
+        "inicio.fonte",
+        "Conexão",
+        "cable",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só o que veio de uma conexão",
+    ),
+    definir_acao(
         I::EstadoDoAchado,
         "inicio.estado",
         "Estado do achado",
@@ -351,7 +377,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os achados num estado",
     ),
-    a(
+    definir_acao(
         I::EstadoTodos,
         "inicio.estado.todos",
         "Todos os estados",
@@ -361,7 +387,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Sem filtro de estado",
     ),
-    a(
+    definir_acao(
         I::EstadoATriar,
         "inicio.estado.a-triar",
         "A triar",
@@ -371,7 +397,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os achados a triar",
     ),
-    a(
+    definir_acao(
         I::EstadoDocumento,
         "inicio.estado.documento",
         "Documento",
@@ -381,7 +407,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os documentos",
     ),
-    a(
+    definir_acao(
         I::EstadoEmDuvida,
         "inicio.estado.em-duvida",
         "Em dúvida",
@@ -391,7 +417,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os achados em dúvida",
     ),
-    a(
+    definir_acao(
         I::EstadoDescartado,
         "inicio.estado.descartado",
         "Descartado",
@@ -401,7 +427,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os descartados",
     ),
-    a(
+    definir_acao(
         I::TipoDoDocumento,
         "inicio.tipo",
         "Tipo",
@@ -411,7 +437,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só um tipo de documento",
     ),
-    a(
+    definir_acao(
         I::TipoTodos,
         "inicio.tipo.todos",
         "Todos os tipos",
@@ -421,7 +447,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Sem filtro de tipo",
     ),
-    a(
+    definir_acao(
         I::TipoBoleto,
         "inicio.tipo.boleto",
         "Boleto",
@@ -431,7 +457,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só boletos",
     ),
-    a(
+    definir_acao(
         I::TipoFatura,
         "inicio.tipo.fatura",
         "Fatura de cartão",
@@ -441,7 +467,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só faturas de cartão",
     ),
-    a(
+    definir_acao(
         I::TipoExtrato,
         "inicio.tipo.extrato",
         "Extrato",
@@ -451,7 +477,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só extratos",
     ),
-    a(
+    definir_acao(
         I::TipoComprovante,
         "inicio.tipo.comprovante",
         "Comprovante",
@@ -461,7 +487,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só comprovantes",
     ),
-    a(
+    definir_acao(
         I::TipoNotaFiscal,
         "inicio.tipo.nota-fiscal",
         "Nota fiscal",
@@ -471,7 +497,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só notas fiscais",
     ),
-    a(
+    definir_acao(
         I::TipoFoto,
         "inicio.tipo.foto",
         "Foto",
@@ -481,7 +507,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só fotos",
     ),
-    a(
+    definir_acao(
         I::TipoOutro,
         "inicio.tipo.outro",
         "Outro",
@@ -491,7 +517,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só os de tipo outro",
     ),
-    a(
+    definir_acao(
         I::QuemDecidiu,
         "inicio.quem-decidiu",
         "Quem decidiu",
@@ -501,7 +527,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só o que você ou as regras decidiram",
     ),
-    a(
+    definir_acao(
         I::QuemTodos,
         "inicio.quem.todos",
         "Todos",
@@ -511,7 +537,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Decisões de todos",
     ),
-    a(
+    definir_acao(
         I::QuemVoce,
         "inicio.quem.voce",
         "Você",
@@ -521,7 +547,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só o que você decidiu",
     ),
-    a(
+    definir_acao(
         I::QuemRegras,
         "inicio.quem.regras",
         "Regras",
@@ -531,7 +557,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Filtros",
         "Só o que as regras decidiram",
     ),
-    a(
+    definir_acao(
         I::Documento,
         "triagem.documento",
         "Documento",
@@ -541,7 +567,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Triagem",
         "Marca os achados selecionados como documento",
     ),
-    a(
+    definir_acao(
         I::Descartar,
         "triagem.descartar",
         "Descartar",
@@ -551,7 +577,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Triagem",
         "Marca os achados selecionados como descartados",
     ),
-    a(
+    definir_acao(
         I::EmDuvida,
         "triagem.em-duvida",
         "Em dúvida",
@@ -561,7 +587,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Triagem",
         "Deixa os achados selecionados em dúvida",
     ),
-    a(
+    definir_acao(
         I::CorrigirFornecedor,
         "corrigir.fornecedor",
         "Corrigir fornecedor",
@@ -571,7 +597,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Corrigir",
         "Corrige o fornecedor do achado ou do registro",
     ),
-    a(
+    definir_acao(
         I::CorrigirCategoria,
         "corrigir.categoria",
         "Corrigir categoria",
@@ -581,7 +607,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Corrigir",
         "Corrige a categoria do registro",
     ),
-    a(
+    definir_acao(
         I::CorrigirTipo,
         "corrigir.tipo",
         "Corrigir tipo",
@@ -591,7 +617,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Corrigir",
         "Corrige o tipo do achado ou do registro",
     ),
-    a(
+    definir_acao(
         I::CorrigirDataEValor,
         "corrigir.data-e-valor",
         "Corrigir data e valor",
@@ -601,7 +627,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Corrigir",
         "Corrige a data e o valor do achado; o ciclo é recalculado",
     ),
-    a(
+    definir_acao(
         I::MarcarDuplicidade,
         "relacionar.duplicidade",
         "Marcar duplicidade",
@@ -611,7 +637,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Relacionar",
         "Marca dois achados como duplicidade um do outro",
     ),
-    a(
+    definir_acao(
         I::UnirConciliados,
         "relacionar.conciliar",
         "Unir conciliados",
@@ -621,7 +647,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Relacionar",
         "Reconhece que dois registros descrevem o mesmo fato",
     ),
-    a(
+    definir_acao(
         I::ConfirmarRecorrencia,
         "relacionar.recorrencia",
         "Confirmar recorrência",
@@ -631,7 +657,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Relacionar",
         "Confirma que o fornecedor se repete todo ciclo",
     ),
-    a(
+    definir_acao(
         I::Aprovar,
         "interpretacao.aprovar",
         "Aprovar",
@@ -641,7 +667,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Interpretação",
         "Aprova os registros selecionados",
     ),
-    a(
+    definir_acao(
         I::Rejeitar,
         "interpretacao.rejeitar",
         "Rejeitar",
@@ -651,7 +677,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Interpretação",
         "Rejeita os registros selecionados, com motivo",
     ),
-    a(
+    definir_acao(
         I::Sinalizar,
         "pendencia.sinalizar",
         "Sinalizar",
@@ -661,7 +687,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Pendência",
         "Abre uma pendência sobre o item",
     ),
-    a(
+    definir_acao(
         I::Responder,
         "pendencia.responder",
         "Responder",
@@ -671,7 +697,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Pendência",
         "Responde a pendência selecionada",
     ),
-    a(
+    definir_acao(
         I::VerDecisoes,
         "historico.ver-decisoes",
         "Ver decisões",
@@ -681,7 +707,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Histórico",
         "Mostra o Histórico de decisões",
     ),
-    a(
+    definir_acao(
         I::NovoLote,
         "lotes.novo",
         "Novo lote",
@@ -691,7 +717,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Lote",
         "Cria um lote com nome",
     ),
-    a(
+    definir_acao(
         I::AdicionarSelecao,
         "lotes.adicionar",
         "Adicionar seleção",
@@ -701,7 +727,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Lote",
         "Põe os documentos e registros selecionados no lote atual",
     ),
-    a(
+    definir_acao(
         I::RemoverDoLote,
         "lotes.remover",
         "Remover",
@@ -711,7 +737,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Lote",
         "Tira os itens selecionados do lote atual",
     ),
-    a(
+    definir_acao(
         I::AprovarLote,
         "lotes.aprovar",
         "Aprovar lote",
@@ -721,7 +747,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Aprovação",
         "Aprova o lote atual: os registros dele ficam aprovados",
     ),
-    a(
+    definir_acao(
         I::DesaprovarLote,
         "lotes.desaprovar",
         "Desaprovar lote",
@@ -731,7 +757,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Aprovação",
         "Volta o lote atual para editável, por uma nova decisão",
     ),
-    a(
+    definir_acao(
         I::EnviarAoServidor,
         "lotes.enviar",
         "Enviar ao servidor",
@@ -741,7 +767,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Promoção",
         "Promove o lote aprovado para a caixa de entrada",
     ),
-    a(
+    definir_acao(
         I::AbrirPdfProtegido,
         "ferramentas.pdf-protegido",
         "Abrir PDF protegido",
@@ -751,7 +777,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "PDF protegido",
         "Tenta abrir os PDFs protegidos pelas regras de senha",
     ),
-    a(
+    definir_acao(
         I::RegrasDeSenha,
         "ferramentas.regras-de-senha",
         "Regras de senha",
@@ -761,7 +787,17 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "PDF protegido",
         "As regras de senha por fornecedor e tipo",
     ),
-    a(
+    definir_acao(
+        I::NovaRegraDeSenha,
+        "ferramentas.nova-regra",
+        "Nova regra",
+        "add",
+        None,
+        B::Ferramentas,
+        "PDF protegido",
+        "Cria uma regra de senha: fornecedor, tipo e estratégia (nunca a senha)",
+    ),
+    definir_acao(
         I::AtualizarEstante,
         "ferramentas.estante",
         "Atualizar estante",
@@ -771,7 +807,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Estante e cópia",
         "Copia os documentos para a estante no Google Drive",
     ),
-    a(
+    definir_acao(
         I::FazerCopiaDeSeguranca,
         "ferramentas.copia",
         "Fazer cópia de segurança",
@@ -781,7 +817,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Estante e cópia",
         "Cópia cifrada do cofre e do banco",
     ),
-    a(
+    definir_acao(
         I::PainelDetalhe,
         "exibir.detalhe",
         "Detalhe",
@@ -791,7 +827,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Painéis",
         "Mostra ou esconde o painel Detalhe",
     ),
-    a(
+    definir_acao(
         I::PainelOrigens,
         "exibir.origens",
         "Origens",
@@ -801,7 +837,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Painéis",
         "Mostra ou esconde o painel Origens",
     ),
-    a(
+    definir_acao(
         I::PainelTexto,
         "exibir.texto",
         "Texto extraído",
@@ -811,7 +847,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Painéis",
         "Mostra ou esconde o painel Texto extraído",
     ),
-    a(
+    definir_acao(
         I::PainelHistorico,
         "exibir.historico",
         "Histórico de decisões",
@@ -821,17 +857,17 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Painéis",
         "Mostra ou esconde o painel Histórico de decisões",
     ),
-    a(
+    definir_acao(
         I::TrocarTema,
         "exibir.tema",
-        "Trocar tema",
+        "Tema",
         "palette",
         None,
         B::Exibir,
         "Aparência",
-        "Passa para o próximo dos 7 temas do SBF",
+        "Escolhe um dos 7 temas do SBF",
     ),
-    a(
+    definir_acao(
         I::AbrirOriginal,
         "achado.abrir-original",
         "Abrir original",
@@ -841,7 +877,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Original",
         "Abre o arquivo original do cofre",
     ),
-    a(
+    definir_acao(
         I::MostrarNoCofre,
         "achado.mostrar-no-cofre",
         "Mostrar no cofre",
@@ -851,7 +887,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Original",
         "Mostra o arquivo na pasta do cofre",
     ),
-    a(
+    definir_acao(
         I::VerTexto,
         "achado.ver-texto",
         "Ver texto",
@@ -861,7 +897,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Original",
         "Mostra o texto extraído",
     ),
-    a(
+    definir_acao(
         I::AbrirProtegido,
         "achado.abrir-protegido",
         "Abrir protegido",
@@ -871,7 +907,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Original",
         "Abre o PDF protegido pela regra de senha",
     ),
-    a(
+    definir_acao(
         I::CopiarHash,
         "achado.copiar-hash",
         "Copiar hash",
@@ -881,7 +917,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Identidade",
         "Copia o hash do conteúdo",
     ),
-    a(
+    definir_acao(
         I::AbrirEmPainelFlutuante,
         "pagina.flutuante",
         "Abrir em painel flutuante",
@@ -891,7 +927,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Janela",
         "Abre o item selecionado num painel flutuante (ou Ctrl+clique)",
     ),
-    a(
+    definir_acao(
         I::CopiarRastro,
         "pagina.copiar-rastro",
         "Copiar rastro",
@@ -977,6 +1013,7 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         I::Atualizar | I::Pesquisar | I::Desfazer | I::VerDecisoes | I::NovoLote => Habilitada,
         I::Periodo | I::PeriodoAtual | I::PeriodoAnterior | I::PeriodoTodos => Habilitada,
         I::QuemDecidiu | I::QuemTodos | I::QuemVoce | I::QuemRegras => Habilitada,
+        I::PeriodoIntervalo | I::FonteDoAchado | I::NovaRegraDeSenha => Habilitada,
         I::EstadoDoAchado
         | I::EstadoTodos
         | I::EstadoATriar
@@ -1169,6 +1206,8 @@ mod testes {
         I::PeriodoAtual,
         I::PeriodoAnterior,
         I::PeriodoTodos,
+        I::PeriodoIntervalo,
+        I::FonteDoAchado,
         I::EstadoDoAchado,
         I::EstadoTodos,
         I::EstadoATriar,
@@ -1213,6 +1252,7 @@ mod testes {
         I::EnviarAoServidor,
         I::AbrirPdfProtegido,
         I::RegrasDeSenha,
+        I::NovaRegraDeSenha,
         I::AtualizarEstante,
         I::FazerCopiaDeSeguranca,
         I::PainelDetalhe,

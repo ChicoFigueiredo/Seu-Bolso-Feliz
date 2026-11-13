@@ -21,14 +21,17 @@ pub enum PainelDoDock {
     Origens,
     Texto,
     Historico,
+    /// A prévia do achado: o texto extraído, ou os metadados. Nunca o arquivo decifrado.
+    Previa,
 }
 
 impl PainelDoDock {
-    pub const TODOS: [PainelDoDock; 4] = [
+    pub const TODOS: [PainelDoDock; 5] = [
         PainelDoDock::Detalhe,
         PainelDoDock::Origens,
         PainelDoDock::Texto,
         PainelDoDock::Historico,
+        PainelDoDock::Previa,
     ];
 
     pub fn titulo(self) -> &'static str {
@@ -37,6 +40,7 @@ impl PainelDoDock {
             PainelDoDock::Origens => "Origens",
             PainelDoDock::Texto => "Texto extraído",
             PainelDoDock::Historico => "Histórico de decisões",
+            PainelDoDock::Previa => "Prévia",
         }
     }
 
@@ -46,6 +50,7 @@ impl PainelDoDock {
             PainelDoDock::Origens => "folder_open",
             PainelDoDock::Texto => "description",
             PainelDoDock::Historico => "history",
+            PainelDoDock::Previa => "visibility",
         }
     }
 }
@@ -83,6 +88,28 @@ pub fn desenhar(
             None => vazio(ui, "Selecione um achado para ver o texto extraído."),
         },
         PainelDoDock::Historico => historico(ui, leitor, foco, decisoes_da_sessao, pedidos),
+        PainelDoDock::Previa => previa(ui, leitor, foco, pedidos),
+    }
+}
+
+fn previa(ui: &mut Ui, leitor: &mut Leitor<'_>, foco: Option<&Ref>, pedidos: &mut Vec<Pedido>) {
+    let Some(alvo) = foco.filter(|r| e_achado(r)) else {
+        vazio(ui, "Selecione um achado para ver a prévia.");
+        return;
+    };
+    match leitor.texto(alvo) {
+        Ok(t) if t.as_deref().is_some_and(|t| !t.trim().is_empty()) => {
+            pagina::texto_extraido(ui, t.as_deref());
+        }
+        _ => {
+            let p = tema::paleta(ui.ctx());
+            ui.label(
+                RichText::new("Sem texto extraído: os dados do achado.")
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
+            detalhe(ui, leitor, Some(alvo), pedidos);
+        }
     }
 }
 
