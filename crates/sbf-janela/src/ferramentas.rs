@@ -417,9 +417,30 @@ impl Ferramentas {
         }
     }
 
+    /// O original da primeira origem local cujo arquivo existe (só leitura).
+    fn caminho_da_origem_local(&self, hash: &str) -> Option<PathBuf> {
+        let conn = sbf_inventario::banco::abrir_leitura(&self.banco).ok()?;
+        let mut st = conn
+            .prepare(
+                "SELECT local_filepath FROM origem
+                  WHERE content_hash = ?1 AND local_filepath IS NOT NULL
+                  ORDER BY visto_em DESC, id DESC",
+            )
+            .ok()?;
+        st.query_map([hash], |l| l.get::<_, String>(0))
+            .ok()?
+            .flatten()
+            .map(PathBuf::from)
+            .find(|p| p.is_absolute() && p.is_file() && std::fs::File::open(p).is_ok())
+    }
+
     /// Aba Achado › Abrir original.
     pub fn abrir_original(&self, hash: &str) -> Result<(), String> {
-        let caminho = self.caminho_do_original(hash)?;
+        let caminho = match self.caminho_do_original(hash) {
+            Ok(c) => c,
+            // Sem cópia no acervo: o original da primeira origem local acessível (só leitura).
+            Err(e) => self.caminho_da_origem_local(hash).ok_or(e)?,
+        };
         abrir_no_sistema(&caminho, false)
     }
 

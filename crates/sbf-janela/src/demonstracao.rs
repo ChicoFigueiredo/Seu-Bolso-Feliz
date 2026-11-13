@@ -185,6 +185,9 @@ fn extensao_de(nome: &str) -> String {
 /// demonstração gera: PDF, PNG, e-mail, CSV e XML. O resto não tem cópia (a prévia mostra
 /// os metadados e o motivo). O PDF "protegido" da demonstração não é cifrado de verdade,
 /// mas a prévia nem tenta abrir: sem chaveiro, mostra "Protegido por senha".
+/// O começo do caminho de uma origem local fictícia: vira a pasta temporária em `gerar_acervo`.
+const MARCADOR_DE_ORIGEM_LOCAL: &str = "@origens-locais";
+
 fn no_cofre(a: &Achado) -> Option<String> {
     let ext = extensao_de(&a.nome);
     let gera = matches!(ext.as_str(), "pdf" | "png" | "eml" | "csv" | "xml");
@@ -212,8 +215,28 @@ impl ConsultaDemonstracao {
     /// de cada achado é relativo a ela). Devolve quantos gravou.
     pub fn gerar_acervo(&self, pasta: &std::path::Path) -> std::io::Result<usize> {
         use crate::acervo_ficticio as f;
-        let estado = self.0.borrow();
+        let mut estado = self.0.borrow_mut();
         let mut n = 0;
+        // Origens locais fictícias: um arquivo real (PNG, mesmo com extensão .jpg: o formato
+        // vem do conteúdo) numa pasta ao lado do acervo, para a prévia lê-lo "da origem".
+        let pasta_das_origens = pasta.join("origens-locais");
+        for o in estado.origens.iter_mut() {
+            let Some(nome) = o
+                .caminho
+                .strip_prefix(&format!("{MARCADOR_DE_ORIGEM_LOCAL}/"))
+            else {
+                continue;
+            };
+            let real = pasta_das_origens.join(nome);
+            std::fs::create_dir_all(&pasta_das_origens)?;
+            std::fs::write(
+                &real,
+                crate::acervo_ficticio::png_do_comprovante(-4890, "02/11/2026 19:05"),
+            )?;
+            o.caminho = real.to_string_lossy().into_owned();
+            n += 1;
+        }
+        let estado = estado;
         for a in &estado.achados {
             let Some(rel) = no_cofre(a) else { continue };
             let bytes = match extensao_de(&a.nome).as_str() {
@@ -1023,6 +1046,18 @@ impl Estado {
                 "drive:principal",
                 &format!("Meu Drive/Diversos/{nome}"),
                 2,
+            );
+        }
+        // Em dúvida, sem cópia no acervo mas com origem local (o arquivo é gerado na pasta
+        // temporária da demonstração; `gerar_acervo` troca o marcador pelo caminho real).
+        {
+            let nome = "IMG_20261102_celular.jpg";
+            let h = e.novo_achado_decidido(nome, "foto", "duvida", "regras@2");
+            e.nova_origem(
+                &h,
+                "disco:d",
+                &format!("{MARCADOR_DE_ORIGEM_LOCAL}/{nome}"),
+                1,
             );
         }
         for nome in [
