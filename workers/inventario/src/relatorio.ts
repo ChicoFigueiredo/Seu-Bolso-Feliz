@@ -65,6 +65,13 @@ function thunderbirdOutlook(): boolean {
   }
 }
 
+/** A pasta do chaveiro do desktop no Linux (`sbf-chaveiro`, `pasta_padrao_do_chaveiro`). */
+function pastaDoChaveiro(): string {
+  const xdg = process.env.XDG_DATA_HOME;
+  const base = xdg && xdg.startsWith("/") ? xdg : join(homedir(), ".local", "share");
+  return join(base, "seu-bolso-feliz", "chaveiro");
+}
+
 function lerEstado(arquivo: string): Estado {
   if (existsSync(arquivo)) return JSON.parse(readFileSync(arquivo, "utf8")) as Estado;
   return { etapas: {}, tarefasFeitas: [], avisos: [] };
@@ -92,10 +99,14 @@ function main(): void {
     },
     {
       id: "t02",
-      tarefa: "Criar o cofre de segredos (senha-mestra + CPF)",
+      tarefa: "Guardar o CPF e as senhas de PDF no chaveiro do desktop",
       etapa: "E0",
-      feito: existsSync(join(cofre.segredos, "cofre.enc")),
-      como: "Num terminal seu: bun run inventario:segredos criar",
+      // O segredos.ts saiu (spec 06): o chaveiro do desktop importa o cofre.enc antigo e
+      // grava o índice de rótulos na pasta de dados do app (crates/sbf-chaveiro).
+      feito:
+        existsSync(join(cofre.segredos, "cofre.enc")) ||
+        existsSync(join(pastaDoChaveiro(), "rotulos.json")),
+      como: "No desktop: Bastidores › Chaveiro (importa o segredos/cofre.enc, se houver)",
     },
     {
       id: "t14",
