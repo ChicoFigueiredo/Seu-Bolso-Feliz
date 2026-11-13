@@ -3,8 +3,8 @@
 //! lotes, painéis do dock e o modo demonstração.
 //!
 //! Escrita contra as costuras de `sbf-inventario`: lê por `&dyn Consulta` e escreve por
-//! `&mut dyn Comandos`. Não depende da `bancada-casca`: a [`moldura`] é provisória e o
-//! integrador liga as peças de [`Janela`] à casca.
+//! `&mut dyn Comandos`. Roda dentro da `bancada-casca` pelo [`AppSbf`] (o `AppCasca` do
+//! SBF, com [`config_da_casca`]); a [`moldura`] provisória fica de reserva, sem a casca.
 
 pub mod acoes;
 pub mod app;
