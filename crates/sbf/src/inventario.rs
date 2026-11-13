@@ -73,7 +73,13 @@ impl AppDoInventario {
             Ok(leitor) => {
                 let cifra = sbf_disco::cifra_do_volume(&self.pasta);
                 let barra = EstadoDaBarra {
-                    inventario: inventario.caminho().display().to_string(),
+                    inventario: format!(
+                        "{} · inventario.sqlite",
+                        self.pasta.file_name().map_or_else(
+                            || self.pasta.display().to_string(),
+                            |n| n.to_string_lossy().into_owned()
+                        )
+                    ),
                     disco_cifrado: Some(
                         match cifra {
                             Cifra::Cifrado => "sim",
@@ -91,7 +97,7 @@ impl AppDoInventario {
                     moldura: MolduraProvisoria::nova(janela, barra),
                     consulta: Box::new(leitor),
                     comandos: Box::new(inventario),
-                    captura: None,
+                    captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
                     quadros: 0,
                 });
             }

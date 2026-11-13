@@ -171,3 +171,17 @@ fn com_50_mil_achados_a_area_desenha_rapido() {
         "abrir a área lento: {primeiro:?}"
     );
 }
+
+/// Gera um banco fictício para abrir com `sbf --inventario` e conferir a janela à mão:
+/// `SBF_GERAR_BANCO=/tmp/x cargo test -p sbf-janela --test real -- --ignored gerar`.
+#[test]
+#[ignore = "só gera o banco de exemplo quando pedido"]
+fn gerar_banco_de_exemplo() {
+    let Some(pasta) = std::env::var_os("SBF_GERAR_BANCO") else {
+        return;
+    };
+    let banco = comum::banco_de_teste();
+    let destino = std::path::Path::new(&pasta).join("inventario.sqlite");
+    std::fs::create_dir_all(&pasta).expect("pasta");
+    std::fs::copy(&banco.caminho, &destino).expect("copiar");
+}

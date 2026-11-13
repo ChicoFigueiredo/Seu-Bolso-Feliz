@@ -87,7 +87,8 @@ fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
     let opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Seu Bolso Feliz — inventário")
-            .with_inner_size([900.0, 620.0]),
+            .with_inner_size([1480.0, 920.0])
+            .with_min_inner_size([960.0, 600.0]),
         ..Default::default()
     };
     let criar = Box::new(|cc: &eframe::CreationContext<'_>| {

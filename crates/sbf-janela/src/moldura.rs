@@ -106,7 +106,7 @@ impl MolduraProvisoria {
         if !self.janela.paineis_visiveis.is_empty() {
             egui::Panel::right("sbf-dock")
                 .resizable(true)
-                .default_size(330.0)
+                .default_size(300.0)
                 .frame(
                     Frame::new()
                         .fill(p.superficie_1)
