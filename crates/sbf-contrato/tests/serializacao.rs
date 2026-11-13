@@ -219,6 +219,33 @@ fn debug_nunca_mostra_credencial_nem_id_token() {
 }
 
 #[test]
+fn estado_leva_os_documentos_a_revisar() {
+    let estado = Estado {
+        contrato: 1,
+        contratos_aceitos: vec![1],
+        regras: "0.1.0".into(),
+        hora_do_servidor: "2026-11-13T21:00:00.000000Z".into(),
+        dia_de_corte: 20,
+        fuso: "America/Sao_Paulo".into(),
+        documentos_a_revisar: 3,
+        estacao: Estacao {
+            id: id(7),
+            nome: "Notebook".into(),
+            sistema: "linux".into(),
+            pareada_em: "2026-11-13T21:00:00Z".into(),
+            ultimo_contato: None,
+            revogada: false,
+            revogada_em: None,
+        },
+    };
+    let fio = serde_json::to_value(&estado).unwrap();
+    assert_eq!(fio["documentos_a_revisar"], json!(3));
+    assert_eq!(fio["dia_de_corte"], json!(20));
+    let volta: Estado = serde_json::from_value(fio).unwrap();
+    assert_eq!(volta, estado);
+}
+
+#[test]
 fn prefixo_da_versao() {
     assert_eq!(prefixo(VERSAO_DO_CONTRATO), "/api/v1");
     const { assert!(PRIMEIRA_VERSAO_DO_CONTRATO <= VERSAO_DO_CONTRATO) };

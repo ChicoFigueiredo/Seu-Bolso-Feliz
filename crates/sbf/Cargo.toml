@@ -12,6 +12,10 @@ sbf-inventario = { workspace = true }
 sbf-disco = { path = "../sbf-disco" }
 eframe = { workspace = true }
 egui = { workspace = true }
+sbf-servidor = { path = "../sbf-servidor" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid = { version = "1" }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true
