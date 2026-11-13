@@ -282,12 +282,14 @@ const recorrentes = await carregarPainelRecorrentes();
 
 // Consulta de referência do gasto pela data da compra (grill Q18): compras no cartão
 // (movimentações com fatura e itens de fatura que não viraram movimentação, na data da
-// compra) e saídas de conta, sem pagamento de fatura, sem transferência e sem ajuste.
+// compra) e saídas de conta, sem pagamento de fatura, sem transferência e sem ajuste. Só
+// movimentação confirmada: a não confirmada é compromisso, ainda não saiu.
 const gastos = await sql`
   SELECT data::text AS data, sum(valor)::text AS valor, count(*)::int AS vezes FROM (
     SELECT t.event_date AS data, abs(t.amount) AS valor FROM transactions t
      WHERE t.user_id = ${semente.donos.a.id}
        AND t.type IN ('expense', 'fee', 'interest_charge', 'liability_payment')
+       AND t.is_confirmed
     UNION ALL
     SELECT si.transaction_date, abs(si.amount) FROM statement_items si
      WHERE si.user_id = ${semente.donos.a.id} AND si.transaction_id IS NULL

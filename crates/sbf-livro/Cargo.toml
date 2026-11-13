@@ -20,6 +20,8 @@ sbf-inventario = { workspace = true, optional = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 proptest = { workspace = true }
+# O teste do ciclo compara com o `ciclo_da_data` do inventário (EST-12), com ou sem a feature.
+sbf-inventario = { workspace = true }
 
 [lints]
 workspace = true

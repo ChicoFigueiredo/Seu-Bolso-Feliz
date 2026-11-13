@@ -13,6 +13,7 @@ pub mod centros;
 pub mod ciclo;
 pub mod data;
 pub mod dinheiro;
+pub mod gastos;
 pub mod hoje;
 pub mod rateio;
 pub mod recorrencia;

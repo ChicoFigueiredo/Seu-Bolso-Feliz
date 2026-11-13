@@ -312,3 +312,68 @@ fn total_mensal_dos_recorrentes_bate_com_carregar_painel_recorrentes() {
         ts["totalMensalEstimado"].as_bool().expect("bool")
     );
 }
+
+#[test]
+fn gasto_pela_data_da_compra_bate_com_a_consulta_de_referencia() {
+    use std::collections::BTreeMap;
+
+    use sbf_livro::gastos::gastos_pela_data_da_compra;
+
+    let ts = &ler("fixtures/paineis.json")["gastosPorDia"];
+    let mut por_dia: BTreeMap<String, (Centavos, u64)> = BTreeMap::new();
+    for g in gastos_pela_data_da_compra(&livro()) {
+        let e = por_dia.entry(g.data.to_string()).or_default();
+        e.0 += g.valor;
+        e.1 += 1;
+    }
+    let por_dia_ts: BTreeMap<String, (Centavos, u64)> = ts
+        .as_array()
+        .expect("gastos")
+        .iter()
+        .map(|g| {
+            (
+                texto(&g["data"]),
+                (c(&g["valor"]), g["vezes"].as_u64().expect("n")),
+            )
+        })
+        .collect();
+    assert_eq!(por_dia, por_dia_ts);
+}
+
+#[cfg(feature = "relatorios")]
+#[test]
+fn livro_caixa_e_uma_fonte_de_gastos_dos_relatorios() {
+    use sbf_inventario::relatorios::FonteDeGastos;
+    use sbf_livro::gastos::GastosDoLivro;
+
+    let livro = livro();
+    let fonte = GastosDoLivro::novo(&livro);
+    let gastos = fonte.gastos("2026-10", "2026-10", &[]).expect("gastos");
+    // Ciclo 2026-10 (20/out a 19/nov): todas as saídas confirmadas e compras do seed
+    // nesse intervalo, sem pagamento de fatura, transferência, ajuste e receita.
+    let total: i64 = gastos.iter().map(|g| g.centavos).sum();
+    assert_eq!(
+        total,
+        12_040 + 8_990 + 30_000 + 12_345 + 4_321 + 733 + 45_000 + 1_500 + 30
+    );
+    assert!(gastos.iter().all(|g| g.ciclo == "2026-10"));
+    let padaria: i64 = gastos
+        .iter()
+        .filter(|g| g.fornecedor.as_deref() == Some("Padaria Exemplo"))
+        .map(|g| g.centavos)
+        .sum();
+    assert_eq!(padaria, 12_040 + 8_990 + 4_321 + 10);
+    // Filtrar por conta (pelo UUID ou pelo nome): só o cartão.
+    let so_cartao = fonte
+        .gastos("2026-10", "2026-10", &["Cartao Gama".to_owned()])
+        .expect("gastos");
+    let total_cartao: i64 = so_cartao.iter().map(|g| g.centavos).sum();
+    assert_eq!(total_cartao, 8_990 + 733 + 4_321);
+    // Ciclos fora da janela não aparecem.
+    assert!(
+        fonte
+            .gastos("2027-01", "2027-02", &[])
+            .expect("gastos")
+            .is_empty()
+    );
+}
