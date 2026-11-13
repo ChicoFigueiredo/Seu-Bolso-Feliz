@@ -103,6 +103,61 @@ pub struct Janela {
     pub ferramentas: Option<crate::ferramentas::Ferramentas>,
     visao_geral_pendente:
         Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
+    /// Primeiros pedaços de áreas pedidos numa thread (no inventário real), por pedido.
+    pedacos_pendentes: HashMap<String, std::sync::mpsc::Receiver<PaginaPendente>>,
+}
+
+type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
+
+/// No inventário real, o primeiro pedaço de uma área é lido numa thread com a própria
+/// `LeitorSqlite` (algumas áreas levam segundos na primeira vez). Devolve `true` quando o
+/// pedaço já está no cache e a tabela pode ser desenhada; `false` enquanto carrega.
+fn pedaco_pronto(
+    pendentes: &mut HashMap<String, std::sync::mpsc::Receiver<PaginaPendente>>,
+    banco: Option<&std::path::Path>,
+    leitor: &mut Leitor<'_>,
+    pedido: &PedidoDeTabela,
+) -> bool {
+    use std::sync::mpsc::TryRecvError;
+    if leitor.tem_pedaco(pedido) {
+        return true;
+    }
+    let Some(banco) = banco else { return true };
+    let k = crate::leitura::chave(pedido);
+    if let Some(rx) = pendentes.get(&k) {
+        return match rx.try_recv() {
+            Ok(r) => {
+                leitor.guardar_pedaco(pedido, r);
+                pendentes.remove(&k);
+                true
+            }
+            Err(TryRecvError::Empty) => false,
+            Err(TryRecvError::Disconnected) => {
+                pendentes.remove(&k);
+                true
+            }
+        };
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let banco = banco.to_path_buf();
+    let p = pedido.clone();
+    std::thread::spawn(move || {
+        let r = sbf_inventario::leitor::LeitorSqlite::abrir(&banco)
+            .and_then(|l| l.tabela_paginada(&p, 0, crate::leitura::PEDACO))
+            .map_err(|e| e.to_string());
+        let _ = tx.send(r);
+    });
+    pendentes.insert(k, rx);
+    false
+}
+
+fn carregando(ui: &mut Ui, texto: &str) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new());
+        ui.label(texto);
+    });
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(100));
 }
 
 impl Default for Janela {
@@ -137,6 +192,7 @@ impl Janela {
             na_casca: false,
             ferramentas: None,
             visao_geral_pendente: None,
+            pedacos_pendentes: HashMap::new(),
         }
     }
 
@@ -447,8 +503,10 @@ impl Janela {
     ) {
         let p = tema::paleta(ui.ctx());
         let filtro = self.filtro();
+        let banco = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
+        let pendentes = &mut self.pedacos_pendentes;
         match destino {
             Destino::Area(Area::VisaoGeral) => {
                 cabecalho_da_area(
@@ -465,12 +523,17 @@ impl Janela {
                             self.visao_geral_pendente = None;
                         }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Spinner::new());
-                                ui.label("Carregando a Visão geral…");
-                            });
-                            ui.ctx()
-                                .request_repaint_after(std::time::Duration::from_millis(100));
+                            // As contagens da barra chegam em milissegundos: mostra antes.
+                            if let Ok(c) = leitor.contagens() {
+                                ui.label(format!(
+                                    "{} achados · {} documentos · {} em dúvida · {} a triar",
+                                    formato::inteiro(c.achados),
+                                    formato::inteiro(c.documentos),
+                                    formato::inteiro(c.em_duvida),
+                                    formato::inteiro(c.a_triar)
+                                ));
+                            }
+                            carregando(ui, "Carregando a Visão geral…");
                             return;
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -515,7 +578,12 @@ impl Janela {
                     };
                     componentes::rotulo_de_secao(ui, areas::rotulo_da_area(outra));
                     let chave = format!("area:{outra:?}");
-                    let n = leitor.carregada(&pedido, 0).map(|c| c.total).unwrap_or(0);
+                    let pronto = pedaco_pronto(pendentes, banco.as_deref(), &mut leitor, &pedido);
+                    let n = if pronto {
+                        leitor.carregada(&pedido, 0).map(|c| c.total).unwrap_or(0)
+                    } else {
+                        0
+                    };
                     let altura = (n as f32 * 26.0 + 30.0).min(200.0);
                     if let Err(e) = pagina::tabela_em_pedacos(
                         ui,
@@ -536,6 +604,10 @@ impl Janela {
                     area: *area,
                     filtro,
                 };
+                if !pedaco_pronto(pendentes, banco.as_deref(), &mut leitor, &pedido) {
+                    carregando(ui, "carregando…");
+                    return;
+                }
                 match leitor.carregada(&pedido, 0) {
                     Ok(c) => {
                         ui.horizontal(|ui| {

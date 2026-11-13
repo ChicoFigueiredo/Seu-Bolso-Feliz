@@ -320,3 +320,45 @@ fn areas_grandes_carregam_em_pedacos_e_ordenar_carrega_tudo() {
         .expect("tudo");
     assert_eq!(c.tabela.linhas.len(), c.total);
 }
+
+#[test]
+fn no_inventario_real_as_areas_e_a_visao_geral_carregam_em_segundo_plano() {
+    let banco = comum::banco_de_teste();
+    let cofre = tempfile::tempdir().expect("cofre");
+    let mut r = Real::novo(&banco.caminho);
+    {
+        let mut j = r.casca.app.janela();
+        j.ferramentas = Some(sbf_janela::ferramentas::Ferramentas::nova(
+            banco.caminho.clone(),
+            cofre.path().to_path_buf(),
+        ));
+        j.pre_carregar_visao_geral(banco.caminho.clone());
+    }
+    // A área pede o primeiro pedaço numa thread: o quadro não espera.
+    bancada_casca::abrir(&r.ctx, Destino::Area(Area::ArquivosEPastas).rota());
+    let pedido = PedidoDeTabela::Area {
+        area: Area::PastasPessoais,
+        filtro: Filtro::default(),
+    };
+    let inicio = Instant::now();
+    loop {
+        r.quadro();
+        let pronto = r
+            .casca
+            .app
+            .janela()
+            .primeiras(r.casca.app.consulta(), &pedido, 0)
+            .is_ok();
+        if pronto && inicio.elapsed() > Duration::from_millis(50) {
+            break;
+        }
+        assert!(inicio.elapsed() < Duration::from_secs(20), "não carregou");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // A Visão geral chega da thread e é desenhada.
+    bancada_casca::abrir(&r.ctx, Destino::Area(Area::VisaoGeral).rota());
+    for _ in 0..50 {
+        r.quadro();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

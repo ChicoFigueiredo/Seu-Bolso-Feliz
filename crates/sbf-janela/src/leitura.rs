@@ -36,7 +36,7 @@ pub struct Cache {
     contagens: Option<Lido<Contagens>>,
 }
 
-fn chave<T: serde::Serialize>(v: &T) -> String {
+pub fn chave<T: serde::Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_default()
 }
 
@@ -182,6 +182,24 @@ impl<'a> Leitor<'a> {
                     .map_err(|e| e.to_string())
             })
             .clone()
+    }
+
+    /// Já há um pedaço desta tabela em cache?
+    pub fn tem_pedaco(&self, pedido: &PedidoDeTabela) -> bool {
+        self.cache.paginadas.contains_key(&chave(pedido))
+    }
+
+    /// Guarda o primeiro pedaço de uma tabela lido em segundo plano.
+    pub fn guardar_pedaco(
+        &mut self,
+        pedido: &PedidoDeTabela,
+        r: Result<sbf_inventario::consulta::PaginaDeTabela, String>,
+    ) {
+        let c = r.map(|p| Carregada {
+            tabela: Arc::new(p.tabela),
+            total: p.total,
+        });
+        self.cache.paginadas.insert(chave(pedido), c);
     }
 
     /// Guarda uma Visão geral lida em segundo plano.
