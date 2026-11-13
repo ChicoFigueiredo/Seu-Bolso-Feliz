@@ -1,6 +1,7 @@
 //! O painel de navegação com o produto inteiro (spec 06, "O produto inteiro na
-//! navegação"). Nesta fatia funcionam o grupo Inventário e Relatórios; o resto aparece
-//! com o selo da fatia em que chega e o motivo.
+//! navegação"). Funcionam o grupo Inventário (fatia 1), as áreas de Dinheiro sobre o
+//! livro-caixa, Relatórios e a Sincronização (fatia 2); o resto aparece com o selo da
+//! fatia em que chega e o motivo.
 
 use egui::{Align, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Sense, Ui};
 use sbf_inventario::Tipo;
@@ -22,59 +23,8 @@ pub struct AreaFutura {
     pub motivo: &'static str,
 }
 
-const LIVRO: &str = "Chega na fatia 2, com o livro-caixa";
-
 /// As áreas das fatias futuras, na ordem do painel.
 pub const AREAS_FUTURAS: &[AreaFutura] = &[
-    AreaFutura {
-        id: "hoje",
-        rotulo: "Hoje",
-        icone: "today",
-        fatia: 2,
-        motivo: LIVRO,
-    },
-    AreaFutura {
-        id: "movimentacoes",
-        rotulo: "Movimentações",
-        icone: "swap_vert",
-        fatia: 2,
-        motivo: "Leitura na fatia 2, com o livro-caixa; edição na fatia 3",
-    },
-    AreaFutura {
-        id: "contas-cartoes",
-        rotulo: "Contas e cartões",
-        icone: "account_balance_wallet",
-        fatia: 2,
-        motivo: LIVRO,
-    },
-    AreaFutura {
-        id: "dividas",
-        rotulo: "Dívidas",
-        icone: "request_quote",
-        fatia: 2,
-        motivo: LIVRO,
-    },
-    AreaFutura {
-        id: "recorrentes",
-        rotulo: "Recorrentes",
-        icone: "event_repeat",
-        fatia: 2,
-        motivo: LIVRO,
-    },
-    AreaFutura {
-        id: "centros",
-        rotulo: "Centros",
-        icone: "donut_small",
-        fatia: 2,
-        motivo: LIVRO,
-    },
-    AreaFutura {
-        id: "fornecedores-cadastro",
-        rotulo: "Fornecedores",
-        icone: "storefront",
-        fatia: 2,
-        motivo: "O cadastro chega na fatia 2, com o livro-caixa. Os fornecedores dos registros já estão no Inventário",
-    },
     AreaFutura {
         id: "caixa",
         rotulo: "Caixa de entrada",
@@ -102,13 +52,6 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         icone: "route",
         fatia: 5,
         motivo: "Chega na fatia 5, com os roteiros",
-    },
-    AreaFutura {
-        id: "sincronizacao",
-        rotulo: "Sincronização",
-        icone: "cloud_sync",
-        fatia: 2,
-        motivo: "Chega na fatia 2, com a estação e o servidor",
     },
     AreaFutura {
         id: "pontos",
@@ -148,10 +91,15 @@ pub const AREAS_DO_INVENTARIO: [Area; 14] = [
     Area::Lotes,
 ];
 
-/// Todas as áreas que funcionam nesta fatia (o Inventário e Relatórios).
+/// As áreas de Dinheiro, na ordem do painel (o livro-caixa).
+pub const AREAS_DE_DINHEIRO: [Area; 7] = Area::DO_LIVRO_CAIXA;
+
+/// Todas as áreas que funcionam (o Inventário, Dinheiro, Relatórios e Sincronização).
 pub fn areas_da_fatia() -> Vec<Area> {
     let mut v = AREAS_DO_INVENTARIO.to_vec();
     v.push(Area::Relatorios);
+    v.extend(AREAS_DE_DINHEIRO);
+    v.push(Area::Sincronizacao);
     v
 }
 
@@ -319,24 +267,19 @@ pub fn destino_do_tipo(tipo: Tipo) -> Option<Destino> {
         Tipo::Coleta | Tipo::Conexao => Area::Coletas,
         Tipo::Ciclo => Area::Ciclos,
         Tipo::Fornecedor => Area::Fornecedores,
-        Tipo::Conta => Area::ContasLacunas,
+        Tipo::Conta | Tipo::Instituicao | Tipo::Produto | Tipo::Cartao => Area::ContasECartoes,
         Tipo::Fatura => Area::Faturas,
         Tipo::RegraDeSenha => Area::Documentos,
-        Tipo::Movimentacao | Tipo::Transferencia => {
-            return Some(Destino::AreaFutura("movimentacoes"));
+        Tipo::Movimentacao | Tipo::Transferencia | Tipo::Categoria | Tipo::Tag => {
+            Area::Movimentacoes
         }
-        Tipo::Instituicao | Tipo::Produto | Tipo::Cartao => {
-            return Some(Destino::AreaFutura("contas-cartoes"));
-        }
-        Tipo::Divida | Tipo::Parcela => return Some(Destino::AreaFutura("dividas")),
-        Tipo::Compromisso | Tipo::Recorrente => return Some(Destino::AreaFutura("recorrentes")),
-        Tipo::Centro => return Some(Destino::AreaFutura("centros")),
-        Tipo::Categoria | Tipo::Tag | Tipo::Contrato => {
-            return Some(Destino::AreaFutura("fornecedores-cadastro"));
-        }
+        Tipo::Divida | Tipo::Parcela => Area::Dividas,
+        Tipo::Compromisso | Tipo::Recorrente => Area::Recorrentes,
+        Tipo::Centro => Area::Centros,
+        Tipo::Contrato => Area::FornecedoresDoLivro,
+        Tipo::Estacao | Tipo::Alteracao => Area::Sincronizacao,
         Tipo::Alerta | Tipo::Canal => return Some(Destino::AreaFutura("alertas")),
         Tipo::Roteiro => return Some(Destino::AreaFutura("roteiros")),
-        Tipo::Estacao | Tipo::Alteracao => return Some(Destino::AreaFutura("sincronizacao")),
         Tipo::Ponto => return Some(Destino::AreaFutura("pontos")),
         Tipo::Destinatario => return Some(Destino::AreaFutura("destinatarios")),
     };
@@ -358,6 +301,8 @@ pub fn rotulo_do_destino(destino: &Destino) -> String {
 fn grupo_do_destino(destino: &Destino) -> &'static str {
     match destino {
         Destino::Area(Area::Relatorios) => "Dinheiro",
+        Destino::Area(Area::Sincronizacao) => "Estação",
+        Destino::Area(a) if a.e_do_livro_caixa() => "Dinheiro",
         Destino::Area(_) => "Inventário",
         Destino::AreaFutura(id) => match *id {
             "caixa" => "Documentos",
@@ -478,34 +423,25 @@ pub fn painel_de_navegacao(
                 ui.add_space(3.0);
             };
 
-            cabecalho(ui, "Dinheiro", None);
-            futuras(
-                ui,
-                &[
-                    "hoje",
-                    "movimentacoes",
-                    "contas-cartoes",
-                    "dividas",
-                    "recorrentes",
-                    "centros",
-                    "fornecedores-cadastro",
-                ],
-                pedidos,
-            );
-            let d = Destino::Area(Area::Relatorios);
-            let r = entrada(
-                ui,
-                icone_da_area(Area::Relatorios),
-                rotulo_da_area(Area::Relatorios),
-                ativo_de(&d),
-                |ui| {
-                    componentes::selo_fatia(ui, 1);
-                },
-                Some("Sobre o inventário nesta fatia; sobre o livro-caixa na fatia 2"),
-            );
-            if r.clicked() {
-                pedidos.push(Pedido::Abrir(d));
+            let real = |ui: &mut Ui, area: Area, pedidos: &mut Vec<Pedido>| {
+                let d = Destino::Area(area);
+                let r = entrada(
+                    ui,
+                    icone_da_area(area),
+                    rotulo_da_area(area),
+                    ativo_de(&d),
+                    |_| {},
+                    None,
+                );
+                if r.clicked() {
+                    pedidos.push(Pedido::Abrir(d));
+                }
+            };
+            cabecalho(ui, "Dinheiro", Some(2));
+            for area in AREAS_DE_DINHEIRO {
+                real(ui, area, pedidos);
             }
+            real(ui, Area::Relatorios, pedidos);
 
             cabecalho(ui, "Documentos", None);
             futuras(ui, &["caixa"], pedidos);
@@ -537,8 +473,8 @@ pub fn painel_de_navegacao(
 
             cabecalho(ui, "Fontes", None);
             futuras(ui, &["conexoes", "alertas", "roteiros"], pedidos);
-            cabecalho(ui, "Estação", None);
-            futuras(ui, &["sincronizacao"], pedidos);
+            cabecalho(ui, "Estação", Some(2));
+            real(ui, Area::Sincronizacao, pedidos);
             cabecalho(ui, "Análise", None);
             futuras(ui, &["pontos", "destinatarios"], pedidos);
             ui.add_space(8.0);

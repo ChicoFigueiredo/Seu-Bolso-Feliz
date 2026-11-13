@@ -75,6 +75,25 @@ pub enum Dialogo {
         ate: String,
         erro: Option<String>,
     },
+    /// Livro-caixa › Mudar categoria (uma movimentação).
+    MudarCategoria {
+        movimentacao: Ref,
+        rotulo: String,
+        atual: Option<String>,
+        opcoes: Vec<sbf_inventario::alteracao::OpcaoDeCategoria>,
+        /// O índice escolhido em `opcoes`; `None` = sem categoria.
+        escolhida: Option<usize>,
+    },
+    /// Livro-caixa › Revogar estação (confirmação).
+    RevogarEstacao {
+        estacao: Ref,
+        nome: String,
+    },
+    /// Livro-caixa › Renomear estação.
+    RenomearEstacao {
+        estacao: Ref,
+        nome: String,
+    },
     /// Ferramentas › Regras de senha › Nova regra. Nunca a senha: só como montá-la.
     NovaRegra {
         fornecedor: String,
@@ -129,6 +148,9 @@ pub struct Janela {
         Option<std::sync::mpsc::Receiver<Result<sbf_inventario::consulta::Painel, String>>>,
     /// Primeiros pedaços de áreas pedidos numa thread (no inventário real), por pedido.
     pedacos_pendentes: HashMap<String, std::sync::mpsc::Receiver<PaginaPendente>>,
+    /// A estação (alterações e sincronização do livro-caixa). `None`: esta máquina ainda
+    /// não é uma estação; as áreas de Dinheiro mostram o motivo.
+    pub estacao: Option<crate::dinheiro::EstacaoLigada>,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -225,7 +247,20 @@ impl Janela {
             chaveiro_trancado: false,
             visao_geral_pendente: None,
             pedacos_pendentes: HashMap::new(),
+            estacao: None,
         }
+    }
+
+    /// Liga a estação (a real, ou o livro fictício da demonstração).
+    pub fn ligar_estacao(&mut self, estacao: Box<dyn crate::dinheiro::EstacaoDoLivro>) {
+        self.estacao = Some(crate::dinheiro::EstacaoLigada(estacao));
+    }
+
+    /// O estado da sincronização, se há estação.
+    pub fn estado_da_sincronizacao(
+        &self,
+    ) -> Option<sbf_inventario::alteracao::EstadoDaSincronizacao> {
+        self.estacao.as_ref().map(|e| e.0.estado())
     }
 
     /// Enfileira um pedido (a casca chama isto para os botões do Ribbon e da Paleta).
@@ -392,7 +427,41 @@ impl Janela {
                 .as_ref()
                 .is_some_and(|f| !f.destino_da_copia.trim().is_empty()),
             ferramenta_ocupada: self.ferramentas.as_ref().is_some_and(|f| f.ocupada()),
+            estacao_ligada: self.estacao.is_some(),
+            estacao_revogada: self.estacao.as_ref().is_some_and(|e| {
+                e.0.estado().rede == sbf_inventario::alteracao::EstadoDaRede::EstacaoRevogada
+            }),
+            alteracao_recusada: self.alteracao_recusada_selecionada().is_some(),
+            estacao_ativa: self.estacao_ativa_selecionada().is_some(),
         }
+    }
+
+    /// A alteração recusada selecionada (ou aberta), se houver.
+    fn alteracao_recusada_selecionada(&self) -> Option<String> {
+        let sel = self.selecao();
+        let [r] = sel.as_slice() else { return None };
+        if r.tipo != Tipo::Alteracao {
+            return None;
+        }
+        let est = self.estacao.as_ref()?;
+        let a = est.0.alteracao(&r.chave).ok().flatten()?;
+        (a.estado == sbf_inventario::alteracao::EstadoDaAlteracao::Recusada).then_some(a.id)
+    }
+
+    /// A estação ativa selecionada (ou aberta), com o nome.
+    fn estacao_ativa_selecionada(&self) -> Option<(Ref, String)> {
+        let sel = self.selecao();
+        let [r] = sel.as_slice() else { return None };
+        if r.tipo != Tipo::Estacao {
+            return None;
+        }
+        let est = self.estacao.as_ref()?;
+        est.0
+            .estacoes()
+            .ok()?
+            .into_iter()
+            .find(|e| &e.alvo == r && e.credencial == sbf_inventario::alteracao::Credencial::Ativa)
+            .map(|e| (e.alvo, e.nome))
     }
 
     /// O ciclo atual (`AAAA-MM`), pelo dia de corte 20.
@@ -579,11 +648,100 @@ impl Janela {
         let filtro = self.filtro();
         let banco = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let descricao_do_filtro_atual = descricao_do_filtro(&filtro, &self.ciclo_atual());
+        let hoje = self.hoje.clone();
+        let estacao: Option<&dyn crate::dinheiro::EstacaoDoLivro> =
+            self.estacao.as_ref().map(|e| e.0.as_ref());
+        let sinc = estacao.map(|e| e.estado());
+        let contexto_da_pagina = pagina::ContextoDaPagina {
+            estacao,
+            hoje: &hoje,
+        };
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
         let previas = &mut self.previas;
         let pendentes = &mut self.pedacos_pendentes;
         match destino {
+            Destino::Area(Area::Sincronizacao) => {
+                cabecalho_da_area(
+                    ui,
+                    Area::Sincronizacao,
+                    None,
+                    &mut self.periodo,
+                    &mut self.focar_pesquisa,
+                );
+                crate::dinheiro::area_sincronizacao(ui, estacao, &hoje, vista, pedidos);
+            }
+            Destino::Area(area) if area.e_do_livro_caixa() => {
+                let pesquisa = if *area == Area::Hoje {
+                    None
+                } else {
+                    Some(&mut self.pesquisa)
+                };
+                cabecalho_da_area(
+                    ui,
+                    *area,
+                    pesquisa,
+                    &mut self.periodo,
+                    &mut self.focar_pesquisa,
+                );
+                crate::dinheiro::faixa_da_estacao(ui, sinc.as_ref(), &hoje);
+                let hora_da_copia = crate::dinheiro::hora_da_copia(sinc.as_ref(), &hoje);
+                let painel = match leitor.painel_da_area(*area, &filtro) {
+                    Ok(painel) => painel,
+                    Err(e) => {
+                        crate::dinheiro::motivo_ou_erro(ui, &e);
+                        return;
+                    }
+                };
+                crate::dinheiro::indicadores(ui, &painel, hora_da_copia.as_deref(), pedidos);
+                let pedido = PedidoDeTabela::Area {
+                    area: *area,
+                    filtro,
+                };
+                let chave = format!("area:{area:?}");
+                if *area == Area::Hoje {
+                    egui::ScrollArea::vertical()
+                        .id_salt("hoje")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            crate::dinheiro::secoes(ui, &painel, *area, vista, pedidos)
+                        });
+                } else if painel.secoes.is_empty() {
+                    if let Err(e) = pagina::tabela_em_pedacos(
+                        ui,
+                        &mut leitor,
+                        &pedido,
+                        &chave,
+                        vista,
+                        pedidos,
+                        None,
+                        true,
+                    ) {
+                        crate::dinheiro::motivo_ou_erro(ui, &e);
+                    }
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("dinheiro", *area as u8))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let n = leitor.carregada(&pedido, 0).map(|c| c.total).unwrap_or(0);
+                            let altura = tabela::altura_para(ui, n, 340.0);
+                            if let Err(e) = pagina::tabela_em_pedacos(
+                                ui,
+                                &mut leitor,
+                                &pedido,
+                                &chave,
+                                vista,
+                                pedidos,
+                                Some(altura),
+                                true,
+                            ) {
+                                crate::dinheiro::motivo_ou_erro(ui, &e);
+                            }
+                            crate::dinheiro::secoes(ui, &painel, *area, vista, pedidos);
+                        });
+                }
+            }
             Destino::Area(Area::VisaoGeral) => {
                 cabecalho_da_area(
                     ui,
@@ -634,6 +792,7 @@ impl Janela {
                     &filtro,
                     vista,
                     pedidos,
+                    estacao.is_some(),
                 );
             }
             Destino::Area(area) => {
@@ -728,7 +887,15 @@ impl Janela {
                     .id_salt("pagina")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        pagina::desenhar(ui, &mut leitor, previas, r, vista, pedidos)
+                        pagina::desenhar(
+                            ui,
+                            &mut leitor,
+                            previas,
+                            r,
+                            vista,
+                            pedidos,
+                            contexto_da_pagina,
+                        )
                     });
             }
             Destino::Total { titulo, pedido } => {
@@ -793,7 +960,12 @@ impl Janela {
     pub fn flutuantes_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
         let p = tema::paleta(ctx);
         let lista: Vec<_> = self.navegacao.flutuantes().to_vec();
+        let hoje = self.hoje.clone();
         for f in lista {
+            let contexto_da_pagina = pagina::ContextoDaPagina {
+                estacao: self.estacao.as_ref().map(|e| e.0.as_ref()),
+                hoje: &hoje,
+            };
             let mut leitor = Leitor::novo(consulta, &mut self.cache);
             let titulo = match &f.destino {
                 Destino::Item(r) => format!("{} · {}", r.tipo.singular(), leitor.rotulo(r)),
@@ -814,9 +986,15 @@ impl Janela {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| match &f.destino {
-                            Destino::Item(r) => {
-                                pagina::desenhar(ui, &mut leitor, previas, r, vista, pedidos)
-                            }
+                            Destino::Item(r) => pagina::desenhar(
+                                ui,
+                                &mut leitor,
+                                previas,
+                                r,
+                                vista,
+                                pedidos,
+                                contexto_da_pagina,
+                            ),
                             Destino::Total { titulo, pedido } => pagina::desenhar_total(
                                 ui,
                                 &mut leitor,
@@ -953,6 +1131,57 @@ impl Janela {
                     ui.add(egui::TextEdit::singleline(prioridade).desired_width(120.0));
                     if let Some(e) = erro {
                         ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
+                    }
+                }
+                Dialogo::MudarCategoria {
+                    rotulo,
+                    atual,
+                    opcoes,
+                    escolhida,
+                    ..
+                } => {
+                    componentes::titulo(ui, "Mudar categoria", 17.0);
+                    ui.label(rotulo.as_str());
+                    ui.label(
+                        RichText::new(format!(
+                            "Hoje: {}. A mudança fica aguardando e vai ao servidor na próxima sincronização; ele aplica ou recusa.",
+                            atual.as_deref().unwrap_or("Sem categoria")
+                        ))
+                        .size(12.0)
+                        .color(tema::paleta(ui.ctx()).tinta_suave),
+                    );
+                    ui.add_space(6.0);
+                    let texto = escolhida
+                        .and_then(|i| opcoes.get(i))
+                        .map(|o| o.nome.clone())
+                        .unwrap_or_else(|| "Sem categoria".to_owned());
+                    egui::ComboBox::from_id_salt("mudar-categoria")
+                        .selected_text(texto)
+                        .width(300.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(escolhida, None, "Sem categoria");
+                            for (i, o) in opcoes.iter().enumerate() {
+                                let rotulo = match &o.grupo {
+                                    Some(g) => format!("{} · {g}", o.nome),
+                                    None => o.nome.clone(),
+                                };
+                                ui.selectable_value(escolhida, Some(i), rotulo);
+                            }
+                        });
+                }
+                Dialogo::RevogarEstacao { nome, .. } => {
+                    componentes::titulo(ui, "Revogar estação", 17.0);
+                    ui.label(format!(
+                        "Revogar a estação \u{201c}{nome}\u{201d}? Ela deixa de sincronizar e, no próximo contato, apaga a cópia do livro-caixa e a credencial. O cofre e o inventário dela ficam. Nada é apagado do servidor."
+                    ));
+                }
+                Dialogo::RenomearEstacao { nome, .. } => {
+                    componentes::titulo(ui, "Renomear estação", 17.0);
+                    ui.label("Nome da estação");
+                    let r = ui.add(egui::TextEdit::singleline(nome).desired_width(f32::INFINITY));
+                    r.request_focus();
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        confirmar = true;
                     }
                 }
                 Dialogo::NovoLote { nome } => {
@@ -1112,6 +1341,27 @@ impl Janela {
                         erro: false,
                     });
                 }
+                Pedido::Alterar(pedido) => self.alterar(pedido),
+                Pedido::RefazerAlteracao(id) => self.refazer(&id),
+                Pedido::DescartarAlteracao(id) => self.descartar(&id),
+                Pedido::Sincronizar => self.sincronizar(),
+                Pedido::RevogarEstacao(r) => match self.estacao.as_mut().map(|e| e.0.revogar(&r)) {
+                    Some(Ok(())) => self.ok(
+                        "Estação revogada. O que ela já sincronizou continua no servidor."
+                            .to_owned(),
+                    ),
+                    Some(Err(e)) => self.erro(e.to_string()),
+                    None => self.erro(acoes::MOTIVO_SEM_ESTACAO.to_owned()),
+                },
+                Pedido::RenomearEstacao(r, nome) => {
+                    match self.estacao.as_mut().map(|e| e.0.renomear(&r, &nome)) {
+                        Some(Ok(())) => {
+                            self.ok(format!("Estação renomeada para \u{201c}{nome}\u{201d}."))
+                        }
+                        Some(Err(e)) => self.erro(e.to_string()),
+                        None => self.erro(acoes::MOTIVO_SEM_ESTACAO.to_owned()),
+                    }
+                }
                 // Já tratados pela navegação.
                 Pedido::Abrir(_)
                 | Pedido::AbrirFlutuante(_)
@@ -1171,6 +1421,59 @@ impl Janela {
             }
             Err(e) => self.erro(e.to_string()),
         }
+    }
+
+    /// Grava uma alteração na fila da estação (vai na próxima sincronização).
+    fn alterar(&mut self, pedido: sbf_inventario::alteracao::PedidoDeAlteracao) {
+        let Some(est) = self.estacao.as_mut() else {
+            self.erro(acoes::MOTIVO_SEM_ESTACAO.to_owned());
+            return;
+        };
+        match est.0.propor(&pedido) {
+            Ok(a) => self.ok(format!(
+                "{}: {} → {}. Aguardando o servidor: vai na próxima sincronização.",
+                a.rotulo(),
+                a.antes,
+                a.depois
+            )),
+            Err(e) => self.erro(e.to_string()),
+        }
+    }
+
+    fn refazer(&mut self, id: &str) {
+        let Some(est) = self.estacao.as_mut() else {
+            return;
+        };
+        match est.0.refazer(id) {
+            Ok(nova) => self.ok(format!(
+                "Refeita sobre a versão nova do servidor: {} aguardando a próxima sincronização.",
+                nova.rotulo()
+            )),
+            Err(e) => self.erro(e.to_string()),
+        }
+    }
+
+    fn descartar(&mut self, id: &str) {
+        let Some(est) = self.estacao.as_mut() else {
+            return;
+        };
+        match est.0.descartar(id) {
+            Ok(()) => self.ok("Alteração descartada: vale a versão do servidor.".to_owned()),
+            Err(e) => self.erro(e.to_string()),
+        }
+    }
+
+    fn sincronizar(&mut self) {
+        let Some(est) = self.estacao.as_mut() else {
+            self.erro(acoes::MOTIVO_SEM_ESTACAO.to_owned());
+            return;
+        };
+        est.0.sincronizar_agora();
+        let estado = est.0.estado();
+        let (texto, _, aviso) = crate::dinheiro::texto_da_barra(&estado, &self.hoje);
+        // Releitura: a troca pode ter mudado o livro-caixa.
+        self.cache.limpar();
+        self.mensagem = Some(Mensagem { texto, erro: aviso });
     }
 
     fn acao(
@@ -1403,6 +1706,72 @@ impl Janela {
                     });
                 }
             }
+            IdAcao::SincronizarAgora => self.sincronizar(),
+            IdAcao::MudarCategoria => {
+                let Some(mov) = sel.first().cloned() else {
+                    return;
+                };
+                let opcoes = self
+                    .estacao
+                    .as_ref()
+                    .and_then(|e| e.0.categorias().ok())
+                    .unwrap_or_default();
+                let mut leitor = Leitor::novo(consulta, &mut self.cache);
+                let rotulo = leitor.rotulo(&mov);
+                let atual = leitor.item(&mov).ok().and_then(|i| {
+                    i.as_ref().as_ref().and_then(|i| {
+                        i.campos
+                            .iter()
+                            .find(|c| c.rotulo == "Categoria")
+                            .map(|c| formato::texto_da_celula(&c.valor))
+                    })
+                });
+                let escolhida = atual
+                    .as_ref()
+                    .and_then(|a| opcoes.iter().position(|o| &o.nome == a));
+                self.dialogo = Some(Dialogo::MudarCategoria {
+                    movimentacao: mov,
+                    rotulo,
+                    atual,
+                    opcoes,
+                    escolhida,
+                });
+            }
+            IdAcao::RefazerAlteracao => {
+                if let Some(id) = self.alteracao_recusada_selecionada() {
+                    self.refazer(&id);
+                }
+            }
+            IdAcao::DescartarAlteracao => {
+                if let Some(id) = self.alteracao_recusada_selecionada() {
+                    self.descartar(&id);
+                }
+            }
+            IdAcao::RevogarEstacao => {
+                if let Some((estacao, nome)) = self.estacao_ativa_selecionada() {
+                    self.dialogo = Some(Dialogo::RevogarEstacao { estacao, nome });
+                }
+            }
+            IdAcao::RenomearEstacao => {
+                let Some(r) = sel.first().cloned() else {
+                    return;
+                };
+                let nome = self
+                    .estacao
+                    .as_ref()
+                    .and_then(|e| e.0.estacoes().ok())
+                    .and_then(|v| v.into_iter().find(|e| e.alvo == r))
+                    .map(|e| e.nome)
+                    .unwrap_or_default();
+                self.dialogo = Some(Dialogo::RenomearEstacao { estacao: r, nome });
+            }
+            IdAcao::EditarMovimentacao | IdAcao::RatearMovimentacao => {
+                self.erro(format!(
+                    "{}: {}",
+                    acoes::definicao(id).rotulo,
+                    crate::dinheiro::MOTIVO_FATIA_3
+                ));
+            }
             IdAcao::CopiarRastro => {
                 if let Some(r) = self.item_aberto().cloned() {
                     let mut leitor = Leitor::novo(consulta, &mut self.cache);
@@ -1515,6 +1884,34 @@ pub const ESTRATEGIAS_SUGERIDAS: &[&str] = &[
 /// Monta o pedido de um diálogo confirmado.
 pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
     match d {
+        Dialogo::MudarCategoria {
+            movimentacao,
+            atual,
+            opcoes,
+            escolhida,
+            ..
+        } => {
+            let nova = escolhida.and_then(|i| opcoes.get(i));
+            let nome = nova.map(|o| o.nome.as_str()).unwrap_or("Sem categoria");
+            if atual.as_deref().unwrap_or("Sem categoria") == nome {
+                return Err("A categoria já é essa.".to_owned());
+            }
+            Ok(Pedido::Alterar(
+                sbf_inventario::alteracao::PedidoDeAlteracao::MudarCategoria {
+                    movimentacao: movimentacao.clone(),
+                    categoria: nova.map(|o| o.alvo.clone()),
+                },
+            ))
+        }
+        Dialogo::RevogarEstacao { estacao, .. } => Ok(Pedido::RevogarEstacao(estacao.clone())),
+        Dialogo::RenomearEstacao { estacao, nome } => {
+            let n = nome.trim();
+            if n.is_empty() {
+                Err("Dê um nome à estação.".to_owned())
+            } else {
+                Ok(Pedido::RenomearEstacao(estacao.clone(), n.to_owned()))
+            }
+        }
         Dialogo::Texto {
             acao, alvos, valor, ..
         } => {

@@ -44,6 +44,11 @@ pub enum ConteudoDaAba {
     Rastro,
     /// A prévia do arquivo do item (o do achado, ou o documento da origem e do registro).
     Arquivo,
+    /// Um recorte do livro-caixa sobre o item (`ItensDoTotal` com o recorte): o pagamento
+    /// de uma fatura, os rateios de um centro, a simulação de uma dívida…
+    Recorte(&'static str),
+    /// As alterações deste item feitas nesta estação (a estação, não a `Consulta`).
+    Alteracoes,
 }
 
 /// Uma aba de página. Desabilitada traz o motivo (as abas do livro-caixa nesta fatia).
@@ -52,6 +57,18 @@ pub struct AbaDePagina {
     pub rotulo: String,
     pub conteudo: ConteudoDaAba,
     pub motivo: Option<String>,
+}
+
+/// A fatia que esta janela já tem: o inventário (1) e o livro-caixa só leitura (2).
+pub const FATIA_DA_JANELA: u8 = 2;
+
+/// O motivo de um tipo que ainda não funciona nesta janela (fatias 3 em diante).
+pub fn motivo_do_tipo(tipo: Tipo) -> Option<String> {
+    if tipo.fatia() <= FATIA_DA_JANELA {
+        None
+    } else {
+        tipo.motivo_da_fatia()
+    }
 }
 
 fn aba(rotulo: &str, tipo: Tipo) -> AbaDePagina {
@@ -63,9 +80,24 @@ fn aba(rotulo: &str, tipo: Tipo) -> AbaDePagina {
     AbaDePagina {
         rotulo,
         conteudo: ConteudoDaAba::Ligados(tipo),
-        motivo: tipo.motivo_da_fatia(),
+        motivo: motivo_do_tipo(tipo),
     }
 }
+
+fn aba_desabilitada(rotulo: &str, tipo: Tipo, motivo: &str) -> AbaDePagina {
+    AbaDePagina {
+        motivo: Some(motivo.to_owned()),
+        ..aba(rotulo, tipo)
+    }
+}
+
+fn recorte(rotulo: &str, r: &'static str) -> AbaDePagina {
+    aba_especial(rotulo, ConteudoDaAba::Recorte(r))
+}
+
+/// A ligação registro → movimentação nasce com a promoção.
+const MOTIVO_PROMOCAO: &str =
+    "A ligação com os registros do inventário nasce com a promoção, na fatia 3";
 
 fn aba_especial(rotulo: &str, conteudo: ConteudoDaAba) -> AbaDePagina {
     AbaDePagina {
@@ -81,10 +113,82 @@ pub fn abas_de(tipo: Tipo) -> Vec<AbaDePagina> {
     let mut v = match tipo {
         T::Fornecedor => vec![
             aba("Movimentações", T::Movimentacao),
+            aba("Compromissos e recorrentes", T::Recorrente),
             aba("Registros", T::Registro),
             aba("Documentos", T::Documento),
-            aba("Compromissos e recorrentes", T::Compromisso),
+            aba("Contratos", T::Contrato),
             aba("Regras de senha", T::RegraDeSenha),
+        ],
+        T::Movimentacao => vec![
+            aba("Rateio por centro", T::Centro),
+            aba("Documento", T::Documento),
+            aba("Ligações", T::Movimentacao),
+            aba_desabilitada("Registro de origem", T::Registro, MOTIVO_PROMOCAO),
+            aba_especial("Alterações", ConteudoDaAba::Alteracoes),
+        ],
+        T::Transferencia => vec![
+            aba("Contas", T::Conta),
+            aba("Movimentações", T::Movimentacao),
+            aba("Documentos", T::Documento),
+        ],
+        T::Instituicao => vec![
+            aba("Contas", T::Conta),
+            aba("Cartões", T::Cartao),
+            aba("Produtos", T::Produto),
+            aba("Dívidas", T::Divida),
+        ],
+        T::Produto => vec![
+            aba("Movimentações", T::Movimentacao),
+            aba("Instituição e conta", T::Instituicao),
+            aba("Dívidas", T::Divida),
+            aba("Documentos", T::Documento),
+        ],
+        T::Cartao => vec![
+            aba("Faturas", T::Fatura),
+            aba("Itens", T::Movimentacao),
+            aba("Documentos", T::Documento),
+            recorte("Compromissos e dívidas", "compromissos-e-dividas"),
+        ],
+        T::Categoria | T::Tag => vec![
+            aba("Movimentações", T::Movimentacao),
+            aba("Fornecedores", T::Fornecedor),
+            aba("Compromissos e recorrentes", T::Recorrente),
+            aba("Documentos", T::Documento),
+        ],
+        T::Centro => vec![
+            recorte("Rateios", "rateios"),
+            aba("Movimentações", T::Movimentacao),
+            aba("Compromissos e recorrentes", T::Recorrente),
+            aba("Documentos", T::Documento),
+        ],
+        T::Compromisso => vec![
+            recorte("Origem", "origem"),
+            recorte("Pagamento", "pagamento"),
+            aba("Documentos", T::Documento),
+        ],
+        T::Recorrente => vec![
+            aba("Ocorrências", T::Compromisso),
+            recorte("Próximos compromissos", "proximos"),
+            recorte("Fornecedor e contrato", "fornecedor-e-contrato"),
+            aba("Documentos", T::Documento),
+        ],
+        T::Divida => vec![
+            aba("Parcelas", T::Parcela),
+            recorte("Simulação SAC × Price", "simulacao"),
+            aba("Movimentações", T::Movimentacao),
+            aba("Contrato", T::Contrato),
+            aba("Documentos", T::Documento),
+        ],
+        T::Parcela => vec![
+            recorte("Pagamento", "pagamento"),
+            aba("Boleto e documentos", T::Documento),
+            aba("Ligações", T::Parcela),
+        ],
+        T::Contrato => vec![
+            aba("Movimentações", T::Movimentacao),
+            aba("Compromissos e recorrentes", T::Recorrente),
+            aba("Documentos", T::Documento),
+            recorte("Dívidas e parcelas", "parcelas-e-dividas"),
         ],
         T::Achado | T::Documento => vec![
             aba_especial("Arquivo", ConteudoDaAba::Arquivo),
@@ -145,21 +249,30 @@ pub fn abas_de(tipo: Tipo) -> Vec<AbaDePagina> {
         ],
         T::Ciclo => vec![
             aba("Movimentações", T::Movimentacao),
+            aba("Compromissos", T::Compromisso),
             aba("Registros", T::Registro),
             aba("Documentos", T::Documento),
             aba("Fornecedores", T::Fornecedor),
         ],
         T::Conta => vec![
             aba("Movimentações", T::Movimentacao),
+            aba("Transferências", T::Transferencia),
+            aba("Extratos e documentos", T::Documento),
             aba("Registros", T::Registro),
-            aba("Documentos", T::Documento),
             aba("Faturas", T::Fatura),
+            aba_desabilitada(
+                "Conexão de origem",
+                T::Conexao,
+                "Chega na fatia 4, com conexões, alertas e canais",
+            ),
         ],
         T::Fatura => vec![
-            aba("Movimentações", T::Movimentacao),
+            recorte("Itens", "itens"),
+            recorte("Pagamento", "pagamento"),
+            aba("Documento da fatura", T::Documento),
             aba("Registros", T::Registro),
-            aba("Documentos", T::Documento),
         ],
+        // Estação e Alteração têm página própria (`dinheiro`), sem `Consulta`.
         // Fatia futura: só o selo, sem abas além do Rastro.
         _ => Vec::new(),
     };
@@ -169,7 +282,20 @@ pub fn abas_de(tipo: Tipo) -> Vec<AbaDePagina> {
 
 /// Tipos cuja página mostra o gráfico de totais por ciclo.
 pub fn tem_grafico_por_ciclo(tipo: Tipo) -> bool {
-    matches!(tipo, Tipo::Fornecedor | Tipo::Conta)
+    matches!(
+        tipo,
+        Tipo::Fornecedor | Tipo::Conta | Tipo::Categoria | Tipo::Centro | Tipo::Cartao
+    )
+}
+
+/// A fonte do gráfico por ciclo: os tipos só do livro-caixa somam movimentações; os
+/// compartilhados continuam somando os registros do inventário (fatia 1).
+fn fonte_do_grafico(tipo: Tipo) -> Fonte {
+    if crate::composta::so_do_livro(tipo) {
+        Fonte::LivroCaixa
+    } else {
+        Fonte::Inventario
+    }
 }
 
 /// O texto do rastro para "Copiar rastro".
@@ -204,6 +330,23 @@ pub fn texto_do_rastro(alvo: &Ref, rotulo: &str, rastro: &Rastro) -> String {
     linhas.join("\n")
 }
 
+/// O que a página precisa da estação (as páginas de Estação e de Alteração e a aba
+/// Alterações da movimentação).
+#[derive(Clone, Copy)]
+pub struct ContextoDaPagina<'a> {
+    pub estacao: Option<&'a dyn crate::dinheiro::EstacaoDoLivro>,
+    pub hoje: &'a str,
+}
+
+impl std::fmt::Debug for ContextoDaPagina<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextoDaPagina")
+            .field("estacao", &self.estacao.is_some())
+            .field("hoje", &self.hoje)
+            .finish()
+    }
+}
+
 /// Desenha a página de um item.
 pub fn desenhar(
     ui: &mut Ui,
@@ -212,9 +355,25 @@ pub fn desenhar(
     alvo: &Ref,
     vista: &mut Vista,
     pedidos: &mut Vec<Pedido>,
+    contexto: ContextoDaPagina<'_>,
 ) {
     let p = tema::paleta(ui.ctx());
-    if let Some(motivo) = alvo.tipo.motivo_da_fatia() {
+    if matches!(alvo.tipo, Tipo::Estacao | Tipo::Alteracao) {
+        match contexto.estacao {
+            Some(est) if alvo.tipo == Tipo::Estacao => {
+                crate::dinheiro::pagina_da_estacao(ui, est, alvo, contexto.hoje, vista, pedidos)
+            }
+            Some(est) => {
+                crate::dinheiro::pagina_da_alteracao(ui, est, alvo, contexto.hoje, vista, pedidos)
+            }
+            None => crate::dinheiro::motivo_ou_erro(
+                ui,
+                &format!("ainda não suportado: {}", crate::composta::SEM_LIVRO),
+            ),
+        }
+        return;
+    }
+    if let Some(motivo) = motivo_do_tipo(alvo.tipo) {
         componentes::fatia_futura(
             ui,
             alvo.tipo.icone(),
@@ -233,6 +392,16 @@ pub fn desenhar(
     }
     let item = match leitor.item(alvo) {
         Ok(i) => i,
+        Err(e) if e.starts_with("ainda não suportado: ") => {
+            componentes::fatia_futura(
+                ui,
+                alvo.tipo.icone(),
+                &format!("{} {}", alvo.tipo.singular(), alvo.chave),
+                2,
+                e.trim_start_matches("ainda não suportado: "),
+            );
+            return;
+        }
         Err(e) => {
             componentes::aviso(
                 ui,
@@ -290,7 +459,7 @@ pub fn desenhar(
         .partition(|c| matches!(c.valor, Celula::Valor { .. }));
     let totais = if tem_grafico_por_ciclo(alvo.tipo) {
         leitor
-            .por_ciclo(alvo, Fonte::Inventario, 6)
+            .por_ciclo(alvo, fonte_do_grafico(alvo.tipo), 6)
             .ok()
             .filter(|t| !t.is_empty())
     } else {
@@ -422,6 +591,36 @@ pub fn desenhar(
             Ok(t) => texto_extraido(ui, t.as_deref()),
             Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
         },
+        ConteudoDaAba::Alteracoes => crate::dinheiro::aba_alteracoes_do_item(
+            ui,
+            contexto.estacao,
+            alvo,
+            contexto.hoje,
+            vista,
+            pedidos,
+        ),
+        ConteudoDaAba::Recorte(r) => {
+            let pedido = PedidoDeTabela::ItensDoTotal {
+                de: alvo.clone(),
+                fonte: Fonte::LivroCaixa,
+                ciclo: None,
+                recorte: Some((*r).to_owned()),
+            };
+            let chave = format!("recorte:{alvo}:{r}");
+            let altura = ui.available_height().max(200.0);
+            if let Err(e) = tabela_em_pedacos(
+                ui,
+                leitor,
+                &pedido,
+                &chave,
+                vista,
+                pedidos,
+                Some(altura),
+                false,
+            ) {
+                crate::dinheiro::motivo_ou_erro(ui, &e);
+            }
+        }
         ConteudoDaAba::Ligados(tipo) => {
             let pedido = PedidoDeTabela::Ligados {
                 de: alvo.clone(),
@@ -439,7 +638,7 @@ pub fn desenhar(
                 Some(altura),
                 false,
             ) {
-                componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo);
+                crate::dinheiro::motivo_ou_erro(ui, &e);
             }
         }
     }
@@ -875,31 +1074,24 @@ mod testes {
     }
 
     #[test]
-    fn fornecedor_tem_as_abas_da_spec_com_o_livro_caixa_desabilitado() {
+    fn fornecedor_tem_as_abas_da_spec_com_o_livro_caixa_aceso() {
         let abas = abas_de(Tipo::Fornecedor);
-        let mov = abas
-            .iter()
-            .find(|a| a.rotulo == "Movimentações")
-            .expect("aba");
-        assert_eq!(
-            mov.motivo.as_deref(),
-            Some("Chega na fatia 2, com o livro-caixa")
-        );
+        for rotulo in ["Movimentações", "Compromissos e recorrentes", "Documentos"] {
+            let a = abas.iter().find(|a| a.rotulo == rotulo).expect("aba");
+            assert!(a.motivo.is_none(), "{rotulo}");
+        }
         let reg = abas
             .iter()
             .find(|a| a.rotulo.starts_with("Registros"))
             .expect("aba");
         assert_eq!(reg.rotulo, "Registros · a conferir");
-        assert!(reg.motivo.is_none());
+        // A movimentação diz por que ainda não liga ao registro (promoção, fatia 3).
+        let mov = abas_de(Tipo::Movimentacao);
         assert!(
-            abas.iter()
-                .any(|a| a.rotulo == "Documentos" && a.motivo.is_none())
+            mov.iter()
+                .any(|a| a.rotulo.starts_with("Registro de origem") && a.motivo.is_some())
         );
-        let comp = abas
-            .iter()
-            .find(|a| a.rotulo == "Compromissos e recorrentes")
-            .expect("aba");
-        assert!(comp.motivo.is_some());
+        assert!(mov.iter().any(|a| a.conteudo == ConteudoDaAba::Alteracoes));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! - Ctrl+clique abre num painel flutuante e **não** mexe no histórico do centro;
 //! - abrir o mesmo destino que já está no centro não cria passo novo.
 
+use sbf_inventario::alteracao::PedidoDeAlteracao;
 use sbf_inventario::comando::{IdDecisao, PedidoDeDecisao};
 use sbf_inventario::consulta::{Area, PedidoDeTabela};
 use sbf_inventario::{Ref, Tipo};
@@ -15,7 +16,7 @@ use crate::acoes::IdAcao;
 /// O que pode estar no centro ou num painel flutuante.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Destino {
-    /// Uma área do grupo Inventário, ou Relatórios.
+    /// Uma área do painel de navegação (Inventário, Dinheiro, Relatórios, Sincronização).
     Area(Area),
     /// Uma área de fatia futura (o id da tabela de [`crate::areas::AREAS_FUTURAS`]).
     AreaFutura(&'static str),
@@ -96,6 +97,19 @@ pub enum Pedido {
         fornecedor: String,
         tipo_de_documento: String,
     },
+    // Livro-caixa e estação (fatia 2).
+    /// Uma alteração do livro-caixa (mudar a categoria de uma movimentação).
+    Alterar(PedidoDeAlteracao),
+    /// "Refazer sobre a nova" de uma alteração recusada (o id).
+    RefazerAlteracao(String),
+    /// "Descartar" uma alteração recusada (o id).
+    DescartarAlteracao(String),
+    /// "Sincronizar agora".
+    Sincronizar,
+    /// Revogar uma estação (já confirmado).
+    RevogarEstacao(Ref),
+    /// Renomear uma estação.
+    RenomearEstacao(Ref, String),
 }
 
 impl Pedido {
@@ -321,7 +335,8 @@ mod testes {
         let destinos = vec![
             Destino::Area(Area::ATriar),
             Destino::Area(Area::Fornecedores),
-            Destino::AreaFutura("hoje"),
+            Destino::AreaFutura("caixa"),
+            Destino::Area(Area::Hoje),
             forn("Energia Exemplo"),
             Destino::Item(Ref::nova(Tipo::Conexao, "disco:e2")),
             Destino::Total {

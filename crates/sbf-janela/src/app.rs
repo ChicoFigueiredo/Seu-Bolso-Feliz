@@ -294,8 +294,9 @@ pub fn keytips_das_acoes() -> HashMap<IdAcao, String> {
     v
 }
 
-const ABAS: [(Aba, &str, &str, &str); 7] = [
+const ABAS: [(Aba, &str, &str, &str); 8] = [
     (Aba::Inicio, "inicio", "Início", "I"),
+    (Aba::LivroCaixa, "livro", "Livro-caixa", "K"),
     (Aba::Triagem, "triagem", "Triagem", "T"),
     (Aba::Lotes, "lotes", "Lotes", "L"),
     (Aba::Ferramentas, "ferramentas", "Ferramentas", "F"),
@@ -508,20 +509,37 @@ impl AppCasca for AppSbf {
             })
         };
         let futuras = |ids: &[&str]| ids.iter().filter_map(|i| futura(i)).collect::<Vec<_>>();
-        let mut dinheiro = futuras(&[
-            "hoje",
-            "movimentacoes",
-            "contas-cartoes",
-            "dividas",
-            "recorrentes",
-            "centros",
-            "fornecedores-cadastro",
-        ]);
-        dinheiro.push(ItemNavegacao::novo(
-            areas::rota_da_area(Area::Relatorios),
-            areas::rotulo_da_area(Area::Relatorios),
-            areas::icone_da_area(Area::Relatorios),
-        ));
+        let real = |a: Area| {
+            ItemNavegacao::novo(
+                areas::rota_da_area(a),
+                areas::rotulo_da_area(a),
+                areas::icone_da_area(a),
+            )
+        };
+        let mut dinheiro: Vec<ItemNavegacao> =
+            areas::AREAS_DE_DINHEIRO.iter().map(|a| real(*a)).collect();
+        dinheiro.push(real(Area::Relatorios));
+        let estacao = {
+            let mut item = real(Area::Sincronizacao);
+            let recusadas = self
+                .janela
+                .borrow()
+                .estacao
+                .as_ref()
+                .and_then(|e| e.0.alteracoes(true).ok())
+                .map(|v| {
+                    v.iter()
+                        .filter(|a| {
+                            a.estado == sbf_inventario::alteracao::EstadoDaAlteracao::Recusada
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            if recusadas > 0 {
+                item = item.contagem(recusadas as u64);
+            }
+            vec![item]
+        };
         let inventario = areas::AREAS_DO_INVENTARIO
             .iter()
             .map(|a| {
@@ -543,11 +561,11 @@ impl AppCasca for AppSbf {
             })
             .collect();
         vec![
-            GrupoNavegacao::novo("Dinheiro", dinheiro),
+            GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", futuras(&["caixa"])),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
             GrupoNavegacao::novo("Fontes", futuras(&["conexoes", "alertas", "roteiros"])),
-            GrupoNavegacao::novo("Estação", futuras(&["sincronizacao"])),
+            GrupoNavegacao::novo("Estação", estacao),
             GrupoNavegacao::novo("Análise", futuras(&["pontos", "destinatarios"])),
         ]
     }
@@ -725,6 +743,30 @@ impl AppCasca for AppSbf {
                 .clicavel(),
             );
         }
+        let (sinc, hoje) = {
+            let j = self.janela.borrow();
+            (j.estado_da_sincronizacao(), j.hoje.clone())
+        };
+        let segmento = match &sinc {
+            Some(e) => {
+                let (texto, icone, aviso) = crate::dinheiro::texto_da_barra(e, &hoje);
+                let mut s = SegmentoStatus::novo("sincronizacao", texto)
+                    .icone(icone)
+                    .clicavel();
+                if aviso {
+                    s = s.tom(Tom::Aviso);
+                }
+                if let Some(x) = crate::dinheiro::explicacao(e) {
+                    s = s.dica(x);
+                }
+                s
+            }
+            None => SegmentoStatus::novo("sincronizacao", "Estação não pareada")
+                .icone("cloud_off")
+                .clicavel()
+                .dica(crate::acoes::MOTIVO_SEM_ESTACAO),
+        };
+        v.push(segmento);
         let (chaveiro, ultima_copia) = {
             let j = self.janela.borrow();
             match &j.ferramentas {
@@ -843,7 +885,7 @@ impl AppCasca for AppSbf {
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);
                 linha(ui, "Versão", env!("CARGO_PKG_VERSION").to_owned());
-                ui.label(RichText::new("Fatia 1: o inventário no desktop. Fontes Manrope e Instrument Serif (OFL) e Material Symbols Rounded (Apache-2.0).").color(p.tinta_suave));
+                ui.label(RichText::new("Fatia 2: o inventário e o livro-caixa (só leitura, mais mudar a categoria) no desktop. Fontes Manrope e Instrument Serif (OFL) e Material Symbols Rounded (Apache-2.0).").color(p.tinta_suave));
             }
         }
     }
@@ -903,6 +945,14 @@ impl AppCasca for AppSbf {
                     Area::ATriar | Area::EmDuvida | Area::Documentos | Area::Registros,
                 ) => Some("triagem"),
                 Destino::Area(Area::Lotes) => Some("lotes"),
+                Destino::Area(a) if a.e_do_livro_caixa() || *a == Area::Sincronizacao => {
+                    Some("livro")
+                }
+                Destino::Item(r)
+                    if matches!(r.tipo, Tipo::Movimentacao | Tipo::Estacao | Tipo::Alteracao) =>
+                {
+                    Some("livro")
+                }
                 Destino::Item(r)
                     if matches!(r.tipo, Tipo::Achado | Tipo::Documento | Tipo::Registro) =>
                 {
@@ -926,6 +976,9 @@ impl AppCasca for AppSbf {
     fn ao_clicar_status(&mut self, ctx: &egui::Context, id: &str) {
         if id == "a-triar" {
             bancada_casca::abrir(ctx, Destino::Area(Area::ATriar).rota());
+        }
+        if id == "sincronizacao" {
+            bancada_casca::abrir(ctx, Destino::Area(Area::Sincronizacao).rota());
         }
     }
 }

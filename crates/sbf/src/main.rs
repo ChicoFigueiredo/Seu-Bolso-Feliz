@@ -124,6 +124,7 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
             casca.estado.secao_bastidores = Some("opcoes".into());
         }
         "regras" => bancada_casca::executar(ctx, "ferramentas.regras-de-senha"),
+        "mudar-categoria" => bancada_casca::executar(ctx, "livro.mudar-categoria"),
         "pdf" => bancada_casca::executar(ctx, "ferramentas.pdf-protegido"),
         "chaveiro" => {
             casca.estado.ribbon.bastidores_abertos = true;
@@ -195,6 +196,23 @@ fn app_de_demonstracao() -> Result<App, String> {
     if let Err(e) = janela.previas.preparar_demonstracao(&consulta) {
         eprintln!("sbf: {e}");
     }
+    // O livro-caixa fictício (fatia 2): a mesma leitura e a estação de mentira.
+    let livro = sbf_janela::livro_ficticio::novo();
+    janela.hoje = sbf_janela::livro_ficticio::HOJE.to_owned();
+    match std::env::var("SBF_CENA").as_deref() {
+        Ok("offline") => livro.definir_rede(sbf_inventario::alteracao::EstadoDaRede::SemRede),
+        Ok("revogada") => {
+            livro.definir_rede(sbf_inventario::alteracao::EstadoDaRede::EstacaoRevogada)
+        }
+        Ok("regras-novas") => {
+            livro.definir_rede(sbf_inventario::alteracao::EstadoDaRede::RegrasMaisNovas {
+                versao_do_servidor: "0.2.0".to_owned(),
+            })
+        }
+        _ => {}
+    }
+    janela.ligar_estacao(Box::new(livro.clone()));
+    let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
     App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
         .map_err(|e| format!("os temas não carregaram: {e}"))
 }
