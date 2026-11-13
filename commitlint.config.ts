@@ -24,6 +24,8 @@ export default {
         "mcp-server",
         "local-scanner",
         "db",
+        "desktop",
+        "inventario",
       ],
     ],
   },
