@@ -270,9 +270,52 @@ impl From<rusqlite::Error> for ErroDeConsulta {
 
 pub type ResultadoDeConsulta<T> = Result<T, ErroDeConsulta>;
 
+/// Um pedaço de uma tabela grande: as linhas `[inicio, inicio + tabela.linhas.len())` de
+/// `total`. A janela virtualiza o `total` inteiro e pede o próximo pedaço quando a rolagem
+/// chega perto do fim do que já carregou.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PaginaDeTabela {
+    /// As colunas e só as linhas deste pedaço.
+    pub tabela: Tabela,
+    /// A posição da primeira linha do pedaço na tabela inteira.
+    pub inicio: usize,
+    /// Quantas linhas a tabela inteira tem (com o mesmo filtro).
+    pub total: usize,
+}
+
 /// A leitura do inventário. Só leitura: nada aqui escreve.
 pub trait Consulta {
     fn tabela(&self, pedido: &PedidoDeTabela) -> ResultadoDeConsulta<Tabela>;
+
+    /// O pedaço `[inicio, inicio + limite)` da tabela de `pedido`, mais o total de linhas.
+    ///
+    /// A implementação padrão monta a tabela inteira e corta; quem tem SQL por trás
+    /// (`LeitorSqlite`) devolve só o pedaço pedido, em tempo que não depende do total. A
+    /// ordem das linhas é a mesma de [`Consulta::tabela`].
+    fn tabela_paginada(
+        &self,
+        pedido: &PedidoDeTabela,
+        inicio: usize,
+        limite: usize,
+    ) -> ResultadoDeConsulta<PaginaDeTabela> {
+        let tabela = self.tabela(pedido)?;
+        let total = tabela.linhas.len();
+        let linhas = tabela
+            .linhas
+            .into_iter()
+            .skip(inicio)
+            .take(limite)
+            .collect();
+        Ok(PaginaDeTabela {
+            tabela: Tabela {
+                colunas: tabela.colunas,
+                linhas,
+            },
+            inicio,
+            total,
+        })
+    }
+
     /// O cabeçalho da página. `None` quando o item não existe.
     fn item(&self, alvo: &Ref) -> ResultadoDeConsulta<Option<Item>>;
     fn rastro(&self, alvo: &Ref) -> ResultadoDeConsulta<Rastro>;
