@@ -220,12 +220,19 @@ fn senha_da_cripto_nao_aparece_no_cmdline_do_rclone() {
                 }
             }
         });
-        copia.fazer(&c, cofre.path(), &senha).expect("fazer");
-        let volta = tempfile::tempdir().expect("volta");
-        copia
-            .restaurar(&senha, &volta.path().join("c"))
-            .expect("restaurar");
+        // O vigia para mesmo se a cópia falhar: sem isso, um pânico aqui deixava o
+        // `scope` esperando o vigia para sempre (o teste travava em vez de falhar).
+        let feito = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            copia.fazer(&c, cofre.path(), &senha).expect("fazer");
+            let volta = tempfile::tempdir().expect("volta");
+            copia
+                .restaurar(&senha, &volta.path().join("c"))
+                .expect("restaurar");
+        }));
         parar.store(true, Ordering::Relaxed);
+        if let Err(panico) = feito {
+            std::panic::resume_unwind(panico);
+        }
     });
     assert!(
         !vazou.load(Ordering::Relaxed),

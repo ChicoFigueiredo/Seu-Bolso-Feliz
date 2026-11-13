@@ -11,11 +11,10 @@
 
 mod comum;
 
-use comum::{Doc, inserir, novo_banco};
+use comum::{Doc, escrever_executavel, inserir, novo_banco};
 use sbf_estante::copia::faxinar_sobras;
 use sbf_estante::{CopiaDeSeguranca, Erro, Estante, Rclone, Segredo};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -121,8 +120,7 @@ fn restauracao_nao_sobrescreve_acervo_existente() {
 fn rclone_travado_tem_limite_de_tempo() {
     let pasta = tempfile::tempdir().expect("pasta");
     let script = pasta.path().join("rclone-travado");
-    fs::write(&script, "#!/bin/sh\nexec sleep 30\n").expect("script");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod");
+    escrever_executavel(&script, "#!/bin/sh\nexec sleep 30\n");
     let rclone = Rclone::com_binario(&script).com_prazo(Duration::from_millis(500));
     let estante = Estante::nova(rclone, pasta.path().to_string_lossy()).expect("estante");
     let inicio = Instant::now();

@@ -6,7 +6,7 @@
 
 mod comum;
 
-use comum::{Doc, inserir, novo_banco};
+use comum::{Doc, escrever_executavel, inserir, novo_banco};
 use sbf_estante::{CopiaDeSeguranca, Erro, Estante, PASTAS_DO_SISTEMA, Rclone, Segredo, confiavel};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -19,15 +19,13 @@ fn embrulho(pasta: &Path) -> (PathBuf, PathBuf) {
     let registros = pasta.join("ambientes");
     std::fs::create_dir(&registros).expect("pasta");
     let script = pasta.join("rclone-embrulho");
-    std::fs::write(
+    escrever_executavel(
         &script,
-        format!(
+        &format!(
             "#!/bin/sh\n/usr/bin/env > \"{}/$$.txt\"\nexec /usr/bin/rclone \"$@\"\n",
             registros.display()
         ),
-    )
-    .expect("script");
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    );
     (script, registros)
 }
 
