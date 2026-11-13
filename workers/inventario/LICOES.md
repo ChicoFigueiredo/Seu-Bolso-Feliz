@@ -29,12 +29,25 @@ worker segue estas regras; cada uma custou uma falha real.
   antes de registrar no índice; um "arquivo sem dono" pode ser só o próximo
   registro. Limpeza ignora `.parcial-*` e tudo com menos de uma hora.
 - **Arquivo grande (> 100 MB) não é copiado**, só hasheado.
+- **O disco D é dividido com outras sessões.** Em 13/11 as pastas `target/` do
+  Rust consumiram 68 GB em 2 h (de 115 para 47 GB livres). Toda rodada confere o
+  espaço livre (`df`), e queda rápida vira aviso ao usuário e à sessão que
+  está gravando, sem mexer nos arquivos dela.
 - **NTFS (ntfs3) lista nomes que não abre** (acentos e símbolos de arquivos
   vindos do Windows): `ENOENT` no `stat` de algo que o `readdir` acabou de
   mostrar. Conta como erro de leitura, não como sumiço; confira se o conteúdo
   veio por um espelho.
 - **Pasta sendo escrita por outro processo fica de fora** (`--pular`) até
   terminar, ou o hash pega arquivo pela metade.
+- **Pasta do OneDrive no disco pode ter só marcadores:** arquivo "disponível na
+  nuvem" aparece com o tamanho real e todos os bytes zero (lido pelo ntfs3). O
+  hash é de zeros, o pdftotext falha e o documento parece inventariado sem
+  estar. Em 13/11 eram ~1.070 documentos e dúvidas de `$Nuvem/OneDrive` no P2.
+  O `e3-extrair` marca `arquivo-zerado` com nota; o conteúdo real só vem pelo
+  OneDrive ao vivo (rclone). Erro de extração que se repete toda rodada é
+  sinal para olhar os bytes (`xxd`, `file`), não para tentar de novo.
+- **Extensão nem sempre diz o tipo:** entre os PDFs ilegíveis havia PostScript,
+  PNG, resíduo `._` do Mac (AppleDouble), PDF em base64 e PDF com DRM da Adobe.
 
 ## Processos
 
@@ -104,7 +117,10 @@ worker segue estas regras; cada uma custou uma falha real.
   legível. Confirmado que era uma aba velha: uma abertura nova às 14:14 UTC
   gravou o documento `page` em `data/users/me` com os dados do snapshot certo.
   Para saber se a página funciona, olhe `page` (o que a última abertura
-  desenhou), não só `runs`.
+  desenhou), não só `runs`. Assinatura da aba velha: `runs` regravado com 404
+  nos 8 datasets no mesmo minuto em que o blob mais antigo é apagado. Basta
+  confirmar que os datasets apontam para o blob novo e que ele responde
+  (`Artifact read` com o id em `path`).
 - **Versão nova do painel que não fui eu que publiquei** costuma ser a atualização
   do tipo Data (muda `artifact-type/*` e o `index.html` de casca). Confira que a
   página em `files/index.html` e as versões de `datasets` não mudaram e siga.
