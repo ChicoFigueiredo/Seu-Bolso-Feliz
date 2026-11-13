@@ -137,6 +137,28 @@ fn caminho_seguro(relativo: &str) -> bool {
             .all(|c| matches!(c, Component::Normal(_)))
 }
 
+/// Um caminho relativo à base da estante que pode ir para o rclone: sem barra inicial, sem
+/// componente vazio, `.` ou `..`, sem `\\` (separador no Windows) e sem `:` (que o rclone
+/// leria como nome de remoto). Conferido antes de cada `copyto`, `moveto` e `deletefile`
+/// (achado A1 da revisão de segurança da fatia 1).
+#[must_use]
+pub fn destino_seguro(relativo: &str) -> bool {
+    !relativo.is_empty()
+        && !relativo.contains(['\\', ':', '\0'])
+        && relativo
+            .split('/')
+            .all(|parte| !parte.is_empty() && parte != "." && parte != "..")
+}
+
+/// Recusa, sem chamar o rclone, um destino que sairia da base.
+fn conferir_destino(relativo: &str) -> Resultado<()> {
+    if destino_seguro(relativo) {
+        Ok(())
+    } else {
+        Err(crate::Erro::DestinoInvalido(relativo.to_owned()))
+    }
+}
+
 /// Lê do banco os documentos que devem estar na estante. Devolve também quantos não têm
 /// original no acervo.
 ///
@@ -345,6 +367,8 @@ impl Estante {
             progresso,
             &falhas,
             |(de, para)| {
+                conferir_destino(de)?;
+                conferir_destino(para)?;
                 self.rclone
                     .executar(
                         [
@@ -361,6 +385,7 @@ impl Estante {
         let enviar: Vec<_> = plano.enviar.iter().collect();
         relatorio.enviados =
             self.em_paralelo(Fase::Enviando, &enviar, progresso, &falhas, |item| {
+                conferir_destino(&item.destino)?;
                 self.rclone
                     .executar(
                         [
@@ -376,6 +401,7 @@ impl Estante {
         let apagar: Vec<_> = plano.apagar.iter().collect();
         relatorio.apagados =
             self.em_paralelo(Fase::Apagando, &apagar, progresso, &falhas, |caminho| {
+                conferir_destino(caminho)?;
                 self.rclone
                     .executar(
                         ["deletefile".to_owned(), juntar(&self.base, caminho)],
@@ -542,5 +568,27 @@ mod testes {
         assert!(!caminho_seguro("../fora.pdf"));
         assert!(!caminho_seguro("/etc/passwd"));
         assert!(!caminho_seguro(""));
+    }
+
+    #[test]
+    fn destinos_que_sairiam_da_base_sao_recusados() {
+        assert!(destino_seguro(
+            "2026-10/faturas/2026-10-25_nu_1,00_ab12cd34.pdf"
+        ));
+        assert!(destino_seguro("a-classificar/outros/ab12cd34"));
+        for ruim in [
+            "",
+            "/etc/x",
+            "../x",
+            "a/../../x",
+            "a//b",
+            "a/./b",
+            "a/",
+            "..",
+            "a\\..\\b",
+            "outro:remoto",
+        ] {
+            assert!(!destino_seguro(ruim), "{ruim:?}");
+        }
     }
 }
