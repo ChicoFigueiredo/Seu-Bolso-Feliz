@@ -18,10 +18,10 @@ fn proposta(id: uuid::Uuid, mov: uuid::Uuid, categoria: Option<uuid::Uuid>, vers
     })
 }
 
-fn movimentacao<'a>(corpo: &'a Value, id: uuid::Uuid) -> &'a Value {
+fn movimentacao(corpo: &Value, id: uuid::Uuid) -> &Value {
     corpo["linhas"]
         .as_array()
-        .unwrap()
+        .expect("linhas")
         .iter()
         .find(|l| l["id"] == json!(id))
         .unwrap_or_else(|| panic!("movimentação {id} não veio"))
@@ -413,6 +413,36 @@ async fn estado_traz_dia_de_corte_padrao_20_ou_o_do_dono() {
     .await;
     let r = amb.get("/api/v1/estado", &cred).await;
     assert_eq!(r.corpo["dia_de_corte"], 5);
+}
+
+#[tokio::test]
+async fn estado_conta_os_documentos_a_revisar_so_do_dono() {
+    let Some(amb) = ambiente().await else { return };
+    let (dono_a, email_a, sub_a) = novo_dono(&amb).await;
+    let (dono_b, _eb, _sb) = novo_dono(&amb).await;
+    let (_e, cred) = amb.parear(&email_a, &sub_a, "Estação").await;
+    let r = amb.get("/api/v1/estado", &cred).await;
+    assert_eq!(r.corpo["documentos_a_revisar"], 0);
+    let run = uuid::Uuid::new_v4();
+    let mut sql = format!(
+        "INSERT INTO public.ingestion_runs (id, user_id, source_type) VALUES ('{run}', '{dono_a}', 'manual_upload');"
+    );
+    for (dono, status) in [
+        (dono_a, "pending_review"),
+        (dono_a, "drafted"),
+        (dono_a, "drafted"),
+        (dono_a, "posted"),
+        (dono_a, "failed"),
+        (dono_b, "pending_review"),
+        (dono_b, "drafted"),
+    ] {
+        sql.push_str(&format!(
+            "INSERT INTO public.ingestion_jobs (run_id, user_id, status) VALUES ('{run}', '{dono}', '{status}');"
+        ));
+    }
+    amb.sql(&sql).await;
+    let r = amb.get("/api/v1/estado", &cred).await;
+    assert_eq!(r.corpo["documentos_a_revisar"], 3);
 }
 
 #[tokio::test]

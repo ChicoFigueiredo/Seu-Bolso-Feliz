@@ -80,13 +80,16 @@ async fn ver_estado(
                 "SELECT ",
                 sql_instante!("now()"),
                 " AS agora, (SELECT financial_cycle_start_day FROM public.user_financial_preferences \
-                 WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1) AS dia"
+                 WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1) AS dia, \
+                 (SELECT count(*) FROM public.ingestion_jobs WHERE user_id = $1 \
+                 AND status IN ('pending_review', 'drafted')) AS a_revisar"
             ),
             &[&quem.dono],
         )
         .await?;
     let agora: String = linha.try_get("agora")?;
     let dia: Option<i32> = linha.try_get("dia")?;
+    let a_revisar: i64 = linha.try_get("a_revisar")?;
     let dia_de_corte = dia
         .and_then(|d| u8::try_from(d).ok())
         .filter(|d| (1..=31).contains(d))
@@ -101,6 +104,7 @@ async fn ver_estado(
         hora_do_servidor: agora,
         dia_de_corte,
         fuso: FUSO_DO_CICLO.into(),
+        documentos_a_revisar: u32::try_from(a_revisar).unwrap_or(u32::MAX),
         estacao,
     }))
 }

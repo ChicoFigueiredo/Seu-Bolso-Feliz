@@ -50,6 +50,7 @@ async fn audiencia_emissor_e_validade_sao_conferidos() {
         ("aud", json!("outro-cliente.apps.googleusercontent.com")),
         ("iss", json!("https://impostor.example.com")),
         ("exp", json!(agora() - 3600)),
+        ("nbf", json!(agora() + 3600)),
     ] {
         let mut r = reivindicacoes("a@example.com", "sub-1", "n1");
         r[campo] = valor;
@@ -88,17 +89,26 @@ async fn kid_desconhecida_e_algoritmo_simetrico_sao_recusados() {
         verificador().verificar(&token, "n1").await,
         Err(ErroDoGoogle::TokenInvalido(_))
     ));
-    // HS256 com um segredo qualquer: o verificador só aceita RS256.
-    let mut cabecalho = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
-    cabecalho.kid = Some(KID.into());
-    let token = jsonwebtoken::encode(
-        &cabecalho,
-        &reivindicacoes("a@example.com", "sub-1", "n1"),
-        &jsonwebtoken::EncodingKey::from_secret(b"segredo-de-teste"),
-    )
-    .unwrap();
+    // Cabeçalho que pede HS256 (a confusão de algoritmo clássica) ou "none".
+    for alg in ["HS256", "none"] {
+        let token = assinar_jwt(
+            google(),
+            &json!({ "alg": alg, "kid": KID }),
+            &reivindicacoes("a@example.com", "sub-1", "n1"),
+        );
+        assert!(matches!(
+            verificador().verificar(&token, "n1").await,
+            Err(ErroDoGoogle::TokenInvalido(_))
+        ));
+    }
+    // Reivindicações trocadas depois da assinatura.
+    let token = id_token("a@example.com", "sub-1", "n1");
+    let partes: Vec<&str> = token.split('.').collect();
+    let outro = id_token("b@example.com", "sub-2", "n1");
+    let corpo_outro = outro.split('.').nth(1).unwrap();
+    let colado = format!("{}.{}.{}", partes[0], corpo_outro, partes[2]);
     assert!(matches!(
-        verificador().verificar(&token, "n1").await,
+        verificador().verificar(&colado, "n1").await,
         Err(ErroDoGoogle::TokenInvalido(_))
     ));
     assert!(matches!(

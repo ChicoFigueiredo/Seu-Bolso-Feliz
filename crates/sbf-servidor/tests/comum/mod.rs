@@ -11,34 +11,30 @@ use axum::http::{Request, StatusCode};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use http_body_util::BodyExt as _;
-use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
-use rsa::pkcs1::EncodeRsaPrivateKey;
-use rsa::traits::PublicKeyParts;
-use sbf_servidor::google::{ChavesFixas, VerificadorGoogle};
+use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair, RsaPublicKeyComponents};
+use sbf_servidor::google::{ChavesFixas, Jwks, VerificadorGoogle};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
 pub const CLIENT_ID: &str = "cliente-de-teste.apps.googleusercontent.com";
 pub const KID: &str = "chave-de-teste-1";
 
-/// Uma chave RSA de teste com o JWKS dela.
+/// Uma chave RSA de teste com o JWKS dela. As chaves em `tests/dados/*.pk8.der` foram
+/// geradas com `openssl genpkey` só para estes testes: não assinam nada de verdade.
 pub struct GoogleFalso {
-    pub privada: EncodingKey,
-    pub jwks: Arc<JwkSet>,
+    pub privada: RsaKeyPair,
+    pub jwks: Arc<Jwks>,
 }
 
-fn gerar_chave(kid: &str) -> GoogleFalso {
-    let mut rng = rand::thread_rng();
-    let chave = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("chave RSA de teste");
-    let pem = chave
-        .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
-        .expect("pem de teste");
-    let privada = EncodingKey::from_rsa_pem(pem.as_bytes()).expect("chave de assinatura");
-    let n = URL_SAFE_NO_PAD.encode(chave.n().to_bytes_be());
-    let e = URL_SAFE_NO_PAD.encode(chave.e().to_bytes_be());
-    let jwks: JwkSet = serde_json::from_value(json!({
-        "keys": [{ "kty": "RSA", "kid": kid, "alg": "RS256", "use": "sig", "n": n, "e": e }]
+fn carregar_chave(der: &[u8], kid: &str) -> GoogleFalso {
+    let privada = RsaKeyPair::from_pkcs8(der).expect("chave RSA de teste");
+    let publica = RsaPublicKeyComponents::<Vec<u8>>::from(privada.public());
+    let jwks: Jwks = serde_json::from_value(json!({
+        "keys": [{
+            "kty": "RSA", "kid": kid, "alg": "RS256", "use": "sig",
+            "n": URL_SAFE_NO_PAD.encode(&publica.n),
+            "e": URL_SAFE_NO_PAD.encode(&publica.e),
+        }]
     }))
     .expect("jwks de teste");
     GoogleFalso {
@@ -47,16 +43,16 @@ fn gerar_chave(kid: &str) -> GoogleFalso {
     }
 }
 
-/// O "Google" dos testes (uma chave por processo: gerar RSA é lento).
+/// O "Google" dos testes.
 pub fn google() -> &'static GoogleFalso {
     static G: OnceLock<GoogleFalso> = OnceLock::new();
-    G.get_or_init(|| gerar_chave(KID))
+    G.get_or_init(|| carregar_chave(include_bytes!("../dados/google-falso-1.pk8.der"), KID))
 }
 
 /// Outra chave, com a mesma `kid`: um token assinado por ela é falso.
 pub fn google_impostor() -> &'static GoogleFalso {
     static G: OnceLock<GoogleFalso> = OnceLock::new();
-    G.get_or_init(|| gerar_chave(KID))
+    G.get_or_init(|| carregar_chave(include_bytes!("../dados/google-falso-2.pk8.der"), KID))
 }
 
 pub fn verificador() -> VerificadorGoogle {
@@ -85,10 +81,34 @@ pub fn reivindicacoes(email: &str, sub: &str, nonce: &str) -> Value {
     })
 }
 
+/// Monta um JWT com o cabeçalho e as reivindicações dados, assinado em RS256.
+pub fn assinar_jwt(chave: &GoogleFalso, cabecalho: &Value, reivindicacoes: &Value) -> String {
+    let mut jwt = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(cabecalho).expect("json")),
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(reivindicacoes).expect("json")),
+    );
+    let mut assinatura = vec![0u8; chave.privada.public().modulus_len()];
+    chave
+        .privada
+        .sign(
+            &RSA_PKCS1_SHA256,
+            &ring::rand::SystemRandom::new(),
+            jwt.as_bytes(),
+            &mut assinatura,
+        )
+        .expect("assinar");
+    jwt.push('.');
+    jwt.push_str(&URL_SAFE_NO_PAD.encode(assinatura));
+    jwt
+}
+
 pub fn assinar_com(chave: &GoogleFalso, kid: &str, reivindicacoes: &Value) -> String {
-    let mut cabecalho = Header::new(Algorithm::RS256);
-    cabecalho.kid = Some(kid.into());
-    jsonwebtoken::encode(&cabecalho, reivindicacoes, &chave.privada).expect("assinar")
+    assinar_jwt(
+        chave,
+        &json!({ "alg": "RS256", "typ": "JWT", "kid": kid }),
+        reivindicacoes,
+    )
 }
 
 pub fn id_token(email: &str, sub: &str, nonce: &str) -> String {

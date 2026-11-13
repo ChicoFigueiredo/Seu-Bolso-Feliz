@@ -2,14 +2,18 @@
 //! Google, não apenas decodificado (mesmas regras de `apps/web/src/lib/auth/google.ts`):
 //! assinatura RS256, emissor do Google, audiência = o client id, validade, `nonce`
 //! igual ao da estação e `email_verified`.
+//!
+//! A assinatura é conferida pelo `ring` (o mesmo do TLS), só com a chave **pública**:
+//! o servidor nunca tem chave privada RSA.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use ring::signature::{RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
@@ -19,6 +23,35 @@ pub const EMISSORES: [&str; 2] = ["https://accounts.google.com", "accounts.googl
 /// O endereço do JWKS do Google.
 pub const URL_DO_JWKS: &str = "https://www.googleapis.com/oauth2/v3/certs";
 
+/// Folga de relógio para `exp` e `nbf`, em segundos.
+const FOLGA_DE_RELOGIO: u64 = 60;
+
+/// Um JWKS: as chaves públicas do emissor.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Jwks {
+    pub keys: Vec<Jwk>,
+}
+
+/// Uma chave do JWKS. Só RSA interessa.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Jwk {
+    pub kty: String,
+    pub kid: Option<String>,
+    pub alg: Option<String>,
+    /// Módulo, base64url sem preenchimento.
+    pub n: Option<String>,
+    /// Expoente, base64url sem preenchimento.
+    pub e: Option<String>,
+}
+
+impl Jwks {
+    fn rsa(&self, kid: &str) -> Option<&Jwk> {
+        self.keys
+            .iter()
+            .find(|k| k.kty == "RSA" && k.kid.as_deref() == Some(kid))
+    }
+}
+
 /// Um futuro em caixa (o trait precisa ser usável como objeto).
 pub type Futuro<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -26,15 +59,15 @@ pub type Futuro<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait FonteDeChaves: Send + Sync {
     /// As chaves atuais. `renovar` pede para ignorar o cache (a `kid` do token não
     /// estava nas chaves guardadas).
-    fn chaves(&self, renovar: bool) -> Futuro<'_, Result<Arc<JwkSet>, ErroDoGoogle>>;
+    fn chaves(&self, renovar: bool) -> Futuro<'_, Result<Arc<Jwks>, ErroDoGoogle>>;
 }
 
-/// Chaves fixas, para testes e para o modo local.
+/// Chaves fixas, para testes.
 #[derive(Debug)]
-pub struct ChavesFixas(pub Arc<JwkSet>);
+pub struct ChavesFixas(pub Arc<Jwks>);
 
 impl FonteDeChaves for ChavesFixas {
-    fn chaves(&self, _renovar: bool) -> Futuro<'_, Result<Arc<JwkSet>, ErroDoGoogle>> {
+    fn chaves(&self, _renovar: bool) -> Futuro<'_, Result<Arc<Jwks>, ErroDoGoogle>> {
         let chaves = Arc::clone(&self.0);
         Box::pin(async move { Ok(chaves) })
     }
@@ -44,7 +77,7 @@ impl FonteDeChaves for ChavesFixas {
 #[derive(Debug)]
 pub struct ChavesDoGoogle {
     http: reqwest::Client,
-    cache: Mutex<Option<(Instant, Arc<JwkSet>)>>,
+    cache: Mutex<Option<(Instant, Arc<Jwks>)>>,
 }
 
 const VALIDADE_DO_CACHE: Duration = Duration::from_secs(3600);
@@ -64,7 +97,7 @@ impl ChavesDoGoogle {
 }
 
 impl FonteDeChaves for ChavesDoGoogle {
-    fn chaves(&self, renovar: bool) -> Futuro<'_, Result<Arc<JwkSet>, ErroDoGoogle>> {
+    fn chaves(&self, renovar: bool) -> Futuro<'_, Result<Arc<Jwks>, ErroDoGoogle>> {
         Box::pin(async move {
             let mut cache = self.cache.lock().await;
             if let Some((quando, chaves)) = cache.as_ref()
@@ -73,7 +106,7 @@ impl FonteDeChaves for ChavesDoGoogle {
             {
                 return Ok(Arc::clone(chaves));
             }
-            let chaves: JwkSet = self
+            let chaves: Jwks = self
                 .http
                 .get(URL_DO_JWKS)
                 .send()
@@ -114,6 +147,24 @@ pub enum ErroDoGoogle {
     Chaves(String),
 }
 
+fn invalido(motivo: &str) -> ErroDoGoogle {
+    ErroDoGoogle::TokenInvalido(motivo.into())
+}
+
+#[derive(Debug, Deserialize)]
+struct Cabecalho {
+    alg: String,
+    kid: Option<String>,
+}
+
+/// `aud` pode ser um texto ou uma lista.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Audiencia {
+    Uma(String),
+    Varias(Vec<String>),
+}
+
 /// `email_verified` vem como booleano, mas tokens antigos o mandavam como texto.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -124,6 +175,10 @@ enum Verificado {
 
 #[derive(Debug, Deserialize)]
 struct Reivindicacoes {
+    iss: String,
+    aud: Audiencia,
+    exp: u64,
+    nbf: Option<u64>,
     sub: String,
     email: Option<String>,
     email_verified: Option<Verificado>,
@@ -145,6 +200,12 @@ impl std::fmt::Debug for VerificadorGoogle {
     }
 }
 
+fn base64url(parte: &str) -> Result<Vec<u8>, ErroDoGoogle> {
+    URL_SAFE_NO_PAD
+        .decode(parte)
+        .map_err(|_| invalido("base64url inválido"))
+}
+
 impl VerificadorGoogle {
     pub fn novo(client_id: impl Into<String>, chaves: Box<dyn FonteDeChaves>) -> Self {
         Self {
@@ -160,33 +221,69 @@ impl VerificadorGoogle {
         id_token: &str,
         nonce: &str,
     ) -> Result<IdentidadeGoogle, ErroDoGoogle> {
-        let cabecalho = jsonwebtoken::decode_header(id_token)
-            .map_err(|e| ErroDoGoogle::TokenInvalido(e.to_string()))?;
-        if cabecalho.alg != Algorithm::RS256 {
-            return Err(ErroDoGoogle::TokenInvalido("algoritmo não aceito".into()));
+        let mut partes = id_token.split('.');
+        let (Some(cab), Some(corpo), Some(assinatura), None) =
+            (partes.next(), partes.next(), partes.next(), partes.next())
+        else {
+            return Err(invalido("não é um JWT"));
+        };
+        let cabecalho: Cabecalho =
+            serde_json::from_slice(&base64url(cab)?).map_err(|_| invalido("cabeçalho ilegível"))?;
+        if cabecalho.alg != "RS256" {
+            return Err(invalido("algoritmo não aceito"));
         }
-        let kid = cabecalho
-            .kid
-            .ok_or_else(|| ErroDoGoogle::TokenInvalido("sem kid".into()))?;
+        let kid = cabecalho.kid.ok_or_else(|| invalido("sem kid"))?;
+
         let mut chaves = self.chaves.chaves(false).await?;
-        if chaves.find(&kid).is_none() {
+        if chaves.rsa(&kid).is_none() {
             chaves = self.chaves.chaves(true).await?;
         }
         let jwk = chaves
-            .find(&kid)
-            .ok_or_else(|| ErroDoGoogle::TokenInvalido("kid desconhecida".into()))?;
-        let chave =
-            DecodingKey::from_jwk(jwk).map_err(|e| ErroDoGoogle::TokenInvalido(e.to_string()))?;
+            .rsa(&kid)
+            .ok_or_else(|| invalido("kid desconhecida"))?;
+        if jwk.alg.as_deref().is_some_and(|a| a != "RS256") {
+            return Err(invalido("a chave não é RS256"));
+        }
+        let publica = RsaPublicKeyComponents {
+            n: base64url(jwk.n.as_deref().ok_or_else(|| invalido("chave sem n"))?)?,
+            e: base64url(jwk.e.as_deref().ok_or_else(|| invalido("chave sem e"))?)?,
+        };
+        let assinado = &id_token[..cab.len() + 1 + corpo.len()];
+        publica
+            .verify(
+                &RSA_PKCS1_2048_8192_SHA256,
+                assinado.as_bytes(),
+                &base64url(assinatura)?,
+            )
+            .map_err(|_| invalido("assinatura não confere"))?;
 
-        let mut validacao = Validation::new(Algorithm::RS256);
-        validacao.set_audience(&[&self.client_id]);
-        validacao.set_issuer(&EMISSORES);
-        validacao.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-        let dados = jsonwebtoken::decode::<Reivindicacoes>(id_token, &chave, &validacao)
-            .map_err(|e| ErroDoGoogle::TokenInvalido(e.to_string()))?;
-        let r = dados.claims;
+        // Só depois da assinatura o conteúdo merece ser lido.
+        let r: Reivindicacoes = serde_json::from_slice(&base64url(corpo)?)
+            .map_err(|_| invalido("reivindicações ilegíveis"))?;
+        if !EMISSORES.contains(&r.iss.as_str()) {
+            return Err(invalido("emissor não é o Google"));
+        }
+        let audiencia_certa = match &r.aud {
+            Audiencia::Uma(a) => *a == self.client_id,
+            Audiencia::Varias(v) => v.contains(&self.client_id),
+        };
+        if !audiencia_certa {
+            return Err(invalido("audiência não é este servidor"));
+        }
+        let agora = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| invalido("relógio do servidor antes de 1970"))?
+            .as_secs();
+        if r.exp.saturating_add(FOLGA_DE_RELOGIO) < agora {
+            return Err(invalido("expirado"));
+        }
+        if r.nbf
+            .is_some_and(|nbf| nbf > agora.saturating_add(FOLGA_DE_RELOGIO))
+        {
+            return Err(invalido("ainda não vale"));
+        }
 
-        if r.nonce.as_deref() != Some(nonce) || nonce.is_empty() {
+        if nonce.is_empty() || r.nonce.as_deref() != Some(nonce) {
             return Err(ErroDoGoogle::NonceDiferente);
         }
         let verificado = match r.email_verified {
@@ -203,7 +300,7 @@ impl VerificadorGoogle {
             .filter(|e| !e.is_empty())
             .ok_or(ErroDoGoogle::SemEmail)?;
         if r.sub.is_empty() {
-            return Err(ErroDoGoogle::TokenInvalido("sem sub".into()));
+            return Err(invalido("sem sub"));
         }
         Ok(IdentidadeGoogle {
             sub: r.sub,
