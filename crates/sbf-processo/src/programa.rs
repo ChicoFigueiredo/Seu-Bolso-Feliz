@@ -1,48 +1,41 @@
-//! Onde estão o `pdftotext` e o `qpdf`, e com que ambiente rodam (achados A6 e A7 da
-//! revisão de segurança da fatia 1).
-//!
-//! - **Caminho absoluto, resolvido uma vez**, nas pastas do sistema ([`PASTAS_DO_SISTEMA`]),
-//!   nunca pelo `PATH` do usuário: um executável com o mesmo nome plantado em `~/.bun/bin`,
-//!   num shim ou em `/usr/local/sbin` receberia a senha candidata ou o PDF decifrado.
-//! - **Nada em pasta gravável por outros**: o arquivo e a pasta dele (depois de seguir links)
-//!   não podem ter escrita para "outros", nem para o grupo se o grupo não for o do root nem o
-//!   grupo próprio do dono.
-//!   Vale para o caminho encontrado e para o configurado à mão em [`crate::Ferramentas`].
-//! - **Ambiente limpo**: o filho não herda tokens nem chaves de API do shell; recebe só um
-//!   `PATH` mínimo e o idioma (`LANG`, `LC_ALL`, `LC_CTYPE`), e no Windows as variáveis sem
-//!   as quais um processo não sobe.
-//!
-//! O `sbf-estante` tem a mesma regra para o `rclone` (cópia em `rclone.rs`; os dois crates
-//! não dependem um do outro).
+//! Qual programa roda: caminho absoluto nas pastas do sistema, nada gravável por outros, e
+//! com que ambiente.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Onde procurar, em ordem. Linux: `/usr/bin` primeiro.
+/// Onde procurar, em ordem. Linux: `/usr/bin` primeiro; `sbin` por último (só o root
+/// escreve lá).
 #[cfg(all(unix, not(target_os = "macos")))]
-pub const PASTAS_DO_SISTEMA: &[&str] = &["/usr/bin", "/usr/local/bin", "/bin"];
-/// Onde procurar, em ordem. macOS: o sistema, depois o Homebrew e o MacPorts.
+pub const PASTAS_DO_SISTEMA: &[&str] =
+    &["/usr/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin"];
+/// Onde procurar, em ordem. macOS: o sistema (`df` está em `/bin`, `diskutil` em
+/// `/usr/sbin`), depois o Homebrew e o MacPorts.
 #[cfg(target_os = "macos")]
 pub const PASTAS_DO_SISTEMA: &[&str] = &[
     "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
     "/usr/local/bin",
     "/opt/homebrew/bin",
     "/opt/local/bin",
 ];
-/// No Windows as pastas vêm de `%ProgramFiles%` (ver [`pastas_do_sistema`]).
+/// No Windows as pastas vêm de `%SystemRoot%` e `%ProgramFiles%` (ver [`pastas_do_sistema`]).
 #[cfg(windows)]
 pub const PASTAS_DO_SISTEMA: &[&str] = &[];
 
 /// `PATH` dos filhos: só o sistema (um script de embrulho ainda acha `sh`, `cat`...).
 #[cfg(unix)]
-const PATH_MINIMO: &str = "/usr/bin:/bin";
+pub(crate) const PATH_MINIMO: &str = "/usr/bin:/bin";
 
-/// Variáveis que passam do app para o filho, se existirem. Nenhuma é segredo.
-#[cfg(unix)]
-const VARIAVEIS_PERMITIDAS: &[&str] = &["LANG", "LC_ALL", "LC_CTYPE"];
+/// Variáveis que passam do app para todo filho, se existirem. Nenhuma é segredo.
+#[cfg(not(windows))]
+pub const VARIAVEIS_BASICAS: &[&str] = &["LANG", "LC_ALL", "LC_CTYPE"];
+/// Variáveis que passam do app para todo filho, se existirem. Nenhuma é segredo.
 #[cfg(windows)]
-const VARIAVEIS_PERMITIDAS: &[&str] = &[
+pub const VARIAVEIS_BASICAS: &[&str] = &[
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
@@ -53,20 +46,29 @@ const VARIAVEIS_PERMITIDAS: &[&str] = &[
     "TMP",
 ];
 
+/// As subpastas de `%ProgramFiles%` onde moram as ferramentas que o app usa no Windows.
+#[cfg(windows)]
+const SUBPASTAS_DE_PROGRAMAS: &[&str] = &[
+    "qpdf\\bin",
+    "poppler\\Library\\bin",
+    "poppler\\bin",
+    "rclone",
+];
+
 /// As pastas onde [`localizar`] procura, em ordem.
 #[must_use]
 pub fn pastas_do_sistema() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         let mut pastas = Vec::new();
+        if let Some(raiz) = std::env::var_os("SystemRoot").map(PathBuf::from) {
+            pastas.push(raiz.join("System32"));
+            pastas.push(raiz.join("System32\\WindowsPowerShell\\v1.0"));
+            pastas.push(raiz);
+        }
         for raiz in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Some(raiz) = std::env::var_os(raiz).map(PathBuf::from) {
-                for sub in [
-                    "qpdf\\bin",
-                    "poppler\\Library\\bin",
-                    "poppler\\bin",
-                    "rclone",
-                ] {
+                for sub in SUBPASTAS_DE_PROGRAMAS {
                     pastas.push(raiz.join(sub));
                 }
             }
@@ -79,9 +81,10 @@ pub fn pastas_do_sistema() -> Vec<PathBuf> {
     }
 }
 
-/// O nome do executável no sistema (`qpdf.exe` no Windows).
+/// O nome do executável no sistema (`qpdf.exe` no Windows; um nome que já termina em `.exe`
+/// fica como está).
 fn nome_do_executavel(nome: &str) -> String {
-    if cfg!(windows) {
+    if cfg!(windows) && !nome.to_ascii_lowercase().ends_with(".exe") {
         format!("{nome}.exe")
     } else {
         nome.to_owned()
@@ -97,6 +100,13 @@ pub fn localizar(nome: &str) -> Option<PathBuf> {
         .into_iter()
         .map(|pasta| pasta.join(&executavel))
         .find(|caminho| confiavel(caminho))
+}
+
+/// O caminho resolvido, ou o próprio nome se não achou (que [`confiavel`] recusa: a chamada
+/// dá "programa não encontrado" em vez de cair no `PATH`).
+#[must_use]
+pub fn localizar_ou_nome(nome: &str) -> PathBuf {
+    localizar(nome).unwrap_or_else(|| PathBuf::from(OsStr::new(nome)))
 }
 
 /// `true` se `caminho` é absoluto, é um arquivo e nem ele nem a pasta dele (depois de seguir
@@ -115,8 +125,7 @@ pub fn confiavel(caminho: &Path) -> bool {
     if !dados.is_file() {
         return false;
     }
-    let pasta_ok = real.parent().is_some_and(sem_escrita_alheia);
-    pasta_ok && sem_escrita_alheia(&real)
+    real.parent().is_some_and(sem_escrita_alheia) && sem_escrita_alheia(&real)
 }
 
 #[cfg(unix)]
@@ -135,16 +144,17 @@ fn sem_escrita_alheia(caminho: &Path) -> bool {
 }
 
 /// No Windows a permissão é por ACL, que a std não lê: vale o caminho absoluto em
-/// `%ProgramFiles%`, que só o administrador escreve.
+/// `%SystemRoot%` e `%ProgramFiles%`, que só o administrador escreve.
 #[cfg(windows)]
 fn sem_escrita_alheia(_caminho: &Path) -> bool {
     true
 }
 
-/// Limpa o ambiente do filho e põe só o necessário.
-pub(crate) fn ambiente_minimo(comando: &mut Command) {
+/// Limpa o ambiente do filho e põe só o necessário: [`VARIAVEIS_BASICAS`], as `herdadas` que
+/// existirem no app, e o `PATH` do sistema.
+pub fn ambiente_minimo(comando: &mut Command, herdadas: &[&str]) {
     comando.env_clear();
-    for nome in VARIAVEIS_PERMITIDAS {
+    for nome in VARIAVEIS_BASICAS.iter().chain(herdadas) {
         if let Some(valor) = std::env::var_os(nome) {
             comando.env(nome, valor);
         }
@@ -155,10 +165,4 @@ pub(crate) fn ambiente_minimo(comando: &mut Command) {
     if let Some(raiz) = std::env::var_os("SystemRoot") {
         comando.env("PATH", PathBuf::from(raiz).join("System32"));
     }
-}
-
-/// O caminho resolvido, ou o próprio nome se não achou (que [`confiavel`] recusa: a chamada
-/// dá "ferramenta não encontrada" em vez de cair no `PATH`).
-pub(crate) fn localizar_ou_nome(nome: &str) -> PathBuf {
-    localizar(nome).unwrap_or_else(|| PathBuf::from(OsStr::new(nome)))
 }

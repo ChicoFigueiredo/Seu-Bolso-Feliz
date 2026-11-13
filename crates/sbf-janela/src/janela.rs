@@ -1512,7 +1512,8 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                 .map_err(|_| format!("Estratégia desconhecida: {estrategia}"))?;
             Ok(Pedido::Decidir(PedidoDeDecisao {
                 acao: Acao::GuardarRegraDeSenha {
-                    document_type: tipo,
+                    tipo_de_documento: tipo,
+                    prioridade: None,
                     estrategia: estrategia.to_owned(),
                 },
                 alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],

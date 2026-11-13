@@ -13,7 +13,6 @@
 
 pub mod abertura;
 pub mod estrategia;
-pub mod ferramenta;
 pub mod fonte;
 pub mod processo;
 pub mod rodada;

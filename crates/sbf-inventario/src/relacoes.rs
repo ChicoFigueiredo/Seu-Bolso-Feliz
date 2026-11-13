@@ -42,10 +42,10 @@ use crate::consulta::{
 use crate::movimento;
 use crate::referencia::{Ref, Tipo};
 use crate::vistas::{
-    self, Contexto, LinkDoAchado, Selecao, c_contagem, c_contagem_solta, c_data_opt,
-    c_estado_achado, c_link, c_link_opt, c_texto, c_texto_opt, c_valor, c_valor_total, coluna,
-    coluna_num, consultar, hash_curto, quem_de, rotulo_da_coleta, rotulo_do_achado,
-    rotulo_do_registro, texto,
+    self, Contexto, LinkDoAchado, Selecao, celula_contagem, celula_contagem_solta, celula_data_opt,
+    celula_estado_achado, celula_link, celula_texto, celula_texto_opt, celula_valor_total, coluna,
+    coluna_num, consultar, hash_curto, rotulo_da_coleta, rotulo_do_achado, rotulo_do_registro,
+    texto,
 };
 
 /// Os recortes de `ItensDoTotal` que este módulo entende.
@@ -379,11 +379,11 @@ pub fn rotulo_do_item(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Opt
 }
 
 /// O nome de uma regra de senha: `Banco Alfa · fatura · cpf_primeiros:5`.
-pub fn rotulo_da_regra(fornecedor: &str, document_type: &str, estrategia: &str) -> String {
-    let tipo = if document_type == "*" {
+pub fn rotulo_da_regra(fornecedor: &str, tipo_de_documento: &str, estrategia: &str) -> String {
+    let tipo = if tipo_de_documento == "*" {
         "qualquer tipo"
     } else {
-        document_type
+        tipo_de_documento
     };
     format!("{fornecedor} · {tipo} · {estrategia}")
 }
@@ -506,12 +506,12 @@ pub fn tabela_origens(linhas: &[LinhaDeOrigemCompleta]) -> Tabela {
             .map(|l| Linha {
                 alvo: Some(Ref::nova(Tipo::Origem, l.id.to_string())),
                 celulas: vec![
-                    c_link(Tipo::Origem, &l.id.to_string(), &l.nome),
+                    celula_link(Tipo::Origem, &l.id.to_string(), &l.nome),
                     l.hash.as_deref().map_or(Celula::Vazia, |h| {
-                        c_link(Tipo::Achado, h, &format!("Achado {}", hash_curto(h)))
+                        celula_link(Tipo::Achado, h, &format!("Achado {}", hash_curto(h)))
                     }),
-                    c_link(Tipo::Conexao, &l.fonte_id, &l.fonte_id),
-                    c_link(
+                    celula_link(Tipo::Conexao, &l.fonte_id, &l.fonte_id),
+                    celula_link(
                         Tipo::Coleta,
                         &l.varredura_id.to_string(),
                         &rotulo_da_coleta(
@@ -520,8 +520,8 @@ pub fn tabela_origens(linhas: &[LinhaDeOrigemCompleta]) -> Tabela {
                             l.varredura_id,
                         ),
                     ),
-                    c_texto(&l.tipo_de_origem),
-                    c_texto_opt(&l.onde),
+                    celula_texto(&l.tipo_de_origem),
+                    celula_texto_opt(&l.onde),
                     Celula::Data(l.visto_em.clone()),
                 ],
             })
@@ -597,7 +597,7 @@ pub fn tabela_decisoes(
                 alvo: a.clone(),
                 texto: rotulo_ou_chave(ctx, a)?,
             },
-            None => c_texto(&l.alvo_id),
+            None => celula_texto(&l.alvo_id),
         };
         let situacao = if l.desfeita_por.is_some() {
             "Desfeita"
@@ -610,7 +610,7 @@ pub fn tabela_decisoes(
         saida.linhas.push(Linha {
             alvo: Some(Ref::nova(Tipo::Decisao, id.as_str())),
             celulas: vec![
-                c_link(
+                celula_link(
                     Tipo::Decisao,
                     &id,
                     &rotulo_da_decisao(&l.campo, &l.antes, &l.depois),
@@ -621,12 +621,12 @@ pub fn tabela_decisoes(
                     quem: Some(Quem::de_texto(&l.autor)),
                 },
                 Celula::Data(l.em.clone()),
-                c_texto_opt(&l.motivo),
+                celula_texto_opt(&l.motivo),
                 l.desfaz.map_or(Celula::Vazia, |d| {
-                    c_link(Tipo::Decisao, &d.to_string(), &format!("Decisão {d}"))
+                    celula_link(Tipo::Decisao, &d.to_string(), &format!("Decisão {d}"))
                 }),
                 l.desfeita_por.map_or(Celula::Vazia, |d| {
-                    c_link(Tipo::Decisao, &d.to_string(), &format!("Decisão {d}"))
+                    celula_link(Tipo::Decisao, &d.to_string(), &format!("Decisão {d}"))
                 }),
             ],
         });
@@ -707,17 +707,17 @@ pub fn tabela_lotes(linhas: &[LinhaDeLote]) -> Tabela {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Lote, &l.id.to_string(), &l.nome),
+                        celula_link(Tipo::Lote, &l.id.to_string(), &l.nome),
                         Celula::Estado {
                             rotulo: l.situacao().to_owned(),
                             quem: Some(Quem::Usuario),
                         },
                         Celula::Data(l.criado_em.clone()),
-                        c_data_opt(&l.aprovado_em),
-                        c_data_opt(&l.promovido_em),
-                        c_contagem(l.achados, de.clone(), None, recorte::ACHADOS),
-                        c_contagem(l.registros, de.clone(), None, recorte::REGISTROS),
-                        c_valor_total(l.valor_dos_registros, de, None, recorte::REGISTROS),
+                        celula_data_opt(&l.aprovado_em),
+                        celula_data_opt(&l.promovido_em),
+                        celula_contagem(l.achados, de.clone(), None, recorte::ACHADOS),
+                        celula_contagem(l.registros, de.clone(), None, recorte::REGISTROS),
+                        celula_valor_total(l.valor_dos_registros, de, None, recorte::REGISTROS),
                     ],
                 }
             })
@@ -748,7 +748,7 @@ pub fn tabela_dos_itens_do_lote(ctx: &Contexto<'_>, lote: i64) -> ResultadoDeCon
                 "SELECT estado FROM achado WHERE content_hash = ?",
                 texto(id.as_str()),
             )?
-            .map(|e| c_estado_achado(&e, &None)),
+            .map(|e| celula_estado_achado(&e, &None)),
             Tipo::Registro => id_numerico(&id)
                 .map(|n| {
                     primeiro_texto(ctx, "SELECT estado FROM registro WHERE id = ?", inteiro(n))
@@ -768,7 +768,7 @@ pub fn tabela_dos_itens_do_lote(ctx: &Contexto<'_>, lote: i64) -> ResultadoDeCon
                     texto: rotulo_ou_chave(ctx, &alvo)?,
                     alvo,
                 },
-                c_texto(t.singular()),
+                celula_texto(t.singular()),
                 estado.unwrap_or(Celula::Vazia),
             ],
         });
@@ -837,13 +837,13 @@ pub fn tabela_pendencias(
                 texto: rotulo_ou_chave(ctx, &r)?,
                 alvo: r,
             },
-            None => c_texto_opt(&l.referencia),
+            None => celula_texto_opt(&l.referencia),
         };
         let id = l.id.to_string();
         tabela.linhas.push(Linha {
             alvo: Some(Ref::nova(Tipo::Pendencia, id.as_str())),
             celulas: vec![
-                c_link(Tipo::Pendencia, &id, &cortar(&l.pergunta, 80)),
+                celula_link(Tipo::Pendencia, &id, &cortar(&l.pergunta, 80)),
                 Celula::Estado {
                     rotulo: if l.resolvida_em.is_some() {
                         "Respondida"
@@ -854,11 +854,11 @@ pub fn tabela_pendencias(
                     quem: l.resolvida_em.as_ref().map(|_| Quem::Usuario),
                 },
                 travado,
-                c_texto(&l.etapa),
-                c_texto(&l.tipo),
+                celula_texto(&l.etapa),
+                celula_texto(&l.tipo),
                 Celula::Data(l.criada_em.clone()),
-                c_data_opt(&l.resolvida_em),
-                c_texto_opt(&l.resposta),
+                celula_data_opt(&l.resolvida_em),
+                celula_texto_opt(&l.resposta),
             ],
         });
     }
@@ -873,7 +873,7 @@ pub fn tabela_pendencias(
 pub struct LinhaDeRegra {
     pub id: i64,
     pub fornecedor: String,
-    pub document_type: String,
+    pub tipo_de_documento: String,
     pub estrategia: String,
     pub prioridade: i64,
     pub ativa: bool,
@@ -898,7 +898,7 @@ pub fn regras_de_senha(
         Ok(LinhaDeRegra {
             id: l.get(0)?,
             fornecedor: l.get(1)?,
-            document_type: l.get(2)?,
+            tipo_de_documento: l.get(2)?,
             estrategia: l.get(3)?,
             prioridade: l.get(4)?,
             ativa: l.get::<_, i64>(5)? != 0,
@@ -929,21 +929,21 @@ pub fn tabela_regras_de_senha(linhas: &[LinhaDeRegra]) -> Tabela {
                 Linha {
                     alvo: Some(Ref::nova(Tipo::RegraDeSenha, id.as_str())),
                     celulas: vec![
-                        c_link(
+                        celula_link(
                             Tipo::RegraDeSenha,
                             &id,
-                            &rotulo_da_regra(&l.fornecedor, &l.document_type, &l.estrategia),
+                            &rotulo_da_regra(&l.fornecedor, &l.tipo_de_documento, &l.estrategia),
                         ),
-                        c_link(Tipo::Fornecedor, &l.fornecedor, &l.fornecedor),
-                        c_texto(&l.document_type),
-                        c_texto(&l.estrategia),
-                        c_contagem_solta(l.prioridade),
+                        celula_link(Tipo::Fornecedor, &l.fornecedor, &l.fornecedor),
+                        celula_texto(&l.tipo_de_documento),
+                        celula_texto(&l.estrategia),
+                        celula_contagem_solta(l.prioridade),
                         Celula::Estado {
                             rotulo: if l.ativa { "Ativa" } else { "Desligada" }.to_owned(),
                             quem: None,
                         },
-                        c_contagem_solta(l.sucessos),
-                        c_contagem_solta(l.falhas),
+                        celula_contagem_solta(l.sucessos),
+                        celula_contagem_solta(l.falhas),
                     ],
                 }
             })
@@ -996,8 +996,8 @@ pub fn tabela_tentativas(linhas: &[LinhaDeTentativa]) -> Tabela {
             .map(|l| Linha {
                 alvo: Some(Ref::nova(Tipo::Achado, l.hash.as_str())),
                 celulas: vec![
-                    c_link(Tipo::Achado, &l.hash, &rotulo_do_achado(&l.nome, &l.hash)),
-                    c_texto(&l.estrategia),
+                    celula_link(Tipo::Achado, &l.hash, &rotulo_do_achado(&l.nome, &l.hash)),
+                    celula_texto(&l.estrategia),
                     Celula::Estado {
                         rotulo: if l.sucesso { "Abriu" } else { "Falhou" }.to_owned(),
                         quem: None,
@@ -1070,17 +1070,17 @@ pub fn tabela_conexoes(linhas: &[LinhaDeConexao]) -> Tabela {
                 Linha {
                     alvo: Some(de.clone()),
                     celulas: vec![
-                        c_link(Tipo::Conexao, &l.id, &l.descricao),
-                        c_texto(&l.tipo),
-                        c_texto(&l.escopo),
+                        celula_link(Tipo::Conexao, &l.id, &l.descricao),
+                        celula_texto(&l.tipo),
+                        celula_texto(&l.escopo),
                         Celula::Texto(if l.escopo == "fora" {
                             "fora".to_owned()
                         } else {
                             l.situacao.clone().unwrap_or_else(|| "ausente".to_owned())
                         }),
-                        c_contagem(l.origens, de.clone(), None, recorte::ORIGENS),
-                        c_contagem(l.coletas, de.clone(), None, recorte::COLETAS),
-                        c_contagem(l.registros, de, None, recorte::REGISTROS),
+                        celula_contagem(l.origens, de.clone(), None, recorte::ORIGENS),
+                        celula_contagem(l.coletas, de.clone(), None, recorte::COLETAS),
+                        celula_contagem(l.registros, de, None, recorte::REGISTROS),
                     ],
                 }
             })
@@ -1130,10 +1130,10 @@ pub fn tabela_de_fornecedores_por_nome(
         tabela.linhas.push(Linha {
             alvo: Some(de.clone()),
             celulas: vec![
-                c_link(Tipo::Fornecedor, nome, nome),
-                c_contagem(registros, de.clone(), None, recorte::REGISTROS),
-                c_valor_total(saiu, de.clone(), None, recorte::SAIDAS),
-                c_contagem(documentos, de, None, recorte::DOCUMENTOS),
+                celula_link(Tipo::Fornecedor, nome, nome),
+                celula_contagem(registros, de.clone(), None, recorte::REGISTROS),
+                celula_valor_total(saiu, de.clone(), None, recorte::SAIDAS),
+                celula_contagem(documentos, de, None, recorte::DOCUMENTOS),
             ],
         });
     }
@@ -1171,9 +1171,9 @@ pub fn tabela_de_contas_por_nome(
         tabela.linhas.push(Linha {
             alvo: Some(de.clone()),
             celulas: vec![
-                c_link(Tipo::Conta, nome, nome),
-                c_contagem(registros, de.clone(), None, recorte::REGISTROS),
-                c_valor_total(saiu, de, None, recorte::SAIDAS),
+                celula_link(Tipo::Conta, nome, nome),
+                celula_contagem(registros, de.clone(), None, recorte::REGISTROS),
+                celula_valor_total(saiu, de, None, recorte::SAIDAS),
             ],
         });
     }
@@ -1214,10 +1214,10 @@ pub fn tabela_de_ciclos_por_id(ctx: &Contexto<'_>, ids: &[String]) -> ResultadoD
         tabela.linhas.push(Linha {
             alvo: Some(de.clone()),
             celulas: vec![
-                c_link(Tipo::Ciclo, id, &format!("Ciclo {id}")),
+                celula_link(Tipo::Ciclo, id, &format!("Ciclo {id}")),
                 Celula::Texto(periodo),
-                c_contagem(registros, de.clone(), Some(id), recorte::REGISTROS),
-                c_valor_total(saiu, de, Some(id), recorte::SAIDAS),
+                celula_contagem(registros, de.clone(), Some(id), recorte::REGISTROS),
+                celula_valor_total(saiu, de, Some(id), recorte::SAIDAS),
             ],
         });
     }
@@ -2034,26 +2034,6 @@ pub fn pedido_dos_itens(de: Ref, ciclo: Option<&str>, recorte_pedido: &str) -> P
     }
 }
 
-/// Usado por quem monta cabeçalhos: o link do estado de um achado sem decisor.
-pub fn estado_sem_quem(estado: &str) -> Celula {
-    c_estado_achado(estado, &None)
-}
-
-/// Usado por quem monta cabeçalhos: o decisor de um texto `decidido_por`.
-pub fn quem_do_texto(decidido_por: &Option<String>) -> Option<Quem> {
-    quem_de(decidido_por)
-}
-
-/// Link para um nome opcional (reexportado para o leitor).
-pub fn link_opcional(tipo: Tipo, nome: &Option<String>) -> Celula {
-    c_link_opt(tipo, nome)
-}
-
-/// Valor sem itens (reexportado para o leitor).
-pub fn valor_simples(centavos: Centavos) -> Celula {
-    c_valor(centavos)
-}
-
 // ---------------------------------------------------------------------------
 // Totais para os cabeçalhos
 // ---------------------------------------------------------------------------
@@ -2101,7 +2081,7 @@ pub fn valor_do_cabecalho(
         base.as_str(),
         recorte::SAIDAS | recorte::MOVIDO | recorte::TRANSACOES | recorte::FATURA
     );
-    Ok(c_valor_total(
+    Ok(celula_valor_total(
         if magnitude { -soma } else { soma },
         de.clone(),
         ciclo,
@@ -2120,5 +2100,5 @@ pub fn contagem_do_cabecalho(
         return Ok(Celula::Vazia);
     };
     let (n, _) = contar_e_somar(ctx, &sel)?;
-    Ok(c_contagem(n, de.clone(), ciclo, recorte_pedido))
+    Ok(celula_contagem(n, de.clone(), ciclo, recorte_pedido))
 }

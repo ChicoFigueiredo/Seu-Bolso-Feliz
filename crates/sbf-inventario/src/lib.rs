@@ -8,6 +8,7 @@
 //! | `banco`, `migracoes`, `decisao`, `projecao`, `lote`, `pendencia` | agente do núcleo |
 //! | `movimento`, `vistas`, `visao_geral`, `relatorios`, `relacoes`, `rastro`, `leitor` | agente de leitura |
 //! | `protegidos` | agente do chaveiro e do PDF |
+//! | `manutencao` | comandos de linha de comando (`sbf reprojetar`) |
 
 pub mod comando;
 pub mod consulta;
@@ -33,6 +34,9 @@ pub mod vistas;
 
 // PDF protegido: alvos, regras, tentativas e pendência por falha.
 pub mod protegidos;
+
+// Manutenção pela linha de comando.
+pub mod manutencao;
 
 pub use comando::{Acao, Comandos, ErroDeComando, IdDecisao, PedidoDeDecisao};
 pub use consulta::{Consulta, ErroDeConsulta};

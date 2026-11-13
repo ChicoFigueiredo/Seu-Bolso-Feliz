@@ -282,15 +282,105 @@ fn n_falhas_viram_pendencia_e_as_tentativas_param() {
 }
 
 #[test]
-fn sem_regra_e_sem_a_opcao_padrao_nada_e_tentado() {
+fn sem_regra_e_sem_a_opcao_padrao_nada_e_tentado_nem_vira_pendencia() {
     let cenario = Cenario::novo(CPF_ULTIMOS_5);
     let relatorio = cenario.rodar(&OpcoesDaRodada::default());
-    assert!(matches!(
-        relatorio.resultados[0].situacao,
-        Situacao::Pendencia { .. }
-    ));
+    assert_eq!(relatorio.resultados[0].situacao, Situacao::SemRegra);
+    assert_eq!(relatorio.resultados[0].tentativas, 0);
+    assert_eq!(
+        relatorio.sem_regra(),
+        1,
+        "a janela mostra \"1 PDF sem regra\""
+    );
     assert!(cenario.tentativas().is_empty(), "nada de tentativa cega");
+    assert!(
+        cenario.pendencias().is_empty(),
+        "sem tentativa não há pendência (spec 06, item 7)"
+    );
+    // Continua alvo: quando a regra chegar, a próxima rodada tenta.
+    assert_eq!(cenario.rodar(&OpcoesDaRodada::default()).sem_regra(), 1);
+    cenario.regra("fatura", "cpf_ultimos:5", 1);
+    assert_eq!(
+        cenario.rodar(&OpcoesDaRodada::default()).resultados[0].situacao,
+        Situacao::Aberto {
+            estrategia: Some("cpf_ultimos:5".into())
+        }
+    );
+}
+
+#[test]
+fn a_pendencia_so_vem_depois_de_n_falhas_acumuladas_entre_rodadas() {
+    let cenario = Cenario::novo(CPF_ULTIMOS_5);
+    cenario.regra("fatura", "cpf_completo", 1);
+    let opcoes = OpcoesDaRodada {
+        limite_de_falhas: 3,
+        ..OpcoesDaRodada::default()
+    };
+    for rodada in 1..=2_u32 {
+        let r = cenario.rodar(&opcoes);
+        assert_eq!(
+            r.resultados[0].situacao,
+            Situacao::NaoAbriu,
+            "rodada {rodada}"
+        );
+        assert_eq!(r.resultados[0].falhas, rodada);
+        assert!(cenario.pendencias().is_empty(), "rodada {rodada}");
+    }
+    let r = cenario.rodar(&opcoes);
+    assert!(
+        matches!(&r.resultados[0].situacao, Situacao::Pendencia { tipo, .. } if tipo == TIPO_SEM_REGRA),
+        "{:?}",
+        r.resultados[0].situacao
+    );
     assert_eq!(cenario.pendencias(), [TIPO_SEM_REGRA]);
+    assert_eq!(cenario.tentativas().len(), 3);
+    assert!(
+        cenario.rodar(&opcoes).resultados.is_empty(),
+        "as tentativas param"
+    );
+}
+
+#[test]
+fn a_rodada_pode_ficar_so_nos_achados_escolhidos() {
+    const OUTRO: &str = "6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b";
+    let cenario = Cenario::novo(SENHA_PROPRIA);
+    cenario.regra("fatura", "senha_propria:fatura-alfa", 1);
+    cenario
+        .c()
+        .execute(
+            "INSERT INTO achado (content_hash, file_size_bytes, camada, estado, document_type,
+                                 supplier_name_raw, protegido_senha)
+             VALUES (?1, 10, 'A', 'documento', 'fatura', 'Banco Alfa', 1)",
+            [OUTRO],
+        )
+        .expect("outro achado");
+
+    let so = |hashes: &[&str]| OpcoesDaRodada {
+        so_os_achados: Some(hashes.iter().map(|h| (*h).to_owned()).collect()),
+        ..OpcoesDaRodada::default()
+    };
+    let r = cenario.rodar(&so(&[OUTRO]));
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, OUTRO);
+    assert_eq!(r.resultados[0].situacao, Situacao::SemArquivo);
+    assert!(
+        cenario.texto().is_none(),
+        "o achado fora da seleção não foi tocado"
+    );
+
+    let r = cenario.rodar(&so(&[HASH]));
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, HASH);
+    assert!(cenario.texto().is_some());
+
+    assert!(
+        cenario.rodar(&so(&[])).resultados.is_empty(),
+        "seleção vazia, nada roda"
+    );
+    // Sem filtro, roda o que ainda é alvo.
+    let r = cenario.rodar(&OpcoesDaRodada::default());
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, OUTRO);
 }
 
 #[test]
@@ -324,8 +414,9 @@ fn estrategia_padrao_vencedora_vira_proposta_e_so_grava_com_confirmacao() {
     assert_eq!(
         pedido.acao,
         Acao::GuardarRegraDeSenha {
-            document_type: "fatura".into(),
-            estrategia: "cpf_ultimos:5".into()
+            tipo_de_documento: "fatura".into(),
+            estrategia: "cpf_ultimos:5".into(),
+            prioridade: None,
         }
     );
     assert_eq!(pedido.alvos, [Ref::nova(Tipo::Fornecedor, "Banco Alfa")]);

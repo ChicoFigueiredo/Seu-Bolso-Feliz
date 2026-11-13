@@ -4598,8 +4598,9 @@ impl Estado {
                     id
                 }
                 Acao::GuardarRegraDeSenha {
-                    document_type,
+                    tipo_de_documento: document_type,
                     estrategia,
+                    ..
                 } => {
                     if alvo.tipo != Tipo::Fornecedor {
                         return Err(nao_se_aplica(alvo));

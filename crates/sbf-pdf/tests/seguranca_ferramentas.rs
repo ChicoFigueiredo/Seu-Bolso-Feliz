@@ -8,8 +8,8 @@
 mod comum;
 
 use comum::*;
-use sbf_pdf::ferramenta::{PASTAS_DO_SISTEMA, confiavel, localizar};
 use sbf_pdf::{Desfecho, FalhaDeFerramenta, Ferramentas, PdfProtegido};
+use sbf_processo::{PASTAS_DO_SISTEMA, confiavel, localizar};
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

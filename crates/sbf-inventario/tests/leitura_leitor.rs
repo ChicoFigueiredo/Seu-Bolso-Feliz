@@ -5,7 +5,7 @@ mod comum;
 
 use comum::{
     BancoDeTeste, H_A_TRIAR_1, H_DUVIDA_REGRAS, H_ENERGIA_OUT, H_ENERGIA_SET, H_FATURA_CARTAO,
-    H_MERCADO, H_STREAMING_A, H_STREAMING_B, hash,
+    H_MERCADO, H_STREAMING_A, H_STREAMING_B, Reg, hash, inserir_registro,
 };
 use rusqlite::Connection;
 use sbf_inventario::consulta::{
@@ -366,6 +366,68 @@ fn livro_caixa_nao_e_suportado_nos_totais() {
     ));
 }
 
+fn campo_do_item(leitor: &LeitorSqlite, alvo: &str, rotulo: &str) -> Celula {
+    let item = leitor.item(&r(alvo)).expect("item").expect("existe");
+    item.campos
+        .into_iter()
+        .find(|c| c.rotulo == rotulo)
+        .unwrap_or_else(|| panic!("{alvo} sem o campo {rotulo}"))
+        .valor
+}
+
+#[test]
+fn cabecalho_do_fornecedor_tem_apelidos_e_contratos() {
+    let (banco, leitor) = abrir();
+    // Na fixture, toda grafia de Energia Exemplo é o próprio nome: nenhum apelido.
+    assert_eq!(
+        campo_do_item(&leitor, "fornecedor:Energia Exemplo", "Apelidos"),
+        Celula::Vazia
+    );
+    assert_eq!(
+        campo_do_item(&leitor, "fornecedor:Energia Exemplo", "Contratos"),
+        Celula::Texto("chegam na fatia 2".into())
+    );
+
+    let conn = Connection::open(&banco.caminho).expect("conexão");
+    let base = Reg {
+        fonte: "disco:e2",
+        tipo: "pagamento",
+        data: "2026-10-26",
+        valor: -100,
+        descricao: "Pagamento de conta",
+        fornecedor: Some("Energia Exemplo"),
+        estado: "extraido",
+        extraido_por: "extrator@1",
+        ..Reg::default()
+    };
+    for (bruto, contraparte) in [
+        (Some("ENERGIA  EXEMPLO S.A."), None),
+        (
+            Some("energia exemplo s.a."),
+            Some("Energia Exemplo Distribuidora"),
+        ),
+        (Some(" energia exemplo "), None),
+    ] {
+        inserir_registro(
+            &conn,
+            &Reg {
+                supplier_raw: bruto,
+                contraparte,
+                ..base.clone()
+            },
+        );
+    }
+    let Celula::Texto(apelidos) = campo_do_item(&leitor, "fornecedor:Energia Exemplo", "Apelidos")
+    else {
+        panic!("apelidos em texto")
+    };
+    // A mais usada primeiro, caixa e espaços juntos, sem o próprio nome nem a descrição.
+    assert_eq!(
+        apelidos,
+        "ENERGIA EXEMPLO S.A. · Energia Exemplo Distribuidora"
+    );
+}
+
 #[test]
 fn total_por_ciclo_do_fornecedor() {
     let (_b, leitor) = abrir();
@@ -561,6 +623,62 @@ fn rastro_de_cada_tipo_da_fatia_1() {
     assert_eq!(lote.acima.len(), 4);
     let regra = leitor.rastro(&r("regra-senha:1")).expect("rastro");
     assert_eq!(regra.abaixo.len(), 2);
+}
+
+#[test]
+fn rastro_da_fatura_e_da_conta_e_o_ciclo_sem_proveniencia() {
+    let (banco, leitor) = abrir();
+    let fatura = leitor.rastro(&r("fatura:b-out")).expect("rastro");
+    // Acima: a conexão de onde a fatura veio (e o documento, quando houver).
+    assert!(
+        fatura.acima.iter().any(|e| e.alvo.tipo == Tipo::Conexao),
+        "{:?}",
+        fatura.acima
+    );
+    assert!(
+        fatura
+            .acima
+            .iter()
+            .all(|e| matches!(e.alvo.tipo, Tipo::Conexao | Tipo::Documento))
+    );
+    // Abaixo: os registros da fatura (ela e as transações), cada um uma vez.
+    let registros = ligados(&leitor, "fatura:b-out", Tipo::Registro);
+    assert!(!fatura.abaixo.is_empty());
+    assert_eq!(fatura.abaixo.len(), registros.linhas.len());
+    assert!(fatura.abaixo.iter().all(|e| e.alvo.tipo == Tipo::Registro));
+    assert!(fatura.abaixo.iter().all(|e| e.quem.is_some()));
+
+    // Com um documento por trás de uma transação, ele aparece acima.
+    let conn = Connection::open(&banco.caminho).expect("conexão");
+    conn.execute(
+        "UPDATE registro SET content_hash = ?1
+          WHERE id = (SELECT min(id) FROM registro WHERE fatura_ref = 'b-out')",
+        [hash(H_FATURA_CARTAO)],
+    )
+    .expect("documento");
+    let fatura = leitor.rastro(&r("fatura:b-out")).expect("rastro");
+    assert!(
+        fatura
+            .acima
+            .iter()
+            .any(|e| e.alvo == Ref::nova(Tipo::Documento, hash(H_FATURA_CARTAO))),
+        "{:?}",
+        fatura.acima
+    );
+
+    let conta = leitor.rastro(&r("conta:Cartão Beta")).expect("rastro");
+    assert!(!conta.acima.is_empty());
+    assert!(conta.acima.iter().all(|e| e.alvo.tipo == Tipo::Conexao));
+    let distintas: std::collections::BTreeSet<_> = conta.acima.iter().map(|e| &e.alvo).collect();
+    assert_eq!(distintas.len(), conta.acima.len(), "sem repetir");
+
+    let ciclo = leitor.rastro(&r("ciclo:2026-10")).expect("rastro");
+    assert!(ciclo.acima.is_empty() && ciclo.abaixo.is_empty());
+    assert_eq!(
+        sbf_inventario::rastro::motivo_sem_rastro(Tipo::Ciclo),
+        Some("O ciclo é um período: não tem proveniência.")
+    );
+    assert_eq!(sbf_inventario::rastro::motivo_sem_rastro(Tipo::Conta), None);
 }
 
 #[test]

@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 sbf-inventario = { workspace = true }
+# A regra única de como chamar um programa externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
 rusqlite = { workspace = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }

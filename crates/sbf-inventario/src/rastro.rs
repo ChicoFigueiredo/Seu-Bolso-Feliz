@@ -4,6 +4,12 @@
 //!   e a conexão (fonte); abaixo os registros extraídos, o lote e as decisões.
 //! - **Registro:** acima o documento, as origens e a conexão; abaixo as decisões, o lote
 //!   e a movimentação em que virou, quando `movimentacao_id` existe.
+//! - **Fatura:** acima o documento de onde ela e as transações saíram (quando vieram de um
+//!   PDF) e a conexão (a Pluggy, ou o disco do PDF); abaixo os registros: a fatura e as
+//!   transações.
+//! - **Conta:** acima as conexões de onde vieram os registros dela.
+//! - **Ciclo:** sem rastro, de propósito: o ciclo é um período, não um item que veio de algum
+//!   lugar. [`motivo_sem_rastro`] dá a frase que a janela mostra no lugar da cadeia.
 //!
 //! Cada [`Elo`] diz quem (`decidido_por`, `classificado_por`, `extraido_por` ou o
 //! `responsavel` da coleta) e quando. A cadeia vai até a origem para trás; a movimentação
@@ -634,8 +640,142 @@ fn rastro_do_fornecedor(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<R
     })
 }
 
-/// O rastro de um item da fatia 1. Item que não existe ou sem cadeia (ciclo, conta,
-/// fatura) devolve um rastro vazio; tipo de fatia futura devolve o rastro vazio também
+/// Um registro de uma fatura ou conta, com a origem: o documento e a conexão.
+struct RegistroLigado {
+    id: i64,
+    descricao: Option<String>,
+    hash: Option<String>,
+    fonte: String,
+    extraido_por: String,
+    criado: String,
+}
+
+/// Os registros de uma fatura ou conta (a mesma seleção das abas da página).
+fn registros_ligados(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<RegistroLigado>> {
+    let Some(sel) = relacoes::selecao_de_registros(ctx, alvo)? else {
+        return Ok(Vec::new());
+    };
+    consultar(
+        ctx.conn,
+        &format!(
+            "SELECT r.id, r.descricao_original, r.content_hash, r.fonte_id, r.extraido_por,
+                    r.criado_em
+             FROM registro r WHERE 1 = 1{}
+             ORDER BY r.tipo <> 'fatura_cartao', r.data, r.id",
+            sel.sql_e()
+        ),
+        sel.params(),
+        |l| {
+            Ok(RegistroLigado {
+                id: l.get(0)?,
+                descricao: l.get(1)?,
+                hash: l.get(2)?,
+                fonte: l.get(3)?,
+                extraido_por: l.get(4)?,
+                criado: l.get(5)?,
+            })
+        },
+    )
+}
+
+/// As conexões (sem repetir, na ordem em que aparecem) de onde vieram os registros.
+fn elos_das_conexoes<'a>(
+    ctx: &Contexto<'_>,
+    fontes: impl Iterator<Item = &'a str>,
+) -> ResultadoDeConsulta<Vec<Elo>> {
+    let mut elos = Vec::new();
+    for fonte in fontes {
+        let conexao = Ref::nova(Tipo::Conexao, fonte);
+        if elos.iter().any(|e: &Elo| e.alvo == conexao) {
+            continue;
+        }
+        let rotulo = rotulo_ou_chave(ctx, &conexao)?;
+        elos.push(elo(conexao, rotulo, "vindo da conexão", None, None));
+    }
+    Ok(elos)
+}
+
+fn rastro_da_fatura(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rastro> {
+    let registros = registros_ligados(ctx, alvo)?;
+    let mut acima = Vec::new();
+    for r in &registros {
+        let Some(hash) = r.hash.as_deref().filter(|h| !h.is_empty()) else {
+            continue;
+        };
+        let documento = Ref::nova(Tipo::Documento, hash);
+        if acima.iter().any(|e: &Elo| e.alvo == documento) {
+            continue;
+        }
+        let nome = consultar(
+            ctx.conn,
+            "SELECT filename FROM origem WHERE content_hash = ? ORDER BY id LIMIT 1",
+            &[texto(hash)],
+            |l| l.get::<_, Option<String>>(0),
+        )?
+        .into_iter()
+        .next()
+        .flatten();
+        acima.push(elo(
+            documento,
+            rotulo_do_achado(&nome, hash),
+            "extraída do documento",
+            Some(Quem::de_texto(&r.extraido_por)),
+            Some(r.criado.clone()),
+        ));
+    }
+    acima.extend(elos_das_conexoes(
+        ctx,
+        registros.iter().map(|r| r.fonte.as_str()),
+    )?);
+    let abaixo = registros
+        .iter()
+        .take(LIMITE_DE_ELOS)
+        .map(|r| {
+            elo(
+                Ref::nova(Tipo::Registro, r.id.to_string()),
+                crate::vistas::rotulo_do_registro(r.id, &r.descricao),
+                "registro da fatura",
+                Some(Quem::de_texto(&r.extraido_por)),
+                Some(r.criado.clone()),
+            )
+        })
+        .collect();
+    Ok(Rastro { acima, abaixo })
+}
+
+fn rastro_da_conta(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rastro> {
+    let Some(sel) = relacoes::selecao_de_registros(ctx, alvo)? else {
+        return Ok(Rastro::default());
+    };
+    // A conta pode ter milhares de registros: só as conexões distintas.
+    let fontes = consultar(
+        ctx.conn,
+        &format!(
+            "SELECT r.fonte_id, min(r.id) AS primeiro FROM registro r WHERE 1 = 1{}
+             GROUP BY r.fonte_id ORDER BY primeiro",
+            sel.sql_e()
+        ),
+        sel.params(),
+        |l| l.get::<_, String>(0),
+    )?;
+    Ok(Rastro {
+        acima: elos_das_conexoes(ctx, fontes.iter().map(String::as_str))?,
+        abaixo: Vec::new(),
+    })
+}
+
+/// A frase que a aba Rastro mostra no lugar da cadeia quando o tipo não tem proveniência
+/// por natureza (hoje, só o ciclo). `None` para os outros tipos.
+#[must_use]
+pub fn motivo_sem_rastro(tipo: Tipo) -> Option<&'static str> {
+    match tipo {
+        Tipo::Ciclo => Some("O ciclo é um período: não tem proveniência."),
+        _ => None,
+    }
+}
+
+/// O rastro de um item da fatia 1. Item que não existe devolve um rastro vazio; o ciclo
+/// também (ver [`motivo_sem_rastro`]); tipo de fatia futura devolve o rastro vazio também
 /// (a janela mostra o selo da fatia).
 pub fn rastro_de(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rastro> {
     match alvo.tipo {
@@ -649,6 +789,8 @@ pub fn rastro_de(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Rastro> 
         Tipo::Pendencia => rastro_da_pendencia(ctx, alvo),
         Tipo::RegraDeSenha => rastro_da_regra(ctx, alvo),
         Tipo::Fornecedor => rastro_do_fornecedor(ctx, alvo),
+        Tipo::Fatura => rastro_da_fatura(ctx, alvo),
+        Tipo::Conta => rastro_da_conta(ctx, alvo),
         _ => Ok(Rastro::default()),
     }
 }

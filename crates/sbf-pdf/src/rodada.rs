@@ -4,8 +4,12 @@
 //!
 //! - A lista padrão de estratégias só entra com [`OpcoesDaRodada::tentar_estrategias_padrao`]
 //!   (desligada por padrão): nada de tentativa cega.
-//! - Depois de N falhas de senha (padrão 6), ou quando não há mais nada a tentar, o achado vira
-//!   a pendência "PDF protegido sem regra" e as tentativas param.
+//! - Depois de N falhas de senha **acumuladas** por documento (padrão 6), o achado vira a
+//!   pendência "PDF protegido sem regra" e as tentativas param. Sem estratégia para tentar
+//!   (nenhuma regra e a opção padrão desligada) não há tentativa nem pendência: o achado só
+//!   entra na contagem [`RelatorioDaRodada::sem_regra`] ("N PDFs sem regra" na janela).
+//! - [`OpcoesDaRodada::so_os_achados`] restringe a rodada à seleção (a Ação "Abrir protegido"
+//!   da aba Achado).
 //! - Quando uma estratégia **padrão** vence para um par sem regra, a rodada devolve uma
 //!   [`PropostaDeRegra`]; gravar a regra é decisão do usuário
 //!   ([`PropostaDeRegra::pedido`], que vira `Acao::GuardarRegraDeSenha`).
@@ -22,6 +26,7 @@ use sbf_inventario::protegidos::{
     TIPO_CIFRA_NAO_SUPORTADA, TIPO_CORROMPIDO, TentativaFeita,
 };
 use sbf_inventario::{Ref, Tipo};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// As opções da rodada.
@@ -32,6 +37,9 @@ pub struct OpcoesDaRodada {
     /// Falhas de senha por documento antes da pendência (padrão 6).
     pub limite_de_falhas: u32,
     pub ferramentas: Ferramentas,
+    /// Só estes achados (`content_hash`), quando a rodada vem de uma seleção; `None` roda
+    /// todos os alvos.
+    pub so_os_achados: Option<BTreeSet<String>>,
 }
 
 impl Default for OpcoesDaRodada {
@@ -40,6 +48,7 @@ impl Default for OpcoesDaRodada {
             tentar_estrategias_padrao: false,
             limite_de_falhas: LIMITE_PADRAO_DE_FALHAS,
             ferramentas: Ferramentas::default(),
+            so_os_achados: None,
         }
     }
 }
@@ -49,7 +58,7 @@ impl Default for OpcoesDaRodada {
 pub struct PropostaDeRegra {
     pub fornecedor: String,
     /// O tipo do achado, ou `*` quando ele não tem tipo.
-    pub document_type: String,
+    pub tipo_de_documento: String,
     pub estrategia: Estrategia,
     pub frase: String,
 }
@@ -76,16 +85,16 @@ fn plural_do_tipo(tipo: &str) -> String {
 }
 
 impl PropostaDeRegra {
-    fn nova(fornecedor: &str, document_type: Option<&str>, estrategia: Estrategia) -> Self {
-        let document_type = document_type.unwrap_or("*").to_owned();
+    fn nova(fornecedor: &str, tipo_de_documento: Option<&str>, estrategia: Estrategia) -> Self {
+        let tipo_de_documento = tipo_de_documento.unwrap_or("*").to_owned();
         let frase = format!(
             "{} do {fornecedor} usam {}. Guardar como regra?",
-            plural_do_tipo(&document_type),
+            plural_do_tipo(&tipo_de_documento),
             estrategia.descricao()
         );
         Self {
             fornecedor: fornecedor.to_owned(),
-            document_type,
+            tipo_de_documento,
             estrategia,
             frase,
         }
@@ -95,8 +104,9 @@ impl PropostaDeRegra {
     pub fn pedido(&self) -> PedidoDeDecisao {
         PedidoDeDecisao {
             acao: Acao::GuardarRegraDeSenha {
-                document_type: self.document_type.clone(),
+                tipo_de_documento: self.tipo_de_documento.clone(),
                 estrategia: self.estrategia.to_string(),
+                prioridade: None,
             },
             alvos: vec![Ref::nova(Tipo::Fornecedor, self.fornecedor.clone())],
             motivo: Some(self.frase.clone()),
@@ -115,6 +125,9 @@ pub enum Situacao {
     Pendencia { tipo: String, id: i64 },
     /// Nenhuma estratégia abriu ainda; outras rodadas podem tentar.
     NaoAbriu,
+    /// Não havia estratégia para tentar (nenhuma regra do fornecedor e a opção "tentar
+    /// estratégias padrão" desligada). Nada foi tentado nem gravado.
+    SemRegra,
     /// A senha conferiu, mas a extração falhou (tenta de novo na próxima rodada).
     FalhaNaExtracao,
     /// Faltou um segredo no chaveiro para alguma estratégia (trancado, sem CPF, sem a senha
@@ -149,6 +162,14 @@ impl RelatorioDaRodada {
     /// As propostas de regra, para a janela perguntar.
     pub fn propostas(&self) -> impl Iterator<Item = &PropostaDeRegra> {
         self.resultados.iter().filter_map(|r| r.proposta.as_ref())
+    }
+
+    /// Quantos PDFs ficaram sem estratégia para tentar ("N PDFs sem regra").
+    pub fn sem_regra(&self) -> usize {
+        self.resultados
+            .iter()
+            .filter(|r| r.situacao == Situacao::SemRegra)
+            .count()
     }
 }
 
@@ -189,7 +210,8 @@ fn relativo_dentro(relativo: &str) -> bool {
             .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
-/// Roda a abertura em todos os alvos do inventário.
+/// Roda a abertura nos alvos do inventário (todos, ou só os de
+/// [`OpcoesDaRodada::so_os_achados`]).
 pub fn abrir_protegidos(
     conexao: &Connection,
     raiz_do_cofre: &Path,
@@ -197,7 +219,16 @@ pub fn abrir_protegidos(
     opcoes: &OpcoesDaRodada,
 ) -> rusqlite::Result<RelatorioDaRodada> {
     let mut relatorio = RelatorioDaRodada::default();
-    for alvo in protegidos::alvos(conexao, opcoes.limite_de_falhas)? {
+    let escolhido = |alvo: &AlvoProtegido| {
+        opcoes
+            .so_os_achados
+            .as_ref()
+            .is_none_or(|so| so.contains(&alvo.content_hash))
+    };
+    for alvo in protegidos::alvos(conexao, opcoes.limite_de_falhas)?
+        .into_iter()
+        .filter(escolhido)
+    {
         let resultado = abrir_um(conexao, raiz_do_cofre, &alvo, fonte, opcoes, &mut relatorio)?;
         relatorio.resultados.push(resultado);
     }
@@ -312,7 +343,7 @@ fn abrir_um(
     for regra in protegidos::regras_para(
         conexao,
         alvo.fornecedor.as_deref(),
-        alvo.document_type.as_deref(),
+        alvo.tipo_de_documento.as_deref(),
     )? {
         match regra.estrategia.parse::<Estrategia>() {
             Ok(e) if !lista.iter().any(|(x, _)| *x == e) => lista.push((e, Some(regra.id))),
@@ -337,15 +368,20 @@ fn abrir_um(
         }
     }
 
+    // Sem estratégia para tentar: nem tentativa nem pendência (spec 06, item 7: pendência só
+    // depois de N falhas). A janela mostra a contagem.
+    if lista.is_empty() {
+        resultado.situacao = Situacao::SemRegra;
+        return Ok(resultado);
+    }
+
     let mut tentativas = Vec::new();
     let mut falhas = alvo.falhas;
     let mut conclusao = None;
     let mut situacao = Situacao::NaoAbriu;
     let mut faltou = None;
-    let mut esgotou = true;
     for (estrategia, regra) in &lista {
         if falhas >= limite {
-            esgotou = false;
             break;
         }
         let candidata = match estrategia.candidata(fonte) {
@@ -407,28 +443,17 @@ fn abrir_um(
         {
             resultado.proposta = Some(PropostaDeRegra::nova(
                 fornecedor,
-                alvo.document_type.as_deref(),
+                alvo.tipo_de_documento.as_deref(),
                 estrategia.clone(),
             ));
         }
-        esgotou = false;
         break;
     }
 
-    let conclusao = match conclusao {
-        Some(c) => c,
-        // Faltou segredo: não é falta de regra, é o chaveiro (a janela pede para destrancar).
-        None if faltou.is_some() && tentativas.is_empty() => Conclusao::SoTentativas,
-        // Nada abriu e não há mais o que tentar.
-        None if esgotou => Conclusao::SemRegra {
-            pergunta: protegidos::pergunta_sem_regra(
-                alvo.fornecedor.as_deref(),
-                alvo.document_type.as_deref(),
-                falhas,
-            ),
-        },
-        None => Conclusao::SoTentativas,
-    };
+    // Nada abriu: só as tentativas. A pendência "sem regra" sai do `registrar` quando as
+    // falhas acumuladas chegam ao limite; faltar segredo não é falha (a janela pede para
+    // destrancar o chaveiro).
+    let conclusao = conclusao.unwrap_or(Conclusao::SoTentativas);
     let tipo = match &conclusao {
         Conclusao::Pendencia { tipo, .. } => *tipo,
         _ => protegidos::TIPO_SEM_REGRA,

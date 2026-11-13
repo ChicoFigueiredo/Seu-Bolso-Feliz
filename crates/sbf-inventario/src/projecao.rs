@@ -14,7 +14,7 @@
 //! | achado ou registro / `estado`, `fornecedor`, `categoria`, `tipo`, `document_type`, `data_e_valor` | objeto `{coluna: valor}` com as colunas que mudam |
 //! | achado / `duplicidade`, registro / `conciliacao` | `{"com": id, "existe": bool}` |
 //! | fornecedor / `recorrente` | `{"recorrente": bool}` (só o log; vira compromisso na fatia 3) |
-//! | fornecedor / `regra_senha` | `{"document_type", "estrategia", "ativa": bool ou nulo}` (nulo: a regra não existe) |
+//! | fornecedor / `regra_senha` | `{"document_type", "estrategia", "ativa": bool ou nulo, "prioridade": número ou nulo}` (`ativa` nulo: a regra não existe; `prioridade` nula: a padrão na regra nova, a mesma na que existe) |
 //! | pendencia / `criada` | a linha da pendência, ou nulo (desfeita: a pendência fecha) |
 //! | pendencia / `resposta` | `{"resposta", "resolvida_em"}` |
 //! | lote / `criado` | `{"nome", "criado_em"}`, ou nulo (desfeito: o lote some) |
@@ -225,21 +225,22 @@ pub fn ler(
             Ok(Some(json!({"recorrente": recorrente})))
         }
         (AlvoTipo::Fornecedor, REGRA_SENHA) => {
-            let document_type = texto_de(forma, "document_type")?;
+            let tipo_de_documento = texto_de(forma, "document_type")?;
             let estrategia = texto_de(forma, "estrategia")?;
-            let ativa: Option<i64> = tx
+            let linha: Option<(i64, i64)> = tx
                 .query_row(
-                    "SELECT ativa FROM regra_senha
+                    "SELECT ativa, prioridade FROM regra_senha
                       WHERE fornecedor = ?1 AND document_type = ?2 AND estrategia = ?3",
-                    params![id, document_type, estrategia],
-                    |l| l.get(0),
+                    params![id, tipo_de_documento, estrategia],
+                    |l| Ok((l.get(0)?, l.get(1)?)),
                 )
                 .optional()?;
             // `ativa: null` = a regra não existe.
             Ok(Some(json!({
-                "document_type": document_type,
+                "document_type": tipo_de_documento,
                 "estrategia": estrategia,
-                "ativa": ativa.map(|a| a != 0),
+                "ativa": linha.map(|(a, _)| a != 0),
+                "prioridade": linha.map(|(_, p)| p),
             })))
         }
         (AlvoTipo::Fornecedor, _) => Err(erro_de_banco(format!("campo {campo} de fornecedor"))),
@@ -464,14 +465,25 @@ pub fn aplicar(
         }
         (AlvoTipo::Fornecedor, RECORRENTE) => {}
         (AlvoTipo::Fornecedor, REGRA_SENHA) => {
-            let document_type = texto_de(valor, "document_type")?;
+            let tipo_de_documento = texto_de(valor, "document_type")?;
             let estrategia = texto_de(valor, "estrategia")?;
+            // Nula: a padrão na regra nova, a mesma na que já existe.
+            let prioridade = valor
+                .and_then(|v| v.get("prioridade"))
+                .and_then(Value::as_i64);
             if bool_de(valor, "ativa") {
                 tx.execute(
-                    "INSERT INTO regra_senha (fornecedor, document_type, estrategia, ativa)
-                     VALUES (?1, ?2, ?3, 1)
-                     ON CONFLICT(fornecedor, document_type, estrategia) DO UPDATE SET ativa = 1",
-                    params![id, document_type, estrategia],
+                    "INSERT INTO regra_senha (fornecedor, document_type, estrategia, ativa, prioridade)
+                     VALUES (?1, ?2, ?3, 1, COALESCE(?4, ?5))
+                     ON CONFLICT(fornecedor, document_type, estrategia) DO UPDATE
+                        SET ativa = 1, prioridade = COALESCE(?4, regra_senha.prioridade)",
+                    params![
+                        id,
+                        tipo_de_documento,
+                        estrategia,
+                        prioridade,
+                        crate::protegidos::PRIORIDADE_PADRAO_DA_REGRA
+                    ],
                 )?;
             } else {
                 // Desfazer a criação apaga a regra que nunca foi usada; a que já tem
@@ -484,13 +496,13 @@ pub fn aplicar(
                         "DELETE FROM regra_senha
                           WHERE fornecedor = ?1 AND document_type = ?2 AND estrategia = ?3
                             AND sucessos = 0 AND falhas = 0",
-                        params![id, document_type, estrategia],
+                        params![id, tipo_de_documento, estrategia],
                     )?;
                 }
                 tx.execute(
-                    "UPDATE regra_senha SET ativa = 0
+                    "UPDATE regra_senha SET ativa = 0, prioridade = COALESCE(?4, prioridade)
                       WHERE fornecedor = ?1 AND document_type = ?2 AND estrategia = ?3",
-                    params![id, document_type, estrategia],
+                    params![id, tipo_de_documento, estrategia, prioridade],
                 )?;
             }
         }

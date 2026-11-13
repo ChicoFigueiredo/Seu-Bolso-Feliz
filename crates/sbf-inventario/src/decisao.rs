@@ -315,17 +315,23 @@ pub(crate) fn efeitos_da_acao(
         }
         (
             Acao::GuardarRegraDeSenha {
-                document_type,
+                tipo_de_documento,
                 estrategia,
+                prioridade,
             },
             AlvoTipo::Fornecedor,
         ) => {
-            if document_type.trim().is_empty() || estrategia.trim().is_empty() {
+            if tipo_de_documento.trim().is_empty() || estrategia.trim().is_empty() {
                 return Err(nao());
             }
             um(
                 campo::REGRA_SENHA,
-                json!({"document_type": document_type, "estrategia": estrategia, "ativa": true}),
+                json!({
+                    "document_type": tipo_de_documento,
+                    "estrategia": estrategia,
+                    "ativa": true,
+                    "prioridade": prioridade,
+                }),
             )
         }
         _ => Err(nao()),

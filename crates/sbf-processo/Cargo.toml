@@ -1,0 +1,17 @@
+[package]
+name = "sbf-processo"
+description = "A regra única de como o Seu Bolso Feliz chama um programa externo (ADR-012): caminho absoluto nas pastas do sistema, nada em pasta gravável por outros, ambiente mínimo, prazo e limite de saída; e abrir um arquivo com o programa do sistema."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -28,7 +28,6 @@ pub fn interpretar_protecao(saida: &str) -> Cifra {
 
 #[cfg(windows)]
 pub(crate) fn cifra_do_volume(caminho: &std::path::Path) -> Cifra {
-    use std::process::Command;
     use std::time::Duration;
     let texto = caminho.to_string_lossy();
     let Some(letra) = letra_da_unidade(texto.trim_start_matches(r"\\?\")) else {
@@ -37,10 +36,12 @@ pub(crate) fn cifra_do_volume(caminho: &std::path::Path) -> Cifra {
     let script = format!(
         "(New-Object -ComObject Shell.Application).NameSpace('{letra}:').Self.ExtendedProperty('System.Volume.BitLockerProtection')"
     );
-    let mut comando = Command::new("powershell.exe");
-    comando.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-    crate::executar_com_limite(comando, Duration::from_secs(10))
-        .map_or(Cifra::Desconhecido, |saida| interpretar_protecao(&saida))
+    crate::executar_com_limite(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", script.as_str()],
+        Duration::from_secs(10),
+    )
+    .map_or(Cifra::Desconhecido, |saida| interpretar_protecao(&saida))
 }
 
 #[cfg(test)]
