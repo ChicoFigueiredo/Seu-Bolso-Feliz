@@ -39,3 +39,17 @@ UPDATE registro SET decidido_por = extraido_por;
 
 CREATE INDEX IF NOT EXISTS origem_gmail_message ON origem(gmail_message_id);
 CREATE INDEX IF NOT EXISTS origem_local_filepath ON origem(local_filepath);
+
+-- O que desfaz o quê: "já foi desfeita?" e "Desfazer decisão" consultam por aqui.
+CREATE INDEX decisao_desfaz ON decisao(desfaz);
+
+-- Unir conciliados (registro ↔ registro). Não cabe em `relacao`, cujas colunas são
+-- chaves estrangeiras para `achado(content_hash)`; a forma é a mesma.
+CREATE TABLE relacao_registro (
+  a         INTEGER NOT NULL REFERENCES registro(id),
+  b         INTEGER NOT NULL REFERENCES registro(id),
+  tipo      TEXT NOT NULL,
+  confianca REAL,
+  motivo    TEXT,
+  PRIMARY KEY (a, b, tipo)
+);
