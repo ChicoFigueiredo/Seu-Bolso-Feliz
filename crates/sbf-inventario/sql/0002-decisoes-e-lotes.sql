@@ -39,6 +39,8 @@ UPDATE registro SET decidido_por = extraido_por;
 
 CREATE INDEX IF NOT EXISTS origem_gmail_message ON origem(gmail_message_id);
 CREATE INDEX IF NOT EXISTS origem_local_filepath ON origem(local_filepath);
+-- A área Registros ordena por data (medido pela leitura: 358 ms → 228 ms com 100 mil).
+CREATE INDEX IF NOT EXISTS registro_data ON registro(data);
 
 -- O que desfaz o quê: "já foi desfeita?" e "Desfazer decisão" consultam por aqui.
 CREATE INDEX decisao_desfaz ON decisao(desfaz);

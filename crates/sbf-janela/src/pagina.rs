@@ -543,10 +543,13 @@ pub fn grafico_por_ciclo(ui: &mut Ui, totais: &[TotalDoCiclo], pedidos: &mut Vec
                     let ultimo = i + 1 == totais.len();
                     ui.vertical(|ui| {
                         ui.set_width(largura_barra);
-                        ui.label(
-                            RichText::new(formato::dinheiro(t.centavos))
-                                .size(11.0)
-                                .color(p.tinta_suave),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(formato::dinheiro(t.centavos).replace("R$ ", ""))
+                                    .size(11.0)
+                                    .color(p.tinta_suave),
+                            )
+                            .extend(),
                         );
                         let (rect, r) = ui
                             .allocate_exact_size(vec2(largura_barra - 12.0, 44.0), Sense::click());

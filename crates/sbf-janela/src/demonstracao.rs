@@ -2511,6 +2511,87 @@ impl Estado {
                     .collect();
                 self.tabela_de_refs(Tipo::Origem, &refs)
             }
+            A::EmailsPorRemetente => {
+                let mut por: BTreeMap<String, (usize, BTreeSet<String>, String)> = BTreeMap::new();
+                for a in &self.achados {
+                    if let Some((rem, _)) = &a.email {
+                        if !Self::passa_no_filtro_texto(filtro, &[rem]) {
+                            continue;
+                        }
+                        let quando = self
+                            .origens_de(&a.hash)
+                            .iter()
+                            .find(|o| o.conexao == "gmail:pessoal")
+                            .map(|o| o.visto_em.clone())
+                            .unwrap_or_default();
+                        let e = por.entry(rem.clone()).or_default();
+                        e.0 += 1;
+                        e.1.insert(a.hash.clone());
+                        if quando > e.2 {
+                            e.2 = quando;
+                        }
+                    }
+                }
+                Tabela {
+                    colunas: vec![
+                        col("Remetente"),
+                        coln("E-mails"),
+                        coln("Anexos achados"),
+                        col("Último"),
+                    ],
+                    linhas: por
+                        .into_iter()
+                        .map(|(rem, (n, anexos, ultimo))| Linha {
+                            alvo: None,
+                            celulas: vec![
+                                txt(rem),
+                                Celula::Contagem {
+                                    n: n as i64,
+                                    itens: None,
+                                },
+                                Celula::Contagem {
+                                    n: anexos.len() as i64,
+                                    itens: None,
+                                },
+                                Celula::Data(ultimo),
+                            ],
+                        })
+                        .collect(),
+                }
+            }
+            A::PastasPessoais => {
+                let mut por: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
+                for o in self.origens.iter().filter(|o| o.conexao != "gmail:pessoal") {
+                    let pasta = o
+                        .caminho
+                        .rsplit_once('/')
+                        .map_or(o.caminho.as_str(), |(p, _)| p)
+                        .to_owned();
+                    if Self::passa_no_filtro_texto(filtro, &[&pasta]) {
+                        *por.entry((pasta, o.conexao)).or_default() += 1;
+                    }
+                }
+                Tabela {
+                    colunas: vec![col("Pasta"), col("Conexão"), coln("Arquivos")],
+                    linhas: por
+                        .into_iter()
+                        .map(|((pasta, conexao), n)| Linha {
+                            alvo: None,
+                            celulas: vec![
+                                txt(pasta),
+                                link(
+                                    Ref::nova(Tipo::Conexao, conexao),
+                                    self.nome_conexao(conexao),
+                                ),
+                                Celula::Contagem {
+                                    n: n as i64,
+                                    itens: None,
+                                },
+                            ],
+                        })
+                        .collect(),
+                }
+            }
             A::Coletas => Tabela {
                 colunas: vec![
                     col("Coleta"),

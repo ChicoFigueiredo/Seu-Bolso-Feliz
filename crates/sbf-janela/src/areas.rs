@@ -167,6 +167,8 @@ pub fn rotulo_da_area(area: Area) -> &'static str {
         Area::Faturas => "Faturas (conferência)",
         Area::ContasLacunas => "Contas (lacunas)",
         Area::Emails => "E-mails",
+        Area::EmailsPorRemetente => "E-mails por remetente",
+        Area::PastasPessoais => "Pastas pessoais",
         Area::ArquivosEPastas => "Arquivos e pastas",
         Area::Coletas => "Coletas",
         Area::Pendencias => "Pendências",
@@ -186,7 +188,8 @@ pub fn icone_da_area(area: Area) -> &'static str {
         Area::Fornecedores => "storefront",
         Area::Faturas => "credit_card",
         Area::ContasLacunas => "account_balance",
-        Area::Emails => "mail",
+        Area::Emails | Area::EmailsPorRemetente => "mail",
+        Area::PastasPessoais => "folder",
         Area::ArquivosEPastas => "folder",
         Area::Coletas => "sync_saved_locally",
         Area::Pendencias => "flag",
@@ -212,6 +215,8 @@ pub fn descricao_da_area(area: Area) -> &'static str {
         Area::Faturas => "Faturas de cartão: o total declarado contra a soma dos registros.",
         Area::ContasLacunas => "Por conta, os ciclos sem nenhum registro.",
         Area::Emails => "Os e-mails por remetente e cada e-mail com anexo.",
+        Area::EmailsPorRemetente => "Quantos e-mails e anexos cada remetente mandou.",
+        Area::PastasPessoais => "As pastas pessoais onde os arquivos foram achados.",
         Area::ArquivosEPastas => "Os arquivos achados no disco e nas nuvens, e as pastas pessoais.",
         Area::Coletas => "Cada passagem por uma fonte do inventário.",
         Area::Pendencias => {
@@ -219,6 +224,16 @@ pub fn descricao_da_area(area: Area) -> &'static str {
         }
         Area::Lotes => "Conjuntos de documentos e registros que você aprova junto para promoção.",
         Area::Relatorios => "As perguntas do §11 respondidas com os registros do inventário.",
+    }
+}
+
+/// A outra metade de uma área que mostra duas vistas (spec 06, "Áreas e vistas"): a
+/// janela desenha esta tabela acima da principal.
+pub fn area_complementar(area: Area) -> Option<Area> {
+    match area {
+        Area::Emails => Some(Area::EmailsPorRemetente),
+        Area::ArquivosEPastas => Some(Area::PastasPessoais),
+        _ => None,
     }
 }
 

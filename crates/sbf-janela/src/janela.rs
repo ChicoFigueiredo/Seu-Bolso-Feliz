@@ -358,6 +358,35 @@ impl Janela {
                 if *area == Area::Lotes {
                     faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), pedidos);
                 }
+                if let Some(outra) = areas::area_complementar(*area) {
+                    let pedido = PedidoDeTabela::Area {
+                        area: outra,
+                        filtro: filtro.clone(),
+                    };
+                    componentes::rotulo_de_secao(ui, areas::rotulo_da_area(outra));
+                    match leitor.tabela(&pedido) {
+                        Ok(t) => {
+                            let chave = format!("area:{outra:?}");
+                            let mut estado = self.centro.tabelas.remove(&chave).unwrap_or_default();
+                            let altura = (t.linhas.len() as f32 * 26.0 + 30.0).min(200.0);
+                            tabela::desenhar(
+                                ui,
+                                &chave,
+                                &t,
+                                &mut estado,
+                                &mut self.centro.selecao,
+                                pedidos,
+                                Some(altura),
+                            );
+                            self.centro.tabelas.insert(chave, estado);
+                        }
+                        Err(e) => {
+                            componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
+                        }
+                    }
+                    ui.add_space(6.0);
+                    componentes::rotulo_de_secao(ui, areas::rotulo_da_area(*area));
+                }
                 let pedido = PedidoDeTabela::Area {
                     area: *area,
                     filtro,
