@@ -33,7 +33,7 @@ pub mod tema;
 pub use acoes::{ACOES, Aba, ContextoDasAcoes, DefinicaoDeAcao, Disponibilidade, IdAcao};
 pub use app::{AppSbf, config_da_casca};
 pub use composta::ConsultaComposta;
-pub use dinheiro::{EstacaoDoLivro, EstacaoLigada};
+pub use dinheiro::{AndamentoDoPareamento, EstacaoDoLivro, EstacaoLigada, Pareamento};
 pub use dock::PainelDoDock;
 pub use janela::{Janela, Ligacoes};
 pub use moldura::{EstadoDaBarra, MolduraProvisoria};
