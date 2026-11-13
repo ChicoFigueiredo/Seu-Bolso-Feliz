@@ -19,6 +19,9 @@ pub enum ErroDeFonte {
     /// O chaveiro (arquivo de fallback) está trancado.
     #[error("o chaveiro está trancado: destranque com a senha-mestra")]
     Trancado,
+    /// A estratégia pede um número de dígitos fora de 1 a 11 (montada sem o `FromStr`).
+    #[error("a estratégia pede um número de dígitos do CPF fora de 1 a 11")]
+    EstrategiaInvalida,
     /// Outra falha do chaveiro.
     #[error("o chaveiro não respondeu")]
     Indisponivel,

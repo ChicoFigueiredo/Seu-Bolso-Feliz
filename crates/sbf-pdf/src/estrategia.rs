@@ -160,8 +160,27 @@ impl Estrategia {
         let valor = match self {
             Self::SenhaPropria(rotulo) => fonte.senha_propria(rotulo)?,
             Self::CpfCompleto => texto_de(&digitos_do_cpf(fonte)?),
-            Self::CpfPrimeiros(n) => texto_de(&digitos_do_cpf(fonte)?[..usize::from(*n)]),
-            Self::CpfUltimos(n) => texto_de(&digitos_do_cpf(fonte)?[11 - usize::from(*n)..]),
+            // Sem fatiar com índice: uma `Estrategia` montada direto com 0 ou 12 dá erro, não
+            // pânico (achado A15 da revisão de segurança da fatia 1).
+            Self::CpfPrimeiros(n) => {
+                let d = digitos_do_cpf(fonte)?;
+                let n = usize::from(*n);
+                texto_de(
+                    d.get(..n)
+                        .filter(|_| n > 0)
+                        .ok_or(ErroDeFonte::EstrategiaInvalida)?,
+                )
+            }
+            Self::CpfUltimos(n) => {
+                let d = digitos_do_cpf(fonte)?;
+                let n = usize::from(*n);
+                let inicio = d
+                    .len()
+                    .checked_sub(n)
+                    .filter(|_| n > 0)
+                    .ok_or(ErroDeFonte::EstrategiaInvalida)?;
+                texto_de(d.get(inicio..).ok_or(ErroDeFonte::EstrategiaInvalida)?)
+            }
             Self::CpfPontuado => {
                 let d = digitos_do_cpf(fonte)?;
                 let mut saida = Zeroizing::new(String::with_capacity(14));

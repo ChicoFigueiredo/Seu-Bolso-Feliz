@@ -386,6 +386,11 @@ fn pipeline_do_qpdf(
     ferramentas: &Ferramentas,
 ) -> Result<Desfecho, FalhaDeFerramenta> {
     let prazo = Instant::now() + ferramentas.limite_de_tempo;
+    // Só caminho absoluto: um relativo começando com `-` ou `@` o qpdf leria como opção ou
+    // arquivo de argumentos (achado A14 da revisão de segurança da fatia 1).
+    if !original.is_absolute() {
+        return Err(FalhaDeFerramenta::NaoEncontrada);
+    }
     let caminho = original.to_str().ok_or(FalhaDeFerramenta::NaoEncontrada)?;
     let mut decifrador =
         comando(qpdf, &["--password-file=-", "--decrypt", caminho, "-"])?.spawn()?;
