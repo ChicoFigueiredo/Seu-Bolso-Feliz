@@ -204,8 +204,10 @@ _Avoid_: cofre, cofre de senhas, carteira, vault, keyring
 Uma fonte de dados ligada ao sistema: um banco via Open Finance, uma caixa de e-mail,
 uma pasta local, o WhatsApp, o Telegram, um site visitado pelo navegador (Receita,
 internet banking), um worker. Cada conexão tem estado, agenda, última coleta e histórico
-de falhas.
-_Avoid_: integração, provider, adapter, serviço, vigia
+de falhas. Um lugar varrido uma vez só, como um disco do inventário, também é uma
+conexão, só que sem agenda.
+_Avoid_: integração, provider, adapter, serviço, vigia, fonte (como nome de um item;
+"fonte em massa" continua valendo como descrição)
 
 **Roteiro**:
 O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.

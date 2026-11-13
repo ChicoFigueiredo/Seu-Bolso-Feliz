@@ -127,9 +127,19 @@ Regra da shell, decidida em 2026-11-12, que vale para o produto inteiro e não t
 tela. O web de hoje não tem isso: a página de fornecedor das telas antigas não lista as
 movimentações dele.
 
-- **Todo nome é link:** fornecedor, conta, cartão, fatura, centro, categoria, tag,
-  ciclo, documento, achado, registro, compromisso, recorrente, dívida, conexão, lote e
-  estação. Clicar abre a **página** daquele item no centro.
+- **Todo nome é link, sem lista fechada:** toda entidade que tem identidade própria tem
+  página. Hoje isso inclui:
+  - **Dinheiro:** movimentação, transferência, conta, instituição, produto financeiro,
+    cartão, fatura, ciclo, categoria, tag, centro, compromisso, recorrente, dívida,
+    parcela, fornecedor e contrato.
+  - **Documentos e inventário:** documento, achado, origem, registro, decisão, lote,
+    pendência e regra de senha.
+  - **Fontes:** conexão (inclusive as fontes do inventário, que são conexões sem agenda),
+    coleta, alerta, canal e roteiro.
+  - **Estação e análise:** estação, alteração, ponto de atenção e destinatário.
+
+  Entidade nova nasce com página. As exceções são de propósito: os segredos do chaveiro
+  nunca aparecem, e os estados internos do pipeline não chegam à interface.
 - **A página de um item** tem um cabeçalho com o resumo e abas com tudo o que se liga a
   ele. O fornecedor, por exemplo:
   - **Cabeçalho:** total por ciclo, se é recorrente, apelidos e contratos.
@@ -144,8 +154,10 @@ movimentações dele.
 - **Em paralelo:** Ctrl+clique abre a página num painel flutuante, que pode ser
   destacado em janela do sistema, para comparar lado a lado. O clique normal continua
   abrindo no centro.
-- **Nesta fatia:** as páginas de achado, registro, fornecedor, ciclo, conta, fatura,
-  lote, pendência e coleta funcionam; as outras nascem com o livro-caixa.
+- **Nesta fatia:** funcionam as páginas das entidades do inventário: achado, origem,
+  registro, decisão, lote, pendência, regra de senha, conexão e coleta. Também
+  funcionam fornecedor, ciclo, conta e fatura, a partir dos registros. As outras nascem
+  com o livro-caixa.
 
 ### O produto inteiro na navegação
 
