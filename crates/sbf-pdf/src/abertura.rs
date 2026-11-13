@@ -27,11 +27,18 @@ use zeroize::Zeroizing;
 pub const ARGUMENTOS_DO_PDFTOTEXT: [&str; 5] = ["-layout", "-l", "3", "-", "-"];
 
 /// As ferramentas externas e o limite de tempo de cada chamada.
+///
+/// O padrão resolve cada uma **uma vez**, por caminho absoluto nas pastas do sistema
+/// ([`crate::ferramenta::localizar`]), nunca pelo `PATH`. Os campos são o lugar da
+/// configuração explícita (Opções), e são o caminho a mostrar em Opções e Bastidores. Um
+/// caminho relativo, ausente ou em pasta gravável por outros não roda: dá
+/// [`FalhaDeFerramenta::NaoEncontrada`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ferramentas {
-    /// O `pdftotext` (poppler). Padrão: `pdftotext` no PATH.
+    /// O `pdftotext` (poppler). Padrão: o de `/usr/bin` ou `/usr/local/bin`.
     pub pdftotext: PathBuf,
-    /// O `qpdf` do fallback, ou `None` para não usar. Padrão: `qpdf` no PATH.
+    /// O `qpdf` do fallback, ou `None` para não usar. Padrão: o de `/usr/bin` ou
+    /// `/usr/local/bin`.
     pub qpdf: Option<PathBuf>,
     /// O limite de cada processo (o `TIMEOUT_PDF_MS` do `e3-extrair.ts`: 30 s).
     pub limite_de_tempo: Duration,
@@ -40,8 +47,8 @@ pub struct Ferramentas {
 impl Default for Ferramentas {
     fn default() -> Self {
         Self {
-            pdftotext: PathBuf::from("pdftotext"),
-            qpdf: Some(PathBuf::from("qpdf")),
+            pdftotext: crate::ferramenta::localizar_ou_nome("pdftotext"),
+            qpdf: Some(crate::ferramenta::localizar_ou_nome("qpdf")),
             limite_de_tempo: Duration::from_secs(30),
         }
     }
@@ -360,21 +367,20 @@ fn pipeline_do_qpdf(
     let prazo = Instant::now() + ferramentas.limite_de_tempo;
     let caminho = original.to_str().ok_or(FalhaDeFerramenta::NaoEncontrada)?;
     let mut decifrador =
-        comando(qpdf, &["--password-file=-", "--decrypt", caminho, "-"]).spawn()?;
+        comando(qpdf, &["--password-file=-", "--decrypt", caminho, "-"])?.spawn()?;
     let pipe = decifrador
         .stdout
         .take()
         .map(Stdio::from)
         .unwrap_or_else(Stdio::null);
     let mut extrator = match comando(&ferramentas.pdftotext, &ARGUMENTOS_DO_PDFTOTEXT)
-        .stdin(pipe)
-        .spawn()
+        .and_then(|mut c| c.stdin(pipe).spawn().map_err(FalhaDeFerramenta::from))
     {
         Ok(filho) => filho,
         Err(erro) => {
             let _ = decifrador.kill();
             let _ = decifrador.wait();
-            return Err(erro.into());
+            return Err(erro);
         }
     };
     // A senha vai numa cópia zerável, pela entrada padrão do qpdf, e a entrada fecha (EOF).

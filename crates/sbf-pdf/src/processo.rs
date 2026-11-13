@@ -1,5 +1,6 @@
 //! Os processos filhos (`pdftotext`, `qpdf`): o que é sensível entra só pela entrada padrão,
 //! nunca pelo argv nem pelo ambiente, e todo filho tem limite de tempo e é morto ao passar.
+//! O programa só roda se for [`crate::ferramenta::confiavel`], e com o ambiente mínimo.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -44,14 +45,20 @@ pub(crate) struct Saida {
     pub(crate) stdout: Vec<u8>,
 }
 
-/// Um comando com a entrada, a saída e o erro em pipe.
-pub(crate) fn comando(programa: &Path, args: &[&str]) -> Command {
+/// Um comando com a entrada, a saída e o erro em pipe, e o ambiente mínimo. Um programa que
+/// não é [`confiavel`](crate::ferramenta::confiavel) (relativo, ausente, ou em pasta gravável
+/// por outros) dá [`FalhaDeFerramenta::NaoEncontrada`] sem rodar.
+pub(crate) fn comando(programa: &Path, args: &[&str]) -> Result<Command, FalhaDeFerramenta> {
+    if !crate::ferramenta::confiavel(programa) {
+        return Err(FalhaDeFerramenta::NaoEncontrada);
+    }
     let mut c = Command::new(programa);
+    crate::ferramenta::ambiente_minimo(&mut c);
     c.args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    c
+    Ok(c)
 }
 
 /// Escreve `bytes` na entrada do filho numa thread (para não travar com a saída cheia) e
@@ -104,7 +111,7 @@ pub(crate) fn rodar_com_entrada(
     limite: Duration,
 ) -> Result<Saida, FalhaDeFerramenta> {
     let prazo = Instant::now() + limite;
-    let mut filho = comando(programa, args).spawn()?;
+    let mut filho = comando(programa, args)?.spawn()?;
     let escrita = filho
         .stdin
         .take()

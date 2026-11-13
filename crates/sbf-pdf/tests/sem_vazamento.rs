@@ -161,7 +161,7 @@ fn interno_abre_sob_strace() {
         return;
     };
     let ferramentas = Ferramentas {
-        qpdf: std::env::var_os("SBF_PDF_QPDF").map(|_| PathBuf::from("qpdf")),
+        qpdf: std::env::var_os("SBF_PDF_QPDF").and_then(|_| Ferramentas::default().qpdf),
         ..Ferramentas::default()
     };
     let pdf = PdfProtegido::ler(Path::new(&alvo)).expect("ler");
