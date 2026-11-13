@@ -52,7 +52,9 @@ worker segue estas regras; cada uma custou uma falha real.
   quando o cursor avança.
 - **Ordem da E3:** `e3-triar`, `e3-pluggy`, `e3-extrair` (pdftotext), `e3-ocr`
   (tesseract nas imagens que a triagem marcou "precisa de OCR"), depois
-  `e3-triar --duvidas-com-texto`, `reparar-acervo` e `vista-ciclos`.
+  `e3-triar --duvidas-com-texto`, `e3-campos-ocr` (data, valor e fornecedor do
+  texto do OCR; sem data no texto, a do nome IMG-AAAAMMDD), `reparar-acervo` e
+  `vista-ciclos`.
 - **Marca de “sem extrator” não é texto lido.** O `e3-extrair` grava
   `sem-extrator:jpg` vazio para imagem, e o OCR pulava tudo que tinha linha em
   `texto`: 16 mil imagens ficaram sem OCR. Quem lê depois substitui a marca.
