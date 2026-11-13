@@ -15,7 +15,12 @@ A fatia substitui o Datasette e o "editar o SQLite na mão", e acrescenta:
 - o **chaveiro**;
 - a abertura de **PDF protegido**;
 - os **lotes** aprovados para promoção;
-- a **estante** e a **cópia de segurança do cofre** no Google Drive.
+- a **estante** e a **cópia de segurança do cofre** no Google Drive;
+- os **relatórios do §11** sobre os registros, com a marca "a conferir". É a primeira
+  resposta de gerenciamento financeiro, antes do livro-caixa chegar na fatia 2.
+
+A shell nasce com o produto inteiro no painel de navegação (ver "O produto inteiro na
+navegação"), para não ser redesenhada a cada fatia.
 
 Os coletores continuam em Bun por enquanto. Cada um é absorvido numa fatia 1b, 1c… e,
 pela regra do ADR-012, a versão TS é apagada no mesmo PR.
@@ -102,9 +107,9 @@ de cima para baixo:
    - **Achado** (contextual, aparece quando há um selecionado): Abrir original, Mostrar
      no cofre, Ver texto, Abrir protegido e Copiar hash.
 3. **Corpo**, em três partes:
-   - **Painel de navegação** à esquerda, com as áreas da tabela abaixo. O grupo "Em
-     breve" (Hoje, Movimentações, Caixa de entrada, Conexões, Sincronização) aparece
-     desabilitado, com o motivo.
+   - **Painel de navegação** à esquerda, já com o produto inteiro (próxima seção).
+     Nesta fatia funcionam o grupo Inventário e a área Relatórios. As outras áreas
+     aparecem com o selo da fatia em que chegam e o motivo.
    - **Tabela densa** no centro, virtualizada.
    - **Dock** à direita, com Detalhe, Origens, Texto e Histórico de decisões.
 4. **Barra de status:**
@@ -115,6 +120,21 @@ de cima para baixo:
 
 Os estados do achado aparecem como **A triar, Documento, Descartado e Em dúvida**, sempre
 com quem decidiu: "você" ou "regras@2".
+
+### O produto inteiro na navegação
+
+O desktop cobre tudo o que o web faz: as áreas da `nova-ia`, mais Fornecedores e
+Relatórios, que hoje só existem nas telas antigas. As configurações vão para Opções, nos
+bastidores. O protótipo mostra todas as áreas com dados fictícios.
+
+| Grupo      | Áreas (fatia em que chegam)                                                                                                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dinheiro   | Hoje (2), Movimentações (2 leitura, 3 edição), Contas e cartões com faturas (2), Dívidas (2), Recorrentes (2), Centros (2), Fornecedores (2), Relatórios (1, sobre o inventário; 2, sobre o livro-caixa) |
+| Documentos | Caixa de entrada (3)                                                                                                                                                                                     |
+| Inventário | as áreas da tabela abaixo (1)                                                                                                                                                                            |
+| Fontes     | Conexões (4), Alertas e canais (4), Roteiros (5)                                                                                                                                                         |
+| Estação    | Sincronização: alterações aguardando, alterações recusadas lado a lado, estações (2)                                                                                                                     |
+| Análise    | Pontos de atenção (6), Destinatários e níveis de confiança (6)                                                                                                                                           |
 
 ### Áreas e vistas
 
@@ -139,6 +159,35 @@ consultas. Ela vira **uma** função em `sbf-inventario`.
 | Coletas           | `varreduras`                                                                                   |
 | Pendências        | a tabela `pendencia`, agora com escrita                                                        |
 | Lotes             | as tabelas novas `lote` e `lote_item`                                                          |
+| Relatórios        | as perguntas do §11 sobre os registros, com a marca "a conferir" (próxima seção)               |
+
+### Relatórios do §11
+
+A área Relatórios responde às perguntas do §11 do prompt V6 com os **registros do
+inventário**:
+
+- quanto saiu no ciclo atual e nos últimos ciclos;
+- maiores fornecedores;
+- o que se repete todo ciclo e quais são as assinaturas;
+- o que aumentou;
+- onde o dinheiro se concentra, por categoria e por fornecedor;
+- o que ainda não foi classificado;
+- possíveis duplicidades;
+- o que falta para a análise ficar confiável: lacunas por conta, faturas que não fecham
+  e fontes sem coleta.
+
+Regras:
+
+- **A marca:** todo número leva "a conferir" (`CONTEXT.md`). Nesta fatia não aparecem
+  "Resultado do mês", "Disponível agora" nem "Livre após compromissos", que pertencem ao
+  livro-caixa.
+- **Gasto:** movimento entre contas não conta como gasto. É a mesma função única das
+  vistas.
+- **Fonte:** um seletor mostra "Inventário · a conferir". "Livro-caixa" aparece
+  desabilitado até a fatia 2, e os dois usam **o mesmo código de relatório**, só muda a
+  fonte (ADR-012: uma implementação por regra).
+- **"O que parece cortável"** aponta para Pontos de atenção (fatia 6). Esta fatia não
+  julga gasto.
 
 ## O banco: dono, migrações e o log de decisões
 
@@ -336,6 +385,7 @@ Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (r
 | INV-15 | Abre e navega no Linux, e no Windows e no macOS por VM, como faz o Chess Studio.                                                                                                                                                                         |
 | INV-16 | Com o inventário real, abre em menos de 3 s e filtra em menos de 300 ms nas vistas principais. As tabelas são virtualizadas, sem paginação visível.                                                                                                      |
 | INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                          |
+| INV-18 | Cada resposta do §11 bate com uma consulta de referência sobre o banco de teste e leva "a conferir". Nenhum termo do livro-caixa aparece na fatia.                                                                                                       |
 
 ## Tickets e paralelização
 
@@ -359,11 +409,13 @@ visual, UX ou segurança leva `ready-for-human` e espera o OK do CEO.
 | B    | T10 Lotes                                                                                                                           | Sonnet           | T4, T9     |
 | B    | T11 `sbf-estante`: estante, cópia de segurança e exclusão na coleta do Drive                                                        | Sonnet           | T4, T7     |
 | B    | T12 Aviso de disco sem cifra nos 3 SOs                                                                                              | Haiku            | T3         |
+| B    | T14 Relatórios do §11 sobre os registros, com o seletor de fonte                                                                    | Sonnet           | T5         |
 | C    | T13 Empacotamento (scripts do Chess adaptados) e relatório da matriz de aceite                                                      | Sonnet           | todos      |
 
 ## Revisão
 
-- Protótipo navegável: link no PR desta spec.
+- Protótipo navegável do produto inteiro: https://claude.ai/artifact/G2oqge11uFBBdVHQnr61fE
+  (privado, dados fictícios).
 - O CEO aprova a spec e o protótipo. Só depois os tickets viram issues e o código começa.
 
 ## Referências

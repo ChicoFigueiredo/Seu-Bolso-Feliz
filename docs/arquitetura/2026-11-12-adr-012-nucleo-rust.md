@@ -42,5 +42,8 @@ As peças que acompanham a decisão:
 
 - O port da conciliação precisa escolher uma das duas cópias atuais e apagar a outra.
 - Os workers Bun se aposentam um a um, à medida que o equivalente Rust chega.
+- O desktop cobre tudo o que o web faz: as áreas da `nova-ia`, mais Fornecedores e
+  Relatórios das telas antigas. As configurações vão para Opções, nos bastidores. Só
+  então o web pode encolher.
 - Durante a transição, o web chama a API Rust para as regras já portadas e as Server
   Actions para as demais.

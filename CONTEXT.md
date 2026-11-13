@@ -24,6 +24,14 @@ Entrou menos saiu dentro do período. É uma medida de fluxo, não de posição 
 positivo com a conta no vermelho.
 _Avoid_: saldo do mês, balanço
 
+**A conferir**:
+A marca de todo número de dinheiro calculado a partir de registros que o usuário ainda
+não aprovou, como os relatórios sobre o inventário: "Saiu no ciclo 2026-10 · a conferir".
+Disponível agora, livre após compromissos e resultado do mês vêm só de movimentações e
+nunca levam essa marca. Não é estimativa: estimativa é um valor futuro ainda não
+confirmado; "a conferir" é um fato ainda não revisado.
+_Avoid_: prévia, provisório, estimativa, não oficial
+
 **Ciclo**:
 O período financeiro pessoal: começa no dia de corte escolhido pelo usuário (hoje, o
 dia 20) e termina na véspera do mesmo dia no mês seguinte, inclusive. Cada dia pertence
