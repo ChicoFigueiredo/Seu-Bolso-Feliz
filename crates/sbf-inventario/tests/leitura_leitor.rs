@@ -626,6 +626,62 @@ fn rastro_de_cada_tipo_da_fatia_1() {
 }
 
 #[test]
+fn rastro_da_fatura_e_da_conta_e_o_ciclo_sem_proveniencia() {
+    let (banco, leitor) = abrir();
+    let fatura = leitor.rastro(&r("fatura:b-out")).expect("rastro");
+    // Acima: a conexão de onde a fatura veio (e o documento, quando houver).
+    assert!(
+        fatura.acima.iter().any(|e| e.alvo.tipo == Tipo::Conexao),
+        "{:?}",
+        fatura.acima
+    );
+    assert!(
+        fatura
+            .acima
+            .iter()
+            .all(|e| matches!(e.alvo.tipo, Tipo::Conexao | Tipo::Documento))
+    );
+    // Abaixo: os registros da fatura (ela e as transações), cada um uma vez.
+    let registros = ligados(&leitor, "fatura:b-out", Tipo::Registro);
+    assert!(!fatura.abaixo.is_empty());
+    assert_eq!(fatura.abaixo.len(), registros.linhas.len());
+    assert!(fatura.abaixo.iter().all(|e| e.alvo.tipo == Tipo::Registro));
+    assert!(fatura.abaixo.iter().all(|e| e.quem.is_some()));
+
+    // Com um documento por trás de uma transação, ele aparece acima.
+    let conn = Connection::open(&banco.caminho).expect("conexão");
+    conn.execute(
+        "UPDATE registro SET content_hash = ?1
+          WHERE id = (SELECT min(id) FROM registro WHERE fatura_ref = 'b-out')",
+        [hash(H_FATURA_CARTAO)],
+    )
+    .expect("documento");
+    let fatura = leitor.rastro(&r("fatura:b-out")).expect("rastro");
+    assert!(
+        fatura
+            .acima
+            .iter()
+            .any(|e| e.alvo == Ref::nova(Tipo::Documento, hash(H_FATURA_CARTAO))),
+        "{:?}",
+        fatura.acima
+    );
+
+    let conta = leitor.rastro(&r("conta:Cartão Beta")).expect("rastro");
+    assert!(!conta.acima.is_empty());
+    assert!(conta.acima.iter().all(|e| e.alvo.tipo == Tipo::Conexao));
+    let distintas: std::collections::BTreeSet<_> = conta.acima.iter().map(|e| &e.alvo).collect();
+    assert_eq!(distintas.len(), conta.acima.len(), "sem repetir");
+
+    let ciclo = leitor.rastro(&r("ciclo:2026-10")).expect("rastro");
+    assert!(ciclo.acima.is_empty() && ciclo.abaixo.is_empty());
+    assert_eq!(
+        sbf_inventario::rastro::motivo_sem_rastro(Tipo::Ciclo),
+        Some("O ciclo é um período: não tem proveniência.")
+    );
+    assert_eq!(sbf_inventario::rastro::motivo_sem_rastro(Tipo::Conta), None);
+}
+
+#[test]
 fn todo_item_da_fatia_1_tem_cabecalho_e_item_ausente_e_none() {
     let (_b, leitor) = abrir();
     let mut refs = vec![
