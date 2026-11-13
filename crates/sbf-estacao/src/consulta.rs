@@ -17,8 +17,8 @@ use sbf_inventario::referencia::{Ref, Tipo};
 use sbf_livro::centros::painel_centros;
 use sbf_livro::contrato::livro_das_linhas;
 use sbf_livro::gastos::GastosDoLivro;
-use sbf_livro::hoje::{PainelHoje, e_entrada, e_saida, painel_hoje};
-use sbf_livro::{Ciclo, Data, LivroCaixa, Movimentacao};
+use sbf_livro::hoje::{MotivoParaResolver, PainelHoje, e_entrada, e_saida, painel_hoje};
+use sbf_livro::{Ciclo, Data, LivroCaixa, Movimentacao, TipoDeMovimentacao};
 
 impl From<ErroDoCache> for ErroDeConsulta {
     fn from(e: ErroDoCache) -> Self {
@@ -30,8 +30,18 @@ impl From<ErroDoCache> for ErroDeConsulta {
 const RECORTE_DISPONIVEL: &str = "disponivel";
 const RECORTE_ENTROU: &str = "entrou";
 const RECORTE_SAIU: &str = "saiu";
-const RECORTE_NO_CARTAO: &str = "no_cartao";
-const RECORTE_PARA_RESOLVER: &str = "para_resolver:";
+const RECORTE_NO_CARTAO: &str = "no-cartao";
+
+/// O recorte de cada item de Para resolver (as convenções da janela).
+fn recorte_de(motivo: MotivoParaResolver) -> &'static str {
+    match motivo {
+        MotivoParaResolver::Vencidas => "vencidos",
+        MotivoParaResolver::SemCategoria => "sem-categoria",
+        MotivoParaResolver::NaoAlocadas => "nao-alocadas",
+        MotivoParaResolver::NaoConfirmadas => "nao-confirmadas",
+        MotivoParaResolver::DocumentosARevisar => "documentos-a-revisar",
+    }
+}
 
 fn linhas_do_cache(cache: &CacheDoLivro, colecao: Colecao) -> Result<LinhasDaColecao, ErroDoCache> {
     use LinhasDaColecao as L;
@@ -459,21 +469,6 @@ impl ConsultaDoLivro {
         let ciclo = ciclo.and_then(|c| Ciclo::do_nome(c, self.livro.corte));
         let no_ciclo = |m: &&Movimentacao| ciclo.as_ref().is_none_or(|c| c.contem(m.data));
         let l = &self.livro;
-        let recorte = recorte.unwrap_or_default();
-        if let Some(motivo) = recorte.strip_prefix(RECORTE_PARA_RESOLVER) {
-            let painel = painel_hoje(l, self.hoje);
-            let ids: Vec<&str> = painel
-                .para_resolver
-                .iter()
-                .find(|i| i.motivo.rotulo() == motivo)
-                .map(|i| i.movimentacoes.iter().map(String::as_str).collect())
-                .unwrap_or_default();
-            return Ok(self.tabela_de_movimentacoes(
-                l.movimentacoes
-                    .iter()
-                    .filter(|m| ids.contains(&m.id.as_str())),
-            ));
-        }
         let cartoes: Vec<&str> = l
             .contas
             .iter()
@@ -482,28 +477,170 @@ impl ConsultaDoLivro {
             .collect();
         let no_cartao =
             |m: &Movimentacao| m.fatura_id.is_some() || cartoes.contains(&m.conta_id.as_str());
-        Ok(match recorte {
-            RECORTE_DISPONIVEL => self.tabela_da_area(Area::ContasECartoes, &Filtro::default())?,
-            RECORTE_ENTROU => self.tabela_de_movimentacoes(
+        let movs = |f: &dyn Fn(&Movimentacao) -> bool| {
+            self.tabela_de_movimentacoes(l.movimentacoes.iter().filter(no_ciclo).filter(|m| f(m)))
+        };
+        let entrou = |m: &Movimentacao| m.confirmada && e_entrada(m.tipo) && !no_cartao(m);
+        let saiu = |m: &Movimentacao| m.confirmada && e_saida(m.tipo) && !no_cartao(m);
+        let para_resolver = |motivo: MotivoParaResolver| {
+            let painel = painel_hoje(l, self.hoje);
+            let ids: Vec<&str> = painel
+                .para_resolver
+                .iter()
+                .find(|i| i.motivo == motivo)
+                .map(|i| i.movimentacoes.iter().map(String::as_str).collect())
+                .unwrap_or_default();
+            self.tabela_de_movimentacoes(
                 l.movimentacoes
                     .iter()
-                    .filter(no_ciclo)
-                    .filter(|m| m.confirmada && e_entrada(m.tipo)),
+                    .filter(|m| ids.contains(&m.id.as_str())),
+            )
+        };
+        Ok(match (de.tipo, recorte) {
+            (Tipo::Ciclo, Some("entrou")) => movs(&entrou),
+            (Tipo::Ciclo, Some("saiu")) => movs(&saiu),
+            (Tipo::Ciclo, Some("no-cartao")) => {
+                movs(&|m| m.confirmada && e_saida(m.tipo) && no_cartao(m))
+            }
+            (Tipo::Ciclo, Some("resultado")) => movs(&|m| entrou(m) || saiu(m)),
+            (Tipo::Ciclo, Some("sem-categoria")) => para_resolver(MotivoParaResolver::SemCategoria),
+            (Tipo::Ciclo, Some("nao-alocadas")) => para_resolver(MotivoParaResolver::NaoAlocadas),
+            (Tipo::Ciclo, Some("nao-confirmadas")) => {
+                para_resolver(MotivoParaResolver::NaoConfirmadas)
+            }
+            (Tipo::Ciclo, Some("vencidos")) => para_resolver(MotivoParaResolver::Vencidas),
+            (Tipo::Ciclo, Some("disponivel")) => {
+                self.tabela_da_area(Area::ContasECartoes, &Filtro::default())?
+            }
+            (Tipo::Ciclo, Some("dividas")) => {
+                self.tabela_da_area(Area::Dividas, &Filtro::default())?
+            }
+            (Tipo::Ciclo, Some("recorrentes")) => {
+                self.tabela_da_area(Area::Recorrentes, &Filtro::default())?
+            }
+            (Tipo::Ciclo, Some("compromissos" | "ainda-vai-sair")) => {
+                self.tabela_de_compromissos(recorte == Some("ainda-vai-sair"))
+            }
+            (Tipo::Fatura, Some("pagamento")) => self.tabela_de_movimentacoes(
+                l.movimentacoes.iter().filter(|m| {
+                    m.tipo == TipoDeMovimentacao::PagamentoDeFatura
+                        && m.fatura_id.as_deref() == Some(de.chave.as_str())
+                }),
             ),
-            RECORTE_SAIU => self.tabela_de_movimentacoes(
-                l.movimentacoes
-                    .iter()
+            (Tipo::Fatura, _) => self.tabela_de_movimentacoes(l.movimentacoes.iter().filter(|m| {
+                m.fatura_id.as_deref() == Some(de.chave.as_str())
+                    && m.tipo != TipoDeMovimentacao::PagamentoDeFatura
+            })),
+            (Tipo::Centro, Some(r)) => {
+                let quer = |m: &Movimentacao| match r {
+                    "entradas" => e_entrada(m.tipo),
+                    "saidas" => e_saida(m.tipo),
+                    _ => m.tipo != TipoDeMovimentacao::Ajuste,
+                };
+                self.tabela_de_movimentacoes(self.movimentacoes_de(de).filter(no_ciclo).filter(|m| quer(m)))
+            }
+            (_, Some(outro))
+                if matches!(
+                    outro,
+                    "origem"
+                        | "proximos"
+                        | "fornecedor-e-contrato"
+                        | "simulacao"
+                        | "compromissos-e-dividas"
+                        | "parcelas-e-dividas"
+                        | "documentos-a-revisar"
+                        | "faturas-abertas"
+                ) =>
+            {
+                return Err(ErroDeConsulta::NaoSuportado(format!(
+                    "o recorte {outro} ainda não é lido do cache da estação"
+                )));
+            }
+            // Conta, cartão, fornecedor, categoria…: as movimentações ligadas (sem ajuste).
+            _ => self.tabela_de_movimentacoes(
+                self.movimentacoes_de(de)
                     .filter(no_ciclo)
-                    .filter(|m| m.confirmada && e_saida(m.tipo) && !no_cartao(m)),
+                    .filter(|m| m.tipo != TipoDeMovimentacao::Ajuste),
             ),
-            RECORTE_NO_CARTAO => self.tabela_de_movimentacoes(
-                l.movimentacoes
-                    .iter()
-                    .filter(no_ciclo)
-                    .filter(|m| m.confirmada && e_saida(m.tipo) && no_cartao(m)),
-            ),
-            _ => self.tabela_de_movimentacoes(self.movimentacoes_de(de).filter(no_ciclo)),
         })
+    }
+
+    fn tabela_de_compromissos(&self, so_os_que_faltam: bool) -> Tabela {
+        let hoje = painel_hoje(&self.livro, self.hoje);
+        Tabela {
+            colunas: colunas(&[("Data", false), ("Compromisso", false), ("Valor", true)]),
+            linhas: hoje
+                .compromissos
+                .iter()
+                .filter(|c| !so_os_que_faltam || !c.vencido)
+                .map(|c| Linha {
+                    alvo: None,
+                    celulas: vec![
+                        Celula::Data(c.data.to_string()),
+                        Celula::Texto(c.descricao.clone()),
+                        self.valor(-c.valor.0, None),
+                    ],
+                })
+                .collect(),
+        }
+    }
+
+    /// A aba "Ligações": tudo que se liga a `de`, numa tabela mista.
+    fn ligacoes(&self, de: &Ref) -> Tabela {
+        let l = &self.livro;
+        let mut refs: Vec<(Tipo, String)> = Vec::new();
+        match de.tipo {
+            Tipo::Movimentacao => {
+                if let Some(m) = l.movimentacoes.iter().find(|m| m.id == de.chave) {
+                    refs.push((Tipo::Conta, m.conta_id.clone()));
+                    for (tipo, id) in [
+                        (Tipo::Categoria, &m.categoria_id),
+                        (Tipo::Fornecedor, &m.fornecedor_id),
+                        (Tipo::Fatura, &m.fatura_id),
+                        (Tipo::Parcela, &m.parcela_id),
+                        (Tipo::Documento, &m.documento_id),
+                    ] {
+                        if let Some(id) = id {
+                            refs.push((tipo, id.clone()));
+                        }
+                    }
+                    refs.extend(
+                        l.rateios
+                            .iter()
+                            .filter(|r| r.movimentacao_id == m.id)
+                            .map(|r| (Tipo::Centro, r.centro_id.clone())),
+                    );
+                }
+            }
+            _ => refs.extend(
+                self.movimentacoes_de(de)
+                    .map(|m| (Tipo::Movimentacao, m.id.clone())),
+            ),
+        }
+        Tabela {
+            colunas: colunas(&[("Tipo", false), ("Item", false)]),
+            linhas: refs
+                .into_iter()
+                .map(|(tipo, id)| {
+                    let texto = match tipo {
+                        Tipo::Movimentacao => l
+                            .movimentacoes
+                            .iter()
+                            .find(|m| m.id == id)
+                            .map_or_else(|| id.clone(), descricao),
+                        _ => self.nome_de(tipo, &id).map_or_else(|| id.clone(), str::to_owned),
+                    };
+                    let alvo = Ref::nova(tipo, id);
+                    Linha {
+                        alvo: Some(alvo.clone()),
+                        celulas: vec![
+                            Celula::Texto(format!("{tipo:?}")),
+                            Celula::Link { alvo, texto },
+                        ],
+                    }
+                })
+                .collect(),
+        }
     }
 
     // ---------------- painéis ----------------
@@ -662,7 +799,7 @@ impl ConsultaDoLivro {
                                     Box::new(self.itens(
                                         de.clone(),
                                         None,
-                                        &format!("{RECORTE_PARA_RESOLVER}{}", i.motivo.rotulo()),
+                                        recorte_de(i.motivo),
                                     ))
                                 }),
                             },
@@ -756,6 +893,7 @@ impl Consulta for ConsultaDoLivro {
     fn tabela(&self, pedido: &PedidoDeTabela) -> ResultadoDeConsulta<Tabela> {
         match pedido {
             PedidoDeTabela::Area { area, filtro } => self.tabela_da_area(*area, filtro),
+            PedidoDeTabela::Ligados { de, tipo } if *tipo == de.tipo => Ok(self.ligacoes(de)),
             PedidoDeTabela::Ligados { de, tipo } => match tipo {
                 Tipo::Movimentacao => Ok(self.tabela_de_movimentacoes(self.movimentacoes_de(de))),
                 Tipo::Centro if de.tipo == Tipo::Movimentacao => Ok(Tabela {
