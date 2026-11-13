@@ -181,10 +181,31 @@ pub fn total(
     pedidos: &mut Vec<Pedido>,
 ) -> Response {
     let p = tema::paleta(ui.ctx());
+    total_rico(
+        ui,
+        RichText::new(texto).color(p.tinta),
+        texto,
+        itens,
+        dica,
+        pedidos,
+        p.borda_forte,
+    )
+}
+
+/// Um total com estilo próprio (cartões de destaque). `cor_do_traco` é o pontilhado.
+pub fn total_rico(
+    ui: &mut Ui,
+    rico: RichText,
+    texto: &str,
+    itens: Option<&PedidoDeTabela>,
+    dica: &str,
+    pedidos: &mut Vec<Pedido>,
+    cor_do_traco: egui::Color32,
+) -> Response {
     match itens {
         Some(pedido) => {
             let r = ui
-                .add(egui::Label::new(RichText::new(texto).color(p.tinta)).sense(Sense::click()))
+                .add(egui::Label::new(rico).sense(Sense::click()))
                 .on_hover_cursor(CursorIcon::PointingHand)
                 .on_hover_text(format!("{dica}\nClique abre os itens que o somam"));
             // Sublinhado pontilhado: o sinal de "todo total é clicável".
@@ -194,7 +215,7 @@ pub fn total(
                 ui.painter().hline(
                     x..=(x + 2.0).min(r.rect.right()),
                     y,
-                    Stroke::new(1.0, p.borda_forte),
+                    Stroke::new(1.0, cor_do_traco),
                 );
                 x += 4.0;
             }
@@ -209,7 +230,7 @@ pub fn total(
             }
             r
         }
-        None => ui.label(texto).on_hover_text(dica),
+        None => ui.label(rico).on_hover_text(dica),
     }
 }
 

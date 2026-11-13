@@ -275,7 +275,31 @@ pub fn desenhar(
         ui.horizontal(|ui| componentes::celula(ui, &c.valor, pedidos));
     }
 
-    // Os campos em grade, como no protótipo (rótulo em caixa alta sobre o valor).
+    // Os valores em cartões (o primeiro em destaque), com o gráfico por ciclo ao lado,
+    // como no protótipo; o resto em grade.
+    let (valores, campos): (Vec<_>, Vec<_>) = campos
+        .into_iter()
+        .partition(|c| matches!(c.valor, Celula::Valor { .. }));
+    let totais = if tem_grafico_por_ciclo(alvo.tipo) {
+        leitor
+            .por_ciclo(alvo, Fonte::Inventario, 6)
+            .ok()
+            .filter(|t| !t.is_empty())
+    } else {
+        None
+    };
+    if !valores.is_empty() || totais.is_some() {
+        ui.horizontal_wrapped(|ui| {
+            for (i, c) in valores.iter().take(4).enumerate() {
+                cartao_de_valor(ui, c, i == 0, pedidos);
+            }
+            if let Some(t) = &totais {
+                grafico_por_ciclo(ui, t, pedidos);
+            }
+        });
+        ui.add_space(8.0);
+    }
+    let campos: Vec<_> = valores.iter().skip(4).copied().chain(campos).collect();
     let largura = ui.available_width();
     let por_linha = ((largura / 190.0).floor() as usize).clamp(1, 5);
     egui::Grid::new(("campos", alvo))
@@ -283,8 +307,10 @@ pub fn desenhar(
         .spacing(vec2(24.0, 8.0))
         .min_col_width((largura / por_linha as f32 - 24.0).max(80.0))
         .show(ui, |ui| {
+            let largura_da_celula = (largura / por_linha as f32 - 24.0).max(80.0);
             for (i, c) in campos.iter().enumerate() {
                 ui.vertical(|ui| {
+                    ui.set_max_width(largura_da_celula);
                     componentes::rotulo_de_secao(ui, &c.rotulo);
                     ui.horizontal(|ui| {
                         componentes::celula(ui, &c.valor, pedidos);
@@ -306,14 +332,6 @@ pub fn desenhar(
                 }
             }
         });
-
-    if tem_grafico_por_ciclo(alvo.tipo)
-        && let Ok(totais) = leitor.por_ciclo(alvo, Fonte::Inventario, 6)
-        && !totais.is_empty()
-    {
-        ui.add_space(10.0);
-        grafico_por_ciclo(ui, &totais, pedidos);
-    }
 
     // Abas.
     ui.add_space(10.0);
@@ -416,6 +434,59 @@ pub fn desenhar(
     }
 }
 
+/// Um cartão com um valor do cabeçalho; o primeiro da página vem em destaque (hero).
+fn cartao_de_valor(
+    ui: &mut Ui,
+    c: &sbf_inventario::consulta::Campo,
+    destaque: bool,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let p = tema::paleta(ui.ctx());
+    let Celula::Valor {
+        centavos,
+        fonte,
+        itens,
+    } = &c.valor
+    else {
+        return;
+    };
+    let (fundo, borda, cor, sub) = if destaque {
+        (p.hero_fundo, p.hero_fundo, p.hero_texto, p.hero_sub)
+    } else {
+        (p.superficie_1, p.borda, p.tinta, p.tinta_suave)
+    };
+    Frame::new()
+        .fill(fundo)
+        .stroke(Stroke::new(1.0, borda))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_min_size(vec2(170.0, 74.0));
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(c.rotulo.to_uppercase())
+                        .font(FontId::new(11.5, familia_forte()))
+                        .color(sub),
+                );
+                let texto = formato::dinheiro(*centavos);
+                componentes::total_rico(
+                    ui,
+                    RichText::new(&texto)
+                        .font(FontId::new(21.0, familia_forte()))
+                        .color(cor),
+                    &texto,
+                    itens.as_deref(),
+                    &format!("{} · {}", c.rotulo, texto),
+                    pedidos,
+                    sub,
+                );
+                if *fonte == Fonte::Inventario {
+                    ui.label(RichText::new(A_CONFERIR).size(12.0).color(sub));
+                }
+            });
+        });
+}
+
 /// O texto extraído, em fonte mono, rolável.
 pub fn texto_extraido(ui: &mut Ui, texto: Option<&str>) {
     let p = tema::paleta(ui.ctx());
@@ -447,79 +518,81 @@ pub fn texto_extraido(ui: &mut Ui, texto: Option<&str>) {
 pub fn grafico_por_ciclo(ui: &mut Ui, totais: &[TotalDoCiclo], pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
     componentes::cartao(ui, |ui| {
-        ui.horizontal(|ui| {
-            componentes::rotulo_de_secao(ui, "Total por ciclo");
-            ui.label(
-                RichText::new(format!(
-                    "últimos {} ciclos · inventário · {A_CONFERIR}",
-                    totais.len()
-                ))
-                .size(12.0)
-                .color(p.tinta_suave),
-            );
-        });
-        ui.add_space(4.0);
-        let maximo = totais
-            .iter()
-            .map(|t| t.centavos.unsigned_abs())
-            .max()
-            .unwrap_or(1)
-            .max(1) as f32;
-        let largura_barra = 64.0;
-        ui.horizontal(|ui| {
-            for (i, t) in totais.iter().enumerate() {
-                let ultimo = i + 1 == totais.len();
-                ui.vertical(|ui| {
-                    ui.set_width(largura_barra);
-                    ui.label(
-                        RichText::new(formato::dinheiro(t.centavos))
-                            .size(11.0)
-                            .color(p.tinta_suave),
-                    );
-                    let (rect, r) =
-                        ui.allocate_exact_size(vec2(largura_barra - 12.0, 44.0), Sense::click());
-                    let h = (t.centavos.unsigned_abs() as f32 / maximo * 40.0).max(2.0);
-                    let barra = egui::Rect::from_min_max(
-                        egui::pos2(rect.left(), rect.bottom() - h),
-                        rect.max,
-                    );
-                    let cor = if ultimo {
-                        p.destaque
-                    } else if r.hovered() {
-                        p.destaque_borda
-                    } else {
-                        p.destaque_sutil
-                    };
-                    ui.painter().rect_filled(barra, CornerRadius::same(2), cor);
-                    let mut texto = RichText::new(&t.ciclo).size(11.0).color(p.tinta_suave);
-                    if ultimo {
-                        texto = texto.strong().color(p.tinta);
-                    }
-                    ui.label(texto);
-                    if let Some(itens) = &t.itens {
-                        let r = r
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text(format!(
-                                "Ciclo {}: {} · {A_CONFERIR}\nClique abre os registros",
-                                t.ciclo,
-                                formato::dinheiro(t.centavos)
-                            ));
-                        if r.clicked() {
-                            pedidos.push(Pedido::abrir(
-                                Destino::Total {
-                                    titulo: format!(
-                                        "Ciclo {} · {}",
-                                        t.ciclo,
-                                        formato::dinheiro(t.centavos)
-                                    ),
-                                    pedido: (**itens).clone(),
-                                },
-                                componentes::ctrl(ui),
-                            ));
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                componentes::rotulo_de_secao(ui, "Total por ciclo");
+                ui.label(
+                    RichText::new(format!(
+                        "últimos {} ciclos · inventário · {A_CONFERIR}",
+                        totais.len()
+                    ))
+                    .size(12.0)
+                    .color(p.tinta_suave),
+                );
+            });
+            ui.add_space(4.0);
+            let maximo = totais
+                .iter()
+                .map(|t| t.centavos.unsigned_abs())
+                .max()
+                .unwrap_or(1)
+                .max(1) as f32;
+            let largura_barra = 54.0;
+            ui.horizontal(|ui| {
+                for (i, t) in totais.iter().enumerate() {
+                    let ultimo = i + 1 == totais.len();
+                    ui.vertical(|ui| {
+                        ui.set_width(largura_barra);
+                        ui.label(
+                            RichText::new(formato::dinheiro(t.centavos))
+                                .size(11.0)
+                                .color(p.tinta_suave),
+                        );
+                        let (rect, r) = ui
+                            .allocate_exact_size(vec2(largura_barra - 12.0, 44.0), Sense::click());
+                        let h = (t.centavos.unsigned_abs() as f32 / maximo * 40.0).max(2.0);
+                        let barra = egui::Rect::from_min_max(
+                            egui::pos2(rect.left(), rect.bottom() - h),
+                            rect.max,
+                        );
+                        let cor = if ultimo {
+                            p.destaque
+                        } else if r.hovered() {
+                            p.destaque_borda
+                        } else {
+                            p.destaque_sutil
+                        };
+                        ui.painter().rect_filled(barra, CornerRadius::same(2), cor);
+                        let mut texto = RichText::new(&t.ciclo).size(11.0).color(p.tinta_suave);
+                        if ultimo {
+                            texto = texto.strong().color(p.tinta);
                         }
-                    }
-                });
-            }
+                        ui.label(texto);
+                        if let Some(itens) = &t.itens {
+                            let r = r
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text(format!(
+                                    "Ciclo {}: {} · {A_CONFERIR}\nClique abre os registros",
+                                    t.ciclo,
+                                    formato::dinheiro(t.centavos)
+                                ));
+                            if r.clicked() {
+                                pedidos.push(Pedido::abrir(
+                                    Destino::Total {
+                                        titulo: format!(
+                                            "Ciclo {} · {}",
+                                            t.ciclo,
+                                            formato::dinheiro(t.centavos)
+                                        ),
+                                        pedido: (**itens).clone(),
+                                    },
+                                    componentes::ctrl(ui),
+                                ));
+                            }
+                        }
+                    });
+                }
+            });
         });
     });
 }
