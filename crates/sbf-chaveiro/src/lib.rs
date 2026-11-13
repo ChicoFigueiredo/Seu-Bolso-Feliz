@@ -36,7 +36,8 @@ mod fonte;
 mod pasta;
 
 pub use chaveiro::{
-    CHAVE_DO_CPF, Chaveiro, OfertaDeApagar, PREFIXO_DE_SENHA, ResumoDaImportacao, SERVICO,
+    CHAVE_DO_CPF, Chaveiro, OfertaDeApagar, PREFIXO_DE_ESTACAO, PREFIXO_DE_SENHA,
+    ResumoDaImportacao, SERVICO,
 };
 pub use erro::ErroDoChaveiro;
 pub use pasta::{
