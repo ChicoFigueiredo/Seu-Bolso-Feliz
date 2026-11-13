@@ -26,6 +26,7 @@ pub mod pendencia;
 pub mod projecao;
 
 // Leitura: vistas, Visão geral, Relatórios do §11, relações, totais e rastro.
+pub mod conciliacao;
 pub mod leitor;
 pub mod movimento;
 pub mod rastro;

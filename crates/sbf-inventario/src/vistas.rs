@@ -1905,6 +1905,7 @@ pub fn tabela_da_area(
             }
             Ok(tabela_varreduras(&varreduras(ctx, &sel)?))
         }
+        Area::SugestoesDeConciliacao => crate::conciliacao::tabela(ctx),
         Area::VisaoGeral | Area::Relatorios | Area::Pendencias | Area::Lotes => Err(
             ErroDeConsulta::NaoSuportado(format!("a área {area:?} não é uma vista simples")),
         ),

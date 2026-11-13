@@ -134,6 +134,9 @@ pub enum Area {
     Coletas,
     Pendencias,
     Lotes,
+    /// Os pares óbvios entre registros de extrato e de documento, que o usuário
+    /// confirma em lote (`conciliacao`).
+    SugestoesDeConciliacao,
     Relatorios,
     // Dinheiro (fatia 2): leem o livro-caixa (`Fonte::LivroCaixa`).
     /// Painel: Disponível agora, Livre após compromissos, Resultado do mês, Para

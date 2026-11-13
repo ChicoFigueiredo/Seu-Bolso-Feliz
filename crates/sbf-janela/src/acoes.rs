@@ -60,6 +60,8 @@ pub enum IdAcao {
     // Relacionar
     MarcarDuplicidade,
     UnirConciliados,
+    /// Nas Sugestões de conciliação: confirma, em lote, os pares selecionados.
+    ConfirmarConciliacoes,
     ConfirmarRecorrencia,
     // Interpretação
     Aprovar,
@@ -660,6 +662,16 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "Reconhece que dois registros descrevem o mesmo fato",
     ),
     definir_acao(
+        I::ConfirmarConciliacoes,
+        "relacionar.confirmar-conciliacoes",
+        "Confirmar conciliações",
+        "call_merge",
+        None,
+        B::Triagem,
+        "Relacionar",
+        "Confirma, em lote, os pares sugeridos selecionados: uma decisão por par",
+    ),
+    definir_acao(
         I::ConfirmarRecorrencia,
         "relacionar.recorrencia",
         "Confirmar recorrência",
@@ -1085,6 +1097,8 @@ pub struct ContextoDasAcoes {
     pub alteracao_recusada: bool,
     /// A seleção é uma estação com credencial ativa.
     pub estacao_ativa: bool,
+    /// A área aberta é a das Sugestões de conciliação.
+    pub nas_sugestoes: bool,
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -1153,6 +1167,10 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         I::UnirConciliados => exige(
             sel.len() == 2 && todos_de(sel, &[Tipo::Registro]),
             "Selecione dois registros",
+        ),
+        I::ConfirmarConciliacoes => exige(
+            c.nas_sugestoes && todos_de(sel, &[Tipo::Registro]),
+            "Abra Sugestões de conciliação e selecione os pares",
         ),
         I::ConfirmarRecorrencia => exige(
             todos_de(sel, &[Tipo::Fornecedor]),
@@ -1375,6 +1393,7 @@ mod testes {
         I::CorrigirDataEValor,
         I::MarcarDuplicidade,
         I::UnirConciliados,
+        I::ConfirmarConciliacoes,
         I::ConfirmarRecorrencia,
         I::Aprovar,
         I::Rejeitar,

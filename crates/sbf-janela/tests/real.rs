@@ -147,6 +147,81 @@ fn uma_decisao_pela_janela_grava_no_banco_e_o_desfazer_restaura() {
 }
 
 #[test]
+fn confirmar_conciliacoes_em_lote_grava_uma_decisao_por_par() {
+    let banco = comum::banco_de_teste();
+    {
+        let conn = rusqlite::Connection::open(&banco.caminho).expect("abrir");
+        let extrato = comum::Reg {
+            fonte: "conexao:pluggy",
+            tipo: "debito",
+            data: "2026-10-20",
+            valor: -77701,
+            descricao: "Compra no extrato",
+            conta: Some("Banco Alfa"),
+            ..comum::Reg::default()
+        };
+        comum::inserir_registro(&conn, &extrato);
+        let documento = comum::Reg {
+            hash: Some(comum::hash(comum::H_MERCADO)),
+            fonte: "gmail",
+            tipo: "compra",
+            data: "2026-10-21",
+            valor: -77701,
+            descricao: "Compra no documento",
+            conta: Some("Banco Alfa"),
+            ..comum::Reg::default()
+        };
+        comum::inserir_registro(&conn, &documento);
+    }
+    let contar = |sql: &str| -> i64 {
+        rusqlite::Connection::open(&banco.caminho)
+            .expect("abrir")
+            .query_row(sql, [], |l| l.get(0))
+            .expect("contar")
+    };
+    let conciliacoes =
+        || contar("SELECT count(*) FROM relacao_registro WHERE tipo = 'conciliacao'");
+    let decisoes = || contar("SELECT count(*) FROM decisao WHERE autor = 'usuario'");
+    let (relacoes_antes, decisoes_antes) = (conciliacoes(), decisoes());
+
+    let mut r = Real::novo(&banco.caminho);
+    r.abrir(Destino::Area(Area::SugestoesDeConciliacao));
+    let pedido = PedidoDeTabela::Area {
+        area: Area::SugestoesDeConciliacao,
+        filtro: Filtro::default(),
+    };
+    let t = r.leitor().tabela(&pedido).expect("sugestões");
+    assert_eq!(t.linhas.len(), 2, "o par da fixture e o novo");
+    // Sem seleção, a Ação não grava nada.
+    r.executar(IdAcao::ConfirmarConciliacoes);
+    assert_eq!(decisoes(), decisoes_antes);
+    // Seleção múltipla: os dois pares.
+    for l in &t.linhas {
+        let alvo = l.alvo.clone().expect("alvo");
+        r.casca.app.janela().centro.selecao.itens.push(alvo);
+    }
+    r.executar(IdAcao::ConfirmarConciliacoes);
+    let mensagem = r.casca.app.janela().mensagem.clone();
+    assert!(mensagem.as_ref().is_some_and(|m| !m.erro), "{mensagem:?}");
+    assert_eq!(conciliacoes(), relacoes_antes + 2);
+    assert_eq!(decisoes(), decisoes_antes + 2, "uma decisão por par");
+    assert!(
+        r.leitor()
+            .tabela(&pedido)
+            .expect("sugestões")
+            .linhas
+            .is_empty()
+    );
+    // Desfazer volta um par por vez.
+    r.executar(IdAcao::Desfazer);
+    assert_eq!(conciliacoes(), relacoes_antes + 1);
+    assert_eq!(
+        r.leitor().tabela(&pedido).expect("sugestões").linhas.len(),
+        1
+    );
+}
+
+#[test]
 fn com_50_mil_achados_a_area_desenha_rapido() {
     let banco = comum::banco_de_teste();
     {
