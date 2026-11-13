@@ -56,6 +56,37 @@ fn inv01_abrir_e_ver_o_plano_nao_mudam_o_banco() {
     assert_eq!(bytes(&caminho), antes, "abrir e planejar mudaram o arquivo");
     let conexao = Connection::open(&caminho).unwrap();
     assert_eq!(valor(&conexao, "PRAGMA user_version"), "0");
+    drop(conexao);
+
+    // Arquivo de 0 bytes: continua com 0 bytes, sem `-wal` nem `-shm` ao lado.
+    let vazio = pasta.path().join("vazio.sqlite");
+    std::fs::write(&vazio, b"").unwrap();
+    let inventario = Inventario::abrir(&vazio).unwrap();
+    assert_eq!(inventario.estado(), EstadoDoBanco::Vazio);
+    assert!(inventario.plano().unwrap().precisa_migrar());
+    drop(inventario);
+    assert_eq!(
+        std::fs::metadata(&vazio).unwrap().len(),
+        0,
+        "abrir gravou no arquivo vazio"
+    );
+    assert_eq!(bytes(&vazio), Vec::<u8>::new());
+    for sufixo in ["-wal", "-shm", "-journal"] {
+        let mut lado = vazio.as_os_str().to_owned();
+        lado.push(sufixo);
+        assert!(
+            !std::path::Path::new(&lado).exists(),
+            "abrir criou {sufixo}"
+        );
+    }
+
+    // Arquivo que não existe: continua não existindo.
+    let ausente = pasta.path().join("ausente.sqlite");
+    let inventario = Inventario::abrir(&ausente).unwrap();
+    assert_eq!(inventario.estado(), EstadoDoBanco::Vazio);
+    assert!(inventario.plano().unwrap().precisa_migrar());
+    drop(inventario);
+    assert!(!ausente.exists(), "abrir criou o arquivo");
 }
 
 #[test]
@@ -310,4 +341,117 @@ fn leitura_separada_ve_a_decisao_e_nao_escreve() {
         "documento"
     );
     assert!(leitura.execute("DELETE FROM achado", []).is_err());
+}
+
+#[test]
+fn migrar_com_andamento_avisa_cada_etapa_antes_de_comecar() {
+    use sbf_inventario::banco::EtapaDaMigracao as E;
+    use std::cell::RefCell;
+
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = banco_do_bun(pasta.path());
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    let etapas = RefCell::new(Vec::new());
+    let copia = pasta.path().join("antes.sqlite");
+    let feita = inventario
+        .migrar_com_andamento(&copia, &|etapa| {
+            // A cópia só existe depois da etapa de cópia.
+            if etapa == E::Copia {
+                assert!(!copia.exists());
+            }
+            etapas.borrow_mut().push(etapa);
+        })
+        .unwrap();
+    assert!(feita.adotou_o_bun);
+    assert_eq!(feita.versao_final, 2);
+    let nomes: Vec<String> = etapas
+        .borrow()
+        .iter()
+        .map(|e| match e {
+            E::Migracao { versao, .. } => format!("Migracao{versao}"),
+            outro => format!("{outro:?}"),
+        })
+        .collect();
+    assert_eq!(
+        nomes,
+        [
+            "Copia",
+            "ConferenciaDaCopia",
+            "Adocao",
+            "Migracao2",
+            "Conferencia"
+        ]
+    );
+
+    // Banco que não existe: sem cópia e sem adoção; o arquivo nasce na migração.
+    let novo = pasta.path().join("novo.sqlite");
+    let mut inventario = Inventario::abrir(&novo).unwrap();
+    let etapas = RefCell::new(Vec::new());
+    inventario
+        .migrar_com_andamento(pasta.path().join("x.sqlite"), &|e| {
+            etapas.borrow_mut().push(e)
+        })
+        .unwrap();
+    assert_eq!(etapas.borrow().len(), 3);
+    assert!(matches!(etapas.borrow()[0], E::Migracao { versao: 1, .. }));
+    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(2));
+    assert!(novo.exists());
+    // A primeira decisão funciona no banco recém-criado.
+    assert_eq!(
+        valor(inventario.conexao(), "SELECT COUNT(*) FROM decisao"),
+        "0"
+    );
+}
+
+#[test]
+fn inv01_reabrir_banco_migrado_e_decidir_abre_a_escrita_na_hora() {
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = inventario_migrado(pasta.path()).caminho().to_path_buf();
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    inventario.executar(&marcar_documento(achado(1))).unwrap();
+    assert_eq!(
+        valor(inventario.conexao(), "SELECT COUNT(*) FROM decisao"),
+        "1"
+    );
+}
+
+#[test]
+fn inv01_copia_nunca_sobrescreve_e_sem_copia_nao_migra() {
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = banco_do_bun(pasta.path());
+    let antes = bytes(&caminho);
+    let ocupado = pasta.path().join("ja-existe.sqlite");
+    std::fs::write(&ocupado, b"outro arquivo").unwrap();
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    assert!(inventario.migrar(&ocupado).is_err());
+    assert_eq!(std::fs::read(&ocupado).unwrap(), b"outro arquivo");
+    assert_eq!(inventario.estado(), EstadoDoBanco::DoBun);
+    drop(inventario);
+    assert_eq!(bytes(&caminho), antes);
+    let sobras: Vec<_> = std::fs::read_dir(pasta.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".parcial-"))
+        .collect();
+    assert!(sobras.is_empty());
+}
+
+#[test]
+fn inv01_copia_feita_com_outro_processo_gravando() {
+    let pasta = tempfile::tempdir().unwrap();
+    let caminho = banco_do_bun(pasta.path());
+    // Um "script" com uma escrita no WAL ainda não consolidada no arquivo principal.
+    let script = Connection::open(&caminho).unwrap();
+    script
+        .execute_batch("PRAGMA wal_autocheckpoint = 0; UPDATE achado SET notas = 'do script'")
+        .unwrap();
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    let copia = pasta.path().join("antes.sqlite");
+    inventario.migrar(&copia).unwrap();
+    let c = Connection::open(&copia).unwrap();
+    assert_eq!(
+        valor(&c, "SELECT COUNT(*) FROM achado WHERE notas = 'do script'"),
+        "4"
+    );
+    drop(script);
 }
