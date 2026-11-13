@@ -14,7 +14,7 @@
 //! | achado ou registro / `estado`, `fornecedor`, `categoria`, `tipo`, `document_type`, `data_e_valor` | objeto `{coluna: valor}` com as colunas que mudam |
 //! | achado / `duplicidade`, registro / `conciliacao` | `{"com": id, "existe": bool}` |
 //! | fornecedor / `recorrente` | `{"recorrente": bool}` (só o log; vira compromisso na fatia 3) |
-//! | fornecedor / `regra_senha` | `{"document_type", "estrategia", "ativa": bool}` |
+//! | fornecedor / `regra_senha` | `{"document_type", "estrategia", "ativa": bool ou nulo}` (nulo: a regra não existe) |
 //! | pendencia / `criada` | a linha da pendência, ou nulo (desfeita: a pendência fecha) |
 //! | pendencia / `resposta` | `{"resposta", "resolvida_em"}` |
 //! | lote / `criado` | `{"nome", "criado_em"}`, ou nulo (desfeito: o lote some) |
@@ -235,10 +235,11 @@ pub fn ler(
                     |l| l.get(0),
                 )
                 .optional()?;
+            // `ativa: null` = a regra não existe.
             Ok(Some(json!({
                 "document_type": document_type,
                 "estrategia": estrategia,
-                "ativa": ativa.unwrap_or(0) != 0,
+                "ativa": ativa.map(|a| a != 0),
             })))
         }
         (AlvoTipo::Fornecedor, _) => Err(erro_de_banco(format!("campo {campo} de fornecedor"))),
@@ -473,6 +474,19 @@ pub fn aplicar(
                     params![id, document_type, estrategia],
                 )?;
             } else {
+                // Desfazer a criação apaga a regra que nunca foi usada; a que já tem
+                // tentativas só se desativa, para não perder a contagem.
+                let ausente = valor
+                    .and_then(|v| v.get("ativa"))
+                    .is_none_or(Value::is_null);
+                if ausente {
+                    tx.execute(
+                        "DELETE FROM regra_senha
+                          WHERE fornecedor = ?1 AND document_type = ?2 AND estrategia = ?3
+                            AND sucessos = 0 AND falhas = 0",
+                        params![id, document_type, estrategia],
+                    )?;
+                }
                 tx.execute(
                     "UPDATE regra_senha SET ativa = 0
                       WHERE fornecedor = ?1 AND document_type = ?2 AND estrategia = ?3",

@@ -478,3 +478,84 @@ fn inv05_sinalizar_vale_para_qualquer_item_com_pagina() {
         Err(ErroDeComando::NaoEncontrado(_))
     ));
 }
+
+/// O retrato sem a tabela `ciclo`: a linha de um ciclo é calendário, não decisão, e fica
+/// depois que a data que a criou é desfeita.
+fn sem_ciclo(retrato: String) -> String {
+    retrato
+        .split("## ciclo")
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Cada Ação do §10, executada e desfeita, devolve a projeção ao que era. Sinalizar fica de
+/// fora (a pendência fecha em vez de sumir: os scripts também criam pendências; ver
+/// `inv05_desfazer_ultima_volta_no_tempo`).
+#[test]
+fn inv05_desfazer_restaura_cada_acao_do_paragrafo_10() {
+    let regra = Acao::GuardarRegraDeSenha {
+        document_type: "fatura".into(),
+        estrategia: "cpf_completo".into(),
+    };
+    let casos: Vec<(Acao, Ref)> = vec![
+        (Acao::MarcarDocumento, achado(1)),
+        (Acao::Descartar, achado(2)),
+        (Acao::EmDuvida, achado(4)),
+        (Acao::CorrigirFornecedor("Outro".into()), achado(2)),
+        (Acao::CorrigirFornecedor("Outro".into()), registro(1)),
+        (Acao::CorrigirCategoria("lazer".into()), registro(2)),
+        (Acao::CorrigirTipo("extrato".into()), achado(4)),
+        (Acao::CorrigirTipo("estorno".into()), registro(3)),
+        (
+            Acao::CorrigirDataEValor {
+                data: Some("2025-03-02".into()),
+                valor_centavos: Some(1),
+            },
+            achado(2),
+        ),
+        (
+            Acao::CorrigirDataEValor {
+                data: Some("2025-03-02".into()),
+                valor_centavos: Some(1),
+            },
+            registro(1),
+        ),
+        (Acao::MarcarDuplicidade { com: achado(2) }, achado(3)),
+        (Acao::UnirConciliados { com: registro(3) }, registro(2)),
+        (Acao::ConfirmarRecorrencia, fornecedor("Energia Exemplo")),
+        (Acao::Aprovar, registro(3)),
+        (
+            Acao::Responder {
+                resposta: "não sei".into(),
+            },
+            Ref::nova(Tipo::Pendencia, "1"),
+        ),
+        (regra, fornecedor("Banco Fictício")),
+    ];
+    for (acao, alvo) in casos {
+        let (_p, mut inv) = novo();
+        let antes = sem_ciclo(retrato(inv.conexao()));
+        let ids = inv
+            .executar(&pedido(acao.clone(), vec![alvo.clone()]))
+            .unwrap();
+        inv.desfazer(ids[0]).unwrap();
+        assert_eq!(
+            sem_ciclo(retrato(inv.conexao())),
+            antes,
+            "{acao:?} em {alvo} não foi restaurada"
+        );
+    }
+    // Rejeitar precisa de motivo.
+    let (_p, mut inv) = novo();
+    let antes = retrato(inv.conexao());
+    let ids = inv
+        .executar(&PedidoDeDecisao {
+            acao: Acao::Rejeitar,
+            alvos: vec![registro(1)],
+            motivo: Some("não reconheço".into()),
+        })
+        .unwrap();
+    inv.desfazer(ids[0]).unwrap();
+    assert_eq!(retrato(inv.conexao()), antes);
+}
