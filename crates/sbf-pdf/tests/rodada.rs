@@ -341,6 +341,49 @@ fn a_pendencia_so_vem_depois_de_n_falhas_acumuladas_entre_rodadas() {
 }
 
 #[test]
+fn a_rodada_pode_ficar_so_nos_achados_escolhidos() {
+    const OUTRO: &str = "6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b";
+    let cenario = Cenario::novo(SENHA_PROPRIA);
+    cenario.regra("fatura", "senha_propria:fatura-alfa", 1);
+    cenario
+        .c()
+        .execute(
+            "INSERT INTO achado (content_hash, file_size_bytes, camada, estado, document_type,
+                                 supplier_name_raw, protegido_senha)
+             VALUES (?1, 10, 'A', 'documento', 'fatura', 'Banco Alfa', 1)",
+            [OUTRO],
+        )
+        .expect("outro achado");
+
+    let so = |hashes: &[&str]| OpcoesDaRodada {
+        so_os_achados: Some(hashes.iter().map(|h| (*h).to_owned()).collect()),
+        ..OpcoesDaRodada::default()
+    };
+    let r = cenario.rodar(&so(&[OUTRO]));
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, OUTRO);
+    assert_eq!(r.resultados[0].situacao, Situacao::SemArquivo);
+    assert!(
+        cenario.texto().is_none(),
+        "o achado fora da seleção não foi tocado"
+    );
+
+    let r = cenario.rodar(&so(&[HASH]));
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, HASH);
+    assert!(cenario.texto().is_some());
+
+    assert!(
+        cenario.rodar(&so(&[])).resultados.is_empty(),
+        "seleção vazia, nada roda"
+    );
+    // Sem filtro, roda o que ainda é alvo.
+    let r = cenario.rodar(&OpcoesDaRodada::default());
+    assert_eq!(r.resultados.len(), 1);
+    assert_eq!(r.resultados[0].content_hash, OUTRO);
+}
+
+#[test]
 fn estrategia_padrao_vencedora_vira_proposta_e_so_grava_com_confirmacao() {
     let mut cenario = Cenario::novo(CPF_ULTIMOS_5);
     let opcoes = OpcoesDaRodada {
