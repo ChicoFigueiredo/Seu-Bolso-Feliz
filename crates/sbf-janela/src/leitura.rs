@@ -8,7 +8,8 @@ use std::sync::Arc;
 use sbf_inventario::Consulta;
 use sbf_inventario::Ref;
 use sbf_inventario::consulta::{
-    Contagens, Filtro, Fonte, Item, Painel, PedidoDeTabela, Pergunta, Rastro, Tabela, TotalDoCiclo,
+    Area, Contagens, Filtro, Fonte, Item, Painel, PainelDeArea, PedidoDeTabela, Pergunta, Rastro,
+    Tabela, TotalDoCiclo,
 };
 
 /// Resultado de leitura já pronto para desenhar: o erro vira texto.
@@ -33,6 +34,7 @@ pub struct Cache {
     por_ciclo: HashMap<(Ref, bool, usize), Lido<Vec<TotalDoCiclo>>>,
     textos: HashMap<Ref, Lido<Option<String>>>,
     paineis: HashMap<String, Lido<Painel>>,
+    paineis_de_area: HashMap<String, Lido<PainelDeArea>>,
     contagens: Option<Lido<Contagens>>,
 }
 
@@ -218,6 +220,22 @@ impl<'a> Leitor<'a> {
             .or_insert_with(|| {
                 consulta
                     .relatorio(pergunta, fonte, filtro)
+                    .map(Arc::new)
+                    .map_err(|e| e.to_string())
+            })
+            .clone()
+    }
+
+    /// Os números e as seções de uma área de Dinheiro.
+    pub fn painel_da_area(&mut self, area: Area, filtro: &Filtro) -> Lido<PainelDeArea> {
+        let k = chave(&(area, filtro));
+        let consulta = self.consulta;
+        self.cache
+            .paineis_de_area
+            .entry(k)
+            .or_insert_with(|| {
+                consulta
+                    .painel_da_area(area, filtro)
                     .map(Arc::new)
                     .map_err(|e| e.to_string())
             })

@@ -13,8 +13,12 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Context, Layout, RichText, Ui};
 use sbf_chaveiro::{Chaveiro, OfertaDeApagar, ResumoDaImportacao, Segredo, Situacao};
+use sbf_estante::destinos::{
+    Destino as DestinoDaEstante, ListaDeDestinos, RelatorioDoDestino, TipoDeDestino,
+    atualizar_destinos, detectar_remotos,
+};
 use sbf_estante::{
-    AVISO_DA_SENHA, CopiaDeSeguranca, Estante, Fase, Rclone, RelatorioDaCopia, RelatorioDaEstante,
+    AVISO_DA_SENHA, CopiaDeSeguranca, Fase, Rclone, RelatorioDaCopia, RelatorioDaEstante,
 };
 use sbf_inventario::banco::Inventario;
 use sbf_inventario::consulta::Tabela;
@@ -54,6 +58,7 @@ enum Evento {
     Andamento(String),
     Pdf(Result<RelatorioDaRodada, String>),
     Estante(Result<RelatorioDaEstante, String>),
+    Destinos(Vec<RelatorioDoDestino>),
     Copia(Result<RelatorioDaCopia, String>),
     Importacao(Result<(ResumoDaImportacao, Option<OfertaDeApagar>, String), String>),
     Destrancar(Result<(), String>),
@@ -74,6 +79,8 @@ enum Resultado {
     },
     Regras(Arc<Tabela>),
     Estante(RelatorioDaEstante),
+    /// "Atualizar estante" com vários destinos: um relatório por destino.
+    Destinos(Vec<RelatorioDoDestino>),
     Copia(RelatorioDaCopia),
     /// Pede a senha da cópia antes de começar (escolhida pelo usuário, sem chaveiro).
     PedirSenhaDaCopia,
@@ -91,8 +98,18 @@ pub struct Ferramentas {
     pub chaveiro: Option<Chaveiro>,
     /// Por que o chaveiro não abriu (a barra mostra "—").
     pub erro_do_chaveiro: Option<String>,
-    /// Destino do rclone para a estante (Opções). Vazio: Ação desabilitada.
+    /// Destino antigo da estante (um só). Na leitura das preferências vira um item de
+    /// [`Ferramentas::destinos`]; o que vale são os destinos.
     pub destino_da_estante: String,
+    /// Os destinos da estante (Drive, OneDrive, pasta local), guardados nas preferências
+    /// do app, fora do cofre. Sem nenhum ativo, "Atualizar estante" fica desabilitada.
+    pub destinos: ListaDeDestinos,
+    /// A lista estava vazia ao abrir: a janela pergunta a pasta local da Estante.
+    pub perguntar_pasta_local: bool,
+    pasta_local_nova: String,
+    nome_novo: String,
+    sugestoes: Vec<DestinoDaEstante>,
+    aviso_dos_destinos: Option<String>,
     /// Destino do rclone para a cópia de segurança (Opções). Vazio: Ação desabilitada.
     pub destino_da_copia: String,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
@@ -148,6 +165,12 @@ impl Ferramentas {
             chaveiro: None,
             erro_do_chaveiro: None,
             destino_da_estante: String::new(),
+            destinos: ListaDeDestinos::nova(),
+            perguntar_pasta_local: false,
+            pasta_local_nova: String::new(),
+            nome_novo: "Pasta local".to_owned(),
+            sugestoes: Vec::new(),
+            aviso_dos_destinos: None,
             destino_da_copia: String::new(),
             tentar_estrategias_padrao: false,
             ultima_copia: None,
@@ -185,6 +208,11 @@ impl Ferramentas {
             ),
             Resultado::Regras(t) => format!("regras: {} linhas", t.linhas.len()),
             Resultado::Estante(r) => format!("estante: {} enviados", r.enviados),
+            Resultado::Destinos(v) => format!(
+                "estante: {} destinos, {} com falha",
+                v.len(),
+                v.iter().filter(|d| d.resultado.is_err()).count()
+            ),
             Resultado::Copia(r) => format!("cópia: {}", r.quando),
             Resultado::PedirSenhaDaCopia => "cópia: pedindo a senha".to_owned(),
             Resultado::SenhaNovaDaCopia(_) => "cópia: senha nova mostrada uma vez".to_owned(),
@@ -274,32 +302,44 @@ impl Ferramentas {
         );
     }
 
-    /// Ferramentas › Atualizar estante.
+    /// Há algum destino ativo para "Atualizar estante"?
+    pub fn tem_destino_da_estante(&self) -> bool {
+        self.destinos.ativos().next().is_some()
+    }
+
+    /// Ferramentas › Atualizar estante: todos os destinos ativos, um depois do outro, numa
+    /// thread. A falha de um destino fica no relatório dele e não para os outros.
     pub fn atualizar_estante(&mut self) {
-        let destino = self.destino_da_estante.trim().to_owned();
-        if destino.is_empty() {
+        if !self.tem_destino_da_estante() {
             self.resultado = Some(Resultado::Erro(MOTIVO_SEM_DESTINO.to_owned()));
             return;
         }
-        let (banco, cofre) = (self.banco.clone(), self.cofre.clone());
+        let (banco, cofre, lista) = (
+            self.banco.clone(),
+            self.cofre.clone(),
+            self.destinos.clone(),
+        );
         self.comecar("Atualizar estante", move |andamento| {
-            let r = (|| -> Result<RelatorioDaEstante, String> {
-                let inv = Inventario::abrir(&banco).map_err(|e| e.to_string())?;
-                let estante =
-                    Estante::nova(Rclone::novo(), destino).map_err(|e| mensagem_da_copia(&e))?;
-                let progresso = |a: sbf_estante::Andamento| {
-                    let fase = match a.fase {
-                        Fase::Planejando => "planejando",
-                        Fase::Renomeando => "renomeando",
-                        Fase::Enviando => "enviando",
-                        Fase::Apagando => "apagando",
-                    };
-                    andamento(format!("{fase}: {} de {}", a.feitos, a.total));
+            let inv = match Inventario::abrir(&banco) {
+                Ok(inv) => inv,
+                Err(e) => return Evento::Estante(Err(e.to_string())),
+            };
+            let progresso = |destino: &str, a: sbf_estante::Andamento| {
+                let fase = match a.fase {
+                    Fase::Planejando => "planejando",
+                    Fase::Renomeando => "renomeando",
+                    Fase::Enviando => "enviando",
+                    Fase::Apagando => "apagando",
                 };
-                let resultado = estante.atualizar(inv.conexao(), &cofre, &progresso);
-                resultado.map_err(|e| mensagem_da_copia(&e))
-            })();
-            Evento::Estante(r)
+                andamento(format!("{destino} · {fase}: {} de {}", a.feitos, a.total));
+            };
+            Evento::Destinos(atualizar_destinos(
+                &Rclone::novo(),
+                &lista,
+                inv.conexao(),
+                &cofre,
+                &progresso,
+            ))
         });
     }
 
@@ -475,6 +515,7 @@ impl Ferramentas {
                 })
             }
             Evento::Estante(Ok(r)) => Some(Resultado::Estante(r)),
+            Evento::Destinos(v) => Some(Resultado::Destinos(v)),
             Evento::Copia(Ok(r)) => {
                 self.ultima_copia = Some(r.quando.clone());
                 Some(Resultado::Copia(r))
@@ -533,7 +574,9 @@ impl Ferramentas {
             .unwrap_or_else(|| match &self.resultado {
                 Some(Resultado::Pdf { .. }) => "Abrir PDF protegido".to_owned(),
                 Some(Resultado::Regras(_)) => "Regras de senha".to_owned(),
-                Some(Resultado::Estante(_)) => "Atualizar estante".to_owned(),
+                Some(Resultado::Estante(_) | Resultado::Destinos(_)) => {
+                    "Atualizar estante".to_owned()
+                }
                 Some(
                     Resultado::Copia(_)
                     | Resultado::PedirSenhaDaCopia
@@ -606,6 +649,24 @@ impl Ferramentas {
                         ));
                         for f in &r.falhas {
                             ui.colored_label(p.perigo, f);
+                        }
+                    }
+                    Some(Resultado::Destinos(v)) => {
+                        for d in v {
+                            match &d.resultado {
+                                Ok(r) => {
+                                    ui.label(format!(
+                                        "{}: enviados {}, renomeados {}, apagados {}, já certos {}, sem original {}.",
+                                        d.destino, r.enviados, r.renomeados, r.apagados, r.intactos, r.sem_copia
+                                    ));
+                                    for f in &r.falhas {
+                                        ui.colored_label(p.perigo, format!("{}: {f}", d.destino));
+                                    }
+                                }
+                                Err(e) => {
+                                    ui.colored_label(p.perigo, format!("{}: falhou: {e}", d.destino));
+                                }
+                            }
                         }
                     }
                     Some(Resultado::Copia(r)) => {
@@ -776,10 +837,8 @@ impl Ferramentas {
     /// Bastidores › Estante e cópia de segurança: os destinos (Opções).
     pub fn destinos_ui(&mut self, ui: &mut Ui) {
         let p = tema::paleta(ui.ctx());
-        ui.label("Destino da estante (remoto do rclone, por exemplo gdrive:SBF/Estante)");
-        let a = ui.add(
-            egui::TextEdit::singleline(&mut self.destino_da_estante).desired_width(f32::INFINITY),
-        );
+        self.lista_de_destinos_ui(ui);
+        ui.add_space(10.0);
         ui.label("Destino da cópia de segurança (por exemplo gdrive:SBF/Copia-de-seguranca)");
         let b = ui.add(
             egui::TextEdit::singleline(&mut self.destino_da_copia).desired_width(f32::INFINITY),
@@ -795,7 +854,7 @@ impl Ferramentas {
             &mut self.tentar_estrategias_padrao,
             "PDF protegido: tentar estratégias padrão",
         );
-        if (a.lost_focus() || b.lost_focus() || c.changed())
+        if (b.lost_focus() || c.changed())
             && let Err(e) = self.salvar_preferencias()
         {
             ui.colored_label(p.perigo, format!("Não deu para guardar as opções: {e}"));
@@ -809,6 +868,174 @@ impl Ferramentas {
         }
     }
 
+    /// Opções › Estante: os destinos, com ativo, remover, nova pasta local e "Detectar
+    /// Drive/OneDrive".
+    pub fn lista_de_destinos_ui(&mut self, ui: &mut Ui) {
+        let p = tema::paleta(ui.ctx());
+        componentes::rotulo_de_secao(ui, "Destinos da estante");
+        let mut mudou = false;
+        let mut remover = None;
+        let mut ativar = None;
+        egui::Grid::new("destinos-da-estante")
+            .num_columns(5)
+            .spacing(egui::vec2(12.0, 6.0))
+            .show(ui, |ui| {
+                for d in self.destinos.todos() {
+                    let mut ativo = d.ativo;
+                    if ui.checkbox(&mut ativo, "ativo").changed() {
+                        ativar = Some((d.nome.clone(), ativo));
+                    }
+                    ui.label(RichText::new(&d.nome).strong());
+                    ui.label(match d.tipo {
+                        TipoDeDestino::Drive => "Google Drive",
+                        TipoDeDestino::OneDrive => "OneDrive",
+                        TipoDeDestino::PastaLocal => "Pasta local",
+                    });
+                    ui.label(RichText::new(&d.alvo).color(p.tinta_suave));
+                    if ui.small_button("Remover").clicked() {
+                        remover = Some(d.nome.clone());
+                    }
+                    ui.end_row();
+                }
+            });
+        if self.destinos.vazia() {
+            ui.label(RichText::new("Nenhum destino ainda.").color(p.tinta_suave));
+        }
+        if let Some((nome, ativo)) = ativar {
+            mudou |= self.destinos.definir_ativo(&nome, ativo);
+        }
+        if let Some(nome) = remover {
+            mudou |= self.destinos.remover(&nome);
+        }
+        ui.label(
+            RichText::new("Remover ou desativar um destino não apaga nada nele: a estante só deixa de ser mantida lá. A pasta local também passa pelo rclone, que continua obrigatório.")
+                .size(12.0)
+                .color(p.tinta_suave),
+        );
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.nome_novo).desired_width(120.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.pasta_local_nova)
+                    .hint_text("/caminho/absoluto/da/estante")
+                    .desired_width(260.0),
+            );
+            if ui.button("Adicionar pasta local").clicked() {
+                mudou |= self.adicionar_pasta_local();
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Detectar Drive/OneDrive").clicked() {
+                match detectar_remotos(&Rclone::novo()) {
+                    Ok(v) if v.is_empty() => {
+                        self.aviso_dos_destinos =
+                            Some("Nenhum remoto drive ou onedrive no rclone.".to_owned());
+                    }
+                    Ok(v) => {
+                        self.sugestoes = v
+                            .into_iter()
+                            .filter(|s| !self.destinos.todos().iter().any(|d| d.nome == s.nome))
+                            .collect();
+                    }
+                    Err(e) => self.aviso_dos_destinos = Some(mensagem_da_copia(&e)),
+                }
+            }
+        });
+        let mut aceitar = None;
+        for (i, s) in self.sugestoes.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} · {}", s.nome, s.alvo));
+                if ui.small_button("Aceitar (entra inativo)").clicked() {
+                    aceitar = Some(i);
+                }
+            });
+        }
+        if let Some(i) = aceitar {
+            let s = self.sugestoes.remove(i);
+            match self.destinos.adicionar(s) {
+                Ok(()) => mudou = true,
+                Err(e) => self.aviso_dos_destinos = Some(mensagem_da_copia(&e)),
+            }
+        }
+        if let Some(a) = &self.aviso_dos_destinos {
+            ui.colored_label(p.aviso, a);
+        }
+        if mudou && let Err(e) = self.salvar_destinos() {
+            self.aviso_dos_destinos = Some(format!("Não deu para guardar os destinos: {e}"));
+        }
+    }
+
+    fn adicionar_pasta_local(&mut self) -> bool {
+        let caminho = PathBuf::from(self.pasta_local_nova.trim());
+        let nome = if self.nome_novo.trim().is_empty() {
+            "Pasta local".to_owned()
+        } else {
+            self.nome_novo.trim().to_owned()
+        };
+        match DestinoDaEstante::pasta_local(nome, &caminho).and_then(|d| self.destinos.adicionar(d))
+        {
+            Ok(()) => {
+                self.aviso_dos_destinos = None;
+                self.pasta_local_nova.clear();
+                true
+            }
+            Err(e) => {
+                self.aviso_dos_destinos = Some(format!(
+                    "Não deu para adicionar: {} (use um caminho absoluto e um nome que ainda não existe).",
+                    mensagem_da_copia(&e)
+                ));
+                false
+            }
+        }
+    }
+
+    /// Primeira abertura com a lista vazia: pergunta a pasta local da Estante (o padrão é
+    /// a que já estiver em uso).
+    pub fn primeira_abertura_ui(&mut self, ctx: &Context) {
+        if !self.perguntar_pasta_local {
+            return;
+        }
+        let mut fechar = false;
+        egui::Modal::new(egui::Id::new("sbf-estante-primeira")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            componentes::titulo(ui, "Onde fica a Estante?", 17.0);
+            ui.label("A Estante é a cópia legível dos documentos, por fornecedor e ciclo. Escolha a pasta local; Drive e OneDrive podem entrar depois em Opções › Estante.");
+            ui.add(egui::TextEdit::singleline(&mut self.pasta_local_nova).desired_width(f32::INFINITY));
+            if let Some(a) = &self.aviso_dos_destinos {
+                ui.colored_label(tema::paleta(ui.ctx()).aviso, a);
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Usar esta pasta").clicked() && self.adicionar_pasta_local() {
+                    if let Err(e) = self.salvar_destinos() {
+                        self.aviso_dos_destinos = Some(e);
+                    }
+                    fechar = true;
+                }
+                if ui.button("Agora não").clicked() {
+                    fechar = true;
+                }
+            });
+        });
+        if fechar {
+            self.perguntar_pasta_local = false;
+        }
+    }
+
+    /// O arquivo dos destinos da estante: na pasta de dados do app, nunca no cofre.
+    pub fn arquivo_dos_destinos(&self) -> Option<PathBuf> {
+        Some(
+            self.arquivo_de_preferencias()?
+                .with_file_name("destinos-da-estante.json"),
+        )
+    }
+
+    /// Grava os destinos da estante.
+    pub fn salvar_destinos(&self) -> Result<(), String> {
+        let arquivo = self
+            .arquivo_dos_destinos()
+            .ok_or("sem pasta de dados do app (ou ela fica dentro do cofre)")?;
+        self.destinos.salvar(&arquivo).map_err(|e| e.to_string())
+    }
+
     /// O arquivo das opções das Ferramentas: na pasta de dados do app, nunca no cofre.
     pub fn arquivo_de_preferencias(&self) -> Option<PathBuf> {
         let pasta = sbf_chaveiro::pasta_de_dados_do_app().ok()?;
@@ -818,6 +1045,42 @@ impl Ferramentas {
 
     /// Lê os destinos e a opção do PDF guardados (sem arquivo, fica tudo vazio).
     pub fn carregar_preferencias(&mut self) {
+        self.carregar_preferencias_antigas();
+        if let Some(arquivo) = self.arquivo_dos_destinos() {
+            match ListaDeDestinos::carregar(&arquivo) {
+                Ok(l) => self.destinos = l,
+                Err(e) => self.aviso_dos_destinos = Some(mensagem_da_copia(&e)),
+            }
+        }
+        // O destino único antigo vira um destino da lista.
+        let antigo = self.destino_da_estante.trim().to_owned();
+        if self.destinos.vazia() && !antigo.is_empty() {
+            let d = if Path::new(&antigo).is_absolute() {
+                DestinoDaEstante::pasta_local("Pasta local", Path::new(&antigo))
+            } else {
+                DestinoDaEstante::nuvem("Estante", TipoDeDestino::Drive, antigo.clone())
+            };
+            if let Ok(d) = d
+                && self.destinos.adicionar(d).is_ok()
+            {
+                let _ = self.salvar_destinos();
+            }
+        }
+        if self.destinos.vazia() {
+            self.perguntar_pasta_local = true;
+            if self.pasta_local_nova.is_empty()
+                && let Some(casa) =
+                    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+            {
+                self.pasta_local_nova = Path::new(&casa)
+                    .join("SBF-Estante")
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+    }
+
+    fn carregar_preferencias_antigas(&mut self) {
         let Some(arquivo) = self.arquivo_de_preferencias() else {
             return;
         };
@@ -958,6 +1221,30 @@ mod testes {
         assert_eq!(
             texto_da_situacao(Situacao::ChaveiroDoSistema),
             "no keyring do sistema"
+        );
+    }
+}
+
+#[cfg(test)]
+mod testes_dos_destinos {
+    use super::*;
+
+    #[test]
+    fn atualizar_estante_so_com_destino_ativo() {
+        let mut f = Ferramentas::nova(PathBuf::from("/tmp/x.sqlite"), PathBuf::from("/tmp/cofre"));
+        assert!(!f.tem_destino_da_estante());
+        f.destinos
+            .adicionar(
+                DestinoDaEstante::pasta_local("Casa", Path::new("/tmp/estante")).expect("destino"),
+            )
+            .expect("adicionar");
+        assert!(f.tem_destino_da_estante());
+        f.destinos.definir_ativo("Casa", false);
+        assert!(!f.tem_destino_da_estante());
+        f.atualizar_estante();
+        assert_eq!(
+            f.resumo().as_deref(),
+            Some(format!("erro: {MOTIVO_SEM_DESTINO}").as_str())
         );
     }
 }
