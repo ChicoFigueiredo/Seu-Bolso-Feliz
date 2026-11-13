@@ -295,6 +295,7 @@ impl Janela {
         }
         self.chaveiro_trancado = trancado;
         f.janela_ui(ctx, &mut self.pedidos);
+        f.primeira_abertura_ui(ctx);
         if terminou {
             self.atualizar();
         }
@@ -421,7 +422,7 @@ impl Janela {
             destino_da_estante: self
                 .ferramentas
                 .as_ref()
-                .is_some_and(|f| !f.destino_da_estante.trim().is_empty()),
+                .is_some_and(|f| f.tem_destino_da_estante()),
             destino_da_copia: self
                 .ferramentas
                 .as_ref()
