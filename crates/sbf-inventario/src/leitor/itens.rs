@@ -756,6 +756,7 @@ fn fornecedor(ctx: &Contexto<'_>, alvo: &Ref, hoje: &str) -> ResultadoDeConsulta
         "SELECT count(*) FROM regra_senha WHERE fornecedor = ?",
         vec![texto(nome)],
     )?;
+    let apelidos = apelidos_do_fornecedor(ctx, alvo)?;
     let de_achados = Ref::nova(Tipo::Fornecedor, nome);
     Ok(vec![
         campo(
@@ -787,10 +788,84 @@ fn fornecedor(ctx: &Contexto<'_>, alvo: &Ref, hoje: &str) -> ResultadoDeConsulta
         campo("Último registro", c_data_opt(&periodo.1)),
         campo("Recorrente", sim_nao(recorrente)),
         campo(
+            "Apelidos",
+            if apelidos.is_empty() {
+                Celula::Vazia
+            } else {
+                Celula::Texto(apelidos.join(" · "))
+            },
+        ),
+        campo("Contratos", Celula::Texto(CONTRATOS_NA_FATIA_2.to_owned())),
+        campo(
             "Regras de senha",
             c_contagem(regras, de_achados, None, recorte::REGRAS),
         ),
     ])
+}
+
+/// O texto do campo "Contratos" do fornecedor: o contrato nasce com o livro-caixa.
+pub const CONTRATOS_NA_FATIA_2: &str = "chegam na fatia 2";
+
+/// Quantos apelidos o cabeçalho mostra; o resto vira "e mais N".
+const APELIDOS_NO_CABECALHO: usize = 8;
+
+/// Junta espaços e tira as pontas (a forma mostrada).
+fn espacos_juntos(texto: &str) -> String {
+    texto.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// As grafias distintas que viraram este fornecedor nos registros: `supplier_name_raw`,
+/// `contraparte` e, quando foi ela que deu o nome (sem as outras), `descricao_original`.
+/// Normalizadas (espaços juntos, sem diferença de caixa), sem o próprio nome, da mais usada à
+/// menos usada.
+fn apelidos_do_fornecedor(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<String>> {
+    let Some(sel) = relacoes::selecao_de_registros(ctx, alvo)? else {
+        return Ok(Vec::new());
+    };
+    let contraparte = ctx.dialeto.contraparte("r.");
+    let filtro = sel.sql_e();
+    let sql = format!(
+        "SELECT v, count(*) AS n FROM (
+           SELECT r.supplier_name_raw AS v FROM registro r WHERE 1 = 1{filtro}
+           UNION ALL SELECT {contraparte} FROM registro r WHERE 1 = 1{filtro}
+           UNION ALL SELECT r.descricao_original FROM registro r
+            WHERE r.fornecedor_normalizado IS NULL AND {contraparte} IS NULL
+              AND nullif(r.supplier_name_raw, '') IS NULL{filtro}
+         ) WHERE v IS NOT NULL AND trim(v) <> ''
+         GROUP BY v ORDER BY n DESC, v"
+    );
+    let mut params = Vec::new();
+    for _ in 0..3 {
+        params.extend_from_slice(sel.params());
+    }
+    let grafias = consultar(ctx.conn, &sql, &params, |l| {
+        Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)?))
+    })?;
+    let chave = |t: &str| espacos_juntos(t).to_lowercase();
+    let proprio = chave(&alvo.chave);
+    // Soma as grafias que só diferem por caixa ou espaço; mostra a mais usada delas.
+    let mut juntas: Vec<(String, String, i64)> = Vec::new();
+    for (grafia, n) in grafias {
+        let k = chave(&grafia);
+        if k == proprio {
+            continue;
+        }
+        match juntas.iter_mut().find(|(c, _, _)| *c == k) {
+            Some((_, _, total)) => *total += n,
+            None => juntas.push((k, espacos_juntos(&grafia), n)),
+        }
+    }
+    juntas.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    let total = juntas.len();
+    let mut apelidos: Vec<String> = juntas
+        .into_iter()
+        .take(APELIDOS_NO_CABECALHO)
+        .map(|(_, grafia, _)| grafia)
+        .collect();
+    if total > APELIDOS_NO_CABECALHO {
+        apelidos.push(format!("e mais {}", total - APELIDOS_NO_CABECALHO));
+    }
+    Ok(apelidos)
 }
 
 fn ciclo(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
