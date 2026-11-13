@@ -2,7 +2,11 @@
 //! janela do sistema: um livro fictício em memória no lugar do cache, e o pareamento
 //! de mentira para o botão "Parear esta estação".
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::field_reassign_with_default
+)]
 
 use std::cell::Cell;
 use std::rc::Rc;

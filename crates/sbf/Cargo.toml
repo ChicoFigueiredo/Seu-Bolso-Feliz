@@ -9,6 +9,8 @@ publish.workspace = true
 sbf-janela = { path = "../sbf-janela" }
 bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
 sbf-inventario = { workspace = true }
+sbf-estacao = { path = "../sbf-estacao" }
+bancada-rede = { path = "../../../bancada/crates/bancada-rede" }
 sbf-disco = { path = "../sbf-disco" }
 eframe = { workspace = true }
 egui = { workspace = true }
@@ -16,6 +18,9 @@ sbf-servidor = { path = "../sbf-servidor" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 uuid = { version = "1" }
 zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

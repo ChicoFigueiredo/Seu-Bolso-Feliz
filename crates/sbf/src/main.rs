@@ -11,6 +11,7 @@
 
 mod captura;
 mod entrada;
+mod estacao;
 mod inventario;
 mod servidor;
 
@@ -24,6 +25,8 @@ use sbf_janela::{AppSbf, EstadoDaBarra, Janela};
 /// A janela: o app do SBF dentro da `bancada-casca`, mais a captura de tela opcional.
 struct App {
     casca: Casca<AppSbf>,
+    /// A estação do livro-caixa (`--inventario` e sem argumento), ticada a cada quadro.
+    estacao: Option<estacao::Ligacao>,
     captura: Option<PathBuf>,
     quadros: u32,
     captura_pedida: bool,
@@ -44,6 +47,7 @@ impl App {
         let casca = Casca::nova(app, config).map_err(|e| e.to_string())?;
         Ok(Self {
             casca,
+            estacao: None,
             captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
             quadros: 0,
             captura_pedida: false,
@@ -54,6 +58,18 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let inicio = std::time::Instant::now();
+        if let Some(estacao) = self.estacao.as_mut() {
+            if estacao.tique() {
+                // Uma troca terminou ou houve escrita local: os números e as tabelas
+                // guardados valem pela cópia anterior.
+                self.casca.app.janela().reler();
+            }
+            // O intervalo e o fim da troca precisam de quadros mesmo sem o mouse.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(
+                    if estacao.sincronizando() { 200 } else { 1000 },
+                ));
+        }
         self.casca.desenhar(ui);
         if std::env::var_os("SBF_DEPURAR").is_some() {
             eprintln!("quadro em {:?}", inicio.elapsed());

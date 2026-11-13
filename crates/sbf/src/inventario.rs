@@ -131,8 +131,14 @@ impl AppDoInventario {
                         erro: false,
                     });
                 }
-                match crate::App::novo(janela, Box::new(leitor), Box::new(inventario), barra) {
-                    Ok(app) => self.janela = Some(app),
+                // O livro-caixa: a estação real (servidor de `SBF_SERVIDOR`), pareada ou não.
+                let (consulta, ligacao) =
+                    crate::estacao::ligar(&mut janela, Box::new(leitor), Some(&self.pasta));
+                match crate::App::novo(janela, consulta, Box::new(inventario), barra) {
+                    Ok(mut app) => {
+                        app.estacao = ligacao;
+                        self.janela = Some(app);
+                    }
                     Err(e) => {
                         self.tela = Tela::Pronto {
                             aviso: format!("Os temas não carregaram: {e}"),
