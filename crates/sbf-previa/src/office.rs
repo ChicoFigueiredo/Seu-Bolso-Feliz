@@ -128,6 +128,32 @@ fn faxinar_em(raiz: &Path) -> usize {
     apagadas
 }
 
+/// Mata (`kill -9`) os processos cujo argv cita `pasta`: o que sobrou de uma conversão que
+/// passou do prazo. Só no Linux (pelo `/proc`).
+fn matar_restos(pasta: &Path) {
+    let agulha = pasta.as_os_str().as_encoded_bytes();
+    let Ok(entradas) = std::fs::read_dir("/proc") else {
+        return;
+    };
+    let eu = std::process::id().to_string();
+    let pids: Vec<String> = entradas
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.bytes().all(|b| b.is_ascii_digit()) && *n != eu)
+        .filter(|n| {
+            std::fs::read(Path::new("/proc").join(n).join("cmdline"))
+                .is_ok_and(|c| c.windows(agulha.len()).any(|j| j == agulha))
+        })
+        .collect();
+    if pids.is_empty() {
+        return;
+    }
+    let _ = Chamada::nova(localizar_ou_nome("kill"))
+        .argumentos(std::iter::once("-9".to_owned()).chain(pids))
+        .com_prazo(Duration::from_secs(5))
+        .rodar();
+}
+
 /// Converte o arquivo em PDF e devolve as páginas.
 pub(crate) fn converter(caminho: &Path, extensao: &str) -> Result<Conteudo, ErroDaPrevia> {
     let bytes = crate::ler(caminho)?;
@@ -159,8 +185,7 @@ pub(crate) fn converter(caminho: &Path, extensao: &str) -> Result<Conteudo, Erro
 
     let mut perfil = std::ffi::OsString::from("-env:UserInstallation=file://");
     perfil.push(pasta.join("perfil"));
-    let mut casa = Zeroizing::new(String::new());
-    casa.push_str(&pasta.to_string_lossy());
+    let pasta_texto = pasta.to_string_lossy();
     let resultado = Chamada::nova(soffice)
         .argumentos([
             perfil.as_os_str(),
@@ -174,12 +199,22 @@ pub(crate) fn converter(caminho: &Path, extensao: &str) -> Result<Conteudo, Erro
             saida.as_os_str(),
             entrada.as_os_str(),
         ])
-        // O HOME do LibreOffice (cache de fontes, etc.) também fica na pasta em memória.
-        .com_variavel("HOME", casa)
+        // O HOME (cache de fontes, etc.) e os temporários do LibreOffice também ficam na
+        // pasta em memória: nada em `~/.config` nem em `/tmp`.
+        .com_variavel("HOME", Zeroizing::new(pasta_texto.to_string()))
+        .com_variavel("TMPDIR", Zeroizing::new(pasta_texto.to_string()))
         .com_prazo(PRAZO)
         .com_saida_maxima(64 * 1024)
-        .rodar()
-        .map_err(|f| ErroDaPrevia::de_processo("soffice", f))?;
+        .rodar();
+    let resultado = match resultado {
+        Ok(r) => r,
+        Err(falha) => {
+            // Passou do prazo: o `oosplash` foi morto, mas o `soffice.bin` filho dele
+            // ficaria órfão, segurando a pasta.
+            matar_restos(pasta);
+            return Err(ErroDaPrevia::de_processo("soffice", falha));
+        }
+    };
     let pdf = saida.join("entrada.pdf");
     if !pdf.exists() {
         let erro = String::from_utf8_lossy(&resultado.stderr);
