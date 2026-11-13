@@ -44,7 +44,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zeroize::Zeroizing;
 
 /// Texto para a tela (Ferramentas > Fazer cópia de segurança, e Opções).
@@ -52,6 +52,51 @@ pub const AVISO_DA_SENHA: &str = "Sem a senha da cópia de segurança, a cópia 
 nem você nem ninguém consegue abrir os arquivos. Guarde essa senha também fora deste \
 computador (num gerenciador de senhas ou num papel em lugar seguro). Se o computador e a \
 senha se perderem juntos, a cópia se perde com eles.";
+
+/// Idade a partir da qual uma pasta `<cofre>/tmp/copia-*` é sobra (achado A8 da revisão de
+/// segurança da fatia 1). Mais nova que isto pode ser de uma cópia rodando em outra janela.
+pub const IDADE_DA_SOBRA: Duration = Duration::from_secs(24 * 60 * 60);
+const PREFIXO_DA_PASTA_TEMPORARIA: &str = "copia-";
+
+/// Apaga as pastas `<cofre>/tmp/copia-*` mais velhas que `idade_minima`: o instantâneo em
+/// claro que uma cópia interrompida (SIGKILL, queda de energia) deixou. [`CopiaDeSeguranca::fazer`]
+/// chama com [`IDADE_DA_SOBRA`]; a abertura do app também deve chamar. Não segue link
+/// simbólico e não mexe no que não é da cópia. Devolve quantas apagou.
+///
+/// # Errors
+/// Falha de disco ao listar ou apagar.
+pub fn faxinar_sobras(cofre: &Path, idade_minima: Duration) -> Resultado<usize> {
+    let tmp = cofre.join("tmp");
+    let entradas = match std::fs::read_dir(&tmp) {
+        Ok(entradas) => entradas,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    let agora = SystemTime::now();
+    let mut apagadas = 0;
+    for entrada in entradas {
+        let entrada = entrada?;
+        let e_da_copia = entrada
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(PREFIXO_DA_PASTA_TEMPORARIA));
+        // `file_type` da entrada não segue link: um link `copia-x` não é apagado.
+        if !e_da_copia || !entrada.file_type()?.is_dir() {
+            continue;
+        }
+        let idade = entrada
+            .metadata()?
+            .modified()
+            .ok()
+            .and_then(|m| agora.duration_since(m).ok())
+            .unwrap_or(Duration::ZERO);
+        if idade >= idade_minima {
+            std::fs::remove_dir_all(entrada.path())?;
+            apagadas += 1;
+        }
+    }
+    Ok(apagadas)
+}
 
 /// O mínimo, em caracteres, de uma senha escolhida pelo usuário. A gerada tem 35.
 pub const MINIMO_DA_SENHA_ESCOLHIDA: usize = 16;
@@ -272,7 +317,11 @@ impl CopiaDeSeguranca {
         // 1. Instantâneo do banco, numa pasta temporária 0700 do cofre.
         let tmp = cofre.join("tmp");
         std::fs::create_dir_all(&tmp)?;
-        let pasta = tempfile::Builder::new().prefix("copia-").tempdir_in(&tmp)?;
+        // A faxina é melhor-esforço: uma sobra que não sai não impede a cópia.
+        let _ = faxinar_sobras(cofre, IDADE_DA_SOBRA);
+        let pasta = tempfile::Builder::new()
+            .prefix(PREFIXO_DA_PASTA_TEMPORARIA)
+            .tempdir_in(&tmp)?;
         let instantaneo = pasta.path().join("inventario.sqlite");
         copiar_banco(conexao, &instantaneo)?;
         verificar_integridade_de_arquivo(&instantaneo)?;
@@ -353,7 +402,8 @@ impl CopiaDeSeguranca {
     }
 
     /// Restaura o acervo e o banco mais recente em `para` (`para/acervo/`,
-    /// `para/inventario.sqlite`). Nunca sobrescreve: se `para/inventario.sqlite` existe, recusa.
+    /// `para/inventario.sqlite`). Nunca sobrescreve: se `para/inventario.sqlite` existe, recusa;
+    /// um arquivo do acervo que já esteja em `para/acervo/` fica como está (`--ignore-existing`).
     ///
     /// # Errors
     /// [`Erro::JaExiste`], [`Erro::SemInstantaneo`] (senha errada ou cópia vazia),
@@ -379,6 +429,8 @@ impl CopiaDeSeguranca {
                 acervo.clone().into_os_string(),
                 "--transfers".into(),
                 "4".into(),
+                // Nunca sobrescreve um arquivo que já esteja no destino (achado A9).
+                "--ignore-existing".into(),
             ],
             &ambiente,
             None,

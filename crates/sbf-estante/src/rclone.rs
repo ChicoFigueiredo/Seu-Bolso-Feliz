@@ -21,6 +21,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 /// Variável de ambiente para o filho: nome e valor (zerado ao descartar).
@@ -165,10 +166,19 @@ fn ambiente_minimo(comando: &mut Command) {
     }
 }
 
+/// Prazo padrão das chamadas curtas (listar, ler o sal, ofuscar, renomear, apagar): um remoto
+/// travado não trava a ação (achado A9 da revisão de segurança da fatia 1). As transferências
+/// (`copy`, `copyto`) não têm prazo de relógio, porque o acervo pode levar horas; nelas vale
+/// o `--timeout` do próprio rclone (5 min sem tráfego).
+pub const PRAZO_PADRAO: Duration = Duration::from_secs(5 * 60);
+/// Subcomandos que transferem dados e ficam sem prazo de relógio.
+const TRANSFERENCIAS: &[&str] = &["copy", "copyto"];
+
 /// O rclone instalado.
 #[derive(Debug, Clone)]
 pub struct Rclone {
     binario: PathBuf,
+    prazo: Duration,
 }
 
 impl Default for Rclone {
@@ -184,6 +194,7 @@ impl Rclone {
     pub fn novo() -> Self {
         Self {
             binario: localizar_rclone().unwrap_or_default(),
+            prazo: PRAZO_PADRAO,
         }
     }
 
@@ -199,7 +210,15 @@ impl Rclone {
     pub fn com_binario(binario: impl Into<PathBuf>) -> Self {
         Self {
             binario: binario.into(),
+            prazo: PRAZO_PADRAO,
         }
+    }
+
+    /// Troca o prazo das chamadas curtas ([`PRAZO_PADRAO`]).
+    #[must_use]
+    pub fn com_prazo(mut self, prazo: Duration) -> Self {
+        self.prazo = prazo;
+        self
     }
 
     /// Roda o rclone e devolve o stdout. `entrada` vai na entrada padrão; `ambiente` só no
@@ -251,7 +270,8 @@ impl Rclone {
             // Fecha a entrada para o rclone ver o fim.
             drop(stdin);
         }
-        // stderr em outra thread, para nenhum dos dois pipes encher e travar o filho.
+        // stdout e stderr em threads, para nenhum pipe encher e travar o filho, e para o prazo
+        // valer mesmo com o filho calado.
         let mut stderr = filho.stderr.take();
         let leitor = std::thread::spawn(move || {
             let mut texto = String::new();
@@ -260,11 +280,30 @@ impl Rclone {
             }
             texto
         });
-        let mut saida = String::new();
-        if let Some(mut stdout) = filho.stdout.take() {
-            let _ = stdout.read_to_string(&mut saida);
-        }
-        let estado = filho.wait()?;
+        let mut stdout = filho.stdout.take();
+        let leitor_da_saida = std::thread::spawn(move || {
+            let mut texto = String::new();
+            if let Some(s) = stdout.as_mut() {
+                let _ = s.read_to_string(&mut texto);
+            }
+            texto
+        });
+        let prazo =
+            (!TRANSFERENCIAS.contains(&comando.as_str())).then(|| Instant::now() + self.prazo);
+        let estado = loop {
+            if let Some(estado) = filho.try_wait()? {
+                break estado;
+            }
+            if prazo.is_some_and(|p| Instant::now() >= p) {
+                let _ = filho.kill();
+                let _ = filho.wait();
+                let _ = leitor.join();
+                let _ = leitor_da_saida.join();
+                return Err(Erro::TempoEsgotado { comando });
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let saida = leitor_da_saida.join().unwrap_or_default();
         let erro = leitor.join().unwrap_or_default();
         if estado.success() {
             return Ok(saida);

@@ -21,6 +21,12 @@ pub enum Erro {
         /// Fim do stderr.
         mensagem: String,
     },
+    /// Uma chamada curta ao rclone passou do prazo e foi encerrada.
+    #[error("rclone {comando} passou do limite de tempo e foi encerrado")]
+    TempoEsgotado {
+        /// Subcomando (`lsf`, `cat`...).
+        comando: String,
+    },
     /// Falha de disco.
     #[error("falha de disco: {0}")]
     Io(#[from] std::io::Error),
