@@ -1195,13 +1195,25 @@ pub struct LinhaDeEmail {
 }
 
 pub fn emails(ctx: &Contexto<'_>, sel: &Selecao) -> ResultadoDeConsulta<Vec<LinhaDeEmail>> {
+    // Em duas fases, como `arquivos`: a de dentro ordena e corta só as chaves, pelo índice
+    // parcial `origem_gmail_date` (que já tem `content_hash`, então não lê a linha nem junta
+    // `achado` ao pular páginas); a de fora monta as colunas só para a página. A junção com
+    // `achado` na de dentro só entra quando o filtro olha para o achado.
+    let juncao = if sel.menciona("a.") {
+        " JOIN achado a ON a.content_hash = o.content_hash"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT o.id, a.content_hash, substr(o.gmail_date, 1, 16) AS data, o.gmail_from, o.gmail_subject,
            (SELECT count(*) FROM origem x WHERE x.gmail_message_id = o.gmail_message_id AND x.mensagem_ref = 'anexo') AS anexos,
            a.estado, a.caminho_acervo, a.decidido_por
-         FROM origem o JOIN achado a ON a.content_hash = o.content_hash
-         WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml'{sel}
-         ORDER BY o.gmail_date DESC, o.id DESC{limite}",
+         FROM (SELECT o.id AS oid, o.gmail_date AS gd FROM origem o{juncao}
+                WHERE o.origin_type = 'gmail' AND o.mensagem_ref = 'eml' AND o.content_hash IS NOT NULL{sel}
+                ORDER BY o.gmail_date DESC, o.id DESC{limite}) k
+           JOIN origem o ON o.id = k.oid
+           JOIN achado a ON a.content_hash = o.content_hash
+         ORDER BY k.gd DESC, k.oid DESC",
         sel = sel.sql_e(),
         limite = sel.sql_limite(),
     );
@@ -1378,29 +1390,109 @@ pub struct LinhaDePasta {
     pub descartados: i64,
 }
 
+/// O que se sabe de uma pasta enquanto as linhas passam.
+#[derive(Default)]
+struct DaPasta {
+    numero: u32,
+    achados: i64,
+    documentos: i64,
+    descartados: i64,
+}
+
+/// Os 128 primeiros bits do hash (hexadecimal) como número; texto que não seja hexadecimal
+/// cai num hash comum do Rust.
+fn chave_do_hash(hash: &str) -> u128 {
+    hash.get(..32)
+        .and_then(|h| u128::from_str_radix(h, 16).ok())
+        .unwrap_or_else(|| {
+            use std::hash::{BuildHasher, RandomState};
+            u128::from(RandomState::new().hash_one(hash))
+        })
+}
+
+/// `pastas_pessoais`: achados da camada A por pasta.
+///
+/// O agrupamento é feito aqui, e não no `GROUP BY` do SQLite: as pastas de um disco pessoal
+/// têm caminhos longos que começam igual, e o SQLite ordena e compara a chave inteira a cada
+/// linha (2,4 s com 81 mil pastas no inventário real). Uma tabela de dispersão resolve em
+/// uma passada. A ordem e as contagens são as da SQL original (`count(DISTINCT hash)` e a
+/// soma de estados por origem).
 pub fn pastas_pessoais(
     ctx: &Contexto<'_>,
     sel: &Selecao,
 ) -> ResultadoDeConsulta<Vec<LinhaDePasta>> {
+    use std::collections::HashMap;
+    let sel_completa = sel.sem_pagina();
     let sql = format!(
         "SELECT substr(o.local_filepath, 1, length(o.local_filepath) - length(o.filename) - 1) AS pasta,
-           count(DISTINCT o.content_hash) AS achados,
-           coalesce(sum(a.estado = 'documento'), 0) AS documentos,
-           coalesce(sum(a.estado = 'descartado'), 0) AS descartados
+           o.content_hash, a.estado
          FROM achado a CROSS JOIN origem o ON o.content_hash = a.content_hash
-         WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL{sel}
-         GROUP BY 1 ORDER BY 2 DESC, 1{limite}",
-        sel = sel.sql_e(),
-        limite = sel.sql_limite(),
+         WHERE a.camada = 'A' AND o.local_filepath IS NOT NULL{sel}",
+        sel = sel_completa.sql_e(),
     );
-    consultar(ctx.conn, &sql, sel.params(), |l| {
-        Ok(LinhaDePasta {
-            pasta: l.get(0)?,
-            achados: l.get(1)?,
-            documentos: l.get(2)?,
-            descartados: l.get(3)?,
+    let mut instrucao = ctx.conn.prepare_cached(&sql)?;
+    let mut linhas = instrucao.query(rusqlite::params_from_iter(sel_completa.params().iter()))?;
+    let mut pastas: HashMap<String, DaPasta> = HashMap::new();
+    let mut sem_pasta = DaPasta::default();
+    // Um conjunto só para `count(DISTINCT hash)` de todas as pastas: (pasta, hash).
+    let mut vistos: std::collections::HashSet<(u32, u128)> = std::collections::HashSet::new();
+    let erro = |e: rusqlite::types::FromSqlError| ErroDeConsulta::Banco(e.to_string());
+    while let Some(l) = linhas.next()? {
+        let pasta = l.get_ref(0)?.as_str_or_null().map_err(erro)?;
+        let hash = l
+            .get_ref(1)?
+            .as_str_or_null()
+            .map_err(erro)?
+            .unwrap_or_default();
+        let estado = l
+            .get_ref(2)?
+            .as_str_or_null()
+            .map_err(erro)?
+            .unwrap_or_default();
+        // Só aloca a chave na primeira vez que a pasta aparece.
+        let proximo = u32::try_from(pastas.len() + 1).unwrap_or(u32::MAX);
+        let da_pasta = match pasta {
+            Some(p) => match pastas.get_mut(p) {
+                Some(d) => d,
+                None => pastas.entry(p.to_owned()).or_insert(DaPasta {
+                    numero: proximo,
+                    ..DaPasta::default()
+                }),
+            },
+            None => &mut sem_pasta,
+        };
+        if vistos.insert((da_pasta.numero, chave_do_hash(hash))) {
+            da_pasta.achados += 1;
+        }
+        match estado {
+            "documento" => da_pasta.documentos += 1,
+            "descartado" => da_pasta.descartados += 1,
+            _ => {}
+        }
+    }
+    let nula = (sem_pasta.achados > 0).then_some((None, sem_pasta));
+    let mut saida: Vec<LinhaDePasta> = pastas
+        .into_iter()
+        .map(|(pasta, p)| (Some(pasta), p))
+        .chain(nula)
+        .map(|(pasta, p)| LinhaDePasta {
+            pasta,
+            achados: p.achados,
+            documentos: p.documentos,
+            descartados: p.descartados,
         })
-    })
+        .collect();
+    // ORDER BY achados DESC, pasta ASC (NULL primeiro, comparação por bytes).
+    saida.sort_by(|a, b| {
+        b.achados
+            .cmp(&a.achados)
+            .then_with(|| a.pasta.cmp(&b.pasta))
+    });
+    Ok(saida
+        .into_iter()
+        .skip(sel.deslocamento)
+        .take(sel.limite.unwrap_or(usize::MAX))
+        .collect())
 }
 
 pub fn pastas_pessoais_datasette(ctx: &Contexto<'_>) -> ResultadoDeConsulta<Vec<LinhaDePasta>> {
