@@ -98,6 +98,40 @@ fn coluna_do_inventario(tabela: &Tabela, col: usize) -> bool {
     })
 }
 
+/// Larguras iniciais pelo conteúdo (cabeçalho e as primeiras linhas), entre 48 e 360 px.
+fn larguras_das_colunas(tabela: &Tabela) -> Vec<f32> {
+    tabela
+        .colunas
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut maior = c.rotulo.chars().count()
+                + if coluna_do_inventario(tabela, i) {
+                    14
+                } else {
+                    2
+                };
+            for l in tabela.linhas.iter().take(200) {
+                if let Some(cel) = l.celulas.get(i) {
+                    let extra = if matches!(cel, Celula::Estado { .. }) {
+                        6
+                    } else {
+                        0
+                    };
+                    let n = match cel {
+                        Celula::Valor { centavos, .. } => {
+                            formato::dinheiro(*centavos).chars().count()
+                        }
+                        outra => formato::texto_da_celula(outra).chars().count(),
+                    };
+                    maior = maior.max(n + extra);
+                }
+            }
+            (maior as f32 * 6.8 + 18.0).clamp(48.0, 360.0)
+        })
+        .collect()
+}
+
 /// Desenha a tabela. `altura` limita a altura (abas de página); `None` ocupa o resto.
 pub fn desenhar(
     ui: &mut Ui,
@@ -122,96 +156,125 @@ pub fn desenhar(
     let mut ordem_nova = None;
     let mut clique: Option<(usize, bool, bool, bool)> = None; // (pos, ctrl, shift, duplo)
 
-    let mut construtor = TableBuilder::new(ui)
-        .id_salt(id)
-        .striped(false)
-        .resizable(true)
-        .sense(Sense::click())
-        .cell_layout(Layout::left_to_right(Align::Center))
-        .auto_shrink([false, true]);
-    if let Some(h) = altura {
-        construtor = construtor
-            .max_scroll_height(h)
-            .min_scrolled_height(h.min(160.0));
-    }
-    for (i, coluna) in tabela.colunas.iter().enumerate() {
-        let c = if i + 1 == n_colunas {
-            Column::remainder().at_least(60.0).clip(true)
-        } else if coluna.numerica {
-            Column::auto().at_least(70.0).clip(true)
-        } else {
-            Column::initial(170.0).at_least(50.0).clip(true)
-        };
-        construtor = construtor.column(c);
-    }
-    construtor
-        .header(26.0, |mut cabecalho| {
-            for (i, coluna) in tabela.colunas.iter().enumerate() {
-                cabecalho.col(|ui| {
-                    let seta = match estado.ordem {
-                        Some((c, true)) if c == i => " ↑",
-                        Some((c, false)) if c == i => " ↓",
-                        _ => "",
-                    };
-                    let mut texto = coluna.rotulo.clone();
-                    if marcas[i] {
-                        texto.push_str(&format!(" · {A_CONFERIR}"));
-                    }
-                    let layout = if coluna.numerica {
-                        Layout::right_to_left(Align::Center)
-                    } else {
-                        Layout::left_to_right(Align::Center)
-                    };
-                    ui.with_layout(layout, |ui| {
-                        let r = ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::new(format!("{texto}{seta}"))
-                                        .strong()
-                                        .size(12.5)
-                                        .color(p.tinta_suave),
-                                )
-                                .sense(Sense::click())
-                                .truncate(),
-                            )
-                            .on_hover_cursor(CursorIcon::PointingHand)
-                            .on_hover_text("Clique para ordenar");
-                        if r.clicked() {
-                            ordem_nova = Some(match estado.ordem {
-                                Some((c, true)) if c == i => Some((i, false)),
-                                Some((c, false)) if c == i => None,
-                                _ => Some((i, !coluna.numerica)),
-                            });
-                        }
-                    });
-                });
+    let mut larguras = larguras_das_colunas(tabela);
+    // Cabe na largura disponível: um teto comum para as colunas mais largas (as
+    // estreitas, como data e valor, ficam inteiras).
+    let disponivel = ui.available_width() - 8.0 * n_colunas as f32;
+    if larguras.iter().sum::<f32>() > disponivel {
+        let (mut baixo, mut alto) = (48.0f32, 360.0f32);
+        for _ in 0..24 {
+            let meio = (baixo + alto) / 2.0;
+            let total: f32 = tabela
+                .colunas
+                .iter()
+                .zip(&larguras)
+                .map(|(c, l)| if c.numerica { *l } else { l.min(meio) })
+                .sum();
+            if total > disponivel {
+                alto = meio;
+            } else {
+                baixo = meio;
             }
-        })
-        .body(|corpo| {
-            corpo.rows(ALTURA_DA_LINHA, indices.len(), |mut linha_ui| {
-                let pos = linha_ui.index();
-                let linha = &tabela.linhas[indices[pos]];
-                let selecionada = linha.alvo.as_ref().is_some_and(|a| selecao.contem(a));
-                linha_ui.set_selected(selecionada);
-                for (i, c) in linha.celulas.iter().enumerate().take(n_colunas) {
-                    let numerica = tabela.colunas.get(i).is_some_and(|c| c.numerica);
-                    linha_ui.col(|ui| {
-                        if numerica {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                componentes::celula(ui, c, pedidos);
-                            });
-                        } else {
-                            componentes::celula(ui, c, pedidos);
+        }
+        for (c, l) in tabela.colunas.iter().zip(larguras.iter_mut()) {
+            if !c.numerica {
+                *l = l.min(baixo);
+            }
+        }
+    }
+    {
+        let mut construtor = TableBuilder::new(ui)
+            .id_salt(id)
+            .striped(false)
+            .resizable(true)
+            .sense(Sense::click())
+            .cell_layout(Layout::left_to_right(Align::Center))
+            .auto_shrink([false, true]);
+        if let Some(h) = altura {
+            construtor = construtor
+                .max_scroll_height(h)
+                .min_scrolled_height(h.min(160.0));
+        }
+        for (i, coluna) in tabela.colunas.iter().enumerate() {
+            let c = if i + 1 == n_colunas {
+                Column::remainder().at_least(60.0).clip(true)
+            } else if coluna.numerica {
+                Column::initial(larguras[i]).at_least(56.0).clip(true)
+            } else {
+                Column::initial(larguras[i]).at_least(40.0).clip(true)
+            };
+            construtor = construtor.column(c);
+        }
+        construtor
+            .header(26.0, |mut cabecalho| {
+                for (i, coluna) in tabela.colunas.iter().enumerate() {
+                    cabecalho.col(|ui| {
+                        let seta = match estado.ordem {
+                            Some((c, true)) if c == i => " ↑",
+                            Some((c, false)) if c == i => " ↓",
+                            _ => "",
+                        };
+                        let mut texto = coluna.rotulo.clone();
+                        if marcas[i] {
+                            texto.push_str(&format!(" · {A_CONFERIR}"));
                         }
+                        let layout = if coluna.numerica {
+                            Layout::right_to_left(Align::Center)
+                        } else {
+                            Layout::left_to_right(Align::Center)
+                        };
+                        ui.with_layout(layout, |ui| {
+                            let r = ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(format!("{texto}{seta}"))
+                                            .strong()
+                                            .size(12.5)
+                                            .color(p.tinta_suave),
+                                    )
+                                    .sense(Sense::click())
+                                    .truncate(),
+                                )
+                                .on_hover_cursor(CursorIcon::PointingHand)
+                                .on_hover_text("Clique para ordenar");
+                            if r.clicked() {
+                                ordem_nova = Some(match estado.ordem {
+                                    Some((c, true)) if c == i => Some((i, false)),
+                                    Some((c, false)) if c == i => None,
+                                    _ => Some((i, !coluna.numerica)),
+                                });
+                            }
+                        });
                     });
                 }
-                let r = linha_ui.response();
-                if r.clicked() || r.double_clicked() {
-                    let (ctrl, shift) = r.ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
-                    clique = Some((pos, ctrl, shift, r.double_clicked()));
-                }
+            })
+            .body(|corpo| {
+                corpo.rows(ALTURA_DA_LINHA, indices.len(), |mut linha_ui| {
+                    let pos = linha_ui.index();
+                    let linha = &tabela.linhas[indices[pos]];
+                    let selecionada = linha.alvo.as_ref().is_some_and(|a| selecao.contem(a));
+                    linha_ui.set_selected(selecionada);
+                    for (i, c) in linha.celulas.iter().enumerate().take(n_colunas) {
+                        let numerica = tabela.colunas.get(i).is_some_and(|c| c.numerica);
+                        linha_ui.col(|ui| {
+                            if numerica {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    componentes::celula(ui, c, pedidos);
+                                });
+                            } else {
+                                componentes::celula(ui, c, pedidos);
+                            }
+                        });
+                    }
+                    let r = linha_ui.response();
+                    if r.clicked() || r.double_clicked() {
+                        let (ctrl, shift) =
+                            r.ctx.input(|i| (i.modifiers.command, i.modifiers.shift));
+                        clique = Some((pos, ctrl, shift, r.double_clicked()));
+                    }
+                });
             });
-        });
+    }
 
     if let Some(o) = ordem_nova {
         estado.ordem = o;

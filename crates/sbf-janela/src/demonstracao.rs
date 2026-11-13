@@ -1762,15 +1762,16 @@ impl Estado {
         Linha {
             alvo: Some(alvo.clone()),
             celulas: vec![
-                link(
-                    alvo.clone(),
-                    format!("{}{}", if a.protegido { "🔒 " } else { "" }, a.nome),
-                ),
+                link(alvo.clone(), a.nome.clone()),
                 Celula::Estado {
                     rotulo: rotulo_estado_achado(&a.estado).into(),
                     quem: a.decidido_por.as_deref().map(quem),
                 },
-                txt(rotulo_tipo_doc(&a.document_type)),
+                txt(format!(
+                    "{}{}",
+                    rotulo_tipo_doc(&a.document_type),
+                    if a.protegido { " · protegido" } else { "" }
+                )),
                 a.fornecedor.as_ref().map_or(Celula::Vazia, |f| {
                     link(Ref::nova(Tipo::Fornecedor, f.clone()), f.clone())
                 }),
