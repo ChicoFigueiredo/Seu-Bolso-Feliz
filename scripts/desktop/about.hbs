@@ -1,0 +1,26 @@
+Seu Bolso Feliz desktop — licenças de terceiros
+===============================================
+
+Lista das bibliotecas Rust incluídas no executável e suas licenças.
+Gerado por scripts/desktop/gerar-licencas.sh (cargo about).
+
+RESUMO
+------
+{{#each overview}}
+{{{name}}} ({{count}} crates)
+{{/each}}
+
+LICENÇAS
+--------
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+================================================================================
+Usada por:
+{{#each used_by}}
+- {{{crate.name}}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}
