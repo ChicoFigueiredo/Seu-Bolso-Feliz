@@ -8,7 +8,8 @@
 //! - **2**: o log de decisões, lotes, `decidido_por` e índices
 //!   ([`esquema::MIGRACAO_2_DECISOES_E_LOTES`]), as colunas que o `aplicarSchema` do Bun
 //!   acrescentava por `garantirColuna` (para o banco novo e o adotado ficarem iguais) e o
-//!   trigger que faz de `decisao` uma tabela só de acréscimo (INV-07).
+//!   trigger que faz de `decisao` uma tabela só de acréscimo (INV-07), mais
+//!   [`GATILHO_QUE_RECUSA_SUBSTITUIR`], que vale também para conexões de fora do app.
 //!
 //! Regra de ouro: migração aplicada num banco real nunca é editada; só se acrescenta uma.
 
@@ -83,6 +84,21 @@ pub(crate) fn tem_coluna(
     consulta.exists([tabela, coluna])
 }
 
+/// O terceiro trigger de `decisao` (achado A4 da revisão de segurança da fatia 1).
+///
+/// Os triggers de `UPDATE` e `DELETE` da bancada não pegam um `INSERT OR REPLACE` vindo de
+/// uma conexão sem `recursive_triggers` (o padrão do SQLite: um script, o `sqlite3`): o
+/// REPLACE apaga a linha antiga sem disparar o trigger de `DELETE`. Este recusa, antes de
+/// tudo, inserir um `id` que já existe, com ou sem o PRAGMA. O `INSERT` sem `id` continua
+/// valendo (no `BEFORE INSERT` o `NEW.id` de um rowid automático é -1, que não existe).
+pub const GATILHO_QUE_RECUSA_SUBSTITUIR: &str = "\
+CREATE TRIGGER IF NOT EXISTS \"decisao_recusa_substituir\" BEFORE INSERT ON \"decisao\"
+WHEN EXISTS (SELECT 1 FROM decisao WHERE id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'a tabela decisao é somente de acréscimo: substituir recusado');
+END;
+";
+
 fn migracao_2(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     for (tabela, coluna, tipo) in COLUNAS_DO_GARANTIR_COLUNA {
         if !tem_coluna(tx, tabela, coluna)? {
@@ -96,7 +112,8 @@ fn migracao_2(tx: &Transaction<'_>) -> rusqlite::Result<()> {
             Some(erro.to_string()),
         )
     })?;
-    tx.execute_batch(&gatilhos)
+    tx.execute_batch(&gatilhos)?;
+    tx.execute_batch(GATILHO_QUE_RECUSA_SUBSTITUIR)
 }
 
 /// Confere, coluna a coluna, que um banco a adotar tem tudo o que a migração 1 cria.
