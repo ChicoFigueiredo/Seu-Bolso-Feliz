@@ -521,12 +521,12 @@ impl ConsultaDoLivro {
             (Tipo::Ciclo, Some("compromissos" | "ainda-vai-sair")) => {
                 self.tabela_de_compromissos(recorte == Some("ainda-vai-sair"))
             }
-            (Tipo::Fatura, Some("pagamento")) => self.tabela_de_movimentacoes(
-                l.movimentacoes.iter().filter(|m| {
+            (Tipo::Fatura, Some("pagamento")) => {
+                self.tabela_de_movimentacoes(l.movimentacoes.iter().filter(|m| {
                     m.tipo == TipoDeMovimentacao::PagamentoDeFatura
                         && m.fatura_id.as_deref() == Some(de.chave.as_str())
-                }),
-            ),
+                }))
+            }
             (Tipo::Fatura, _) => self.tabela_de_movimentacoes(l.movimentacoes.iter().filter(|m| {
                 m.fatura_id.as_deref() == Some(de.chave.as_str())
                     && m.tipo != TipoDeMovimentacao::PagamentoDeFatura
@@ -537,7 +537,11 @@ impl ConsultaDoLivro {
                     "saidas" => e_saida(m.tipo),
                     _ => m.tipo != TipoDeMovimentacao::Ajuste,
                 };
-                self.tabela_de_movimentacoes(self.movimentacoes_de(de).filter(no_ciclo).filter(|m| quer(m)))
+                self.tabela_de_movimentacoes(
+                    self.movimentacoes_de(de)
+                        .filter(no_ciclo)
+                        .filter(|m| quer(m)),
+                )
             }
             (_, Some(outro))
                 if matches!(
@@ -628,7 +632,9 @@ impl ConsultaDoLivro {
                             .iter()
                             .find(|m| m.id == id)
                             .map_or_else(|| id.clone(), descricao),
-                        _ => self.nome_de(tipo, &id).map_or_else(|| id.clone(), str::to_owned),
+                        _ => self
+                            .nome_de(tipo, &id)
+                            .map_or_else(|| id.clone(), str::to_owned),
                     };
                     let alvo = Ref::nova(tipo, id);
                     Linha {
@@ -796,11 +802,7 @@ impl ConsultaDoLivro {
                             Celula::Contagem {
                                 n: i64::from(i.quantidade),
                                 itens: (!i.movimentacoes.is_empty()).then(|| {
-                                    Box::new(self.itens(
-                                        de.clone(),
-                                        None,
-                                        recorte_de(i.motivo),
-                                    ))
+                                    Box::new(self.itens(de.clone(), None, recorte_de(i.motivo)))
                                 }),
                             },
                         ],
