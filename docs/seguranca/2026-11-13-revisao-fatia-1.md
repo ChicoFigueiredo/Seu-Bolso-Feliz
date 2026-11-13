@@ -267,6 +267,14 @@ viraram testes versionados (`seguranca_scrypt.rs`, `seguranca_destino.rs`,
 | A16 | Aberto | — | — | Um `panic::set_hook` é global; quem instala é a janela (costura). |
 | A17, A18 | Abertos | — | — | Na bancada e na CI, fora do escopo deste agente. |
 
+Na rodada final, `cargo test --workspace` passou com 232 testes, nenhuma falha e 4
+ignorados de propósito, e `cargo clippy --workspace --all-targets -D warnings` também
+passou. Uma rodada anterior travou 35 min em `copia.rs`
+(`senha_da_cripto_nao_aparece_no_cmdline_do_rclone`). Um pânico dentro do `scope` deixava
+o vigia de `/proc` girando para sempre. A causa provável é um ETXTBSY no script de
+embrulho, gravado enquanto outra thread fazia `fork`. O commit `2cf2ca6` faz o teste falhar
+em vez de travar e grava os scripts por um `sh` filho. Dez rodadas seguidas passaram.
+
 ### Decisões das correções (para conferir)
 
 - **C1. Onde fica o sal da cópia.** A tarefa pedia o `PASSWORD2` "guardado no chaveiro
