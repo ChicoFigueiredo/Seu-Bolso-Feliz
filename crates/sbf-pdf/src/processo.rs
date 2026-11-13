@@ -77,12 +77,25 @@ pub(crate) fn escrever_e_fechar(
     })
 }
 
-/// Lê tudo de um pipe numa thread.
-pub(crate) fn ler_tudo<R: Read + Send + 'static>(fonte: Option<R>) -> JoinHandle<Vec<u8>> {
+/// O máximo guardado da saída de um filho (achado A10 da revisão de segurança da fatia 1).
+/// O texto de 3 páginas tem poucos KiB; o que passar disto é drenado e descartado.
+pub const SAIDA_MAXIMA_DO_FILHO: usize = 8 * 1024 * 1024;
+/// O máximo guardado do stderr de um filho (só o do `qpdf` é lido, e só para achar "invalid
+/// password").
+pub(crate) const ERRO_MAXIMO_DO_FILHO: usize = 64 * 1024;
+
+/// Lê de um pipe numa thread, guardando no máximo `limite` bytes. O resto é lido e jogado
+/// fora, para o filho não travar com o pipe cheio.
+pub(crate) fn ler_tudo<R: Read + Send + 'static>(
+    fonte: Option<R>,
+    limite: usize,
+) -> JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {
         let mut saida = Vec::new();
         if let Some(mut fonte) = fonte {
-            let _ = fonte.read_to_end(&mut saida);
+            let teto = u64::try_from(limite).unwrap_or(u64::MAX);
+            let _ = (&mut fonte).take(teto).read_to_end(&mut saida);
+            let _ = std::io::copy(&mut fonte, &mut std::io::sink());
         }
         saida
     })
@@ -116,8 +129,8 @@ pub(crate) fn rodar_com_entrada(
         .stdin
         .take()
         .map(|stdin| escrever_e_fechar(stdin, entrada));
-    let stdout = ler_tudo(filho.stdout.take());
-    let stderr = ler_tudo(filho.stderr.take());
+    let stdout = ler_tudo(filho.stdout.take(), SAIDA_MAXIMA_DO_FILHO);
+    let stderr = ler_tudo(filho.stderr.take(), ERRO_MAXIMO_DO_FILHO);
     let status = esperar(&mut filho, prazo);
     // Com o filho morto, os pipes fecham e as threads terminam.
     let escrita = escrita.map(|t| t.join());

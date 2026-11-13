@@ -122,6 +122,9 @@ pub enum Situacao {
     FaltouSegredo(ErroDeFonte),
     /// Nem o acervo nem a origem local têm o arquivo.
     SemArquivo,
+    /// O arquivo passa de [`crate::abertura::TAMANHO_MAXIMO_DO_PDF`]: nem foi lido nem
+    /// tentado (achado A10 da revisão de segurança da fatia 1).
+    GrandeDemais,
 }
 
 /// O resultado de um documento.
@@ -231,8 +234,15 @@ fn abrir_um(
     let Some(caminho) = localizar(raiz_do_cofre, alvo) else {
         return Ok(resultado);
     };
-    let Ok(pdf) = PdfProtegido::ler(&caminho) else {
-        return Ok(resultado);
+    let pdf = match PdfProtegido::ler(&caminho) {
+        Ok(pdf) => pdf,
+        Err(erro) if erro.kind() == std::io::ErrorKind::FileTooLarge => {
+            return Ok(ResultadoDoAlvo {
+                situacao: Situacao::GrandeDemais,
+                ..resultado
+            });
+        }
+        Err(_) => return Ok(resultado),
     };
     let ferramentas = &opcoes.ferramentas;
     let limite = opcoes.limite_de_falhas;

@@ -26,6 +26,10 @@ use zeroize::Zeroizing;
 /// Os argumentos do `pdftotext`, iguais aos do `e3-extrair.ts`, com o PDF pela entrada padrão.
 pub const ARGUMENTOS_DO_PDFTOTEXT: [&str; 5] = ["-layout", "-l", "3", "-", "-"];
 
+/// O maior PDF que a abertura lê para a memória (achado A10 da revisão de segurança da fatia
+/// 1). Fatura e boleto têm poucos MiB; acima disto é um anexo hostil ou não é documento.
+pub const TAMANHO_MAXIMO_DO_PDF: u64 = 50 * 1024 * 1024;
+
 /// As ferramentas externas e o limite de tempo de cada chamada.
 ///
 /// O padrão resolve cada uma **uma vez**, por caminho absoluto nas pastas do sistema
@@ -201,8 +205,25 @@ fn pdftotext(
 
 impl PdfProtegido {
     /// Lê o original para a memória (e guarda o caminho para o fallback do `qpdf`).
+    ///
+    /// # Errors
+    /// Falha de leitura, ou [`std::io::ErrorKind::FileTooLarge`] acima de
+    /// [`TAMANHO_MAXIMO_DO_PDF`] (o arquivo nem é lido).
     pub fn ler(caminho: &Path) -> std::io::Result<Self> {
-        let bytes = std::fs::read(caminho)?;
+        use std::io::Read as _;
+        let grande_demais = || std::io::Error::from(std::io::ErrorKind::FileTooLarge);
+        let arquivo = std::fs::File::open(caminho)?;
+        if arquivo.metadata()?.len() > TAMANHO_MAXIMO_DO_PDF {
+            return Err(grande_demais());
+        }
+        // O tamanho pode mudar entre o `metadata` e a leitura: o `take` é o teto de fato.
+        let mut bytes = Vec::new();
+        arquivo
+            .take(TAMANHO_MAXIMO_DO_PDF + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > TAMANHO_MAXIMO_DO_PDF {
+            return Err(grande_demais());
+        }
         Ok(Self::novo(bytes, Some(caminho.to_path_buf())))
     }
 
@@ -387,9 +408,9 @@ fn pipeline_do_qpdf(
     let mut senha = Zeroizing::new(Vec::with_capacity(candidata.expor().len()));
     senha.extend_from_slice(candidata.expor().as_bytes());
     let escrita = decifrador.stdin.take().map(|e| escrever_e_fechar(e, senha));
-    let erro_do_qpdf = ler_tudo(decifrador.stderr.take());
-    let texto = ler_tudo(extrator.stdout.take());
-    let erro_do_pdftotext = ler_tudo(extrator.stderr.take());
+    let erro_do_qpdf = ler_tudo(decifrador.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
+    let texto = ler_tudo(extrator.stdout.take(), processo::SAIDA_MAXIMA_DO_FILHO);
+    let erro_do_pdftotext = ler_tudo(extrator.stderr.take(), processo::ERRO_MAXIMO_DO_FILHO);
 
     let status_do_qpdf = esperar(&mut decifrador, prazo);
     let status_do_pdftotext = match status_do_qpdf {
