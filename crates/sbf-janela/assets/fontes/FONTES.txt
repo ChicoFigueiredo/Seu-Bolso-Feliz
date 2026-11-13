@@ -1,0 +1,14 @@
+Fontes embutidas no sbf-janela (baixadas em 2026-11-13):
+
+- Manrope[wght].ttf: google/fonts, ofl/manrope. Licença SIL OFL 1.1 (OFL-Manrope.txt).
+- InstrumentSerif-Regular.ttf: google/fonts, ofl/instrumentserif. Licença SIL OFL 1.1
+  (OFL-InstrumentSerif.txt).
+- MaterialSymbolsRounded-subconjunto.ttf: subconjunto de
+  google/material-design-icons, variablefont/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf,
+  só com os ícones de icones.codepoints (os eixos variáveis continuam). Licença Apache-2.0
+  (LICENSE-MaterialSymbols.txt).
+
+Ícone novo: acrescente a linha "nome codepoint" do .codepoints original em
+icones.codepoints e refaça o subconjunto com subsetar-icones.rs.txt (um main.rs sobre o
+crate fontcull-klippa 0.1.2): subsetar <fonte-original.ttf> <original.codepoints> <nomes.txt> <saida.ttf>.
+Ícone pedido que não estiver no subconjunto aparece como um quadrado vazio.
