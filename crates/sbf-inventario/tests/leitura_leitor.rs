@@ -240,6 +240,17 @@ fn registro_lote_pendencia_regra_e_decisao_se_ligam() {
     assert_eq!(ligados(&leitor, "registro:2", Tipo::Conta).linhas.len(), 1);
     assert_eq!(ligados(&leitor, "registro:2", Tipo::Ciclo).linhas.len(), 1);
 
+    // Unir conciliados: o registro do documento e o da conexão.
+    assert_eq!(
+        ligados(&leitor, "registro:1", Tipo::Registro).linhas.len(),
+        1
+    );
+    assert!(
+        ligados(&leitor, "registro:2", Tipo::Registro)
+            .linhas
+            .is_empty()
+    );
+
     // Lote → itens.
     assert_eq!(ligados(&leitor, "lote:1", Tipo::Registro).linhas.len(), 1);
     assert_eq!(ligados(&leitor, "lote:1", Tipo::Documento).linhas.len(), 1);

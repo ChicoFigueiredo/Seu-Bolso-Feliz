@@ -20,6 +20,7 @@
 use std::path::PathBuf;
 
 use rusqlite::{Connection, params};
+use sbf_inventario::banco::Inventario;
 use sbf_inventario::esquema::{MIGRACAO_1_BASE_BUN, MIGRACAO_2_DECISOES_E_LOTES};
 use tempfile::TempDir;
 
@@ -29,20 +30,29 @@ pub struct BancoDeTeste {
     pub caminho: PathBuf,
 }
 
-/// Cria `inventario.sqlite` num diretório temporário, com esquema e dados da fixture.
+/// Cria `inventario.sqlite` num diretório temporário, como o app o abre: um banco do Bun
+/// "2" que `Inventario::abrir(..).migrar(..)` leva ao esquema do Rust, e então os dados da
+/// fixture.
 pub fn banco_de_teste() -> BancoDeTeste {
     let dir = tempfile::tempdir().expect("diretório temporário");
     let caminho = dir.path().join("inventario.sqlite");
     let conn = Connection::open(&caminho).expect("abrir banco de teste");
-    aplicar_esquema(&conn);
+    aplicar_schema_do_bun(&conn);
+    drop(conn);
+    let mut inventario = Inventario::abrir(&caminho).expect("abrir o inventário");
+    inventario
+        .migrar(dir.path().join("copia-antes-da-migracao.sqlite"))
+        .expect("migrar");
+    drop(inventario);
+    let conn = Connection::open(&caminho).expect("reabrir banco de teste");
     popular(&conn);
     drop(conn);
     BancoDeTeste { _dir: dir, caminho }
 }
 
-/// Migração 1 (esquema do Bun), as colunas que o Bun acrescenta em `aplicarSchema`
-/// (`garantirColuna`) e a migração 2.
-pub fn aplicar_esquema(conn: &Connection) {
+/// O que o `aplicarSchema` do Bun faz num banco novo: `schema.sql`, as colunas do
+/// `garantirColuna` e `meta.schema_versao = '2'`.
+pub fn aplicar_schema_do_bun(conn: &Connection) {
     conn.execute_batch(MIGRACAO_1_BASE_BUN).expect("migração 1");
     conn.execute_batch(
         "ALTER TABLE registro ADD COLUMN tipo_original TEXT;
@@ -54,6 +64,12 @@ pub fn aplicar_esquema(conn: &Connection) {
          INSERT OR REPLACE INTO meta (chave, valor) VALUES ('schema_versao', '2');",
     )
     .expect("colunas do Bun");
+}
+
+/// Migração 1, colunas do Bun e migração 2 por `execute_batch`, numa conexão sua (sem o
+/// trigger de `decisao`). Prefira [`banco_de_teste`].
+pub fn aplicar_esquema(conn: &Connection) {
+    aplicar_schema_do_bun(conn);
     conn.execute_batch(MIGRACAO_2_DECISOES_E_LOTES)
         .expect("migração 2");
 }
@@ -1267,6 +1283,15 @@ pub fn popular(conn: &Connection) {
             },
         );
     }
+
+    // Conciliação: o registro do documento e o da conexão descrevem a conta de outubro.
+    conn.execute(
+        "INSERT INTO relacao_registro (a, b, tipo, confianca, motivo)
+         SELECT 1, r.id, 'conciliacao', 0.95, 'mesmo valor e data' FROM registro r
+          WHERE r.fonte_id = 'conexao:pluggy' AND r.valor_centavos = -18750 AND r.data = '2026-10-25'",
+        [],
+    )
+    .expect("conciliação");
 
     // Preenchimento para a conta de uso regular (conta_buracos): 24 registros em 3 meses, sem setembro,
     // e 22 na reserva, só em julho e outubro.

@@ -16,7 +16,7 @@
 //! | origem | achado, documento, conexão, coleta, registro |
 //! | conexão | coleta, origem, registro, achado, documento |
 //! | coleta | origem, conexão, achado, documento |
-//! | registro | achado, documento, origem, decisão, lote, conexão, fornecedor, conta, ciclo, fatura, pendência |
+//! | registro | achado, documento, origem, decisão, lote, conexão, fornecedor, conta, ciclo, fatura, pendência, registro (conciliados) |
 //! | lote | registro, achado, documento, decisão |
 //! | pendência | o alvo (achado, documento, registro, lote), decisão |
 //! | regra de senha | achado e documento (as tentativas), fornecedor |
@@ -1724,6 +1724,17 @@ pub fn tabela_ligados(ctx: &Contexto<'_>, de: &Ref, tipo: Tipo) -> ResultadoDeCo
     }
 
     match tipo {
+        Tipo::Registro if de_tipo == Tipo::Registro => {
+            // Unir conciliados: registros que descrevem o mesmo fato.
+            let Some(id) = id_numerico(&de.chave) else {
+                return Ok(tabela_vazia());
+            };
+            let sel = Selecao::nova().onde(
+                "r.id IN (SELECT b FROM relacao_registro WHERE a = ? UNION SELECT a FROM relacao_registro WHERE b = ?)",
+                vec![inteiro(id), inteiro(id)],
+            );
+            Ok(vistas::tabela_registros(&vistas::registros(ctx, &sel)?))
+        }
         Tipo::Registro => match selecao_de_registros(ctx, de)? {
             Some(sel) if de_tipo != Tipo::Registro => {
                 Ok(vistas::tabela_registros(&vistas::registros(ctx, &sel)?))

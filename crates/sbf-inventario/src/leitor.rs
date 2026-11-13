@@ -25,7 +25,7 @@ mod itens;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 
 use crate::consulta::{
     Area, Consulta, Contagens, ErroDeConsulta, Filtro, Fonte, Item, Painel, PedidoDeTabela,
@@ -51,10 +51,7 @@ pub struct LeitorSqlite {
 impl LeitorSqlite {
     /// Abre o banco só para leitura, numa conexão própria.
     pub fn abrir(caminho: &Path) -> ResultadoDeConsulta<Self> {
-        let conn = Connection::open_with_flags(
-            caminho,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
+        let conn = crate::banco::abrir_leitura(caminho)?;
         Self::de_conexao(conn)
     }
 
