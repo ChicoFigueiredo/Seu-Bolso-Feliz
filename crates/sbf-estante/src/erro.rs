@@ -58,6 +58,12 @@ pub enum Erro {
     /// O destino não é aceitável (vazio ou começando com `-`).
     #[error("destino inválido: {0:?}")]
     DestinoInvalido(String),
+    /// As preferências de destinos não puderam ser lidas (arquivo adulterado ou ilegível).
+    #[error("as preferências de destinos da estante estão ilegíveis: {0}")]
+    PreferenciasIlegiveis(String),
+    /// Já existe um destino com esse nome.
+    #[error("já existe um destino da estante chamado {0:?}")]
+    DestinoRepetido(String),
     /// A cópia remota não tem nenhum instantâneo do banco (senha errada ou cópia vazia).
     #[error("nenhum instantâneo do banco na cópia: a senha está errada ou a cópia está vazia")]
     SemInstantaneo,
