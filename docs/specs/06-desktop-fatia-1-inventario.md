@@ -273,7 +273,7 @@ Regras:
 | Corrigir tipo                        | achado / `document_type`; registro / `tipo` | idem                                                                                                 |
 | Corrigir data e valor                | achado / `data_chave`, `valor_centavos`     | idem, e recalcula `ciclo_id`                                                                         |
 | Marcar duplicidade                   | achado ↔ achado / `duplicidade`             | `relacao(tipo='duplicidade')`. Conteúdo idêntico nunca chega aqui: é o mesmo achado com duas origens |
-| Unir conciliados                     | registro ↔ registro / `conciliacao`         | `relacao(tipo='conciliacao')`                                                                        |
+| Unir conciliados                     | registro ↔ registro / `conciliacao`         | `relacao_registro(tipo='conciliacao')`, tabela da migração 2: a `relacao` só aceita achados                                                                        |
 | Confirmar recorrência                | fornecedor / `recorrente`                   | a decisão em si; vira compromisso recorrente só na fatia 3                                           |
 | Aprovar / Rejeitar                   | registro / `estado`                         | `aprovado` ou `divergente`, com motivo                                                               |
 | Sinalizar / Responder pendência      | pendencia                                   | `pendencia`, com `resposta` e `resolvida_em`                                                         |
