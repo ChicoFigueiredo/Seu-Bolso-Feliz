@@ -5,7 +5,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { abrirBanco, aplicarSchema } from "./banco";
@@ -18,10 +18,19 @@ afterEach(() => {
 });
 
 /** A migração 2 do Rust, a mesma que o desktop aplica. */
-const MIGRACAO_2 = readFileSync(
-  new URL("../../../crates/sbf-inventario/sql/0002-decisoes-e-lotes.sql", import.meta.url),
-  "utf8",
-);
+const MIGRACAO_2 = (() => {
+  const url = new URL(
+    "../../../crates/sbf-inventario/sql/0002-decisoes-e-lotes.sql",
+    import.meta.url,
+  );
+  // Na branch do inventário o crate Rust não existe: usa só a parte da migração
+  // 2 de que os scripts Bun dependem (as colunas decidido_por).
+  if (existsSync(url)) return readFileSync(url, "utf8");
+  return `ALTER TABLE achado ADD COLUMN decidido_por TEXT;
+          ALTER TABLE registro ADD COLUMN decidido_por TEXT;
+          UPDATE achado SET decidido_por = classificado_por;
+          UPDATE registro SET decidido_por = extraido_por;`;
+})();
 
 const hash = (n: number) => n.toString(16).padStart(2, "0").repeat(32);
 
