@@ -29,6 +29,13 @@ worker segue estas regras; cada uma custou uma falha real.
   antes de registrar no índice; um "arquivo sem dono" pode ser só o próximo
   registro. Limpeza ignora `.parcial-*` e tudo com menos de uma hora.
 - **Arquivo grande (> 100 MB) não é copiado**, só hasheado.
+- **O índice é dividido com o desktop Rust (spec 06).** Ao abrir
+  `inventario.sqlite`, o `sbf --inventario` aplica as migrações dele (versão em
+  `PRAGMA user_version`; o Bun segue com `meta.schema_versao='2'`): tabelas
+  `decisao`, `lote`, `lote_item`, `relacao_registro` e índices em `origem` e
+  `registro`. Em 13/11 o índice cresceu 123 MB nisso. Tabela ou índice que o
+  worker não cria não é sujeira; não apague. Para saber quem está com o banco
+  aberto, procure `inventario.sqlite` em `/proc/*/fd`.
 - **O disco D é dividido com outras sessões.** Em 13/11 as pastas `target/` do
   Rust consumiram 68 GB em 2 h (de 115 para 47 GB livres). Toda rodada confere o
   espaço livre (`df`), e queda rápida vira aviso ao usuário e à sessão que
