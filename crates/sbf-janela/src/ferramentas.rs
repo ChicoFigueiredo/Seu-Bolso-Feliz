@@ -555,6 +555,12 @@ impl Ferramentas {
                         }
                     }
                     Some(Resultado::Regras(t)) => {
+                        if ui
+                            .button((crate::icones::icone_cor("add", 15.0, p.tinta), "Nova regra"))
+                            .clicked()
+                        {
+                            pedidos.push(Pedido::Executar(crate::acoes::IdAcao::NovaRegraDeSenha));
+                        }
                         ui.label(
                             RichText::new("As regras dizem como montar a senha; a senha mesmo fica no chaveiro e nunca aparece aqui.")
                                 .color(p.tinta_suave),

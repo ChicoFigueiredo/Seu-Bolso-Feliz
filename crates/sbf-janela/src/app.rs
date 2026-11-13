@@ -88,6 +88,11 @@ impl std::fmt::Debug for AppSbf {
     }
 }
 
+/// Ações geradas dos dados (fora da lista estática): o filtro por conexão e a escolha do tema.
+const PREFIXO_FONTE: &str = "inicio.fonte.";
+const PREFIXO_FONTE_TODAS: &str = "inicio.fonte-todas";
+const PREFIXO_TEMA: &str = "exibir.tema.";
+
 /// O id do painel do dock na casca.
 pub fn id_do_painel(p: PainelDoDock) -> &'static str {
     match p {
@@ -95,6 +100,7 @@ pub fn id_do_painel(p: PainelDoDock) -> &'static str {
         PainelDoDock::Origens => "origens",
         PainelDoDock::Texto => "texto",
         PainelDoDock::Historico => "historico",
+        PainelDoDock::Previa => "previa",
     }
 }
 
@@ -240,6 +246,7 @@ fn filho_de_menu(id: IdAcao) -> bool {
         IdAcao::PeriodoAtual
             | IdAcao::PeriodoAnterior
             | IdAcao::PeriodoTodos
+            | IdAcao::PeriodoIntervalo
             | IdAcao::QuemTodos
             | IdAcao::QuemVoce
             | IdAcao::QuemRegras
@@ -298,6 +305,7 @@ impl AppCasca for AppSbf {
     fn acoes(&self) -> Vec<AcaoCasca> {
         let contexto = self.janela.borrow().contexto_das_acoes();
         let mut v = Vec::new();
+        let conexoes = self.janela.borrow_mut().conexoes(self.consulta.as_ref());
         let todas: Vec<&acoes::DefinicaoDeAcao> =
             ACOES.iter().filter(|d| !fica_de_fora(d.id)).collect();
         let keytips = keytips_das_acoes();
@@ -321,7 +329,30 @@ impl AppCasca for AppSbf {
                     "inicio.periodo.atual",
                     "inicio.periodo.anterior",
                     "inicio.periodo.todos",
+                    "inicio.periodo.intervalo",
                 ]),
+                IdAcao::PeriodoIntervalo => {
+                    a.alternancia(j.periodo == crate::janela::Periodo::Intervalo)
+                }
+                IdAcao::FonteDoAchado => {
+                    let menu: Vec<String> = std::iter::once(PREFIXO_FONTE_TODAS.to_owned())
+                        .chain(
+                            conexoes
+                                .iter()
+                                .map(|(id, _)| format!("{PREFIXO_FONTE}{id}")),
+                        )
+                        .collect();
+                    let refs: Vec<&str> = menu.iter().map(String::as_str).collect();
+                    a.menu(&refs)
+                }
+                IdAcao::TrocarTema => {
+                    let menu: Vec<String> = tema::temas()
+                        .iter()
+                        .map(|t| format!("{PREFIXO_TEMA}{}", t.id))
+                        .collect();
+                    let refs: Vec<&str> = menu.iter().map(String::as_str).collect();
+                    a.menu(&refs)
+                }
                 IdAcao::EstadoDoAchado => a.menu(&[
                     "inicio.estado.todos",
                     "inicio.estado.a-triar",
@@ -371,6 +402,31 @@ impl AppCasca for AppSbf {
             };
             drop(j);
             v.push(a);
+        }
+        // As Ações geradas dos dados: uma por conexão (filtro) e uma por tema.
+        let fonte_atual = self.janela.borrow().fonte.clone();
+        v.push(
+            AcaoCasca::nova(PREFIXO_FONTE_TODAS, "Todas as conexões")
+                .icone("list_alt")
+                .alternancia(fonte_atual.is_none()),
+        );
+        for (id, nome) in &conexoes {
+            v.push(
+                AcaoCasca::nova(format!("{PREFIXO_FONTE}{id}"), nome.clone())
+                    .icone("cable")
+                    .dica(format!("Só o que veio de {nome}"))
+                    .alternancia(fonte_atual.as_deref() == Some(id.as_str())),
+            );
+        }
+        for t in tema::temas() {
+            v.push(
+                AcaoCasca::nova(
+                    format!("{PREFIXO_TEMA}{}", t.id),
+                    format!("{} · {}", t.nome, t.familia),
+                )
+                .icone("palette")
+                .alternancia(t.id == self.tema_atual),
+            );
         }
         v
     }
@@ -604,7 +660,10 @@ impl AppCasca for AppSbf {
             .map(|p| {
                 let pilha = if p == PainelDoDock::Historico { 1 } else { 0 };
                 let mut d = PainelDock::novo(id_do_painel(p), p.titulo(), pilha).icone(p.icone());
-                if matches!(p, PainelDoDock::Origens | PainelDoDock::Texto) {
+                if matches!(
+                    p,
+                    PainelDoDock::Origens | PainelDoDock::Texto | PainelDoDock::Previa
+                ) {
                     d = d.escondido();
                 }
                 d
@@ -781,6 +840,18 @@ impl AppCasca for AppSbf {
     }
 
     fn ao_executar(&mut self, ctx: &egui::Context, id: &str) {
+        if id == PREFIXO_FONTE_TODAS {
+            self.janela.get_mut().fonte = None;
+            return;
+        }
+        if let Some(fonte) = id.strip_prefix(PREFIXO_FONTE) {
+            self.janela.get_mut().fonte = Some(fonte.to_owned());
+            return;
+        }
+        if let Some(t) = id.strip_prefix(PREFIXO_TEMA) {
+            bancada_casca::pedir(ctx, bancada_casca::Pedido::Tema(t.to_owned()));
+            return;
+        }
         let Some(acao) = acao_do_codigo(id) else {
             return;
         };

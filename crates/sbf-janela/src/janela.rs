@@ -32,6 +32,8 @@ pub enum Periodo {
     CicloAnterior,
     #[default]
     TodosOsCiclos,
+    /// Do ciclo ao ciclo de [`Janela::intervalo`].
+    Intervalo,
 }
 
 /// Uma mensagem curta no topo do centro (resultado da última Ação).
@@ -67,6 +69,19 @@ pub enum Dialogo {
     NovoLote {
         nome: String,
     },
+    /// Período › Intervalo…
+    Intervalo {
+        de: String,
+        ate: String,
+        erro: Option<String>,
+    },
+    /// Ferramentas › Regras de senha › Nova regra. Nunca a senha: só como montá-la.
+    NovaRegra {
+        fornecedor: String,
+        tipo_de_documento: String,
+        estrategia: String,
+        erro: Option<String>,
+    },
 }
 
 /// A janela do SBF.
@@ -82,6 +97,10 @@ pub struct Janela {
     pub quem_decidiu: Option<sbf_inventario::consulta::Quem>,
     /// Filtros "Estado do achado" e "Tipo" (aba Início): `None` = todos.
     pub estado_do_achado: Option<String>,
+    /// Filtro "Conexão": o id da fonte.
+    pub fonte: Option<String>,
+    /// Período › Intervalo…: do ciclo ao ciclo.
+    pub intervalo: Option<(String, String)>,
     pub tipo_do_documento: Option<String>,
     focar_pesquisa: bool,
     relatorios: EstadoDosRelatorios,
@@ -177,6 +196,8 @@ impl Janela {
             periodo: Periodo::default(),
             quem_decidiu: None,
             estado_do_achado: None,
+            fonte: None,
+            intervalo: None,
             tipo_do_documento: None,
             focar_pesquisa: false,
             relatorios: EstadoDosRelatorios::default(),
@@ -222,6 +243,30 @@ impl Janela {
         if terminou {
             self.atualizar();
         }
+    }
+
+    /// As conexões do inventário (para o filtro Conexão), lidas da área Coletas: `(id, nome)`.
+    pub fn conexoes(&mut self, consulta: &dyn Consulta) -> Vec<(String, String)> {
+        let pedido = PedidoDeTabela::Area {
+            area: Area::Coletas,
+            filtro: Filtro::default(),
+        };
+        let mut v: Vec<(String, String)> = Vec::new();
+        if let Ok(c) =
+            Leitor::novo(consulta, &mut self.cache).carregada(&pedido, crate::leitura::PEDACO)
+        {
+            for l in &c.tabela.linhas {
+                for cel in &l.celulas {
+                    if let sbf_inventario::consulta::Celula::Link { alvo, texto } = cel
+                        && alvo.tipo == Tipo::Conexao
+                        && !v.iter().any(|(id, _)| *id == alvo.chave)
+                    {
+                        v.push((alvo.chave.clone(), texto.clone()));
+                    }
+                }
+            }
+        }
+        v
     }
 
     /// As primeiras `n` linhas de uma tabela, lida em pedaços (a Paleta usa).
@@ -345,14 +390,15 @@ impl Janela {
                 let a = ciclo_anterior(&atual);
                 Some((a.clone(), a))
             }
+            Periodo::Intervalo => self.intervalo.clone(),
         };
         Filtro {
             texto: Some(self.pesquisa.trim().to_owned()).filter(|t| !t.is_empty()),
             ciclos,
             quem_decidiu: self.quem_decidiu.clone(),
             estados: self.estado_do_achado.iter().cloned().collect(),
+            fontes: self.fonte.iter().cloned().collect(),
             tipos: self.tipo_do_documento.iter().cloned().collect(),
-            ..Filtro::default()
         }
     }
 
@@ -795,6 +841,49 @@ impl Janela {
                         ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
                     }
                 }
+                Dialogo::Intervalo { de, ate, erro } => {
+                    componentes::titulo(ui, "Período: intervalo de ciclos", 17.0);
+                    ui.label("Do ciclo (AAAA-MM)");
+                    ui.add(egui::TextEdit::singleline(de).desired_width(f32::INFINITY));
+                    ui.label("Até o ciclo (AAAA-MM), inclusive");
+                    ui.add(egui::TextEdit::singleline(ate).desired_width(f32::INFINITY));
+                    if let Some(e) = erro {
+                        ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
+                    }
+                }
+                Dialogo::NovaRegra {
+                    fornecedor,
+                    tipo_de_documento,
+                    estrategia,
+                    erro,
+                } => {
+                    componentes::titulo(ui, "Nova regra de senha", 17.0);
+                    ui.label(
+                        RichText::new("A regra diz só como montar a senha. A senha mesmo fica no chaveiro.")
+                            .size(12.0)
+                            .color(tema::paleta(ui.ctx()).tinta_suave),
+                    );
+                    ui.label("Fornecedor (como aparece nos registros)");
+                    ui.add(egui::TextEdit::singleline(fornecedor).desired_width(f32::INFINITY));
+                    ui.label("Tipo de documento (ex.: fatura, boleto, extrato; * para todos)");
+                    ui.add(egui::TextEdit::singleline(tipo_de_documento).desired_width(f32::INFINITY));
+                    ui.label("Estratégia");
+                    egui::ComboBox::from_id_salt("estrategia-da-regra")
+                        .selected_text(estrategia.as_str())
+                        .show_ui(ui, |ui| {
+                            for e in ESTRATEGIAS_SUGERIDAS {
+                                ui.selectable_value(estrategia, (*e).to_owned(), *e);
+                            }
+                        });
+                    ui.add(
+                        egui::TextEdit::singleline(estrategia)
+                            .hint_text("cpf_primeiros:5, cpf_ultimos:5, cpf_completo, senha_propria:<rótulo>")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if let Some(e) = erro {
+                        ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
+                    }
+                }
                 Dialogo::NovoLote { nome } => {
                     componentes::titulo(ui, "Novo lote", 17.0);
                     ui.label("Nome do lote");
@@ -825,7 +914,10 @@ impl Janela {
                     return;
                 }
                 Err(e) => {
-                    if let Dialogo::DataEValor { erro, .. } = &mut dialogo {
+                    if let Dialogo::DataEValor { erro, .. }
+                    | Dialogo::Intervalo { erro, .. }
+                    | Dialogo::NovaRegra { erro, .. } = &mut dialogo
+                    {
                         *erro = Some(e);
                     } else {
                         self.mensagem = Some(Mensagem {
@@ -926,6 +1018,10 @@ impl Janela {
                     Err(e) => self.erro(e.to_string()),
                 },
                 Pedido::EscolherLote(r) => self.lote_atual = Some(r),
+                Pedido::Intervalo(de, ate) => {
+                    self.intervalo = Some((de, ate));
+                    self.periodo = Periodo::Intervalo;
+                }
                 Pedido::Copiar(texto) => {
                     ctx.copy_text(texto);
                     self.mensagem = Some(Mensagem {
@@ -1038,7 +1134,33 @@ impl Janela {
             IdAcao::Periodo
             | IdAcao::QuemDecidiu
             | IdAcao::EstadoDoAchado
-            | IdAcao::TipoDoDocumento => {}
+            | IdAcao::TipoDoDocumento
+            | IdAcao::FonteDoAchado => {}
+            IdAcao::PeriodoIntervalo => {
+                let atual = self.ciclo_atual();
+                let (de, ate) = self
+                    .intervalo
+                    .clone()
+                    .unwrap_or_else(|| (ciclo_anterior(&ciclo_anterior(&atual)), atual));
+                self.dialogo = Some(Dialogo::Intervalo {
+                    de,
+                    ate,
+                    erro: None,
+                });
+            }
+            IdAcao::NovaRegraDeSenha => {
+                let fornecedor = sel
+                    .first()
+                    .filter(|r| r.tipo == Tipo::Fornecedor)
+                    .map(|r| r.chave.clone())
+                    .unwrap_or_default();
+                self.dialogo = Some(Dialogo::NovaRegra {
+                    fornecedor,
+                    tipo_de_documento: "fatura".to_owned(),
+                    estrategia: ESTRATEGIAS_SUGERIDAS[0].to_owned(),
+                    erro: None,
+                });
+            }
             IdAcao::EstadoTodos
             | IdAcao::EstadoATriar
             | IdAcao::EstadoDocumento
@@ -1064,9 +1186,8 @@ impl Janela {
             IdAcao::QuemTodos => self.quem_decidiu = None,
             IdAcao::QuemVoce => self.quem_decidiu = Some(sbf_inventario::consulta::Quem::Usuario),
             IdAcao::QuemRegras => {
-                self.quem_decidiu = Some(sbf_inventario::consulta::Quem::Automatico(
-                    "regras@2".to_owned(),
-                ));
+                // Texto vazio: qualquer rodada de regras.
+                self.quem_decidiu = Some(sbf_inventario::consulta::Quem::Automatico(String::new()));
             }
             IdAcao::AbrirEmPainelFlutuante => {
                 if let Some(r) = sel.first() {
@@ -1290,6 +1411,17 @@ fn rotulo_da_acao(acao: &Acao) -> &'static str {
     acoes::definicao(id).rotulo
 }
 
+/// As estratégias que o menu da Nova regra sugere (o campo aceita qualquer uma válida).
+pub const ESTRATEGIAS_SUGERIDAS: &[&str] = &[
+    "cpf_primeiros:5",
+    "cpf_primeiros:4",
+    "cpf_primeiros:3",
+    "cpf_ultimos:5",
+    "cpf_ultimos:4",
+    "cpf_completo",
+    "cpf_pontuado",
+];
+
 /// Monta o pedido de um diálogo confirmado.
 pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
     match d {
@@ -1341,6 +1473,50 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                 },
                 alvos: alvos.clone(),
                 motivo: None,
+            }))
+        }
+        Dialogo::Intervalo { de, ate, .. } => {
+            let (de, ate) = (de.trim(), ate.trim());
+            let valido = |c: &str| {
+                c.len() == 7
+                    && c.as_bytes()[4] == b'-'
+                    && c[..4].parse::<u32>().is_ok()
+                    && c[5..].parse::<u32>().is_ok_and(|m| (1..=12).contains(&m))
+            };
+            if !valido(de) || !valido(ate) {
+                return Err("Use ciclos no formato AAAA-MM, por exemplo 2026-05.".to_owned());
+            }
+            if de > ate {
+                return Err("O ciclo inicial vem depois do final.".to_owned());
+            }
+            Ok(Pedido::Intervalo(de.to_owned(), ate.to_owned()))
+        }
+        Dialogo::NovaRegra {
+            fornecedor,
+            tipo_de_documento,
+            estrategia,
+            ..
+        } => {
+            let fornecedor = fornecedor.trim();
+            if fornecedor.is_empty() {
+                return Err("Diga o fornecedor.".to_owned());
+            }
+            let tipo = if tipo_de_documento.trim().is_empty() {
+                "*".to_owned()
+            } else {
+                tipo_de_documento.trim().to_owned()
+            };
+            let estrategia = estrategia.trim();
+            estrategia
+                .parse::<sbf_pdf::Estrategia>()
+                .map_err(|_| format!("Estratégia desconhecida: {estrategia}"))?;
+            Ok(Pedido::Decidir(PedidoDeDecisao {
+                acao: Acao::GuardarRegraDeSenha {
+                    document_type: tipo,
+                    estrategia: estrategia.to_owned(),
+                },
+                alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],
+                motivo: Some("regra criada à mão (Ferramentas › Regras de senha)".to_owned()),
             }))
         }
         Dialogo::NovoLote { nome } => {
@@ -1462,8 +1638,18 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
     for t in &f.tipos {
         partes.push(format!("tipo {}", t.replace('_', " ")));
     }
-    if let Some(q) = &f.quem_decidiu {
-        partes.push(format!("decidido por {}", q.rotulo()));
+    for c in &f.fontes {
+        partes.push(format!("conexão {c}"));
+    }
+    match &f.quem_decidiu {
+        Some(sbf_inventario::consulta::Quem::Usuario) => {
+            partes.push("decidido por você".to_owned())
+        }
+        Some(sbf_inventario::consulta::Quem::Automatico(r)) if r.is_empty() => {
+            partes.push("decidido pelas regras".to_owned());
+        }
+        Some(q) => partes.push(format!("decidido por {}", q.rotulo())),
+        None => {}
     }
     if let Some(t) = &f.texto {
         partes.push(format!("\u{201c}{t}\u{201d}"));

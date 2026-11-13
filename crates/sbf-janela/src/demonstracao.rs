@@ -2348,6 +2348,11 @@ impl Estado {
                 && Self::quem_no_filtro(filtro, a.decidido_por.as_deref())
                 && (filtro.estados.is_empty() || filtro.estados.contains(&a.estado))
                 && (filtro.tipos.is_empty() || filtro.tipos.contains(&a.document_type))
+                && (filtro.fontes.is_empty()
+                    || self
+                        .origens_de(&a.hash)
+                        .iter()
+                        .any(|o| filtro.fontes.iter().any(|f| f == o.conexao)))
         };
         match area {
             A::ATriar => self.tabela_de_achados(
@@ -3230,7 +3235,6 @@ impl Estado {
                                 ligados(alvo, Tipo::Fatura),
                             ),
                         ),
-                        campo("Saldo", txt("vem do livro-caixa, na fatia 2")),
                     ],
                 )
             }

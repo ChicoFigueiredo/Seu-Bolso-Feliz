@@ -89,6 +89,8 @@ pub enum Pedido {
     EscolherLote(Ref),
     /// Copia para a área de transferência (Copiar rastro, Copiar hash).
     Copiar(String),
+    /// Período › Intervalo…: do ciclo `AAAA-MM` ao ciclo `AAAA-MM`.
+    Intervalo(String, String),
 }
 
 impl Pedido {

@@ -21,6 +21,10 @@ pub enum IdAcao {
     PeriodoAtual,
     PeriodoAnterior,
     PeriodoTodos,
+    /// Período › Intervalo…: do ciclo inicial ao final.
+    PeriodoIntervalo,
+    /// Conexão (menu, com as conexões do inventário).
+    FonteDoAchado,
     /// Estado do achado (menu).
     EstadoDoAchado,
     EstadoTodos,
@@ -76,6 +80,7 @@ pub enum IdAcao {
     // Ferramentas
     AbrirPdfProtegido,
     RegrasDeSenha,
+    NovaRegraDeSenha,
     AtualizarEstante,
     FazerCopiaDeSeguranca,
     // Exibir
@@ -340,6 +345,26 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         B::Inicio,
         "Período",
         "Sem filtro de ciclo",
+    ),
+    a(
+        I::PeriodoIntervalo,
+        "inicio.periodo.intervalo",
+        "Intervalo…",
+        "date_range",
+        None,
+        B::Inicio,
+        "Período",
+        "Do ciclo inicial ao ciclo final",
+    ),
+    a(
+        I::FonteDoAchado,
+        "inicio.fonte",
+        "Conexão",
+        "cable",
+        None,
+        B::Inicio,
+        "Filtros",
+        "Só o que veio de uma conexão",
     ),
     a(
         I::EstadoDoAchado,
@@ -762,6 +787,16 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         "As regras de senha por fornecedor e tipo",
     ),
     a(
+        I::NovaRegraDeSenha,
+        "ferramentas.nova-regra",
+        "Nova regra",
+        "add",
+        None,
+        B::Ferramentas,
+        "PDF protegido",
+        "Cria uma regra de senha: fornecedor, tipo e estratégia (nunca a senha)",
+    ),
+    a(
         I::AtualizarEstante,
         "ferramentas.estante",
         "Atualizar estante",
@@ -824,12 +859,12 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
     a(
         I::TrocarTema,
         "exibir.tema",
-        "Trocar tema",
+        "Tema",
         "palette",
         None,
         B::Exibir,
         "Aparência",
-        "Passa para o próximo dos 7 temas do SBF",
+        "Escolhe um dos 7 temas do SBF",
     ),
     a(
         I::AbrirOriginal,
@@ -977,6 +1012,7 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         I::Atualizar | I::Pesquisar | I::Desfazer | I::VerDecisoes | I::NovoLote => Habilitada,
         I::Periodo | I::PeriodoAtual | I::PeriodoAnterior | I::PeriodoTodos => Habilitada,
         I::QuemDecidiu | I::QuemTodos | I::QuemVoce | I::QuemRegras => Habilitada,
+        I::PeriodoIntervalo | I::FonteDoAchado | I::NovaRegraDeSenha => Habilitada,
         I::EstadoDoAchado
         | I::EstadoTodos
         | I::EstadoATriar
@@ -1169,6 +1205,8 @@ mod testes {
         I::PeriodoAtual,
         I::PeriodoAnterior,
         I::PeriodoTodos,
+        I::PeriodoIntervalo,
+        I::FonteDoAchado,
         I::EstadoDoAchado,
         I::EstadoTodos,
         I::EstadoATriar,
@@ -1213,6 +1251,7 @@ mod testes {
         I::EnviarAoServidor,
         I::AbrirPdfProtegido,
         I::RegrasDeSenha,
+        I::NovaRegraDeSenha,
         I::AtualizarEstante,
         I::FazerCopiaDeSeguranca,
         I::PainelDetalhe,
