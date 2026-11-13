@@ -98,6 +98,9 @@ pub struct Janela {
     /// Dentro da `bancada-casca`: a navegação é da casca, e os pedidos de navegação vão
     /// para a fila dela.
     pub na_casca: bool,
+    /// As Ferramentas do inventário real (PDF protegido, estante, cópia, chaveiro).
+    /// `None` no modo demonstração.
+    pub ferramentas: Option<crate::ferramentas::Ferramentas>,
 }
 
 impl Default for Janela {
@@ -130,6 +133,7 @@ impl Janela {
             ligacoes: Ligacoes::default(),
             hoje: hoje_em_sao_paulo(),
             na_casca: false,
+            ferramentas: None,
         }
     }
 
@@ -146,6 +150,19 @@ impl Janela {
     /// As decisões que você tomou nesta sessão.
     pub fn decisoes_da_sessao(&self) -> &[IdDecisao] {
         &self.decisoes_da_sessao
+    }
+
+    /// A janela das Ferramentas (andamento e resultado). Quando uma tarefa termina, relê o
+    /// inventário: a rodada de PDF e a aceitação de uma regra mudam o banco.
+    pub fn ferramentas_ui(&mut self, ctx: &Context) {
+        let Some(f) = self.ferramentas.as_mut() else {
+            return;
+        };
+        let terminou = f.sondar(ctx);
+        f.janela_ui(ctx, &mut self.pedidos);
+        if terminou {
+            self.atualizar();
+        }
     }
 
     /// Uma tabela pela leitura com cache (a Paleta usa).
@@ -216,9 +233,18 @@ impl Janela {
             pode_voltar: self.navegacao.pode_voltar(),
             pode_avancar: self.navegacao.pode_avancar(),
             item_aberto: self.item_aberto().cloned(),
-            pdf_ligado: self.ligacoes.pdf,
-            estante_ligada: self.ligacoes.estante,
-            cofre_aberto: self.ligacoes.cofre,
+            pdf_ligado: self.ligacoes.pdf || self.ferramentas.is_some(),
+            estante_ligada: self.ligacoes.estante || self.ferramentas.is_some(),
+            cofre_aberto: self.ligacoes.cofre || self.ferramentas.is_some(),
+            destino_da_estante: self
+                .ferramentas
+                .as_ref()
+                .is_some_and(|f| !f.destino_da_estante.trim().is_empty()),
+            destino_da_copia: self
+                .ferramentas
+                .as_ref()
+                .is_some_and(|f| !f.destino_da_copia.trim().is_empty()),
+            ferramenta_ocupada: self.ferramentas.as_ref().is_some_and(|f| f.ocupada()),
         }
     }
 
@@ -1073,6 +1099,43 @@ impl Janela {
                         }
                         Err(e) => self.erro(e),
                     }
+                }
+            }
+            IdAcao::AbrirPdfProtegido
+            | IdAcao::AbrirProtegido
+            | IdAcao::RegrasDeSenha
+            | IdAcao::AtualizarEstante
+            | IdAcao::FazerCopiaDeSeguranca
+            | IdAcao::AbrirOriginal
+            | IdAcao::MostrarNoCofre
+                if self.ferramentas.is_some() =>
+            {
+                let hash = sel.first().map(|r| r.chave.clone()).unwrap_or_default();
+                let Some(f) = self.ferramentas.as_mut() else {
+                    return;
+                };
+                let r = match id {
+                    IdAcao::AbrirPdfProtegido | IdAcao::AbrirProtegido => {
+                        f.abrir_pdf_protegido();
+                        Ok(())
+                    }
+                    IdAcao::RegrasDeSenha => {
+                        f.regras_de_senha();
+                        Ok(())
+                    }
+                    IdAcao::AtualizarEstante => {
+                        f.atualizar_estante();
+                        Ok(())
+                    }
+                    IdAcao::FazerCopiaDeSeguranca => {
+                        f.pedir_copia();
+                        Ok(())
+                    }
+                    IdAcao::AbrirOriginal => f.abrir_original(&hash),
+                    _ => f.mostrar_no_cofre(&hash),
+                };
+                if let Err(e) = r {
+                    self.erro(e);
                 }
             }
             IdAcao::EnviarAoServidor

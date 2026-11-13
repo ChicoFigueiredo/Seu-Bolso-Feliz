@@ -585,6 +585,7 @@ impl AppCasca for AppSbf {
                 janela.mensagem_ui(ui);
                 janela.desenhar_destino(ui, consulta.as_ref(), &destino, None);
                 janela.dialogos_ui(&ctx);
+                janela.ferramentas_ui(&ctx);
             }
             Local::Flutuante(id) => {
                 let vista = vistas_flutuantes.entry(id).or_default();
@@ -657,12 +658,21 @@ impl AppCasca for AppSbf {
                 .clicavel(),
             );
         }
+        let (chaveiro, ultima_copia) = {
+            let j = self.janela.borrow();
+            match &j.ferramentas {
+                Some(f) => (
+                    f.texto_do_chaveiro()
+                        .or_else(|| self.barra.chaveiro.clone()),
+                    f.ultima_copia
+                        .clone()
+                        .or_else(|| self.barra.ultima_copia.clone()),
+                ),
+                None => (self.barra.chaveiro.clone(), self.barra.ultima_copia.clone()),
+            }
+        };
         v.push(
-            SegmentoStatus::novo(
-                "chaveiro",
-                format!("Chaveiro {}", traco(&self.barra.chaveiro)),
-            )
-            .icone("key"),
+            SegmentoStatus::novo("chaveiro", format!("Chaveiro {}", traco(&chaveiro))).icone("key"),
         );
         let disco = format!("Disco cifrado: {}", traco(&self.barra.disco_cifrado));
         v.push(match &self.barra.aviso_de_disco {
@@ -673,11 +683,8 @@ impl AppCasca for AppSbf {
             None => SegmentoStatus::novo("disco", disco).icone("hard_drive"),
         });
         v.push(
-            SegmentoStatus::novo(
-                "copia",
-                format!("Última cópia: {}", traco(&self.barra.ultima_copia)),
-            )
-            .icone("backup"),
+            SegmentoStatus::novo("copia", format!("Última cópia: {}", traco(&ultima_copia)))
+                .icone("backup"),
         );
         if let Some(s) = &self.barra.selo {
             v.push(
@@ -720,6 +727,23 @@ impl AppCasca for AppSbf {
                 if let Some(c) = self.janela.get_mut().contagens(self.consulta.as_ref()) {
                     linha(ui, "Achados", formato::inteiro(c.achados));
                     linha(ui, "Documentos", formato::inteiro(c.documentos));
+                }
+            }
+            "chaveiro" if self.janela.get_mut().ferramentas.is_some() => {
+                componentes::titulo(ui, "Chaveiro", 18.0);
+                if let Some(f) = self.janela.get_mut().ferramentas.as_mut() {
+                    f.chaveiro_ui(ui);
+                }
+            }
+            "estante" if self.janela.get_mut().ferramentas.is_some() => {
+                componentes::titulo(ui, "Estante e cópia de segurança", 18.0);
+                if let Some(f) = self.janela.get_mut().ferramentas.as_mut() {
+                    f.destinos_ui(ui);
+                    linha(
+                        ui,
+                        "Última cópia",
+                        f.ultima_copia.clone().unwrap_or_else(|| "—".into()),
+                    );
                 }
             }
             "chaveiro" => {

@@ -944,6 +944,11 @@ pub struct ContextoDasAcoes {
     pub estante_ligada: bool,
     /// Há um cofre aberto (o modo demonstração não tem).
     pub cofre_aberto: bool,
+    /// Destinos configurados em Opções.
+    pub destino_da_estante: bool,
+    pub destino_da_copia: bool,
+    /// Uma ferramenta lenta já está rodando.
+    pub ferramenta_ocupada: bool,
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -1048,9 +1053,26 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
         }
         I::AprovarLote | I::DesaprovarLote => exige(c.lote_atual.is_some(), "Escolha um lote"),
         I::EnviarAoServidor => Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned()),
-        I::AbrirPdfProtegido | I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
+        I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
+        I::AbrirPdfProtegido if c.ferramenta_ocupada => {
+            Desabilitada("Outra ferramenta está rodando".to_owned())
+        }
+        I::AbrirPdfProtegido => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
         I::AtualizarEstante | I::FazerCopiaDeSeguranca => {
-            exige(c.estante_ligada, MOTIVO_NAO_LIGADO)
+            let destino = if id == I::AtualizarEstante {
+                c.destino_da_estante
+            } else {
+                c.destino_da_copia
+            };
+            if !c.estante_ligada {
+                Desabilitada(MOTIVO_NAO_LIGADO.to_owned())
+            } else if !destino {
+                Desabilitada(crate::ferramentas::MOTIVO_SEM_DESTINO.to_owned())
+            } else if c.ferramenta_ocupada {
+                Desabilitada("Outra ferramenta está rodando".to_owned())
+            } else {
+                Habilitada
+            }
         }
         I::AbrirOriginal | I::MostrarNoCofre => {
             if !(sel.len() == 1 && todos_de(sel, ACHADOS)) {

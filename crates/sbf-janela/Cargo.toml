@@ -11,10 +11,14 @@ sbf-inventario = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
 bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
+sbf-pdf = { path = "../sbf-pdf" }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+sbf-estante = { path = "../sbf-estante" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+bancada-segredos = { workspace = true, features = ["testes"] }
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 
