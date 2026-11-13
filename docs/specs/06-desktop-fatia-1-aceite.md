@@ -1,34 +1,51 @@
-# Relatório de aceite da fatia 1 (rascunho)
+# Relatório de aceite da fatia 1
 
-Rascunho da branch `feat/desktop-empacotamento`, base `b3f7f36`. O integrador completa
-às 06:00 de 2026-11-14 depois de juntar as branches. Estados: PASS, FAIL, UNVERIFIED, N/A.
-"Pendente de integração" é UNVERIFIED até a branch do critério entrar.
+Branch `feat/desktop-rust`, depois de integrar todas as frentes da noite de 2026-11-13
+(núcleo, leitura, chaveiro e PDF, estante e disco, casca na `bancada`, janela,
+empacotamento, scripts Bun, correções das revisões de segurança e de código).
+Estados: PASS, FAIL, UNVERIFIED, N/A.
 
-Como reproduzir: `scripts/desktop/conferir.sh` (fmt, clippy, `cargo test --workspace`,
-`bun test` do worker, build release).
+Como reproduzir: `cargo test --workspace` (322 testes, 0 falhas em 2026-11-13 às 03:30),
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, e no worker
+`bun test` (122) e `bunx vitest run workers/inventario` (104). A casca tem os testes dela em
+`/mnt/d/Chico/bancada` (`cargo test --workspace`). `scripts/desktop/conferir.sh` roda tudo.
 
-| ID     | Estado                        | Evidência |
-| ------ | ----------------------------- | --------- |
-| INV-01 | PASS (núcleo)                 | `crates/sbf-inventario/tests/nucleo_banco.rs`: `inv01_abrir_e_ver_o_plano_nao_mudam_o_banco`, `inv01_nenhuma_decisao_antes_de_migrar`, `inv01_migrar_faz_a_copia_antes`, `inv01_depois_de_migrar_abrir_de_novo_nao_muda_nada`. O aviso na janela é pendente de integração. |
-| INV-02 | PASS                          | `nucleo_banco.rs`: `inv02_banco_do_bun_2_vira_user_version_2`, `inv02_rust_recusa_banco_mais_novo_sem_tocar_nele`, `inv02_banco_vazio_e_banco_do_bun_terminam_com_o_mesmo_esquema`, mais duas recusas de banco estranho. A metade "o Bun recusa banco mais novo" não tem teste com id `inv02` nesta branch: UNVERIFIED (conferir em `workers/inventario`). |
-| INV-03 | pendente de integração        | As 12 vistas ainda não estão nesta branch. |
-| INV-04 | pendente de integração        | Visão geral e comparação com `relatorio.ts`. |
-| INV-05 | PASS                          | `nucleo_decisoes.rs` (`inv05_*`, 17 testes, todas as Ações do §10) e `nucleo_reprojetar.rs::inv05_reprojetar_reproduz_o_estado` (propriedade). |
-| INV-06 | PASS                          | `nucleo_bun.rs::inv06_e3_triar_do_bun_nao_muda_o_que_o_usuario_decidiu`. |
-| INV-07 | PASS                          | `nucleo_banco.rs::inv07_decisao_recusa_update_e_delete`. |
-| INV-08 | PASS                          | `crates/sbf-chaveiro/tests/importacao.rs`: `senha_errada_e_arquivo_adulterado_dao_o_mesmo_erro`, `importa_para_o_keyring_do_sistema`, `sem_keyring_importa_para_o_arquivo_de_fallback_com_a_mesma_senha_mestra`, `conferir_que_nenhum_arquivo_tem_valor` (busca pelo valor), `o_crate_nao_loga`. |
-| INV-09 | PASS                          | `sbf-pdf/tests/rodada.rs::abre_pela_regra_com_o_texto_do_pdftotext_e_sem_senha_no_banco`, `n_falhas_viram_pendencia_e_as_tentativas_param`, `estrategia_padrao_vencedora_vira_proposta_e_so_grava_com_confirmacao`; `sem_vazamento.rs::a_senha_nao_aparece_em_argv_nem_ambiente_de_nenhum_processo` (/proc), `nenhum_arquivo_e_criado_na_abertura` (strace; `/usr/bin/strace` existe nesta máquina, então rodou de verdade), `o_crate_nao_loga`. |
-| INV-10 | PARCIAL: PASS no núcleo       | `nucleo_lotes.rs`: `inv10_aprovar_lote_marca_os_registros_como_decisoes`, `inv10_enviar_ao_servidor_fica_desabilitado_com_o_motivo` e outros. O botão desabilitado na janela é pendente de integração. |
-| INV-11 | pendente de integração        | Estante e coleta do Drive (`sbf-estante`). |
-| INV-12 | pendente de integração        | Restauração da cópia cifrada. |
-| INV-13 | pendente de integração        | Aviso de disco sem cifra. |
-| INV-14 | pendente de integração        | Shell (`bancada-casca`) e janela. |
-| INV-15 | UNVERIFIED                    | Linux: pendente da janela. Windows e macOS: sem VM; os scripts `empacotar-macos.sh` e `empacotar-windows.ps1` não foram executados. Cross-build para Windows não foi possível aqui (falta `x86_64-w64-mingw32-gcc` e o alvo no rustup; `cargo-xwin` está instalado, mas baixa o SDK da Microsoft, rede fora da regra). |
-| INV-16 | UNVERIFIED                    | Exige o inventário real, que esta rodada não pode abrir; medir às 06:00 pelo usuário. |
-| INV-17 | PASS com ressalvas            | Ver "Varredura INV-17" abaixo. |
-| INV-18 | pendente de integração        | Respostas do §11. |
-| INV-19 | pendente de integração        | Links de item e páginas. |
-| INV-20 | pendente de integração        | Rastro e totais navegáveis. |
+**Inventário real.** Nenhum teste toca o cofre. A conferência sobre dados reais foi feita
+pelo integrador numa **cópia** do `inventario.sqlite` tirada pela API de backup do SQLite,
+com `cargo run --release -p sbf-inventario --example medir -- <cópia>`, que só imprime
+contagens e tempos; a cópia foi apagada depois. Abrir o inventário de verdade pela janela
+fica para o CEO.
+
+| ID     | Estado | Evidência |
+| ------ | ------ | --------- |
+| INV-01 | PASS | `nucleo_banco.rs`: `inv01_abrir_e_ver_o_plano_nao_mudam_o_banco` (inclusive arquivo de 0 bytes e ausente), `inv01_nenhuma_decisao_antes_de_migrar`, `inv01_migrar_faz_a_copia_antes`, `inv01_copia_nunca_sobrescreve_e_sem_copia_nao_migra`, `inv01_copia_feita_com_outro_processo_gravando`. Na cópia do inventário real: estado `DoBun`, plano de 2 passos, migração 0 → 2 em 9,1 s com a cópia antes. Na janela, `sbf --inventario` mostra o plano e o caminho da cópia e só migra com o OK, com andamento por etapa (teste manual; sem teste automático do diálogo). |
+| INV-02 | PASS | Rust: `inv02_banco_do_bun_2_vira_user_version_2`, `inv02_rust_recusa_banco_mais_novo_sem_tocar_nele`, `inv02_banco_vazio_e_banco_do_bun_terminam_com_o_mesmo_esquema`. Bun: `workers/inventario/src/banco_test.ts` ("inv02 com user_version >= 1 não roda DDL nem grava meta", "inv02 recusa banco numa versão do Rust que não conhece"). Real: a cópia foi adotada sem `NaoBate`. |
+| INV-03 | PASS | `leitura_vistas.rs` roda a SQL original de cada uma das 12 consultas (cópia congelada em `tests/fixtures/datasette-metadata.json`) e compara linha a linha; `leitura_areas_divididas.rs::inv03_emails_por_remetente_e_pastas_pessoais_saem_pela_consulta`; `leitura_paginas.rs::paginas_das_areas_grandes_juntas_sao_a_tabela_inteira`. O Datasette saiu do worker. |
+| INV-04 | PASS | `leitura_visao_geral.rs::contagens_iguais_ao_relatorio_ts` roda o `relatorio.ts` de verdade sobre a fixture e compara resumo, fontes, áreas, os 13 ciclos e os avisos. Etapas E0, E2, E4 e E5 dependem de arquivos fora do banco e ficam "aberta"/"aguardando" salvo `estado.json`. |
+| INV-05 | PASS | `nucleo_decisoes.rs` (20 testes `inv05_*`, uma por Ação do §10, desfazer de cada uma, falha num alvo não grava nada, regra de senha com prioridade) e `nucleo_reprojetar.rs::inv05_reprojetar_reproduz_o_estado` (proptest). Comando `sbf reprojetar --inventario <pasta>` sobre `manutencao::reprojetar_a_pasta` (`tests/manutencao.rs`). |
+| INV-06 | PASS | `nucleo_bun.rs::inv06_e3_triar_do_bun_nao_muda_o_que_o_usuario_decidiu` roda o `bun` de verdade. A regra também vale para `e3-extrair`, `e3-pluggy` e as reimportações da Pluggy (`workers/inventario/src/decisao_test.ts`). |
+| INV-07 | PASS | `nucleo_banco.rs::inv07_decisao_recusa_update_e_delete` e `seguranca_decisao.rs` (INSERT OR REPLACE, REPLACE e upsert recusados também numa conexão crua de fora do app). |
+| INV-08 | PASS | `sbf-chaveiro/tests/importacao.rs` (fixture gerada pelo próprio `segredos.ts`, N=2^10; senha errada e 16 adulterações dão o mesmo erro; busca pelo valor em todo arquivo tocado; o crate não loga) e `seguranca_scrypt.rs` (parâmetros hostis recusados em menos de 200 ms). |
+| INV-09 | PASS | `sbf-pdf/tests/rodada.rs` (abre pela regra com o texto do `pdftotext`; só vira pendência depois de N falhas acumuladas; proposta de regra só grava com confirmação; rodada só na seleção), `sem_vazamento.rs` (varredura de `/proc/*/cmdline` e `environ` dos filhos; `strace -f` sem nenhuma abertura para escrita), `seguranca_*.rs`. RC4-40, RC4-128, AES-128, AES-256 testados. |
+| INV-10 | PASS | Núcleo: `nucleo_lotes.rs` (7 testes `inv10_*`). Janela: `desenho.rs::lote_pela_janela_cria_adiciona_e_aprova`; "Enviar ao servidor" desabilitado com "Chega na fatia 3, com a caixa de entrada" (`acoes_pela_casca_gravam_e_desfazem`). |
+| INV-11 | PASS | `sbf-estante/tests/estante.rs::so_documentos_com_nome_da_vista_e_bytes_originais` (PDF protegido chega protegido, bytes iguais), `atualizacao_incremental_renomeia_em_vez_de_reenviar`, `nomes_ts.rs` (nomes iguais aos do `vista-nome.ts`, regerados pelo Bun), `seguranca_destino.rs`; coleta do Drive ignora `SBF/` (`workers/inventario/src/pasta-sbf.test.ts`). Só com remotos locais: o Drive real precisa de um remoto com escrita. |
+| INV-12 | PASS | `sbf-estante/tests/copia.rs::ida_e_volta_reproduz_acervo_e_banco_com_o_mesmo_hash` (remoto crypt sobre pasta local, banco pela API de backup, nada do WAL), `senha_da_cripto_nao_aparece_no_cmdline_do_rclone`, `seguranca_senha.rs` (senha gerada, sal próprio por destino). |
+| INV-13 | PASS no Linux; UNVERIFIED no Windows e no macOS | `sbf-disco` (testes do parser com LUKS, LVM sobre LUKS, partição comum, tmpfs, NFS, btrfs); nesta máquina `/`, `/home` e `/mnt/d` dão "não cifrado" e a barra mostra o aviso. BitLocker e FileVault só por parser de saídas de exemplo; o código desses SOs não foi compilado aqui. |
+| INV-14 | PASS | Casca (`bancada/crates/bancada-casca/tests/janela.rs`): `desenha_em_todos_os_temas_densidades_escalas_e_modos_sem_panico`, `os_sete_temas_do_sbf_carregam_do_temas_json_real`, `ctrl_f1_e_atalhos_do_app_e_acao_desabilitada_nao_roda`, `keytips_alt_aba_e_acao_pelo_teclado`, `ctrl_k_abre_e_fecha_a_paleta_e_esc_fecha`, `paleta_busca_e_enter_abre_o_destino`. Janela: `varios_quadros_seguidos_nao_travam_e_a_lista_de_acoes_vale` (a lista única inteira entra na casca), `keytips_sem_ambiguidade_em_todas_as_abas`. |
+| INV-15 | UNVERIFIED | Linux: abre e navega pelo XWayland (`WAYLAND_DISPLAY=`), com capturas; no Wayland nativo a janela desenhou só 2 quadros no ambiente dos agentes (provável sandbox; conferir na sessão do CEO). Windows e macOS: sem VM; scripts `empacotar-macos.sh` e `empacotar-windows.ps1` não executados; build cruzado para Windows precisa de `gcc-mingw-w64-x86-64` e do alvo no rustup. `.deb` e `.tar.gz` do Linux gerados. |
+| INV-16 | PASS (vistas principais) | Cópia do inventário real (300 mil achados, 638 mil origens, 57 mil e-mails), build release, primeira página de 1.000 linhas: Documentos 28 ms, Registros 2 ms, Fornecedores 3 ms, Em dúvida 61 ms, Arquivos e pastas 64 ms, E-mails 120 ms, E-mails por remetente 97 ms; filtro de texto até 175 ms; relatórios até 63 ms; contagens 19 ms. Ressalvas: Pastas pessoais 2,0 s na primeira chamada (área secundária, lida em segundo plano) e Visão geral 0,5 s (lida em segundo plano). Tabelas virtualizadas, em pedaços, sem paginação visível. A abertura da janela real em menos de 3 s não foi cronometrada. |
+| INV-17 | PASS com ressalvas | Ver "Varredura INV-17" abaixo. A demonstração e todas as fixtures são fictícias. |
+| INV-18 | PASS | `leitura_relatorios.rs`: cada pergunta contra uma consulta de referência, `toda_pergunta_responde_com_a_marca_e_sem_termo_do_livro_caixa`, `livro_caixa_nao_e_suportado_na_fatia_1`. Janela: "· a conferir" nos valores e o seletor com Livro-caixa desabilitado. |
+| INV-19 | PASS | Leitura: todo nome sai como `Celula::Link`; `fornecedor_liga_registros_documentos_e_decisoes`, `cabecalho_do_fornecedor_tem_apelidos_e_contratos`. Janela: `dados_coerentes_toda_ref_de_link_abre_uma_pagina`, `fornecedor_tem_as_abas_da_spec_com_o_livro_caixa_desabilitado`, `totais_voltar_flutuantes_dialogos_e_temas`; casca: `historico_por_alt_setas_e_botoes_laterais_do_mouse`, `ctrl_clique_abre_paineis_flutuantes_que_navegam_e_se_destacam`. |
+| INV-20 | PASS no escopo da fatia 1 | `leitura_leitor.rs::todo_total_abre_os_itens_que_o_somam` (mais de 200 totais conferidos contra os itens), `conta_e_fatura_ligam_registros`, `rastro_do_registro_vai_ate_a_movimentacao`, `rastro_da_fatura_e_da_conta_e_o_ciclo_sem_proveniencia`; janela: `todo_total_do_fornecedor_abre_os_registros_que_o_somam`, `rastro_do_registro_vai_ate_a_conexao_e_ao_lote`. Rateio e centros são do livro-caixa (fatia 2). |
+
+## O que fica para o CEO
+
+- Abrir o inventário real pela janela (`sbf --inventario /mnt/d/Chico/financas`) e aceitar a
+  migração; conferir a abertura em menos de 3 s.
+- Conferir o Wayland nativo na sessão gráfica dele.
+- Criar um remoto do Drive com escrita para a Estante e a cópia de segurança.
+- As decisões de risco da revisão de segurança (`docs/seguranca/2026-11-13-revisao-fatia-1.md`).
 
 ## Varredura INV-17
 
@@ -54,7 +71,7 @@ e-mail fora de `example/teste/localhost`, e o literal `/mnt/d/Chico/financas`.
   caminho por configuração fica com o CEO.
 - Não foram varridos os binários nem o `docs/` fora dos listados.
 
-## Resultado do `conferir.sh` nesta branch
+## Resultado do `conferir.sh` na branch do empacotamento (antes da integração)
 
 fmt, clippy `-D warnings`, `cargo test --workspace`, `bun test` do worker e build release:
 todos PASS. `empacotar-linux.sh --sem-build` gerou o `.tar.gz` e o `.deb`
