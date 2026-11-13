@@ -409,6 +409,7 @@ impl Janela {
                         });
                         let chave = format!("area:{area:?}");
                         let mut estado = self.centro.tabelas.remove(&chave).unwrap_or_default();
+                        estado.teclado = true;
                         tabela::desenhar(
                             ui,
                             &chave,

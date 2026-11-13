@@ -48,6 +48,9 @@ type Assinatura = (usize, usize, Option<(usize, bool)>);
 pub struct EstadoDaTabela {
     /// Coluna e sentido (`true` = crescente).
     pub ordem: Option<(usize, bool)>,
+    /// A tabela do centro responde ao teclado: ↑/↓ movem a seleção, Shift estende,
+    /// Enter abre a página do item.
+    pub teclado: bool,
     indices: Vec<usize>,
     assinatura: Option<Assinatura>,
 }
@@ -183,6 +186,51 @@ pub fn desenhar(
         }
     }
     {
+        // Teclado: ↑/↓ movem a seleção (Shift estende), Enter abre o item em foco.
+        let mut rolar_para = None;
+        if estado.teclado && !ui.ctx().egui_wants_keyboard_input() && !indices.is_empty() {
+            let (baixo, cima, enter, shift) = ui.input_mut(|i| {
+                let shift = i.modifiers.shift;
+                (
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                        || i.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowDown),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+                        || i.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    shift,
+                )
+            });
+            if baixo || cima || enter {
+                let atual = selecao.foco.as_ref().and_then(|f| {
+                    indices
+                        .iter()
+                        .position(|i| tabela.linhas[*i].alvo.as_ref() == Some(f))
+                });
+                if enter {
+                    if let Some(f) = selecao.foco.clone() {
+                        pedidos.push(Pedido::Abrir(Destino::Item(f)));
+                    }
+                } else {
+                    let nova = match (atual, baixo) {
+                        (None, _) => 0,
+                        (Some(p), true) => (p + 1).min(indices.len() - 1),
+                        (Some(p), false) => p.saturating_sub(1),
+                    };
+                    if let Some(alvo) = tabela.linhas[indices[nova]].alvo.clone() {
+                        if shift {
+                            if !selecao.itens.contains(&alvo) {
+                                selecao.itens.push(alvo.clone());
+                            }
+                            selecao.foco = Some(alvo);
+                        } else {
+                            selecao.so(alvo);
+                            selecao.ancora = Some(nova);
+                        }
+                    }
+                    rolar_para = Some(nova);
+                }
+            }
+        }
         let mut construtor = TableBuilder::new(ui)
             .id_salt(id)
             .striped(false)
@@ -190,6 +238,9 @@ pub fn desenhar(
             .sense(Sense::click())
             .cell_layout(Layout::left_to_right(Align::Center))
             .auto_shrink([false, true]);
+        if let Some(linha) = rolar_para {
+            construtor = construtor.scroll_to_row(linha, None);
+        }
         if let Some(h) = altura {
             construtor = construtor
                 .max_scroll_height(h)
