@@ -122,8 +122,14 @@ pub enum Area {
     Fornecedores,
     Faturas,
     ContasLacunas,
+    /// As mensagens (vista `emails`).
     Emails,
+    /// A outra metade da área E-mails (vista `emails_por_remetente`).
+    EmailsPorRemetente,
+    /// Os arquivos (vista `arquivos`).
     ArquivosEPastas,
+    /// A outra metade da área Arquivos e pastas (vista `pastas_pessoais`).
+    PastasPessoais,
     Coletas,
     Pendencias,
     Lotes,

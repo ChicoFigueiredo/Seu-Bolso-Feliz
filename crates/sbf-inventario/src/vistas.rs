@@ -1724,6 +1724,8 @@ pub fn tabela_da_area(
             Ok(tabela_contas_buracos(&contas_buracos(ctx, &sel)?))
         }
         Area::Emails => Ok(tabela_emails(&emails(ctx, &selecao_de_emails(filtro))?)),
+        Area::EmailsPorRemetente => tabela_de_emails_por_remetente(ctx, filtro),
+        Area::PastasPessoais => tabela_de_pastas_pessoais(ctx, filtro),
         Area::ArquivosEPastas => Ok(tabela_arquivos(&arquivos(
             ctx,
             &selecao_de_arquivos(filtro),
