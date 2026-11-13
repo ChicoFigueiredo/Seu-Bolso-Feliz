@@ -1,0 +1,21 @@
+use fontcull_klippa::{parse_name_ids, parse_name_languages, parse_tag_list, parse_unicodes, populate_gids, subset_font, Plan, SubsetFlags};
+use fontcull_write_fonts::read::FontRef;
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let dados = std::fs::read(&a[1]).unwrap();
+    let pontos = std::fs::read_to_string(&a[2]).unwrap();
+    let nomes = std::fs::read_to_string(&a[3]).unwrap();
+    let mapa: std::collections::HashMap<&str, &str> = pontos.lines().filter_map(|l| l.split_once(' ')).collect();
+    let mut cps = Vec::new();
+    for n in nomes.split_whitespace() {
+        match mapa.get(n) { Some(c) => cps.push(c.to_string()), None => eprintln!("sem icone: {n}") }
+    }
+    let font = FontRef::new(&dados).unwrap();
+    let gids = populate_gids("").unwrap();
+    let uni = parse_unicodes(&cps.join(",")).unwrap();
+    let drop = parse_tag_list("GSUB,GPOS,morx,mort,kerx,kern").unwrap();
+    let plan = Plan::new(&gids, &uni, &font, SubsetFlags::default(), &drop, &parse_tag_list("*").unwrap_or_default(), &parse_tag_list("*").unwrap_or_default(), &parse_name_ids("*").unwrap_or_default(), &parse_name_languages("*").unwrap_or_default());
+    let out = subset_font(&font, &plan).unwrap();
+    std::fs::write(&a[4], out).unwrap();
+    eprintln!("{} icones", cps.len());
+}

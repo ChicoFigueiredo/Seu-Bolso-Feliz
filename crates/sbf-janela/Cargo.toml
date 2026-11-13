@@ -1,0 +1,17 @@
+[package]
+name = "sbf-janela"
+description = "A interface egui do Seu Bolso Feliz: áreas, tabelas, páginas de item, rastro, Ações do §10, lotes, painéis e o modo demonstração."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-inventario = { workspace = true }
+egui = { workspace = true }
+egui_extras = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
