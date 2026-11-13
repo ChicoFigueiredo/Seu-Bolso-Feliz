@@ -93,6 +93,13 @@ impl EstadoDaTabela {
 
 const ALTURA_DA_LINHA: f32 = 26.0;
 
+/// A altura que `n` linhas ocupam de fato (com o espaçamento do tema e o cabeçalho), para
+/// tabelas que devem aparecer inteiras até `maximo`.
+pub fn altura_para(ui: &Ui, n: usize, maximo: f32) -> f32 {
+    let passo = ALTURA_DA_LINHA + ui.spacing().item_spacing.y;
+    ((n as f32 + 1.0) * passo + 8.0).min(maximo)
+}
+
 fn coluna_do_inventario(tabela: &Tabela, col: usize) -> bool {
     tabela.linhas.iter().take(64).any(|l| {
         matches!(

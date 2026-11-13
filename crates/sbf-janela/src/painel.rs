@@ -79,7 +79,7 @@ pub fn desenhar_painel(
             let tabela = std::sync::Arc::new(s.tabela.clone());
             let id = format!("{chave}:{i}");
             let mut estado = vista.tabelas.remove(&id).unwrap_or_default();
-            let altura = (s.tabela.linhas.len() as f32 * 26.0 + 30.0).min(360.0);
+            let altura = tabela::altura_para(ui, s.tabela.linhas.len(), 420.0);
             tabela::desenhar(
                 ui,
                 &id,

@@ -585,7 +585,7 @@ impl Janela {
                     } else {
                         0
                     };
-                    let altura = (n as f32 * 26.0 + 30.0).min(200.0);
+                    let altura = tabela::altura_para(ui, n, 220.0);
                     if let Err(e) = pagina::tabela_em_pedacos(
                         ui,
                         &mut leitor,
