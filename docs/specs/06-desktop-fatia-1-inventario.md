@@ -140,6 +140,7 @@ movimentações dele.
 
   Entidade nova nasce com página. As exceções são de propósito: os segredos do chaveiro
   nunca aparecem, e os estados internos do pipeline não chegam à interface.
+
 - **A página de um item** tem um cabeçalho com o resumo e abas com tudo o que se liga a
   ele. O fornecedor, por exemplo:
   - **Cabeçalho:** total por ciclo, se é recorrente, apelidos e contratos.
@@ -273,7 +274,7 @@ Regras:
 | Corrigir tipo                        | achado / `document_type`; registro / `tipo` | idem                                                                                                 |
 | Corrigir data e valor                | achado / `data_chave`, `valor_centavos`     | idem, e recalcula `ciclo_id`                                                                         |
 | Marcar duplicidade                   | achado ↔ achado / `duplicidade`             | `relacao(tipo='duplicidade')`. Conteúdo idêntico nunca chega aqui: é o mesmo achado com duas origens |
-| Unir conciliados                     | registro ↔ registro / `conciliacao`         | `relacao_registro(tipo='conciliacao')`, tabela da migração 2: a `relacao` só aceita achados                                                                        |
+| Unir conciliados                     | registro ↔ registro / `conciliacao`         | `relacao_registro(tipo='conciliacao')`, tabela da migração 2: a `relacao` só aceita achados          |
 | Confirmar recorrência                | fornecedor / `recorrente`                   | a decisão em si; vira compromisso recorrente só na fatia 3                                           |
 | Aprovar / Rejeitar                   | registro / `estado`                         | `aprovado` ou `divergente`, com motivo                                                               |
 | Sinalizar / Responder pendência      | pendencia                                   | `pendencia`, com `resposta` e `resolvida_em`                                                         |
@@ -322,7 +323,7 @@ Regras:
      - Senha errada é um erro tipado (`InvalidPassword`).
      - PDF "reparado e sem nenhuma letra" é tratado como corrompido.
    - **Fallback**, para cifra que o `lopdf` não implementa: `qpdf --password-file=-
-     --decrypt <original> -` em pipe para o `pdftotext`, nunca com cópia em disco.
+--decrypt <original> -` em pipe para o `pdftotext`, nunca com cópia em disco.
 4. **Nenhuma cópia decifrada no disco.** O caminho principal não cria arquivo. O único
    caso que vai precisar de pasta temporária é o OCR de PDF protegido escaneado, que
    fica para quando a E3 for portada. Nesse caso valem:
@@ -421,28 +422,28 @@ São mudanças transitórias, cada uma apagada quando o dono dela for portado:
 Cada item termina como PASS, FAIL, UNVERIFIED ou N/A, com teste ou evidência (regra do
 `00-estado-real.md`).
 
-| ID     | Critério                                                                                                                                                                                                                                                 |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| INV-01 | Abre o inventário de verdade, avisa da migração e faz a cópia antes. Fora isso, nada muda no banco até a primeira decisão.                                                                                                                               |
-| INV-02 | Um banco na versão "2" do Bun vira `user_version=2` do Rust. O Rust recusa banco mais novo que ele, e o Bun recusa banco mais novo que ele.                                                                                                              |
-| INV-03 | Cada uma das 12 vistas devolve as mesmas linhas que a consulta do Datasette correspondente, sobre o banco de teste.                                                                                                                                      |
-| INV-04 | A Visão geral mostra as mesmas contagens que o `relatorio.ts` para o mesmo banco.                                                                                                                                                                        |
-| INV-05 | Toda Ação do §10 grava uma decisão e a projeção na mesma transação. Desfazer restaura. `reprojetar` reproduz o estado (teste de propriedade).                                                                                                            |
-| INV-06 | O `e3-triar` rodado depois de uma decisão sua não muda o achado.                                                                                                                                                                                         |
-| INV-07 | `decisao` recusa UPDATE e DELETE.                                                                                                                                                                                                                        |
-| INV-08 | O chaveiro importa um `cofre.enc` de teste (N=2^10). Senha errada e arquivo adulterado dão o mesmo erro. O valor de teste não aparece em nenhum arquivo, log ou banco tocado (busca pelo valor).                                                         |
+| ID     | Critério                                                                                                                                                                                                                                                                                                                           |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| INV-01 | Abre o inventário de verdade, avisa da migração e faz a cópia antes. Fora isso, nada muda no banco até a primeira decisão.                                                                                                                                                                                                         |
+| INV-02 | Um banco na versão "2" do Bun vira `user_version=2` do Rust. O Rust recusa banco mais novo que ele, e o Bun recusa banco mais novo que ele.                                                                                                                                                                                        |
+| INV-03 | Cada uma das 12 vistas devolve as mesmas linhas que a consulta do Datasette correspondente, sobre o banco de teste.                                                                                                                                                                                                                |
+| INV-04 | A Visão geral mostra as mesmas contagens que o `relatorio.ts` para o mesmo banco.                                                                                                                                                                                                                                                  |
+| INV-05 | Toda Ação do §10 grava uma decisão e a projeção na mesma transação. Desfazer restaura. `reprojetar` reproduz o estado (teste de propriedade).                                                                                                                                                                                      |
+| INV-06 | O `e3-triar` rodado depois de uma decisão sua não muda o achado.                                                                                                                                                                                                                                                                   |
+| INV-07 | `decisao` recusa UPDATE e DELETE.                                                                                                                                                                                                                                                                                                  |
+| INV-08 | O chaveiro importa um `cofre.enc` de teste (N=2^10). Senha errada e arquivo adulterado dão o mesmo erro. O valor de teste não aparece em nenhum arquivo, log ou banco tocado (busca pelo valor).                                                                                                                                   |
 | INV-09 | O PDF de teste abre pela regra, e a senha não aparece no argv (conferido por `/proc` durante a execução) nem em log. Nenhum arquivo decifrado é criado (conferido com `strace`). O texto sai igual ao do `pdftotext` sobre o original decifrado. Depois de N falhas o achado vira pendência. A regra só é gravada com confirmação. |
-| INV-10 | Aprovar um lote marca os itens. Enviar fica desabilitado, com o motivo.                                                                                                                                                                                  |
-| INV-11 | A estante tem só documentos, com o nome de `vista-nome`. Um PDF protegido chega protegido. A coleta do Drive ignora `SBF/`.                                                                                                                              |
-| INV-12 | Restaurar a partir da cópia cifrada reproduz o acervo e o banco com o mesmo hash.                                                                                                                                                                        |
-| INV-13 | O aviso de disco sem cifra aparece num volume sem cifra e some num cifrado.                                                                                                                                                                              |
-| INV-14 | A shell funciona: Ribbon nos 3 modos, KeyTips, Paleta, painel de navegação, os 7 temas, densidade e escala. Toda Ação vem da lista única.                                                                                                                |
-| INV-15 | Abre e navega no Linux, e no Windows e no macOS por VM, como faz o Chess Studio.                                                                                                                                                                         |
-| INV-16 | Com o inventário real, abre em menos de 3 s e filtra em menos de 300 ms nas vistas principais. As tabelas são virtualizadas, sem paginação visível.                                                                                                      |
-| INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                          |
-| INV-18 | Cada resposta do §11 bate com uma consulta de referência sobre o banco de teste e leva "a conferir". Nenhum termo do livro-caixa aparece na fatia.                                                                                                       |
-| INV-19 | Todo nome visível é link para a página do item. A página do fornecedor lista os registros dele e os documentos, com as abas do livro-caixa desabilitadas com o motivo. Voltar e Avançar refazem o caminho. Ctrl+clique abre em painel flutuante. |
-| INV-20 | De qualquer conta, cartão, dívida, centro ou fornecedor se chega a cada registro e movimentação ligados. Todo total abre os itens que o somam. A aba Rastro de um item leva até a origem para trás e até os centros para a frente. |
+| INV-10 | Aprovar um lote marca os itens. Enviar fica desabilitado, com o motivo.                                                                                                                                                                                                                                                            |
+| INV-11 | A estante tem só documentos, com o nome de `vista-nome`. Um PDF protegido chega protegido. A coleta do Drive ignora `SBF/`.                                                                                                                                                                                                        |
+| INV-12 | Restaurar a partir da cópia cifrada reproduz o acervo e o banco com o mesmo hash.                                                                                                                                                                                                                                                  |
+| INV-13 | O aviso de disco sem cifra aparece num volume sem cifra e some num cifrado.                                                                                                                                                                                                                                                        |
+| INV-14 | A shell funciona: Ribbon nos 3 modos, KeyTips, Paleta, painel de navegação, os 7 temas, densidade e escala. Toda Ação vem da lista única.                                                                                                                                                                                          |
+| INV-15 | Abre e navega no Linux, e no Windows e no macOS por VM, como faz o Chess Studio.                                                                                                                                                                                                                                                   |
+| INV-16 | Com o inventário real, abre em menos de 3 s e filtra em menos de 300 ms nas vistas principais. As tabelas são virtualizadas, sem paginação visível.                                                                                                                                                                                |
+| INV-17 | Nenhum dado real em protótipo, fixture ou teste do repositório.                                                                                                                                                                                                                                                                    |
+| INV-18 | Cada resposta do §11 bate com uma consulta de referência sobre o banco de teste e leva "a conferir". Nenhum termo do livro-caixa aparece na fatia.                                                                                                                                                                                 |
+| INV-19 | Todo nome visível é link para a página do item. A página do fornecedor lista os registros dele e os documentos, com as abas do livro-caixa desabilitadas com o motivo. Voltar e Avançar refazem o caminho. Ctrl+clique abre em painel flutuante.                                                                                   |
+| INV-20 | De qualquer conta, cartão, dívida, centro ou fornecedor se chega a cada registro e movimentação ligados. Todo total abre os itens que o somam. A aba Rastro de um item leva até a origem para trás e até os centros para a frente.                                                                                                 |
 
 ## Tickets e paralelização
 
@@ -452,22 +453,22 @@ Os tickets viram issues em `ChicoFigueiredo/Seu-Bolso-Feliz`: um ticket, uma bra
 São até 6 subagentes ao mesmo tempo, com arquivos disjuntos. Eu reviso e integro. PR de
 visual, UX ou segurança leva `ready-for-human` e espera o OK do CEO.
 
-| Fase | Ticket                                                                                                                              | Modelo sugerido  | Depende de |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
-| A    | T1 `bancada`: criar o repo e extrair `bancada-armazem`                                                                              | Sonnet           | —          |
-| A    | T2 `bancada-segredos`, a partir do `chess-vault`                                                                                    | Opus (segurança) | T1 (repo)  |
-| A    | T3 `bancada-casca`: Ribbon, Ações, Paleta, KeyTips, painel de navegação, histórico Voltar/Avançar, link de item e página em painel flutuante, dock, status, temas, Fluent, ícones plugáveis              | Opus             | T1 (repo)  |
-| A    | T4 `sbf-inventario`: migrações 1 e 2, log de decisões, projeção, desfazer, e as mudanças transitórias em `banco.ts` e `e3-triar.ts` | Opus             | —          |
-| A    | T5 `sbf-inventario`: as 12 vistas e a Visão geral, com fixture contra o Datasette                                                   | Sonnet           | T4         |
-| A    | T6 Tokens dos 7 temas do SBF (`packages/design-system/src/tokens.css`) em JSON para a casca                                         | Haiku            | —          |
-| B    | T7 `sbf-chaveiro`: importar o `cofre.enc` e apagar `segredos.ts`                                                                    | Opus             | T2         |
-| B    | T8 `sbf-pdf`: PDF protegido, com o spike `lopdf` × `qpdf`                                                                           | Opus             | T4, T7     |
-| B    | T9 `sbf-janela`: áreas, páginas de item, Ações do §10 e Histórico de decisões                                                                        | Sonnet           | T3, T5     |
-| B    | T10 Lotes                                                                                                                           | Sonnet           | T4, T9     |
-| B    | T11 `sbf-estante`: estante, cópia de segurança e exclusão na coleta do Drive                                                        | Sonnet           | T4, T7     |
-| B    | T12 Aviso de disco sem cifra nos 3 SOs                                                                                              | Haiku            | T3         |
-| B    | T14 Relatórios do §11 sobre os registros, com o seletor de fonte                                                                    | Sonnet           | T5         |
-| C    | T13 Empacotamento (scripts do Chess adaptados) e relatório da matriz de aceite                                                      | Sonnet           | todos      |
+| Fase | Ticket                                                                                                                                                                                      | Modelo sugerido  | Depende de |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------- |
+| A    | T1 `bancada`: criar o repo e extrair `bancada-armazem`                                                                                                                                      | Sonnet           | —          |
+| A    | T2 `bancada-segredos`, a partir do `chess-vault`                                                                                                                                            | Opus (segurança) | T1 (repo)  |
+| A    | T3 `bancada-casca`: Ribbon, Ações, Paleta, KeyTips, painel de navegação, histórico Voltar/Avançar, link de item e página em painel flutuante, dock, status, temas, Fluent, ícones plugáveis | Opus             | T1 (repo)  |
+| A    | T4 `sbf-inventario`: migrações 1 e 2, log de decisões, projeção, desfazer, e as mudanças transitórias em `banco.ts` e `e3-triar.ts`                                                         | Opus             | —          |
+| A    | T5 `sbf-inventario`: as 12 vistas e a Visão geral, com fixture contra o Datasette                                                                                                           | Sonnet           | T4         |
+| A    | T6 Tokens dos 7 temas do SBF (`packages/design-system/src/tokens.css`) em JSON para a casca                                                                                                 | Haiku            | —          |
+| B    | T7 `sbf-chaveiro`: importar o `cofre.enc` e apagar `segredos.ts`                                                                                                                            | Opus             | T2         |
+| B    | T8 `sbf-pdf`: PDF protegido, com o spike `lopdf` × `qpdf`                                                                                                                                   | Opus             | T4, T7     |
+| B    | T9 `sbf-janela`: áreas, páginas de item, Ações do §10 e Histórico de decisões                                                                                                               | Sonnet           | T3, T5     |
+| B    | T10 Lotes                                                                                                                                                                                   | Sonnet           | T4, T9     |
+| B    | T11 `sbf-estante`: estante, cópia de segurança e exclusão na coleta do Drive                                                                                                                | Sonnet           | T4, T7     |
+| B    | T12 Aviso de disco sem cifra nos 3 SOs                                                                                                                                                      | Haiku            | T3         |
+| B    | T14 Relatórios do §11 sobre os registros, com o seletor de fonte                                                                                                                            | Sonnet           | T5         |
+| C    | T13 Empacotamento (scripts do Chess adaptados) e relatório da matriz de aceite                                                                                                              | Sonnet           | todos      |
 
 ## Revisão
 
