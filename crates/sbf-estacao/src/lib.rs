@@ -31,7 +31,9 @@ pub use cache::{
     apagar_arquivos,
 };
 pub use consulta::ConsultaDoLivro;
-pub use credencial::{CredencialDaEstacao, GuardaDeCredencial, GuardaEmMemoria};
+pub use credencial::{
+    CredencialDaEstacao, GuardaDeCredencial, GuardaEmMemoria, importar_credencial,
+};
 pub use estacao::{ConfiguracaoDaEstacao, EstacaoLocal, INTERVALO_PADRAO};
 pub use pareamento::{CAMINHO_DO_RETORNO, ErroDePareamento, Pareador, sistema_atual};
 pub use pasta::{

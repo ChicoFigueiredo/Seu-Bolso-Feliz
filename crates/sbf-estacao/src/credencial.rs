@@ -125,3 +125,66 @@ impl FonteDeAutorizacao for CredencialDaEstacao {
             .and_then(Autorizacao::portador)
     }
 }
+
+/// Guarda no chaveiro uma credencial emitida pelo servidor fora do pareamento (`sbf
+/// servidor emitir-credencial`). Confere só a forma (`sbfe_<32 hex>_<43 base64url>`);
+/// quem diz se vale é o servidor. O texto nunca entra em erro nem em log.
+///
+/// # Errors
+/// Forma inválida, ou chaveiro que não guardou.
+pub fn importar_credencial(
+    guarda: &dyn GuardaDeCredencial,
+    servidor: &str,
+    texto: &str,
+) -> Result<(), crate::ErroDePareamento> {
+    let texto = texto.trim();
+    let forma_ok = texto.strip_prefix("sbfe_").is_some_and(|resto| {
+        resto.split_once('_').is_some_and(|(id, segredo)| {
+            id.len() == 32
+                && id.bytes().all(|b| b.is_ascii_hexdigit())
+                && segredo.len() == 43
+                && segredo
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+    });
+    if !forma_ok {
+        return Err(crate::ErroDePareamento::CredencialInvalida);
+    }
+    guarda
+        .gravar(servidor, Segredo::novo(texto.to_owned()))
+        .map_err(crate::ErroDePareamento::Chaveiro)
+}
+
+#[cfg(test)]
+mod testes_de_importacao {
+    use super::*;
+
+    const BOA: &str =
+        "sbfe_0123456789abcdef0123456789abcdef_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde";
+
+    #[test]
+    fn importa_e_guarda_sob_o_servidor() {
+        let guarda = GuardaEmMemoria::default();
+        importar_credencial(&guarda, "127.0.0.1:8787", &format!("{BOA}\n")).unwrap();
+        assert!(guarda.tem("127.0.0.1:8787"));
+        assert!(!format!("{guarda:?}").contains("AbCdEf"));
+    }
+
+    #[test]
+    fn recusa_forma_invalida_sem_gravar_nem_vazar() {
+        let guarda = GuardaEmMemoria::default();
+        for ruim in [
+            "",
+            "lixo",
+            "sbfe_curto_x",
+            &BOA[..BOA.len() - 1],
+            &BOA.replace("sbfe", "sbfx"),
+        ] {
+            let e = importar_credencial(&guarda, "s", ruim).unwrap_err();
+            assert_eq!(e, crate::ErroDePareamento::CredencialInvalida);
+            assert!(!e.to_string().contains(ruim) || ruim.is_empty());
+        }
+        assert!(!guarda.tem("s"));
+    }
+}
