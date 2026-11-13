@@ -82,6 +82,8 @@ function main(): void {
     multi: number;
     fps: number;
     pend: number;
+    zerados: number;
+    ilegiveis: number;
   }>(`SELECT (SELECT count(*) FROM achado) achados, (SELECT count(*) FROM origem) origens,
       (SELECT sum(estado='documento') FROM achado) docs, (SELECT sum(estado='duvida') FROM achado) duvidas,
       (SELECT sum(estado='descartado') FROM achado) descartados,
@@ -89,7 +91,11 @@ function main(): void {
       (SELECT round(sum(file_size_bytes)/1e9,1) FROM achado WHERE caminho_acervo IS NOT NULL) gb,
       (SELECT count(*) FROM (SELECT content_hash FROM origem WHERE content_hash IS NOT NULL GROUP BY 1 HAVING count(*) > 1)) multi,
       (SELECT count(*) FROM (SELECT canonical_fingerprint FROM achado WHERE canonical_fingerprint IS NOT NULL GROUP BY 1 HAVING count(*) > 1)) fps,
-      (SELECT count(*) FROM pendencia WHERE resolvida_em IS NULL) pend`);
+      (SELECT count(*) FROM pendencia WHERE resolvida_em IS NULL) pend,
+      (SELECT count(*) FROM texto WHERE metodo='arquivo-zerado') zerados,
+      (SELECT count(*) FROM achado a WHERE estado IN ('documento','duvida')
+          AND (protegido_senha IS NULL OR protegido_senha = 0)
+          AND NOT EXISTS (SELECT 1 FROM texto x WHERE x.content_hash = a.content_hash)) ilegiveis`);
 
   const pl = um<{
     n: number;
@@ -460,10 +466,13 @@ ${tabela(
 
 <section><h2>Lacunas e falhas</h2><ul>
 <li>OneDrive ao vivo: remoto criado mas sem o drive escolhido (rclone config reconnect OneDrive:). Google Drive: sem remoto. A cópia local do OneDrive vai só até 05/2026.</li>
-<li>Celular (WhatsApp, fotos, Download): cópia ainda em andamento; Telegram, SMS, Outlook, faturas em PDF, OFX, consignados, VR/VA, LGPD e contracheques do RH: não coletados.</li>
+<li>Arquivos "só na nuvem": <b>${f(t.zerados)}</b> documentos e dúvidas das pastas OneDrive e Google Drive do disco P2 são marcadores com bytes zerados. Estão contados, mas o conteúdo real só vem com a nuvem ao vivo.</li>
+<li><b>${f(t.ilegiveis)}</b> arquivos com extensão que não bate com o conteúdo (PostScript, PNG ou resíduo do Mac com nome .pdf, PDF em base64, PDF com DRM) seguem sem leitura.</li>
+<li>Celular: a cópia ainda anda e só trouxe a mídia do WhatsApp; DCIM, Download e Documents chegaram vazios. Novo scan quando a cópia parar, comparando com o manifesto de 12/11. Telegram, SMS, Outlook, faturas em PDF, OFX, consignados, VR/VA, LGPD e contracheques do RH: não coletados.</li>
 <li>Pluggy: sem contraparte na maioria dos Pix e boletos; sem empréstimos; buracos na conta CAIXA mais usada (fev, ago, set/2026) e na Nubank (jan, fev, ago, set/2026).</li>
 <li>Faturas do cartão: só 1 de 28 fecha com as compras; no cartão gold a diferença repete a fatura anterior (indício de saldo rolado com juros).</li>
-<li>Falhas corrigidas durante a noite: token do Gmail vencido, cota do Gmail, chamada de rede pendurada, cópias concorrentes no cofre, transação aberta no SQLite, painel apontando para snapshot apagado. Cada uma virou regra em workers/inventario/LICOES.md.</li>
+<li>Cartão gold: na Pluggy está cancelado desde 26/10/2026 (última compra em 30/10, última fatura conhecida com vencimento em 21/10). O ciclo de novembro dele depende da fatura baixada do banco.</li>
+<li>Falhas corrigidas durante a noite: token do Gmail vencido, cota do Gmail, chamada de rede pendurada, cópias concorrentes no cofre, transação aberta no SQLite, painel apontando para snapshot apagado, PDFs zerados do OneDrive relidos a cada rodada, disco D quase cheio por compilações de outra sessão. Cada uma virou regra em workers/inventario/LICOES.md.</li>
 </ul></section>
 
 <section><h2>O que o Seu Bolso Feliz não representou</h2><ul>
