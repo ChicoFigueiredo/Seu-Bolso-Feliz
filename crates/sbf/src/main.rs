@@ -1,11 +1,13 @@
 //! O binário do Seu Bolso Feliz desktop (ADR-012). Na fatia 1, só o modo janela:
 //!
+//! - `sbf`: a tela de entrada (abrir a pasta do cofre ou o modo demonstração);
 //! - `sbf --demonstracao`: a janela com dados fictícios em memória;
 //! - `sbf --inventario <pasta-do-cofre>`: o inventário de verdade (`LeitorSqlite` e
 //!   `Inventario`), com o plano de migração antes (só migra com o OK);
 //! - `sbf --versao`.
 
 mod captura;
+mod entrada;
 mod inventario;
 
 use std::path::PathBuf;
@@ -145,7 +147,25 @@ fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
     }
 }
 
-const AJUDA: &str = "uso: sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf --versao";
+/// A janela do modo demonstração, com dados fictícios em memória.
+fn app_de_demonstracao() -> Result<App, String> {
+    let (consulta, comandos) = sbf_janela::demonstracao::nova();
+    let barra = EstadoDaBarra {
+        inventario: "Modo demonstração · dados fictícios".to_owned(),
+        selo: Some("Demonstração · dados fictícios".to_owned()),
+        ..Default::default()
+    };
+    App::novo(
+        Janela::nova(),
+        Box::new(consulta),
+        Box::new(comandos),
+        barra,
+    )
+    .map_err(|e| format!("os temas não carregaram: {e}"))
+}
+
+const AJUDA: &str =
+    "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -181,26 +201,14 @@ fn main() -> ExitCode {
             println!("sbf {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some("--demonstracao") => {
-            let (consulta, comandos) = sbf_janela::demonstracao::nova();
-            let barra = EstadoDaBarra {
-                inventario: "Modo demonstração · dados fictícios".to_owned(),
-                selo: Some("Demonstração · dados fictícios".to_owned()),
-                ..Default::default()
-            };
-            match App::novo(
-                Janela::nova(),
-                Box::new(consulta),
-                Box::new(comandos),
-                barra,
-            ) {
-                Ok(app) => abrir_janela_de(Box::new(app)),
-                Err(e) => {
-                    eprintln!("sbf: os temas não carregaram: {e}");
-                    ExitCode::FAILURE
-                }
+        Some("--demonstracao") => match app_de_demonstracao() {
+            Ok(app) => abrir_janela_de(Box::new(app)),
+            Err(e) => {
+                eprintln!("sbf: {e}");
+                ExitCode::FAILURE
             }
-        }
+        },
+        None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
         Some("--inventario") => {
             let Some(pasta) = args.get(1) else {
                 eprintln!("sbf: falta a pasta do cofre.\n{AJUDA}");
