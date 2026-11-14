@@ -1,0 +1,25 @@
+{
+  "results": [
+    {
+      "id": "t-003",
+      "accountId": "c1",
+      "date": "2026-03-12T03:00:00.000Z",
+      "description": "Mercado Bom",
+      "descriptionRaw": "MERCADO BOM",
+      "currencyCode": "BRL",
+      "amount": 20.0,
+      "amountInAccountCurrency": null,
+      "balance": 1000.0,
+      "category": "Groceries",
+      "categoryId": "08000000",
+      "providerCode": "x",
+      "providerId": null,
+      "status": "POSTED",
+      "type": "DEBIT",
+      "merchant": {
+        "name": "Mercado Bom"
+      }
+    }
+  ],
+  "next": null
+}
