@@ -8,10 +8,12 @@
 //!   do log de decisões e imprime o resumo;
 //! - `sbf mcp --inventario <pasta-do-cofre>`: o servidor MCP local por stdio (ver `mcp.rs`);
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
+//! - `sbf coletor-vps`: as coletas da VPS, Gmail e Pluggy (ADR-014; ver `coletor.rs`);
 //! - `sbf --versao`.
 
 mod caixa;
 mod captura;
+mod coletor;
 mod entrada;
 mod estacao;
 mod inventario;
@@ -379,7 +381,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf coletor-vps [gmail|pluggy|comparar] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -424,6 +426,7 @@ fn main() -> ExitCode {
         },
         None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
         Some("servidor") => servidor::rodar(&args[1..]),
+        Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {
