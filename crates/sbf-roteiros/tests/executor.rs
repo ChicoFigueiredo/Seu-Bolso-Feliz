@@ -874,6 +874,27 @@ fn limpar_texto_tira_o_segredo_e_a_forma_percent_encoded() {
     assert!(!limpo.contains(SENHA) && !limpo.contains("%234821"));
     assert!(!limpo.contains(CPF) && !limpo.contains("12345678909"));
 }
+
+#[test]
+fn ro_02_o_executor_so_navega_para_http_ou_https() {
+    for url in [
+        "file:///etc/hosts",
+        "javascript:alert(1)",
+        "data:text/html,oi",
+        "chrome://settings",
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut nav = site(false);
+        let r = rodar_cru(&mut nav, vec![Passo::Navegar { url: url.into() }], d.path());
+        assert!(
+            matches!(r.rel.fim, Fim::Falhou { passo: 0, .. }),
+            "{url}: {:?}",
+            r.rel.fim
+        );
+        assert!(nav.chamadas.is_empty(), "{url}: o navegador foi chamado");
+    }
+}
+
 #[test]
 fn o_download_e_o_csv_temporarios_somem_depois_de_ir_ao_cofre() {
     let d = tempfile::tempdir().unwrap();

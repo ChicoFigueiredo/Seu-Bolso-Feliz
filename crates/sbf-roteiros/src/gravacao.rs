@@ -92,8 +92,14 @@ fn esquema_do_conserto() -> Value {
 /// O que a IA propôs para o próximo passo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Proposta {
-    /// Um passo, com a explicação para o usuário aceitar ou recusar.
-    Passo { passo: Passo, explicacao: String },
+    /// Um passo, com a explicação para o usuário aceitar ou recusar. `alvo` diz, na linguagem da
+    /// página, o que há no elemento do passo (tag, texto, rótulo, destino), para o usuário
+    /// conferir o que vai clicar; vazio quando o passo não tem elemento.
+    Passo {
+        passo: Passo,
+        explicacao: String,
+        alvo: String,
+    },
     /// A página pede MFA, CAPTCHA ou confirmação: passar a vez ao usuário.
     Pausa { motivo: String },
     /// O objetivo foi cumprido.
@@ -279,9 +285,11 @@ impl Guia<'_> {
         falho: usize,
         motivo_da_falha: &str,
         pagina: &Pagina,
+                let alvo = descrever_alvo(&passo, pagina);
     ) -> Resultado<(Vec<Passo>, String)> {
         self.propor_conserto_limpando(roteiro, falho, motivo_da_falha, pagina, &[])
     }
+                    alvo,
 
     /// Como [`Self::propor_conserto`], mas limpa também os `usados` (os segredos que a
     /// execução digitou) de tudo o que vai à IA.
@@ -421,6 +429,48 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
             Ok(())
         }
         Passo::Clicar { seletor } | Passo::Baixar { seletor, .. } => {
+/// O que há no elemento do passo, como a página o mostra (para a aprovação do usuário).
+fn descrever_alvo(passo: &Passo, pagina: &Pagina) -> String {
+    let seletor = match passo {
+        Passo::Clicar { seletor }
+        | Passo::Baixar { seletor, .. }
+        | Passo::Preencher { seletor, .. }
+        | Passo::PreencherSenha { seletor, .. }
+        | Passo::PreencherCpf { seletor, .. } => seletor,
+        _ => return String::new(),
+    };
+    if let Some(e) = pagina.elementos.iter().find(|e| e.seletor == *seletor) {
+        let mut partes = vec![format!("<{}>", e.tag)];
+        if !e.texto.trim().is_empty() {
+            partes.push(format!("texto \"{}\"", e.texto.trim()));
+        }
+        if !e.rotulo.trim().is_empty() {
+            partes.push(format!("rótulo \"{}\"", e.rotulo.trim()));
+        }
+        if !e.destino.trim().is_empty() {
+            partes.push(format!("leva a {}", e.destino.trim()));
+        }
+        return partes.join(", ");
+    }
+    if let Some(c) = campo_na_pagina(pagina, seletor) {
+        return format!(
+            "campo {} \"{}\"{}",
+            c.tipo,
+            if c.rotulo.is_empty() {
+                &c.nome
+            } else {
+                &c.rotulo
+            },
+            if c.preenchido {
+                " (já preenchido)"
+            } else {
+                ""
+            }
+        );
+    }
+    String::new()
+}
+
             if !existe(seletor) {
                 return recusa("o seletor não está na página");
             }
@@ -444,6 +494,9 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
                 return recusa("campo de senha só se preenche com a senha do chaveiro");
             }
             Ok(())
+            if !crate::passo::url_navegavel(url) {
+                return recusa("só se navega para endereços http e https");
+            }
         }
         Passo::PreencherSenha {
             seletor, rotulo, ..

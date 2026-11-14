@@ -546,6 +546,9 @@ pub fn executar_passo(
 ) -> Resultado<()> {
     match passo {
         Passo::Navegar { url } => {
+            if !crate::passo::url_navegavel(url) {
+                return Err(falha(i, "só se navega para endereços http e https"));
+            }
             if let Some(b) = bloqueio::avaliar_url(url) {
                 return Err(ErroDeRoteiro::Bloqueado(b));
             }
@@ -662,12 +665,12 @@ fn entregar(
     nome: &str,
 ) -> Resultado<()> {
     let r = c.destino.receber(caminho, nome)?;
-    rel.baixados += 1;
-    if r == Recebido::Novo {
-        rel.novos += 1;
     // O arquivo já está no cofre (ou já estava): a cópia temporária não fica na pasta de dados
     // do app, que não é cofre. Só os metadados da execução ficam.
     let _ = std::fs::remove_file(caminho);
+    rel.baixados += 1;
+    if r == Recebido::Novo {
+        rel.novos += 1;
     }
     Ok(())
 }

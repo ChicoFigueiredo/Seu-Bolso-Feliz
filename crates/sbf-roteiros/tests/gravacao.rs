@@ -584,7 +584,58 @@ fn ro_01_conserto_nao_leva_a_senha_que_a_execucao_usou() {
     assert!(!tudo.contains(SENHA), "senha no pedido de conserto: {tudo}");
     assert!(tudo.contains("***"));
 }
+
 #[test]
+fn ro_02_a_ia_so_navega_para_http_ou_https() {
+    let mut nav = site(false);
+    let pagina = sbf_roteiros::Navegador::pagina(&mut nav).unwrap();
+    for url in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:text/html,<script>1</script>",
+        "chrome://settings",
+        "about:blank",
+        "view-source:http://127.0.0.1:1/",
+        "ftp://x.example/a",
+    ] {
+        let ia = Falso::com_roteiro(vec![passo(json!({"tipo": "navegar", "url": url}), "ir")]);
+        let r = guia_de(&ia).propor_proximo("x", &[], &pagina, None);
+        assert!(
+            matches!(r, Err(sbf_roteiros::ErroDeRoteiro::Invalido(_))),
+            "{url}: {r:?}"
+        );
+    }
+    let ia = Falso::com_roteiro(vec![passo(
+        json!({"tipo": "navegar", "url": "https://banco.example/extratos?mes=10"}),
+        "ir",
+    )]);
+    let r = guia_de(&ia)
+        .propor_proximo("x", &[], &pagina, None)
+        .unwrap();
+    assert!(matches!(r, Proposta::Passo { .. }));
+}
+#[test]
+#[test]
+fn ro_04_a_proposta_de_clicar_mostra_o_que_ha_no_alvo() {
+    let mut nav = site(false);
+    nav.atual = "login".into();
+    let pagina = sbf_roteiros::Navegador::pagina(&mut nav).unwrap();
+    let ia = Falso::com_roteiro(vec![passo(
+        json!({"tipo": "clicar", "seletor": "#entrar"}),
+        "entrar",
+    )]);
+    let Proposta::Passo { alvo, .. } = guia_de(&ia)
+        .propor_proximo("x", &[], &pagina, None)
+        .unwrap()
+    else {
+        panic!("esperava um passo")
+    };
+    assert!(
+        alvo.contains("Entrar"),
+        "o texto do elemento aparece: {alvo}"
+    );
+    assert!(alvo.contains("button"), "e a tag: {alvo}");
+}
 fn ro_01_provedor_que_falha_depois_de_receber_o_pedido_deixa_a_saida_registrada() {
     use sbf_ia::ErroDeIa;
     for (erro, saidas) in [

@@ -497,6 +497,9 @@ impl Chrome {
 
 impl Navegador for Chrome {
     fn navegar(&mut self, url: &str) -> Resultado<()> {
+        if !crate::passo::url_navegavel(url) {
+            return Err(erro("só se navega para endereços http e https"));
+        }
         self.pagina.eventos.clear();
         let r = self.pagina.chamar("Page.navigate", &json!({"url": url}))?;
         if let Some(t) = r.get("errorText").and_then(Value::as_str) {
