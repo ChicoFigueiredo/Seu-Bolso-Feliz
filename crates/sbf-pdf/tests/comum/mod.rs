@@ -183,11 +183,12 @@ pub fn cifrar(pasta: &Path, nome: &str, base: &[u8], senha: &str, cifra: Cifra) 
         Cifra::Aes256 => qpdf.args(["--bits=256"]),
         Cifra::Aes256ComObjectStreams => qpdf.args(["--bits=256"]),
     };
+    // As opções de cifra terminam no `--`; `--object-streams` vem depois dele.
+    qpdf.arg("--");
     if cifra == Cifra::Aes256ComObjectStreams {
         qpdf.arg("--object-streams=generate");
     }
     let saida_qpdf = qpdf
-        .arg("--")
         .arg(&entrada)
         .arg(&saida)
         .output()
