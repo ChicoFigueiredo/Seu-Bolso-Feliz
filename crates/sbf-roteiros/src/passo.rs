@@ -28,10 +28,21 @@ pub enum Passo {
     Clicar { seletor: String },
     /// Preenche um campo com texto fixo (nunca um campo de senha).
     Preencher { seletor: String, texto: String },
-    /// Preenche com a senha do chaveiro de rótulo `rotulo` (senhas de sites).
-    PreencherSenha { seletor: String, rotulo: String },
-    /// Preenche com o CPF do chaveiro.
-    PreencherCpf { seletor: String },
+    /// Preenche com a senha do chaveiro de rótulo `rotulo` (senhas de sites). `host` é o site
+    /// em que o usuário aprovou usar a senha: o executor só digita se a página atual é desse
+    /// host (a senha não vai para um endereço que o usuário não viu).
+    PreencherSenha {
+        seletor: String,
+        rotulo: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host: Option<String>,
+    },
+    /// Preenche com o CPF do chaveiro (mesma regra do `host`).
+    PreencherCpf {
+        seletor: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host: Option<String>,
+    },
     /// Clica no elemento que dispara um download e espera o arquivo.
     Baixar {
         seletor: String,
@@ -53,17 +64,43 @@ impl Passo {
             Self::EsperarSeletor { seletor, .. } => format!("Esperar {seletor}"),
             Self::Clicar { seletor } => format!("Clicar em {seletor}"),
             Self::Preencher { seletor, .. } => format!("Preencher {seletor}"),
-            Self::PreencherSenha { seletor, rotulo } => {
-                format!("Preencher {seletor} com a senha \"{rotulo}\" do chaveiro")
-            }
-            Self::PreencherCpf { seletor } => {
-                format!("Preencher {seletor} com o CPF do chaveiro")
-            }
+            Self::PreencherSenha {
+                seletor,
+                rotulo,
+                host,
+            } => format!(
+                "Preencher {seletor} com a senha \"{rotulo}\" do chaveiro{}",
+                so_no_host(host.as_deref())
+            ),
+            Self::PreencherCpf { seletor, host } => format!(
+                "Preencher {seletor} com o CPF do chaveiro{}",
+                so_no_host(host.as_deref())
+            ),
             Self::Baixar { seletor, .. } => format!("Baixar por {seletor}"),
             Self::LerTabela { nome, .. } => format!("Ler a tabela \"{nome}\""),
             Self::PausaParaUsuario { motivo } => format!("Sua vez: {motivo}"),
         }
     }
+}
+
+fn so_no_host(host: Option<&str>) -> String {
+    host.map(|h| format!(" (só em {h})")).unwrap_or_default()
+}
+
+/// O host de uma URL `http(s)`, em minúsculas, sem porta nem credenciais. `None` se não é uma
+/// URL de rede (`about:blank`, `chrome-error:`…).
+#[must_use]
+pub fn host_de(url: &str) -> Option<String> {
+    let resto = url.split_once("://")?.1;
+    let autoridade = resto.split(['/', '?', '#']).next()?;
+    let sem_credenciais = autoridade.rsplit('@').next()?;
+    let host = if let Some(v6) = sem_credenciais.strip_prefix('[') {
+        v6.split(']').next()?
+    } else {
+        sem_credenciais.split(':').next()?
+    };
+    let host = host.trim().to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
 }
 
 fn sem_consulta(url: &str) -> &str {
@@ -99,13 +136,13 @@ impl Roteiro {
                 Passo::Navegar { url } => url.trim().is_empty(),
                 Passo::EsperarSeletor { seletor, .. }
                 | Passo::Clicar { seletor }
-                | Passo::PreencherCpf { seletor }
+                | Passo::PreencherCpf { seletor, .. }
                 | Passo::Baixar { seletor, .. }
                 | Passo::LerTabela { seletor, .. }
                 | Passo::Preencher { seletor, .. } => seletor.trim().is_empty(),
-                Passo::PreencherSenha { seletor, rotulo } => {
-                    seletor.trim().is_empty() || rotulo.trim().is_empty()
-                }
+                Passo::PreencherSenha {
+                    seletor, rotulo, ..
+                } => seletor.trim().is_empty() || rotulo.trim().is_empty(),
                 Passo::PausaParaUsuario { motivo } => motivo.trim().is_empty(),
             };
             if vazio {
@@ -140,11 +177,12 @@ mod testes {
         let p = Passo::PreencherSenha {
             seletor: "#senha".into(),
             rotulo: "banco-ficticio".into(),
+            host: Some("banco.exemplo".into()),
         };
         let j = serde_json::to_string(&p).unwrap();
         assert_eq!(
             j,
-            r##"{"tipo":"preencher_senha","seletor":"#senha","rotulo":"banco-ficticio"}"##
+            r##"{"tipo":"preencher_senha","seletor":"#senha","rotulo":"banco-ficticio","host":"banco.exemplo"}"##
         );
         assert_eq!(serde_json::from_str::<Passo>(&j).unwrap(), p);
     }
@@ -184,6 +222,28 @@ mod testes {
             }],
         };
         assert!(r.validar().is_err());
+    }
+
+    #[test]
+    fn host_de_url() {
+        assert_eq!(
+            host_de("https://Banco.Exemplo.com.br:8443/a?b#c").as_deref(),
+            Some("banco.exemplo.com.br")
+        );
+        assert_eq!(
+            host_de("http://u:p@127.0.0.1:80/x").as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(host_de("http://[::1]:9/x").as_deref(), Some("::1"));
+        assert_eq!(host_de("about:blank"), None);
+        assert_eq!(
+            host_de("chrome-error://chromewebdata/"),
+            Some("chromewebdata".into())
+        );
+        assert_eq!(
+            host_de("https://evil.example.com@good.example/").as_deref(),
+            Some("good.example")
+        );
     }
 
     #[test]

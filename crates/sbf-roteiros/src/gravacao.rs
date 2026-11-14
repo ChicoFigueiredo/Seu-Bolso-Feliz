@@ -210,7 +210,7 @@ impl Guia<'_> {
                     .to_owned(),
             }),
             Some("passo") => {
-                let passo = passo_de(&j["passo"])?;
+                let passo = com_host_da_pagina(passo_de(&j["passo"])?, pagina);
                 conferir_proposta(&passo, pagina, &self.rotulos_de_senha)?;
                 Ok(Proposta::Passo {
                     passo,
@@ -273,7 +273,7 @@ impl Guia<'_> {
             .as_array()
             .ok_or_else(|| ErroDeRoteiro::Invalido("conserto sem passos".into()))?
             .iter()
-            .map(passo_de)
+            .map(|p| passo_de(p).map(|p| com_host_da_pagina(p, pagina)))
             .collect::<Resultado<_>>()?;
         for p in &novos {
             conferir_proposta(p, pagina, &self.rotulos_de_senha)?;
@@ -284,6 +284,23 @@ impl Guia<'_> {
             todos.extend_from_slice(&roteiro.passos[falho + 1..]);
         }
         Ok((todos, j["explicacao"].as_str().unwrap_or("").to_owned()))
+    }
+}
+
+/// Quem decide o host em que a senha vale é o SBF (a página em que o passo é proposto), nunca a
+/// IA: ela pode até escrever um `host` no JSON, e ele é trocado aqui.
+fn com_host_da_pagina(passo: Passo, pagina: &Pagina) -> Passo {
+    let host = crate::passo::host_de(&pagina.url);
+    match passo {
+        Passo::PreencherSenha {
+            seletor, rotulo, ..
+        } => Passo::PreencherSenha {
+            seletor,
+            rotulo,
+            host,
+        },
+        Passo::PreencherCpf { seletor, .. } => Passo::PreencherCpf { seletor, host },
+        outro => outro,
     }
 }
 
@@ -348,7 +365,9 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
             }
             Ok(())
         }
-        Passo::PreencherSenha { seletor, rotulo } => {
+        Passo::PreencherSenha {
+            seletor, rotulo, ..
+        } => {
             if campo_na_pagina(pagina, seletor).is_none() {
                 return recusa("o campo não está na página");
             }
@@ -357,7 +376,7 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
             }
             Ok(())
         }
-        Passo::PreencherCpf { seletor } | Passo::LerTabela { seletor, .. } => {
+        Passo::PreencherCpf { seletor, .. } | Passo::LerTabela { seletor, .. } => {
             if existe(seletor) {
                 Ok(())
             } else {

@@ -893,13 +893,12 @@ impl AppCasca for AppSbf {
                     self.barra.chaveiro.clone().unwrap_or_else(|| "—".into()),
                 );
                 ui.label(RichText::new("Os rótulos dos segredos aparecem aqui; os valores, nunca. Importar o cofre.enc chega quando o chaveiro for ligado a esta janela.").color(p.tinta_suave));
-                if self
+                if !self
                     .janela
                     .get_mut()
                     .roteiros
                     .rotulos_da_demonstracao()
-                    .len()
-                    > 0
+                    .is_empty()
                 {
                     ui.add_space(12.0);
                     self.janela.get_mut().roteiros.senhas_da_demonstracao_ui(ui);

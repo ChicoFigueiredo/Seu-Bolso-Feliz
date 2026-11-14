@@ -28,13 +28,16 @@ use zeroize::Zeroize as _;
 
 use crate::{componentes, tema};
 
+/// O provedor e o registro de `saida_ia` da IA dos roteiros.
+pub type ProvedorEmRegistro = (Arc<dyn Provedor>, Arc<dyn Registro>);
+
 /// O provedor de IA e o registro do que sai para ele (o `sbf` monta sobre o motor da triagem).
 pub trait IaDosRoteiros: Send + Sync {
     /// O provedor principal e o registro de `saida_ia`.
     ///
     /// # Errors
     /// O motivo de a IA não estar disponível.
-    fn pronta(&self) -> Result<(Arc<dyn Provedor>, Arc<dyn Registro>), String>;
+    fn pronta(&self) -> Result<ProvedorEmRegistro, String>;
 }
 
 /// O que a gravação mostra enquanto a IA conduz.

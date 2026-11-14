@@ -49,10 +49,15 @@ fn o_passo_de_senha_so_tem_o_rotulo() {
     let j = serde_json::to_value(sbf_roteiros::Passo::PreencherSenha {
         seletor: "#s".into(),
         rotulo: "r".into(),
+        host: None,
     })
     .unwrap();
     let chaves: Vec<&str> = j.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(chaves, vec!["rotulo", "seletor", "tipo"]);
+    assert_eq!(
+        chaves,
+        vec!["rotulo", "seletor", "tipo"],
+        "host só aparece quando aprovado"
+    );
     // e um JSON com `senha`/`valor` sobrando é descartado, não guardado
     let p: sbf_roteiros::Passo = serde_json::from_str(
         r##"{"tipo":"preencher_senha","seletor":"#s","rotulo":"r","senha":"vazou","valor":"vazou"}"##,

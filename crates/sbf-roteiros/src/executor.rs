@@ -389,6 +389,40 @@ fn esperar_visivel(
     }
 }
 
+/// A senha e o CPF só vão para o site em que o usuário aprovou usá-los: se a página atual não é
+/// do host gravado no passo, nada é digitado.
+fn conferir_host(c: &mut Contexto<'_>, passo: usize, esperado: Option<&str>) -> Resultado<()> {
+    let Some(esperado) = esperado else {
+        return Ok(());
+    };
+    let atual = c
+        .navegador
+        .pagina()
+        .ok()
+        .and_then(|p| crate::passo::host_de(&p.url));
+    if atual.as_deref() == Some(esperado) {
+        Ok(())
+    } else {
+        Err(falha(
+            passo,
+            format!(
+                "esta página não é de {esperado}: a senha do chaveiro só vai para o site em que você a aprovou"
+            ),
+        ))
+    }
+}
+
+/// Depois de navegar ou clicar: a página em que o navegador caiu (inclusive por redirecionamento
+/// do site) está na lista de bloqueio? Então o roteiro para ali.
+fn conferir_destino(c: &mut Contexto<'_>) -> Resultado<()> {
+    if let Ok(p) = c.navegador.pagina()
+        && let Some(b) = bloqueio::avaliar_url(&p.url)
+    {
+        return Err(ErroDeRoteiro::Bloqueado(b));
+    }
+    Ok(())
+}
+
 /// Confere o elemento na lista de bloqueio antes de agir.
 fn conferir_elemento(
     c: &mut Contexto<'_>,
@@ -471,7 +505,8 @@ pub fn executar_passo(
                 return Err(ErroDeRoteiro::Bloqueado(b));
             }
             c.navegador.navegar(url)?;
-            conferir_barrado(c)
+            conferir_barrado(c)?;
+            conferir_destino(c)
         }
         Passo::EsperarSeletor { seletor, segundos } => {
             let prazo = segundos.map_or(c.opcoes.espera, Duration::from_secs);
@@ -482,7 +517,8 @@ pub fn executar_passo(
             conferir_elemento(c, i, seletor)?;
             let r = c.navegador.clicar(seletor);
             conferir_barrado(c)?;
-            r
+            r?;
+            conferir_destino(c)
         }
         Passo::Preencher { seletor, texto } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
@@ -495,8 +531,13 @@ pub fn executar_passo(
             }
             c.navegador.preencher(seletor, texto)
         }
-        Passo::PreencherSenha { seletor, rotulo } => {
+        Passo::PreencherSenha {
+            seletor,
+            rotulo,
+            host,
+        } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
+            conferir_host(c, i, host.as_deref())?;
             let segredo = c
                 .senhas
                 .senha_de_site(rotulo)
@@ -507,8 +548,9 @@ pub fn executar_passo(
             c.navegador.preencher_segredo(seletor, segredo)?;
             Ok(())
         }
-        Passo::PreencherCpf { seletor } => {
+        Passo::PreencherCpf { seletor, host } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
+            conferir_host(c, i, host.as_deref())?;
             let segredo = c.senhas.cpf().map_err(ErroDeRoteiro::Chaveiro)?;
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;

@@ -68,10 +68,12 @@ fn passos_de_login(site: &SiteFalso) -> Vec<Passo> {
         },
         Passo::PreencherCpf {
             seletor: "#cpf".into(),
+            host: None,
         },
         Passo::PreencherSenha {
             seletor: "#senha".into(),
             rotulo: "banco-ficticio".into(),
+            host: None,
         },
         Passo::Clicar {
             seletor: "#entrar".into(),

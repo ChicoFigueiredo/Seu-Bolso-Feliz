@@ -21,12 +21,14 @@ fn login(com_senha: bool) -> Vec<Passo> {
         },
         Passo::PreencherCpf {
             seletor: "#cpf".into(),
+            host: None,
         },
     ];
     if com_senha {
         p.push(Passo::PreencherSenha {
             seletor: "#senha".into(),
             rotulo: "banco-ficticio".into(),
+            host: None,
         });
     }
     p.push(Passo::Clicar {
@@ -577,4 +579,79 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
         .unwrap();
     assert!(cofre.join(caminho).exists());
     let _ = FORMATO;
+}
+
+#[test]
+fn ro_01_a_senha_so_vai_para_o_host_em_que_foi_aprovada() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("outro-site.example".into()),
+        },
+    ];
+    let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
+    let Fim::Falhou { passo: 1, motivo } = &r.rel.fim else {
+        panic!("{:?}", r.rel.fim)
+    };
+    assert!(motivo.contains("outro-site.example"));
+    assert!(nav.digitados.is_empty(), "nada foi digitado");
+    // o mesmo passo com o host certo digita
+    let mut nav = site(false);
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("127.0.0.1".into()),
+        },
+    ];
+    let d2 = tempfile::tempdir().unwrap();
+    let r = rodar(&mut nav, passos, &PausaFalsa::default(), d2.path());
+    assert_eq!(r.rel.fim, Fim::Concluida);
+    assert_eq!(nav.digitados.len(), 1);
+}
+
+#[test]
+fn ro_02_cair_numa_pagina_de_pagamento_por_redirecionamento_aborta() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    // um link inocente cujo servidor redireciona para /pagamento/…
+    nav.pagina_nomeada(
+        "destino",
+        sbf_roteiros::Pagina {
+            url: "http://127.0.0.1:1/pagamento/confirmar".into(),
+            ..sbf_roteiros::Pagina::default()
+        },
+    );
+    nav.elementos.get_mut("#ver").unwrap().leva_a = Some("destino".into());
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::Clicar {
+            seletor: "#entrar".into(),
+        },
+        Passo::Clicar {
+            seletor: "#ver".into(),
+        },
+        Passo::Baixar {
+            seletor: "#baixar".into(),
+            nome: None,
+        },
+    ];
+    let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
+    assert!(
+        matches!(r.rel.fim, Fim::Bloqueada { passo: 2, .. }),
+        "{:?}",
+        r.rel.fim
+    );
+    assert!(!nav.chamadas.iter().any(|c| c.starts_with("baixar")));
 }

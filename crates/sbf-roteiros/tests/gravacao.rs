@@ -157,11 +157,13 @@ fn ro_04_grava_com_ia_executa_sem_ia_e_conserta_so_apos_aprovacao() {
                 url: "http://127.0.0.1:1/login".into()
             },
             Passo::PreencherCpf {
-                seletor: "#cpf".into()
+                seletor: "#cpf".into(),
+                host: Some("127.0.0.1".into())
             },
             Passo::PreencherSenha {
                 seletor: "#senha".into(),
-                rotulo: "banco-ficticio".into()
+                rotulo: "banco-ficticio".into(),
+                host: Some("127.0.0.1".into())
             },
             Passo::Clicar {
                 seletor: "#entrar".into()
