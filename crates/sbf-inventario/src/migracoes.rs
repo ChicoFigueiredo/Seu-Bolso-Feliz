@@ -10,6 +10,7 @@
 //!   acrescentava por `garantirColuna` (para o banco novo e o adotado ficarem iguais) e o
 //!   trigger que faz de `decisao` uma tabela só de acréscimo (INV-07), mais
 //!   [`GATILHO_QUE_RECUSA_SUBSTITUIR`], que vale também para conexões de fora do app.
+//! - **3**: a triagem por IA ([`esquema::MIGRACAO_3_TRIAGEM`], spec 09).
 //!
 //! Regra de ouro: migração aplicada num banco real nunca é editada; só se acrescenta uma.
 
@@ -19,7 +20,7 @@ use rusqlite::{Connection, Transaction};
 use crate::esquema;
 
 /// A versão de esquema que esta build entende e produz.
-pub const VERSAO_ATUAL: u32 = 2;
+pub const VERSAO_ATUAL: u32 = 3;
 
 /// O valor de `meta.schema_versao` que o Bun grava no esquema adotado.
 pub const VERSAO_DO_BUN_ADOTADA: &str = "2";
@@ -57,7 +58,7 @@ pub const COLUNAS_DO_GARANTIR_COLUNA: &[(&str, &str, &str)] = &[
 
 const MARCADOR_DO_BUN: &str = "SELECT valor FROM meta WHERE chave = 'schema_versao'";
 
-static MIGRACOES: [Migracao; 2] = [
+static MIGRACOES: [Migracao; 3] = [
     Migracao::sql(
         "esquema do inventário do Bun, versão 2",
         esquema::MIGRACAO_1_BASE_BUN,
@@ -65,6 +66,10 @@ static MIGRACOES: [Migracao; 2] = [
     Migracao::codigo(
         "log de decisões só de acréscimo, lotes, quem decidiu e índices",
         migracao_2,
+    ),
+    Migracao::sql(
+        "triagem por IA: sugestões, rodadas, o que saiu e cache",
+        esquema::MIGRACAO_3_TRIAGEM,
     ),
 ];
 

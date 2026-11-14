@@ -114,6 +114,8 @@ pub enum Pedido {
     RenomearEstacao(Ref, String),
     // Caixa de entrada e edição (fatia 3).
     Caixa(crate::caixa_ui::PedidoDaCaixa),
+    /// Triagem por IA (spec 09): rodada, aceitar e recusar sugestões, opções.
+    Triagem(crate::triagem::AcaoDaTriagem),
 }
 
 impl Pedido {

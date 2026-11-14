@@ -139,6 +139,14 @@ pub(crate) fn gravar(
         em,
     )?;
     projecao::recalcular_decidido_por(tx, efeito.alvo, &efeito.id)?;
+    // IA-08: a sugestão aberta do campo que o usuário acabou de decidir deixa de valer.
+    crate::sugestao::obsoletar(
+        tx,
+        efeito.alvo.codigo(),
+        &efeito.id,
+        efeito.campo,
+        efeito.depois.as_ref(),
+    )?;
     Ok(id)
 }
 

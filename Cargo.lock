@@ -4256,6 +4256,7 @@ dependencies = [
  "bancada-armazem",
  "proptest",
  "rusqlite",
+ "sbf-ia",
  "serde",
  "serde_json",
  "tempfile",
@@ -4274,11 +4275,13 @@ dependencies = [
  "sbf-chaveiro",
  "sbf-estacao",
  "sbf-estante",
+ "sbf-ia",
  "sbf-inventario",
  "sbf-livro",
  "sbf-pdf",
  "sbf-previa",
  "sbf-processo",
+ "sbf-triagem",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -4364,6 +4367,19 @@ dependencies = [
  "tower",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "sbf-triagem"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "sbf-ia",
+ "sbf-inventario",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

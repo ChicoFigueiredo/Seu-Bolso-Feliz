@@ -16,6 +16,8 @@ sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-estante = { path = "../sbf-estante" }
 sbf-processo = { path = "../sbf-processo" }
 sbf-previa = { path = "../sbf-previa" }
+sbf-triagem = { path = "../sbf-triagem" }
+sbf-ia = { path = "../sbf-ia" }
 # Só para o acervo fictício da demonstração (o anexo do e-mail liga ao achado pelo sha256).
 sha2 = "0.11"
 serde = { workspace = true }

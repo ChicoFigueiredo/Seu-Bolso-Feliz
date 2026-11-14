@@ -899,6 +899,13 @@ impl AppCasca for AppSbf {
                     ui.add_space(12.0);
                     f.nuvens_ui(ui);
                 }
+                ui.add_space(12.0);
+                let janela = self.janela.get_mut();
+                let mut pedidos = Vec::new();
+                crate::triagem::opcoes_ia(ui, &mut janela.triagem, &mut pedidos);
+                for p in pedidos {
+                    janela.pedir(p);
+                }
             }
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);
