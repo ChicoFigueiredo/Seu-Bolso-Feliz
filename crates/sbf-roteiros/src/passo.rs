@@ -103,6 +103,21 @@ pub fn host_de(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+/// Segredo (senha, CPF) só vai a uma página `https`; `http` só no próprio computador
+/// (`127.0.0.1`, `localhost`, `::1`: o site falso dos testes e da demonstração).
+#[must_use]
+pub fn esquema_aceito_para_segredo(url: &str) -> bool {
+    let u = url.trim_start().to_ascii_lowercase();
+    if u.starts_with("https://") {
+        return host_de(&u).is_some();
+    }
+    u.starts_with("http://")
+        && matches!(
+            host_de(&u).as_deref(),
+            Some("127.0.0.1" | "localhost" | "::1")
+        )
+}
+
 fn sem_consulta(url: &str) -> &str {
     url.split(['?', '#']).next().unwrap_or(url)
 }
@@ -147,6 +162,14 @@ impl Roteiro {
             };
             if vazio {
                 return Err(format!("o passo {} está incompleto", i + 1));
+            }
+            if let Passo::PreencherSenha { host, .. } | Passo::PreencherCpf { host, .. } = p
+                && host.as_deref().is_none_or(|h| h.trim().is_empty())
+            {
+                return Err(format!(
+                    "o passo {} usa o chaveiro mas não diz em que site (host) a senha vale",
+                    i + 1
+                ));
             }
         }
         Ok(())
@@ -244,6 +267,43 @@ mod testes {
             host_de("https://evil.example.com@good.example/").as_deref(),
             Some("good.example")
         );
+    }
+
+    #[test]
+    fn segredo_so_em_https_ou_no_proprio_computador() {
+        assert!(esquema_aceito_para_segredo("https://banco.example/login"));
+        assert!(esquema_aceito_para_segredo("http://127.0.0.1:8080/login"));
+        assert!(esquema_aceito_para_segredo("http://localhost:3000/"));
+        assert!(!esquema_aceito_para_segredo("http://banco.example/login"));
+        assert!(!esquema_aceito_para_segredo("ftp://banco.example/"));
+        assert!(!esquema_aceito_para_segredo("about:blank"));
+        assert!(!esquema_aceito_para_segredo(
+            "chrome-error://chromewebdata/"
+        ));
+        assert!(!esquema_aceito_para_segredo(""));
+    }
+
+    #[test]
+    fn passo_com_chaveiro_sem_host_nao_valida() {
+        for p in [
+            Passo::PreencherSenha {
+                seletor: "#s".into(),
+                rotulo: "r".into(),
+                host: None,
+            },
+            Passo::PreencherCpf {
+                seletor: "#c".into(),
+                host: Some(" ".into()),
+            },
+        ] {
+            let r = Roteiro {
+                formato: FORMATO,
+                nome: "x".into(),
+                descricao: String::new(),
+                passos: vec![p],
+            };
+            assert!(r.validar().is_err());
+        }
     }
 
     #[test]

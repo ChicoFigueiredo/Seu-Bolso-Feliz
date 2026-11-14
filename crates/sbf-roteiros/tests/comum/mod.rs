@@ -139,12 +139,14 @@ pub fn site(com_mfa: bool) -> NavegadorFalso {
     n.elementos.insert("#cpf".into(), {
         let mut e = Elemento::com_texto("");
         e.candidato.eh_campo = true;
+        e.candidato.tipo = "text".into();
         e
     });
     n.elementos.insert("#senha".into(), {
         let mut e = Elemento::com_texto("");
         e.candidato.eh_campo = true;
         e.candidato.eh_senha = true;
+        e.candidato.tipo = "password".into();
         e
     });
     let mut entrar = Elemento::com_texto("Entrar");

@@ -19,7 +19,9 @@
 use crate::banco::{BancoDeRoteiros, OrigemDaVersao};
 use crate::bloqueio::{self, Candidato};
 use crate::erro::{ErroDeRoteiro, Resultado};
-use crate::executor::{Contexto, Decisao, Fim, Relatorio, executar, executar_passo};
+use crate::executor::{
+    Contexto, Decisao, Fim, Relatorio, executar_guardando_segredos, executar_passo,
+};
 use crate::pagina::Pagina;
 use crate::passo::{Passo, Roteiro};
 use sbf_chaveiro::Segredo;
@@ -123,13 +125,29 @@ impl std::fmt::Debug for Guia<'_> {
 }
 
 impl Guia<'_> {
-    fn pagina_para_ia(&self, pagina: &Pagina) -> String {
-        let s: Vec<&str> = self.segredos.iter().map(Segredo::expor).collect();
+    /// Todo segredo que pode aparecer num texto que vai à IA: os que o chamador deu e os que
+    /// a execução usou (`usados`).
+    fn segredos_para_limpar<'s>(&'s self, usados: &'s [Segredo]) -> Vec<&'s str> {
+        self.segredos
+            .iter()
+            .chain(usados)
+            .map(Segredo::expor)
+            .collect()
+    }
+
+    fn pagina_para_ia(&self, pagina: &Pagina, usados: &[Segredo]) -> String {
+        let s = self.segredos_para_limpar(usados);
         let mut p = pagina.clone().limpar(&s);
         if self.nivel != NivelDeConfianca::Completo {
             p = p.mascarar();
         }
         p.para_texto()
+    }
+
+    /// A última barreira: o pedido inteiro (objetivo, passos, motivo da recusa, a página)
+    /// passa pela limpeza de segredos antes de sair.
+    fn limpar_pedido(&self, texto: &str, usados: &[Segredo]) -> String {
+        crate::pagina::limpar_texto_com(texto, &self.segredos_para_limpar(usados))
     }
 
     fn pedir(&self, pedido: &Pedido) -> Resultado<Value> {
@@ -174,6 +192,22 @@ impl Guia<'_> {
         pagina: &Pagina,
         recusada: Option<&str>,
     ) -> Resultado<Proposta> {
+        self.propor_proximo_limpando(objetivo, aceitos, pagina, recusada, &[])
+    }
+
+    /// Como [`Self::propor_proximo`], mas limpa também os `usados` (os segredos que a execução
+    /// já digitou) de tudo o que vai à IA.
+    ///
+    /// # Errors
+    /// Falha do provedor, resposta fora do esquema ou proposta que não passa nos filtros.
+    pub fn propor_proximo_limpando(
+        &self,
+        objetivo: &str,
+        aceitos: &[Passo],
+        pagina: &Pagina,
+        recusada: Option<&str>,
+        usados: &[Segredo],
+    ) -> Resultado<Proposta> {
         let mut entrada = format!(
             "Objetivo: {objetivo}\n{}\nPassos já aceitos:\n",
             self.cabecalho_de_rotulos()
@@ -188,7 +222,8 @@ impl Guia<'_> {
             entrada.push_str(&format!("A proposta anterior foi recusada: {r}\n"));
         }
         entrada.push_str("\nPágina atual:\n");
-        entrada.push_str(&self.pagina_para_ia(pagina));
+        entrada.push_str(&self.pagina_para_ia(pagina, usados));
+        let entrada = self.limpar_pedido(&entrada, usados);
         let pedido = Pedido {
             prompt_versao: PROMPT_DE_GRAVACAO.to_owned(),
             instrucao: format!(
@@ -234,6 +269,22 @@ impl Guia<'_> {
         motivo_da_falha: &str,
         pagina: &Pagina,
     ) -> Resultado<(Vec<Passo>, String)> {
+        self.propor_conserto_limpando(roteiro, falho, motivo_da_falha, pagina, &[])
+    }
+
+    /// Como [`Self::propor_conserto`], mas limpa também os `usados` (os segredos que a
+    /// execução digitou) de tudo o que vai à IA.
+    ///
+    /// # Errors
+    /// Falha do provedor, a IA desistir, ou proposta que não passa nos filtros.
+    pub fn propor_conserto_limpando(
+        &self,
+        roteiro: &Roteiro,
+        falho: usize,
+        motivo_da_falha: &str,
+        pagina: &Pagina,
+        usados: &[Segredo],
+    ) -> Resultado<(Vec<Passo>, String)> {
         let mut entrada = format!(
             "{}\nRoteiro \"{}\":\n",
             self.cabecalho_de_rotulos(),
@@ -250,7 +301,8 @@ impl Guia<'_> {
             ));
         }
         entrada.push_str("\nPágina atual:\n");
-        entrada.push_str(&self.pagina_para_ia(pagina));
+        entrada.push_str(&self.pagina_para_ia(pagina, usados));
+        let entrada = self.limpar_pedido(&entrada, usados);
         let pedido = Pedido {
             prompt_versao: PROMPT_DE_CONSERTO.to_owned(),
             instrucao: format!(
@@ -329,6 +381,18 @@ fn campo_na_pagina<'a>(pagina: &'a Pagina, seletor: &str) -> Option<&'a crate::p
         .find(|c| c.seletor == seletor)
 }
 
+/// O elemento tem texto ou rótulo (aria-label, title, alt) que se possa ler? Campos contam
+/// pelo rótulo ou pelo nome.
+fn tem_nome_acessivel(pagina: &Pagina, seletor: &str) -> bool {
+    if let Some(e) = pagina.elementos.iter().find(|e| e.seletor == seletor) {
+        return !e.texto.trim().is_empty() || !e.rotulo.trim().is_empty();
+    }
+    if let Some(c) = campo_na_pagina(pagina, seletor) {
+        return !c.rotulo.trim().is_empty() || !c.nome.trim().is_empty();
+    }
+    true
+}
+
 /// Os filtros que toda proposta da IA passa antes de chegar ao usuário.
 fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resultado<()> {
     let recusa = |m: &str| Err(ErroDeRoteiro::Invalido(m.to_owned()));
@@ -354,6 +418,11 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
             {
                 return Err(ErroDeRoteiro::Bloqueado(b));
             }
+            // Um elemento sem texto nem rótulo é um alvo que o usuário não consegue conferir
+            // (um link invisível, um ícone sem nome): a IA não pode propor clicar nele.
+            if !tem_nome_acessivel(pagina, seletor) {
+                return recusa("o elemento não tem texto nem rótulo que o usuário possa conferir");
+            }
             Ok(())
         }
         Passo::Preencher { seletor, .. } => {
@@ -368,15 +437,33 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
         Passo::PreencherSenha {
             seletor, rotulo, ..
         } => {
-            if campo_na_pagina(pagina, seletor).is_none() {
+            let Some(c) = campo_na_pagina(pagina, seletor) else {
                 return recusa("o campo não está na página");
+            };
+            if c.tipo != "password" {
+                return recusa("a senha do chaveiro só vai num campo de senha (type=password)");
             }
             if !rotulos.iter().any(|r| r == rotulo) {
                 return recusa("esse rótulo não existe no chaveiro");
             }
+            if !crate::passo::esquema_aceito_para_segredo(&pagina.url) {
+                return recusa("a senha do chaveiro só vai para uma página https");
+            }
             Ok(())
         }
-        Passo::PreencherCpf { seletor, .. } | Passo::LerTabela { seletor, .. } => {
+        Passo::PreencherCpf { seletor, .. } => {
+            let Some(c) = campo_na_pagina(pagina, seletor) else {
+                return recusa("o campo não está na página");
+            };
+            if !matches!(c.tipo.as_str(), "text" | "tel" | "number" | "search") {
+                return recusa("o CPF só vai num campo de texto");
+            }
+            if !crate::passo::esquema_aceito_para_segredo(&pagina.url) {
+                return recusa("o CPF do chaveiro só vai para uma página https");
+            }
+            Ok(())
+        }
+        Passo::LerTabela { seletor, .. } => {
             if existe(seletor) {
                 Ok(())
             } else {
@@ -477,7 +564,13 @@ pub fn gravar_guiado(
             liberado_em = Some(aceitos.len());
             continue;
         }
-        let proposta = match guia.propor_proximo(objetivo, &aceitos, &pagina, recusada.as_deref()) {
+        let proposta = match guia.propor_proximo_limpando(
+            objetivo,
+            &aceitos,
+            &pagina,
+            recusada.as_deref(),
+            &usados,
+        ) {
             Ok(p) => p,
             Err(ErroDeRoteiro::Invalido(m)) => {
                 recusada = Some(m);
@@ -571,11 +664,13 @@ pub fn executar_com_conserto(
     roteiro: &Roteiro,
     guia: Option<&Guia<'_>>,
 ) -> Resultado<Relatorio> {
-    let rel = executar(c, execucao, roteiro)?;
+    let mut usados: Vec<Segredo> = Vec::new();
+    let rel = executar_guardando_segredos(c, execucao, roteiro, &mut usados)?;
     if let (Fim::Falhou { passo, motivo }, Some(g)) = (&rel.fim, guia) {
         let banco: &BancoDeRoteiros = c.banco;
         let pagina = c.navegador.pagina().unwrap_or_default();
-        match g.propor_conserto(roteiro, *passo, motivo, &pagina) {
+        // Os segredos que a execução digitou saem de tudo o que vai à IA.
+        match g.propor_conserto_limpando(roteiro, *passo, motivo, &pagina, &usados) {
             Ok((passos, explicacao)) => {
                 banco.propor_versao(roteiro_id, &passos, &explicacao, OrigemDaVersao::Conserto)?;
                 banco.evento(

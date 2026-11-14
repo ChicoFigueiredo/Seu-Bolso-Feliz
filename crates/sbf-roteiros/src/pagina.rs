@@ -185,23 +185,10 @@ impl Pagina {
     /// Segredo com menos de 4 caracteres não é trocado (apagaria o texto todo).
     #[must_use]
     pub fn limpar(mut self, segredos: &[&str]) -> Self {
-        let variantes: Vec<String> = segredos
-            .iter()
-            .filter(|s| s.chars().count() >= 4)
-            .flat_map(|s| [(*s).to_owned(), codificar_url(s)])
-            .collect();
-        if variantes.is_empty() {
+        if variantes_do_segredo(segredos).is_empty() {
             return self;
         }
-        self.mapear(&|t| {
-            let mut saida = t.to_owned();
-            for v in &variantes {
-                if saida.contains(v.as_str()) {
-                    saida = saida.replace(v.as_str(), "***");
-                }
-            }
-            saida
-        });
+        self.mapear(&|t| limpar_texto_com(t, segredos));
         self
     }
 
@@ -289,6 +276,39 @@ impl Pagina {
         }
         s
     }
+}
+
+/// As formas em que um segredo pode reaparecer: ele mesmo, percent-encoded e, se é um número
+/// com pontuação (CPF), só os dígitos. Segredo com menos de 4 caracteres fica de fora.
+fn variantes_do_segredo(segredos: &[&str]) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for s in segredos.iter().filter(|s| s.chars().count() >= 4) {
+        v.push((*s).to_owned());
+        v.push(codificar_url(s));
+        let so_digitos: String = s.chars().filter(char::is_ascii_digit).collect();
+        let numerico = s
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '/' | ' '));
+        if numerico && so_digitos.len() >= 8 {
+            v.push(so_digitos);
+        }
+    }
+    v.sort_by_key(|x| std::cmp::Reverse(x.len()));
+    v.dedup();
+    v
+}
+
+/// Troca por `***` o segredo, a forma percent-encoded e (para um número com pontuação) só os
+/// dígitos, em qualquer parte de `texto`.
+#[must_use]
+pub fn limpar_texto_com(texto: &str, segredos: &[&str]) -> String {
+    let mut saida = texto.to_owned();
+    for v in variantes_do_segredo(segredos) {
+        if saida.contains(v.as_str()) {
+            saida = saida.replace(v.as_str(), "***");
+        }
+    }
+    saida
 }
 
 fn codificar_url(s: &str) -> String {

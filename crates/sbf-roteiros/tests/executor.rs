@@ -21,14 +21,14 @@ fn login(com_senha: bool) -> Vec<Passo> {
         },
         Passo::PreencherCpf {
             seletor: "#cpf".into(),
-            host: None,
+            host: Some("127.0.0.1".into()),
         },
     ];
     if com_senha {
         p.push(Passo::PreencherSenha {
             seletor: "#senha".into(),
             rotulo: "banco-ficticio".into(),
-            host: None,
+            host: Some("127.0.0.1".into()),
         });
     }
     p.push(Passo::Clicar {
@@ -688,4 +688,189 @@ fn ro_02_o_executor_marca_a_fase_de_login_ao_digitar_e_a_encerra_no_clique() {
             None, // o clique que envia o login
         ]
     );
+}
+
+/// Roda um roteiro **sem passar pela validação do banco** (defesa em profundidade: o executor
+/// recusa sozinho o que o banco já recusaria, caso um JSON antigo ou editado à mão chegue).
+fn rodar_cru(nav: &mut NavegadorFalso, passos: Vec<Passo>, pasta: &std::path::Path) -> Resultado {
+    let banco = BancoDeRoteiros::em_memoria().unwrap();
+    let id = banco
+        .criar_roteiro("cru", "", "", None, &[], OrigemDaVersao::Manual)
+        .unwrap();
+    let (vid, _, _) = banco.versao_ativa(id).unwrap();
+    let execucao = banco.iniciar_execucao(id, vid, "teste").unwrap();
+    let roteiro = Roteiro {
+        formato: FORMATO,
+        nome: "cru".into(),
+        descricao: String::new(),
+        passos,
+    };
+    let (cofre, conn) = inventario(pasta);
+    let mut destino = NoInventario::novo(&conn, &cofre, "cru", execucao);
+    let nao = AtomicBool::new(false);
+    let pausa = PausaFalsa::default();
+    let rel = {
+        let mut c = Contexto {
+            navegador: nav,
+            senhas: &Senhas,
+            pausa: &pausa,
+            destino: &mut destino,
+            banco: &banco,
+            pasta: pasta.join("baixados"),
+            opcoes: Opcoes {
+                espera: Duration::from_millis(30),
+                download: Duration::from_secs(1),
+                intervalo: Duration::from_millis(5),
+            },
+            cancelar: &nao,
+        };
+        executar(&mut c, execucao, &roteiro).unwrap()
+    };
+    Resultado {
+        rel,
+        banco,
+        execucao,
+        roteiro,
+    }
+}
+
+fn senha_em(seletor: &str, host: Option<&str>) -> Vec<Passo> {
+    vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: seletor.into(),
+            rotulo: "banco-ficticio".into(),
+            host: host.map(str::to_owned),
+        },
+    ]
+}
+
+#[test]
+fn ro_01_passo_de_senha_ou_cpf_sem_site_aprovado_nao_digita_nada() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    let r = rodar_cru(&mut nav, senha_em("#senha", None), d.path());
+    assert!(
+        matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }),
+        "{:?}",
+        r.rel.fim
+    );
+    let mut nav = site(false);
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherCpf {
+            seletor: "#cpf".into(),
+            host: None,
+        },
+    ];
+    let d2 = tempfile::tempdir().unwrap();
+    let r = rodar_cru(&mut nav, passos, d2.path());
+    assert!(matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }));
+    assert!(nav.digitados.is_empty(), "nada foi digitado");
+}
+
+#[test]
+fn ro_01_a_senha_so_vai_num_campo_de_senha_e_o_cpf_so_num_campo_de_texto() {
+    let d = tempfile::tempdir().unwrap();
+    // senha num campo de texto: recusado
+    let mut nav = site(false);
+    let r = rodar_cru(&mut nav, senha_em("#cpf", Some("127.0.0.1")), d.path());
+    assert!(
+        matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }),
+        "{:?}",
+        r.rel.fim
+    );
+    assert!(nav.digitados.is_empty());
+    // CPF num campo de senha: recusado
+    let mut nav = site(false);
+    let d2 = tempfile::tempdir().unwrap();
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherCpf {
+            seletor: "#senha".into(),
+            host: Some("127.0.0.1".into()),
+        },
+    ];
+    let r = rodar_cru(&mut nav, passos, d2.path());
+    assert!(matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }));
+    assert!(nav.digitados.is_empty());
+    // CPF num botão: recusado
+    let mut nav = site(false);
+    let d3 = tempfile::tempdir().unwrap();
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherCpf {
+            seletor: "#entrar".into(),
+            host: Some("127.0.0.1".into()),
+        },
+    ];
+    let r = rodar_cru(&mut nav, passos, d3.path());
+    assert!(matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }));
+    assert!(nav.digitados.is_empty());
+}
+
+#[test]
+fn ro_01_segredo_so_vai_em_https_salvo_no_proprio_computador() {
+    // http num site de verdade: recusado, mesmo com o host certo
+    let mut nav = site(false);
+    nav.rotas
+        .insert("http://banco.exemplo/login".into(), "login".into());
+    nav.paginas.get_mut("login").unwrap().url = "http://banco.exemplo/login".into();
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://banco.exemplo/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("banco.exemplo".into()),
+        },
+    ];
+    let d = tempfile::tempdir().unwrap();
+    let r = rodar_cru(&mut nav, passos, d.path());
+    let Fim::Falhou { passo: 1, motivo } = &r.rel.fim else {
+        panic!("{:?}", r.rel.fim)
+    };
+    assert!(motivo.contains("https"), "{motivo}");
+    assert!(nav.digitados.is_empty());
+    // https: digita
+    let mut nav = site(false);
+    nav.rotas
+        .insert("https://banco.exemplo/login".into(), "login".into());
+    nav.paginas.get_mut("login").unwrap().url = "https://banco.exemplo/login".into();
+    let passos = vec![
+        Passo::Navegar {
+            url: "https://banco.exemplo/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("banco.exemplo".into()),
+        },
+    ];
+    let d = tempfile::tempdir().unwrap();
+    let r = rodar_cru(&mut nav, passos, d.path());
+    assert_eq!(r.rel.fim, Fim::Concluida);
+    assert_eq!(nav.digitados.len(), 1);
+}
+
+#[test]
+fn limpar_texto_tira_o_segredo_e_a_forma_percent_encoded() {
+    use sbf_chaveiro::Segredo;
+    let s = [Segredo::novo(SENHA), Segredo::novo(CPF)];
+    let t = format!(
+        "a={}&b=SenhaFicticia%234821 e o cpf {CPF} ou 12345678909",
+        SENHA
+    );
+    let limpo = sbf_roteiros::executor::limpar_texto(&t, &s);
+    assert!(!limpo.contains(SENHA) && !limpo.contains("%234821"));
+    assert!(!limpo.contains(CPF) && !limpo.contains("12345678909"));
 }

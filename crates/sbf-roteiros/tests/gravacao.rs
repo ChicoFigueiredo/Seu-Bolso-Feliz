@@ -393,3 +393,185 @@ fn ro_04_resposta_fora_do_esquema_e_erro() {
     let r = g.propor_proximo("x", &[], &sbf_roteiros::Pagina::default(), None);
     assert!(r.is_err());
 }
+
+fn guia_de<'a>(ia: &'a Falso) -> Guia<'a> {
+    Guia {
+        provedor: ia,
+        registro: None,
+        destinatario: "roteiros".into(),
+        nivel: NivelDeConfianca::Mascarado,
+        rotulos_de_senha: vec!["banco-ficticio".into()],
+        tem_cpf: true,
+        // como no `sbf` e na janela: o chamador não conhece nenhum segredo de antemão
+        segredos: vec![],
+    }
+}
+
+fn gravar(
+    nav: &mut sbf_roteiros::falso::NavegadorFalso,
+    guia: &Guia<'_>,
+    pasta: &std::path::Path,
+) -> sbf_roteiros::erro::Resultado<sbf_roteiros::gravacao::Gravado> {
+    let (cofre, conn) = inventario(pasta);
+    let banco = BancoDeRoteiros::em_memoria().unwrap();
+    let id = banco
+        .criar_rascunho("g", "", "http://127.0.0.1:1/login", Some("banco-ficticio"))
+        .unwrap();
+    let (vid, _, _) = banco.versao_ativa(id).unwrap();
+    let exec = banco.iniciar_execucao(id, vid, "gravacao").unwrap();
+    let mut destino = NoInventario::novo(&conn, &cofre, "g", exec);
+    let nao = AtomicBool::new(false);
+    let pausa = PausaFalsa::default();
+    let mut c = Contexto {
+        navegador: nav,
+        senhas: &Senhas,
+        pausa: &pausa,
+        destino: &mut destino,
+        banco: &banco,
+        pasta: pasta.join("g"),
+        opcoes: opcoes(),
+        cancelar: &nao,
+    };
+    let mut ap = AceitaTudo(Vec::new());
+    gravar_guiado(
+        guia,
+        &mut c,
+        exec,
+        "baixar",
+        "http://127.0.0.1:1/login",
+        &mut ap,
+        20,
+    )
+}
+
+#[test]
+fn ro_01_a_ia_nao_leva_a_senha_em_campo_que_nao_e_de_senha() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    // um campo de busca na página de login
+    nav.paginas.get_mut("login").unwrap().formularios[0]
+        .campos
+        .push(sbf_roteiros::pagina::Campo {
+            seletor: "#busca".into(),
+            tipo: "text".into(),
+            nome: "busca".into(),
+            ..Default::default()
+        });
+    let mut e = sbf_roteiros::falso::Elemento::com_texto("");
+    e.candidato.eh_campo = true;
+    e.candidato.tipo = "text".into();
+    nav.elementos.insert("#busca".into(), e);
+    let ia = Falso::com_roteiro(vec![
+        // a IA propõe a senha do chaveiro num campo de busca
+        passo(
+            json!({"tipo": "preencher_senha", "seletor": "#busca", "rotulo": "banco-ficticio"}),
+            "senha em #busca",
+        ),
+        // e o CPF num campo de senha
+        passo(json!({"tipo": "preencher_cpf", "seletor": "#senha"}), "cpf"),
+        resposta(json!({"acao": "fim"})),
+    ]);
+    let g = gravar(&mut nav, &guia_de(&ia), d.path()).unwrap();
+    assert_eq!(g.passos.len(), 1, "só o Navegar inicial: {:?}", g.passos);
+    assert!(nav.digitados.is_empty(), "nada foi digitado");
+    let pedidos = ia.pedidos();
+    assert!(
+        pedidos[1]
+            .entrada
+            .contains("proposta anterior foi recusada"),
+        "a recusa volta para a IA"
+    );
+}
+
+#[test]
+fn ro_01_senha_usada_na_gravacao_nao_aparece_no_pedido_seguinte_nem_na_url() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    // depois do login, o site "repete" a senha no texto e na URL (GET com a senha)
+    {
+        let p = nav.paginas.get_mut("painel").unwrap();
+        p.url = format!("http://127.0.0.1:1/painel?s=SenhaFicticia%234821&k={SENHA}");
+        p.texto = format!("Olá {CPF}, sua senha {SENHA} está certa");
+    }
+    let ia = Falso::com_roteiro(vec![
+        passo(json!({"tipo": "preencher_cpf", "seletor": "#cpf"}), "cpf"),
+        passo(
+            json!({"tipo": "preencher_senha", "seletor": "#senha", "rotulo": "banco-ficticio"}),
+            "senha",
+        ),
+        passo(json!({"tipo": "clicar", "seletor": "#entrar"}), "entrar"),
+        resposta(json!({"acao": "fim"})),
+    ]);
+    let g = gravar(&mut nav, &guia_de(&ia), d.path()).unwrap();
+    assert_eq!(g.fim, FimDaGravacao::Cumprido);
+    let pedidos = ia.pedidos();
+    assert_eq!(pedidos.len(), 4);
+    for p in &pedidos {
+        let tudo = format!("{}\n{}", p.instrucao, p.entrada);
+        assert!(!tudo.contains(SENHA), "senha no pedido: {tudo}");
+        assert!(!tudo.contains("%234821"), "senha codificada no pedido");
+        assert!(!tudo.contains(CPF), "CPF no pedido");
+    }
+    assert!(pedidos[3].entrada.contains("***"), "a página foi limpa");
+}
+
+#[test]
+fn ro_01_conserto_nao_leva_a_senha_que_a_execucao_usou() {
+    let d = tempfile::tempdir().unwrap();
+    let (cofre, conn) = inventario(d.path());
+    let banco = BancoDeRoteiros::em_memoria().unwrap();
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("127.0.0.1".into()),
+        },
+        Passo::Clicar {
+            seletor: "#entrar".into(),
+        },
+        Passo::Baixar {
+            seletor: "#some".into(),
+            nome: None,
+        },
+    ];
+    let id = banco
+        .criar_roteiro("r", "", "", None, &passos, OrigemDaVersao::Manual)
+        .unwrap();
+    let (vid, _, roteiro) = banco.versao_ativa(id).unwrap();
+    let mut nav = site(false);
+    {
+        let p = nav.paginas.get_mut("painel").unwrap();
+        p.url = format!("http://127.0.0.1:1/painel?s={SENHA}");
+        p.texto = format!("sua senha {SENHA}");
+    }
+    let ia = Falso::com_roteiro(vec![resposta(json!({"acao": "desistir"}))]);
+    let execucao = banco.iniciar_execucao(id, vid, "agenda").unwrap();
+    let mut destino = NoInventario::novo(&conn, &cofre, "r", execucao);
+    let nao = AtomicBool::new(false);
+    let pausa = PausaFalsa::default();
+    let mut c = Contexto {
+        navegador: &mut nav,
+        senhas: &Senhas,
+        pausa: &pausa,
+        destino: &mut destino,
+        banco: &banco,
+        pasta: d.path().join("e"),
+        opcoes: opcoes(),
+        cancelar: &nao,
+    };
+    let g = guia_de(&ia);
+    let rel = executar_com_conserto(&mut c, id, execucao, &roteiro, Some(&g)).unwrap();
+    assert!(
+        matches!(rel.fim, Fim::Falhou { passo: 3, .. }),
+        "{:?}",
+        rel.fim
+    );
+    let pedidos = ia.pedidos();
+    assert_eq!(pedidos.len(), 1);
+    let tudo = format!("{}\n{}", pedidos[0].instrucao, pedidos[0].entrada);
+    assert!(!tudo.contains(SENHA), "senha no pedido de conserto: {tudo}");
+    assert!(tudo.contains("***"));
+}
