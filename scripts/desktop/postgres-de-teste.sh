@@ -103,6 +103,14 @@ case "${1:-}" in
     cd "$RAIZ"
     SBF_PG_TESTE=1 SBF_PG_TESTE_URL="$URL" cargo test -j 4 -p sbf-coletor "$@"
     ;;
+  testar-canais)
+    # Os testes do `sbf-canais` (bot do Telegram e alertas): Telegram falso local.
+    shift
+    trap 'docker rm -f "$NOME" >/dev/null 2>&1 || true' EXIT
+    subir_banco
+    cd "$RAIZ"
+    SBF_PG_TESTE=1 SBF_PG_TESTE_URL="$URL" cargo test -j 4 -p sbf-canais "$@"
+    ;;
   subir)
     subir_banco
     semear_exemplo
