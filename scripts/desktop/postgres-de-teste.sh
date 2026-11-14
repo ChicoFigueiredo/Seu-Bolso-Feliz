@@ -6,6 +6,8 @@
 #   scripts/desktop/postgres-de-teste.sh testar [args do cargo test]
 #       sobe um contêiner, roda os testes de integração do sbf-servidor contra ele
 #       (SBF_PG_TESTE=1) e apaga o contêiner no fim, passe ou falhe;
+#   scripts/desktop/postgres-de-teste.sh testar-coletor [args do cargo test]
+#       o mesmo, para os testes do `sbf-coletor` (coletas da VPS);
 #   scripts/desktop/postgres-de-teste.sh subir
 #       sobe um contêiner com os dados fictícios de exemplo e imprime
 #       `export SBF_DATABASE_URL=...` (para `sbf servidor` à mão);
@@ -93,6 +95,14 @@ case "${1:-}" in
     cd "$RAIZ"
     SBF_PG_TESTE=1 SBF_PG_TESTE_URL="$URL" cargo test -j 4 -p sbf-servidor "$@"
     ;;
+  testar-coletor)
+    # Os testes do coletor da VPS (`sbf-coletor`): Gmail e Pluggy contra servidores HTTP falsos.
+    shift
+    trap 'docker rm -f "$NOME" >/dev/null 2>&1 || true' EXIT
+    subir_banco
+    cd "$RAIZ"
+    SBF_PG_TESTE=1 SBF_PG_TESTE_URL="$URL" cargo test -j 4 -p sbf-coletor "$@"
+    ;;
   subir)
     subir_banco
     semear_exemplo
@@ -103,7 +113,7 @@ case "${1:-}" in
     descer_todos
     ;;
   *)
-    sed -n '2,15p' "$0"
+    sed -n '2,18p' "$0"
     exit 2
     ;;
 esac

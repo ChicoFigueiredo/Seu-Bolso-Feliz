@@ -47,10 +47,10 @@ pub fn montar_consulta(partes: &PartesDaConsulta<'_>) -> String {
     if let Some(depois) = data_do_gmail(partes.de) {
         termos.push(format!("after:{depois}"));
     }
-    if let Some(ate) = partes.ate {
-        if let Some(antes) = somar_um_dia(ate).and_then(|d| data_do_gmail(Some(&d))) {
-            termos.push(format!("before:{antes}"));
-        }
+    if let Some(ate) = partes.ate
+        && let Some(antes) = somar_um_dia(ate).and_then(|d| data_do_gmail(Some(&d)))
+    {
+        termos.push(format!("before:{antes}"));
     }
     termos.join(" ")
 }

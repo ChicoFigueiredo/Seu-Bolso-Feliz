@@ -164,16 +164,16 @@ fn anexo_aceito(p: &Parte) -> bool {
 
 fn achar_anexos(partes: &[Parte], saida: &mut Vec<Anexo>) {
     for p in partes {
-        if anexo_aceito(p) {
-            if let Some(id) = &p.body.attachment_id {
-                saida.push(Anexo {
-                    id_da_parte: p.part_id.clone(),
-                    id_do_anexo: id.clone(),
-                    nome: p.filename.clone(),
-                    tipo_mime: p.mime_type.clone(),
-                    tamanho: p.body.size,
-                });
-            }
+        if anexo_aceito(p)
+            && let Some(id) = &p.body.attachment_id
+        {
+            saida.push(Anexo {
+                id_da_parte: p.part_id.clone(),
+                id_do_anexo: id.clone(),
+                nome: p.filename.clone(),
+                tipo_mime: p.mime_type.clone(),
+                tamanho: p.body.size,
+            });
         }
         // Recursão para multipart aninhado.
         achar_anexos(&p.parts, saida);
