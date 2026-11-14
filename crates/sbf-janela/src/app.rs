@@ -895,6 +895,10 @@ impl AppCasca for AppSbf {
                 bancada_casca::vista::opcoes_de_aparencia(ui, &self.textos);
                 ui.add_space(12.0);
                 opcoes_da_previa(ui, &mut self.janela.get_mut().previas);
+                if let Some(f) = self.janela.get_mut().ferramentas.as_mut() {
+                    ui.add_space(12.0);
+                    f.nuvens_ui(ui);
+                }
             }
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);

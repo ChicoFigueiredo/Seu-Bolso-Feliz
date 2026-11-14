@@ -17,9 +17,7 @@ use sbf_estante::destinos::{
     Destino as DestinoDaEstante, ListaDeDestinos, RelatorioDoDestino, TipoDeDestino,
     atualizar_destinos, detectar_remotos,
 };
-use sbf_estante::{
-    AVISO_DA_SENHA, CopiaDeSeguranca, Fase, Rclone, RelatorioDaCopia, RelatorioDaEstante,
-};
+use sbf_estante::{AVISO_DA_SENHA, CopiaDeSeguranca, Fase, RelatorioDaCopia, RelatorioDaEstante};
 use sbf_inventario::banco::Inventario;
 use sbf_inventario::consulta::Tabela;
 use sbf_inventario::leitor::LeitorSqlite;
@@ -112,6 +110,8 @@ pub struct Ferramentas {
     aviso_dos_destinos: Option<String>,
     /// Destino do rclone para a cópia de segurança (Opções). Vazio: Ação desabilitada.
     pub destino_da_copia: String,
+    /// Opções › Nuvens (conectar Drive e OneDrive, coleta, último backup).
+    pub nuvens: crate::nuvens::Nuvens,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -159,6 +159,7 @@ pub fn texto_da_situacao(s: Situacao) -> &'static str {
 
 impl Ferramentas {
     pub fn nova(banco: PathBuf, cofre: PathBuf) -> Self {
+        let cofre_para_nuvens = cofre.clone();
         Self {
             banco,
             cofre,
@@ -172,6 +173,7 @@ impl Ferramentas {
             sugestoes: Vec::new(),
             aviso_dos_destinos: None,
             destino_da_copia: String::new(),
+            nuvens: crate::nuvens::Nuvens::nova(cofre_para_nuvens),
             tentar_estrategias_padrao: false,
             ultima_copia: None,
             tarefa: None,
@@ -319,6 +321,7 @@ impl Ferramentas {
             self.cofre.clone(),
             self.destinos.clone(),
         );
+        let rclone = crate::nuvens::rclone_do_sbf(&cofre, self.chaveiro.as_ref());
         self.comecar("Atualizar estante", move |andamento| {
             let inv = match Inventario::abrir(&banco) {
                 Ok(inv) => inv,
@@ -334,7 +337,7 @@ impl Ferramentas {
                 andamento(format!("{destino} · {fase}: {} de {}", a.feitos, a.total));
             };
             Evento::Destinos(atualizar_destinos(
-                &Rclone::novo(),
+                &rclone,
                 &lista,
                 inv.conexao(),
                 &cofre,
@@ -382,12 +385,13 @@ impl Ferramentas {
     fn fazer_copia(&mut self, senha: Segredo) {
         let destino = self.destino_da_copia.trim().to_owned();
         let (banco, cofre) = (self.banco.clone(), self.cofre.clone());
+        let rclone = crate::nuvens::rclone_do_sbf(&cofre, self.chaveiro.as_ref());
         self.comecar("Fazer cópia de segurança", move |andamento| {
             andamento("copiando o banco e o acervo, cifrados…".to_owned());
             let r = (|| -> Result<RelatorioDaCopia, String> {
                 let inv = Inventario::abrir(&banco).map_err(|e| e.to_string())?;
-                let copia = CopiaDeSeguranca::nova(Rclone::novo(), destino)
-                    .map_err(|e| mensagem_da_copia(&e))?;
+                let copia =
+                    CopiaDeSeguranca::nova(rclone, destino).map_err(|e| mensagem_da_copia(&e))?;
                 copia
                     .fazer(inv.conexao(), &cofre, &senha)
                     .map_err(|e| mensagem_da_copia(&e))
@@ -518,6 +522,7 @@ impl Ferramentas {
             Evento::Destinos(v) => Some(Resultado::Destinos(v)),
             Evento::Copia(Ok(r)) => {
                 self.ultima_copia = Some(r.quando.clone());
+                self.nuvens.registrar_backup(&r.quando);
                 Some(Resultado::Copia(r))
             }
             Evento::Importacao(Ok((resumo, oferta, aviso))) => {
@@ -868,6 +873,12 @@ impl Ferramentas {
         }
     }
 
+    /// Opções › Nuvens.
+    pub fn nuvens_ui(&mut self, ui: &mut Ui) {
+        let ativos = self.destinos.ativos().count();
+        self.nuvens.ui(ui, self.chaveiro.as_ref(), ativos);
+    }
+
     /// Opções › Estante: os destinos, com ativo, remover, nova pasta local e "Detectar
     /// Drive/OneDrive".
     pub fn lista_de_destinos_ui(&mut self, ui: &mut Ui) {
@@ -925,7 +936,10 @@ impl Ferramentas {
         });
         ui.horizontal(|ui| {
             if ui.button("Detectar Drive/OneDrive").clicked() {
-                match detectar_remotos(&Rclone::novo()) {
+                match detectar_remotos(&crate::nuvens::rclone_do_sbf(
+                    &self.cofre,
+                    self.chaveiro.as_ref(),
+                )) {
                     Ok(v) if v.is_empty() => {
                         self.aviso_dos_destinos =
                             Some("Nenhum remoto drive ou onedrive no rclone.".to_owned());
@@ -1045,6 +1059,10 @@ impl Ferramentas {
 
     /// Lê os destinos e a opção do PDF guardados (sem arquivo, fica tudo vazio).
     pub fn carregar_preferencias(&mut self) {
+        self.nuvens.carregar();
+        if self.ultima_copia.is_none() {
+            self.ultima_copia.clone_from(&self.nuvens.ultimo_backup);
+        }
         self.carregar_preferencias_antigas();
         if let Some(arquivo) = self.arquivo_dos_destinos() {
             match ListaDeDestinos::carregar(&arquivo) {
