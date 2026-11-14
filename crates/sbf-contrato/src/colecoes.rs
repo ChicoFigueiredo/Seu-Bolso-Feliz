@@ -39,11 +39,15 @@ pub enum Colecao {
     Ocorrencias,
     /// Metadados dos documentos do servidor (`source_documents`), sem os bytes.
     Documentos,
+    /// Lotes de rascunhos do pipeline de ingestão (`draft_batches`). Contrato v2.
+    LotesDeRascunhos,
+    /// Rascunhos do pipeline de ingestão (`draft_records`). Contrato v2.
+    Rascunhos,
 }
 
 impl Colecao {
     /// Todas, na ordem em que a sincronização as baixa.
-    pub const TODAS: [Colecao; 19] = [
+    pub const TODAS: [Colecao; 21] = [
         Colecao::Instituicoes,
         Colecao::Contas,
         Colecao::Cartoes,
@@ -63,7 +67,18 @@ impl Colecao {
         Colecao::Recorrentes,
         Colecao::Ocorrencias,
         Colecao::Documentos,
+        Colecao::LotesDeRascunhos,
+        Colecao::Rascunhos,
     ];
+
+    /// A primeira versão de contrato em que a coleção existe. O servidor só a serve em
+    /// `/api/v{N}` com `N` igual ou maior que isto.
+    pub fn desde_a_versao(self) -> u32 {
+        match self {
+            Colecao::LotesDeRascunhos | Colecao::Rascunhos => 2,
+            _ => 1,
+        }
+    }
 
     /// O segmento do caminho: `GET /api/v1/livro/{caminho}`.
     pub fn caminho(self) -> &'static str {
@@ -87,6 +102,8 @@ impl Colecao {
             Colecao::Recorrentes => "recorrentes",
             Colecao::Ocorrencias => "ocorrencias",
             Colecao::Documentos => "documentos",
+            Colecao::LotesDeRascunhos => "lotes-de-rascunhos",
+            Colecao::Rascunhos => "rascunhos",
         }
     }
 
@@ -121,6 +138,8 @@ pub enum LinhasDaColecao {
     Recorrentes(Vec<Recorrente>),
     Ocorrencias(Vec<Ocorrencia>),
     Documentos(Vec<Documento>),
+    LotesDeRascunhos(Vec<LoteDeRascunhos>),
+    Rascunhos(Vec<Rascunho>),
 }
 
 impl LinhasDaColecao {
@@ -146,6 +165,8 @@ impl LinhasDaColecao {
             LinhasDaColecao::Recorrentes(_) => Colecao::Recorrentes,
             LinhasDaColecao::Ocorrencias(_) => Colecao::Ocorrencias,
             LinhasDaColecao::Documentos(_) => Colecao::Documentos,
+            LinhasDaColecao::LotesDeRascunhos(_) => Colecao::LotesDeRascunhos,
+            LinhasDaColecao::Rascunhos(_) => Colecao::Rascunhos,
         }
     }
 
@@ -171,6 +192,8 @@ impl LinhasDaColecao {
             LinhasDaColecao::Recorrentes(v) => v.len(),
             LinhasDaColecao::Ocorrencias(v) => v.len(),
             LinhasDaColecao::Documentos(v) => v.len(),
+            LinhasDaColecao::LotesDeRascunhos(v) => v.len(),
+            LinhasDaColecao::Rascunhos(v) => v.len(),
         }
     }
 }
@@ -397,6 +420,66 @@ pub enum EstadoDaOcorrencia {
     Pulada,
     Vencida,
     Cancelada,
+}
+
+/// `draft_batches.status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstadoDoLote {
+    Aberto,
+    EmRevisao,
+    Aprovado,
+    Parcial,
+    Recusado,
+}
+
+/// `draft_records.draft_type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeRascunho {
+    Movimentacao,
+    Recorrente,
+    Divida,
+    MetricaDeConsumo,
+}
+
+/// `draft_records.status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstadoDoRascunho {
+    /// `pending_review`: espera a revisão do usuário.
+    PendenteDeRevisao,
+    Aprovado,
+    /// `posted`: já virou registro no livro-caixa. Terminal.
+    Lancado,
+    Recusado,
+    /// `corrected`: o usuário corrigiu os campos; ainda não aprovou.
+    Corrigido,
+    Arquivado,
+}
+
+impl EstadoDoRascunho {
+    /// Ainda espera uma decisão do usuário (entra em "Aprovar o lote").
+    pub fn pendente(self) -> bool {
+        matches!(
+            self,
+            EstadoDoRascunho::PendenteDeRevisao | EstadoDoRascunho::Corrigido
+        )
+    }
+}
+
+/// `draft_records.reconciliation_status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstadoDaConciliacao {
+    NaoVerificado,
+    SemCorrespondencia,
+    CorrespondenciaExata,
+    CorrespondenciaAproximada,
+    PossivelDuplicata,
+    CorrespondeARecorrente,
+    ConfirmadoNovo,
+    ConfirmadoDuplicata,
 }
 
 /// `source_documents.origin_type`.
@@ -726,5 +809,47 @@ pub struct Documento {
     pub assunto_do_email: Option<String>,
     pub remetente_do_email: Option<String>,
     pub recebido_em: Option<Instante>,
+    pub criado_em: Option<Instante>,
+}
+
+/// `draft_batches`: um lote de rascunhos que o pipeline gerou de um documento.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoteDeRascunhos {
+    pub id: Id,
+    pub versao: Versao,
+    pub nome: Option<String>,
+    pub estado: EstadoDoLote,
+    pub total: i32,
+    pub aprovados: i32,
+    pub recusados: i32,
+    pub documento: Option<Id>,
+    pub criado_em: Option<Instante>,
+}
+
+/// `draft_records`: um rascunho do pipeline, a espera de revisão.
+///
+/// `dados` é o `draft_data` **já no formato v1** (`schema_version: 1`; o servidor migra o
+/// v0 de movimentações em memória). Dinheiro dentro de `dados` segue o contrato do draft:
+/// `amount_cents` em centavos inteiros.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rascunho {
+    pub id: Id,
+    pub versao: Versao,
+    pub lote: Option<Id>,
+    pub documento: Option<Id>,
+    pub tipo: TipoDeRascunho,
+    pub estado: EstadoDoRascunho,
+    pub dados: serde_json::Value,
+    /// `draft_schema_version` como está no banco (0: o `dados` foi migrado na leitura).
+    pub versao_do_esquema: i16,
+    /// `corrections`: `{"manual_edit": true, ...}` ou `{"rejection_reason": "..."}`.
+    pub correcoes: Option<serde_json::Value>,
+    /// A confiança do pipeline, de 0 a 100.
+    pub confianca_percentual: Option<i32>,
+    pub conciliacao: EstadoDaConciliacao,
+    /// A movimentação já existente com que a conciliação casou (ou que o usuário indicou).
+    pub movimentacao_conciliada: Option<Id>,
+    /// O registro que o lançamento criou (`posted_record_id`).
+    pub lancado_como: Option<Id>,
     pub criado_em: Option<Instante>,
 }

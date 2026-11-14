@@ -46,6 +46,12 @@ pub enum CodigoDeErro {
     /// Motivo de recusa: a alteração aponta para outra linha que não existe (ex.: a
     /// categoria nova).
     ReferenciaNaoEncontrada,
+    /// Motivo de recusa (contrato v2): o banco ou a regra de lançamento recusou (rascunho
+    /// que não pode virar movimentação, restrição violada). Nada mudou; a mensagem diz o
+    /// que falta.
+    RegraViolada,
+    /// `413`. O arquivo é maior que o servidor aceita.
+    ArquivoGrande,
     /// `429`. Pedidos demais.
     PedidosDemais,
     /// `500`/`503`. Falha do servidor ou do banco. Tente de novo mais tarde.
