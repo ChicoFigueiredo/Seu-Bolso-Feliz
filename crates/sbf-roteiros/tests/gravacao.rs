@@ -575,3 +575,26 @@ fn ro_01_conserto_nao_leva_a_senha_que_a_execucao_usou() {
     assert!(!tudo.contains(SENHA), "senha no pedido de conserto: {tudo}");
     assert!(tudo.contains("***"));
 }
+#[test]
+fn ro_01_provedor_que_falha_depois_de_receber_o_pedido_deixa_a_saida_registrada() {
+    use sbf_ia::ErroDeIa;
+    for (erro, saidas) in [
+        (ErroDeIa::Outro("tempo esgotado".into()), 1_usize),
+        (ErroDeIa::Limite { espera_segundos: 5 }, 1),
+        (ErroDeIa::Indisponivel("sem claude".into()), 0),
+        (ErroDeIa::Teto, 0),
+    ] {
+        let ia = Falso::com_roteiro(vec![Err(erro)]);
+        let registro = Memoria::default();
+        let g = Guia {
+            registro: Some(&registro),
+            ..guia_de(&ia)
+        };
+        let r = g.propor_proximo("x", &[], &sbf_roteiros::Pagina::default(), None);
+        assert!(r.is_err());
+        assert_eq!(registro.0.lock().unwrap().len(), saidas);
+        if saidas == 1 {
+            assert!(registro.0.lock().unwrap()[0].bytes_enviados > 0);
+        }
+    }
+}

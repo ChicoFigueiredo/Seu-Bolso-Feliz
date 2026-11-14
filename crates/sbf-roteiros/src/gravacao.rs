@@ -151,15 +151,25 @@ impl Guia<'_> {
     }
 
     fn pedir(&self, pedido: &Pedido) -> Resultado<Value> {
-        let r = self.provedor.pedir(pedido)?;
-        if let Some(reg) = self.registro {
+        let resposta = self.provedor.pedir(pedido);
+        // O que saiu fica registrado mesmo quando o provedor falha depois de receber o pedido
+        // (tempo esgotado, resposta ruim, limite do servidor). Só não conta o que nem saiu:
+        // provedor indisponível e teto de gasto nosso.
+        let (modelo, consumo, saiu) = match &resposta {
+            Ok(r) => (r.modelo.clone(), r.consumo, true),
+            Err(ErroDeIa::Indisponivel(_) | ErroDeIa::Teto) => {
+                (String::new(), sbf_ia::Consumo::default(), false)
+            }
+            Err(_) => (String::new(), sbf_ia::Consumo::default(), true),
+        };
+        if saiu && let Some(reg) = self.registro {
             reg.registrar_saida(&Saida {
                 destinatario: self.destinatario.clone(),
                 provedor: self.provedor.nome().to_owned(),
-                modelo: r.modelo.clone(),
+                modelo,
                 nivel: self.nivel,
                 bytes_enviados: (pedido.instrucao.len() + pedido.entrada.len()) as u64,
-                consumo: r.consumo,
+                consumo,
                 quando: agora_rfc3339(),
             })?;
         }
@@ -179,6 +189,7 @@ impl Guia<'_> {
             if self.tem_cpf { "sim" } else { "não" }
         )
     }
+        let r = resposta?;
 
     /// Propõe o próximo passo da gravação. `recusada` leva o motivo da proposta anterior que o
     /// usuário ou os filtros recusaram.
