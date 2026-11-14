@@ -8,6 +8,24 @@
 //! - nenhum teste chama provedor real.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+mod claude_cli;
+mod esquema;
+mod falso;
+mod fila;
+mod openrouter;
+mod tempo;
+
+pub use claude_cli::ClaudeCli;
+pub use esquema::{extrair_json, validar_esquema};
+pub use falso::Falso;
+pub use fila::{
+    Atribuicao, ConfiguracaoDaFila, Controle, Evento, Fila, Formato, Interrupcao, LoteResolvido,
+    Relatorio,
+};
+pub use openrouter::{ConfiguracaoOpenRouter, FonteDaChave, OpenRouter};
+pub use tempo::{agora_rfc3339, rfc3339_de};
 
 /// Quanto do conteúdo pode sair para um destinatário (ADR-015).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +125,14 @@ pub trait Provedor: Send + Sync {
     fn nome(&self) -> &'static str;
     /// Uma chamada. Não faz cache nem retentativa: isso é da fila.
     fn pedir(&self, pedido: &Pedido) -> ResultadoDeIa<Resposta>;
+    /// Começa uma rodada: zera o que é "por rodada" (o teto do OpenRouter). A fila chama
+    /// no início de cada rodada.
+    fn nova_rodada(&self) {}
+    /// `false` quando o provedor já não aceita pedidos por gasto (teto de rodada ou do mês).
+    /// A fila só troca para a reserva se ela responde `true`.
+    fn dentro_do_teto(&self) -> bool {
+        true
+    }
 }
 
 /// Onde a fila grava o que saiu e guarda o cache. O inventário implementa sobre
@@ -117,9 +143,94 @@ pub trait Registro: Send + Sync {
     fn gravar_cache(&self, chave: &str, json: &serde_json::Value) -> ResultadoDeIa<()>;
 }
 
-/// A chave do cache: `sha256(prompt_versao + modelo do degrau + entrada)`, em hex.
-/// O agente do motor implementa (a assinatura é a costura).
+/// A chave do cache: `sha256(prompt_versao + degrau + provedor + entrada)`, em hex minúsculo.
+/// Os campos são separados por um byte zero, para `("ab","c")` e `("a","bc")` não colidirem.
+/// A instrução não entra: a `prompt_versao` a representa.
 pub fn chave_do_cache(pedido: &Pedido, provedor: &str) -> String {
-    let _ = (pedido, provedor);
-    unimplemented!("agente do motor: sha256 de prompt_versao, degrau, provedor e entrada")
+    let degrau = match pedido.degrau {
+        Degrau::Rapido => "rapido",
+        Degrau::Forte => "forte",
+    };
+    let mut resumo = Sha256::new();
+    for campo in [
+        pedido.prompt_versao.as_str(),
+        degrau,
+        provedor,
+        pedido.entrada.as_str(),
+    ] {
+        resumo.update(campo.as_bytes());
+        resumo.update([0_u8]);
+    }
+    resumo
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, b| {
+            use std::fmt::Write;
+            let _ = write!(hex, "{b:02x}");
+            hex
+        })
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn pedido(entrada: &str, degrau: Degrau) -> Pedido {
+        Pedido {
+            prompt_versao: "v1".into(),
+            instrucao: "i".into(),
+            entrada: entrada.into(),
+            esquema: serde_json::json!({}),
+            degrau,
+            max_tokens_saida: 100,
+        }
+    }
+
+    #[test]
+    fn chave_e_sha256_em_hex_e_estavel() {
+        let a = chave_do_cache(&pedido("x", Degrau::Rapido), "falso");
+        assert_eq!(a.len(), 64);
+        assert!(
+            a.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
+        assert_eq!(a, chave_do_cache(&pedido("x", Degrau::Rapido), "falso"));
+    }
+
+    #[test]
+    fn chave_muda_com_entrada_degrau_provedor_e_versao() {
+        let base = chave_do_cache(&pedido("x", Degrau::Rapido), "falso");
+        assert_ne!(base, chave_do_cache(&pedido("y", Degrau::Rapido), "falso"));
+        assert_ne!(base, chave_do_cache(&pedido("x", Degrau::Forte), "falso"));
+        assert_ne!(base, chave_do_cache(&pedido("x", Degrau::Rapido), "outro"));
+        let mut p = pedido("x", Degrau::Rapido);
+        p.prompt_versao = "v2".into();
+        assert_ne!(base, chave_do_cache(&p, "falso"));
+    }
+
+    #[test]
+    fn chave_nao_colide_por_fronteira_de_campos() {
+        let mut a = pedido("c", Degrau::Rapido);
+        a.prompt_versao = "ab".into();
+        let mut b = pedido("bc", Degrau::Rapido);
+        b.prompt_versao = "a".into();
+        assert_ne!(chave_do_cache(&a, "p"), chave_do_cache(&b, "p"));
+    }
+
+    #[test]
+    fn chave_conhecida_de_sha256() {
+        // Conferido contra o sha256 dos mesmos bytes.
+        let esperado = {
+            let mut r = Sha256::new();
+            r.update(b"v1\0rapido\0falso\0x\0");
+            r.finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(
+            chave_do_cache(&pedido("x", Degrau::Rapido), "falso"),
+            esperado
+        );
+    }
 }
