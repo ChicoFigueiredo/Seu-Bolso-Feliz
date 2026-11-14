@@ -81,6 +81,8 @@ pub enum ErroDeComando {
     NaoEncontrado(Ref),
     #[error("ação {acao} não se aplica a {alvo}")]
     NaoSeAplica { acao: String, alvo: Ref },
+    #[error("A promoção ao servidor não se desfaz; para corrigir, edite no livro-caixa.")]
+    PromocaoNaoSeDesfaz,
     #[error("motivo obrigatório")]
     MotivoObrigatorio,
     #[error("decisão {0} já desfeita ou inexistente")]

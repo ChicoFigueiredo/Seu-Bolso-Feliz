@@ -300,11 +300,7 @@ fn vigia_avisa_e_indexa_um_arquivo_novo_com_as_mesmas_regras() {
 fn origem_gravada_pelo_bun_com_mtime_divergente_nao_ganha_segunda_origem() {
     // Fracoes problematicas: .5, .9999 e valores grandes. A chave do Bun pode diferir
     // na ultima casa do mtimeMs; o caminho, o tamanho e o mtime em ms ainda casam.
-    for segundos in [
-        1_700_000_000.5_f64,
-        1_700_000_000.9999,
-        4_102_444_799.123,
-    ] {
+    for segundos in [1_700_000_000.5_f64, 1_700_000_000.999_9, 4_102_444_799.123] {
         let c = cenario();
         escrever(&c.raiz, "fatura-luz.pdf", "conteudo ficticio um");
         let alvo = c.raiz.join("fatura-luz.pdf");
