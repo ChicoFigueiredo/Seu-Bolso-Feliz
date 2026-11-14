@@ -218,10 +218,117 @@ async fn corrigir_depois_recusar_e_conciliar() {
         json!(c.s.movimentacao)
     );
 
-    // O lote refletiu: 0 pendente, 1 recusado... ainda há o corrigido pendente.
+    // Conciliar é terminal: o rascunho vira recusado (com a marca da movimentação), o lote
+    // conta dois recusados e o rascunho não vira dinheiro.
+    assert_eq!(r.corpo["linhas"][0]["linha"]["estado"], "recusado");
+    assert_eq!(
+        r.corpo["linhas"][0]["linha"]["correcoes"]["reconciled_with"],
+        json!(c.s.movimentacao)
+    );
     let lotes = c.amb.get("/api/v2/livro/lotes-de-rascunhos", &c.cred).await;
     let lote = &lotes.corpo["linhas"]["linhas"][0];
-    assert_eq!(lote["recusados"], 1);
+    assert_eq!(lote["recusados"], 2);
+    let nova = r.corpo["linhas"][0]["linha"]["versao"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let antes = contar(
+        &c.amb,
+        "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+        c.dono,
+    )
+    .await;
+    let r = c
+        .amb
+        .post(
+            "/api/v2/alteracoes",
+            &c.cred,
+            proposta(
+                json!({"tipo": "aprovar_rascunho", "rascunho": ids[2]}),
+                ("rascunhos", ids[2]),
+                &[("rascunhos", ids[2], &nova)],
+            ),
+        )
+        .await;
+    assert_eq!(r.corpo["resultado"], "recusada", "{:?}", r.corpo);
+    assert_eq!(
+        contar(
+            &c.amb,
+            "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+            c.dono
+        )
+        .await,
+        antes
+    );
+}
+
+#[tokio::test]
+async fn rascunho_conciliado_antigo_ainda_pendente_nao_vira_dinheiro() {
+    let Some(c) = cena().await else { return };
+    let (lote, ids) = semear_lote(&c.amb, c.dono, c.s.conta, 2, 0).await;
+    // Dado legado: conciliado como duplicata, mas ainda pending_review.
+    c.amb
+        .sql(&format!(
+            "UPDATE public.draft_records SET reconciliation_status = 'confirmed_duplicate' WHERE id = '{}'",
+            ids[0]
+        ))
+        .await;
+    let antes = contar(
+        &c.amb,
+        "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+        c.dono,
+    )
+    .await;
+    let mut bases = vec![(
+        "lotes-de-rascunhos",
+        lote,
+        versao_de(&c.amb, &c.cred, "lotes-de-rascunhos", lote).await,
+    )];
+    for id in &ids {
+        bases.push((
+            "rascunhos",
+            *id,
+            versao_de(&c.amb, &c.cred, "rascunhos", *id).await,
+        ));
+    }
+    let b: Vec<(&str, Uuid, &str)> = bases.iter().map(|(a, b, v)| (*a, *b, v.as_str())).collect();
+    let r = c
+        .amb
+        .post(
+            "/api/v2/alteracoes",
+            &c.cred,
+            proposta(
+                json!({"tipo": "aprovar_lote_de_rascunhos", "lote": lote}),
+                ("lotes-de-rascunhos", lote),
+                &b,
+            ),
+        )
+        .await;
+    // O lote muda de composição (o conciliado sai) e a versão de base diverge, ou passa
+    // só com o outro: nos dois casos o conciliado não vira transação.
+    let _ = r;
+    let depois = contar(
+        &c.amb,
+        "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+        c.dono,
+    )
+    .await;
+    assert!(depois <= antes + 1, "o conciliado virou dinheiro");
+    // Aprovar o rascunho conciliado sozinho é recusado.
+    let base = versao_de(&c.amb, &c.cred, "rascunhos", ids[0]).await;
+    let r = c
+        .amb
+        .post(
+            "/api/v2/alteracoes",
+            &c.cred,
+            proposta(
+                json!({"tipo": "aprovar_rascunho", "rascunho": ids[0]}),
+                ("rascunhos", ids[0]),
+                &[("rascunhos", ids[0], &base)],
+            ),
+        )
+        .await;
+    assert_eq!(r.corpo["resultado"], "recusada", "{:?}", r.corpo);
 }
 
 // ───────────────────────────── CX-02: tudo ou nada ─────────────────────────────

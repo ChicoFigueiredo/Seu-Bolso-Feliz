@@ -367,6 +367,7 @@ async fn rascunhos_lancaveis<C: GenericClient>(
         .query(
             "SELECT id FROM public.draft_records WHERE batch_id = $1 AND user_id = $2 \
              AND status IN ('pending_review', 'corrected', 'approved') AND posted_record_id IS NULL \
+             AND reconciliation_status <> 'confirmed_duplicate' \
              ORDER BY created_at, id FOR UPDATE",
             &[&lote, &dono],
         )
@@ -689,6 +690,7 @@ async fn ratear(
 
 struct DadosDoRascunho {
     estado: String,
+    conciliacao: String,
     tipo: String,
     dados: serde_json::Value,
     versao_do_esquema: i16,
@@ -697,13 +699,14 @@ struct DadosDoRascunho {
 async fn dados_do_rascunho(t: &Transaction<'_>, dono: Uuid, id: Uuid) -> Res<DadosDoRascunho> {
     let l = t
         .query_one(
-            "SELECT status, draft_type, draft_data, draft_schema_version FROM public.draft_records \
+            "SELECT status, reconciliation_status, draft_type, draft_data, draft_schema_version FROM public.draft_records \
              WHERE id = $1 AND user_id = $2",
             &[&id, &dono],
         )
         .await?;
     Ok(DadosDoRascunho {
         estado: l.try_get("status")?,
+        conciliacao: l.try_get("reconciliation_status")?,
         tipo: l.try_get("draft_type")?,
         dados: l.try_get("draft_data")?,
         versao_do_esquema: l.try_get("draft_schema_version")?,
@@ -790,6 +793,12 @@ async fn aprovar_um(
                 "o rascunho está {outro} e não pode ser lançado"
             )));
         }
+    }
+    if atual.conciliacao == "confirmed_duplicate" {
+        return Ok(Err(
+            "o rascunho foi conciliado com uma movimentação existente e não pode ser lançado"
+                .into(),
+        ));
     }
     let dados = dados_v1(&atual.tipo, &atual.dados, atual.versao_do_esquema);
     let payload = match payload_de_lancamento(&atual.tipo, &dados) {
@@ -894,20 +903,48 @@ async fn recusar(t: &Transaction<'_>, dono: Uuid, id: Uuid, motivo: &str) -> Res
     })
 }
 
+/// Conciliar com uma movimentação existente é uma decisão terminal: o rascunho é a mesma
+/// coisa que a movimentação, então lançá-lo duplicaria o dinheiro. Vira `rejected` (o mesmo
+/// destino de "recusar", que o lote já conta e que o CHECK de `draft_records` aceita), com
+/// `corrections.reconciled_with` apontando a movimentação; `archived` esconderia o
+/// rascunho das contagens do lote.
 async fn conciliar(
     t: &Transaction<'_>,
     dono: Uuid,
     rascunho: Uuid,
     movimentacao: Uuid,
 ) -> Res<Saida> {
+    let atual = dados_do_rascunho(t, dono, rascunho).await?;
+    if !matches!(
+        atual.estado.as_str(),
+        "pending_review" | "corrected" | "approved"
+    ) {
+        return recusa(
+            CodigoDeErro::RegraViolada,
+            format!(
+                "o rascunho está {} e não pode mais ser conciliado",
+                atual.estado
+            ),
+        );
+    }
+    let lote = lote_do_rascunho(t, dono, rascunho).await?;
+    let marca = movimentacao.to_string();
     t.execute(
         "UPDATE public.draft_records SET reconciliation_status = 'confirmed_duplicate', \
-         reconciled_transaction_id = $3, reconciled_at = now() WHERE id = $1 AND user_id = $2",
-        &[&rascunho, &dono, &movimentacao],
+         reconciled_transaction_id = $3, reconciled_at = now(), status = 'rejected', \
+         corrections = COALESCE(corrections, '{}'::jsonb) || jsonb_build_object(\
+           'rejection_reason', 'conciliado com movimentação existente', 'reconciled_with', $4::text) \
+         WHERE id = $1 AND user_id = $2",
+        &[&rascunho, &dono, &movimentacao, &marca],
     )
     .await?;
+    let mut linhas = vec![rascunho_agora(t, dono, rascunho).await?];
+    if let Some(lote) = lote {
+        recalcular_lote(t, dono, lote).await?;
+        linhas.push(lote_agora(t, dono, lote).await?);
+    }
     Ok(Saida::Aceita {
-        linhas: vec![rascunho_agora(t, dono, rascunho).await?],
+        linhas,
         excluidas: vec![],
     })
 }

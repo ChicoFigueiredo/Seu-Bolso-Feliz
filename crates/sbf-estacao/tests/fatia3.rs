@@ -367,6 +367,29 @@ fn com_rascunhos(c: &Cena) {
 }
 
 #[test]
+fn rascunho_conciliado_nao_entra_na_caixa_nem_no_aprovar_lote() {
+    let c = cena();
+    c.s.mexer(|e| {
+        e.lotes = vec![lote(60, "Lote exemplo")];
+        let mut conciliado = rascunho(61, id(60), "Mercado Delta");
+        conciliado.conciliacao = sbf_contrato::EstadoDaConciliacao::ConfirmadoDuplicata;
+        e.rascunhos = vec![conciliado, rascunho(62, id(60), "Padaria Exemplo")];
+    });
+    let mut cache = c.sincronizar_e_ver();
+    let caixa = cache.caixa_de_entrada(true).unwrap();
+    assert_eq!(caixa[0].itens.len(), 1, "o conciliado não espera decisão");
+    assert_eq!(caixa[0].itens[0].rascunho.id, id(62));
+    cache
+        .enfileirar(Acao::AprovarLoteDeRascunhos { lote: id(60) }, AGORA)
+        .unwrap();
+    let r: Rascunho = cache
+        .linha(Colecao::Rascunhos, &id(61).to_string())
+        .unwrap()
+        .unwrap();
+    assert_ne!(r.estado, EstadoDoRascunho::Aprovado);
+}
+
+#[test]
 fn caixa_de_entrada_agrupa_por_lote_e_aprovar_vira_movimentacao() {
     let c = cena();
     com_rascunhos(&c);

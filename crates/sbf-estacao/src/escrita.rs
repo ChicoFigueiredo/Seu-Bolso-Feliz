@@ -355,7 +355,9 @@ fn rascunho_do_cache(tx: &Transaction<'_>, id: Id) -> ResultadoDeEscrita<Rascunh
 }
 
 fn a_decidir(r: &Rascunho) -> bool {
-    r.estado.pendente() || (r.estado == EstadoDoRascunho::Aprovado && r.lancado_como.is_none())
+    r.conciliacao != EstadoDaConciliacao::ConfirmadoDuplicata
+        && (r.estado.pendente()
+            || (r.estado == EstadoDoRascunho::Aprovado && r.lancado_como.is_none()))
 }
 
 fn base_de(colecao: Colecao, id: Id, versao: &str) -> VersaoDeBase {
@@ -659,6 +661,7 @@ fn aplicar_otimista(tx: &Transaction<'_>, p: &PropostaDeAlteracao) -> ResultadoD
         } => {
             if let Some(mut r) = ler::<Rascunho>(tx, Colecao::Rascunhos, *rascunho)? {
                 r.conciliacao = EstadoDaConciliacao::ConfirmadoDuplicata;
+                r.estado = EstadoDoRascunho::Recusado;
                 r.movimentacao_conciliada = Some(*movimentacao);
                 linhas.push(LinhaAgora::Rascunhos(Box::new(r)));
             }
