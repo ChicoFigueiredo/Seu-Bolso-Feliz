@@ -943,6 +943,30 @@ pub fn rodar_ciclo(
     ao_abrir: &dyn Fn(i64),
     rastro: Option<crate::rodada::RastroDeFalhas>,
 ) -> Resultado<ResumoDoCiclo> {
+    rodar_ciclo_com(
+        inv, agente, motor, provedor, lote, controle, progresso, ao_abrir, rastro, None,
+    )
+}
+
+/// Como [`rodar_ciclo`], com a busca por semelhança do índice local (spec 10): além das
+/// decisões do mesmo fornecedor, o prompt recebe decisões do usuário sobre itens de texto
+/// parecido. Sem busca (`None`), é igual a [`rodar_ciclo`].
+///
+/// # Errors
+/// Falha do SQLite.
+#[allow(clippy::too_many_arguments)]
+pub fn rodar_ciclo_com(
+    inv: &Connection,
+    agente: &Agente,
+    motor: &std::sync::Arc<sbf_ia::Fila>,
+    provedor: &str,
+    lote: usize,
+    controle: &sbf_ia::Controle,
+    progresso: &std::sync::Mutex<crate::rodada::Progresso>,
+    ao_abrir: &dyn Fn(i64),
+    rastro: Option<crate::rodada::RastroDeFalhas>,
+    semelhantes: Option<&dyn sbf_indice::Busca>,
+) -> Resultado<ResumoDoCiclo> {
     use crate::fila::{OpcoesDaFila, selecionar};
     use crate::rodada::{ConfigDaRodada, SituacaoDaRodada, rodar};
     use crate::sugestoes::gravar_regras;
@@ -979,7 +1003,10 @@ pub fn rodar_ciclo(
     if fila.alvos.is_empty() {
         return Ok(resumo);
     }
-    let exemplos = Agente::exemplos_para(inv, &fila.alvos)?;
+    let mut exemplos = Agente::exemplos_para(inv, &fila.alvos)?;
+    if let Some(busca) = semelhantes {
+        crate::semelhantes::completar_exemplos(inv, &fila.alvos, busca, &mut exemplos)?;
+    }
     let config = ConfigDaRodada {
         prompt_versao: PROMPT_VERSAO_V2.to_owned(),
         rastro,

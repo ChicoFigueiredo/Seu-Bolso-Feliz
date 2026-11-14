@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 sbf-inventario = { workspace = true }
 sbf-ia = { path = "../sbf-ia" }
+# A busca por semelhança do índice local (só o trait `Busca`; sem modelo no build padrão).
+sbf-indice = { path = "../sbf-indice" }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

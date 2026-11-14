@@ -5329,6 +5329,7 @@ version = "0.1.0"
 dependencies = [
  "rusqlite",
  "sbf-ia",
+ "sbf-indice",
  "sbf-inventario",
  "serde",
  "serde_json",
