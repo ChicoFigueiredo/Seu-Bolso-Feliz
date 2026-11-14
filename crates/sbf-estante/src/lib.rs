@@ -14,6 +14,7 @@ pub mod destinos;
 pub mod erro;
 pub mod estante;
 pub mod nome;
+pub mod nuvens;
 mod rclone;
 
 pub use bancada_segredos::Segredo;
@@ -24,4 +25,5 @@ pub use destinos::{
 };
 pub use erro::{Erro, Resultado};
 pub use estante::{Andamento, Estante, Fase, Plano, RelatorioDaEstante};
+pub use nuvens::{Conexao, Conexoes, Nuvem};
 pub use rclone::{Rclone, SAIDA_MAXIMA_DO_RCLONE, VARIAVEIS_DO_RCLONE, localizar_rclone};

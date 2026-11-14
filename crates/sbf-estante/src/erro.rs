@@ -75,6 +75,19 @@ pub enum Erro {
         /// Prefixo do hash que o arquivo tem.
         obtido: String,
     },
+    /// Nome de conexão inválido (vazio, com símbolo que o rclone leria como outra coisa, ou
+    /// começando com `-`).
+    #[error("nome de conexão inválido: {0:?} (use letras, números, _ e -)")]
+    NomeDeConexaoInvalido(String),
+    /// Já existe uma conexão com esse nome.
+    #[error("já existe uma conexão chamada {0:?}")]
+    ConexaoRepetida(String),
+    /// Não existe conexão com esse nome.
+    #[error("não existe a conexão {0:?}")]
+    ConexaoInexistente(String),
+    /// O app precisa de um arquivo de configuração próprio para conectar nuvens.
+    #[error("falta o arquivo de configuração do rclone próprio do SBF")]
+    SemConfiguracaoPropria,
     /// A restauração não sobrescreve nada.
     #[error("já existe {0}; a restauração não sobrescreve")]
     JaExiste(PathBuf),

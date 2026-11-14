@@ -80,6 +80,10 @@ const TRANSFERENCIAS: &[&str] = &["copy", "copyto"];
 pub struct Rclone {
     binario: PathBuf,
     prazo: Duration,
+    /// Arquivo de configuração próprio do SBF (`RCLONE_CONFIG`). `None`: o rclone decide.
+    configuracao: Option<PathBuf>,
+    /// Senha de um arquivo de configuração cifrado (`RCLONE_CONFIG_PASS`), só no ambiente.
+    senha_da_configuracao: Option<std::sync::Arc<Zeroizing<String>>>,
 }
 
 impl Default for Rclone {
@@ -96,6 +100,8 @@ impl Rclone {
         Self {
             binario: localizar_rclone().unwrap_or_default(),
             prazo: PRAZO_PADRAO,
+            configuracao: None,
+            senha_da_configuracao: None,
         }
     }
 
@@ -112,7 +118,32 @@ impl Rclone {
         Self {
             binario: binario.into(),
             prazo: PRAZO_PADRAO,
+            configuracao: None,
+            senha_da_configuracao: None,
         }
+    }
+
+    /// Usa o arquivo de configuração próprio do SBF em vez do do usuário (`RCLONE_CONFIG`).
+    #[must_use]
+    pub fn com_configuracao(mut self, arquivo: impl Into<PathBuf>) -> Self {
+        self.configuracao = Some(arquivo.into());
+        self
+    }
+
+    /// O arquivo de configuração em uso, se foi definido.
+    #[must_use]
+    pub fn configuracao(&self) -> Option<&Path> {
+        self.configuracao.as_deref()
+    }
+
+    /// Senha do arquivo de configuração, se ele for cifrado (vem do chaveiro). Vai só no
+    /// ambiente do filho (`RCLONE_CONFIG_PASS`), nunca em argumento.
+    #[must_use]
+    pub fn com_senha_da_configuracao(mut self, senha: &bancada_segredos::Segredo) -> Self {
+        self.senha_da_configuracao = Some(std::sync::Arc::new(Zeroizing::new(
+            senha.expor().to_owned(),
+        )));
+        self
     }
 
     /// Troca o prazo das chamadas curtas ([`PRAZO_PADRAO`]).
@@ -124,11 +155,28 @@ impl Rclone {
 
     /// Roda o rclone e devolve o stdout. `entrada` vai na entrada padrão; `ambiente` só no
     /// ambiente do filho.
-    pub(crate) fn executar<I, S>(
+    pub fn executar<I, S>(
         &self,
         argumentos: I,
         ambiente: &[VariavelDeAmbiente],
         entrada: Option<&str>,
+    ) -> Resultado<Zeroizing<String>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.executar_com(argumentos, ambiente, entrada, &[], None)
+    }
+
+    /// Como [`Rclone::executar`], com variáveis a mais herdadas do ambiente (por exemplo
+    /// `DISPLAY`, para o rclone abrir o navegador) e um prazo próprio.
+    pub fn executar_com<I, S>(
+        &self,
+        argumentos: I,
+        ambiente: &[VariavelDeAmbiente],
+        entrada: Option<&str>,
+        herdar_alem: &[&str],
+        prazo: Option<Duration>,
     ) -> Resultado<Zeroizing<String>>
     where
         I: IntoIterator<Item = S>,
@@ -145,14 +193,25 @@ impl Rclone {
         let mut chamada = Chamada::nova(&self.binario)
             .argumentos(&argumentos)
             .herdando(VARIAVEIS_DO_RCLONE)
+            .herdando(herdar_alem)
             .com_saida_maxima(SAIDA_MAXIMA_DO_RCLONE)
             .com_capacidade_da_saida(CAPACIDADE_DA_SAIDA);
         // As transferências não têm prazo de relógio (vale o `--timeout` do rclone).
         chamada = if TRANSFERENCIAS.contains(&comando.as_str()) {
             chamada.sem_prazo()
         } else {
-            chamada.com_prazo(self.prazo)
+            chamada.com_prazo(prazo.unwrap_or(self.prazo))
         };
+        if let Some(arquivo) = &self.configuracao {
+            chamada = chamada.com_variavel(
+                "RCLONE_CONFIG",
+                Zeroizing::new(arquivo.to_string_lossy().into_owned()),
+            );
+        }
+        if let Some(senha) = &self.senha_da_configuracao {
+            chamada =
+                chamada.com_variavel("RCLONE_CONFIG_PASS", Zeroizing::new((***senha).clone()));
+        }
         for (nome, valor) in ambiente {
             chamada = chamada.com_variavel(nome.clone(), valor.clone());
         }
