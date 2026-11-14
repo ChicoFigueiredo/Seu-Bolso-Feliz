@@ -167,6 +167,9 @@ pub struct Proposta {
     pub motivo: String,
 }
 
+/// Um evento da execução: (quando, passo, tipo, mensagem).
+pub type Evento = (String, Option<i64>, String, String);
+
 /// O banco dos roteiros.
 #[derive(Debug)]
 pub struct BancoDeRoteiros {
@@ -250,8 +253,16 @@ impl BancoDeRoteiros {
         url_inicial: &str,
         rotulo_senha: Option<&str>,
     ) -> Resultado<i64> {
-        let id = self.criar_roteiro(nome, descricao, url_inicial, rotulo_senha, &[], OrigemDaVersao::Gravacao)?;
-        self.conn.execute("UPDATE roteiro SET ativo = 0 WHERE id = ?1", [id])?;
+        let id = self.criar_roteiro(
+            nome,
+            descricao,
+            url_inicial,
+            rotulo_senha,
+            &[],
+            OrigemDaVersao::Gravacao,
+        )?;
+        self.conn
+            .execute("UPDATE roteiro SET ativo = 0 WHERE id = ?1", [id])?;
         Ok(id)
     }
 
@@ -265,12 +276,20 @@ impl BancoDeRoteiros {
             [roteiro_id],
             |l| Ok((l.get(0)?, l.get(1)?)),
         )?;
-        Roteiro { formato: crate::passo::FORMATO, nome, descricao, passos: passos.to_vec() }
-            .validar()
-            .map_err(ErroDeRoteiro::Invalido)?;
+        Roteiro {
+            formato: crate::passo::FORMATO,
+            nome,
+            descricao,
+            passos: passos.to_vec(),
+        }
+        .validar()
+        .map_err(ErroDeRoteiro::Invalido)?;
         self.conn.execute(
             "UPDATE versao SET passos = ?2 WHERE roteiro_id = ?1 AND estado = 'ativa'",
-            params![roteiro_id, serde_json::to_string(passos).unwrap_or_default()],
+            params![
+                roteiro_id,
+                serde_json::to_string(passos).unwrap_or_default()
+            ],
         )?;
         self.conn
             .execute("UPDATE roteiro SET ativo = 1 WHERE id = ?1", [roteiro_id])?;
@@ -284,7 +303,9 @@ impl BancoDeRoteiros {
     pub fn id_do_roteiro(&self, nome: &str) -> Resultado<Option<i64>> {
         Ok(self
             .conn
-            .query_row("SELECT id FROM roteiro WHERE nome = ?1", [nome], |l| l.get(0))
+            .query_row("SELECT id FROM roteiro WHERE nome = ?1", [nome], |l| {
+                l.get(0)
+            })
             .optional()?)
     }
 
@@ -400,8 +421,10 @@ impl BancoDeRoteiros {
             "UPDATE versao SET estado = 'anterior' WHERE roteiro_id = ?1 AND estado = 'ativa'",
             [roteiro_id],
         )?;
-        self.conn
-            .execute("UPDATE versao SET estado = 'ativa' WHERE id = ?1", [p.versao_id])?;
+        self.conn.execute(
+            "UPDATE versao SET estado = 'ativa' WHERE id = ?1",
+            [p.versao_id],
+        )?;
         Ok(())
     }
 
@@ -468,7 +491,19 @@ impl BancoDeRoteiros {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let mut saida = Vec::new();
-        for (id, nome, descricao, url_inicial, rotulo_senha, agenda_horas, ativo, versao, passos, ha_proposta) in linhas {
+        for (
+            id,
+            nome,
+            descricao,
+            url_inicial,
+            rotulo_senha,
+            agenda_horas,
+            ativo,
+            versao,
+            passos,
+            ha_proposta,
+        ) in linhas
+        {
             let n = passos_de(&passos).map(|p| p.len()).unwrap_or(0);
             saida.push(LinhaDeRoteiro {
                 id,
@@ -491,7 +526,11 @@ impl BancoDeRoteiros {
     ///
     /// # Errors
     /// Banco.
-    pub fn historico(&self, roteiro_id: Option<i64>, limite: usize) -> Resultado<Vec<LinhaDeExecucao>> {
+    pub fn historico(
+        &self,
+        roteiro_id: Option<i64>,
+        limite: usize,
+    ) -> Resultado<Vec<LinhaDeExecucao>> {
         let mut st = self.conn.prepare(
             "SELECT e.id, e.roteiro_id, r.nome, v.numero, e.gatilho, e.iniciada_em, e.concluida_em,
                     e.estado, e.passo_atual, e.motivo, e.baixados, e.novos
@@ -500,22 +539,25 @@ impl BancoDeRoteiros {
               ORDER BY e.id DESC LIMIT ?2",
         )?;
         let linhas = st
-            .query_map(params![roteiro_id, i64::try_from(limite).unwrap_or(50)], |l| {
-                Ok(LinhaDeExecucao {
-                    id: l.get(0)?,
-                    roteiro_id: l.get(1)?,
-                    roteiro: l.get(2)?,
-                    versao: l.get(3)?,
-                    gatilho: l.get(4)?,
-                    iniciada_em: l.get(5)?,
-                    concluida_em: l.get(6)?,
-                    estado: EstadoDaExecucao::de(&l.get::<_, String>(7)?),
-                    passo_atual: l.get(8)?,
-                    motivo: l.get(9)?,
-                    baixados: l.get(10)?,
-                    novos: l.get(11)?,
-                })
-            })?
+            .query_map(
+                params![roteiro_id, i64::try_from(limite).unwrap_or(50)],
+                |l| {
+                    Ok(LinhaDeExecucao {
+                        id: l.get(0)?,
+                        roteiro_id: l.get(1)?,
+                        roteiro: l.get(2)?,
+                        versao: l.get(3)?,
+                        gatilho: l.get(4)?,
+                        iniciada_em: l.get(5)?,
+                        concluida_em: l.get(6)?,
+                        estado: EstadoDaExecucao::de(&l.get::<_, String>(7)?),
+                        passo_atual: l.get(8)?,
+                        motivo: l.get(9)?,
+                        baixados: l.get(10)?,
+                        novos: l.get(11)?,
+                    })
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(linhas)
     }
@@ -524,7 +566,12 @@ impl BancoDeRoteiros {
     ///
     /// # Errors
     /// Banco.
-    pub fn iniciar_execucao(&self, roteiro_id: i64, versao_id: i64, gatilho: &str) -> Resultado<i64> {
+    pub fn iniciar_execucao(
+        &self,
+        roteiro_id: i64,
+        versao_id: i64,
+        gatilho: &str,
+    ) -> Resultado<i64> {
         self.conn.execute(
             "INSERT INTO execucao (roteiro_id, versao_id, gatilho) VALUES (?1,?2,?3)",
             params![roteiro_id, versao_id, gatilho],
@@ -548,7 +595,13 @@ impl BancoDeRoteiros {
     ///
     /// # Errors
     /// Banco.
-    pub fn evento(&self, execucao: i64, passo: Option<usize>, tipo: &str, mensagem: &str) -> Resultado<()> {
+    pub fn evento(
+        &self,
+        execucao: i64,
+        passo: Option<usize>,
+        tipo: &str,
+        mensagem: &str,
+    ) -> Resultado<()> {
         self.conn.execute(
             "INSERT INTO evento (execucao_id, passo, tipo, mensagem) VALUES (?1,?2,?3,?4)",
             params![
@@ -565,12 +618,14 @@ impl BancoDeRoteiros {
     ///
     /// # Errors
     /// Banco.
-    pub fn eventos(&self, execucao: i64) -> Resultado<Vec<(String, Option<i64>, String, String)>> {
+    pub fn eventos(&self, execucao: i64) -> Resultado<Vec<Evento>> {
         let mut st = self.conn.prepare(
             "SELECT quando, passo, tipo, mensagem FROM evento WHERE execucao_id = ?1 ORDER BY id",
         )?;
         Ok(st
-            .query_map([execucao], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
+            .query_map([execucao], |l| {
+                Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -637,7 +692,11 @@ impl BancoDeRoteiros {
     pub fn pedido_do_usuario(&self, execucao: i64) -> Resultado<i64> {
         Ok(self
             .conn
-            .query_row("SELECT continuar FROM execucao WHERE id = ?1", [execucao], |l| l.get(0))
+            .query_row(
+                "SELECT continuar FROM execucao WHERE id = ?1",
+                [execucao],
+                |l| l.get(0),
+            )
             .optional()?
             .unwrap_or(2))
     }
@@ -694,20 +753,38 @@ mod testes {
     use super::*;
 
     fn passos() -> Vec<Passo> {
-        vec![Passo::Navegar { url: "http://127.0.0.1:1/".into() }]
+        vec![Passo::Navegar {
+            url: "http://127.0.0.1:1/".into(),
+        }]
     }
 
     #[test]
     fn criar_listar_proposta_aprovar() {
         let b = BancoDeRoteiros::em_memoria().unwrap();
         let id = b
-            .criar_roteiro("extratos", "d", "http://127.0.0.1:1/", Some("banco"), &passos(), OrigemDaVersao::Gravacao)
+            .criar_roteiro(
+                "extratos",
+                "d",
+                "http://127.0.0.1:1/",
+                Some("banco"),
+                &passos(),
+                OrigemDaVersao::Gravacao,
+            )
             .unwrap();
-        assert!(b.criar_roteiro("extratos", "", "", None, &passos(), OrigemDaVersao::Manual).is_err());
+        assert!(
+            b.criar_roteiro("extratos", "", "", None, &passos(), OrigemDaVersao::Manual)
+                .is_err()
+        );
         let l = b.listar().unwrap();
-        assert_eq!((l.len(), l[0].versao, l[0].passos, l[0].ha_proposta), (1, 1, 1, false));
-        let novos = vec![Passo::Navegar { url: "http://127.0.0.1:1/novo".into() }];
-        b.propor_versao(id, &novos, "o site mudou", OrigemDaVersao::Conserto).unwrap();
+        assert_eq!(
+            (l.len(), l[0].versao, l[0].passos, l[0].ha_proposta),
+            (1, 1, 1, false)
+        );
+        let novos = vec![Passo::Navegar {
+            url: "http://127.0.0.1:1/novo".into(),
+        }];
+        b.propor_versao(id, &novos, "o site mudou", OrigemDaVersao::Conserto)
+            .unwrap();
         // proposta não vale: a versão ativa segue a mesma
         assert_eq!(b.versao_ativa(id).unwrap().2.passos, passos());
         assert!(b.listar().unwrap()[0].ha_proposta);
@@ -720,8 +797,18 @@ mod testes {
     #[test]
     fn rejeitar_deixa_a_ativa() {
         let b = BancoDeRoteiros::em_memoria().unwrap();
-        let id = b.criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual).unwrap();
-        b.propor_versao(id, &[Passo::Clicar { seletor: "#a".into() }], "m", OrigemDaVersao::Conserto).unwrap();
+        let id = b
+            .criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual)
+            .unwrap();
+        b.propor_versao(
+            id,
+            &[Passo::Clicar {
+                seletor: "#a".into(),
+            }],
+            "m",
+            OrigemDaVersao::Conserto,
+        )
+        .unwrap();
         b.rejeitar_proposta(id).unwrap();
         assert!(b.proposta(id).unwrap().is_none());
         assert_eq!(b.versao_ativa(id).unwrap().1, 1);
@@ -730,14 +817,23 @@ mod testes {
     #[test]
     fn agenda_so_dispara_depois_do_intervalo() {
         let b = BancoDeRoteiros::em_memoria().unwrap();
-        let id = b.criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual).unwrap();
-        assert!(b.devidos(1_000_000).unwrap().is_empty(), "sem agenda não é devido");
+        let id = b
+            .criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual)
+            .unwrap();
+        assert!(
+            b.devidos(1_000_000).unwrap().is_empty(),
+            "sem agenda não é devido"
+        );
         b.definir_agenda(id, Some(24)).unwrap();
         assert_eq!(b.devidos(1_000_000).unwrap(), vec![id], "nunca rodou");
         let v = b.versao_ativa(id).unwrap().0;
         let e = b.iniciar_execucao(id, v, "agenda").unwrap();
-        assert!(b.devidos(i64::MAX / 4).unwrap().is_empty(), "rodando não repete");
-        b.finalizar(e, EstadoDaExecucao::Concluida, None, 0, 0).unwrap();
+        assert!(
+            b.devidos(i64::MAX / 4).unwrap().is_empty(),
+            "rodando não repete"
+        );
+        b.finalizar(e, EstadoDaExecucao::Concluida, None, 0, 0)
+            .unwrap();
         let agora: i64 = b
             .conn
             .query_row("SELECT strftime('%s','now')", [], |l| l.get::<_, String>(0))
@@ -751,7 +847,9 @@ mod testes {
     #[test]
     fn pausa_pelo_banco() {
         let b = BancoDeRoteiros::em_memoria().unwrap();
-        let id = b.criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual).unwrap();
+        let id = b
+            .criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual)
+            .unwrap();
         let v = b.versao_ativa(id).unwrap().0;
         let e = b.iniciar_execucao(id, v, "janela").unwrap();
         b.pedir_continuar(e, true).unwrap();

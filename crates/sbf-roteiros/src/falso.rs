@@ -62,7 +62,11 @@ impl NavegadorFalso {
             .liberacao
             .as_ref()
             .is_some_and(|l| l.load(std::sync::atomic::Ordering::SeqCst));
-        if liberado && self.atual == "mfa" { "painel" } else { &self.atual }
+        if liberado && self.atual == "mfa" {
+            "painel"
+        } else {
+            &self.atual
+        }
     }
 
     /// Define uma página.
@@ -120,11 +124,17 @@ impl Navegador for NavegadorFalso {
 
     fn preencher_segredo(&mut self, seletor: &str, segredo: &Segredo) -> Resultado<()> {
         self.chamadas.push(format!("preencher_segredo {seletor}"));
-        self.digitados.push((seletor.to_owned(), segredo.expor().to_owned()));
+        self.digitados
+            .push((seletor.to_owned(), segredo.expor().to_owned()));
         Ok(())
     }
 
-    fn clicar_e_baixar(&mut self, seletor: &str, pasta: &Path, _prazo: Duration) -> Resultado<PathBuf> {
+    fn clicar_e_baixar(
+        &mut self,
+        seletor: &str,
+        pasta: &Path,
+        _prazo: Duration,
+    ) -> Resultado<PathBuf> {
         self.chamadas.push(format!("baixar {seletor}"));
         let e = self
             .elementos
@@ -152,7 +162,11 @@ impl Navegador for NavegadorFalso {
     }
 
     fn pagina(&mut self) -> Resultado<Pagina> {
-        Ok(self.paginas.get(self.efetiva()).cloned().unwrap_or_default())
+        Ok(self
+            .paginas
+            .get(self.efetiva())
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn bloqueios(&mut self) -> Resultado<Vec<Bloqueio>> {

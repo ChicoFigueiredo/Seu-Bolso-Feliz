@@ -5,10 +5,10 @@
 mod comum;
 
 use comum::{CPF, PausaFalsa, SENHA, Senhas, clicavel, inventario, site};
+use sbf_roteiros::Navegador as _;
 use sbf_roteiros::banco::{BancoDeRoteiros, OrigemDaVersao};
 use sbf_roteiros::executor::{Contexto, Decisao, Fim, Opcoes, Relatorio, executar};
 use sbf_roteiros::falso::{Elemento, NavegadorFalso};
-use sbf_roteiros::Navegador as _;
 use sbf_roteiros::inventario::NoInventario;
 use sbf_roteiros::passo::{FORMATO, Passo, Roteiro};
 use std::sync::atomic::AtomicBool;
@@ -16,13 +16,22 @@ use std::time::Duration;
 
 fn login(com_senha: bool) -> Vec<Passo> {
     let mut p = vec![
-        Passo::Navegar { url: "http://127.0.0.1:1/login".into() },
-        Passo::PreencherCpf { seletor: "#cpf".into() },
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherCpf {
+            seletor: "#cpf".into(),
+        },
     ];
     if com_senha {
-        p.push(Passo::PreencherSenha { seletor: "#senha".into(), rotulo: "banco-ficticio".into() });
+        p.push(Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+        });
     }
-    p.push(Passo::Clicar { seletor: "#entrar".into() });
+    p.push(Passo::Clicar {
+        seletor: "#entrar".into(),
+    });
     p
 }
 
@@ -33,10 +42,22 @@ struct Resultado {
     roteiro: Roteiro,
 }
 
-fn rodar(nav: &mut NavegadorFalso, passos: Vec<Passo>, pausa: &PausaFalsa, pasta: &std::path::Path) -> Resultado {
+fn rodar(
+    nav: &mut NavegadorFalso,
+    passos: Vec<Passo>,
+    pausa: &PausaFalsa,
+    pasta: &std::path::Path,
+) -> Resultado {
     let banco = BancoDeRoteiros::em_memoria().unwrap();
     let id = banco
-        .criar_roteiro("extratos", "", "http://127.0.0.1:1/login", Some("banco-ficticio"), &passos, OrigemDaVersao::Gravacao)
+        .criar_roteiro(
+            "extratos",
+            "",
+            "http://127.0.0.1:1/login",
+            Some("banco-ficticio"),
+            &passos,
+            OrigemDaVersao::Gravacao,
+        )
         .unwrap();
     let (vid, _, roteiro) = banco.versao_ativa(id).unwrap();
     let execucao = banco.iniciar_execucao(id, vid, "teste").unwrap();
@@ -61,7 +82,12 @@ fn rodar(nav: &mut NavegadorFalso, passos: Vec<Passo>, pausa: &PausaFalsa, pasta
         executar(&mut c, execucao, &roteiro).unwrap()
     };
     destino.fechar("concluida").unwrap();
-    Resultado { rel, banco, execucao, roteiro }
+    Resultado {
+        rel,
+        banco,
+        execucao,
+        roteiro,
+    }
 }
 
 #[test]
@@ -69,12 +95,21 @@ fn ro_01_a_senha_e_o_cpf_chegam_ao_campo_e_a_nada_mais() {
     let d = tempfile::tempdir().unwrap();
     let mut nav = site(false);
     let mut passos = login(true);
-    passos.push(Passo::EsperarSeletor { seletor: "#baixar".into(), segundos: Some(1) });
-    passos.push(Passo::Baixar { seletor: "#baixar".into(), nome: None });
+    passos.push(Passo::EsperarSeletor {
+        seletor: "#baixar".into(),
+        segundos: Some(1),
+    });
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: None,
+    });
     let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
     assert_eq!(r.rel.fim, Fim::Concluida);
     // chegou ao campo, no passo determinístico
-    assert!(nav.digitados.contains(&("#senha".to_owned(), SENHA.to_owned())));
+    assert!(
+        nav.digitados
+            .contains(&("#senha".to_owned(), SENHA.to_owned()))
+    );
     assert!(nav.digitados.contains(&("#cpf".to_owned(), CPF.to_owned())));
 
     // procura a senha em TUDO que sai: roteiro gravado, eventos, histórico, relatório, Debug,
@@ -112,26 +147,52 @@ fn ro_01_erro_do_navegador_que_repete_a_senha_e_limpo() {
 
     struct Vaza(NavegadorFalso);
     impl Navegador for Vaza {
-        fn navegar(&mut self, u: &str) -> R<()> { self.0.navegar(u) }
-        fn visivel(&mut self, s: &str) -> R<bool> { self.0.visivel(s) }
-        fn descrever(&mut self, s: &str) -> R<Option<Candidato>> { self.0.descrever(s) }
-        fn clicar(&mut self, s: &str) -> R<()> { self.0.clicar(s) }
-        fn preencher(&mut self, s: &str, t: &str) -> R<()> { self.0.preencher(s, t) }
-        fn preencher_segredo(&mut self, _s: &str, segredo: &Segredo) -> R<()> {
-            Err(ErroDeRoteiro::Navegador(format!("campo recusou o valor {}", segredo.expor())))
+        fn navegar(&mut self, u: &str) -> R<()> {
+            self.0.navegar(u)
         }
-        fn clicar_e_baixar(&mut self, s: &str, p: &std::path::Path, t: Duration) -> R<std::path::PathBuf> {
+        fn visivel(&mut self, s: &str) -> R<bool> {
+            self.0.visivel(s)
+        }
+        fn descrever(&mut self, s: &str) -> R<Option<Candidato>> {
+            self.0.descrever(s)
+        }
+        fn clicar(&mut self, s: &str) -> R<()> {
+            self.0.clicar(s)
+        }
+        fn preencher(&mut self, s: &str, t: &str) -> R<()> {
+            self.0.preencher(s, t)
+        }
+        fn preencher_segredo(&mut self, _s: &str, segredo: &Segredo) -> R<()> {
+            Err(ErroDeRoteiro::Navegador(format!(
+                "campo recusou o valor {}",
+                segredo.expor()
+            )))
+        }
+        fn clicar_e_baixar(
+            &mut self,
+            s: &str,
+            p: &std::path::Path,
+            t: Duration,
+        ) -> R<std::path::PathBuf> {
             self.0.clicar_e_baixar(s, p, t)
         }
-        fn ler_tabela(&mut self, s: &str) -> R<Vec<Vec<String>>> { self.0.ler_tabela(s) }
-        fn pagina(&mut self) -> R<Pagina> { self.0.pagina() }
-        fn bloqueios(&mut self) -> R<Vec<Bloqueio>> { self.0.bloqueios() }
+        fn ler_tabela(&mut self, s: &str) -> R<Vec<Vec<String>>> {
+            self.0.ler_tabela(s)
+        }
+        fn pagina(&mut self) -> R<Pagina> {
+            self.0.pagina()
+        }
+        fn bloqueios(&mut self) -> R<Vec<Bloqueio>> {
+            self.0.bloqueios()
+        }
     }
 
     let d = tempfile::tempdir().unwrap();
     let banco = BancoDeRoteiros::em_memoria().unwrap();
     let passos = login(true);
-    let id = banco.criar_roteiro("x", "", "", None, &passos, OrigemDaVersao::Manual).unwrap();
+    let id = banco
+        .criar_roteiro("x", "", "", None, &passos, OrigemDaVersao::Manual)
+        .unwrap();
     let (vid, _, roteiro) = banco.versao_ativa(id).unwrap();
     let execucao = banco.iniciar_execucao(id, vid, "teste").unwrap();
     let (cofre, conn) = inventario(d.path());
@@ -146,11 +207,16 @@ fn ro_01_erro_do_navegador_que_repete_a_senha_e_limpo() {
         destino: &mut destino,
         banco: &banco,
         pasta: d.path().join("b"),
-        opcoes: Opcoes { espera: Duration::from_millis(30), ..Opcoes::default() },
+        opcoes: Opcoes {
+            espera: Duration::from_millis(30),
+            ..Opcoes::default()
+        },
         cancelar: &nao,
     };
     let rel = executar(&mut c, execucao, &roteiro).unwrap();
-    let Fim::Falhou { motivo, .. } = &rel.fim else { panic!("{:?}", rel.fim) };
+    let Fim::Falhou { motivo, .. } = &rel.fim else {
+        panic!("{:?}", rel.fim)
+    };
     assert!(!motivo.contains(SENHA));
     assert!(motivo.contains("***"));
     for e in banco.eventos(execucao).unwrap() {
@@ -165,11 +231,20 @@ fn ro_01_campo_de_senha_nao_aceita_texto_fixo() {
     let d = tempfile::tempdir().unwrap();
     let mut nav = site(false);
     let passos = vec![
-        Passo::Navegar { url: "http://127.0.0.1:1/login".into() },
-        Passo::Preencher { seletor: "#senha".into(), texto: "a-senha-no-roteiro".into() },
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::Preencher {
+            seletor: "#senha".into(),
+            texto: "a-senha-no-roteiro".into(),
+        },
     ];
     let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
-    assert!(matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }), "{:?}", r.rel.fim);
+    assert!(
+        matches!(r.rel.fim, Fim::Falhou { passo: 1, .. }),
+        "{:?}",
+        r.rel.fim
+    );
     assert!(nav.digitados.is_empty());
 }
 
@@ -178,15 +253,23 @@ fn bloqueado_ao_clicar(mutar: impl FnOnce(&mut NavegadorFalso)) -> (Fim, Vec<Str
     let mut nav = site(false);
     mutar(&mut nav);
     let mut passos = login(true);
-    passos.push(Passo::Clicar { seletor: "#perigo".into() });
-    passos.push(Passo::Baixar { seletor: "#baixar".into(), nome: None });
+    passos.push(Passo::Clicar {
+        seletor: "#perigo".into(),
+    });
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: None,
+    });
     let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
     (r.rel.fim, nav.chamadas)
 }
 
 fn com_perigo(texto: &str, campos: &[(&str, &str)]) -> impl FnOnce(&mut NavegadorFalso) {
     let texto = texto.to_owned();
-    let campos: Vec<(String, String)> = campos.iter().map(|(a, b)| ((*a).to_owned(), (*b).to_owned())).collect();
+    let campos: Vec<(String, String)> = campos
+        .iter()
+        .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+        .collect();
     move |n: &mut NavegadorFalso| {
         let p = n.paginas.get_mut("painel").unwrap();
         p.elementos.push(clicavel("#perigo", &texto));
@@ -215,7 +298,8 @@ fn ro_02_botoes_perigosos_abortam_o_roteiro_sem_clicar() {
         // o elemento aparece no painel: o roteiro chega nele depois do login
         let (fim, chamadas) = bloqueado_ao_clicar(|n| {
             n.rotas.clear();
-            n.rotas.insert("http://127.0.0.1:1/login".into(), "login".into());
+            n.rotas
+                .insert("http://127.0.0.1:1/login".into(), "login".into());
             com_perigo(texto, &[])(n);
             // o login leva ao painel direto
         });
@@ -226,8 +310,14 @@ fn ro_02_botoes_perigosos_abortam_o_roteiro_sem_clicar() {
             }
             outro => panic!("{texto}: esperava Bloqueada, veio {outro:?}"),
         }
-        assert!(!chamadas.iter().any(|c| c == "clicar #perigo"), "{texto}: clicou");
-        assert!(!chamadas.iter().any(|c| c.starts_with("baixar")), "{texto}: seguiu adiante");
+        assert!(
+            !chamadas.iter().any(|c| c == "clicar #perigo"),
+            "{texto}: clicou"
+        );
+        assert!(
+            !chamadas.iter().any(|c| c.starts_with("baixar")),
+            "{texto}: seguiu adiante"
+        );
     }
 }
 
@@ -245,7 +335,10 @@ fn ro_02_links_e_formularios_disfarcados() {
     ] {
         let (fim, chamadas) = bloqueado_ao_clicar(com_perigo("Continuar", &campos));
         assert!(matches!(fim, Fim::Bloqueada { .. }), "{campos:?}: {fim:?}");
-        assert!(!chamadas.iter().any(|c| c == "clicar #perigo"), "{campos:?}");
+        assert!(
+            !chamadas.iter().any(|c| c == "clicar #perigo"),
+            "{campos:?}"
+        );
     }
 }
 
@@ -256,16 +349,32 @@ fn ro_02_o_que_so_o_script_do_navegador_pega_tambem_aborta() {
     let d = tempfile::tempdir().unwrap();
     let mut nav = site(false);
     let mut e = Elemento::com_texto("Continuar");
-    e.barrado_no_navegador = Some(sbf_roteiros::Bloqueio { campo: "destino".into(), termo: "pagament".into() });
+    e.barrado_no_navegador = Some(sbf_roteiros::Bloqueio {
+        campo: "destino".into(),
+        termo: "pagament".into(),
+    });
     nav.elementos.insert("#ver".into(), e);
     let passos = vec![
-        Passo::Navegar { url: "http://127.0.0.1:1/login".into() },
-        Passo::Clicar { seletor: "#entrar".into() },
-        Passo::Clicar { seletor: "#ver".into() },
-        Passo::Baixar { seletor: "#baixar".into(), nome: None },
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::Clicar {
+            seletor: "#entrar".into(),
+        },
+        Passo::Clicar {
+            seletor: "#ver".into(),
+        },
+        Passo::Baixar {
+            seletor: "#baixar".into(),
+            nome: None,
+        },
     ];
     let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
-    assert!(matches!(r.rel.fim, Fim::Bloqueada { passo: 2, .. }), "{:?}", r.rel.fim);
+    assert!(
+        matches!(r.rel.fim, Fim::Bloqueada { passo: 2, .. }),
+        "{:?}",
+        r.rel.fim
+    );
     assert!(!nav.chamadas.iter().any(|c| c.starts_with("baixar")));
     let h = r.banco.historico(None, 1).unwrap();
     assert_eq!(h[0].estado.texto(), "bloqueada");
@@ -276,7 +385,9 @@ fn ro_02_o_que_so_o_script_do_navegador_pega_tambem_aborta() {
 fn ro_02_navegar_para_url_de_pagamento_e_bloqueado() {
     let d = tempfile::tempdir().unwrap();
     let mut nav = site(false);
-    let passos = vec![Passo::Navegar { url: "http://127.0.0.1:1/pagamento/novo".into() }];
+    let passos = vec![Passo::Navegar {
+        url: "http://127.0.0.1:1/pagamento/novo".into(),
+    }];
     let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
     assert!(matches!(r.rel.fim, Fim::Bloqueada { passo: 0, .. }));
     assert!(nav.chamadas.is_empty());
@@ -290,8 +401,14 @@ fn ro_03_mfa_detectado_pausa_e_continuar_retoma_do_passo_certo() {
     nav.liberacao = Some(sinal.clone());
     let mut passos = login(true);
     // sem passo explícito: a detecção é que para, antes de esperar o painel (passo 4)
-    passos.push(Passo::EsperarSeletor { seletor: "#baixar".into(), segundos: Some(1) });
-    passos.push(Passo::Baixar { seletor: "#baixar".into(), nome: None });
+    passos.push(Passo::EsperarSeletor {
+        seletor: "#baixar".into(),
+        segundos: Some(1),
+    });
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: None,
+    });
     let mut pausa = PausaFalsa::com(&[Decisao::Continuar]);
     pausa.sinal = Some(sinal);
     let r = rodar(&mut nav, passos, &pausa, d.path());
@@ -299,7 +416,11 @@ fn ro_03_mfa_detectado_pausa_e_continuar_retoma_do_passo_certo() {
     assert_eq!(r.rel.pausas, 1);
     assert!(pausa.motivos.lock().unwrap()[0].contains("MFA"));
     let eventos = r.banco.eventos(r.execucao).unwrap();
-    let vistos: Vec<i64> = eventos.iter().filter(|e| e.2 == "passo").filter_map(|e| e.1).collect();
+    let vistos: Vec<i64> = eventos
+        .iter()
+        .filter(|e| e.2 == "passo")
+        .filter_map(|e| e.1)
+        .collect();
     // cada passo executado uma só vez: o login não se repete depois do Continuar
     assert_eq!(vistos, vec![0, 1, 2, 3, 4, 5]);
     let pausa_ev = eventos.iter().position(|e| e.2 == "pausa").unwrap();
@@ -308,8 +429,14 @@ fn ro_03_mfa_detectado_pausa_e_continuar_retoma_do_passo_certo() {
     // a pausa foi registrada no passo 4 e o passo 4 é o primeiro depois dela
     assert_eq!(eventos[pausa_ev].1, Some(4));
     assert_eq!(eventos[retomada + 1].1, Some(4));
-    assert_eq!(nav.digitados.iter().filter(|(s, _)| s == "#senha").count(), 1);
-    assert_eq!(r.banco.historico(None, 1).unwrap()[0].estado.texto(), "concluida");
+    assert_eq!(
+        nav.digitados.iter().filter(|(s, _)| s == "#senha").count(),
+        1
+    );
+    assert_eq!(
+        r.banco.historico(None, 1).unwrap()[0].estado.texto(),
+        "concluida"
+    );
 }
 
 #[test]
@@ -317,13 +444,21 @@ fn ro_03_passo_explicito_pausa_e_continua_no_proximo() {
     let d = tempfile::tempdir().unwrap();
     let mut nav = site(false);
     let mut passos = login(true);
-    passos.push(Passo::PausaParaUsuario { motivo: "confirme no aplicativo do banco".into() });
-    passos.push(Passo::Baixar { seletor: "#baixar".into(), nome: None });
+    passos.push(Passo::PausaParaUsuario {
+        motivo: "confirme no aplicativo do banco".into(),
+    });
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: None,
+    });
     let pausa = PausaFalsa::com(&[Decisao::Continuar]);
     let r = rodar(&mut nav, passos, &pausa, d.path());
     assert_eq!(r.rel.fim, Fim::Concluida);
     assert_eq!(r.rel.pausas, 1);
-    assert_eq!(pausa.motivos.lock().unwrap()[0], "confirme no aplicativo do banco");
+    assert_eq!(
+        pausa.motivos.lock().unwrap()[0],
+        "confirme no aplicativo do banco"
+    );
     // depois da pausa só o download correu: o passo da pausa não foi refeito
     let ultimas: Vec<&String> = nav.chamadas.iter().rev().take(1).collect();
     assert!(ultimas[0].starts_with("baixar"));
@@ -332,16 +467,28 @@ fn ro_03_passo_explicito_pausa_e_continua_no_proximo() {
 
 #[test]
 fn ro_03_cancelar_e_expirar_encerram_sem_baixar() {
-    for (decisao, esperado) in [(Decisao::Cancelar, "cancelada"), (Decisao::Expirou, "falhou")] {
+    for (decisao, esperado) in [
+        (Decisao::Cancelar, "cancelada"),
+        (Decisao::Expirou, "falhou"),
+    ] {
         let d = tempfile::tempdir().unwrap();
         let mut nav = site(false);
         let passos = vec![
-            Passo::Navegar { url: "http://127.0.0.1:1/login".into() },
-            Passo::PausaParaUsuario { motivo: "CAPTCHA".into() },
-            Passo::Clicar { seletor: "#entrar".into() },
+            Passo::Navegar {
+                url: "http://127.0.0.1:1/login".into(),
+            },
+            Passo::PausaParaUsuario {
+                motivo: "CAPTCHA".into(),
+            },
+            Passo::Clicar {
+                seletor: "#entrar".into(),
+            },
         ];
         let r = rodar(&mut nav, passos, &PausaFalsa::com(&[decisao]), d.path());
-        assert_eq!(r.banco.historico(None, 1).unwrap()[0].estado.texto(), esperado);
+        assert_eq!(
+            r.banco.historico(None, 1).unwrap()[0].estado.texto(),
+            esperado
+        );
         assert!(!nav.chamadas.iter().any(|c| c.starts_with("clicar")));
     }
 }
@@ -352,9 +499,17 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
     let (cofre, conn) = inventario(d.path());
     let banco = BancoDeRoteiros::em_memoria().unwrap();
     let mut passos = login(true);
-    passos.push(Passo::Baixar { seletor: "#baixar".into(), nome: Some("Extrato Outubro".into()) });
-    passos.push(Passo::LerTabela { seletor: "#extratos".into(), nome: "extratos".into() });
-    let id = banco.criar_roteiro("meu banco", "", "", None, &passos, OrigemDaVersao::Gravacao).unwrap();
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: Some("Extrato Outubro".into()),
+    });
+    passos.push(Passo::LerTabela {
+        seletor: "#extratos".into(),
+        nome: "extratos".into(),
+    });
+    let id = banco
+        .criar_roteiro("meu banco", "", "", None, &passos, OrigemDaVersao::Gravacao)
+        .unwrap();
     let (vid, _, roteiro) = banco.versao_ativa(id).unwrap();
     let nao = AtomicBool::new(false);
     let pausa = PausaFalsa::default();
@@ -371,7 +526,10 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
                 destino: &mut destino,
                 banco: &banco,
                 pasta: d.path().join(format!("b{execucao}")),
-                opcoes: Opcoes { espera: Duration::from_millis(30), ..Opcoes::default() },
+                opcoes: Opcoes {
+                    espera: Duration::from_millis(30),
+                    ..Opcoes::default()
+                },
                 cancelar: &nao,
             };
             executar(&mut c, execucao, &roteiro).unwrap()
@@ -383,8 +541,12 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
     // 1ª vez: PDF e CSV novos; 2ª vez: os mesmos conteúdos, nada novo
     assert_eq!((totais[0].0, totais[0].1), (2, 2));
     assert_eq!((totais[1].0, totais[1].1), (2, 0));
-    let achados: i64 = conn.query_row("SELECT count(*) FROM achado", [], |l| l.get(0)).unwrap();
-    let origens: i64 = conn.query_row("SELECT count(*) FROM origem", [], |l| l.get(0)).unwrap();
+    let achados: i64 = conn
+        .query_row("SELECT count(*) FROM achado", [], |l| l.get(0))
+        .unwrap();
+    let origens: i64 = conn
+        .query_row("SELECT count(*) FROM origem", [], |l| l.get(0))
+        .unwrap();
     assert_eq!((achados, origens), (2, 2));
     let chave: String = conn
         .query_row(
@@ -393,7 +555,10 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
             |l| l.get(0),
         )
         .unwrap();
-    assert_eq!(chave, format!("roteiro:meu banco/{}/Extrato Outubro.pdf", totais[0].2));
+    assert_eq!(
+        chave,
+        format!("roteiro:meu banco/{}/Extrato Outubro.pdf", totais[0].2)
+    );
     let (tipo, fonte_tipo): (String, String) = conn
         .query_row(
             "SELECT o.origin_type, f.tipo FROM origem o JOIN fonte f ON f.id = o.fonte_id LIMIT 1",
@@ -404,7 +569,11 @@ fn ro_05_o_download_vira_achado_com_origem_roteiro_e_nao_duplica() {
     assert_eq!((tipo.as_str(), fonte_tipo.as_str()), ("roteiro", "conexao"));
     // o arquivo foi para o cofre
     let caminho: String = conn
-        .query_row("SELECT caminho_acervo FROM achado WHERE extensao = 'pdf'", [], |l| l.get(0))
+        .query_row(
+            "SELECT caminho_acervo FROM achado WHERE extensao = 'pdf'",
+            [],
+            |l| l.get(0),
+        )
         .unwrap();
     assert!(cofre.join(caminho).exists());
     let _ = FORMATO;

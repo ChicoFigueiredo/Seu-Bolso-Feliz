@@ -132,7 +132,11 @@ impl Destino for NoInventario<'_> {
         let chave = chave_da_origem(&self.roteiro, self.execucao, nome);
         let ja_chave: Option<i64> = self
             .conn
-            .query_row("SELECT 1 FROM origem WHERE origin_key = ?1", [&chave], |l| l.get(0))
+            .query_row(
+                "SELECT 1 FROM origem WHERE origin_key = ?1",
+                [&chave],
+                |l| l.get(0),
+            )
             .optional()?;
         if ja_chave.is_some() {
             self.repetidos += 1;
@@ -200,7 +204,11 @@ impl Destino for NoInventario<'_> {
             self.copiar(arquivo, &hash, &ext, tamanho)?;
         }
         self.novos += 1;
-        Ok(if novo_conteudo { Recebido::Novo } else { Recebido::Repetido })
+        Ok(if novo_conteudo {
+            Recebido::Novo
+        } else {
+            Recebido::Repetido
+        })
     }
 }
 

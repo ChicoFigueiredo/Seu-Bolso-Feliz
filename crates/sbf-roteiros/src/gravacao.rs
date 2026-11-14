@@ -16,8 +16,8 @@
 //! aceitos (sem valores), rótulos do chaveiro (nunca a senha) e a página no nível de confiança
 //! do destinatário. O registro do que saiu ([`sbf_ia::Saida`]) guarda só tamanho e custo.
 
-use crate::bloqueio::{self, Candidato};
 use crate::banco::{BancoDeRoteiros, OrigemDaVersao};
+use crate::bloqueio::{self, Candidato};
 use crate::erro::{ErroDeRoteiro, Resultado};
 use crate::executor::{Contexto, Decisao, Fim, Relatorio, executar, executar_passo};
 use crate::pagina::Pagina;
@@ -153,7 +153,11 @@ impl Guia<'_> {
     fn cabecalho_de_rotulos(&self) -> String {
         format!(
             "Rótulos de senha disponíveis no chaveiro: {}. CPF no chaveiro: {}.",
-            if self.rotulos_de_senha.is_empty() { "(nenhum)".to_owned() } else { self.rotulos_de_senha.join(", ") },
+            if self.rotulos_de_senha.is_empty() {
+                "(nenhum)".to_owned()
+            } else {
+                self.rotulos_de_senha.join(", ")
+            },
             if self.tem_cpf { "sim" } else { "não" }
         )
     }
@@ -170,7 +174,10 @@ impl Guia<'_> {
         pagina: &Pagina,
         recusada: Option<&str>,
     ) -> Resultado<Proposta> {
-        let mut entrada = format!("Objetivo: {objetivo}\n{}\nPassos já aceitos:\n", self.cabecalho_de_rotulos());
+        let mut entrada = format!(
+            "Objetivo: {objetivo}\n{}\nPassos já aceitos:\n",
+            self.cabecalho_de_rotulos()
+        );
         if aceitos.is_empty() {
             entrada.push_str("(nenhum)\n");
         }
@@ -197,7 +204,10 @@ impl Guia<'_> {
         match j["acao"].as_str() {
             Some("fim") => Ok(Proposta::Fim),
             Some("pausa") => Ok(Proposta::Pausa {
-                motivo: j["motivo"].as_str().unwrap_or("o site pediu uma ação sua").to_owned(),
+                motivo: j["motivo"]
+                    .as_str()
+                    .unwrap_or("o site pediu uma ação sua")
+                    .to_owned(),
             }),
             Some("passo") => {
                 let passo = passo_de(&j["passo"])?;
@@ -224,7 +234,11 @@ impl Guia<'_> {
         motivo_da_falha: &str,
         pagina: &Pagina,
     ) -> Resultado<(Vec<Passo>, String)> {
-        let mut entrada = format!("{}\nRoteiro \"{}\":\n", self.cabecalho_de_rotulos(), roteiro.nome);
+        let mut entrada = format!(
+            "{}\nRoteiro \"{}\":\n",
+            self.cabecalho_de_rotulos(),
+            roteiro.nome
+        );
         for (i, p) in roteiro.passos.iter().enumerate() {
             let marca = if i == falho { "  <-- FALHOU" } else { "" };
             entrada.push_str(&format!("{}. {}{marca}\n", i + 1, p.descricao()));
@@ -251,7 +265,9 @@ impl Guia<'_> {
         };
         let j = self.pedir(&pedido)?;
         if j["acao"].as_str() != Some("conserto") {
-            return Err(ErroDeRoteiro::Invalido("a IA não conseguiu propor um conserto".into()));
+            return Err(ErroDeRoteiro::Invalido(
+                "a IA não conseguiu propor um conserto".into(),
+            ));
         }
         let novos: Vec<Passo> = j["passos"]
             .as_array()
@@ -289,7 +305,11 @@ fn candidato_na_pagina(pagina: &Pagina, seletor: &str) -> Option<Candidato> {
 }
 
 fn campo_na_pagina<'a>(pagina: &'a Pagina, seletor: &str) -> Option<&'a crate::pagina::Campo> {
-    pagina.formularios.iter().flat_map(|f| &f.campos).find(|c| c.seletor == seletor)
+    pagina
+        .formularios
+        .iter()
+        .flat_map(|f| &f.campos)
+        .find(|c| c.seletor == seletor)
 }
 
 /// Os filtros que toda proposta da IA passa antes de chegar ao usuário.
@@ -338,7 +358,11 @@ fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resu
             Ok(())
         }
         Passo::PreencherCpf { seletor } | Passo::LerTabela { seletor, .. } => {
-            if existe(seletor) { Ok(()) } else { recusa("o seletor não está na página") }
+            if existe(seletor) {
+                Ok(())
+            } else {
+                recusa("o seletor não está na página")
+            }
         }
         Passo::EsperarSeletor { .. } => Ok(()),
         Passo::PausaParaUsuario { .. } => recusa("a pausa se propõe com acao=pausa"),
@@ -400,13 +424,20 @@ pub fn gravar_guiado(
 ) -> Resultado<Gravado> {
     let mut aceitos: Vec<Passo> = Vec::new();
     let mut usados: Vec<Segredo> = Vec::new();
-    let mut rel = Relatorio { fim: Fim::Concluida, baixados: 0, novos: 0, pausas: 0 };
+    let mut rel = Relatorio {
+        fim: Fim::Concluida,
+        baixados: 0,
+        novos: 0,
+        pausas: 0,
+    };
     let mut recusada: Option<String> = None;
     let mut seguidas = 0_u32;
     let mut liberado_em: Option<usize> = None;
 
     if !url_inicial.is_empty() {
-        let p = Passo::Navegar { url: url_inicial.to_owned() };
+        let p = Passo::Navegar {
+            url: url_inicial.to_owned(),
+        };
         executar_passo(c, execucao, 0, &p, &mut usados, &mut rel)?;
         aceitos.push(p);
     }
@@ -421,7 +452,9 @@ pub fn gravar_guiado(
             if pausar_na_gravacao(c, execucao, aceitos.len(), m.frase())? != Decisao::Continuar {
                 break FimDaGravacao::PausaNaoResolvida;
             }
-            aceitos.push(Passo::PausaParaUsuario { motivo: m.frase().to_owned() });
+            aceitos.push(Passo::PausaParaUsuario {
+                motivo: m.frase().to_owned(),
+            });
             liberado_em = Some(aceitos.len());
             continue;
         }
@@ -463,7 +496,9 @@ pub fn gravar_guiado(
                 if pausar_na_gravacao(c, execucao, aceitos.len(), motivo)? != Decisao::Continuar {
                     break FimDaGravacao::PausaNaoResolvida;
                 }
-                aceitos.push(Passo::PausaParaUsuario { motivo: motivo.clone() });
+                aceitos.push(Passo::PausaParaUsuario {
+                    motivo: motivo.clone(),
+                });
                 liberado_em = Some(aceitos.len());
             }
             Proposta::Passo { passo, .. } => match aprovador.decidir(&proposta) {
@@ -482,10 +517,18 @@ pub fn gravar_guiado(
         }
     };
     drop(usados);
-    Ok(Gravado { passos: aceitos, fim })
+    Ok(Gravado {
+        passos: aceitos,
+        fim,
+    })
 }
 
-fn pausar_na_gravacao(c: &mut Contexto<'_>, execucao: i64, passo: usize, motivo: &str) -> Resultado<Decisao> {
+fn pausar_na_gravacao(
+    c: &mut Contexto<'_>,
+    execucao: i64,
+    passo: usize,
+    motivo: &str,
+) -> Resultado<Decisao> {
     c.banco.marcar_aguardando(execucao, motivo)?;
     c.banco.evento(execucao, Some(passo), "pausa", motivo)?;
     let d = c.pausa.aguardar(execucao, motivo);
@@ -516,10 +559,20 @@ pub fn executar_com_conserto(
         match g.propor_conserto(roteiro, *passo, motivo, &pagina) {
             Ok((passos, explicacao)) => {
                 banco.propor_versao(roteiro_id, &passos, &explicacao, OrigemDaVersao::Conserto)?;
-                banco.evento(execucao, Some(*passo), "conserto", "a IA propôs um conserto; aguarda a sua aprovação")?;
+                banco.evento(
+                    execucao,
+                    Some(*passo),
+                    "conserto",
+                    "a IA propôs um conserto; aguarda a sua aprovação",
+                )?;
             }
             Err(e) => {
-                banco.evento(execucao, Some(*passo), "conserto", &format!("sem conserto: {e}"))?;
+                banco.evento(
+                    execucao,
+                    Some(*passo),
+                    "conserto",
+                    &format!("sem conserto: {e}"),
+                )?;
             }
         }
     }

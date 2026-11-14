@@ -18,6 +18,8 @@
 
 pub mod banco;
 pub mod bloqueio;
+pub mod cdp;
+pub mod chrome;
 pub mod erro;
 pub mod executor;
 pub mod falso;
@@ -26,8 +28,11 @@ pub mod inventario;
 pub mod navegador;
 pub mod pagina;
 pub mod passo;
+pub mod site_falso;
 
-pub use banco::{BancoDeRoteiros, EstadoDaExecucao, LinhaDeExecucao, LinhaDeRoteiro, OrigemDaVersao, Proposta};
+pub use banco::{
+    BancoDeRoteiros, EstadoDaExecucao, LinhaDeExecucao, LinhaDeRoteiro, OrigemDaVersao, Proposta,
+};
 pub use bloqueio::{Bloqueio, Candidato};
 pub use erro::{ErroDeRoteiro, Resultado};
 pub use navegador::Navegador;

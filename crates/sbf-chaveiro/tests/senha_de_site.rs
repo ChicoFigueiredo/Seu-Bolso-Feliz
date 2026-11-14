@@ -22,7 +22,10 @@ fn a_senha_de_site_fica_separada_das_senhas_de_pdf() {
     chaveiro
         .guardar_senha("pdf", Segredo::novo("outra-ficticia"))
         .unwrap();
-    assert_eq!(chaveiro.rotulos_de_site(), vec!["banco-ficticio".to_owned()]);
+    assert_eq!(
+        chaveiro.rotulos_de_site(),
+        vec!["banco-ficticio".to_owned()]
+    );
     assert_eq!(chaveiro.rotulos_de_senha(), vec!["pdf".to_owned()]);
     assert_eq!(
         chaveiro.senha_de_site("banco-ficticio").unwrap().expor(),

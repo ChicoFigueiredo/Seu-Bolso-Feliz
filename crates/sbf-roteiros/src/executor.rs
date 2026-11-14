@@ -113,12 +113,20 @@ pub trait Destino {
 pub enum Fim {
     Concluida,
     /// Um passo falhou (o site mudou, prazo, seletor).
-    Falhou { passo: usize, motivo: String },
+    Falhou {
+        passo: usize,
+        motivo: String,
+    },
     /// A lista de bloqueio barrou uma ação.
-    Bloqueada { passo: usize, bloqueio: Bloqueio },
+    Bloqueada {
+        passo: usize,
+        bloqueio: Bloqueio,
+    },
     Cancelada,
     /// O usuário não voltou da pausa a tempo.
-    PausaExpirou { passo: usize },
+    PausaExpirou {
+        passo: usize,
+    },
 }
 
 /// O relatório de uma execução.
@@ -195,7 +203,11 @@ fn interage(p: &Passo) -> bool {
 ///
 /// # Errors
 /// Só falha de infraestrutura (banco, disco). Falha de passo e bloqueio vêm em [`Fim`].
-pub fn executar(contexto: &mut Contexto<'_>, execucao: i64, roteiro: &Roteiro) -> Resultado<Relatorio> {
+pub fn executar(
+    contexto: &mut Contexto<'_>,
+    execucao: i64,
+    roteiro: &Roteiro,
+) -> Resultado<Relatorio> {
     let mut usados: Vec<Segredo> = Vec::new();
     let r = rodar(contexto, execucao, roteiro, &mut usados);
     // Segredo nenhum fica na memória além da execução (Segredo zera ao cair).
@@ -209,10 +221,16 @@ fn rodar(
     roteiro: &Roteiro,
     usados: &mut Vec<Segredo>,
 ) -> Resultado<Relatorio> {
-    let mut rel = Relatorio { fim: Fim::Concluida, baixados: 0, novos: 0, pausas: 0 };
+    let mut rel = Relatorio {
+        fim: Fim::Concluida,
+        baixados: 0,
+        novos: 0,
+        pausas: 0,
+    };
     let mut i = 0_usize;
-    // O passo em que o usuário acabou de resolver a pausa: não detecta de novo antes dele.
-    let mut liberado: Option<usize> = None;
+    // Onde o usuário acabou de resolver a pausa (o passo e a URL da página): não detecta de novo
+    // antes desse passo nem enquanto a página for a mesma (o CAPTCHA resolvido continua na tela).
+    let mut liberado: Option<(usize, String)> = None;
     while i < roteiro.passos.len() {
         if c.cancelar.load(Ordering::SeqCst) {
             rel.fim = Fim::Cancelada;
@@ -234,13 +252,23 @@ fn rodar(
             }
         }
 
-        if interage(passo) && liberado != Some(i) {
-            let motivo = c.navegador.pagina().ok().and_then(|p| p.pausa_necessaria());
+        if interage(passo) {
+            let pagina = c.navegador.pagina().ok();
+            let ja_liberada = liberado.as_ref().is_some_and(|(idx, url)| {
+                *idx == i
+                    || pagina
+                        .as_ref()
+                        .is_some_and(|p| !url.is_empty() && p.url == *url)
+            });
+            let motivo = pagina
+                .as_ref()
+                .and_then(|p| p.pausa_necessaria())
+                .filter(|_| !ja_liberada);
             if let Some(m) = motivo {
                 match pausar(c, execucao, i, m.frase(), &mut rel)? {
                     Decisao::Continuar => {
                         // Volta ao MESMO passo: o que veio antes (o login) não se repete.
-                        liberado = Some(i);
+                        liberado = Some((i, pagina.map(|p| p.url).unwrap_or_default()));
                         continue;
                     }
                     outra => {
@@ -251,12 +279,21 @@ fn rodar(
             }
         }
 
-        c.banco.evento(execucao, Some(i), "passo", &limpar_texto(&passo.descricao(), usados))?;
+        c.banco.evento(
+            execucao,
+            Some(i),
+            "passo",
+            &limpar_texto(&passo.descricao(), usados),
+        )?;
         match executar_passo(c, execucao, i, passo, usados, &mut rel) {
             Ok(()) => i += 1,
             Err(ErroDeRoteiro::Bloqueado(b)) => {
-                c.banco.evento(execucao, Some(i), "bloqueio", &b.to_string())?;
-                rel.fim = Fim::Bloqueada { passo: i, bloqueio: b };
+                c.banco
+                    .evento(execucao, Some(i), "bloqueio", &b.to_string())?;
+                rel.fim = Fim::Bloqueada {
+                    passo: i,
+                    bloqueio: b,
+                };
                 break;
             }
             Err(ErroDeRoteiro::Cancelado) => {
@@ -274,12 +311,14 @@ fn rodar(
     }
     let (estado, motivo) = match &rel.fim {
         Fim::Concluida => (EstadoDaExecucao::Concluida, None),
-        Fim::Falhou { passo, motivo } => {
-            (EstadoDaExecucao::Falhou, Some(format!("passo {}: {motivo}", passo + 1)))
-        }
-        Fim::Bloqueada { passo, bloqueio } => {
-            (EstadoDaExecucao::Bloqueada, Some(format!("passo {}: {bloqueio}", passo + 1)))
-        }
+        Fim::Falhou { passo, motivo } => (
+            EstadoDaExecucao::Falhou,
+            Some(format!("passo {}: {motivo}", passo + 1)),
+        ),
+        Fim::Bloqueada { passo, bloqueio } => (
+            EstadoDaExecucao::Bloqueada,
+            Some(format!("passo {}: {bloqueio}", passo + 1)),
+        ),
         Fim::Cancelada => (EstadoDaExecucao::Cancelada, None),
         Fim::PausaExpirou { passo } => (
             EstadoDaExecucao::Falhou,
@@ -308,20 +347,30 @@ fn pausar(
     rel.pausas += 1;
     c.banco.marcar_aguardando(execucao, motivo)?;
     c.banco.evento(execucao, Some(passo), "pausa", motivo)?;
+    c.navegador.trazer_para_frente();
     let d = c.pausa.aguardar(execucao, motivo);
     if d == Decisao::Continuar {
         c.banco.marcar_rodando(execucao)?;
-        c.banco.evento(execucao, Some(passo), "retomada", "o usuário continuou")?;
+        c.banco
+            .evento(execucao, Some(passo), "retomada", "o usuário continuou")?;
     }
     Ok(d)
 }
 
 fn falha(passo: usize, motivo: impl Into<String>) -> ErroDeRoteiro {
-    ErroDeRoteiro::PassoFalhou { passo, motivo: motivo.into() }
+    ErroDeRoteiro::PassoFalhou {
+        passo,
+        motivo: motivo.into(),
+    }
 }
 
 /// Espera o seletor ficar visível.
-fn esperar_visivel(c: &mut Contexto<'_>, passo: usize, seletor: &str, prazo: Duration) -> Resultado<()> {
+fn esperar_visivel(
+    c: &mut Contexto<'_>,
+    passo: usize,
+    seletor: &str,
+    prazo: Duration,
+) -> Resultado<()> {
     let inicio = Instant::now();
     loop {
         if c.navegador.visivel(seletor)? {
@@ -331,14 +380,21 @@ fn esperar_visivel(c: &mut Contexto<'_>, passo: usize, seletor: &str, prazo: Dur
             return Err(ErroDeRoteiro::Cancelado);
         }
         if inicio.elapsed() >= prazo {
-            return Err(falha(passo, format!("o elemento \"{seletor}\" não apareceu")));
+            return Err(falha(
+                passo,
+                format!("o elemento \"{seletor}\" não apareceu"),
+            ));
         }
         std::thread::sleep(c.opcoes.intervalo);
     }
 }
 
 /// Confere o elemento na lista de bloqueio antes de agir.
-fn conferir_elemento(c: &mut Contexto<'_>, passo: usize, seletor: &str) -> Resultado<crate::bloqueio::Candidato> {
+fn conferir_elemento(
+    c: &mut Contexto<'_>,
+    passo: usize,
+    seletor: &str,
+) -> Resultado<crate::bloqueio::Candidato> {
     let Some(cand) = c.navegador.descrever(seletor)? else {
         return Err(falha(passo, format!("o elemento \"{seletor}\" não existe")));
     };
@@ -359,10 +415,22 @@ fn conferir_barrado(c: &mut Contexto<'_>) -> Resultado<()> {
 fn nome_de_arquivo_seguro(nome: &str) -> String {
     let limpo: String = nome
         .chars()
-        .map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    let limpo = limpo.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_owned();
-    if limpo.is_empty() { "arquivo".to_owned() } else { limpo.chars().take(120).collect() }
+    let limpo = limpo
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_owned();
+    if limpo.is_empty() {
+        "arquivo".to_owned()
+    } else {
+        limpo.chars().take(120).collect()
+    }
 }
 
 fn csv(linhas: &[Vec<String>]) -> String {
@@ -412,20 +480,27 @@ pub fn executar_passo(
         Passo::Clicar { seletor } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_elemento(c, i, seletor)?;
-            c.navegador.clicar(seletor)?;
-            conferir_barrado(c)
+            let r = c.navegador.clicar(seletor);
+            conferir_barrado(c)?;
+            r
         }
         Passo::Preencher { seletor, texto } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             let cand = conferir_elemento(c, i, seletor)?;
             if cand.eh_senha {
-                return Err(falha(i, "campo de senha só se preenche com a senha do chaveiro"));
+                return Err(falha(
+                    i,
+                    "campo de senha só se preenche com a senha do chaveiro",
+                ));
             }
             c.navegador.preencher(seletor, texto)
         }
         Passo::PreencherSenha { seletor, rotulo } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
-            let segredo = c.senhas.senha_de_site(rotulo).map_err(ErroDeRoteiro::Chaveiro)?;
+            let segredo = c
+                .senhas
+                .senha_de_site(rotulo)
+                .map_err(ErroDeRoteiro::Chaveiro)?;
             // Entra na lista de limpeza ANTES de ir ao campo: se a falha repetir o valor, some.
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
@@ -444,20 +519,31 @@ pub fn executar_passo(
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_elemento(c, i, seletor)?;
             std::fs::create_dir_all(&c.pasta)?;
-            let caminho = c.navegador.clicar_e_baixar(seletor, &c.pasta, c.opcoes.download)?;
+            let r = c
+                .navegador
+                .clicar_e_baixar(seletor, &c.pasta, c.opcoes.download);
+            // O bloqueio do navegador vale mais que a falha que ele causou (nada baixou).
             conferir_barrado(c)?;
+            let caminho = r?;
             let nome_final = match nome {
                 Some(n) => {
                     let ext = caminho.extension().and_then(|e| e.to_str()).unwrap_or("");
                     let base = nome_de_arquivo_seguro(n);
-                    if ext.is_empty() || base.to_lowercase().ends_with(&format!(".{}", ext.to_lowercase())) {
+                    if ext.is_empty()
+                        || base
+                            .to_lowercase()
+                            .ends_with(&format!(".{}", ext.to_lowercase()))
+                    {
                         base
                     } else {
                         format!("{base}.{ext}")
                     }
                 }
                 None => nome_de_arquivo_seguro(
-                    caminho.file_name().and_then(|n| n.to_str()).unwrap_or("arquivo"),
+                    caminho
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("arquivo"),
                 ),
             };
             entregar(c, rel, &caminho, &nome_final)
@@ -475,7 +561,12 @@ pub fn executar_passo(
     }
 }
 
-fn entregar(c: &mut Contexto<'_>, rel: &mut Relatorio, caminho: &Path, nome: &str) -> Resultado<()> {
+fn entregar(
+    c: &mut Contexto<'_>,
+    rel: &mut Relatorio,
+    caminho: &Path,
+    nome: &str,
+) -> Resultado<()> {
     let r = c.destino.receber(caminho, nome)?;
     rel.baixados += 1;
     if r == Recebido::Novo {

@@ -5,8 +5,8 @@ use rusqlite::Connection;
 use sbf_chaveiro::Segredo;
 use sbf_roteiros::executor::{Decisao, FonteDeSenhas, Pausa};
 use sbf_roteiros::falso::{Elemento, NavegadorFalso};
-use sbf_roteiros::pagina::{Campo, Formulario, Pagina};
 use sbf_roteiros::pagina::Elemento as ElementoDePagina;
+use sbf_roteiros::pagina::{Campo, Formulario, Pagina};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -53,7 +53,12 @@ impl PausaFalsa {
 impl Pausa for PausaFalsa {
     fn aguardar(&self, _execucao: i64, motivo: &str) -> Decisao {
         self.motivos.lock().unwrap().push(motivo.to_owned());
-        let d = self.respostas.lock().unwrap().pop_front().unwrap_or(Decisao::Cancelar);
+        let d = self
+            .respostas
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Decisao::Cancelar);
         if d == Decisao::Continuar
             && let Some(s) = &self.sinal
         {
@@ -75,7 +80,8 @@ pub fn clicavel(seletor: &str, texto: &str) -> ElementoDePagina {
 /// O site: login → (MFA) → painel com extrato, tabela e o botão Pagar.
 pub fn site(com_mfa: bool) -> NavegadorFalso {
     let mut n = NavegadorFalso::default();
-    n.rotas.insert("http://127.0.0.1:1/login".into(), "login".into());
+    n.rotas
+        .insert("http://127.0.0.1:1/login".into(), "login".into());
     n.pagina_nomeada(
         "login",
         Pagina {
@@ -88,8 +94,16 @@ pub fn site(com_mfa: bool) -> NavegadorFalso {
                 acao: "/login".into(),
                 metodo: "post".into(),
                 campos: vec![
-                    Campo { seletor: "#cpf".into(), tipo: "text".into(), ..Campo::default() },
-                    Campo { seletor: "#senha".into(), tipo: "password".into(), ..Campo::default() },
+                    Campo {
+                        seletor: "#cpf".into(),
+                        tipo: "text".into(),
+                        ..Campo::default()
+                    },
+                    Campo {
+                        seletor: "#senha".into(),
+                        tipo: "password".into(),
+                        ..Campo::default()
+                    },
                 ],
             }],
             ..Pagina::default()
@@ -140,10 +154,15 @@ pub fn site(com_mfa: bool) -> NavegadorFalso {
     valida.leva_a = Some("painel".into());
     n.elementos.insert("#confirmar-codigo".into(), valida);
     let mut baixar = Elemento::com_texto("Baixar extrato");
-    baixar.baixa = Some(("extrato-2026-10.pdf".into(), b"%PDF-1.4 extrato ficticio outubro".to_vec()));
+    baixar.baixa = Some((
+        "extrato-2026-10.pdf".into(),
+        b"%PDF-1.4 extrato ficticio outubro".to_vec(),
+    ));
     n.elementos.insert("#baixar".into(), baixar);
-    n.elementos.insert("#pagar".into(), Elemento::com_texto("Pagar"));
-    n.elementos.insert("#ver".into(), Elemento::com_texto("Continuar"));
+    n.elementos
+        .insert("#pagar".into(), Elemento::com_texto("Pagar"));
+    n.elementos
+        .insert("#ver".into(), Elemento::com_texto("Continuar"));
     n.tabelas.insert(
         "#extratos".into(),
         vec![

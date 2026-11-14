@@ -24,11 +24,19 @@ pub trait Navegador {
     /// e o campo; a implementação não o copia para log, erro ou `Debug`.
     fn preencher_segredo(&mut self, seletor: &str, segredo: &Segredo) -> Resultado<()>;
     /// Clica e espera o arquivo baixado cair em `pasta`.
-    fn clicar_e_baixar(&mut self, seletor: &str, pasta: &Path, prazo: Duration) -> Resultado<PathBuf>;
+    fn clicar_e_baixar(
+        &mut self,
+        seletor: &str,
+        pasta: &Path,
+        prazo: Duration,
+    ) -> Resultado<PathBuf>;
     /// As linhas da tabela, como texto.
     fn ler_tabela(&mut self, seletor: &str) -> Resultado<Vec<Vec<String>>>;
     /// A página simplificada (sem valores de campo).
     fn pagina(&mut self) -> Resultado<Pagina>;
     /// Os bloqueios que o script do navegador barrou desde a última chamada.
     fn bloqueios(&mut self) -> Resultado<Vec<Bloqueio>>;
+
+    /// Traz a janela do navegador para a frente (a pausa "Sua vez no navegador"). Opcional.
+    fn trazer_para_frente(&mut self) {}
 }

@@ -88,7 +88,10 @@ impl Roteiro {
     /// A primeira regra violada.
     pub fn validar(&self) -> Result<(), String> {
         if self.formato > FORMATO {
-            return Err(format!("formato {} é mais novo que o conhecido", self.formato));
+            return Err(format!(
+                "formato {} é mais novo que o conhecido",
+                self.formato
+            ));
         }
         validar_nome(&self.nome)?;
         for (i, p) in self.passos.iter().enumerate() {
@@ -153,8 +156,13 @@ mod testes {
             nome: "extratos".into(),
             descricao: String::new(),
             passos: vec![
-                Passo::Navegar { url: "http://127.0.0.1:1/".into() },
-                Passo::Baixar { seletor: "#baixar".into(), nome: None },
+                Passo::Navegar {
+                    url: "http://127.0.0.1:1/".into(),
+                },
+                Passo::Baixar {
+                    seletor: "#baixar".into(),
+                    nome: None,
+                },
             ],
         };
         let j = serde_json::to_string(&r).unwrap();
@@ -171,14 +179,19 @@ mod testes {
             formato: FORMATO,
             nome: "x".into(),
             descricao: String::new(),
-            passos: vec![Passo::Clicar { seletor: " ".into() }],
+            passos: vec![Passo::Clicar {
+                seletor: " ".into(),
+            }],
         };
         assert!(r.validar().is_err());
     }
 
     #[test]
     fn a_descricao_da_navegacao_tira_a_consulta() {
-        let d = Passo::Navegar { url: "http://x/y?token=segredo#a".into() }.descricao();
+        let d = Passo::Navegar {
+            url: "http://x/y?token=segredo#a".into(),
+        }
+        .descricao();
         assert!(!d.contains("segredo"));
     }
 }

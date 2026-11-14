@@ -269,13 +269,23 @@ impl Pagina {
                     c.tipo,
                     c.nome,
                     c.rotulo,
-                    if c.preenchido { "(preenchido)" } else { "(vazio)" }
+                    if c.preenchido {
+                        "(preenchido)"
+                    } else {
+                        "(vazio)"
+                    }
                 );
             }
         }
         let _ = writeln!(s, "Tabelas:");
         for t in &self.tabelas {
-            let _ = writeln!(s, "- [{}] {} linhas: {}", t.seletor, t.linhas, t.cabecalho.join(" | "));
+            let _ = writeln!(
+                s,
+                "- [{}] {} linhas: {}",
+                t.seletor,
+                t.linhas,
+                t.cabecalho.join(" | ")
+            );
         }
         s
     }
@@ -358,8 +368,10 @@ mod testes {
 
     #[test]
     fn mascarar_cobre_cpf_e_numero_longo() {
-        let mut p = Pagina::default();
-        p.texto = "CPF 123.456.789-09 conta 12345678901234 valor R$ 1.234,56".into();
+        let p = Pagina {
+            texto: "CPF 123.456.789-09 conta 12345678901234 valor R$ 1.234,56".into(),
+            ..Pagina::default()
+        };
         let p = p.mascarar();
         assert!(!p.texto.contains("789-09"));
         assert!(!p.texto.contains("12345678901234"));
@@ -367,7 +379,10 @@ mod testes {
     }
 
     fn com_texto(t: &str) -> Pagina {
-        Pagina { texto: t.into(), ..Pagina::default() }
+        Pagina {
+            texto: t.into(),
+            ..Pagina::default()
+        }
     }
 
     #[test]
@@ -385,11 +400,15 @@ mod testes {
             Some(MotivoDePausa::Captcha)
         );
         let mut p = Pagina::default();
-        p.quadros.push("https://www.google.com/recaptcha/api2/anchor".into());
+        p.quadros
+            .push("https://www.google.com/recaptcha/api2/anchor".into());
         assert_eq!(p.pausa_necessaria(), Some(MotivoDePausa::Captcha));
         let mut p = Pagina::default();
         p.formularios.push(Formulario {
-            campos: vec![Campo { autocomplete: "one-time-code".into(), ..Campo::default() }],
+            campos: vec![Campo {
+                autocomplete: "one-time-code".into(),
+                ..Campo::default()
+            }],
             ..Formulario::default()
         });
         assert_eq!(p.pausa_necessaria(), Some(MotivoDePausa::Mfa));
@@ -397,6 +416,9 @@ mod testes {
             com_texto("Confirme sua identidade para continuar").pausa_necessaria(),
             Some(MotivoDePausa::Confirmacao)
         );
-        assert_eq!(com_texto("Extratos do mês. Baixar PDF").pausa_necessaria(), None);
+        assert_eq!(
+            com_texto("Extratos do mês. Baixar PDF").pausa_necessaria(),
+            None
+        );
     }
 }
