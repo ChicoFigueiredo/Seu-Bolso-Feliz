@@ -274,6 +274,27 @@ const NOMES_DE_SISTEMA: &[&str] = &[
     "steamapps",
 ];
 
+/// Os caminhos de camada A dentro de `raiz` (a própria `raiz` não conta): o varredor
+/// passa por eles primeiro, como o `raizesA` do `scan-discos.ts`.
+#[must_use]
+pub fn raizes_a_dentro_de(raiz: &str) -> Vec<&'static str> {
+    REGRAS_POR_CAMINHO
+        .iter()
+        .filter(|(p, camada, ..)| {
+            *camada == Camada::A
+                && *p != raiz
+                && (*p == raiz || p.strip_prefix(raiz).is_some_and(|r| r.starts_with('/')))
+        })
+        .map(|(p, ..)| *p)
+        .collect()
+}
+
+/// Há regra exata para este caminho (e não só pelo nome da pasta)?
+#[must_use]
+pub fn tem_regra_exata(caminho: &str) -> bool {
+    regra_por_caminho(caminho).is_some()
+}
+
 fn regra_por_caminho(caminho: &str) -> Option<Regra> {
     REGRAS_POR_CAMINHO
         .iter()
