@@ -27,7 +27,8 @@ use sbf_triagem::agente::{Agente, rodar_ciclo};
 use sbf_triagem::rodada::Progresso;
 use sbf_worker::estado::{EstadoDoWorker, agora, texto_da_barra};
 use sbf_worker::laco::{
-    ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem, Triador, Worker, carregar_config,
+    ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
+    ResumoDeMensageiros, Triador, Worker, carregar_config,
 };
 use sbf_worker::registro::Falha;
 use sbf_worker::trava::Trava;
@@ -119,6 +120,43 @@ impl ColetorDeNuvem for NuvemReal {
             }
         }
         Ok(total)
+    }
+}
+
+/// Os mensageiros de verdade: Telegram pelo export e WhatsApp pela ponte (ADR-017), só as
+/// conversas que o usuário incluiu em Opções › Mensageiros.
+struct MensageirosReais {
+    dados: Dados,
+}
+
+impl ColetorDeMensageiros for MensageirosReais {
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDeMensageiros, Falha> {
+        let conn = sbf_worker::banco::abrir(&self.dados.banco).map_err(|_| Falha::Banco)?;
+        // O worker não pede senha: se o chaveiro não abre sozinho, o WhatsApp falha e o
+        // Telegram segue.
+        let chaveiro = || {
+            sbf_chaveiro::Chaveiro::abrir_na_pasta_padrao()
+                .map_err(|e| sbf_mensageiros::Erro::Chaveiro(e.to_string()))
+        };
+        let r = sbf_mensageiros::ciclo::rodar(
+            &conn,
+            &self.dados.pasta,
+            &self.dados.cofre,
+            &chaveiro,
+            cancelar,
+        )
+        .map_err(|e| match e {
+            sbf_mensageiros::Erro::Banco(_) => Falha::Banco,
+            sbf_mensageiros::Erro::Io(_) => Falha::Disco,
+            _ => Falha::Externo,
+        })?;
+        if r.falhas > 0 && r.mensagens == 0 {
+            return Err(Falha::Externo);
+        }
+        Ok(ResumoDeMensageiros {
+            mensagens: r.mensagens,
+            novos: r.novos,
+        })
     }
 }
 
@@ -228,8 +266,12 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
         motor: None,
         agente: None,
     });
+    let mensageiros = Box::new(MensageirosReais {
+        dados: dados.clone(),
+    });
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
-        Ok(mut w) => {
+        Ok(w) => {
+            let mut w = w.com_mensageiros(mensageiros);
             w.rodar(&parar);
             ExitCode::SUCCESS
         }

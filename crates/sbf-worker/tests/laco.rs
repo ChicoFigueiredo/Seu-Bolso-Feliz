@@ -10,7 +10,10 @@ use std::time::Duration;
 use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
-use sbf_worker::laco::{ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem, Triador, Worker};
+use sbf_worker::laco::{
+    ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
+    ResumoDeMensageiros, Triador, Worker,
+};
 use sbf_worker::registro::Falha;
 
 const SQL_BASE: &str = include_str!("../../sbf-inventario/sql/0001-base-bun-v2.sql");
@@ -267,4 +270,53 @@ fn sinal_de_parada_encerra_o_laco_e_marca_parado() {
             .unwrap()
             .rodando(agora())
     );
+}
+
+struct MensageirosFalsos(Rc<Cell<u32>>);
+impl ColetorDeMensageiros for MensageirosFalsos {
+    fn coletar(&mut self, _: &AtomicBool) -> Result<ResumoDeMensageiros, Falha> {
+        self.0.set(self.0.get() + 1);
+        Ok(ResumoDeMensageiros {
+            mensagens: 5,
+            novos: 3,
+        })
+    }
+}
+
+#[test]
+fn mensageiros_so_rodam_ligados_e_no_intervalo_do_arquivo() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_mensageiros(Box::new(MensageirosFalsos(n.clone())));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 0, "sem mensageiros.json: desligado");
+    std::fs::write(
+        c.dados.mensageiros(),
+        r#"{"ligado": false, "intervalo_minutos": 5}"#,
+    )
+    .unwrap();
+    w.passo(t0 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 0);
+    std::fs::write(
+        c.dados.mensageiros(),
+        r#"{"ligado": true, "intervalo_minutos": 5}"#,
+    )
+    .unwrap();
+    w.passo(t0 + 2, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1);
+    assert!(w.estado.mensageiros_ligados);
+    assert_eq!(
+        w.estado.ultima_coleta.as_ref().unwrap().origem,
+        "mensageiros"
+    );
+    w.passo(t0 + 60, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "antes do intervalo");
+    w.passo(t0 + 5 * 60 + 5, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("mensageiros mensagens=5 novos=3"), "{log}");
 }

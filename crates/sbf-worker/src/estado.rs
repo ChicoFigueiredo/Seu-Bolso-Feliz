@@ -26,7 +26,7 @@ pub fn agora() -> u64 {
 pub struct UltimaColeta {
     /// Quando (segundos unix).
     pub quando: u64,
-    /// De onde: `pastas` ou `nuvem`.
+    /// De onde: `pastas`, `nuvem` ou `mensageiros`.
     pub origem: String,
     /// Quantas origens novas.
     pub novos: u64,
@@ -56,6 +56,8 @@ pub struct EstadoDoWorker {
     pub triagem_ligada: bool,
     /// A coleta de nuvem está ligada?
     pub nuvem_ligada: bool,
+    /// A coleta de mensageiros está ligada?
+    pub mensageiros_ligados: bool,
     /// Falhas desde que subiu.
     pub falhas: u32,
 }

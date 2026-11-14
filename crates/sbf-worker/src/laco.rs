@@ -6,7 +6,9 @@
 //!    pegar o que o `notify` perdeu (fila cheia, disco montado depois, evento descartado). É
 //!    barata: origem já vista (caminho e mtime) é pulada sem reler o arquivo;
 //! 3. **Nuvem**: se a coleta está ligada em Opções › Nuvens, no intervalo configurado;
-//! 4. **Triagem**: um pequeno lote do agente, no horário configurado.
+//! 4. **Mensageiros**: se ligados em Opções › Mensageiros, WhatsApp e Telegram (só as conversas
+//!    que o usuário incluiu), no intervalo de `mensageiros.json`;
+//! 5. **Triagem**: um pequeno lote do agente, no horário configurado.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -71,6 +73,12 @@ impl Dados {
     pub fn agente(&self) -> PathBuf {
         self.pasta.join("agente.sqlite")
     }
+    /// `mensageiros.json`, onde a janela guarda o interruptor e as conversas incluídas
+    /// (Opções › Mensageiros).
+    #[must_use]
+    pub fn mensageiros(&self) -> PathBuf {
+        self.pasta.join("mensageiros.json")
+    }
     /// `nuvens.json`, onde a janela guarda "coleta ligada" (Opções › Nuvens).
     #[must_use]
     pub fn nuvens(&self) -> PathBuf {
@@ -91,6 +99,42 @@ pub fn coleta_de_nuvem_ligada(dados: &Dados) -> bool {
         .and_then(|t| serde_json::from_str::<P>(&t).ok())
         .unwrap_or_default()
         .coleta_ligada
+}
+
+/// O interruptor e o intervalo dos mensageiros, lidos de `mensageiros.json` (o resto do
+/// arquivo é do crate `sbf-mensageiros`). Sem arquivo: desligado.
+#[must_use]
+pub fn mensageiros_ligados(dados: &Dados) -> Option<u64> {
+    #[derive(serde::Deserialize)]
+    struct P {
+        #[serde(default)]
+        ligado: bool,
+        #[serde(default = "trinta")]
+        intervalo_minutos: u64,
+    }
+    fn trinta() -> u64 {
+        30
+    }
+    let p: P = serde_json::from_str(&std::fs::read_to_string(dados.mensageiros()).ok()?).ok()?;
+    p.ligado.then_some(p.intervalo_minutos)
+}
+
+/// O que uma coleta de mensageiros fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDeMensageiros {
+    /// Mensagens vistas.
+    pub mensagens: usize,
+    /// Origens novas no inventário.
+    pub novos: usize,
+}
+
+/// Uma coleta de mensageiros (a real é `sbf_mensageiros`, montada no `sbf`).
+pub trait ColetorDeMensageiros {
+    /// Coleta as conversas incluídas de cada mensageiro pareado ou importado.
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDeMensageiros, Falha>;
 }
 
 /// O que uma coleta de nuvem fez.
@@ -138,6 +182,7 @@ pub struct Worker {
     dados: Dados,
     config: Config,
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
+    mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
     triador: Option<Box<dyn Triador>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
@@ -147,6 +192,7 @@ pub struct Worker {
     conn: Option<Connection>,
     proxima_reconciliacao: u64,
     proxima_nuvem: u64,
+    proxima_mensageiros: u64,
     proxima_triagem: u64,
     gravado_em: u64,
     sujo: bool,
@@ -199,6 +245,7 @@ impl Worker {
             dados,
             config,
             nuvem,
+            mensageiros: None,
             triador,
             registro,
             estado,
@@ -208,6 +255,7 @@ impl Worker {
             // A primeira reconciliação roda logo: é a varredura inicial das pastas.
             proxima_reconciliacao: agora_,
             proxima_nuvem: agora_,
+            proxima_mensageiros: agora_,
             proxima_triagem: agora_,
             gravado_em: 0,
             sujo: true,
@@ -216,6 +264,13 @@ impl Worker {
             vigiadas: w.estado.vigiando,
         });
         Ok(w)
+    }
+
+    /// Liga a coleta de mensageiros (sem mudar a assinatura de [`Worker::novo`]).
+    #[must_use]
+    pub fn com_mensageiros(mut self, coletor: Box<dyn ColetorDeMensageiros>) -> Self {
+        self.mensageiros = Some(coletor);
+        self
     }
 
     fn banco(&mut self) -> Resultado<&Connection> {
@@ -365,6 +420,18 @@ impl Worker {
             self.proxima_nuvem = agora_ + self.config.nuvem_minutos.max(1) * 60;
             self.passo_da_nuvem(cancelar, agora_);
         }
+        let mensageiros = mensageiros_ligados(&self.dados);
+        if mensageiros.is_some() != self.estado.mensageiros_ligados {
+            self.estado.mensageiros_ligados = mensageiros.is_some();
+            self.sujo = true;
+        }
+        if let Some(minutos) = mensageiros
+            && agora_ >= self.proxima_mensageiros
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.proxima_mensageiros = agora_ + minutos.max(1) * 60;
+            self.passo_dos_mensageiros(cancelar, agora_);
+        }
         if self.config.triagem.ligada
             && agora_ >= self.proxima_triagem
             && self
@@ -396,6 +463,23 @@ impl Worker {
             Err(f) => self.falhou("nuvem", f),
         }
         self.nuvem = Some(n);
+    }
+
+    fn passo_dos_mensageiros(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut m) = self.mensageiros.take() else {
+            return;
+        };
+        match m.coletar(cancelar) {
+            Ok(r) => {
+                let _ = self.registro.registrar(&Evento::Mensageiros {
+                    mensagens: r.mensagens,
+                    novos: r.novos,
+                });
+                self.coletou("mensageiros", r.novos as u64, agora_);
+            }
+            Err(f) => self.falhou("mensageiros", f),
+        }
+        self.mensageiros = Some(m);
     }
 
     fn passo_da_triagem(&mut self, cancelar: &AtomicBool, agora_: u64) {
