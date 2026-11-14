@@ -124,6 +124,7 @@ impl AppDoInventario {
                 f.carregar_preferencias();
                 f.faxinar_sobras_em_segundo_plano();
                 let chaveiro_da_ia = f.chaveiro.clone();
+                let mut janela_chaveiro_para_perguntar = f.chaveiro.clone();
                 let chaves_da_ia = f.chaveiro.clone();
                 let chaveiro_dos_roteiros = f.chaveiro.clone();
                 janela.ferramentas = Some(f);
@@ -165,6 +166,29 @@ impl AppDoInventario {
                         });
                     }
                     Err(_) => {}
+                }
+                // Análise (spec 10): Perguntar (índice local + o motor de IA de Opções → IA) e
+                // Pontos de atenção (análise por regras, sem IA). O modelo de busca só é
+                // baixado pelo botão da própria área Perguntar, depois do aviso.
+                if let Ok(pasta_de_dados) = sbf_chaveiro::pasta_de_dados_do_app() {
+                    let dados = sbf_worker::laco::Dados::novos(&self.pasta, &pasta_de_dados);
+                    janela.ligar_perguntar(Box::new(crate::rag::ServicoReal::novo(
+                        dados.clone(),
+                        crate::triagem::Insumos::do_ambiente(janela_chaveiro_para_perguntar.take()),
+                    )));
+                    if let Ok(armazem) =
+                        sbf_pontos::Armazem::abrir(crate::rag::caminho_dos_pontos(&pasta_de_dados))
+                    {
+                        let (cofre, banco, pasta) = (
+                            dados.cofre.clone(),
+                            dados.banco.clone(),
+                            dados.pasta.clone(),
+                        );
+                        janela.ligar_pontos(Box::new(sbf_pontos::PontosLocais::novo(
+                            armazem,
+                            move |_| crate::rag::analisar_pontos(&cofre, &banco, &pasta),
+                        )));
+                    }
                 }
                 // Opções → IA → Chaves e contas: o mesmo chaveiro e o mesmo `claude` do provedor.
                 janela.ligar_chaves_de_ia(

@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 sbf-inventario = { workspace = true }
 sbf-triagem = { path = "../sbf-triagem" }
+sbf-indice = { path = "../sbf-indice" }
+sbf-ia = { path = "../sbf-ia" }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,8 +20,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-# A ajuda de testes da triagem (banco fictício migrado) é reaproveitada por caminho.
-sbf-ia = { path = "../sbf-ia" }
 
 [lints]
 workspace = true

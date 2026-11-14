@@ -14,6 +14,7 @@
 //! | [`aceite`] | aceitar e recusar em lote, uma decisão por item (IA-07, IA-08) |
 //! | [`piloto`] | o acerto contra as decisões já tomadas (IA-09) |
 //! | [`agente`] | o agente contínuo: regras aprendidas, exemplos no prompt, calibração, painel |
+//! | [`semelhantes`] | exemplos por texto parecido, pelo índice local, no prompt do agente |
 //! | [`servico`] | o trait pequeno que a janela usa (iniciar, pausar, retomar, progresso) |
 //!
 //! O motor (provedores, cache, ritmo, registro do que saiu) é do `sbf-ia`: esta crate só
@@ -30,6 +31,7 @@ pub mod piloto;
 pub mod prompt;
 pub mod resposta;
 pub mod rodada;
+pub mod semelhantes;
 pub mod servico;
 pub mod sugestoes;
 pub mod tipos;

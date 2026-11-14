@@ -22,6 +22,7 @@ mod estacao;
 mod inventario;
 mod mcp;
 mod roteiros;
+mod rag;
 mod servidor;
 mod triagem;
 mod worker;
@@ -151,7 +152,7 @@ impl eframe::App for App {
 /// `SBF_CAPTURA_ABRIR` (uma rota: `a-triar`, `fornecedor:Energia Exemplo`…),
 /// `SBF_CAPTURA_ABA` (o índice da aba da página), `SBF_CAPTURA_FOCO` (a rota do item em
 /// foco no dock: a prévia dele no painel) e `SBF_CENA` (`paleta`, `keytips`, `simples`,
-/// `bastidores`, `chaves-ia`, `flutuante`, `previa-destacada`).
+/// `bastidores`, `chaves-ia`, `flutuante`, `previa-destacada`, `perguntar`).
 fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     use sbf_janela::Destino;
     if let Ok(rota) = std::env::var("SBF_CAPTURA_ABRIR") {
@@ -183,6 +184,14 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
             casca.estado.ribbon.bastidores_abertos = true;
             casca.estado.secao_bastidores = Some("opcoes".into());
             casca.app.janela().triagem.chaves.rolar_ate_aqui = 6;
+        }
+        // Perguntar já respondida (a demonstração usa o provedor falso e o índice em memória).
+        "perguntar" => {
+            casca
+                .app
+                .janela()
+                .perguntar
+                .perguntar(ctx, "Quanto foi a fatura de energia elétrica de outubro?");
         }
         "regras" => bancada_casca::executar(ctx, "ferramentas.regras-de-senha"),
         "mudar-categoria" => bancada_casca::executar(ctx, "livro.mudar-categoria"),
@@ -298,6 +307,13 @@ fn app_de_demonstracao() -> Result<App, String> {
         .demonstracao(&std::env::var("SBF_CENA").unwrap_or_default());
     // A triagem por IA fictícia: dados inventados, nenhum provedor é chamado.
     janela.ligar_triagem(Box::new(sbf_triagem::servico::TriagemFicticia::nova()));
+    // Perguntar e Pontos de atenção fictícios: motor verdadeiro, dados inventados.
+    janela.ligar_perguntar(sbf_janela::analise_ficticia::perguntar_da_demonstracao(
+        &documentos,
+    ));
+    janela.ligar_pontos(sbf_janela::analise_ficticia::pontos_da_demonstracao(
+        &documentos,
+    ));
     // As chaves da demonstração: uma guarda em memória com uma chave inventada.
     janela.ligar_chaves_de_ia(
         Some(Box::new(sbf_janela::chaves_ia::GuardaFicticia::com_chave(

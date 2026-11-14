@@ -182,7 +182,8 @@ fn contexto(
         dono,
         chats_configurados: tg.chats_autorizados.iter().copied().collect(),
         config: ConfigAlertas::do_ambiente()?,
-        extras: Arc::new(Vec::new()),
+        // Os pontos de atenção só entram com SBF_PONTOS_BANCO (desligado por padrão).
+        extras: Arc::new(crate::pontos::do_ambiente()),
     })
 }
 

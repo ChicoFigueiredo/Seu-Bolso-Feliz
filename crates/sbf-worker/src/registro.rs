@@ -107,6 +107,24 @@ pub enum Evento<'a> {
         /// Itens que ainda esperam.
         na_fila: usize,
     },
+    /// Atualização do índice local (spec 10).
+    Indice {
+        /// Trechos novos ou mudados (passaram pelo modelo).
+        embutidos: usize,
+        /// Trechos iguais (sem recalcular).
+        mantidos: usize,
+        /// Trechos que saíram.
+        removidos: usize,
+    },
+    /// Análise dos pontos de atenção (spec 10).
+    Pontos {
+        /// Pontos novos.
+        novos: usize,
+        /// Pontos que voltaram por mudança da evidência.
+        reabertos: usize,
+        /// Pontos fechados porque a evidência sumiu.
+        fechados: usize,
+    },
     /// Um passo falhou.
     Falhou {
         /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `triagem`, `estado`).
@@ -149,6 +167,22 @@ impl fmt::Display for Evento<'_> {
             } => write!(
                 f,
                 "triagem enviados={enviados} sugestoes={sugestoes} por_regra={por_regra} na_fila={na_fila}"
+            ),
+            Self::Indice {
+                embutidos,
+                mantidos,
+                removidos,
+            } => write!(
+                f,
+                "indice embutidos={embutidos} mantidos={mantidos} removidos={removidos}"
+            ),
+            Self::Pontos {
+                novos,
+                reabertos,
+                fechados,
+            } => write!(
+                f,
+                "pontos novos={novos} reabertos={reabertos} fechados={fechados}"
             ),
             Self::Falhou { passo, falha } => write!(f, "falhou passo={passo} causa={falha}"),
         }

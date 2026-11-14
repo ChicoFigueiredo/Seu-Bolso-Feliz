@@ -54,6 +54,13 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         motivo: "Chega na fatia 5, com os roteiros",
     },
     AreaFutura {
+        id: "perguntar",
+        rotulo: "Perguntar",
+        icone: "forum",
+        fatia: 6,
+        motivo: "Pergunte ao índice local sobre seus documentos (precisa do índice e de um provedor de IA)",
+    },
+    AreaFutura {
         id: "pontos",
         rotulo: "Pontos de atenção",
         icone: "lightbulb",
@@ -322,7 +329,7 @@ fn grupo_do_destino(destino: &Destino) -> &'static str {
             "caixa" => "Documentos",
             "conexoes" | "alertas" | "roteiros" => "Fontes",
             "sincronizacao" => "Estação",
-            "pontos" | "destinatarios" => "Análise",
+            "perguntar" | "pontos" | "destinatarios" => "Análise",
             _ => "Dinheiro",
         },
         _ => "",
@@ -490,7 +497,7 @@ pub fn painel_de_navegacao(
             cabecalho(ui, "Estação", Some(2));
             real(ui, Area::Sincronizacao, pedidos);
             cabecalho(ui, "Análise", None);
-            futuras(ui, &["pontos", "destinatarios"], pedidos);
+            futuras(ui, &["perguntar", "pontos", "destinatarios"], pedidos);
             ui.add_space(8.0);
         });
 }

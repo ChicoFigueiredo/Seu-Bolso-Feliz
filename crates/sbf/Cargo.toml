@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# O modelo de embeddings local (FastEmbed, ONNX Runtime) para o RAG. Fora do build padrão
+# porque o `ort` baixa a biblioteca nativa na compilação. O app que se entrega liga esta
+# feature: `cargo build --features modelo-real`.
+modelo-real = ["sbf-indice/modelo-real"]
+
 [dependencies]
 sbf-janela = { path = "../sbf-janela" }
 bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
@@ -30,6 +37,9 @@ sbf-coleta = { path = "../sbf-coleta" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
 sbf-roteiros = { path = "../sbf-roteiros" }
+sbf-indice = { path = "../sbf-indice" }
+sbf-pontos = { path = "../sbf-pontos" }
+sbf-livro = { path = "../sbf-livro" }
 ctrlc = { version = "3", features = ["termination"] }
 zeroize = { workspace = true }
 

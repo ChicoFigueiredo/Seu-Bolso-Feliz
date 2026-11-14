@@ -585,7 +585,16 @@ impl AppCasca for AppSbf {
                 v
             }),
             GrupoNavegacao::novo("Estação", estacao),
-            GrupoNavegacao::novo("Análise", futuras(&["pontos", "destinatarios"])),
+            GrupoNavegacao::novo("Análise", {
+                // Perguntar e Pontos de atenção funcionam (spec 10); Destinatários chega depois.
+                let mut v: Vec<ItemNavegacao> = ["perguntar", "pontos"]
+                    .iter()
+                    .filter_map(|id| areas::area_futura(id))
+                    .map(|a| ItemNavegacao::novo(a.id, a.rotulo, a.icone))
+                    .collect();
+                v.extend(futuras(&["destinatarios"]));
+                v
+            }),
         ]
     }
 

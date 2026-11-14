@@ -539,3 +539,53 @@ fn opcoes_ia_com_chaves_e_contas_desenha_em_todos_os_temas() {
         .pedir_para_apagar("openrouter");
     b.quadro();
 }
+
+#[test]
+fn perguntar_e_pontos_desenham_sem_servico_e_com_o_da_demonstracao() {
+    let mut b = Banco::novo();
+    // Sem serviço: o aviso de que não está ligado.
+    for rota in ["perguntar", "pontos"] {
+        bancada_casca::abrir(&b.ctx, rota.to_owned());
+        b.quadro();
+        b.quadro();
+    }
+    let docs: Vec<Ref> = (0..6)
+        .map(|i| Ref::nova(Tipo::Achado, format!("hash-demo-{i}")))
+        .collect();
+    b.casca
+        .app
+        .janela()
+        .ligar_perguntar(sbf_janela::analise_ficticia::perguntar_da_demonstracao(
+            &docs,
+        ));
+    b.casca
+        .app
+        .janela()
+        .ligar_pontos(sbf_janela::analise_ficticia::pontos_da_demonstracao(&docs));
+    bancada_casca::abrir(&b.ctx, "perguntar".to_owned());
+    b.quadro();
+    let ctx = b.ctx.clone();
+    b.casca
+        .app
+        .janela()
+        .perguntar
+        .perguntar(&ctx, "fatura de energia");
+    for _ in 0..200 {
+        b.quadro();
+        if !b.casca.app.janela().perguntar.trocas.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(b.casca.app.janela().perguntar.trocas.len(), 1);
+    assert!(b.casca.app.janela().perguntar.trocas[0].resposta.is_ok());
+    bancada_casca::abrir(&b.ctx, "pontos".to_owned());
+    for t in sbf_janela::tema::temas() {
+        bancada_casca::pedir(&b.ctx, PedidoCasca::Tema(t.id.clone()));
+        b.quadro();
+        b.quadro();
+    }
+    assert_eq!(b.casca.app.janela().pontos.total_aberto(), 6);
+    bancada_casca::abrir(&b.ctx, "perguntar".to_owned());
+    b.quadro();
+}

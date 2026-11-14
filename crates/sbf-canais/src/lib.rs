@@ -21,6 +21,7 @@ pub mod confianca;
 pub mod config;
 pub mod envio;
 pub mod erro;
+pub mod pontos;
 pub mod repo;
 pub mod telegram;
 pub mod texto;

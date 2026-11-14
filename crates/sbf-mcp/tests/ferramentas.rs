@@ -546,3 +546,63 @@ fn abrir_so_com_o_caminho_dado_e_sem_criar_nada() {
     assert!(Nucleo::novo(&falta, None).is_err());
     assert!(!falta.exists());
 }
+
+// -- buscar_semelhantes (spec 10) -----------------------------------------------------------
+
+#[test]
+fn buscar_semelhantes_acha_mascara_e_registra_a_saida() {
+    use sbf_ia::NivelDeConfianca;
+    use sbf_indice::{BuscaLocal, Embedder, EmbedderFalso, Indice};
+    use std::sync::Arc;
+
+    let c = cenario();
+    // Um achado com CPF no texto, para ver a máscara.
+    inserir_achado(
+        &c.banco.conexao(),
+        30,
+        "novo",
+        Some("Fatura de energia da Cemig, titular CPF 123.456.789-09, total 210,00"),
+        "luz.pdf",
+    );
+    // Sem índice ligado, a ferramenta diz por quê.
+    assert!(
+        c.nucleo
+            .buscar_semelhantes("energia", None)
+            .unwrap_err()
+            .contains("índice")
+    );
+
+    let pasta = tempfile::tempdir().unwrap();
+    let e: Arc<dyn Embedder> = Arc::new(EmbedderFalso::novo());
+    let caminho = pasta.path().join("indice.sqlite");
+    let mut ind = Indice::abrir(&caminho).unwrap();
+    sbf_indice::fontes::atualizar(&mut ind, &c.banco.conexao(), None, e.as_ref()).unwrap();
+    let nucleo = c.nucleo.clone().com_busca(
+        Arc::new(BuscaLocal::nova(&caminho, e)),
+        NivelDeConfianca::Mascarado,
+    );
+
+    let r = nucleo
+        .buscar_semelhantes("fatura de energia Cemig", Some(3))
+        .unwrap();
+    let itens = r["itens"].as_array().unwrap();
+    assert!(!itens.is_empty() && itens.len() <= 3);
+    assert_eq!(itens[0]["tipo"], "achado");
+    let texto = itens[0]["trecho"].as_str().unwrap();
+    assert!(
+        texto.contains("•••") && !texto.contains("123.456.789-09"),
+        "{texto}"
+    );
+    assert!(nucleo.buscar_semelhantes("  ", None).is_err());
+
+    let n: i64 = c
+        .banco
+        .conexao()
+        .query_row(
+            "SELECT COUNT(*) FROM saida_ia WHERE destinatario = 'mcp:buscar_semelhantes' AND nivel = 'mascarado'",
+            [],
+            |l| l.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+}

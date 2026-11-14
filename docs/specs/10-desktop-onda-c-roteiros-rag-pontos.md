@@ -99,6 +99,51 @@ consultar e baixar documentos.
   - O Telegram recebe os pontos novos pelo trait `FonteDeAlertas` já existente. Isso só é
     ligado quando o canal estiver vinculado.
 
+### Implementação da frente C2 (2026-11-14)
+
+- **`sbf-indice`**: trait `Embedder`; `EmbedderFalso` (256 dimensões, por hash de palavra, conta o que
+  embutiu); `FastEmbedder` com `multilingual-e5-small` (384 dimensões, ~120 MB) atrás da feature
+  `modelo-real`. Licenças conferidas com `cargo deny` (fastembed Apache-2.0, ort MIT OR Apache-2.0); a
+  feature usa `ort-download-binaries-rustls-tls` e `hf-hub-rustls-tls`, sem OpenSSL. O `ort` baixa o
+  ONNX Runtime **na compilação**, por isso a feature fica fora do build padrão. O app que se entrega
+  compila com `cargo build -p sbf --features modelo-real`. Sem ela, Perguntar diz que a compilação não
+  inclui o modelo e o worker não indexa.
+- **`indice.sqlite`** (pasta de dados): tabela `trecho` com o texto, o hash dele (SHA-256), o modelo e o
+  vetor como BLOB `f32` little-endian. Busca por força bruta (cosseno). Pedaços de 800 caracteres com
+  120 de sobreposição, cortados em espaço. `sincronizar(fonte, trechos)` só embute o que é novo, mudou
+  ou veio de outro modelo, e apaga o que sumiu (RG-02). Fontes: `achado` (texto extraído), `registro`
+  (descrição, fornecedor, valor, categoria) e `movimentacao` (cache do livro-caixa, lido só para leitura
+  da tabela `linha`).
+- **Download do modelo**: só em `FastEmbedder::novo`, chamado pelo botão "Baixar modelo (~120 MB)" da
+  área Perguntar, que mostra o aviso antes. O `sbf worker` e o MCP só carregam modelo que já está em
+  `modelos/` (`modelo_baixado`) e nunca baixam.
+- **Perguntar**: `perguntar(busca, provedor, registro, nivel, pergunta, k)`. Só os k=6 trechos mais
+  próximos vão, numerados, com a pergunta, mascarados no nível (o padrão é **mascarado**, ADR-015:
+  destinatário novo). Sem trecho, nada sai e nada é registrado. Cada chamada grava `saida_ia`
+  (destinatário `perguntar`, bytes, tokens). Citação fora dos trechos enviados é descartada.
+- **Triagem**: `sbf_triagem::semelhantes::completar_exemplos` junta, aos exemplos do mesmo fornecedor,
+  decisões **suas** sobre itens de texto parecido (até 8 no total); `rodar_ciclo_com` recebe a busca, e
+  `rodar_ciclo` segue igual. O worker só passa a busca quando o modelo e o índice existem.
+- **MCP**: `buscar_semelhantes(texto, limite)`: trechos mascarados no nível do cliente (mascarado) e
+  uma linha em `saida_ia` (`mcp:buscar_semelhantes`). Só liga se o índice existe.
+- **`sbf-pontos`**: dez regras (`assinatura-reajuste`, `cobranca-sem-documento`, `tarifas-no-ciclo`,
+  `juros-e-multa`, `documentos-parados`, `coleta-falhando`, `disco-sem-cifra`, `ia-consumo-acima-do-ritmo`,
+  `ia-provedor-reserva`, `fila-de-sugestoes-crescendo`), todas em `sbf_pontos::regras`, com os limites em
+  `Limites`. Impacto em centavos `i64` com `estimativa`: projeção anual é estimativa (PA-03); soma do
+  ciclo é apurada. Resolver e Ignorar exigem motivo. Ponto aberto não se repete; fechado só volta se a
+  assinatura da evidência mudar; ponto aberto cuja regra rodou e não o produz fecha com o motivo
+  "deixou de valer" (PA-02). Regra sem dado para ler (sem cache do livro, disco desconhecido) não roda e
+  não fecha nada.
+- **Worker**: de 30 em 30 minutos atualiza o índice (se o modelo está lá) e de 6 em 6 horas analisa os
+  pontos; eventos `indice` e `pontos` no log, sem conteúdo.
+- **Telegram**: `sbf_canais::pontos::FonteDePontos` implementa `FonteDeAlertas` sobre `pontos.sqlite`.
+  **Desligada por padrão**: só entra com `SBF_PONTOS_BANCO=<caminho do pontos.sqlite>` no ambiente do
+  `sbf canais`. O texto passa pelo nível de confiança do destinatário.
+- **Janela**: grupo Análise ganha **Perguntar** e **Pontos de atenção** (a demonstração usa o motor
+  verdadeiro com índice em memória e provedor falso).
+- **Fora desta entrega**: resumo opcional dos pontos por IA; nível de confiança de Perguntar configurável
+  (a tela Destinatários é futura); medição do tempo de busca em dezenas de milhares de trechos.
+
 ## Matriz de aceite
 
 | ID    | Critério                                                                                         |

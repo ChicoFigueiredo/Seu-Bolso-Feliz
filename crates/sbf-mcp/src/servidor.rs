@@ -109,6 +109,14 @@ esquema!(PedidoDeSugestoesAbertas, ParamsDeSugestoesAbertas {
 });
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeSemelhantes {
+    /// O texto a procurar (uma descrição, um fornecedor, uma frase).
+    pub texto: String,
+    /// Quantos trechos (1 a 20, padrão 5).
+    pub limite: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct PedidoDeRegistro {
     /// O id numérico do registro.
     pub id: i64,
@@ -268,6 +276,19 @@ impl Servidor {
             })
             .collect();
         responder("sugerir", self.nucleo.sugerir(&lista))
+    }
+
+    #[tool(
+        description = "Busca por semelhanca de texto no indice local: trechos de achados, registros e movimentacoes parecidos com o texto dado, com tipo, id e nota. Os numeros longos (CPF, conta, cartao) vem mascarados; para ler o item inteiro use ver_texto_do_achado ou ver_registro. Erro se o indice ainda nao foi montado."
+    )]
+    fn buscar_semelhantes(
+        &self,
+        Parameters(p): Parameters<PedidoDeSemelhantes>,
+    ) -> Result<String, String> {
+        responder(
+            "buscar_semelhantes",
+            self.nucleo.buscar_semelhantes(&p.texto, p.limite),
+        )
     }
 
     #[tool(
