@@ -33,3 +33,27 @@ fn a_chave_de_ia_fica_sob_ia_provedor_e_nao_aparece_como_senha() {
     ));
     assert!(!chaveiro.tem_chave_de_ia(""));
 }
+
+#[test]
+fn apagar_a_chave_de_ia_tira_so_ela() {
+    let pasta = tempfile::tempdir().unwrap();
+    let chaveiro = Chaveiro::abrir_com_chaveiro(
+        pasta.path(),
+        Arc::new(ChaveiroEmMemoria::novo()),
+        ParametrosDeDerivacao::rapidos_para_testes(),
+    )
+    .unwrap();
+    chaveiro
+        .guardar_chave_de_ia("openrouter", Segredo::novo("chave-ficticia-ia"))
+        .unwrap();
+    chaveiro
+        .guardar_senha("banco", Segredo::novo("senha-ficticia"))
+        .unwrap();
+    chaveiro.apagar_chave_de_ia("openrouter").unwrap();
+    assert!(!chaveiro.tem_chave_de_ia("openrouter"));
+    assert_eq!(chaveiro.rotulos_de_senha(), vec!["banco".to_owned()]);
+    assert!(matches!(
+        chaveiro.apagar_chave_de_ia(""),
+        Err(ErroDoChaveiro::RotuloInvalido)
+    ));
+}
