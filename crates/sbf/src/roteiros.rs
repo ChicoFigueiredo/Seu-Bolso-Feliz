@@ -101,47 +101,6 @@ pub struct IaDoInventario {
 
 impl sbf_janela::roteiros::IaDosRoteiros for IaDoInventario {
     fn pronta(&self) -> Result<sbf_janela::roteiros::ProvedorEmRegistro, String> {
-        let motor = montar_motor(&self.dados.banco, &insumos, true).ok();
-        let registro: Option<&dyn Registro> = motor.as_ref().map(|m| &*m.registro as &dyn Registro);
-        let guia = motor.as_ref().map(|m| Guia {
-            provedor: &*m.principal,
-            registro,
-            destinatario: "roteiros".to_owned(),
-            nivel: NivelDeConfianca::Mascarado,
-            rotulos_de_senha: chaveiro
-                .as_ref()
-                .map(Chaveiro::rotulos_de_site)
-                .unwrap_or_default(),
-            tem_cpf: chaveiro.as_ref().is_some_and(Chaveiro::tem_cpf),
-            segredos: Vec::new(),
-        });
-        let r = executar_devidos(&amb, agora_i, senhas, guia.as_ref(), cancelar)
-            .map_err(|_| Falha::Externo)?;
-        Ok(ResumoDeRoteiros {
-            executados: r.executados,
-            baixados: r.baixados as usize,
-            novos: r.novos as usize,
-        })
-    }
-}
-
-/// A IA dos roteiros na janela: o mesmo motor da triagem (o `claude` do usuário como
-/// principal), montado quando a gravação ou o conserto pedem.
-pub struct IaDoInventario {
-    pub banco: std::path::PathBuf,
-    pub insumos: Insumos,
-}
-
-impl sbf_janela::roteiros::IaDosRoteiros for IaDoInventario {
-    fn pronta(
-        &self,
-    ) -> Result<
-        (
-            std::sync::Arc<dyn sbf_ia::Provedor>,
-            std::sync::Arc<dyn Registro>,
-        ),
-        String,
-    > {
         let motor = montar_motor(&self.banco, &self.insumos, true)?;
         Ok((motor.principal, motor.registro))
     }
