@@ -57,7 +57,12 @@ impl Cliente {
             .unwrap();
         let entrada = filho.stdin.take().unwrap();
         let saida = BufReader::new(filho.stdout.take().unwrap());
-        Self { filho, entrada, saida, proximo: 1 }
+        Self {
+            filho,
+            entrada,
+            saida,
+            proximo: 1,
+        }
     }
 
     fn enviar(&mut self, v: &Value) {
@@ -71,7 +76,10 @@ impl Cliente {
         self.enviar(&json!({"jsonrpc": "2.0", "id": id, "method": metodo, "params": params}));
         loop {
             let mut linha = String::new();
-            assert!(self.saida.read_line(&mut linha).unwrap() > 0, "o servidor fechou");
+            assert!(
+                self.saida.read_line(&mut linha).unwrap() > 0,
+                "o servidor fechou"
+            );
             let v: Value = serde_json::from_str(&linha).unwrap();
             if v["id"] == json!(id) {
                 return v;
@@ -107,14 +115,27 @@ fn initialize_listar_e_chamar_ferramentas() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     for esperado in [
-        "inventario_resumo", "buscar_registros", "ver_registro", "buscar_achados",
-        "ver_texto_do_achado", "fornecedores", "decisoes_recentes", "livro_movimentacoes",
-        "sugerir", "sugestoes_abertas",
+        "inventario_resumo",
+        "buscar_registros",
+        "ver_registro",
+        "buscar_achados",
+        "ver_texto_do_achado",
+        "fornecedores",
+        "decisoes_recentes",
+        "livro_movimentacoes",
+        "sugerir",
+        "sugestoes_abertas",
     ] {
-        assert!(nomes.contains(&esperado), "falta a ferramenta {esperado}: {nomes:?}");
+        assert!(
+            nomes.contains(&esperado),
+            "falta a ferramenta {esperado}: {nomes:?}"
+        );
     }
 
-    let resumo = c.pedir("tools/call", json!({"name": "inventario_resumo", "arguments": {}}));
+    let resumo = c.pedir(
+        "tools/call",
+        json!({"name": "inventario_resumo", "arguments": {}}),
+    );
     let texto = resumo["result"]["content"][0]["text"].as_str().unwrap();
     let v: Value = serde_json::from_str(texto).unwrap();
     assert_eq!(v["registros"]["total"], 1);
@@ -129,7 +150,10 @@ fn initialize_listar_e_chamar_ferramentas() {
         serde_json::from_str(sug["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(v["gravadas"], 1);
 
-    let erro = c.pedir("tools/call", json!({"name": "ver_registro", "arguments": {"id": 999}}));
+    let erro = c.pedir(
+        "tools/call",
+        json!({"name": "ver_registro", "arguments": {"id": 999}}),
+    );
     assert_eq!(erro["result"]["isError"], true);
 }
 

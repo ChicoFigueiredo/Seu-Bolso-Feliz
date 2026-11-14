@@ -436,7 +436,7 @@ impl Nucleo {
             )
             .map_err(erro)?;
         Ok(Value::Array(
-            st.query_map(params![tipo, id], |l| Ok(linha_de_sugestao(l, 0)?))
+            st.query_map(params![tipo, id], |l| linha_de_sugestao(l, 0))
                 .map_err(erro)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(erro)?,
@@ -648,7 +648,7 @@ impl Nucleo {
             ))
             .map_err(erro)?;
         let itens = st
-            .query_map(params_from_iter(o.valores.iter()), |l| linha_de_decisao(l))
+            .query_map(params_from_iter(o.valores.iter()), linha_de_decisao)
             .map_err(erro)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(erro)?;
@@ -1026,7 +1026,7 @@ fn decisoes_do_alvo(c: &Connection, tipo: &str, id: &str) -> Result<Value, Strin
         )
         .map_err(erro)?;
     Ok(Value::Array(
-        st.query_map(params![tipo, id], |l| linha_de_decisao(l))
+        st.query_map(params![tipo, id], linha_de_decisao)
             .map_err(erro)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(erro)?,
