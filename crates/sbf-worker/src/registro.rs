@@ -82,6 +82,13 @@ pub enum Evento<'a> {
         /// Itens baixados.
         baixados: usize,
     },
+    /// Coleta de mensageiros.
+    Mensageiros {
+        /// Mensagens vistas.
+        mensagens: usize,
+        /// Origens novas.
+        novos: usize,
+    },
     /// Ciclo da triagem.
     Triagem {
         /// Itens enviados à IA.
@@ -95,7 +102,7 @@ pub enum Evento<'a> {
     },
     /// Um passo falhou.
     Falhou {
-        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `triagem`, `estado`).
+        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `triagem`, `estado`).
         passo: &'static str,
         /// A categoria.
         falha: Falha,
@@ -119,6 +126,9 @@ impl fmt::Display for Evento<'_> {
             } => write!(f, "reconciliou fonte={fonte} novos={novos} erros={erros}"),
             Self::Nuvem { listados, baixados } => {
                 write!(f, "nuvem listados={listados} baixados={baixados}")
+            }
+            Self::Mensageiros { mensagens, novos } => {
+                write!(f, "mensageiros mensagens={mensagens} novos={novos}")
             }
             Self::Triagem {
                 enviados,

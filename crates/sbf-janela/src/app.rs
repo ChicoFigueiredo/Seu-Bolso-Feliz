@@ -911,6 +911,8 @@ impl AppCasca for AppSbf {
                     f.nuvens_ui(ui);
                     ui.add_space(12.0);
                     f.worker_ui(ui);
+                    ui.add_space(12.0);
+                    f.mensageiros_ui(ui);
                 }
                 ui.add_space(12.0);
                 let janela = self.janela.get_mut();

@@ -23,6 +23,8 @@ pub const PREFIXO_DE_SENHA: &str = "senha:";
 pub const PREFIXO_DE_ESTACAO: &str = "estacao:";
 /// O prefixo das chaves de provedores de IA (spec 09): a do OpenRouter é `ia:openrouter`.
 pub const PREFIXO_DE_IA: &str = "ia:";
+/// Prefixo das chaves de sessão dos mensageiros (a chave que cifra a sessão do WhatsApp).
+pub const PREFIXO_DE_MENSAGEIRO: &str = "mensageiro:";
 
 /// O que a importação trouxe, sem nenhum valor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +230,47 @@ impl Chaveiro {
     /// Apaga a chave do provedor de IA (sem erro se já não havia).
     pub fn apagar_chave_de_ia(&self, provedor: &str) -> Result<(), ErroDoChaveiro> {
         Ok(self.guarda.apagar(&Self::chave_de_ia_de(provedor)?)?)
+    }
+
+    // ---------------- Chave de sessão de mensageiro ----------------
+
+    fn chave_de_mensageiro(nome: &str) -> Result<String, ErroDoChaveiro> {
+        if nome.is_empty()
+            || PREFIXO_DE_MENSAGEIRO.len() + nome.len() > TAMANHO_MAXIMO_DO_ROTULO
+            || nome.chars().any(char::is_control)
+        {
+            return Err(ErroDoChaveiro::RotuloInvalido);
+        }
+        Ok(format!("{PREFIXO_DE_MENSAGEIRO}{nome}"))
+    }
+
+    /// Guarda (ou troca) o segredo de sessão do mensageiro `nome` (`whatsapp`).
+    pub fn guardar_segredo_de_mensageiro(
+        &self,
+        nome: &str,
+        segredo: Segredo,
+    ) -> Result<(), ErroDoChaveiro> {
+        Ok(self
+            .guarda
+            .gravar(&Self::chave_de_mensageiro(nome)?, segredo)?)
+    }
+
+    /// O segredo de sessão do mensageiro, em claro. Só o crate dos mensageiros chama isto.
+    pub fn segredo_de_mensageiro(&self, nome: &str) -> Result<Segredo, ErroDoChaveiro> {
+        Ok(self.guarda.ler(&Self::chave_de_mensageiro(nome)?)?)
+    }
+
+    /// Há segredo guardado para o mensageiro (sem ler o valor).
+    pub fn tem_segredo_de_mensageiro(&self, nome: &str) -> bool {
+        Self::chave_de_mensageiro(nome).is_ok_and(|c| self.guarda.rotulos().contains(&c))
+    }
+
+    /// Apaga o segredo do mensageiro (sem erro se já não havia).
+    pub fn apagar_segredo_de_mensageiro(&self, nome: &str) -> Result<(), ErroDoChaveiro> {
+        match self.guarda.apagar(&Self::chave_de_mensageiro(nome)?) {
+            Ok(()) | Err(bancada_segredos::ErroDeSegredo::NaoEncontrado) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ---------------- Credencial de estação ----------------

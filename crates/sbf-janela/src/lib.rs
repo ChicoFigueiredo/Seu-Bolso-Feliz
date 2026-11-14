@@ -25,6 +25,7 @@ pub mod icones;
 pub mod janela;
 pub mod leitura;
 pub mod livro_ficticio;
+pub mod mensageiros;
 pub mod moldura;
 pub mod navegacao;
 pub mod nuvens;

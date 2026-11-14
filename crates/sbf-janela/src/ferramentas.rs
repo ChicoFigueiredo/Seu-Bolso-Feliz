@@ -114,6 +114,8 @@ pub struct Ferramentas {
     pub nuvens: crate::nuvens::Nuvens,
     /// Opções › Worker (agente de triagem e pastas vigiadas, em `worker.json`).
     pub worker: crate::opcoes_do_worker::OpcoesDoWorker,
+    /// Opções › Mensageiros (WhatsApp por QR, export do Telegram, conversas incluídas).
+    pub mensageiros: crate::mensageiros::Mensageiros,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -166,6 +168,7 @@ impl Ferramentas {
             .ok()
             .filter(|p| sbf_chaveiro::garantir_fora_do_cofre(p, &cofre).is_ok())
             .map(|p| p.join("worker.json"));
+        let cofre_para_mensageiros = cofre.clone();
         Self {
             worker: crate::opcoes_do_worker::OpcoesDoWorker::nova(arquivo_do_worker, cofre.clone()),
             banco,
@@ -181,6 +184,7 @@ impl Ferramentas {
             aviso_dos_destinos: None,
             destino_da_copia: String::new(),
             nuvens: crate::nuvens::Nuvens::nova(cofre_para_nuvens),
+            mensageiros: crate::mensageiros::Mensageiros::nova(cofre_para_mensageiros),
             tentar_estrategias_padrao: false,
             ultima_copia: None,
             tarefa: None,
@@ -889,6 +893,11 @@ impl Ferramentas {
     pub fn nuvens_ui(&mut self, ui: &mut Ui) {
         let ativos = self.destinos.ativos().count();
         self.nuvens.ui(ui, self.chaveiro.as_ref(), ativos);
+    }
+
+    /// Opções › Mensageiros.
+    pub fn mensageiros_ui(&mut self, ui: &mut Ui) {
+        self.mensageiros.ui(ui, self.chaveiro.as_ref());
     }
 
     /// Opções › Estante: os destinos, com ativo, remover, nova pasta local e "Detectar
