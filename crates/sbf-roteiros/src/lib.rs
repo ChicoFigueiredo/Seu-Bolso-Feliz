@@ -21,6 +21,7 @@ pub mod bloqueio;
 pub mod erro;
 pub mod executor;
 pub mod falso;
+pub mod gravacao;
 pub mod inventario;
 pub mod navegador;
 pub mod pagina;

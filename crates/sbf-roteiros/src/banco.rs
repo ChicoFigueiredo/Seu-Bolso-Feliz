@@ -238,6 +238,45 @@ impl BancoDeRoteiros {
         Ok(id)
     }
 
+    /// Cria um rascunho: o roteiro existe (para a gravação ter onde registrar a execução), mas
+    /// fica inativo, sem agenda, até [`Self::concluir_gravacao`].
+    ///
+    /// # Errors
+    /// Nome inválido ou repetido, ou falha do banco.
+    pub fn criar_rascunho(
+        &self,
+        nome: &str,
+        descricao: &str,
+        url_inicial: &str,
+        rotulo_senha: Option<&str>,
+    ) -> Resultado<i64> {
+        let id = self.criar_roteiro(nome, descricao, url_inicial, rotulo_senha, &[], OrigemDaVersao::Gravacao)?;
+        self.conn.execute("UPDATE roteiro SET ativo = 0 WHERE id = ?1", [id])?;
+        Ok(id)
+    }
+
+    /// Termina a gravação: os passos aceitos viram a versão 1 e o roteiro fica ativo.
+    ///
+    /// # Errors
+    /// Passos inválidos ou falha do banco.
+    pub fn concluir_gravacao(&self, roteiro_id: i64, passos: &[Passo]) -> Resultado<()> {
+        let (nome, descricao): (String, String) = self.conn.query_row(
+            "SELECT nome, descricao FROM roteiro WHERE id = ?1",
+            [roteiro_id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )?;
+        Roteiro { formato: crate::passo::FORMATO, nome, descricao, passos: passos.to_vec() }
+            .validar()
+            .map_err(ErroDeRoteiro::Invalido)?;
+        self.conn.execute(
+            "UPDATE versao SET passos = ?2 WHERE roteiro_id = ?1 AND estado = 'ativa'",
+            params![roteiro_id, serde_json::to_string(passos).unwrap_or_default()],
+        )?;
+        self.conn
+            .execute("UPDATE roteiro SET ativo = 1 WHERE id = ?1", [roteiro_id])?;
+        Ok(())
+    }
+
     /// O id de um roteiro pelo nome.
     ///
     /// # Errors

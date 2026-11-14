@@ -384,7 +384,12 @@ fn csv(linhas: &[Vec<String>]) -> String {
     s
 }
 
-fn executar_passo(
+/// Executa **um** passo, com as mesmas conferências do roteiro inteiro (lista de bloqueio
+/// antes de clicar ou baixar, segredo só no campo). A gravação guiada usa isto.
+///
+/// # Errors
+/// A falha do passo ([`ErroDeRoteiro::PassoFalhou`], [`ErroDeRoteiro::Bloqueado`], …).
+pub fn executar_passo(
     c: &mut Contexto<'_>,
     _execucao: i64,
     i: usize,
