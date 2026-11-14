@@ -18,6 +18,9 @@ sbf-processo = { path = "../sbf-processo" }
 sbf-previa = { path = "../sbf-previa" }
 sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
+sbf-mensageiros = { path = "../sbf-mensageiros" }
+# QR do pareamento do WhatsApp (MIT OR Apache-2.0); só desenhamos a matriz.
+qrcode = { version = "0.14", default-features = false }
 # Só para o acervo fictício da demonstração (o anexo do e-mail liga ao achado pelo sha256).
 sha2 = "0.11"
 zeroize = { workspace = true }

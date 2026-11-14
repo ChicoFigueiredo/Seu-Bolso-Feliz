@@ -112,6 +112,8 @@ pub struct Ferramentas {
     pub destino_da_copia: String,
     /// Opções › Nuvens (conectar Drive e OneDrive, coleta, último backup).
     pub nuvens: crate::nuvens::Nuvens,
+    /// Opções › Mensageiros (WhatsApp por QR, export do Telegram, conversas incluídas).
+    pub mensageiros: crate::mensageiros::Mensageiros,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -160,6 +162,7 @@ pub fn texto_da_situacao(s: Situacao) -> &'static str {
 impl Ferramentas {
     pub fn nova(banco: PathBuf, cofre: PathBuf) -> Self {
         let cofre_para_nuvens = cofre.clone();
+        let cofre_para_mensageiros = cofre.clone();
         Self {
             banco,
             cofre,
@@ -174,6 +177,7 @@ impl Ferramentas {
             aviso_dos_destinos: None,
             destino_da_copia: String::new(),
             nuvens: crate::nuvens::Nuvens::nova(cofre_para_nuvens),
+            mensageiros: crate::mensageiros::Mensageiros::nova(cofre_para_mensageiros),
             tentar_estrategias_padrao: false,
             ultima_copia: None,
             tarefa: None,
@@ -877,6 +881,11 @@ impl Ferramentas {
     pub fn nuvens_ui(&mut self, ui: &mut Ui) {
         let ativos = self.destinos.ativos().count();
         self.nuvens.ui(ui, self.chaveiro.as_ref(), ativos);
+    }
+
+    /// Opções › Mensageiros.
+    pub fn mensageiros_ui(&mut self, ui: &mut Ui) {
+        self.mensageiros.ui(ui, self.chaveiro.as_ref());
     }
 
     /// Opções › Estante: os destinos, com ativo, remover, nova pasta local e "Detectar

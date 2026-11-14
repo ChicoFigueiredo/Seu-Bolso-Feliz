@@ -102,3 +102,21 @@ pub fn rodar(
     pontos.salvar(&arquivo_de_pontos)?;
     Ok(resumo)
 }
+
+/// Abre o `inventario.sqlite` do cofre (WAL, espera de 30 s) e roda um ciclo; para a janela,
+/// que não tem conexão aberta ("Importar agora").
+///
+/// # Errors
+/// Como [`rodar`], mais falha ao abrir o banco.
+pub fn rodar_no_cofre(
+    pasta_de_dados: &Path,
+    cofre: &Path,
+    chaveiro: &dyn Fn() -> Result<Chaveiro, Erro>,
+    cancelar: &AtomicBool,
+) -> Resultado<Resumo> {
+    let conexao = Connection::open(cofre.join("inventario.sqlite"))?;
+    conexao.busy_timeout(std::time::Duration::from_secs(30))?;
+    conexao.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
+    conexao.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
+    rodar(&conexao, pasta_de_dados, cofre, chaveiro, cancelar)
+}
