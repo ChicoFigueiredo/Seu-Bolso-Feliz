@@ -89,6 +89,13 @@ pub enum Evento<'a> {
         /// Origens novas.
         novos: usize,
     },
+    /// Roteiros agendados executados.
+    Roteiros {
+        /// Roteiros executados.
+        executados: usize,
+        /// Arquivos baixados.
+        baixados: usize,
+    },
     /// Ciclo da triagem.
     Triagem {
         /// Itens enviados à IA.
@@ -130,6 +137,10 @@ impl fmt::Display for Evento<'_> {
             Self::Mensageiros { mensagens, novos } => {
                 write!(f, "mensageiros mensagens={mensagens} novos={novos}")
             }
+            Self::Roteiros {
+                executados,
+                baixados,
+            } => write!(f, "roteiros executados={executados} baixados={baixados}"),
             Self::Triagem {
                 enviados,
                 sugestoes,
