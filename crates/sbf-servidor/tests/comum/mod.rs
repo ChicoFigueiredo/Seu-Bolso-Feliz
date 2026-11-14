@@ -133,16 +133,29 @@ pub struct Ambiente {
 }
 
 pub async fn ambiente() -> Option<Ambiente> {
-    let url = zeroize::Zeroizing::new(url_de_teste()?);
-    let banco = sbf_servidor::abrir_banco(&url)
-        .await
-        .expect("banco de teste");
     let armazenamento = sbf_servidor::armazenamento::ArmazenamentoFalso::novo();
+    ambiente_com(Arc::new(armazenamento.clone()), armazenamento, None).await
+}
+
+/// Como [`ambiente`], mas com um armazenamento escolhido pelo teste. `banco`: reaproveita
+/// um pool (o armazenamento do teste precisa dele antes de existir o ambiente).
+pub async fn ambiente_com(
+    usado: Arc<dyn sbf_servidor::armazenamento::Armazenamento>,
+    armazenamento: sbf_servidor::armazenamento::ArmazenamentoFalso,
+    banco: Option<deadpool_postgres::Pool>,
+) -> Option<Ambiente> {
+    let url = zeroize::Zeroizing::new(url_de_teste()?);
+    let banco = match banco {
+        Some(b) => b,
+        None => sbf_servidor::abrir_banco(&url)
+            .await
+            .expect("banco de teste"),
+    };
     let estado = sbf_servidor::EstadoDoServidor {
         banco: banco.clone(),
         google: Arc::new(verificador()),
         regras: "0.1.0-teste".into(),
-        armazenamento: Arc::new(armazenamento.clone()),
+        armazenamento: usado,
     };
     Some(Ambiente {
         app: sbf_servidor::rotas(estado),
@@ -287,7 +300,11 @@ impl Ambiente {
 
 /// Um dono fictício novo, com um e-mail único. Devolve (id, email, sub).
 pub async fn novo_dono(amb: &Ambiente) -> (uuid::Uuid, String, String) {
-    let id = uuid::Uuid::new_v4();
+    novo_dono_com_id(amb, uuid::Uuid::new_v4()).await
+}
+
+/// Como [`novo_dono`], com o id escolhido pelo teste.
+pub async fn novo_dono_com_id(amb: &Ambiente, id: uuid::Uuid) -> (uuid::Uuid, String, String) {
     let email = format!("dono-{}@example.com", id.simple());
     let sub = format!("sub-{}", id.simple());
     amb.sql(&format!(

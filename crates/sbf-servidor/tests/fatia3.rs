@@ -64,6 +64,48 @@ async fn cena() -> Option<Cena> {
     Some(Cena { amb, dono, cred, s })
 }
 
+/// Envelhece em uma hora as linhas do dono (gatilhos desligados só nesta transação).
+async fn envelhecer(c: &Cena) {
+    c.amb
+        .sql(&format!(
+            "BEGIN; SET LOCAL session_replication_role = replica; \
+             UPDATE public.transactions SET updated_at = now() - interval '1 hour' WHERE user_id = '{d}'; \
+             COMMIT;",
+            d = c.dono
+        ))
+        .await;
+}
+
+#[tokio::test]
+async fn delta_cobre_linha_gravada_por_transacao_longa_dentro_da_margem() {
+    let Some(c) = cena().await else { return };
+    let d0 = c.amb.get("/api/v2/livro/movimentacoes", &c.cred).await;
+    let cursor0 = d0.corpo["cursor"].as_str().unwrap().to_owned();
+    // Uma transação que começou antes da leitura e só terminou depois: a linha dela tem
+    // `updated_at` 2 s atrás, menor que o relógio da leitura anterior.
+    c.amb
+        .sql(&format!(
+            "BEGIN; SET LOCAL session_replication_role = replica; \
+             UPDATE public.transactions SET description = 'Tardia', updated_at = now() - interval '2 seconds' WHERE id = '{}'; \
+             COMMIT;",
+            c.s.movimentacao_dez
+        ))
+        .await;
+    let d1 = c
+        .amb
+        .get(
+            &format!("/api/v2/livro/movimentacoes?desde={cursor0}"),
+            &c.cred,
+        )
+        .await;
+    let linhas = d1.corpo["linhas"]["linhas"].as_array().unwrap();
+    assert!(
+        linhas.iter().any(|l| l["descricao"] == "Tardia"),
+        "{:?}",
+        d1.corpo
+    );
+}
+
 // ───────────────────────────── CX-01: aprovar ─────────────────────────────
 
 #[tokio::test]
@@ -620,6 +662,7 @@ async fn cx05_ratear_valida_a_soma_e_troca_o_conjunto() {
 #[tokio::test]
 async fn editar_com_centro_e_excluir_apagam_os_rateios_e_a_exclusao_entra_no_delta() {
     let Some(c) = cena().await else { return };
+    envelhecer(&c).await;
     let mov = c.s.movimentacao;
     let base = versao_de(&c.amb, &c.cred, "movimentacoes", mov).await;
     // Editar com centro: o rateio vira um só, do valor inteiro.
@@ -691,6 +734,9 @@ async fn editar_com_centro_e_excluir_apagam_os_rateios_e_a_exclusao_entra_no_del
 #[tokio::test]
 async fn cx06_delta_traz_so_o_que_mudou_e_duas_leituras_seguidas_vem_vazias() {
     let Some(c) = cena().await else { return };
+    // O delta recua o cursor uma margem (transações longas): o que foi gravado agora volta
+    // no delta seguinte. Para ver "vazio", as linhas semeadas ficam velhas.
+    envelhecer(&c).await;
     // Carga completa.
     let d0 = c.amb.get("/api/v2/livro/movimentacoes", &c.cred).await;
     assert_eq!(d0.status, StatusCode::OK, "{:?}", d0.corpo);
@@ -709,7 +755,6 @@ async fn cx06_delta_traz_so_o_que_mudou_e_duas_leituras_seguidas_vem_vazias() {
     assert_eq!(d1.corpo["completo"], false);
     assert_eq!(d1.corpo["linhas"]["linhas"], json!([]));
     assert_eq!(d1.corpo["excluidas"], json!([]));
-    assert_eq!(d1.corpo["cursor"], json!(cursor0));
     let d1b = c
         .amb
         .get(
@@ -717,7 +762,7 @@ async fn cx06_delta_traz_so_o_que_mudou_e_duas_leituras_seguidas_vem_vazias() {
             &c.cred,
         )
         .await;
-    assert_eq!(d1b.corpo, d1.corpo);
+    assert_eq!(d1b.corpo["linhas"], d1.corpo["linhas"]);
 
     // Muda uma só (pelo SQL, como o pipeline faria): aparece só ela.
     c.amb
@@ -746,7 +791,15 @@ async fn cx06_delta_traz_so_o_que_mudou_e_duas_leituras_seguidas_vem_vazias() {
             &c.cred,
         )
         .await;
-    assert_eq!(d3.corpo["linhas"]["linhas"], json!([]));
+    // Dentro da margem do cursor, a linha que acabou de mudar volta (aplicar de novo é sem
+    // dano); nenhuma outra.
+    assert!(
+        d3.corpo["linhas"]["linhas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["id"] == json!(c.s.movimentacao_dez))
+    );
 
     // Mudar o rateio por fora muda o delta de rateios (a versão é a da movimentação).
     let dr0 = c.amb.get("/api/v2/livro/rateios", &c.cred).await;
@@ -867,7 +920,9 @@ async fn cx07_envio_de_documento_e_idempotente_pelo_sha256() {
         enviar(&c, &sha_novo, "outro.pdf", &novo)
     );
     assert_eq!(a.corpo["source_document_id"], b.corpo["source_document_id"]);
-    assert_eq!(c.amb.armazenamento.gravacoes(), 2);
+    // O PUT vem antes da trava: a corrida pode gravar duas vezes, sempre na mesma chave
+    // (a do sha256), então não sobra blob órfão.
+    assert_eq!(c.amb.armazenamento.chaves().len(), 2);
 }
 
 #[tokio::test]
@@ -1073,5 +1128,159 @@ async fn corrigir_e_aprovar_recusam_ids_de_outro_dono() {
         )
         .await,
         antes
+    );
+}
+
+/// Guarda como o falso, mas antes tenta pegar o trava consultiva do documento (a que o envio
+/// pega dentro da transação): se não consegue, o PUT no Blob está com a transação aberta.
+#[derive(Debug)]
+struct ArmazenamentoQueOlhaOBanco {
+    banco: deadpool_postgres::Pool,
+    dentro: sbf_servidor::armazenamento::ArmazenamentoFalso,
+    trava: String,
+    transacoes_abertas: std::sync::Arc<std::sync::atomic::AtomicI64>,
+}
+
+impl sbf_servidor::armazenamento::Armazenamento for ArmazenamentoQueOlhaOBanco {
+    fn gravar<'a>(
+        &'a self,
+        chave: &'a str,
+        bytes: &'a [u8],
+        tipo_mime: &'a str,
+    ) -> sbf_servidor::armazenamento::Futuro<
+        'a,
+        Result<(), sbf_servidor::armazenamento::ErroDeArmazenamento>,
+    > {
+        Box::pin(async move {
+            let mut c = self.banco.get().await.unwrap();
+            let t = c.transaction().await.unwrap();
+            let pegou: bool = t
+                .query_one(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))",
+                    &[&self.trava],
+                )
+                .await
+                .unwrap()
+                .get(0);
+            t.rollback().await.unwrap();
+            let n = i64::from(!pegou);
+            self.transacoes_abertas
+                .fetch_add(n, std::sync::atomic::Ordering::SeqCst);
+            self.dentro.gravar(chave, bytes, tipo_mime).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn envio_grava_o_blob_antes_de_abrir_a_transacao() {
+    let Some(url) = url_de_teste() else { return };
+    let banco = sbf_servidor::abrir_banco(&zeroize::Zeroizing::new(url))
+        .await
+        .unwrap();
+    let falso = sbf_servidor::armazenamento::ArmazenamentoFalso::novo();
+    let abertas = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+    let dono = Uuid::new_v4();
+    let bytes = b"%PDF-1.4 ficticio para o teste da transacao".to_vec();
+    let usado = std::sync::Arc::new(ArmazenamentoQueOlhaOBanco {
+        banco: banco.clone(),
+        dentro: falso.clone(),
+        trava: format!("{dono}:{}", hex(&bytes)),
+        transacoes_abertas: abertas.clone(),
+    });
+    let amb = ambiente_com(usado, falso, Some(banco)).await.unwrap();
+    let (dono, email, sub) = novo_dono_com_id(&amb, dono).await;
+    let (_e, cred) = amb.parear(&email, &sub, "Notebook").await;
+    let s = semear(&amb, dono).await;
+    let c = Cena { amb, dono, cred, s };
+    let r = enviar_doc(&c, &hex(&bytes), "a.pdf", &bytes).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.corpo);
+    assert_eq!(
+        abertas.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "havia transação aberta durante o PUT no Blob"
+    );
+}
+
+#[tokio::test]
+async fn documento_sem_job_ganha_job_sem_novo_documento_nem_blob() {
+    let Some(c) = cena().await else { return };
+    let bytes = b"%PDF-1.4 documento sem job ficticio".to_vec();
+    let sha = hex(&bytes);
+    let doc = Uuid::new_v4();
+    c.amb
+        .sql(&format!(
+            "INSERT INTO public.source_documents (id, user_id, origin_type, origin_key, filename, mime_type, \
+             file_size_bytes, storage_path, status, content_hash) \
+             VALUES ('{doc}', '{}', 'manual_upload', 'upload:antigo:{sha}', 'antigo.pdf', 'application/pdf', \
+             {}, '{}/{doc}/antigo.pdf', 'active', '{sha}')",
+            c.dono,
+            bytes.len(),
+            c.dono
+        ))
+        .await;
+    let r = enviar_doc(&c, &sha, "novo.pdf", &bytes).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.corpo);
+    assert_eq!(r.corpo["source_document_id"], json!(doc));
+    assert_eq!(
+        c.amb.armazenamento.gravacoes(),
+        0,
+        "não pode haver blob novo"
+    );
+    let c0 = c.amb.banco.get().await.unwrap();
+    let n: i64 = c0
+        .query_one(
+            "SELECT count(*) FROM public.source_documents WHERE user_id = $1 AND content_hash = $2",
+            &[&c.dono, &sha],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 1);
+    let jobs: i64 = c0
+        .query_one(
+            "SELECT count(*) FROM public.ingestion_jobs WHERE user_id = $1 AND source_document_id = $2",
+            &[&c.dono, &doc],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(jobs, 1);
+    // Reenviar devolve o mesmo job.
+    let r2 = enviar_doc(&c, &sha, "novo.pdf", &bytes).await;
+    assert_eq!(r2.corpo["job_id"], r.corpo["job_id"]);
+}
+
+#[tokio::test]
+async fn tipo_mime_vem_da_extensao_e_nao_do_cliente() {
+    let Some(c) = cena().await else { return };
+    let bytes = b"%PDF-1.4 ficticio mime".to_vec();
+    let sha = hex(&bytes);
+    let (tipo, corpo) = multipart(
+        &[("sha256", &sha), ("nome_original", "a.pdf")],
+        Some(("a.pdf", "text/html", &bytes)),
+    );
+    let r = c
+        .amb
+        .pedir_bruto("/api/v2/documentos", &c.cred, &tipo, corpo)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.corpo);
+    let mime: String = c
+        .amb
+        .banco
+        .get()
+        .await
+        .unwrap()
+        .query_one(
+            "SELECT mime_type FROM public.source_documents WHERE user_id = $1 AND content_hash = $2",
+            &[&c.dono, &sha],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(mime, "application/pdf");
+    let chave = c.amb.armazenamento.chaves().remove(0);
+    assert_eq!(
+        c.amb.armazenamento.arquivo(&chave).unwrap().1,
+        "application/pdf"
     );
 }
