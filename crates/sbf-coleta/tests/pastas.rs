@@ -295,3 +295,35 @@ fn vigia_avisa_e_indexa_um_arquivo_novo_com_as_mesmas_regras() {
     .expect("sumiu");
     assert_eq!(d, Destino::Ignorado);
 }
+
+#[test]
+fn origem_gravada_pelo_bun_com_mtime_divergente_nao_ganha_segunda_origem() {
+    // Fracoes problematicas: .5, .9999 e valores grandes. A chave do Bun pode diferir
+    // na ultima casa do mtimeMs; o caminho, o tamanho e o mtime em ms ainda casam.
+    for segundos in [
+        1_700_000_000.5_f64,
+        1_700_000_000.9999,
+        4_102_444_799.123_456,
+    ] {
+        let c = cenario();
+        escrever(&c.raiz, "fatura-luz.pdf", "conteudo ficticio um");
+        let alvo = c.raiz.join("fatura-luz.pdf");
+        fs::File::options()
+            .write(true)
+            .open(&alvo)
+            .expect("abrir")
+            .set_modified(UNIX_EPOCH + Duration::from_secs_f64(segundos))
+            .expect("mtime");
+        let r1 = varrer(&c, true);
+        assert_eq!(r1.novos, 1, "{r1:?}");
+        // Simula a linha gravada pelo Bun: mesma origem, ultima casa do mtimeMs diferente.
+        let n = c
+            .conn
+            .execute("UPDATE origem SET origin_key = origin_key || '1'", [])
+            .expect("bun");
+        assert_eq!(n, 1);
+        let r2 = varrer(&c, true);
+        assert_eq!((r2.novos, r2.repetidos), (0, 1), "{segundos}: {r2:?}");
+        assert_eq!(contar(&c, "SELECT COUNT(*) FROM origem"), 1, "{segundos}");
+    }
+}
