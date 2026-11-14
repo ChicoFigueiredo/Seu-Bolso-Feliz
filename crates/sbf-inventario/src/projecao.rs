@@ -660,6 +660,21 @@ pub fn reprojetar(tx: &Transaction<'_>) -> ResultadoDeComando<ResumoDaReprojecao
             })?
             .collect::<Result<Vec<_>, _>>()?
     };
+    // O `id` da regra de senha é um rowid: reaplicar o log sobre linhas que já existem
+    // (apaga, recria) o reatribuiria fora de ordem. As regras que o log cria e que ninguém
+    // usou ainda saem antes; o log as recria na ordem em que nasceram, com os mesmos ids de
+    // quem o aplicou pela primeira vez. As usadas (têm contagem) ficam, e as dos scripts
+    // (que o log nunca citou) também.
+    tx.execute(
+        "DELETE FROM regra_senha
+          WHERE sucessos = 0 AND falhas = 0 AND EXISTS (
+            SELECT 1 FROM decisao d
+             WHERE d.alvo_tipo = 'fornecedor' AND d.campo = 'regra_senha'
+               AND d.alvo_id = regra_senha.fornecedor
+               AND json_extract(d.depois, '$.document_type') = regra_senha.document_type
+               AND json_extract(d.depois, '$.estrategia') = regra_senha.estrategia)",
+        [],
+    )?;
     let mut alvos = BTreeSet::new();
     for (alvo_tipo, alvo_id, campo, depois, em) in &decisoes {
         let alvo = AlvoTipo::de_codigo(alvo_tipo)
