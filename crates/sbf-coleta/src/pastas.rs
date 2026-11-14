@@ -192,6 +192,73 @@ fn sha256_do_arquivo(caminho: &Path) -> std::io::Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Transação curta: o banco é compartilhado com a janela, os scripts Bun e a triagem, então
+/// a escrita não segura o lock durante muito tempo. Abre sob demanda e fecha a cada
+/// [`LoteCurto::MAX_ARQUIVOS`] arquivos, [`LoteCurto::MAX_BYTES`] lidos ou
+/// [`LoteCurto::MAX_TEMPO`]; cai com `ROLLBACK` se for solta aberta (erro no meio).
+struct LoteCurto<'a> {
+    conn: &'a Connection,
+    aberto: bool,
+    arquivos: u32,
+    bytes: u64,
+    desde: std::time::Instant,
+}
+
+impl<'a> LoteCurto<'a> {
+    const MAX_ARQUIVOS: u32 = 200;
+    const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    const MAX_TEMPO: Duration = Duration::from_secs(1);
+
+    fn novo(conn: &'a Connection) -> Self {
+        Self {
+            conn,
+            aberto: false,
+            arquivos: 0,
+            bytes: 0,
+            desde: std::time::Instant::now(),
+        }
+    }
+
+    fn antes(&mut self) -> Resultado<()> {
+        if !self.aberto {
+            self.conn.execute_batch("BEGIN IMMEDIATE")?;
+            self.aberto = true;
+            self.arquivos = 0;
+            self.bytes = 0;
+            self.desde = std::time::Instant::now();
+        }
+        Ok(())
+    }
+
+    fn depois(&mut self, bytes: u64) -> Resultado<()> {
+        self.arquivos += 1;
+        self.bytes += bytes;
+        if self.arquivos >= Self::MAX_ARQUIVOS
+            || self.bytes >= Self::MAX_BYTES
+            || self.desde.elapsed() >= Self::MAX_TEMPO
+        {
+            self.fechar()?;
+        }
+        Ok(())
+    }
+
+    fn fechar(&mut self) -> Resultado<()> {
+        if self.aberto {
+            self.aberto = false;
+            self.conn.execute_batch("COMMIT")?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for LoteCurto<'_> {
+    fn drop(&mut self) {
+        if self.aberto {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+    }
+}
+
 /// O miolo: indexa **um** arquivo (hash, achado, origem, cópia ao cofre).
 struct Nucleo<'a> {
     conn: &'a Connection,
@@ -563,7 +630,7 @@ impl<'a> Varredor<'a> {
                     continue;
                 }
             };
-            let tx = self.conn.unchecked_transaction()?;
+            let mut lote = LoteCurto::novo(self.conn);
             for ent in entradas.flatten() {
                 let caminho = ent.path();
                 let Ok(tipo) = ent.file_type() else { continue };
@@ -605,8 +672,9 @@ impl<'a> Varredor<'a> {
                     }
                     pilha.push((caminho, sub));
                 } else if tipo.is_file() {
+                    lote.antes()?;
                     let nucleo = Nucleo {
-                        conn: &tx,
+                        conn: self.conn,
                         cofre: &self.cofre,
                         fonte: &self.fonte,
                         varredura_id: self.varredura_id,
@@ -620,9 +688,10 @@ impl<'a> Varredor<'a> {
                         &mut self.ignorados,
                         &mut self.erros,
                     )?;
+                    lote.depois(std::fs::metadata(&caminho).map_or(0, |m| m.len()))?;
                 }
             }
-            tx.commit()?;
+            lote.fechar()?;
             self.salvar_progresso(&dir)?;
         }
         Ok(true)

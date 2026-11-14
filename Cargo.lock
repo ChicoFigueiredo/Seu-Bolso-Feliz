@@ -4673,6 +4673,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-worker"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "sbf-coleta",
+ "sbf-inventario",
+ "sbf-processo",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
