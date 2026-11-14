@@ -105,7 +105,10 @@ fn faixa(confianca: f64) -> &'static str {
 }
 
 /// A coluna da decisão que carrega o gabarito de um campo de sugestão.
-fn gabarito_do_campo(alvo_tipo: &str, campo: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn gabarito_do_campo(
+    alvo_tipo: &str,
+    campo: &str,
+) -> Option<(&'static str, &'static str)> {
     match (alvo_tipo, campo) {
         ("achado", "e_financeiro") => Some(("estado", "estado")),
         ("achado", "tipo_documento") => Some(("document_type", "document_type")),

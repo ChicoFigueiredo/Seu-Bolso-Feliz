@@ -466,3 +466,39 @@ fn ia05_registro_da_ia_guarda_tamanho_tokens_e_custo_nunca_o_texto_e_faz_cache()
         Some(json!({"itens": []}))
     );
 }
+
+#[test]
+fn aceitar_recusa_sugestao_cujo_campo_o_usuario_decidiu_depois() {
+    let (banco, ids) = banco_com(1);
+    let s = sugerir(
+        &banco,
+        Alvo::Registro(ids[0]),
+        "categoria",
+        json!("Mercado"),
+        0.95,
+    );
+    let c = banco.conexao();
+    // Uma decisão do usuário, posterior à sugestão, que o núcleo não obsoletou (a sugestão
+    // chegou depois do clique, por exemplo).
+    c.execute(
+        "INSERT INTO decisao (alvo_tipo, alvo_id, campo, antes, depois, autor, em)
+         VALUES ('registro', ?1, 'categoria', '{}', '{\"categoria_provavel\":\"Feita\"}', 'usuario',
+                 '2999-01-01T00:00:00.000Z')",
+        [ids[0].to_string()],
+    )
+    .expect("decisao");
+    c.execute("UPDATE sugestao_ia SET estado = 'aberta'", [])
+        .expect("reabrir");
+    let antes = contar(&c, "SELECT COUNT(*) FROM decisao");
+    let mut inv = banco.inventario();
+
+    let r = aceitar(&c, &mut inv, &[s]).expect("aceitar");
+
+    assert!(r.aceitas.is_empty(), "{r:?}");
+    assert_eq!(r.ignoradas.len(), 1);
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM decisao"), antes);
+    assert_eq!(
+        valor_texto(&c, "SELECT estado FROM sugestao_ia"),
+        "obsoleta"
+    );
+}
