@@ -744,6 +744,14 @@ pub fn area_sincronizacao(
         .id_salt("sincronizacao")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            if let Some(c) = caixa {
+                secao(
+                    ui,
+                    "Caixa de entrada e edição",
+                    "aprovações, correções e edições do livro-caixa",
+                    |ui| crate::caixa_ui::secoes_da_sincronizacao(ui, c, hoje, pedidos),
+                );
+            }
             secao(ui, "Aguardando o servidor", &aguardando.len().to_string(), |ui| {
                 if aguardando.is_empty() {
                     ui.label(
@@ -783,14 +791,6 @@ pub fn area_sincronizacao(
                     }
                 },
             );
-            if let Some(c) = caixa {
-                secao(
-                    ui,
-                    "Caixa de entrada e edição",
-                    "aprovações, correções e edições do livro-caixa",
-                    |ui| crate::caixa_ui::secoes_da_sincronizacao(ui, c, hoje, pedidos),
-                );
-            }
             let estacoes = est.estacoes().unwrap_or_default();
             secao(
                 ui,

@@ -1101,6 +1101,8 @@ pub struct ContextoDasAcoes {
     pub nas_sugestoes: bool,
     /// O envio do lote atual ao servidor (fatia 3).
     pub envio_do_lote: EnvioNoContexto,
+    /// A caixa de entrada e a edição estão ligadas (Editar e Ratear a movimentação).
+    pub edicao_ligada: bool,
 }
 
 /// Se Enviar ao servidor pode rodar no lote atual.
@@ -1286,7 +1288,14 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
             }
         }
         I::EditarMovimentacao | I::RatearMovimentacao => {
-            Desabilitada(crate::dinheiro::MOTIVO_FATIA_3.to_owned())
+            if !c.edicao_ligada {
+                Desabilitada(crate::dinheiro::MOTIVO_FATIA_3.to_owned())
+            } else {
+                exige(
+                    sel.len() == 1 && todos_de(sel, &[Tipo::Movimentacao]),
+                    "Selecione uma movimentação",
+                )
+            }
         }
         I::RefazerAlteracao | I::DescartarAlteracao => exige(
             c.alteracao_recusada,
@@ -1502,11 +1511,16 @@ mod testes {
         c.selecao = vec![mov];
         c.estacao_revogada = true;
         assert!(!disponibilidade(I::MudarCategoria, &c).habilitada());
-        // A edição do resto do livro-caixa fica para a fatia 3, com o motivo.
+        // A edição do resto do livro-caixa só liga com a caixa, e diz o motivo.
         assert_eq!(
             disponibilidade(I::EditarMovimentacao, &c).motivo(),
             Some(crate::dinheiro::MOTIVO_FATIA_3)
         );
+        c.edicao_ligada = true;
+        assert!(disponibilidade(I::EditarMovimentacao, &c).habilitada());
+        assert!(disponibilidade(I::RatearMovimentacao, &c).habilitada());
+        c.selecao.clear();
+        assert!(!disponibilidade(I::RatearMovimentacao, &c).habilitada());
     }
 
     #[test]

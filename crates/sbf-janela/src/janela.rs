@@ -468,6 +468,7 @@ impl Janela {
                 self.navegacao.atual(),
                 Destino::Area(Area::SugestoesDeConciliacao)
             ),
+            edicao_ligada: self.caixa.is_some(),
             envio_do_lote: match (&self.caixa, &self.lote_atual) {
                 (None, _) => acoes::EnvioNoContexto::NaoLigado,
                 (Some(_), None) => {
@@ -2097,11 +2098,25 @@ impl Janela {
                 self.dialogo = Some(Dialogo::RenomearEstacao { estacao: r, nome });
             }
             IdAcao::EditarMovimentacao | IdAcao::RatearMovimentacao => {
-                self.erro(format!(
-                    "{}: {}",
-                    acoes::definicao(id).rotulo,
-                    crate::dinheiro::MOTIVO_FATIA_3
-                ));
+                let alvo = self
+                    .selecao()
+                    .into_iter()
+                    .find(|r| r.tipo == Tipo::Movimentacao);
+                match alvo {
+                    Some(alvo) if self.caixa.is_some() => {
+                        use crate::caixa_ui::PedidoDaCaixa as P;
+                        self.caixa_pedido(if id == IdAcao::EditarMovimentacao {
+                            P::PedirEdicao(alvo)
+                        } else {
+                            P::PedirRateio(alvo)
+                        });
+                    }
+                    _ => self.erro(format!(
+                        "{}: {}",
+                        acoes::definicao(id).rotulo,
+                        crate::dinheiro::MOTIVO_FATIA_3
+                    )),
+                }
             }
             IdAcao::CopiarRastro => {
                 if let Some(r) = self.item_aberto().cloned() {

@@ -320,7 +320,7 @@ fn atalhos(
 
 fn icone_do_status(s: StatusDoRascunho) -> &'static str {
     match s {
-        StatusDoRascunho::EmRevisao => "pending_actions",
+        StatusDoRascunho::EmRevisao => "help",
         StatusDoRascunho::Corrigido => "edit_note",
         StatusDoRascunho::Aprovado => "check_circle",
         StatusDoRascunho::Recusado => "cancel",
@@ -393,16 +393,13 @@ pub fn area(
     }
     let altura = ui.available_height().max(320.0);
     StripBuilder::new(ui)
-        .size(Size::exact(330.0))
-        .size(Size::exact(330.0))
-        .size(Size::remainder().at_least(320.0))
+        .size(Size::exact(260.0))
+        .size(Size::exact(290.0))
+        .size(Size::remainder().at_least(300.0))
         .horizontal(|mut tira| {
             tira.cell(|ui| lista(ui, &lotes, estado, pedidos));
             tira.cell(|ui| {
                 let doc = estado.rascunho(&lotes).and_then(|r| r.documento.clone());
-                if let Some(r) = estado.rascunho(&lotes) {
-                    ui.label(RichText::new(r.rotulo.clone()).strong().color(p.tinta));
-                }
                 if let Some(doc) = doc {
                     if let Some(abrir) =
                         previas.painel_ui(ui, leitor, Some(&doc), altura - 40.0, pedidos)
@@ -509,7 +506,7 @@ fn lista(
                     ui.add_enabled_ui(l.n_abertos() > 0, |ui| {
                         if ui
                             .button((
-                                icones::icone_cor("done_all", 15.0, p.tinta),
+                                icones::icone_cor("check_circle", 15.0, p.tinta),
                                 RichText::new("Aprovar lote"),
                             ))
                             .on_hover_text(
@@ -814,7 +811,7 @@ fn formulario(
                     .add_enabled(
                         aberto && sujo && validacao.is_ok(),
                         egui::Button::new((
-                            icones::icone_cor("save", 16.0, p.tinta),
+                            icones::icone_cor("edit_note", 16.0, p.tinta),
                             RichText::new("Salvar correção"),
                         )),
                     )
