@@ -665,6 +665,9 @@ fn entregar(
     rel.baixados += 1;
     if r == Recebido::Novo {
         rel.novos += 1;
+    // O arquivo já está no cofre (ou já estava): a cópia temporária não fica na pasta de dados
+    // do app, que não é cofre. Só os metadados da execução ficam.
+    let _ = std::fs::remove_file(caminho);
     }
     Ok(())
 }

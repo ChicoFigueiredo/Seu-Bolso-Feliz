@@ -141,6 +141,8 @@ pub fn executar_roteiro_em(
         executar_com_conserto(&mut c, roteiro_id, execucao, &roteiro, guia)?
     };
     destino.fechar("concluida")?;
+    // Sobra de download que não chegou ao cofre (falha no meio): não fica na pasta de dados.
+    let _ = std::fs::remove_dir_all(amb.pasta_da_execucao(execucao));
     Ok(rel)
 }
 
@@ -283,6 +285,7 @@ pub fn gravar_novo(
         };
         destino.fechar("concluida")?;
         chrome.fechar();
+        let _ = std::fs::remove_dir_all(amb.pasta_da_execucao(execucao));
         let g = r?;
         Ok((g.passos, g.fim))
     })();

@@ -874,3 +874,34 @@ fn limpar_texto_tira_o_segredo_e_a_forma_percent_encoded() {
     assert!(!limpo.contains(SENHA) && !limpo.contains("%234821"));
     assert!(!limpo.contains(CPF) && !limpo.contains("12345678909"));
 }
+#[test]
+fn o_download_e_o_csv_temporarios_somem_depois_de_ir_ao_cofre() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    let mut passos = login(true);
+    passos.push(Passo::Baixar {
+        seletor: "#baixar".into(),
+        nome: Some("Extrato".into()),
+    });
+    passos.push(Passo::LerTabela {
+        seletor: "#extratos".into(),
+        nome: "extratos".into(),
+    });
+    let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
+    assert_eq!((r.rel.fim.clone(), r.rel.baixados), (Fim::Concluida, 2));
+    let sobras: Vec<_> = std::fs::read_dir(d.path().join("baixados"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert!(sobras.is_empty(), "sobrou: {sobras:?}");
+    // e foram para o cofre
+    let achados: i64 = rusqlite::Connection::open(d.path().join("cofre/inventario.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM achado WHERE caminho_acervo IS NOT NULL",
+            [],
+            |l| l.get(0),
+        )
+        .unwrap();
+    assert_eq!(achados, 2);
+}
