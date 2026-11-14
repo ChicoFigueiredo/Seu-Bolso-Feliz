@@ -29,6 +29,7 @@ pub mod painel;
 pub mod previa;
 pub mod tabela;
 pub mod tema;
+pub mod triagem;
 
 pub use acoes::{ACOES, Aba, ContextoDasAcoes, DefinicaoDeAcao, Disponibilidade, IdAcao};
 pub use app::{AppSbf, config_da_casca};

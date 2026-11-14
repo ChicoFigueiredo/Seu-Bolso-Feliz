@@ -137,6 +137,9 @@ pub enum Area {
     /// Os pares óbvios entre registros de extrato e de documento, que o usuário
     /// confirma em lote (`conciliacao`).
     SugestoesDeConciliacao,
+    /// As sugestões da IA (spec 09). Sem tabela da `Consulta`: a janela a lê pelo serviço
+    /// de triagem (`sbf_triagem::servico`).
+    TriagemPorIa,
     Relatorios,
     // Dinheiro (fatia 2): leem o livro-caixa (`Fonte::LivroCaixa`).
     /// Painel: Disponível agora, Livre após compromissos, Resultado do mês, Para

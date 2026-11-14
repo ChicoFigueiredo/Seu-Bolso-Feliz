@@ -112,6 +112,8 @@ pub enum Pedido {
     RevogarEstacao(Ref),
     /// Renomear uma estação.
     RenomearEstacao(Ref, String),
+    /// Triagem por IA (spec 09): rodada, aceitar e recusar sugestões, opções.
+    Triagem(crate::triagem::AcaoDaTriagem),
 }
 
 impl Pedido {

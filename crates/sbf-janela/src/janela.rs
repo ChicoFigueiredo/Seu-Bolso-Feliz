@@ -153,6 +153,8 @@ pub struct Janela {
     pub estacao: Option<crate::dinheiro::EstacaoLigada>,
     /// O pareamento da estação (login Google). `None`: a janela não sabe parear.
     pub pareamento: Option<Box<dyn crate::dinheiro::Pareamento>>,
+    /// A triagem por IA (spec 09): o serviço e o estado da tela.
+    pub triagem: crate::triagem::EstadoDaTriagem,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -251,6 +253,7 @@ impl Janela {
             pedacos_pendentes: HashMap::new(),
             estacao: None,
             pareamento: None,
+            triagem: crate::triagem::EstadoDaTriagem::default(),
         }
     }
 
@@ -680,6 +683,16 @@ impl Janela {
         let previas = &mut self.previas;
         let pendentes = &mut self.pedacos_pendentes;
         match destino {
+            Destino::Area(Area::TriagemPorIa) => {
+                cabecalho_da_area(
+                    ui,
+                    Area::TriagemPorIa,
+                    None,
+                    &mut self.periodo,
+                    &mut self.focar_pesquisa,
+                );
+                crate::triagem::area(ui, &mut self.triagem, pedidos);
+            }
             Destino::Area(Area::Sincronizacao) => {
                 cabecalho_da_area(
                     ui,
@@ -1344,6 +1357,7 @@ impl Janela {
                     Err(e) => self.erro(e.to_string()),
                 },
                 Pedido::EscolherLote(r) => self.lote_atual = Some(r),
+                Pedido::Triagem(acao) => self.acao_da_triagem(comandos, acao),
                 Pedido::NovaRegra {
                     fornecedor,
                     tipo_de_documento,
@@ -1419,6 +1433,70 @@ impl Janela {
         };
         bancada_casca::pedir(ctx, p);
         true
+    }
+
+    /// Liga o serviço de triagem por IA (a fictícia, na demonstração; a do inventário, no
+    /// real). Sem ele, a área e Opções → IA dizem que a triagem não está ligada.
+    pub fn ligar_triagem(&mut self, servico: Box<dyn sbf_triagem::servico::ServicoDeTriagem>) {
+        self.triagem = crate::triagem::EstadoDaTriagem::com_servico(servico);
+    }
+
+    /// Aplica um pedido da triagem por IA. Aceitar grava uma decisão do usuário por item
+    /// (pelo `Comandos`), que entra no histórico da sessão e se desfaz como qualquer outra.
+    fn acao_da_triagem(
+        &mut self,
+        comandos: &mut dyn Comandos,
+        acao: crate::triagem::AcaoDaTriagem,
+    ) {
+        use crate::triagem::AcaoDaTriagem as A;
+        let Some(servico) = self.triagem.servico.as_deref_mut() else {
+            return;
+        };
+        let resultado: Result<String, String> = match acao {
+            A::Iniciar { piloto } => servico.iniciar(piloto).map(|()| {
+                if piloto {
+                    "Piloto iniciado: 200 itens que você já decidiu.".to_owned()
+                } else {
+                    "Rodada de triagem iniciada.".to_owned()
+                }
+            }),
+            A::Pausar => {
+                servico.pausar();
+                Ok("Pausa pedida: vale ao fim do lote em andamento.".to_owned())
+            }
+            A::Retomar => servico.retomar().map(|()| "Rodada retomada.".to_owned()),
+            A::Aceitar(ids) => servico.aceitar(&ids, comandos).map(|r| {
+                self.decisoes_da_sessao.extend(&r.decisoes);
+                let mut texto = format!(
+                    "{} sugestões aceitas: uma decisão sua por item (Desfazer decisão desfaz).",
+                    r.aceitas.len()
+                );
+                if !r.ignoradas.is_empty() {
+                    texto.push_str(&format!(
+                        " {} não viraram decisão: {}.",
+                        r.ignoradas.len(),
+                        r.ignoradas[0].1
+                    ));
+                }
+                texto
+            }),
+            A::Recusar(ids) => servico
+                .recusar(&ids)
+                .map(|n| format!("{n} sugestões recusadas. Nenhuma decisão foi gravada.")),
+            A::SalvarConfiguracao(c) => servico
+                .salvar_configuracao(c)
+                .map(|()| "Opções de IA salvas.".to_owned()),
+            A::TestarConexao => {
+                let r = servico.testar_conexao();
+                self.triagem.teste = Some(r.clone());
+                r.map(|_| "Conexão com o provedor verificada.".to_owned())
+            }
+        };
+        self.triagem.atualizar();
+        match resultado {
+            Ok(t) => self.ok(t),
+            Err(e) => self.erro(e),
+        }
     }
 
     fn ok(&mut self, texto: String) {
