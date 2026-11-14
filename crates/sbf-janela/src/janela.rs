@@ -94,6 +94,8 @@ pub enum Dialogo {
         estacao: Ref,
         nome: String,
     },
+    /// Caixa de entrada e edição de movimentações (fatia 3).
+    Caixa(crate::caixa_ui::DialogoDaCaixa),
     /// Ferramentas › Regras de senha › Nova regra. Nunca a senha: só como montá-la.
     NovaRegra {
         fornecedor: String,
@@ -153,6 +155,12 @@ pub struct Janela {
     pub estacao: Option<crate::dinheiro::EstacaoLigada>,
     /// O pareamento da estação (login Google). `None`: a janela não sabe parear.
     pub pareamento: Option<Box<dyn crate::dinheiro::Pareamento>>,
+    /// A caixa de entrada, a edição e o envio de lotes (fatia 3). `None`: a área mostra o
+    /// selo da fatia e o botão Enviar fica desabilitado com o motivo.
+    pub caixa: Option<crate::caixa::CaixaLigada>,
+    caixa_ui: crate::caixa_ui::EstadoDaCaixa,
+    /// O erro do último Confirmar de um diálogo da caixa (mostrado dentro do diálogo).
+    erro_do_dialogo: Option<String>,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -251,7 +259,15 @@ impl Janela {
             pedacos_pendentes: HashMap::new(),
             estacao: None,
             pareamento: None,
+            caixa: None,
+            caixa_ui: crate::caixa_ui::EstadoDaCaixa::default(),
+            erro_do_dialogo: None,
         }
+    }
+
+    /// Liga a caixa de entrada e a edição (a real, ou a fictícia da demonstração).
+    pub fn ligar_caixa(&mut self, caixa: Box<dyn crate::caixa::Caixa>) {
+        self.caixa = Some(crate::caixa::CaixaLigada(caixa));
     }
 
     /// Liga a estação (a real, ou o livro fictício da demonstração).
@@ -452,6 +468,26 @@ impl Janela {
                 self.navegacao.atual(),
                 Destino::Area(Area::SugestoesDeConciliacao)
             ),
+            edicao_ligada: self.caixa.is_some(),
+            envio_do_lote: match (&self.caixa, &self.lote_atual) {
+                (None, _) => acoes::EnvioNoContexto::NaoLigado,
+                (Some(_), None) => {
+                    acoes::EnvioNoContexto::Indisponivel("Escolha um lote".to_owned())
+                }
+                (Some(c), Some(l)) => match c.0.envio_do_lote(l) {
+                    crate::caixa::EnvioDoLote::Pronto { .. }
+                    | crate::caixa::EnvioDoLote::Falhou { .. } => acoes::EnvioNoContexto::Pronto,
+                    crate::caixa::EnvioDoLote::Indisponivel(m) => {
+                        acoes::EnvioNoContexto::Indisponivel(m)
+                    }
+                    crate::caixa::EnvioDoLote::Enviando(_) => {
+                        acoes::EnvioNoContexto::Indisponivel("O envio está em andamento".to_owned())
+                    }
+                    crate::caixa::EnvioDoLote::Enviado { .. } => {
+                        acoes::EnvioNoContexto::Indisponivel("O lote já foi enviado".to_owned())
+                    }
+                },
+            },
         }
     }
 
@@ -646,6 +682,11 @@ impl Janela {
         destino: &Destino,
         vista: Option<&mut Vista>,
     ) {
+        if let Some(c) = self.caixa.as_mut()
+            && c.0.tique()
+        {
+            self.cache.limpar();
+        }
         match vista {
             Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
             None => {
@@ -671,8 +712,13 @@ impl Janela {
         let estacao: Option<&dyn crate::dinheiro::EstacaoDoLivro> =
             self.estacao.as_ref().map(|e| e.0.as_ref());
         let sinc = estacao.map(|e| e.estado());
+        let caixa: Option<&dyn crate::caixa::FonteDaCaixa> = self
+            .caixa
+            .as_ref()
+            .map(|c| &*c.0 as &dyn crate::caixa::FonteDaCaixa);
         let contexto_da_pagina = pagina::ContextoDaPagina {
             estacao,
+            caixa,
             hoje: &hoje,
         };
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
@@ -692,6 +738,7 @@ impl Janela {
                     ui,
                     estacao,
                     self.pareamento.as_deref(),
+                    caixa,
                     &hoje,
                     vista,
                     pedidos,
@@ -711,6 +758,9 @@ impl Janela {
                     &mut self.focar_pesquisa,
                 );
                 crate::dinheiro::faixa_da_estacao(ui, sinc.as_ref(), &hoje);
+                if let Some(c) = caixa {
+                    crate::caixa_ui::faixa_de_pendentes(ui, c, pedidos);
+                }
                 let hora_da_copia = crate::dinheiro::hora_da_copia(sinc.as_ref(), &hoje);
                 let painel = match leitor.painel_da_area(*area, &filtro) {
                     Ok(painel) => painel,
@@ -830,7 +880,7 @@ impl Janela {
                     &mut self.focar_pesquisa,
                 );
                 if *area == Area::Lotes {
-                    faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), pedidos);
+                    faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), caixa, pedidos);
                 }
                 if let Some(outra) = areas::area_complementar(*area) {
                     let pedido = PedidoDeTabela::Area {
@@ -901,6 +951,19 @@ impl Janela {
                     Err(e) => {
                         componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
                     }
+                }
+            }
+            Destino::AreaFutura("caixa") if caixa.is_some() => {
+                if let Some(c) = caixa {
+                    crate::caixa_ui::area(
+                        ui,
+                        c,
+                        &mut self.caixa_ui,
+                        previas,
+                        &mut leitor,
+                        &hoje,
+                        pedidos,
+                    );
                 }
             }
             Destino::AreaFutura(id) => {
@@ -990,6 +1053,10 @@ impl Janela {
         for f in lista {
             let contexto_da_pagina = pagina::ContextoDaPagina {
                 estacao: self.estacao.as_ref().map(|e| e.0.as_ref()),
+                caixa: self
+                    .caixa
+                    .as_ref()
+                    .map(|c| &*c.0 as &dyn crate::caixa::FonteDaCaixa),
                 hoje: &hoje,
             };
             let mut leitor = Leitor::novo(consulta, &mut self.cache);
@@ -1210,6 +1277,26 @@ impl Janela {
                         confirmar = true;
                     }
                 }
+                Dialogo::Caixa(d) => {
+                    ui.set_width(460.0);
+                    if crate::caixa_ui::desenhar_dialogo(ui, d) {
+                        confirmar = true;
+                    }
+                    if let Some(e) = &self.erro_do_dialogo {
+                        ui.colored_label(tema::paleta(ui.ctx()).perigo, e.as_str());
+                    }
+                    ui.add_space(10.0);
+                    let rotulo = d.rotulo_do_botao();
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(rotulo).clicked() {
+                            confirmar = true;
+                        }
+                        if ui.button("Cancelar").clicked() {
+                            fechar = true;
+                        }
+                    });
+                    return;
+                }
                 Dialogo::NovoLote { nome } => {
                     componentes::titulo(ui, "Novo lote", 17.0);
                     ui.label("Nome do lote");
@@ -1236,8 +1323,12 @@ impl Janela {
         if confirmar {
             match confirmar_dialogo(&dialogo) {
                 Ok(pedido) => {
+                    self.erro_do_dialogo = None;
                     self.pedidos.push(pedido);
                     return;
+                }
+                Err(e) if matches!(dialogo, Dialogo::Caixa(_)) => {
+                    self.erro_do_dialogo = Some(e);
                 }
                 Err(e) => {
                     if let Dialogo::DataEValor { erro, .. }
@@ -1367,6 +1458,7 @@ impl Janela {
                         erro: false,
                     });
                 }
+                Pedido::Caixa(p) => self.caixa_pedido(p),
                 Pedido::Alterar(pedido) => self.alterar(pedido),
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
                 Pedido::DescartarAlteracao(id) => self.descartar(&id),
@@ -1511,6 +1603,154 @@ impl Janela {
                 }
             }
             Err(e) => self.erro(e.to_string()),
+        }
+    }
+
+    /// Um pedido da caixa de entrada ou da edição: abre o diálogo ou grava na fila pelo
+    /// [`Editor`](crate::caixa::Editor). Nada aqui espera a rede.
+    fn caixa_pedido(&mut self, pedido: crate::caixa_ui::PedidoDaCaixa) {
+        use crate::caixa_ui::{self as ui_caixa, PedidoDaCaixa as P};
+        let Some(caixa) = self.caixa.as_mut() else {
+            self.erro("A caixa de entrada ainda não está ligada a esta janela.".to_owned());
+            return;
+        };
+        let c = &mut caixa.0;
+        let resultado: Result<String, String> = match pedido {
+            P::PedirRecusa(id) => {
+                let rotulo = c
+                    .lotes()
+                    .ok()
+                    .and_then(|ls| {
+                        ls.into_iter()
+                            .flat_map(|l| l.rascunhos)
+                            .find(|r| r.id == id)
+                            .map(|r| r.rotulo)
+                    })
+                    .unwrap_or_default();
+                self.dialogo = Some(Dialogo::Caixa(ui_caixa::DialogoDaCaixa::Recusar {
+                    id,
+                    rotulo,
+                    motivo: String::new(),
+                }));
+                self.erro_do_dialogo = None;
+                return;
+            }
+            P::PedirAprovarLote(id) => match ui_caixa::dialogo_de_lote(&**c, &id) {
+                Ok(d) => {
+                    self.dialogo = Some(Dialogo::Caixa(d));
+                    self.erro_do_dialogo = None;
+                    return;
+                }
+                Err(e) => Err(e),
+            },
+            P::PedirEdicao(alvo) => match ui_caixa::dialogo_de_edicao(&**c, &alvo) {
+                Ok(d) => {
+                    self.dialogo = Some(Dialogo::Caixa(d));
+                    self.erro_do_dialogo = None;
+                    return;
+                }
+                Err(e) => Err(e),
+            },
+            P::PedirRateio(alvo) => match ui_caixa::dialogo_de_rateio(&**c, &alvo) {
+                Ok(d) => {
+                    self.dialogo = Some(Dialogo::Caixa(d));
+                    self.erro_do_dialogo = None;
+                    return;
+                }
+                Err(e) => Err(e),
+            },
+            P::PedirExclusao(alvo) => match ui_caixa::dialogo_de_exclusao(&**c, &alvo) {
+                Ok(d) => {
+                    self.dialogo = Some(Dialogo::Caixa(d));
+                    self.erro_do_dialogo = None;
+                    return;
+                }
+                Err(e) => Err(e),
+            },
+            P::Corrigir { id, campos } => c
+                .corrigir(&id, campos)
+                .map(|e| {
+                    format!(
+                        "{}: {}. Pendente: vai na próxima sincronização.",
+                        e.o_que, e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::Aprovar(id) => c
+                .aprovar(&id)
+                .map(|e| {
+                    format!(
+                        "Aprovado: {}. Pendente até o servidor lançar no livro-caixa.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::Recusar { id, motivo } => c
+                .recusar(&id, &motivo)
+                .map(|e| {
+                    format!(
+                        "Recusado: {}. Pendente até o servidor aceitar.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::AprovarLote(id) => c
+                .aprovar_lote(&id)
+                .map(|e| {
+                    format!(
+                        "Lote aprovado: {}. Pendente: tudo ou nada no servidor.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::Editar { alvo, campos } => c
+                .editar_movimentacao(&alvo, campos)
+                .map(|e| {
+                    format!(
+                        "Editada: {}. Pendente até o servidor aceitar.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::Ratear { alvo, linhas } => c
+                .ratear(&alvo, linhas)
+                .map(|e| {
+                    format!(
+                        "Rateada: {}. Pendente até o servidor aceitar.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::Excluir(alvo) => c
+                .excluir(&alvo)
+                .map(|e| {
+                    format!(
+                        "Exclusão de {} pendente até o servidor aceitar.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::RefazerEscrita(id) => c
+                .refazer(&id)
+                .map(|e| {
+                    format!(
+                        "Refeita sobre a versão do servidor: {} pendente.",
+                        e.rotulo_do_alvo
+                    )
+                })
+                .map_err(|e| e.to_string()),
+            P::DescartarEscrita(id) => c
+                .descartar(&id)
+                .map(|()| "Escrita descartada: vale a versão do servidor.".to_owned())
+                .map_err(|e| e.to_string()),
+            P::EnviarLote(lote) => c
+                .enviar_lote(&lote)
+                .map(|()| "Enviando o lote ao servidor. Acompanhe na barra.".to_owned())
+                .map_err(|e| e.to_string()),
+        };
+        match resultado {
+            Ok(t) => self.ok(t),
+            Err(e) => self.erro(e),
         }
     }
 
@@ -1745,7 +1985,7 @@ impl Janela {
                 let r = match id {
                     IdAcao::AdicionarSelecao => comandos.adicionar_ao_lote(&lote, &sel).map(|()| format!("{} itens no lote.", sel.len())),
                     IdAcao::RemoverDoLote => comandos.remover_do_lote(&lote, &sel).map(|()| format!("{} itens tirados do lote.", sel.len())),
-                    IdAcao::AprovarLote => comandos.aprovar_lote(&lote).map(|()| "Lote aprovado: os registros dele ficam aprovados. Enviar chega na fatia 3.".to_owned()),
+                    IdAcao::AprovarLote => comandos.aprovar_lote(&lote).map(|()| "Lote aprovado: os registros dele ficam aprovados. Enviar ao servidor promove os documentos.".to_owned()),
                     _ => comandos.desaprovar_lote(&lote).map(|()| "Lote de volta a editável.".to_owned()),
                 };
                 match r {
@@ -1858,11 +2098,25 @@ impl Janela {
                 self.dialogo = Some(Dialogo::RenomearEstacao { estacao: r, nome });
             }
             IdAcao::EditarMovimentacao | IdAcao::RatearMovimentacao => {
-                self.erro(format!(
-                    "{}: {}",
-                    acoes::definicao(id).rotulo,
-                    crate::dinheiro::MOTIVO_FATIA_3
-                ));
+                let alvo = self
+                    .selecao()
+                    .into_iter()
+                    .find(|r| r.tipo == Tipo::Movimentacao);
+                match alvo {
+                    Some(alvo) if self.caixa.is_some() => {
+                        use crate::caixa_ui::PedidoDaCaixa as P;
+                        self.caixa_pedido(if id == IdAcao::EditarMovimentacao {
+                            P::PedirEdicao(alvo)
+                        } else {
+                            P::PedirRateio(alvo)
+                        });
+                    }
+                    _ => self.erro(format!(
+                        "{}: {}",
+                        acoes::definicao(id).rotulo,
+                        crate::dinheiro::MOTIVO_FATIA_3
+                    )),
+                }
             }
             IdAcao::CopiarRastro => {
                 if let Some(r) = self.item_aberto().cloned() {
@@ -1923,8 +2177,11 @@ impl Janela {
                     self.erro(e);
                 }
             }
-            IdAcao::EnviarAoServidor
-            | IdAcao::AbrirPdfProtegido
+            IdAcao::EnviarAoServidor => match self.lote_atual.clone() {
+                Some(lote) => self.caixa_pedido(crate::caixa_ui::PedidoDaCaixa::EnviarLote(lote)),
+                None => self.erro("Escolha um lote".to_owned()),
+            },
+            IdAcao::AbrirPdfProtegido
             | IdAcao::RegrasDeSenha
             | IdAcao::AtualizarEstante
             | IdAcao::FazerCopiaDeSeguranca
@@ -1995,6 +2252,7 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                 },
             ))
         }
+        Dialogo::Caixa(c) => c.confirmar().map(Pedido::Caixa),
         Dialogo::RevogarEstacao { estacao, .. } => Ok(Pedido::RevogarEstacao(estacao.clone())),
         Dialogo::RenomearEstacao { estacao, nome } => {
             let n = nome.trim();
@@ -2291,6 +2549,7 @@ fn faixa_do_lote(
     ui: &mut Ui,
     leitor: &mut Leitor<'_>,
     lote_atual: Option<&Ref>,
+    caixa: Option<&dyn crate::caixa::FonteDaCaixa>,
     pedidos: &mut Vec<Pedido>,
 ) {
     let p = tema::paleta(ui.ctx());
@@ -2310,10 +2569,18 @@ fn faixa_do_lote(
             }
             ui.separator();
             ui.label(
-                RichText::new("Selecione documentos ou registros em qualquer área e use Lotes › Adicionar seleção. Enviar ao servidor chega na fatia 3.")
-                    .size(12.0)
-                    .color(p.tinta_suave),
+                RichText::new(if caixa.is_some() {
+                    "Selecione documentos ou registros em qualquer área e use Lotes › Adicionar seleção. Aprovado o lote, Enviar ao servidor sobe os documentos."
+                } else {
+                    "Selecione documentos ou registros em qualquer área e use Lotes › Adicionar seleção."
+                })
+                .size(12.0)
+                .color(p.tinta_suave),
             );
+            if let (Some(c), Some(l)) = (caixa, lote_atual) {
+                ui.separator();
+                crate::caixa_ui::envio_do_lote(ui, c, l, pedidos);
+            }
         });
     });
     ui.add_space(4.0);

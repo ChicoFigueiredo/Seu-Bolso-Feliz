@@ -11,6 +11,8 @@ pub mod acervo_ficticio;
 pub mod acoes;
 pub mod app;
 pub mod areas;
+pub mod caixa;
+pub mod caixa_ui;
 pub mod componentes;
 pub mod composta;
 pub mod demonstracao;

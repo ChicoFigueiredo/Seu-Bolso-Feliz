@@ -1099,6 +1099,21 @@ pub struct ContextoDasAcoes {
     pub estacao_ativa: bool,
     /// A área aberta é a das Sugestões de conciliação.
     pub nas_sugestoes: bool,
+    /// O envio do lote atual ao servidor (fatia 3).
+    pub envio_do_lote: EnvioNoContexto,
+    /// A caixa de entrada e a edição estão ligadas (Editar e Ratear a movimentação).
+    pub edicao_ligada: bool,
+}
+
+/// Se Enviar ao servidor pode rodar no lote atual.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EnvioNoContexto {
+    /// A caixa não está ligada a esta janela.
+    #[default]
+    NaoLigado,
+    Pronto,
+    /// Por que não: "Escolha um lote", "O lote ainda não está aprovado"…
+    Indisponivel(String),
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -1207,7 +1222,11 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
             }
         }
         I::AprovarLote | I::DesaprovarLote => exige(c.lote_atual.is_some(), "Escolha um lote"),
-        I::EnviarAoServidor => Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned()),
+        I::EnviarAoServidor => match &c.envio_do_lote {
+            EnvioNoContexto::NaoLigado => Desabilitada(MOTIVO_NAO_LIGADO.to_owned()),
+            EnvioNoContexto::Pronto => Habilitada,
+            EnvioNoContexto::Indisponivel(m) => Desabilitada(m.clone()),
+        },
         I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
         I::AbrirPdfProtegido if c.ferramenta_ocupada => {
             Desabilitada("Outra ferramenta está rodando".to_owned())
@@ -1269,7 +1288,14 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
             }
         }
         I::EditarMovimentacao | I::RatearMovimentacao => {
-            Desabilitada(crate::dinheiro::MOTIVO_FATIA_3.to_owned())
+            if !c.edicao_ligada {
+                Desabilitada(crate::dinheiro::MOTIVO_FATIA_3.to_owned())
+            } else {
+                exige(
+                    sel.len() == 1 && todos_de(sel, &[Tipo::Movimentacao]),
+                    "Selecione uma movimentação",
+                )
+            }
         }
         I::RefazerAlteracao | I::DescartarAlteracao => exige(
             c.alteracao_recusada,
@@ -1485,23 +1511,35 @@ mod testes {
         c.selecao = vec![mov];
         c.estacao_revogada = true;
         assert!(!disponibilidade(I::MudarCategoria, &c).habilitada());
-        // A edição do resto do livro-caixa fica para a fatia 3, com o motivo.
+        // A edição do resto do livro-caixa só liga com a caixa, e diz o motivo.
         assert_eq!(
             disponibilidade(I::EditarMovimentacao, &c).motivo(),
             Some(crate::dinheiro::MOTIVO_FATIA_3)
         );
+        c.edicao_ligada = true;
+        assert!(disponibilidade(I::EditarMovimentacao, &c).habilitada());
+        assert!(disponibilidade(I::RatearMovimentacao, &c).habilitada());
+        c.selecao.clear();
+        assert!(!disponibilidade(I::RatearMovimentacao, &c).habilitada());
     }
 
     #[test]
-    fn enviar_ao_servidor_sempre_desabilitado_com_o_motivo() {
-        let c = ContextoDasAcoes {
+    fn enviar_ao_servidor_segue_o_contexto_da_caixa() {
+        let mut c = ContextoDasAcoes {
             lote_atual: Some(Ref::nova(Tipo::Lote, "1")),
             ..Default::default()
         };
         assert_eq!(
             disponibilidade(I::EnviarAoServidor, &c),
-            Disponibilidade::Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned())
+            Disponibilidade::Desabilitada(MOTIVO_NAO_LIGADO.to_owned())
         );
+        c.envio_do_lote = EnvioNoContexto::Indisponivel("O lote ainda não está aprovado".into());
+        assert_eq!(
+            disponibilidade(I::EnviarAoServidor, &c),
+            Disponibilidade::Desabilitada("O lote ainda não está aprovado".to_owned())
+        );
+        c.envio_do_lote = EnvioNoContexto::Pronto;
+        assert!(disponibilidade(I::EnviarAoServidor, &c).habilitada());
     }
 
     #[test]

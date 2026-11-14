@@ -3224,7 +3224,7 @@ impl Estado {
                         ),
                         campo(
                             "Promoção",
-                            txt("Enviar ao servidor chega na fatia 3, com a caixa de entrada"),
+                            txt("Aprovado o lote, Enviar ao servidor sobe os documentos"),
                         ),
                     ],
                 )

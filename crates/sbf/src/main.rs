@@ -30,6 +30,8 @@ struct App {
     captura: Option<PathBuf>,
     quadros: u32,
     captura_pedida: bool,
+    /// A cena da demonstração: a rota a abrir e os pedidos a fazer no primeiro quadro.
+    cena: Option<(String, Vec<sbf_janela::Pedido>)>,
 }
 
 impl App {
@@ -51,6 +53,7 @@ impl App {
             captura: std::env::var_os("SBF_CAPTURA").map(PathBuf::from),
             quadros: 0,
             captura_pedida: false,
+            cena: None,
         })
     }
 }
@@ -82,6 +85,12 @@ impl eframe::App for App {
         ctx.request_repaint();
         if self.quadros == 1 {
             preparar_captura(&mut self.casca, &ctx);
+            if let Some((rota, pedidos)) = self.cena.take() {
+                bancada_casca::abrir(&ctx, rota);
+                for p in pedidos {
+                    self.casca.app.janela().pedir(p);
+                }
+            }
         }
         // O foco depois da navegação (abrir uma área limpa a seleção).
         if self.quadros == 4 {
@@ -230,9 +239,125 @@ fn app_de_demonstracao() -> Result<App, String> {
         _ => {}
     }
     janela.ligar_estacao(Box::new(livro.clone()));
+    // A caixa de entrada fictícia (fatia 3): rascunhos ligados aos documentos do acervo e as
+    // movimentações do livro como base de edição.
+    let documentos: Vec<sbf_inventario::Ref> = sbf_inventario::Consulta::tabela(
+        &consulta,
+        &sbf_inventario::consulta::PedidoDeTabela::Area {
+            area: sbf_inventario::consulta::Area::Documentos,
+            filtro: sbf_inventario::consulta::Filtro::default(),
+        },
+    )
+    .map(|t| {
+        t.linhas
+            .into_iter()
+            .filter_map(|l| l.alvo)
+            .take(5)
+            .collect()
+    })
+    .unwrap_or_default();
+    let caixa = sbf_janela::caixa::demonstracao(&documentos, Box::new(livro.clone()));
+    janela.ligar_caixa(Box::new(caixa.clone()));
+    let cena = preparar_cena_da_caixa(&caixa, &consulta, &livro, &mut janela);
     let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
-    App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
-        .map_err(|e| format!("os temas não carregaram: {e}"))
+    let mut app = App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
+        .map_err(|e| format!("os temas não carregaram: {e}"))?;
+    app.cena = cena;
+    Ok(app)
+}
+
+/// A primeira linha com alvo de uma área (para as cenas de captura).
+fn primeiro_alvo(
+    c: &dyn Consulta,
+    area: sbf_inventario::consulta::Area,
+) -> Option<sbf_inventario::Ref> {
+    c.tabela(&sbf_inventario::consulta::PedidoDeTabela::Area {
+        area,
+        filtro: sbf_inventario::consulta::Filtro::default(),
+    })
+    .ok()?
+    .linhas
+    .into_iter()
+    .find_map(|l| l.alvo)
+}
+
+/// `SBF_CENA` da caixa: deixa a demonstração num estado que mostra pendente, aceita e recusada
+/// (`caixa-pendente`, `caixa-recusa`, `caixa-sinc`, `caixa-mov`, `caixa-edicao`, `caixa-rateio`,
+/// `caixa-exclusao`, `caixa-envio`). Devolve a rota a abrir e os pedidos do primeiro quadro.
+fn preparar_cena_da_caixa(
+    caixa: &sbf_janela::caixa::CaixaFicticia,
+    inventario: &dyn Consulta,
+    livro: &sbf_janela::livro_ficticio::LivroFicticio,
+    janela: &mut Janela,
+) -> Option<(String, Vec<sbf_janela::Pedido>)> {
+    use sbf_inventario::alteracao::CampoLadoALado;
+    use sbf_inventario::consulta::Area;
+    use sbf_janela::Pedido;
+    use sbf_janela::caixa::{Editor, FonteDaCaixa};
+    use sbf_janela::caixa_ui::PedidoDaCaixa as P;
+    let cena = std::env::var("SBF_CENA").unwrap_or_default();
+    let mut c = caixa.clone();
+    match cena.as_str() {
+        "caixa-pendente" | "caixa-recusa" | "caixa-sinc" => {
+            let _ = c.aprovar("r1");
+            let _ = c.aprovar("r3");
+            caixa.servidor_aceita_tudo();
+            let _ = c.aprovar("r4");
+            if cena != "caixa-pendente"
+                && let Ok(fila) = c.escritas()
+                && let Some(e) = fila.first()
+            {
+                caixa.servidor_recusa(
+                    &e.id,
+                    "O rascunho mudou no servidor depois que você aprovou.",
+                    vec![
+                        CampoLadoALado::novo("Valor", "R$ 458,10", "R$ 460,00"),
+                        CampoLadoALado::novo(
+                            "Conta ou cartão",
+                            "Cartão Azul",
+                            "Conta corrente Exemplo",
+                        ),
+                        CampoLadoALado::novo("Fornecedor", "Mercado Delta", "Mercado Delta"),
+                    ],
+                );
+            }
+            if cena == "caixa-sinc" {
+                // Mais uma na fila, esperando.
+                let _ = c.aprovar("r5");
+                let _ = c.aprovar("r2");
+                return Some(("sincronizacao".to_owned(), Vec::new()));
+            }
+            None
+        }
+        "caixa-mov" | "caixa-edicao" | "caixa-rateio" | "caixa-exclusao" => {
+            let mov = primeiro_alvo(livro, Area::Movimentacoes)?;
+            let m = c.movimentacao(&mov).ok().flatten()?;
+            if cena == "caixa-mov" {
+                let mut campos = m.campos.clone();
+                campos.descricao = format!("{} (conferida)", campos.descricao);
+                let _ = c.editar_movimentacao(&mov, campos);
+            }
+            let pedido = match cena.as_str() {
+                "caixa-edicao" => Some(P::PedirEdicao(mov.clone())),
+                "caixa-rateio" => Some(P::PedirRateio(mov.clone())),
+                "caixa-exclusao" => Some(P::PedirExclusao(mov.clone())),
+                _ => None,
+            };
+            Some((
+                mov.to_string(),
+                pedido.map(|p| vec![Pedido::Caixa(p)]).unwrap_or_default(),
+            ))
+        }
+        "caixa-envio" => {
+            let lote = primeiro_alvo(inventario, Area::Lotes)?;
+            janela.lote_atual = Some(lote.clone());
+            let _ = c.enviar_lote(&lote);
+            caixa.avancar_envio();
+            caixa.avancar_envio();
+            Some(("lote".to_owned(), Vec::new()))
+        }
+        _ => None,
+    }
 }
 
 const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
