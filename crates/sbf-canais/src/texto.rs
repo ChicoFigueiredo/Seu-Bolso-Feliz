@@ -85,6 +85,18 @@ pub fn linha(alerta: &Alerta, nivel: Nivel) -> String {
         Dados::Triagem { quantidade } => {
             format!("• {quantidade} sugestões da triagem esperam você no desktop")
         }
+        Dados::Ponto {
+            titulo,
+            area,
+            impacto,
+        } => match impacto {
+            Some(i) => format!(
+                "• {} [{area}] ({})",
+                proteger(titulo, nivel),
+                proteger(i, nivel)
+            ),
+            None => format!("• {} [{area}]", proteger(titulo, nivel)),
+        },
     }
 }
 
@@ -95,6 +107,7 @@ fn titulo(tipo: TipoDeAlerta) -> &'static str {
         TipoDeAlerta::CobrancaDuplicada => "Possível cobrança duplicada",
         TipoDeAlerta::GastoForaDoPadrao => "Gasto fora do padrão",
         TipoDeAlerta::SugestoesDaTriagem => "Triagem",
+        TipoDeAlerta::PontoDeAtencao => "Pontos de atenção",
     }
 }
 

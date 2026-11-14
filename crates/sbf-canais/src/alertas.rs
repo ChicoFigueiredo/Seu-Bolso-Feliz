@@ -54,6 +54,8 @@ pub enum TipoDeAlerta {
     GastoForaDoPadrao,
     /// Ponto de extensão: as sugestões da triagem moram na estação, não na VPS.
     SugestoesDaTriagem,
+    /// Um ponto de atenção da análise da estação (`pontos.sqlite`, spec 10).
+    PontoDeAtencao,
 }
 
 impl TipoDeAlerta {
@@ -64,6 +66,7 @@ impl TipoDeAlerta {
             TipoDeAlerta::CobrancaDuplicada => "cobranca_duplicada",
             TipoDeAlerta::GastoForaDoPadrao => "gasto_fora_do_padrao",
             TipoDeAlerta::SugestoesDaTriagem => "sugestoes_da_triagem",
+            TipoDeAlerta::PontoDeAtencao => "ponto_de_atencao",
         }
     }
 }
@@ -94,6 +97,12 @@ pub enum Dados {
     },
     Triagem {
         quantidade: u32,
+    },
+    /// Um ponto de atenção: o título, a área e o impacto já com a estimativa marcada.
+    Ponto {
+        titulo: String,
+        area: String,
+        impacto: Option<String>,
     },
 }
 

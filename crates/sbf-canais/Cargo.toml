@@ -11,6 +11,8 @@ sbf-servidor = { path = "../sbf-servidor" }
 sbf-coletor = { path = "../sbf-coletor" }
 sbf-contrato = { path = "../sbf-contrato" }
 sbf-livro = { path = "../sbf-livro", default-features = false, features = ["contrato"] }
+# Os pontos de atenção que a estação gera (a fonte de alertas é opcional e vem desligada).
+sbf-pontos = { path = "../sbf-pontos" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +27,7 @@ sha2 = "0.10"
 getrandom = "0.3"
 
 [dev-dependencies]
+tempfile = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 sbf-servidor = { path = "../sbf-servidor" }
 
