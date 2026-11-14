@@ -43,11 +43,25 @@ pub enum Modo {
     Backfill,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpcoesDaSincronizacao {
     pub de: Option<String>,
     pub ate: Option<String>,
     pub backfill: bool,
+    /// Só conta o que seria criado: consulta a Pluggy e o banco, sem gravar nada (nem lote,
+    /// categoria, checkpoint, saldo ou `last_synced_at`). Serve ao comparador do corte.
+    pub simulacao: bool,
+}
+
+/// Uma conexão a sincronizar, com a janela já resolvida.
+#[derive(Debug, Clone)]
+pub struct Conexao<'a> {
+    pub item: &'a str,
+    pub mapeamentos: &'a [Mapeamento],
+    pub de: NaiveDate,
+    pub ate: NaiveDate,
+    pub modo: Modo,
+    pub simulacao: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -143,9 +157,15 @@ pub async fn sincronizar_em(
         } else {
             Modo::Incremental
         };
-        let r = match sincronizar_conexao(banco, pluggy, dono, &item, &mapeamentos, de, ate, modo)
-            .await
-        {
+        let a_sincronizar = Conexao {
+            item: &item,
+            mapeamentos: &mapeamentos,
+            de,
+            ate,
+            modo,
+            simulacao: opcoes.simulacao,
+        };
+        let r = match sincronizar_conexao(banco, pluggy, dono, &a_sincronizar).await {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("falha ao sincronizar a conexão {id}: {e}");
@@ -161,6 +181,9 @@ pub async fn sincronizar_em(
         resumo.ja_sincronizados += r.ja_sincronizados;
         resumo.erros_de_item += r.erros_de_item;
 
+        if opcoes.simulacao {
+            continue;
+        }
         // Saldo é posição, não fluxo: as transações nunca o atualizam. Falha aqui não derruba o
         // sync (as transações já estão gravadas e valem sozinhas).
         match atualizar_saldos(banco, pluggy, dono, &item, &mapeamentos).await {
@@ -229,6 +252,7 @@ struct Contexto<'a> {
     banco: &'a Pool,
     dono: Uuid,
     lote: Option<Uuid>,
+    simulacao: bool,
     apelidos: Vec<Apelido>,
     categorias: HashMap<String, Uuid>,
 }
@@ -285,17 +309,20 @@ impl Contexto<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn sincronizar_conexao(
     banco: &Pool,
     pluggy: &ClientePluggy,
     dono: Uuid,
-    item: &str,
-    mapeamentos: &[Mapeamento],
-    de: NaiveDate,
-    ate: NaiveDate,
-    modo: Modo,
+    conexao: &Conexao<'_>,
 ) -> Result<ResultadoDaConexao, ErroDeColeta> {
+    let Conexao {
+        item,
+        mapeamentos,
+        de,
+        ate,
+        modo,
+        simulacao,
+    } = *conexao;
     let ativos: Vec<&Mapeamento> = mapeamentos
         .iter()
         .filter(|m| m.situacao != "ignored")
@@ -311,6 +338,7 @@ pub async fn sincronizar_conexao(
         banco,
         dono,
         lote: None,
+        simulacao,
         apelidos: Vec::new(),
         categorias: HashMap::new(),
     };
@@ -354,7 +382,7 @@ pub async fn sincronizar_conexao(
     }
 
     for mapeamento in ativos {
-        let janela = if modo == Modo::Backfill {
+        let janela = if modo == Modo::Backfill && !simulacao {
             let c = banco.get().await?;
             Some(
                 checkpoint::iniciar_ou_retomar(
@@ -453,6 +481,9 @@ async fn gravar_transacao(
         if ja.is_some() {
             return Ok(Desfecho::JaExistia);
         }
+    }
+    if ctx.simulacao {
+        return Ok(Desfecho::Criado);
     }
     let fornecedor = resolver_fornecedor(
         t.nome_do_comerciante.as_deref().unwrap_or(""),

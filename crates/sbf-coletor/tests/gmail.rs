@@ -3,53 +3,11 @@
 
 mod comum;
 
-use comum::{Falso, Pedido, arquivo, banco, novo_dono, subir};
+use comum::{SEGREDO, banco, gmail_falso, novo_dono, roteiro_do_gmail, subir};
 use sbf_coletor::config::{ConfigGmail, Segredo};
 use sbf_coletor::gmail::cliente::ClienteGmail;
 use sbf_coletor::gmail::varredura::{OpcoesDaVarredura, varrer};
 use sbf_servidor::armazenamento::ArmazenamentoFalso;
-
-const SEGREDO: &str = "segredo-do-cliente-ficticio";
-const REFRESH: &str = "refresh-ficticio-nao-vazar";
-
-fn roteiro_do_gmail(p: &Pedido) -> (u16, String) {
-    match (p.metodo.as_str(), p.caminho.as_str()) {
-        ("POST", "/token") => {
-            if p.corpo.contains(&format!("refresh_token={REFRESH}")) {
-                (200, arquivo("gmail/token.json"))
-            } else {
-                (400, arquivo("gmail/token_revogado.json"))
-            }
-        }
-        ("GET", "/labels") => (200, arquivo("gmail/rotulos.json")),
-        ("GET", "/messages") => match p.parametro("pageToken").as_deref() {
-            None => (200, arquivo("gmail/lista_p1.json")),
-            Some("pagina-2") => (200, arquivo("gmail/lista_p2.json")),
-            Some(_) => (400, "{}".into()),
-        },
-        ("GET", c) if c.starts_with("/messages/") && c.contains("/attachments/") => {
-            let id = c.rsplit('/').next().unwrap_or("");
-            (200, arquivo(&format!("gmail/anexo_{id}.json")))
-        }
-        ("GET", c) if c.starts_with("/messages/") => {
-            let id = c.trim_start_matches("/messages/");
-            (200, arquivo(&format!("gmail/mensagem_{id}.json")))
-        }
-        _ => (404, "{}".into()),
-    }
-}
-
-async fn gmail_falso() -> (Falso, ClienteGmail) {
-    let falso = subir(roteiro_do_gmail).await;
-    let mut config = ConfigGmail::com_enderecos_padrao(
-        "cliente-ficticio.apps.googleusercontent.com".into(),
-        Segredo::novo(SEGREDO),
-        Segredo::novo(REFRESH),
-    );
-    config.base_api = falso.base.clone();
-    config.url_do_token = format!("{}/token", falso.base);
-    (falso, ClienteGmail::novo(config))
-}
 
 #[tokio::test]
 async fn token_e_renovado_uma_vez_e_vai_no_cabecalho() {

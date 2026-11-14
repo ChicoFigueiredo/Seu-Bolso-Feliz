@@ -14,6 +14,7 @@
 
 pub mod agenda;
 pub mod checkpoint;
+pub mod cli;
 pub mod comparador;
 pub mod config;
 pub mod dono;

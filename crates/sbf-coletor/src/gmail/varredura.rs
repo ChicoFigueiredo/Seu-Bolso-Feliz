@@ -36,7 +36,7 @@ use crate::erro::ErroDeColeta;
 /// mensagens que chegaram fora de ordem.
 const FOLGA_DO_CHECKPOINT_MS: i64 = 2 * 24 * 60 * 60 * 1000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpcoesDaVarredura {
     pub rotulo: String,
     pub consulta: String,

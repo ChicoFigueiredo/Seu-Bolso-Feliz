@@ -536,3 +536,41 @@ async fn auth_recusada_nao_vaza_o_segredo() {
     assert!(erro.contains("HTTP 403"), "{erro}");
     assert!(!erro.contains("outro-segredo-ficticio"), "{erro}");
 }
+
+#[tokio::test]
+async fn simulacao_conta_sem_gravar_nada() {
+    let Some(banco) = banco().await else { return };
+    let cen = montar(&banco).await;
+    let (_falso, pluggy, _) = pluggy_falso(false).await;
+    let opcoes = OpcoesDaSincronizacao {
+        backfill: true,
+        simulacao: true,
+        ..Default::default()
+    };
+    let r = sincronizar_em(&banco, &pluggy, cen.dono, &opcoes, hoje())
+        .await
+        .expect("simulação");
+    assert_eq!(
+        (r.criados, r.ja_sincronizados, r.conexoes_com_falha),
+        (4, 0, 0)
+    );
+    for sql in [
+        "SELECT count(*) FROM public.draft_records WHERE user_id = $1",
+        "SELECT count(*) FROM public.draft_batches WHERE user_id = $1",
+        "SELECT count(*) FROM public.categories WHERE user_id = $1",
+        "SELECT count(*) FROM public.ingestion_checkpoints WHERE user_id = $1",
+    ] {
+        assert_eq!(contar(&banco, sql, cen.dono).await, 0, "{sql}");
+    }
+    let c = banco.get().await.expect("conexão");
+    let l = c
+        .query_one(
+            "SELECT (SELECT current_balance::text FROM public.financial_products WHERE id = $1), \
+             (SELECT last_synced_at IS NULL FROM public.provider_connections WHERE id = $2)",
+            &[&cen.produto, &cen.conexao],
+        )
+        .await
+        .expect("estado");
+    assert_eq!(l.get::<_, String>(0), "0.00");
+    assert!(l.get::<_, bool>(1));
+}
