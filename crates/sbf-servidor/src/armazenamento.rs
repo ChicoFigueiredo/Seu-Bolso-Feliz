@@ -151,6 +151,12 @@ impl fmt::Debug for VercelBlob {
 /// A API do Vercel Blob.
 pub const BASE_DO_VERCEL_BLOB: &str = "https://vercel.com/api/blob";
 
+/// Prazo para abrir a conexão com o Blob.
+const PRAZO_DE_CONEXAO: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Prazo total de um PUT (o arquivo mais pesado aceito, 50 MB, em rede doméstica).
+const PRAZO_TOTAL: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// A versão do protocolo que este cliente fala.
 const VERSAO_DA_API: &str = "12";
 
@@ -164,8 +170,24 @@ impl VercelBlob {
 
     /// Com a base e o token dados (os testes apontam a base para um servidor local).
     pub fn novo(base: &str, token: Zeroizing<String>) -> Self {
+        Self::com_prazos(base, token, PRAZO_DE_CONEXAO, PRAZO_TOTAL)
+    }
+
+    /// Como [`VercelBlob::novo`], com os prazos de conexão e total escolhidos (os testes usam
+    /// prazos curtos).
+    pub fn com_prazos(
+        base: &str,
+        token: Zeroizing<String>,
+        conexao: std::time::Duration,
+        total: std::time::Duration,
+    ) -> Self {
+        let cliente = reqwest::Client::builder()
+            .connect_timeout(conexao)
+            .timeout(total)
+            .build()
+            .unwrap_or_default();
         Self {
-            cliente: reqwest::Client::new(),
+            cliente,
             base: base.trim_end_matches('/').to_owned(),
             token,
         }
@@ -267,6 +289,35 @@ mod testes {
         assert_eq!(cab["authorization"], "Bearer token-ficticio-de-teste");
         assert_eq!(cab["x-content-type"], "application/pdf");
         assert_eq!(cab["x-add-random-suffix"], "0");
+    }
+
+    #[tokio::test]
+    async fn vercel_blob_que_nao_responde_estoura_o_prazo_sem_vazar_o_token() {
+        // Um servidor que aceita a conexão e nunca responde.
+        let ouvinte = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("porta");
+        let porta = ouvinte.local_addr().expect("endereço").port();
+        tokio::spawn(async move {
+            let mut seguradas = Vec::new();
+            while let Ok((s, _)) = ouvinte.accept().await {
+                seguradas.push(s);
+            }
+        });
+        let blob = VercelBlob::com_prazos(
+            &format!("http://127.0.0.1:{porta}"),
+            Zeroizing::new("segredo-y".into()),
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(300),
+        );
+        let inicio = std::time::Instant::now();
+        let erro = blob.gravar("a", b"x", "text/plain").await.unwrap_err();
+        assert!(inicio.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(
+            erro,
+            ErroDeArmazenamento::Indisponivel("tempo esgotado".into())
+        );
+        assert!(!erro.to_string().contains("segredo-y"));
     }
 
     #[tokio::test]
