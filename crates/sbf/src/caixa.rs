@@ -463,8 +463,7 @@ impl CaixaDaEstacao {
                 let servidor = agora_rasc.map(|r| campos_do_rascunho(&r.dados));
                 let dinheiro_de = |v: Option<i64>| v.map_or_else(|| "—".to_owned(), dinheiro);
                 let conta_de = |c: &Option<String>| {
-                    c.as_deref()
-                        .map_or_else(|| "—".to_owned(), &nome_da_conta)
+                    c.as_deref().map_or_else(|| "—".to_owned(), &nome_da_conta)
                 };
                 vec![
                     CampoLadoALado::novo(

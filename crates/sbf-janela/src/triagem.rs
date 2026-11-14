@@ -177,7 +177,7 @@ fn cartao_da_rodada(ui: &mut Ui, p: &Progresso, pedidos: &mut Vec<Pedido>) {
         ui.add(
             egui::ProgressBar::new(p.fracao())
                 .show_percentage()
-                .desired_width(f32::INFINITY),
+                .desired_width(ui.available_width()),
         );
         ui.label(
             RichText::new(format!(
