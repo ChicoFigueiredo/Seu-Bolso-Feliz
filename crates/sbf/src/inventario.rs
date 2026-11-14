@@ -123,7 +123,24 @@ impl AppDoInventario {
                 }
                 f.carregar_preferencias();
                 f.faxinar_sobras_em_segundo_plano();
+                let chaveiro_da_ia = f.chaveiro.clone();
                 janela.ferramentas = Some(f);
+                // A triagem por IA (spec 09): o `claude` do usuário como principal e, só se
+                // houver chave no chaveiro e a reserva ligada, o OpenRouter. Nada é chamado
+                // aqui: o provedor só roda quando você clica em Iniciar ou em Testar conexão.
+                match crate::triagem::montar(
+                    inventario.caminho(),
+                    &crate::triagem::Insumos::do_ambiente(chaveiro_da_ia),
+                ) {
+                    Ok(servico) => janela.ligar_triagem(Box::new(servico)),
+                    Err(e) if janela.mensagem.is_none() => {
+                        janela.mensagem = Some(sbf_janela::janela::Mensagem {
+                            texto: format!("Triagem por IA indisponível: {e}"),
+                            erro: true,
+                        });
+                    }
+                    Err(_) => {}
+                }
                 janela.pre_carregar_visao_geral(inventario.caminho().to_path_buf());
                 if let Some(t) = aviso {
                     janela.mensagem = Some(sbf_janela::janela::Mensagem {

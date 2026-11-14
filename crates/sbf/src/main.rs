@@ -9,11 +9,13 @@
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf --versao`.
 
+mod caixa;
 mod captura;
 mod entrada;
 mod estacao;
 mod inventario;
 mod servidor;
+mod triagem;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -258,6 +260,8 @@ fn app_de_demonstracao() -> Result<App, String> {
     .unwrap_or_default();
     let caixa = sbf_janela::caixa::demonstracao(&documentos, Box::new(livro.clone()));
     janela.ligar_caixa(Box::new(caixa.clone()));
+    // A triagem por IA fictícia: dados inventados, nenhum provedor é chamado.
+    janela.ligar_triagem(Box::new(sbf_triagem::servico::TriagemFicticia::nova()));
     let cena = preparar_cena_da_caixa(&caixa, &consulta, &livro, &mut janela);
     let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
     let mut app = App::novo(janela, Box::new(consulta), Box::new(comandos), barra)

@@ -70,6 +70,70 @@ impl Default for ConfiguracaoDeIa {
     }
 }
 
+/// O que terminou fora do quadro (a janela lê com [`ServicoDeTriagem::sondar`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Conclusao {
+    /// "Testar conexão": o texto a mostrar ou o motivo.
+    Teste(Result<String, String>),
+    /// "Salvar": gravou ou não.
+    Configuracao(Result<(), String>),
+}
+
+/// Onde as threads de "Testar conexão" e "Salvar" deixam o resultado. Barato de clonar.
+#[derive(Debug, Clone, Default)]
+pub struct CaixaDeConclusoes {
+    prontas: Arc<Mutex<Vec<Conclusao>>>,
+    em_andamento: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl CaixaDeConclusoes {
+    fn travar(&self) -> std::sync::MutexGuard<'_, Vec<Conclusao>> {
+        self.prontas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Roda `trabalho` numa thread e guarda o que ele devolve. Se a thread não nasce, a
+    /// conclusão é o erro.
+    fn lancar(
+        &self,
+        nome: &str,
+        trabalho: impl FnOnce() -> Conclusao + Send + 'static,
+        falha: fn(String) -> Conclusao,
+    ) {
+        use std::sync::atomic::Ordering;
+        self.em_andamento.fetch_add(1, Ordering::AcqRel);
+        let caixa = self.clone();
+        let iniciada = std::thread::Builder::new()
+            .name(nome.to_owned())
+            .spawn(move || {
+                // Um pânico do trabalho não pode deixar a janela esperando para sempre.
+                let c = std::panic::catch_unwind(std::panic::AssertUnwindSafe(trabalho))
+                    .unwrap_or_else(|_| falha("a tarefa parou de repente".to_owned()));
+                caixa.travar().push(c);
+                caixa.em_andamento.fetch_sub(1, Ordering::AcqRel);
+            });
+        if iniciada.is_err() {
+            self.em_andamento.fetch_sub(1, Ordering::AcqRel);
+            self.travar()
+                .push(falha("não foi possível iniciar a tarefa".to_owned()));
+        }
+    }
+
+    /// Guarda uma conclusão que já está pronta (a fictícia).
+    fn entregar(&self, c: Conclusao) {
+        self.travar().push(c);
+    }
+
+    fn tomar(&self) -> Vec<Conclusao> {
+        std::mem::take(&mut *self.travar())
+    }
+
+    fn ocupada(&self) -> bool {
+        self.em_andamento.load(std::sync::atomic::Ordering::Acquire) > 0
+    }
+}
+
 /// O trait pequeno da rodada.
 pub trait RodadaDeTriagem {
     /// Começa uma rodada sobre a fila (ou o piloto de 200 itens já decididos).
@@ -119,6 +183,17 @@ pub trait ServicoDeTriagem: RodadaDeTriagem {
     /// # Errors
     /// Texto para a tela.
     fn testar_conexao(&mut self) -> Result<String, String>;
+
+    /// Como [`Self::testar_conexao`], mas **sem bloquear**: o resultado chega por
+    /// [`Self::sondar`] como [`Conclusao::Teste`]. A janela só usa esta.
+    fn iniciar_teste_de_conexao(&mut self);
+    /// Como [`Self::salvar_configuracao`], sem bloquear: a configuração já vale na memória e o
+    /// resultado da gravação chega como [`Conclusao::Configuracao`].
+    fn iniciar_salvamento(&mut self, configuracao: ConfiguracaoDeIa);
+    /// O que terminou desde a última chamada. Não bloqueia.
+    fn sondar(&mut self) -> Vec<Conclusao>;
+    /// Há teste ou gravação em andamento (a janela pede repintura).
+    fn ocupado(&self) -> bool;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -135,6 +210,7 @@ pub struct TriagemFicticia {
     grupos: Vec<GrupoDeSugestoes>,
     configuracao: ConfiguracaoDeIa,
     proxima_decisao: IdDecisao,
+    conclusoes: CaixaDeConclusoes,
     /// Itens por segundo da rodada fictícia.
     pub ritmo: usize,
 }
@@ -230,6 +306,7 @@ impl TriagemFicticia {
             grupos,
             configuracao: ConfiguracaoDeIa::default(),
             proxima_decisao: 9000,
+            conclusoes: CaixaDeConclusoes::default(),
             ritmo: 20,
         };
         f.piloto = Some(f.relatorio_ficticio());
@@ -411,12 +488,82 @@ impl ServicoDeTriagem for TriagemFicticia {
     fn testar_conexao(&mut self) -> Result<String, String> {
         Ok("conexão de demonstração: nenhum provedor foi chamado".to_owned())
     }
+
+    fn iniciar_teste_de_conexao(&mut self) {
+        let r = self.testar_conexao();
+        self.conclusoes.entregar(Conclusao::Teste(r));
+    }
+
+    fn iniciar_salvamento(&mut self, configuracao: ConfiguracaoDeIa) {
+        let r = self.salvar_configuracao(configuracao);
+        self.conclusoes.entregar(Conclusao::Configuracao(r));
+    }
+
+    fn sondar(&mut self) -> Vec<Conclusao> {
+        self.conclusoes.tomar()
+    }
+
+    fn ocupado(&self) -> bool {
+        self.conclusoes.ocupada()
+    }
 }
 
 // ---------------------------------------------------------------------------------------
 // Sobre o inventário
 
 const CHAVE_DA_CONFIGURACAO: &str = "triagem.configuracao";
+
+/// A configuração de Opções → IA gravada no banco (o padrão se nunca foi salva). Quem monta
+/// a [`Fila`] precisa dela antes do serviço (a reserva só entra se estiver ligada).
+pub fn configuracao_salva(caminho: impl AsRef<Path>) -> ConfiguracaoDeIa {
+    sugestoes::abrir(caminho.as_ref())
+        .ok()
+        .and_then(|conn| ler_configuracao(&conn))
+        .unwrap_or_default()
+}
+
+fn ler_configuracao(conn: &rusqlite::Connection) -> Option<ConfiguracaoDeIa> {
+    conn.query_row(
+        "SELECT valor FROM meta WHERE chave = ?1",
+        [CHAVE_DA_CONFIGURACAO],
+        |l| l.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|t| serde_json::from_str(&t).ok())
+}
+
+fn pedido_de_teste() -> Pedido {
+    Pedido {
+        prompt_versao: "teste-de-conexao".to_owned(),
+        instrucao: "Responda com o JSON {\"ok\": true}.".to_owned(),
+        entrada: "teste".to_owned(),
+        esquema: json!({
+            "type": "object",
+            "required": ["ok"],
+            "properties": {"ok": {"type": "boolean"}}
+        }),
+        degrau: Degrau::Rapido,
+        max_tokens_saida: 20,
+    }
+}
+
+fn testar(provedor: &dyn Provedor) -> Result<String, String> {
+    provedor
+        .pedir(&pedido_de_teste())
+        .map(|r| format!("{} respondeu ({})", provedor.nome(), r.modelo))
+        .map_err(|e| e.to_string())
+}
+
+fn gravar_configuracao(caminho: &Path, configuracao: &ConfiguracaoDeIa) -> Result<(), String> {
+    let conn = sugestoes::abrir(caminho).map_err(|e| e.to_string())?;
+    let texto = serde_json::to_string(configuracao).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
+        rusqlite::params![CHAVE_DA_CONFIGURACAO, texto],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 /// O serviço sobre o `inventario.sqlite` (já migrado) e um [`Provedor`]. A rodada roda numa
 /// thread própria, com a sua conexão.
@@ -431,6 +578,7 @@ pub struct TriagemDoInventario {
     thread: Option<JoinHandle<()>>,
     configuracao: ConfiguracaoDeIa,
     rastro: Option<crate::rodada::RastroDeFalhas>,
+    conclusoes: CaixaDeConclusoes,
 }
 
 impl std::fmt::Debug for TriagemDoInventario {
@@ -455,15 +603,7 @@ impl TriagemDoInventario {
     ) -> Result<Self, String> {
         let caminho = caminho.as_ref().to_path_buf();
         let conn = sugestoes::abrir(&caminho).map_err(|e| e.to_string())?;
-        let configuracao = conn
-            .query_row(
-                "SELECT valor FROM meta WHERE chave = ?1",
-                [CHAVE_DA_CONFIGURACAO],
-                |l| l.get::<_, String>(0),
-            )
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
+        let configuracao = ler_configuracao(&conn).unwrap_or_default();
         Ok(Self {
             caminho,
             fila,
@@ -475,6 +615,7 @@ impl TriagemDoInventario {
             thread: None,
             configuracao,
             rastro: None,
+            conclusoes: CaixaDeConclusoes::default(),
         })
     }
 
@@ -620,33 +761,40 @@ impl ServicoDeTriagem for TriagemDoInventario {
     }
 
     fn salvar_configuracao(&mut self, configuracao: ConfiguracaoDeIa) -> Result<(), String> {
-        let conn = sugestoes::abrir(&self.caminho).map_err(|e| e.to_string())?;
-        let texto = serde_json::to_string(&configuracao).map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (chave, valor) VALUES (?1, ?2)",
-            rusqlite::params![CHAVE_DA_CONFIGURACAO, texto],
-        )
-        .map_err(|e| e.to_string())?;
+        gravar_configuracao(&self.caminho, &configuracao)?;
         self.configuracao = configuracao;
         Ok(())
     }
 
     fn testar_conexao(&mut self) -> Result<String, String> {
-        let pedido = Pedido {
-            prompt_versao: "teste-de-conexao".to_owned(),
-            instrucao: "Responda com o JSON {\"ok\": true}.".to_owned(),
-            entrada: "teste".to_owned(),
-            esquema: json!({
-                "type": "object",
-                "required": ["ok"],
-                "properties": {"ok": {"type": "boolean"}}
-            }),
-            degrau: Degrau::Rapido,
-            max_tokens_saida: 20,
-        };
-        self.provedor
-            .pedir(&pedido)
-            .map(|r| format!("{} respondeu ({})", self.provedor.nome(), r.modelo))
-            .map_err(|e| e.to_string())
+        testar(self.provedor.as_ref())
+    }
+
+    fn iniciar_teste_de_conexao(&mut self) {
+        let provedor = Arc::clone(&self.provedor);
+        self.conclusoes.lancar(
+            "sbf-teste-de-ia",
+            move || Conclusao::Teste(testar(provedor.as_ref())),
+            |m| Conclusao::Teste(Err(m)),
+        );
+    }
+
+    fn iniciar_salvamento(&mut self, configuracao: ConfiguracaoDeIa) {
+        // Vale já na tela; a gravação (que pode esperar o banco) roda fora do quadro.
+        self.configuracao = configuracao.clone();
+        let caminho = self.caminho.clone();
+        self.conclusoes.lancar(
+            "sbf-salvar-opcoes-de-ia",
+            move || Conclusao::Configuracao(gravar_configuracao(&caminho, &configuracao)),
+            |m| Conclusao::Configuracao(Err(m)),
+        );
+    }
+
+    fn sondar(&mut self) -> Vec<Conclusao> {
+        self.conclusoes.tomar()
+    }
+
+    fn ocupado(&self) -> bool {
+        self.conclusoes.ocupada()
     }
 }

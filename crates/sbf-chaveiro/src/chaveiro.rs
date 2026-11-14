@@ -21,6 +21,8 @@ pub const PREFIXO_DE_SENHA: &str = "senha:";
 /// O prefixo da credencial de estação (spec 07, "Autenticação da estação"): a chave do
 /// servidor `<servidor>` é `estacao:<servidor>`.
 pub const PREFIXO_DE_ESTACAO: &str = "estacao:";
+/// O prefixo das chaves de provedores de IA (spec 09): a do OpenRouter é `ia:openrouter`.
+pub const PREFIXO_DE_IA: &str = "ia:";
 
 /// O que a importação trouxe, sem nenhum valor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +190,39 @@ impl Chaveiro {
     /// A senha própria do rótulo, em claro. Só a abertura de PDF protegido chama isto.
     pub fn senha(&self, rotulo: &str) -> Result<Segredo, ErroDoChaveiro> {
         Ok(self.guarda.ler(&chave_de_senha(rotulo)?)?)
+    }
+
+    // ---------------- Chave de provedor de IA ----------------
+
+    fn chave_de_ia_de(provedor: &str) -> Result<String, ErroDoChaveiro> {
+        if provedor.is_empty()
+            || PREFIXO_DE_IA.len() + provedor.len() > TAMANHO_MAXIMO_DO_ROTULO
+            || provedor.chars().any(char::is_control)
+        {
+            return Err(ErroDoChaveiro::RotuloInvalido);
+        }
+        Ok(format!("{PREFIXO_DE_IA}{provedor}"))
+    }
+
+    /// Guarda (ou troca) a chave do provedor de IA `provedor` (`openrouter`).
+    pub fn guardar_chave_de_ia(
+        &self,
+        provedor: &str,
+        chave: Segredo,
+    ) -> Result<(), ErroDoChaveiro> {
+        Ok(self
+            .guarda
+            .gravar(&Self::chave_de_ia_de(provedor)?, chave)?)
+    }
+
+    /// A chave do provedor de IA, em claro. Só o portão de rede do provedor chama isto.
+    pub fn chave_de_ia(&self, provedor: &str) -> Result<Segredo, ErroDoChaveiro> {
+        Ok(self.guarda.ler(&Self::chave_de_ia_de(provedor)?)?)
+    }
+
+    /// Há chave guardada para o provedor (sem ler o valor).
+    pub fn tem_chave_de_ia(&self, provedor: &str) -> bool {
+        Self::chave_de_ia_de(provedor).is_ok_and(|c| self.guarda.rotulos().contains(&c))
     }
 
     // ---------------- Credencial de estação ----------------

@@ -16,11 +16,18 @@ eframe = { workspace = true }
 egui = { workspace = true }
 sbf-servidor = { path = "../sbf-servidor" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
-uuid = { version = "1" }
+uuid = { version = "1", features = ["v4"] }
+sbf-contrato = { path = "../sbf-contrato" }
+serde_json = { workspace = true }
+sbf-triagem = { path = "../sbf-triagem" }
+sbf-ia = { path = "../sbf-ia" }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+sbf-processo = { path = "../sbf-processo" }
 zeroize = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+rusqlite = { workspace = true }
 
 [lints]
 workspace = true

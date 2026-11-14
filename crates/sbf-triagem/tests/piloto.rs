@@ -165,3 +165,45 @@ fn servico_sobre_o_inventario_roda_lista_aceita_e_desfaz() {
     assert_eq!(servico.configuracao(), Default::default());
     assert!(servico.testar_conexao().expect("teste").contains("falso"));
 }
+
+#[test]
+fn teste_e_salvamento_nao_bloqueiam_e_chegam_por_sondar() {
+    use sbf_triagem::servico::Conclusao;
+    let (banco, verdade) = banco_do_piloto();
+    let m = montar(&banco, falso_que_acerta_80(verdade));
+    let mut servico = TriagemDoInventario::nova(
+        &banco.caminho,
+        Arc::clone(&m.fila),
+        Arc::clone(&m.registro),
+        Arc::clone(&m.falso) as Arc<dyn sbf_ia::Provedor>,
+    )
+    .expect("serviço");
+
+    let mut nova = servico.configuracao();
+    nova.teto_do_mes_centavos_usd = 777;
+    servico.iniciar_teste_de_conexao();
+    servico.iniciar_salvamento(nova.clone());
+    // A configuração já vale na memória, sem esperar a gravação.
+    assert_eq!(servico.configuracao(), nova);
+
+    let mut chegaram = Vec::new();
+    for _ in 0..200 {
+        chegaram.extend(servico.sondar());
+        if chegaram.len() == 2 && !servico.ocupado() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    assert!(!servico.ocupado());
+    assert!(
+        chegaram
+            .iter()
+            .any(|c| matches!(c, Conclusao::Teste(Ok(t)) if t.contains("falso")))
+    );
+    assert!(chegaram.contains(&Conclusao::Configuracao(Ok(()))));
+    // Gravou de verdade: a configuração salva é a que o próximo app abre.
+    assert_eq!(
+        sbf_triagem::servico::configuracao_salva(&banco.caminho),
+        nova
+    );
+}

@@ -496,13 +496,16 @@ fn lista(
                             .truncate(),
                         );
                     });
-                    ui.horizontal(|ui| {
-                        ui.label(
+                    // `truncate`: um texto longo (a pasta de origem) não pode alargar o cartão e
+                    // empurrar a prévia e o formulário para fora da tela.
+                    ui.add(
+                        egui::Label::new(
                             RichText::new(format!("{} · {} esperando", l.origem, l.n_abertos()))
                                 .size(12.0)
                                 .color(p.tinta_suave),
-                        );
-                    });
+                        )
+                        .truncate(),
+                    );
                     ui.add_enabled_ui(l.n_abertos() > 0, |ui| {
                         if ui
                             .button((
@@ -593,6 +596,12 @@ fn linha_do_rascunho(ui: &mut Ui, r: &Rascunho, estado: &mut EstadoDaCaixa) {
     }
 }
 
+/// A largura de um campo de texto que **cabe na coluna**. `desired_width(INFINITY)` não
+/// desconta a margem interna do campo (4 px de cada lado) e o campo passava da borda direita.
+fn largura_do_campo(ui: &Ui) -> f32 {
+    (ui.available_width() - 10.0).max(80.0)
+}
+
 fn campo_de_texto(ui: &mut Ui, rotulo: &str, valor: &mut String, falta: bool, dica: &str) {
     let p = tema::paleta(ui.ctx());
     ui.horizontal(|ui| {
@@ -605,7 +614,7 @@ fn campo_de_texto(ui: &mut Ui, rotulo: &str, valor: &mut String, falta: bool, di
     ui.add(
         egui::TextEdit::singleline(valor)
             .hint_text(dica)
-            .desired_width(f32::INFINITY),
+            .desired_width(largura_do_campo(ui)),
     );
     ui.add_space(3.0);
 }
@@ -632,7 +641,7 @@ fn seletor(
         .map_or("Escolha…".to_owned(), |(_, n)| n.clone());
     egui::ComboBox::from_id_salt(id)
         .selected_text(texto)
-        .width(ui.available_width() - 8.0)
+        .width(largura_do_campo(ui))
         .show_ui(ui, |ui| {
             for (i, n) in opcoes {
                 ui.selectable_value(atual, Some(i.clone()), n);
@@ -781,7 +790,7 @@ fn formulario(
                 ui.add(
                     egui::TextEdit::multiline(&mut f.observacoes)
                         .desired_rows(2)
-                        .desired_width(f32::INFINITY),
+                        .desired_width(largura_do_campo(ui)),
                 );
             });
             ui.add_space(8.0);
@@ -1581,6 +1590,80 @@ mod testes {
             descricao: Some("Energia".into()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn campos_do_formulario_cabem_na_coluna() {
+        let ctx = egui::Context::default();
+        tema::instalar_fontes(&ctx);
+        tema::aplicar(&ctx, "claro");
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut sobra = Vec::new();
+        let mut saida = ctx.run_ui(entrada, |ui| {
+            for largura in [260.0_f32, 330.0, 480.0] {
+                ui.allocate_ui(egui::vec2(largura, 200.0), |ui| {
+                    let limite = ui.max_rect().right();
+                    let mut v = String::new();
+                    campo_de_texto(ui, "Descrição", &mut v, false, "o que foi");
+                    let mut atual = Some("a".to_owned());
+                    seletor(
+                        ui,
+                        "Conta",
+                        "teste-conta",
+                        false,
+                        &mut atual,
+                        &[("a".to_owned(), "Conta corrente Exemplo".to_owned())],
+                    );
+                    sobra.push(ui.min_rect().right() - limite);
+                });
+            }
+        });
+        saida.textures_delta.clear();
+        for s in sobra {
+            assert!(s <= 0.5, "o campo passou {s} px da borda direita");
+        }
+    }
+
+    #[test]
+    fn lista_de_lotes_com_origem_longa_nao_passa_da_coluna() {
+        let ctx = egui::Context::default();
+        tema::instalar_fontes(&ctx);
+        tema::aplicar(&ctx, "claro");
+        let lote = LoteDeRascunhos {
+            id: "L".into(),
+            nome: "Pasta local · outubro".into(),
+            origem: "Pasta local · Documentos/Contas/Energia/Exemplo/Muito/Longa".into(),
+            criado_em: "2026-11-01T00:00:00Z".into(),
+            rascunhos: vec![r("a", completo())],
+        };
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut sobra = 0.0_f32;
+        let mut saida = ctx.run_ui(entrada, |ui| {
+            ui.allocate_ui(egui::vec2(260.0, 400.0), |ui| {
+                let limite = ui.max_rect().right();
+                let mut estado = EstadoDaCaixa::default();
+                let mut pedidos = Vec::new();
+                lista(ui, std::slice::from_ref(&lote), &mut estado, &mut pedidos);
+                sobra = ui.min_rect().right() - limite;
+            });
+        });
+        saida.textures_delta.clear();
+        assert!(
+            sobra <= 0.5,
+            "a lista passou {sobra} px da coluna e empurra o formulário"
+        );
     }
 
     #[test]

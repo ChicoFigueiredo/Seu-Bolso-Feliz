@@ -53,6 +53,8 @@ pub struct EstadoDaTriagem {
     edicao: Option<ConfiguracaoDeIa>,
     /// O resultado do último teste de conexão.
     pub teste: Option<Result<String, String>>,
+    /// Há um teste de conexão em andamento (a tela mostra "Testando…" e desliga o botão).
+    pub testando: bool,
     /// O último erro de leitura.
     pub erro: Option<String>,
 }
@@ -175,7 +177,7 @@ fn cartao_da_rodada(ui: &mut Ui, p: &Progresso, pedidos: &mut Vec<Pedido>) {
         ui.add(
             egui::ProgressBar::new(p.fracao())
                 .show_percentage()
-                .desired_width(f32::INFINITY),
+                .desired_width(ui.available_width()),
         );
         ui.label(
             RichText::new(format!(
@@ -539,8 +541,15 @@ pub fn opcoes_ia(ui: &mut Ui, estado: &mut EstadoDaTriagem, pedidos: &mut Vec<Pe
         if ui.button("Salvar").clicked() {
             pedidos.push(Pedido::Triagem(AcaoDaTriagem::SalvarConfiguracao(nova)));
         }
-        if ui.button("Testar conexão").clicked() {
+        if ui
+            .add_enabled(!estado.testando, egui::Button::new("Testar conexão"))
+            .clicked()
+        {
             pedidos.push(Pedido::Triagem(AcaoDaTriagem::TestarConexao));
+        }
+        if estado.testando {
+            ui.spinner();
+            ui.label(RichText::new("Testando…").color(cores.tinta_suave));
         }
     });
     match &estado.teste {
