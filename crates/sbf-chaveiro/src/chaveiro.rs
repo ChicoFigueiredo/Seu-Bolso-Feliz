@@ -23,6 +23,9 @@ pub const PREFIXO_DE_SENHA: &str = "senha:";
 pub const PREFIXO_DE_ESTACAO: &str = "estacao:";
 /// O prefixo das chaves de provedores de IA (spec 09): a do OpenRouter é `ia:openrouter`.
 pub const PREFIXO_DE_IA: &str = "ia:";
+/// O prefixo das senhas de sites dos roteiros (ADR-016): a chave do rótulo `<rotulo>` é
+/// `site:<rotulo>`. Fica separado de `senha:` (PDFs) para as duas listas não se misturarem.
+pub const PREFIXO_DE_SITE: &str = "site:";
 /// Prefixo das chaves de sessão dos mensageiros (a chave que cifra a sessão do WhatsApp).
 pub const PREFIXO_DE_MENSAGEIRO: &str = "mensageiro:";
 
@@ -146,6 +149,50 @@ impl Chaveiro {
             .into_iter()
             .filter_map(|r| r.strip_prefix(PREFIXO_DE_SENHA).map(str::to_owned))
             .collect()
+    }
+
+    // ---------------- Senhas de sites (roteiros, ADR-016) ----------------
+
+    fn chave_de_site(rotulo: &str) -> Result<String, ErroDoChaveiro> {
+        if rotulo.is_empty()
+            || PREFIXO_DE_SITE.len() + rotulo.len() > TAMANHO_MAXIMO_DO_ROTULO
+            || rotulo.chars().any(char::is_control)
+        {
+            return Err(ErroDoChaveiro::RotuloInvalido);
+        }
+        Ok(format!("{PREFIXO_DE_SITE}{rotulo}"))
+    }
+
+    /// Guarda (ou troca) a senha do site de rótulo `rotulo`.
+    pub fn guardar_senha_de_site(
+        &self,
+        rotulo: &str,
+        senha: Segredo,
+    ) -> Result<(), ErroDoChaveiro> {
+        Ok(self.guarda.gravar(&Self::chave_de_site(rotulo)?, senha)?)
+    }
+
+    /// A senha do site, em claro. Só o executor de roteiros chama isto, e só entre o chaveiro
+    /// e o campo do navegador.
+    pub fn senha_de_site(&self, rotulo: &str) -> Result<Segredo, ErroDoChaveiro> {
+        Ok(self.guarda.ler(&Self::chave_de_site(rotulo)?)?)
+    }
+
+    /// Os rótulos das senhas de sites, sem prefixo e sem valores, em ordem.
+    pub fn rotulos_de_site(&self) -> Vec<String> {
+        self.guarda
+            .rotulos()
+            .into_iter()
+            .filter_map(|r| r.strip_prefix(PREFIXO_DE_SITE).map(str::to_owned))
+            .collect()
+    }
+
+    /// Apaga a senha do site (sem erro se já não havia).
+    pub fn apagar_senha_de_site(&self, rotulo: &str) -> Result<(), ErroDoChaveiro> {
+        match self.guarda.apagar(&Self::chave_de_site(rotulo)?) {
+            Ok(()) | Err(bancada_segredos::ErroDeSegredo::NaoEncontrado) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ---------------- Arquivo de fallback ----------------
