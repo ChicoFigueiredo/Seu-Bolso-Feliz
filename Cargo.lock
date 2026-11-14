@@ -3739,6 +3739,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "851ca9db4932932d69f3ea811b1abe63087a0f740a47692619dd40d4899b68be"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
  "serde_core",
@@ -4325,6 +4326,7 @@ dependencies = [
  "egui",
  "rusqlite",
  "sbf-chaveiro",
+ "sbf-coletor",
  "sbf-contrato",
  "sbf-disco",
  "sbf-estacao",
@@ -4370,6 +4372,27 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",
+]
+
+[[package]]
+name = "sbf-coletor"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "deadpool-postgres",
+ "reqwest",
+ "sbf-servidor",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-postgres",
+ "unicode-normalization",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

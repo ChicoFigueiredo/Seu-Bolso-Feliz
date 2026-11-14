@@ -1,0 +1,23 @@
+{
+  "results": [
+    {
+      "id": "t-101",
+      "accountId": "c2",
+      "date": "2026-03-13T03:00:00.000Z",
+      "description": "Loja Online",
+      "descriptionRaw": "LOJA ONLINE",
+      "currencyCode": "BRL",
+      "amount": -99.9,
+      "amountInAccountCurrency": null,
+      "balance": 1000.0,
+      "category": "Online shopping",
+      "categoryId": "08000000",
+      "providerCode": "x",
+      "providerId": null,
+      "status": "POSTED",
+      "type": "DEBIT",
+      "merchant": null
+    }
+  ],
+  "next": null
+}

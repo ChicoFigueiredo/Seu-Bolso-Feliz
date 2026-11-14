@@ -1,0 +1,35 @@
+{
+  "id": "m-003",
+  "threadId": "t-003",
+  "labelIds": [
+    "Label_1"
+  ],
+  "snippet": "Oi",
+  "internalDate": "1773938800000",
+  "sizeEstimate": 300,
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {
+        "name": "Subject",
+        "value": "Sem anexo"
+      },
+      {
+        "name": "From",
+        "value": "Alguem <alguem@exemplo.test>"
+      },
+      {
+        "name": "To",
+        "value": "dono.ficticio@example.com"
+      },
+      {
+        "name": "Date",
+        "value": "Thu, 19 Mar 2026 12:00:00 +0000"
+      }
+    ],
+    "body": {
+      "size": 3,
+      "data": "b2kh"
+    }
+  }
+}

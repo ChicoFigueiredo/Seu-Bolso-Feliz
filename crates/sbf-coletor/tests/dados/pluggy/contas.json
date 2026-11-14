@@ -1,0 +1,37 @@
+{
+  "results": [
+    {
+      "id": "c1",
+      "itemId": "item-1",
+      "type": "BANK",
+      "subtype": "CHECKING_ACCOUNT",
+      "name": "Conta Exemplo",
+      "number": "1234-5",
+      "balance": 1234.56,
+      "currencyCode": "BRL"
+    },
+    {
+      "id": "c2",
+      "itemId": "item-1",
+      "type": "CREDIT",
+      "subtype": "CREDIT_CARD",
+      "name": "Cartao Exemplo",
+      "number": "9999",
+      "balance": 500.0,
+      "currencyCode": "BRL"
+    },
+    {
+      "id": "c3",
+      "itemId": "item-1",
+      "type": "BANK",
+      "subtype": "SAVINGS_ACCOUNT",
+      "name": "Poupanca",
+      "number": "1234-5",
+      "balance": 10.0,
+      "currencyCode": "BRL"
+    }
+  ],
+  "total": 3,
+  "page": 1,
+  "totalPages": 1
+}

@@ -1,0 +1,67 @@
+{
+  "id": "m-001",
+  "threadId": "t-001",
+  "labelIds": [
+    "INBOX",
+    "Label_1"
+  ],
+  "snippet": "Segue o boleto",
+  "internalDate": "1773766000000",
+  "sizeEstimate": 2048,
+  "payload": {
+    "mimeType": "multipart/mixed",
+    "headers": [
+      {
+        "name": "Subject",
+        "value": "Boleto de março"
+      },
+      {
+        "name": "From",
+        "value": "Cobrança Exemplo <cobranca@exemplo.test>"
+      },
+      {
+        "name": "To",
+        "value": "dono.ficticio@example.com"
+      },
+      {
+        "name": "Date",
+        "value": "Tue, 17 Mar 2026 17:06:02 +0000 (UTC)"
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [],
+        "body": {
+          "size": 10,
+          "data": "U2VndWUgbyBib2xldG8"
+        }
+      },
+      {
+        "partId": "1",
+        "mimeType": "application/pdf",
+        "filename": "Boleto Março.pdf",
+        "headers": [],
+        "body": {
+          "attachmentId": "a-001",
+          "size": 42
+        }
+      },
+      {
+        "partId": "2",
+        "mimeType": "image/gif",
+        "filename": "logo.gif",
+        "headers": [],
+        "body": {
+          "attachmentId": "a-gif",
+          "size": 4
+        }
+      }
+    ]
+  }
+}
