@@ -606,3 +606,43 @@ fn buscar_semelhantes_acha_mascara_e_registra_a_saida() {
         .unwrap();
     assert_eq!(n, 1);
 }
+
+#[test]
+fn ver_texto_do_achado_vem_mascarado_por_padrao_e_inteiro_so_no_nivel_completo() {
+    use sbf_ia::NivelDeConfianca;
+    use sbf_indice::{BuscaLocal, Embedder, EmbedderFalso};
+    use std::sync::Arc;
+
+    let c = cenario();
+    let hash = inserir_achado(
+        &c.banco.conexao(),
+        31,
+        "novo",
+        Some("Titular CPF 123.456.789-09 conta 12345678901 total 210,00"),
+        "extrato.pdf",
+    );
+    // sem nível dito, o cliente é um destinatário novo: mascarado
+    let v = c.nucleo.ver_texto_do_achado(&hash).unwrap();
+    let t = v["texto"].as_str().unwrap();
+    assert!(!t.contains("123.456.789-09") && !t.contains("12345678901"), "{t}");
+    assert!(t.contains("•••") && t.contains("210,00"));
+    // no nível completo (o usuário escolheu), o texto vem inteiro
+    let e: Arc<dyn Embedder> = Arc::new(EmbedderFalso::novo());
+    let pasta = tempfile::tempdir().unwrap();
+    let completo = c.nucleo.clone().com_busca(
+        Arc::new(BuscaLocal::nova(pasta.path().join("i.sqlite"), e)),
+        NivelDeConfianca::Completo,
+    );
+    let v = completo.ver_texto_do_achado(&hash).unwrap();
+    assert!(v["texto"].as_str().unwrap().contains("123.456.789-09"));
+}
+
+#[test]
+fn a_descricao_de_buscar_semelhantes_nao_manda_ler_o_texto_do_achado() {
+    let fonte = include_str!("../src/servidor.rs");
+    let linha = fonte
+        .lines()
+        .find(|l| l.contains("Busca por semelhanca de texto no indice local"))
+        .expect("a descrição existe");
+    assert!(!linha.contains("ver_texto_do_achado"), "{linha}");
+}

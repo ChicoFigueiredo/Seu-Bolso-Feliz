@@ -23,6 +23,7 @@ use sbf_roteiros::banco::{
 };
 use sbf_roteiros::executor::Fim;
 use sbf_roteiros::gravacao::{Aprovacao, Aprovador, FimDaGravacao, Guia, Proposta};
+use sbf_roteiros::passo::Marca;
 use sbf_roteiros::servico::{Ambiente, executar_roteiro, gravar_novo};
 use zeroize::Zeroize as _;
 
@@ -136,8 +137,9 @@ impl std::fmt::Debug for Roteiros {
     }
 }
 
+/// O passo como o usuário o aprova: a URL inteira, o texto que será digitado.
 fn texto_do_passo(p: &Passo) -> String {
-    p.descricao()
+    p.descricao_completa()
 }
 
 impl Roteiros {
@@ -350,6 +352,7 @@ impl Roteiros {
                             seletor: "#entrar".into(),
                         },
                         explicacao: "Enviar o login para entrar na conta.".into(),
+                        alvo: "<button>, texto \"Entrar\"".into(),
                     }),
                     ..Gravando::default()
                 });
@@ -766,7 +769,14 @@ impl Roteiros {
                 ui.label(format!("{}. {a}", i + 1));
             }
             match (&g.proposta, &g.terminou) {
-                (Some(Proposta::Passo { passo, explicacao }), None) => {
+                (
+                    Some(Proposta::Passo {
+                        passo,
+                        explicacao,
+                        alvo,
+                    }),
+                    None,
+                ) => {
                     ui.add_space(6.0);
                     componentes::aviso(
                         ui,
@@ -776,6 +786,13 @@ impl Roteiros {
                         p.info_borda,
                         p.info,
                     );
+                    if !alvo.is_empty() {
+                        ui.label(
+                            RichText::new(format!("No elemento da página: {alvo}"))
+                                .size(12.5)
+                                .color(p.tinta),
+                        );
+                    }
                     ui.horizontal(|ui| {
                         if ui.button("Aceitar e executar").clicked() {
                             g.aceitos.push(texto_do_passo(passo));
@@ -995,7 +1012,9 @@ impl Roteiros {
             p.aviso,
         );
         for linha in &diff {
-            let cor = if linha.starts_with('+') {
+            let cor = if linha.starts_with('!') {
+                p.perigo
+            } else if linha.starts_with('+') {
                 p.sucesso
             } else if linha.starts_with('−') {
                 p.perigo
@@ -1114,24 +1133,19 @@ fn selo_da_execucao(ui: &mut Ui, estado: EstadoDaExecucao) {
     componentes::selo(ui, estado.rotulo(), fundo, cor);
 }
 
-/// As linhas do "antes e depois" de um conserto: o que sai com `−` e o que entra com `+`.
+/// As linhas do "antes e depois" de um conserto: o que sai com `−`, o que entra com `+` e, com
+/// `!`, o passo que leva a um **site novo** (o usuário confere o endereço inteiro antes de
+/// aprovar).
 fn diferenca(antes: &[Passo], depois: &[Passo]) -> Vec<String> {
-    let mut v = Vec::new();
-    let n = antes.len().max(depois.len());
-    for i in 0..n {
-        match (antes.get(i), depois.get(i)) {
-            (Some(a), Some(d)) if a == d => v.push(format!("   {}", a.descricao())),
-            (a, d) => {
-                if let Some(a) = a {
-                    v.push(format!("−  {}", a.descricao()));
-                }
-                if let Some(d) = d {
-                    v.push(format!("+  {}", d.descricao()));
-                }
-            }
-        }
-    }
-    v
+    sbf_roteiros::passo::diferenca(antes, depois)
+        .into_iter()
+        .map(|l| match (l.marca, l.host_novo) {
+            (Marca::Igual, _) => format!("   {}", l.texto),
+            (Marca::Removido, _) => format!("−  {}", l.texto),
+            (Marca::Novo, Some(host)) => format!("!  SITE NOVO ({host}): {}", l.texto),
+            (Marca::Novo, None) => format!("+  PASSO NOVO: {}", l.texto),
+        })
+        .collect()
 }
 
 /// O estado do formulário de senhas de sites (Opções › Chaveiro). Os campos são zerados assim
@@ -1246,5 +1260,34 @@ impl Roteiros {
         if let Some(c) = &self.cancelar_a_gravacao {
             c.store(true, Ordering::SeqCst);
         }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn o_conserto_destaca_o_site_novo_e_mostra_a_url_inteira() {
+        let antes = vec![Passo::Navegar {
+            url: "https://banco.example/login".into(),
+        }];
+        let depois = vec![
+            Passo::Navegar {
+                url: "https://banco.example/login".into(),
+            },
+            Passo::Navegar {
+                url: "https://outro.example/x?token=1".into(),
+            },
+            Passo::Clicar {
+                seletor: "#baixar".into(),
+            },
+        ];
+        let linhas = diferenca(&antes, &depois);
+        assert!(linhas[0].starts_with("   "));
+        assert!(linhas[1].starts_with('!'), "{linhas:?}");
+        assert!(linhas[1].contains("SITE NOVO (outro.example)"));
+        assert!(linhas[1].contains("token=1"), "a URL vai inteira");
+        assert!(linhas[2].starts_with("+  PASSO NOVO"));
     }
 }

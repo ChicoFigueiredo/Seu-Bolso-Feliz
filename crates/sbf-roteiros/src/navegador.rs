@@ -37,6 +37,10 @@ pub trait Navegador {
     /// Os bloqueios que o script do navegador barrou desde a última chamada.
     fn bloqueios(&mut self) -> Resultado<Vec<Bloqueio>>;
 
+    /// Marca a fase de login: enquanto `host` é `Some`, o navegador só deixa sair requisição que
+    /// muda estado (`POST` e afins) para esse host (RO-02). `None` encerra a fase. Opcional.
+    fn fase_de_login(&mut self, _host: Option<&str>) {}
+
     /// Traz a janela do navegador para a frente (a pausa "Sua vez no navegador"). Opcional.
     fn trazer_para_frente(&mut self) {}
 }

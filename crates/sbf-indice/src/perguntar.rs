@@ -139,16 +139,28 @@ pub fn perguntar(
         degrau: Degrau::Rapido,
         max_tokens_saida: 800,
     };
-    let resposta = provedor.pedir(&pedido)?;
-    registro.registrar_saida(&Saida {
-        destinatario: DESTINATARIO.to_owned(),
-        provedor: provedor.nome().to_owned(),
-        modelo: resposta.modelo.clone(),
-        nivel,
-        bytes_enviados: (pedido.instrucao.len() + pedido.entrada.len()) as u64,
-        consumo: resposta.consumo,
-        quando: agora_rfc3339(),
-    })?;
+    let resultado = provedor.pedir(&pedido);
+    // O que saiu fica registrado mesmo quando o provedor falha depois de receber o pedido; só
+    // não conta o que nem saiu (provedor indisponível, teto de gasto nosso).
+    let (modelo, consumo, saiu) = match &resultado {
+        Ok(r) => (r.modelo.clone(), r.consumo, true),
+        Err(sbf_ia::ErroDeIa::Indisponivel(_) | sbf_ia::ErroDeIa::Teto) => {
+            (String::new(), sbf_ia::Consumo::default(), false)
+        }
+        Err(_) => (String::new(), sbf_ia::Consumo::default(), true),
+    };
+    if saiu {
+        registro.registrar_saida(&Saida {
+            destinatario: DESTINATARIO.to_owned(),
+            provedor: provedor.nome().to_owned(),
+            modelo,
+            nivel,
+            bytes_enviados: (pedido.instrucao.len() + pedido.entrada.len()) as u64,
+            consumo,
+            quando: agora_rfc3339(),
+        })?;
+    }
+    let resposta = resultado?;
     let texto = resposta
         .json
         .get("resposta")

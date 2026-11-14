@@ -42,11 +42,69 @@ pub const CONTEM: &[&str] = &[
     "purchase",
     "checkout",
     "subscribe",
+    "efetivar",
+    "efetive",
+    "efetivacao",
+    "agendar",
+    "agende",
+    "agendamento",
+    "antecipar",
+    "antecipe",
+    "antecipacao",
+    "recarga",
 ];
 
 /// Termos que só casam como palavra inteira (para não pegar `pixel`, `ted` em `protegido`).
 pub const PALAVRA: &[&str] = &[
-    "pix", "ted", "pay", "buy", "wire", "compre", "comprar", "sacar", "saque", "invest",
+    "pix",
+    "ted",
+    "pay",
+    "buy",
+    "wire",
+    "compre",
+    "comprar",
+    "sacar",
+    "saque",
+    "invest",
+    "investimento",
+    "investimentos",
+    "aplicar",
+    "aplique",
+    "aplicacao",
+    "aplicacoes",
+    "autorizar",
+    "autorize",
+    "quitar",
+    "quite",
+    "emprestimo",
+    "emprestimos",
+    "financiamento",
+    "financiamentos",
+    "assinar",
+    "assine",
+];
+
+/// Frases de **consulta** que contêm um termo da lista e mesmo assim passam: o comprovante de
+/// um pagamento já feito e o extrato de uma aplicação, de um empréstimo ou de um
+/// financiamento são documentos para baixar. A exceção só apaga a própria frase: o que sobrar
+/// no campo ("pagar", o destino `/pagamento/confirmar`…) continua sendo conferido.
+pub const EXCECOES: &[&str] = &[
+    "comprovante de pagamento",
+    "comprovantes de pagamento",
+    "comprovante de pagamentos",
+    "comprovantes de pagamentos",
+    "extrato de pagamento",
+    "extrato de pagamentos",
+    "extrato de transferencia",
+    "extrato de transferencias",
+    "extrato de investimento",
+    "extrato de investimentos",
+    "extrato de aplicacao",
+    "extrato de aplicacoes",
+    "extrato de emprestimo",
+    "extrato de emprestimos",
+    "extrato de financiamento",
+    "extrato de financiamentos",
 ];
 
 /// Sequências de palavras que indicam alterar cadastro ou conta.
@@ -73,6 +131,9 @@ pub const FRASES: &[&str] = &[
     "delete account",
     "close account",
     "send money",
+    "debito automatico",
+    "debito em conta automatico",
+    "cadastrar debito",
 ];
 
 /// O tamanho máximo de cada campo examinado (um cartão clicável com a página inteira dentro
@@ -89,6 +150,9 @@ pub struct Candidato {
     pub eh_senha: bool,
     /// O elemento é um `input`/`textarea`/`select` (para os passos de preencher).
     pub eh_campo: bool,
+    /// O tipo do campo, como o **navegador** o entende (`password`, `text`, `tel`…; a tag em
+    /// minúsculas para o que não é `input`). Vazio quando não se sabe.
+    pub tipo: String,
 }
 
 impl Candidato {
@@ -116,6 +180,13 @@ pub struct Bloqueio {
 
 impl fmt::Display for Bloqueio {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.campo == "rede" {
+            return write!(
+                f,
+                "uma requisição de rede foi barrada (\"{}\"), e roteiro só consulta e baixa",
+                self.termo
+            );
+        }
         write!(
             f,
             "o campo \"{}\" do elemento indica \"{}\", e roteiro só consulta e baixa",
@@ -154,7 +225,22 @@ pub fn palavras(texto: &str) -> Vec<String> {
 /// O termo da lista que casa com `valor`, se algum.
 #[must_use]
 pub fn termo_que_casa(valor: &str) -> Option<String> {
-    let p = palavras(valor);
+    let mut p = palavras(valor);
+    for excecao in EXCECOES {
+        let alvo: Vec<&str> = excecao.split(' ').collect();
+        let mut i = 0;
+        while i + alvo.len() <= p.len() {
+            if p[i..i + alvo.len()]
+                .iter()
+                .map(String::as_str)
+                .eq(alvo.iter().copied())
+            {
+                p.drain(i..i + alvo.len());
+            } else {
+                i += 1;
+            }
+        }
+    }
     for palavra in &p {
         if let Some(t) = CONTEM.iter().find(|t| palavra.contains(**t)) {
             return Some((*t).to_owned());
@@ -198,6 +284,7 @@ pub fn lista_em_json() -> String {
         "contem": CONTEM,
         "palavra": PALAVRA,
         "frases": FRASES,
+        "excecoes": EXCECOES,
         "limite": LIMITE_DO_CAMPO,
     })
     .to_string()
@@ -292,6 +379,66 @@ mod testes {
     }
 
     #[test]
+    fn novos_termos_de_dinheiro_saindo_sao_bloqueados() {
+        for texto in [
+            "Aplicar",
+            "Aplicação",
+            "Autorizar pagamento",
+            "Autorizar",
+            "Efetivar",
+            "Agendar",
+            "Agendamento",
+            "Quitar",
+            "Antecipar parcelas",
+            "Antecipação de recebíveis",
+            "Recarga de celular",
+            "Empréstimo",
+            "Financiamento",
+            "Investimentos",
+            "Contratar",
+            "Assinar contrato",
+            "Débito automático",
+            "Cadastrar débito automático",
+        ] {
+            assert!(bloqueia("texto", texto), "deveria bloquear: {texto}");
+        }
+        assert!(bloqueia("destino", "/emprestimo/simular"));
+        assert!(bloqueia("id", "btnAgendar"));
+    }
+
+    #[test]
+    fn comprovante_e_extrato_de_consulta_passam_por_excecao_explicita() {
+        for texto in [
+            "Comprovante de pagamento",
+            "Baixar comprovante de pagamento",
+            "Comprovantes de Pagamentos",
+            "Extrato de investimentos",
+            "Extrato de empréstimo",
+            "Extrato de financiamento",
+            "Extrato de aplicações",
+            "Extrato",
+        ] {
+            assert!(!bloqueia("texto", texto), "não deveria bloquear: {texto}");
+        }
+        assert!(!bloqueia("destino", "/comprovante-de-pagamento/123.pdf"));
+        // o outro lado: a exceção só apaga a frase; o resto do campo continua conferido
+        for texto in [
+            "Comprovante de pagamento. Pagar agora",
+            "Extrato de empréstimo: contratar",
+            "Extrato de aplicações e aplicar",
+            "Pagamento",
+            "Confirmar pagamento",
+            "Empréstimo",
+        ] {
+            assert!(bloqueia("texto", texto), "deveria bloquear: {texto}");
+        }
+        assert!(bloqueia(
+            "destino",
+            "/pagamento/comprovante-de-pagamento/confirmar"
+        ));
+    }
+
+    #[test]
     fn acento_e_caixa_nao_enganam() {
         assert!(bloqueia("texto", "TRANSFERÊNCIA"));
         assert!(bloqueia("texto", "pagaménto"));
@@ -324,6 +471,7 @@ mod testes {
         assert!(v["contem"].as_array().unwrap().len() > 5);
         assert!(v["palavra"].as_array().unwrap().iter().any(|t| t == "pix"));
         assert!(v["frases"].as_array().unwrap().len() > 5);
+        assert!(!v["excecoes"].as_array().unwrap().is_empty());
         assert!(!script_da_ponte().contains("__SBF_LISTA__"));
     }
 }

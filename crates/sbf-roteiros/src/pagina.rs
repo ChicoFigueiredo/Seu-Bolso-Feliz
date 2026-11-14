@@ -6,9 +6,7 @@
 //! construção (o `serde` descarta chave desconhecida), e [`Pagina::limpar`] ainda troca por
 //! `***` qualquer segredo que a própria página tenha repetido no texto ou na URL.
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 
 /// Um elemento clicável.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +143,23 @@ const TRECHOS_DE_CONFIRMACAO: &[&str] = &[
     "confirm your identity",
 ];
 
+/// `trecho` aparece em `texto` como palavra (ou frase) inteira? "2fa" não casa dentro de
+/// "x2fab" nem de um hash. Os dois já vêm em minúsculas e sem acento.
+fn contem_trecho(texto: &str, trecho: &str) -> bool {
+    let mut inicio = 0;
+    while let Some(p) = texto[inicio..].find(trecho) {
+        let a = inicio + p;
+        let b = a + trecho.len();
+        let antes = texto[..a].chars().next_back();
+        let depois = texto[b..].chars().next();
+        if !antes.is_some_and(char::is_alphanumeric) && !depois.is_some_and(char::is_alphanumeric) {
+            return true;
+        }
+        inicio = a + trecho.chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
 fn sem_acento(s: &str) -> String {
     use unicode_normalization::UnicodeNormalization as _;
     s.nfd()
@@ -160,18 +175,22 @@ impl Pagina {
         self.titulo = f(&self.titulo);
         self.texto = f(&self.texto);
         for e in &mut self.elementos {
+            e.seletor = f(&e.seletor);
             e.texto = f(&e.texto);
             e.rotulo = f(&e.rotulo);
             e.destino = f(&e.destino);
         }
         for fo in &mut self.formularios {
+            fo.seletor = f(&fo.seletor);
             fo.acao = f(&fo.acao);
             for c in &mut fo.campos {
+                c.seletor = f(&c.seletor);
                 c.rotulo = f(&c.rotulo);
                 c.nome = f(&c.nome);
             }
         }
         for t in &mut self.tabelas {
+            t.seletor = f(&t.seletor);
             for c in &mut t.cabecalho {
                 *c = f(c);
             }
@@ -185,23 +204,10 @@ impl Pagina {
     /// Segredo com menos de 4 caracteres não é trocado (apagaria o texto todo).
     #[must_use]
     pub fn limpar(mut self, segredos: &[&str]) -> Self {
-        let variantes: Vec<String> = segredos
-            .iter()
-            .filter(|s| s.chars().count() >= 4)
-            .flat_map(|s| [(*s).to_owned(), codificar_url(s)])
-            .collect();
-        if variantes.is_empty() {
+        if variantes_do_segredo(segredos).is_empty() {
             return self;
         }
-        self.mapear(&|t| {
-            let mut saida = t.to_owned();
-            for v in &variantes {
-                if saida.contains(v.as_str()) {
-                    saida = saida.replace(v.as_str(), "***");
-                }
-            }
-            saida
-        });
+        self.mapear(&|t| limpar_texto_com(t, segredos));
         self
     }
 
@@ -223,7 +229,7 @@ impl Pagina {
             || quadros.contains("h-captcha")
             || quadros.contains("turnstile")
             || quadros.contains("captcha")
-            || TRECHOS_DE_CAPTCHA.iter().any(|t| texto.contains(t))
+            || TRECHOS_DE_CAPTCHA.iter().any(|t| contem_trecho(&texto, t))
         {
             return Some(MotivoDePausa::Captcha);
         }
@@ -232,10 +238,13 @@ impl Pagina {
             .iter()
             .flat_map(|f| &f.campos)
             .any(|c| c.autocomplete.eq_ignore_ascii_case("one-time-code"));
-        if campo_de_codigo || TRECHOS_DE_MFA.iter().any(|t| texto.contains(t)) {
+        if campo_de_codigo || TRECHOS_DE_MFA.iter().any(|t| contem_trecho(&texto, t)) {
             return Some(MotivoDePausa::Mfa);
         }
-        if TRECHOS_DE_CONFIRMACAO.iter().any(|t| texto.contains(t)) {
+        if TRECHOS_DE_CONFIRMACAO
+            .iter()
+            .any(|t| contem_trecho(&texto, t))
+        {
             return Some(MotivoDePausa::Confirmacao);
         }
         None
@@ -291,6 +300,39 @@ impl Pagina {
     }
 }
 
+/// As formas em que um segredo pode reaparecer: ele mesmo, percent-encoded e, se é um número
+/// com pontuação (CPF), só os dígitos. Segredo com menos de 4 caracteres fica de fora.
+fn variantes_do_segredo(segredos: &[&str]) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for s in segredos.iter().filter(|s| s.chars().count() >= 4) {
+        v.push((*s).to_owned());
+        v.push(codificar_url(s));
+        let so_digitos: String = s.chars().filter(char::is_ascii_digit).collect();
+        let numerico = s
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '/' | ' '));
+        if numerico && so_digitos.len() >= 8 {
+            v.push(so_digitos);
+        }
+    }
+    v.sort_by_key(|x| std::cmp::Reverse(x.len()));
+    v.dedup();
+    v
+}
+
+/// Troca por `***` o segredo, a forma percent-encoded e (para um número com pontuação) só os
+/// dígitos, em qualquer parte de `texto`.
+#[must_use]
+pub fn limpar_texto_com(texto: &str, segredos: &[&str]) -> String {
+    let mut saida = texto.to_owned();
+    for v in variantes_do_segredo(segredos) {
+        if saida.contains(v.as_str()) {
+            saida = saida.replace(v.as_str(), "***");
+        }
+    }
+    saida
+}
+
 fn codificar_url(s: &str) -> String {
     let mut saida = String::new();
     for b in s.bytes() {
@@ -303,22 +345,81 @@ fn codificar_url(s: &str) -> String {
     saida
 }
 
-fn mascarar_numeros(t: &str) -> String {
-    static CPF: OnceLock<Regex> = OnceLock::new();
-    static LONGO: OnceLock<Regex> = OnceLock::new();
-    static LINHA: OnceLock<Regex> = OnceLock::new();
-    let cpf = CPF.get_or_init(|| Regex::new(r"\d{3}\.\d{3}\.\d{3}-\d{2}").expect("regex fixa"));
-    let longo = LONGO.get_or_init(|| Regex::new(r"\d{8,}").expect("regex fixa"));
-    let linha = LINHA.get_or_init(|| Regex::new(r"\d[\d. ]{18,}\d").expect("regex fixa"));
-    let a = cpf.replace_all(t, "***.***.***-**");
-    let b = linha.replace_all(&a, |c: &regex::Captures<'_>| {
-        if c[0].chars().filter(char::is_ascii_digit).count() >= 18 {
-            "[número longo]".to_owned()
-        } else {
-            c[0].to_owned()
+/// O mesmo mascaramento de números longos, para um texto solto (a descrição de um passo, que
+/// leva o seletor).
+#[must_use]
+pub fn mascarar_texto(texto: &str) -> String {
+    mascarar_numeros(texto)
+}
+
+/// Troca por `•••` cada sequência de seis ou mais dígitos (com espaço, ponto ou hífen entre
+/// eles: CPF, CNPJ, cartão, conta, linha digitável). É a mesma regra do nível "mascarado" do
+/// `sbf-canais` e do `sbf-indice`, copiada para não puxar o Postgres nem o modelo de
+/// embeddings.
+fn mascarar_numeros(texto: &str) -> String {
+    let chars: Vec<char> = texto.chars().collect();
+    let mut saida = String::with_capacity(texto.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_digit() {
+            saida.push(chars[i]);
+            i += 1;
+            continue;
         }
-    });
-    longo.replace_all(&b, "[número longo]").into_owned()
+        let inicio = i;
+        let mut fim = i;
+        let mut j = i;
+        while j < chars.len() {
+            if chars[j].is_ascii_digit() {
+                fim = j + 1;
+                j += 1;
+            } else if matches!(chars[j], ' ' | '.' | '-')
+                && chars.get(j + 1).is_some_and(char::is_ascii_digit)
+            {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let trecho = &chars[inicio..fim];
+        if trecho.iter().filter(|c| c.is_ascii_digit()).count() >= 6 {
+            saida.push_str("•••");
+        } else {
+            saida.extend(trecho);
+        }
+        i = fim;
+    }
+    saida
+}
+
+impl Pagina {
+    /// Os seletores da página como a IA os vê (limpos de segredo e, se `mascarar`, sem números
+    /// longos) e o que cada um era. Só entram os que mudaram: é com isto que a resposta da
+    /// IA volta ao seletor de verdade.
+    #[must_use]
+    pub fn seletores_vistos_pela_ia(
+        &self,
+        segredos: &[&str],
+        mascarar: bool,
+    ) -> std::collections::HashMap<String, String> {
+        let mut originais: Vec<&str> = Vec::new();
+        originais.extend(self.elementos.iter().map(|e| e.seletor.as_str()));
+        originais.extend(self.tabelas.iter().map(|t| t.seletor.as_str()));
+        for f in &self.formularios {
+            originais.push(&f.seletor);
+            originais.extend(f.campos.iter().map(|c| c.seletor.as_str()));
+        }
+        originais
+            .into_iter()
+            .filter_map(|o| {
+                let mut v = limpar_texto_com(o, segredos);
+                if mascarar {
+                    v = mascarar_numeros(&v);
+                }
+                (v != o).then(|| (v, o.to_owned()))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -367,6 +468,45 @@ mod testes {
     }
 
     #[test]
+    fn a_mascara_e_a_do_sbf_indice_e_do_sbf_canais() {
+        let p = |t: &str| {
+            Pagina {
+                texto: t.into(),
+                ..Pagina::default()
+            }
+            .mascarar()
+            .texto
+        };
+        // seis dígitos ou mais, com separadores
+        assert_eq!(p("conta 123456"), "conta •••");
+        assert_eq!(p("conta 12345"), "conta 12345");
+        assert_eq!(p("cartão 4111 1111 1111 1111"), "cartão •••");
+        assert_eq!(p("CPF 123.456.789-09"), "CPF •••");
+        assert_eq!(p("CNPJ 12.345.678/0001-90"), "CNPJ •••/•••");
+        assert_eq!(
+            p("linha 23793.38128 60000.000003 00000.000400 1 84340000012345"),
+            "linha •••"
+        );
+        assert_eq!(p("R$ 1.234,56 em 31/10/2026"), "R$ 1.234,56 em 31/10/2026");
+    }
+
+    #[test]
+    fn numero_longo_em_seletor_vai_mascarado_e_volta_ao_original() {
+        let p = Pagina {
+            elementos: vec![Elemento {
+                seletor: "#conta-12345678901".into(),
+                texto: "Baixar".into(),
+                ..Elemento::default()
+            }],
+            ..Pagina::default()
+        };
+        let vista = p.clone().mascarar();
+        assert_eq!(vista.elementos[0].seletor, "#conta-•••");
+        let mapa = p.seletores_vistos_pela_ia(&[], true);
+        assert_eq!(mapa["#conta-•••"], "#conta-12345678901");
+    }
+
+    #[test]
     fn mascarar_cobre_cpf_e_numero_longo() {
         let p = Pagina {
             texto: "CPF 123.456.789-09 conta 12345678901234 valor R$ 1.234,56".into(),
@@ -382,6 +522,31 @@ mod testes {
         Pagina {
             texto: t.into(),
             ..Pagina::default()
+        }
+    }
+
+    #[test]
+    fn mfa_so_casa_palavra_inteira() {
+        for t in [
+            "Ative a 2FA da conta",
+            "Use o 2FA.",
+            "(2FA) obrigatório",
+            "Two-factor authentication",
+        ] {
+            assert_eq!(
+                com_texto(t).pausa_necessaria(),
+                Some(MotivoDePausa::Mfa),
+                "{t}"
+            );
+        }
+        for t in [
+            "classe x2fab e hash a1b2fa9c",
+            "abc2fa",
+            "2faz",
+            "token3 security codex",
+            "Extratos do mês. Baixar PDF",
+        ] {
+            assert_eq!(com_texto(t).pausa_necessaria(), None, "{t}");
         }
     }
 

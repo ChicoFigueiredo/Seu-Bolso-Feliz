@@ -563,21 +563,39 @@ impl BancoDeRoteiros {
         Ok(linhas)
     }
 
-    /// Começa uma execução.
+    /// Começa uma execução, **atomicamente**: se o roteiro já tem uma rodando ou esperando o
+    /// usuário (neste ou em outro processo), recusa.
     ///
     /// # Errors
-    /// Banco.
+    /// Banco, ou o roteiro já está rodando.
     pub fn iniciar_execucao(
         &self,
         roteiro_id: i64,
         versao_id: i64,
         gatilho: &str,
     ) -> Resultado<i64> {
-        self.conn.execute(
+        // Uma transação que já nasce com a trava de escrita: a conferência e o INSERT não
+        // deixam outro processo (a janela, o worker) passar no meio.
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let rodando: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM execucao WHERE roteiro_id = ?1
+                             AND estado IN ('rodando','aguardando_usuario'))",
+            [roteiro_id],
+            |l| l.get(0),
+        )?;
+        if rodando {
+            return Err(ErroDeRoteiro::Invalido("o roteiro já está rodando".into()));
+        }
+        tx.execute(
             "INSERT INTO execucao (roteiro_id, versao_id, gatilho, pid) VALUES (?1,?2,?3,?4)",
             params![roteiro_id, versao_id, gatilho, std::process::id()],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let id = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(id)
     }
 
     /// O passo em que a execução está.
@@ -884,6 +902,49 @@ mod testes {
             .unwrap();
         assert!(b.devidos(agora + 3600).unwrap().is_empty());
         assert_eq!(b.devidos(agora + 25 * 3600).unwrap(), vec![id]);
+    }
+
+    #[test]
+    fn so_uma_execucao_comeca_mesmo_com_processos_concorrentes() {
+        let d = tempfile::tempdir().unwrap();
+        let arquivo = d.path().join("roteiros.sqlite");
+        let (id, v) = {
+            let b = BancoDeRoteiros::abrir(&arquivo).unwrap();
+            let id = b
+                .criar_roteiro("x", "", "", None, &passos(), OrigemDaVersao::Manual)
+                .unwrap();
+            (id, b.versao_ativa(id).unwrap().0)
+        };
+        let largada = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let fios: Vec<_> = (0..8)
+            .map(|_| {
+                let (a, l) = (arquivo.clone(), std::sync::Arc::clone(&largada));
+                std::thread::spawn(move || {
+                    let b = BancoDeRoteiros::abrir(&a).unwrap();
+                    l.wait();
+                    b.iniciar_execucao(id, v, "agenda").is_ok()
+                })
+            })
+            .collect();
+        let comecaram = fios
+            .into_iter()
+            .map(|f| f.join().unwrap())
+            .filter(|ok| *ok)
+            .count();
+        assert_eq!(comecaram, 1, "só uma execução do mesmo roteiro por vez");
+        // acabou a rodando: pode começar outra
+        let b = BancoDeRoteiros::abrir(&arquivo).unwrap();
+        let rodando: i64 = b
+            .conn
+            .query_row(
+                "SELECT id FROM execucao WHERE estado = 'rodando'",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        b.finalizar(rodando, EstadoDaExecucao::Concluida, None, 0, 0)
+            .unwrap();
+        assert!(b.iniciar_execucao(id, v, "agenda").is_ok());
     }
 
     #[test]

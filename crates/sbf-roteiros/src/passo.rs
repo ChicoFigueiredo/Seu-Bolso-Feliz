@@ -83,6 +83,135 @@ impl Passo {
     }
 }
 
+impl Passo {
+    /// A descrição **completa**, para o usuário aprovar: a URL inteira (com a consulta), o
+    /// texto que será digitado. Só vai à tela dele; o que vai à IA e ao histórico é
+    /// [`Self::descricao`], que não leva a consulta nem o texto.
+    #[must_use]
+    pub fn descricao_completa(&self) -> String {
+        match self {
+            Self::Navegar { url } => format!("Abrir {url}"),
+            Self::Preencher { seletor, texto } => {
+                format!("Preencher {seletor} com o texto \"{texto}\"")
+            }
+            Self::Baixar { seletor, nome } => match nome {
+                Some(n) => format!("Baixar por {seletor} (salvar como \"{n}\")"),
+                None => format!("Baixar por {seletor}"),
+            },
+            outro => outro.descricao(),
+        }
+    }
+
+    /// Troca o seletor do passo, se ele aparece como chave de `mapa` (o seletor mascarado que a
+    /// IA viu volta ao de verdade).
+    #[must_use]
+    pub fn com_seletor_mapeado(mut self, mapa: &std::collections::HashMap<String, String>) -> Self {
+        let (Self::EsperarSeletor { seletor, .. }
+        | Self::Clicar { seletor }
+        | Self::Preencher { seletor, .. }
+        | Self::PreencherSenha { seletor, .. }
+        | Self::PreencherCpf { seletor, .. }
+        | Self::Baixar { seletor, .. }
+        | Self::LerTabela { seletor, .. }) = &mut self
+        else {
+            return self;
+        };
+        if let Some(original) = mapa.get(seletor.as_str()) {
+            seletor.clone_from(original);
+        }
+        self
+    }
+
+    /// O host que este passo visita ou em que aprova usar o chaveiro, se algum.
+    fn host_do_passo(&self) -> Option<String> {
+        match self {
+            Self::Navegar { url } => host_de(url),
+            Self::PreencherSenha { host, .. } | Self::PreencherCpf { host, .. } => host
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .filter(|h| !h.is_empty()),
+            _ => None,
+        }
+    }
+}
+
+/// Uma linha do "antes e depois" de um conserto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinhaDeDiferenca {
+    pub marca: Marca,
+    /// A descrição completa do passo.
+    pub texto: String,
+    /// O host que só este passo traz (nenhum passo antigo o visita nem o aprova).
+    pub host_novo: Option<String>,
+}
+
+/// O que aconteceu com o passo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Marca {
+    Igual,
+    Removido,
+    Novo,
+}
+
+/// O "antes e depois" de um conserto, alinhado pela maior sequência de passos em comum, com os
+/// passos novos e os **sites novos** marcados: o usuário vê o que a IA acrescentou antes de
+/// aprovar.
+#[must_use]
+pub fn diferenca(antes: &[Passo], depois: &[Passo]) -> Vec<LinhaDeDiferenca> {
+    let (n, m) = (antes.len(), depois.len());
+    // maior subsequência comum
+    let mut lcs = vec![vec![0_usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if antes[i] == depois[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
+        }
+    }
+    let hosts_antigos: Vec<String> = antes.iter().filter_map(Passo::host_do_passo).collect();
+    let (mut i, mut j) = (0, 0);
+    let mut saida = Vec::new();
+    while i < n || j < m {
+        if i < n && j < m && antes[i] == depois[j] {
+            saida.push(LinhaDeDiferenca {
+                marca: Marca::Igual,
+                texto: antes[i].descricao_completa(),
+                host_novo: None,
+            });
+            i += 1;
+            j += 1;
+        } else if i < n && (j >= m || lcs[i + 1][j] >= lcs[i][j + 1]) {
+            saida.push(LinhaDeDiferenca {
+                marca: Marca::Removido,
+                texto: antes[i].descricao_completa(),
+                host_novo: None,
+            });
+            i += 1;
+        } else {
+            let host_novo = depois[j]
+                .host_do_passo()
+                .filter(|h| !hosts_antigos.contains(h));
+            saida.push(LinhaDeDiferenca {
+                marca: Marca::Novo,
+                texto: depois[j].descricao_completa(),
+                host_novo,
+            });
+            j += 1;
+        }
+    }
+    saida
+}
+
+/// A URL é de `http` ou `https`, com um host? Roteiro nenhum navega para `file:`, `data:`,
+/// `javascript:`, `chrome:` nem `about:`.
+#[must_use]
+pub fn url_navegavel(url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    (u.starts_with("http://") || u.starts_with("https://")) && host_de(&u).is_some()
+}
+
 fn so_no_host(host: Option<&str>) -> String {
     host.map(|h| format!(" (só em {h})")).unwrap_or_default()
 }
@@ -101,6 +230,21 @@ pub fn host_de(url: &str) -> Option<String> {
     };
     let host = host.trim().to_ascii_lowercase();
     (!host.is_empty()).then_some(host)
+}
+
+/// Segredo (senha, CPF) só vai a uma página `https`; `http` só no próprio computador
+/// (`127.0.0.1`, `localhost`, `::1`: o site falso dos testes e da demonstração).
+#[must_use]
+pub fn esquema_aceito_para_segredo(url: &str) -> bool {
+    let u = url.trim_start().to_ascii_lowercase();
+    if u.starts_with("https://") {
+        return host_de(&u).is_some();
+    }
+    u.starts_with("http://")
+        && matches!(
+            host_de(&u).as_deref(),
+            Some("127.0.0.1" | "localhost" | "::1")
+        )
 }
 
 fn sem_consulta(url: &str) -> &str {
@@ -132,6 +276,15 @@ impl Roteiro {
         }
         validar_nome(&self.nome)?;
         for (i, p) in self.passos.iter().enumerate() {
+            if let Passo::Navegar { url } = p
+                && !url.trim().is_empty()
+                && !url_navegavel(url)
+            {
+                return Err(format!(
+                    "o passo {} abre um endereço que não é http nem https",
+                    i + 1
+                ));
+            }
             let vazio = match p {
                 Passo::Navegar { url } => url.trim().is_empty(),
                 Passo::EsperarSeletor { seletor, .. }
@@ -147,6 +300,14 @@ impl Roteiro {
             };
             if vazio {
                 return Err(format!("o passo {} está incompleto", i + 1));
+            }
+            if let Passo::PreencherSenha { host, .. } | Passo::PreencherCpf { host, .. } = p
+                && host.as_deref().is_none_or(|h| h.trim().is_empty())
+            {
+                return Err(format!(
+                    "o passo {} usa o chaveiro mas não diz em que site (host) a senha vale",
+                    i + 1
+                ));
             }
         }
         Ok(())
@@ -244,6 +405,109 @@ mod testes {
             host_de("https://evil.example.com@good.example/").as_deref(),
             Some("good.example")
         );
+    }
+
+    #[test]
+    fn segredo_so_em_https_ou_no_proprio_computador() {
+        assert!(esquema_aceito_para_segredo("https://banco.example/login"));
+        assert!(esquema_aceito_para_segredo("http://127.0.0.1:8080/login"));
+        assert!(esquema_aceito_para_segredo("http://localhost:3000/"));
+        assert!(!esquema_aceito_para_segredo("http://banco.example/login"));
+        assert!(!esquema_aceito_para_segredo("ftp://banco.example/"));
+        assert!(!esquema_aceito_para_segredo("about:blank"));
+        assert!(!esquema_aceito_para_segredo(
+            "chrome-error://chromewebdata/"
+        ));
+        assert!(!esquema_aceito_para_segredo(""));
+    }
+
+    #[test]
+    fn passo_com_chaveiro_sem_host_nao_valida() {
+        for p in [
+            Passo::PreencherSenha {
+                seletor: "#s".into(),
+                rotulo: "r".into(),
+                host: None,
+            },
+            Passo::PreencherCpf {
+                seletor: "#c".into(),
+                host: Some(" ".into()),
+            },
+        ] {
+            let r = Roteiro {
+                formato: FORMATO,
+                nome: "x".into(),
+                descricao: String::new(),
+                passos: vec![p],
+            };
+            assert!(r.validar().is_err());
+        }
+    }
+
+    #[test]
+    fn a_aprovacao_mostra_a_url_inteira_e_o_texto_digitado() {
+        let n = Passo::Navegar {
+            url: "https://b.example/extratos?mes=10&conta=1".into(),
+        };
+        assert!(n.descricao_completa().contains("mes=10&conta=1"));
+        assert!(!n.descricao().contains("mes=10"));
+        let p = Passo::Preencher {
+            seletor: "#mes".into(),
+            texto: "outubro".into(),
+        };
+        assert!(p.descricao_completa().contains("outubro"));
+        assert!(!p.descricao().contains("outubro"));
+    }
+
+    #[test]
+    fn so_http_e_https_sao_navegaveis() {
+        assert!(url_navegavel("https://a.example/x"));
+        assert!(url_navegavel("HTTP://127.0.0.1:1/"));
+        for u in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,x",
+            "chrome://settings",
+            "about:blank",
+            "https://",
+            "",
+        ] {
+            assert!(!url_navegavel(u), "{u}");
+        }
+        let r = Roteiro {
+            formato: FORMATO,
+            nome: "x".into(),
+            descricao: String::new(),
+            passos: vec![Passo::Navegar {
+                url: "file:///etc/passwd".into(),
+            }],
+        };
+        assert!(r.validar().is_err());
+    }
+
+    #[test]
+    fn a_diferenca_destaca_o_passo_novo_e_o_host_novo() {
+        let nav = |u: &str| Passo::Navegar { url: u.into() };
+        let clicar = |s: &str| Passo::Clicar { seletor: s.into() };
+        let antes = vec![nav("https://banco.example/login"), clicar("#entrar")];
+        let depois = vec![
+            nav("https://banco.example/login"),
+            clicar("#entrar"),
+            nav("https://outro.example/x?a=1"),
+            clicar("#baixar"),
+        ];
+        let d = diferenca(&antes, &depois);
+        assert_eq!(d[0].marca, Marca::Igual);
+        assert_eq!(d[1].marca, Marca::Igual);
+        let novo_host = d.iter().find(|l| l.host_novo.is_some()).unwrap();
+        assert_eq!(novo_host.host_novo.as_deref(), Some("outro.example"));
+        assert_eq!(novo_host.marca, Marca::Novo);
+        assert!(novo_host.texto.contains("a=1"), "a URL vai inteira");
+        assert_eq!(d.iter().filter(|l| l.marca == Marca::Novo).count(), 2);
+        // o que sai
+        let d = diferenca(&depois, &antes);
+        assert_eq!(d.iter().filter(|l| l.marca == Marca::Removido).count(), 2);
+        assert!(d.iter().all(|l| l.host_novo.is_none()));
     }
 
     #[test]

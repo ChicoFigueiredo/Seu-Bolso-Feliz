@@ -399,3 +399,47 @@ fn busca_exclui_o_proprio_item() {
     assert!(r.iter().all(|p| p.item.id != "a"));
     assert_eq!(r.len(), 3);
 }
+
+#[test]
+fn provedor_que_falha_depois_de_receber_o_pedido_deixa_a_saida_registrada() {
+    use sbf_ia::ErroDeIa;
+    for (erro, saidas) in [
+        (ErroDeIa::Outro("tempo esgotado".into()), 1_i64),
+        (ErroDeIa::RespostaInvalida("não é JSON".into()), 1),
+        (ErroDeIa::Indisponivel("claude não instalado".into()), 0),
+        (ErroDeIa::Teto, 0),
+    ] {
+        let (dir, inv) = inventario_fictício();
+        let caminho_inv = dir.path().join("inventario.sqlite");
+        achado_com_texto(
+            &inv,
+            1,
+            "luz.pdf",
+            "Fatura de energia elétrica Cemig outubro total 210,00",
+        );
+        let e: Arc<dyn Embedder> = Arc::new(EmbedderFalso::novo());
+        let caminho_indice = dir.path().join("indice.sqlite");
+        {
+            let mut ind = Indice::abrir(&caminho_indice).expect("índice");
+            atualizar(&mut ind, &inv, None, e.as_ref()).expect("atualizar");
+        }
+        let busca = BuscaLocal::nova(&caminho_indice, Arc::clone(&e));
+        let rotulo = erro.to_string();
+        let falso = Falso::com_roteiro(vec![Err(erro)]);
+        let registro = RegistroDaIa::abrir(&caminho_inv, None).expect("registro");
+        let r = perguntar(
+            &busca,
+            &falso,
+            &registro,
+            NivelDeConfianca::Mascarado,
+            "quanto foi a fatura de energia?",
+            2,
+        );
+        assert!(r.is_err());
+        let n: i64 = Connection::open(&caminho_inv)
+            .expect("abrir")
+            .query_row("SELECT COUNT(*) FROM saida_ia", [], |l| l.get(0))
+            .expect("n");
+        assert_eq!(n, saidas, "{rotulo}");
+    }
+}

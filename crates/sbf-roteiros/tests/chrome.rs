@@ -68,12 +68,12 @@ fn passos_de_login(site: &SiteFalso) -> Vec<Passo> {
         },
         Passo::PreencherCpf {
             seletor: "#cpf".into(),
-            host: None,
+            host: Some("127.0.0.1".into()),
         },
         Passo::PreencherSenha {
             seletor: "#senha".into(),
             rotulo: "banco-ficticio".into(),
-            host: None,
+            host: Some("127.0.0.1".into()),
         },
         Passo::Clicar {
             seletor: "#entrar".into(),
@@ -169,7 +169,16 @@ fn fluxo_completo_com_mfa_download_e_inventario() {
     let origens: i64 = conn
         .query_row("SELECT count(*) FROM origem", [], |l| l.get(0))
         .unwrap();
-    assert_eq!((achados, origens), (2, 2));
+    assert_eq!(
+        (achados, origens),
+        (2, 2),
+        "achados e origens: {:?}",
+        conn.prepare("SELECT origin_key FROM origem")
+            .unwrap()
+            .query_map([], |l| l.get::<_, String>(0))
+            .unwrap()
+            .collect::<Vec<_>>()
+    );
     let (hash, tamanho): (String, i64) = conn
         .query_row(
             "SELECT content_hash, file_size_bytes FROM achado WHERE extensao = 'pdf'",
@@ -391,5 +400,277 @@ fn ro_03_captcha_pausa_e_o_site_mudado_falha_no_passo() {
         rel.fim
     );
     assert!(site.logins() == 1 && site.downloads() == 0);
+    chrome.fechar();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revisão de segurança (Opus): a página é hostil e o SBF não confia em nada que ela diga.
+// ---------------------------------------------------------------------------------------------
+
+/// Roda `passos` no Chrome e devolve o relatório e o banco.
+fn rodar_no_chrome(
+    chrome: &mut Chrome,
+    pasta: &std::path::Path,
+    passos: &[Passo],
+) -> (
+    sbf_roteiros::executor::Relatorio,
+    BancoDeRoteiros,
+    std::path::PathBuf,
+) {
+    let banco = BancoDeRoteiros::em_memoria().unwrap();
+    let id = banco
+        .criar_roteiro(
+            "x",
+            "",
+            "",
+            Some("banco-ficticio"),
+            passos,
+            OrigemDaVersao::Manual,
+        )
+        .unwrap();
+    let (vid, _, roteiro) = banco.versao_ativa(id).unwrap();
+    let execucao = banco.iniciar_execucao(id, vid, "teste").unwrap();
+    let (cofre, conn) = inventario(pasta);
+    let mut destino = NoInventario::novo(&conn, &cofre, "x", execucao);
+    let pausa = comum::PausaFalsa::default();
+    let nao = AtomicBool::new(false);
+    let baixados = pasta.join("b");
+    let rel = {
+        let mut c = Contexto {
+            navegador: chrome,
+            senhas: &Senhas,
+            pausa: &pausa,
+            destino: &mut destino,
+            banco: &banco,
+            pasta: baixados.clone(),
+            opcoes: opcoes(),
+            cancelar: &nao,
+        };
+        executar(&mut c, execucao, &roteiro).unwrap()
+    };
+    (rel, banco, baixados)
+}
+
+/// O mesmo servidor, visto pelo outro nome: o host muda (`localhost`), o servidor não.
+fn como_localhost(url: &str) -> String {
+    url.replace("127.0.0.1", "localhost")
+}
+
+#[test]
+fn ro_01_pagina_hostil_que_troca_a_ponte_e_mente_a_url_nao_recebe_a_senha() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    // O usuário aprovou a senha em 127.0.0.1; a página hostil está em localhost e jura, pela
+    // ponte que ela mesma trocou, que está em 127.0.0.1.
+    let passos = vec![
+        Passo::Navegar {
+            url: como_localhost(&site.url("/hostil")),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("127.0.0.1".into()),
+        },
+    ];
+    let (rel, _banco, _) = rodar_no_chrome(&mut chrome, d.path(), &passos);
+    assert!(
+        matches!(rel.fim, Fim::Falhou { passo: 1, .. }),
+        "{:?}",
+        rel.fim
+    );
+    let valor = Cdp::conectar(chrome.alvo_da_pagina())
+        .unwrap()
+        .avaliar("document.querySelector('#senha').value")
+        .unwrap();
+    assert_eq!(
+        valor, "",
+        "a senha não pode ter sido digitada na página hostil"
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn ro_02_clique_inocente_que_paga_e_transfere_por_script_e_barrado_na_rede() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    let passos = vec![
+        Passo::Navegar {
+            url: site.url("/continuar"),
+        },
+        Passo::Clicar {
+            seletor: "#continuar".into(),
+        },
+        Passo::Baixar {
+            seletor: "#baixar".into(),
+            nome: None,
+        },
+    ];
+    let (rel, banco, _) = rodar_no_chrome(&mut chrome, d.path(), &passos);
+    assert!(
+        matches!(rel.fim, Fim::Bloqueada { passo: 1, .. }),
+        "{:?}",
+        rel.fim
+    );
+    assert_eq!(
+        site.perigosas(),
+        0,
+        "o fetch POST /pagar e o location=/transferir não podem chegar ao servidor"
+    );
+    assert_eq!(site.downloads(), 0, "o roteiro abortou antes do download");
+    assert_eq!(
+        banco.historico(None, 1).unwrap()[0].estado.texto(),
+        "bloqueada"
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn ro_02_iframe_de_outro_site_tambem_e_vigiado_na_rede() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/quadro-de-fora")).unwrap();
+    let limite = std::time::Instant::now() + Duration::from_secs(6);
+    let mut barrados = Vec::new();
+    while barrados.is_empty() && std::time::Instant::now() < limite {
+        barrados = chrome.bloqueios().unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        !barrados.is_empty(),
+        "o fetch do iframe deveria ser barrado"
+    );
+    assert_eq!(
+        site.perigosas(),
+        0,
+        "a requisição do iframe chegou ao servidor"
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn ro_02_na_fase_de_login_envio_para_outro_site_e_barrado() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/login")).unwrap();
+    chrome.fase_de_login(Some("127.0.0.1"));
+    // um envio (POST) para o outro nome do servidor, como um formulário hostil faria
+    Cdp::conectar(chrome.alvo_da_pagina())
+        .unwrap()
+        .avaliar(&format!(
+            "fetch('http://localhost:{}/captcha-ok',{{method:'POST',mode:'no-cors'}});true",
+            site.porta()
+        ))
+        .unwrap();
+    let limite = std::time::Instant::now() + Duration::from_secs(5);
+    let mut barrados = Vec::new();
+    while barrados.is_empty() && std::time::Instant::now() < limite {
+        barrados = chrome.bloqueios().unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        !barrados.is_empty(),
+        "POST para outro host no login deveria cair"
+    );
+    // fora da fase de login o mesmo POST é só uma requisição comum
+    chrome.fase_de_login(None);
+    chrome.fechar();
+}
+
+#[test]
+fn ro_05_clique_coberto_por_capa_ou_quadro_e_recusado() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    for rota in ["/coberto", "/coberto-por-quadro"] {
+        chrome.navegar(&site.url(rota)).unwrap();
+        let r = chrome.clicar("#alvo");
+        assert!(
+            r.is_err(),
+            "{rota}: o clique no ponto coberto devia ser recusado"
+        );
+        let url = chrome.pagina().unwrap().url;
+        assert!(url.ends_with(rota), "{rota}: foi levado para {url}");
+    }
+    chrome.fechar();
+}
+
+#[test]
+fn ro_05_botao_dentro_de_shadow_dom_e_conferido_pelo_alvo_de_verdade() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/sombra")).unwrap();
+    chrome.clicar("#hospedeiro").unwrap();
+    let b = chrome.bloqueios().unwrap();
+    assert!(
+        !b.is_empty(),
+        "o botão Pagar do shadow DOM devia ser barrado"
+    );
+    assert!(chrome.pagina().unwrap().url.ends_with("/sombra"));
+    chrome.fechar();
+}
+
+#[test]
+fn ro_02_janela_nova_aberta_por_script_nao_escapa_da_vigilancia() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/abre-janela")).unwrap();
+    let _ = chrome.clicar("#abre");
+    std::thread::sleep(Duration::from_millis(1200));
+    assert_eq!(
+        site.perigosas(),
+        0,
+        "a janela nova chegou a /transferir sem passar pela lista de bloqueio"
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn ro_02_no_navegador_a_excecao_do_comprovante_vale_e_o_resto_continua_barrado() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/comprovante")).unwrap();
+    chrome.clicar("#ok").unwrap();
+    assert!(chrome.bloqueios().unwrap().is_empty(), "consulta passa");
+    let titulo = Cdp::conectar(chrome.alvo_da_pagina())
+        .unwrap()
+        .avaliar("document.title")
+        .unwrap();
+    assert_eq!(titulo, "clicou");
+    chrome.clicar("#mau").unwrap();
+    assert!(
+        !chrome.bloqueios().unwrap().is_empty(),
+        "o resto do campo vale"
+    );
     chrome.fechar();
 }

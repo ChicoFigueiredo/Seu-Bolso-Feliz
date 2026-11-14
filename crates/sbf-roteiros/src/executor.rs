@@ -181,17 +181,12 @@ impl std::fmt::Debug for Contexto<'_> {
     }
 }
 
-/// Troca por `***` todo segredo (e a forma percent-encoded) que apareça em `texto`.
+/// Troca por `***` todo segredo (e a forma percent-encoded, e só os dígitos de um CPF) que
+/// apareça em `texto`.
 #[must_use]
 pub fn limpar_texto(texto: &str, segredos: &[Segredo]) -> String {
-    let mut saida = texto.to_owned();
-    for s in segredos {
-        let v = s.expor();
-        if v.chars().count() >= 4 && saida.contains(v) {
-            saida = saida.replace(v, "***");
-        }
-    }
-    saida
+    let s: Vec<&str> = segredos.iter().map(Segredo::expor).collect();
+    crate::pagina::limpar_texto_com(texto, &s)
 }
 
 /// Interage com a página (vale a detecção de MFA e CAPTCHA antes do passo).
@@ -213,6 +208,20 @@ pub fn executar(
     // Segredo nenhum fica na memória além da execução (Segredo zera ao cair).
     drop(usados);
     r
+}
+
+/// Como [`executar`], mas os segredos usados ficam em `usados`, de quem chama: é com eles que
+/// o conserto limpa a página antes de ela ir à IA. Quem chama os solta (zera) ao terminar.
+///
+/// # Errors
+/// Só falha de infraestrutura (banco, disco).
+pub fn executar_guardando_segredos(
+    contexto: &mut Contexto<'_>,
+    execucao: i64,
+    roteiro: &Roteiro,
+    usados: &mut Vec<Segredo>,
+) -> Resultado<Relatorio> {
+    rodar(contexto, execucao, roteiro, usados)
 }
 
 fn rodar(
@@ -389,18 +398,25 @@ fn esperar_visivel(
     }
 }
 
-/// A senha e o CPF só vão para o site em que o usuário aprovou usá-los: se a página atual não é
-/// do host gravado no passo, nada é digitado.
+/// A senha e o CPF só vão para o site em que o usuário aprovou usá-los. A página atual é a que
+/// o **navegador** carregou (a URL não vem de JavaScript da página): precisa ser do host
+/// gravado no passo e `https` (`http` só no próprio computador). Passo sem host aprovado não
+/// digita nada: o roteiro tem de ser regravado.
 fn conferir_host(c: &mut Contexto<'_>, passo: usize, esperado: Option<&str>) -> Resultado<()> {
-    let Some(esperado) = esperado else {
-        return Ok(());
+    let Some(esperado) = esperado.filter(|h| !h.trim().is_empty()) else {
+        return Err(falha(
+            passo,
+            "este passo não diz em que site a senha vale: regrave o roteiro para aprová-la",
+        ));
     };
-    let atual = c
-        .navegador
-        .pagina()
-        .ok()
-        .and_then(|p| crate::passo::host_de(&p.url));
-    if atual.as_deref() == Some(esperado) {
+    let url = c.navegador.pagina().map(|p| p.url).unwrap_or_default();
+    if !crate::passo::esquema_aceito_para_segredo(&url) {
+        return Err(falha(
+            passo,
+            "a senha do chaveiro só vai para uma página https (a página atual não é)",
+        ));
+    }
+    if crate::passo::host_de(&url).as_deref() == Some(esperado) {
         Ok(())
     } else {
         Err(falha(
@@ -410,6 +426,35 @@ fn conferir_host(c: &mut Contexto<'_>, passo: usize, esperado: Option<&str>) -> 
             ),
         ))
     }
+}
+
+/// O campo onde um segredo vai cair, como o navegador o descreve: a senha só num
+/// `input type=password`; o CPF só num campo de texto (nunca de senha, botão ou área).
+fn conferir_campo_do_segredo(
+    c: &mut Contexto<'_>,
+    passo: usize,
+    seletor: &str,
+    senha: bool,
+) -> Resultado<()> {
+    let Some(cand) = c.navegador.descrever(seletor)? else {
+        return Err(falha(passo, format!("o elemento \"{seletor}\" não existe")));
+    };
+    if senha {
+        if cand.eh_senha && cand.tipo == "password" {
+            return Ok(());
+        }
+        return Err(falha(
+            passo,
+            "a senha do chaveiro só vai num campo de senha (input type=password)",
+        ));
+    }
+    if cand.eh_campo
+        && !cand.eh_senha
+        && matches!(cand.tipo.as_str(), "text" | "tel" | "number" | "search")
+    {
+        return Ok(());
+    }
+    Err(falha(passo, "o CPF só vai num campo de texto"))
 }
 
 /// Depois de navegar ou clicar: a página em que o navegador caiu (inclusive por redirecionamento
@@ -501,9 +546,13 @@ pub fn executar_passo(
 ) -> Resultado<()> {
     match passo {
         Passo::Navegar { url } => {
+            if !crate::passo::url_navegavel(url) {
+                return Err(falha(i, "só se navega para endereços http e https"));
+            }
             if let Some(b) = bloqueio::avaliar_url(url) {
                 return Err(ErroDeRoteiro::Bloqueado(b));
             }
+            c.navegador.fase_de_login(None);
             c.navegador.navegar(url)?;
             conferir_barrado(c)?;
             conferir_destino(c)
@@ -516,6 +565,8 @@ pub fn executar_passo(
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_elemento(c, i, seletor)?;
             let r = c.navegador.clicar(seletor);
+            // O clique que envia o login acabou: a fase de login (RO-02) termina com ele.
+            c.navegador.fase_de_login(None);
             conferir_barrado(c)?;
             r?;
             conferir_destino(c)
@@ -538,6 +589,8 @@ pub fn executar_passo(
         } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_host(c, i, host.as_deref())?;
+            conferir_campo_do_segredo(c, i, seletor, true)?;
+            c.navegador.fase_de_login(host.as_deref());
             let segredo = c
                 .senhas
                 .senha_de_site(rotulo)
@@ -551,6 +604,8 @@ pub fn executar_passo(
         Passo::PreencherCpf { seletor, host } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_host(c, i, host.as_deref())?;
+            conferir_campo_do_segredo(c, i, seletor, false)?;
+            c.navegador.fase_de_login(host.as_deref());
             let segredo = c.senhas.cpf().map_err(ErroDeRoteiro::Chaveiro)?;
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
@@ -610,6 +665,9 @@ fn entregar(
     nome: &str,
 ) -> Resultado<()> {
     let r = c.destino.receber(caminho, nome)?;
+    // O arquivo já está no cofre (ou já estava): a cópia temporária não fica na pasta de dados
+    // do app, que não é cofre. Só os metadados da execução ficam.
+    let _ = std::fs::remove_file(caminho);
     rel.baixados += 1;
     if r == Recebido::Novo {
         rel.novos += 1;
