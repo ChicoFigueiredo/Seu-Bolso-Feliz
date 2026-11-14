@@ -444,6 +444,12 @@ fn atender(mut c: TcpStream, e: &Estado) -> std::io::Result<()> {
             // inocente não pode fazer na aba vigiada.
             "<button id=\"abre\" onclick=\"window.open('/transferir')\">Continuar</button>",
         ),
+        ("GET", "/comprovante") => html_ok(
+            &mut c,
+            "Comprovante",
+            "<button id=\"ok\" onclick=\"document.title='clicou'\">Comprovante de pagamento</button>\
+             <button id=\"mau\" onclick=\"document.title='mau'\">Comprovante de pagamento: pagar agora</button>",
+        ),
         ("GET", "/navegou") => html_ok(&mut c, "Navegou", "<p>Fui levado para outro lugar.</p>"),
         ("GET", "/sombra") => html_ok(
             &mut c,

@@ -650,3 +650,27 @@ fn ro_02_janela_nova_aberta_por_script_nao_escapa_da_vigilancia() {
     );
     chrome.fechar();
 }
+
+#[test]
+fn ro_02_no_navegador_a_excecao_do_comprovante_vale_e_o_resto_continua_barrado() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/comprovante")).unwrap();
+    chrome.clicar("#ok").unwrap();
+    assert!(chrome.bloqueios().unwrap().is_empty(), "consulta passa");
+    let titulo = Cdp::conectar(chrome.alvo_da_pagina())
+        .unwrap()
+        .avaliar("document.title")
+        .unwrap();
+    assert_eq!(titulo, "clicou");
+    chrome.clicar("#mau").unwrap();
+    assert!(
+        !chrome.bloqueios().unwrap().is_empty(),
+        "o resto do campo vale"
+    );
+    chrome.fechar();
+}
