@@ -9,6 +9,9 @@
 //! 4. **Mensageiros**: se ligados em Opções › Mensageiros, WhatsApp e Telegram (só as conversas
 //!    que o usuário incluiu), no intervalo de `mensageiros.json`;
 //! 5. **Triagem**: um pequeno lote do agente, no horário configurado.
+//! 6. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
+//!    só se o modelo já foi baixado pela janela (o worker nunca baixa modelo);
+//! 7. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -177,6 +180,43 @@ pub trait Triador {
     fn ciclo(&mut self, lote: usize, cancelar: &AtomicBool) -> Result<ResumoDaTriagem, Falha>;
 }
 
+/// O que uma atualização do índice local fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoIndice {
+    pub embutidos: usize,
+    pub mantidos: usize,
+    pub removidos: usize,
+}
+
+/// Atualiza o índice local (o real é `sbf_indice::fontes::atualizar`, montado no `sbf`).
+pub trait Indexador {
+    /// `Ok(None)`: o modelo ainda não foi baixado, nada a fazer (não é falha).
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn atualizar(&mut self, cancelar: &AtomicBool) -> Result<Option<ResumoDoIndice>, Falha>;
+}
+
+/// O que uma análise de pontos de atenção fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDosPontos {
+    pub novos: usize,
+    pub reabertos: usize,
+    pub fechados: usize,
+}
+
+/// A análise dos pontos de atenção (a real é `sbf_pontos::rodar`, montada no `sbf`).
+pub trait Analista {
+    /// # Errors
+    /// A categoria da falha.
+    fn analisar(&mut self) -> Result<ResumoDosPontos, Falha>;
+}
+
+/// De quanto em quanto tempo o índice é atualizado, em segundos.
+pub const INTERVALO_DO_INDICE: u64 = 30 * 60;
+/// De quanto em quanto tempo os pontos de atenção são analisados, em segundos.
+pub const INTERVALO_DOS_PONTOS: u64 = 6 * 3600;
+
 /// O worker.
 pub struct Worker {
     dados: Dados,
@@ -184,6 +224,8 @@ pub struct Worker {
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
     mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
     triador: Option<Box<dyn Triador>>,
+    indexador: Option<Box<dyn Indexador>>,
+    analista: Option<Box<dyn Analista>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
     pub estado: EstadoDoWorker,
@@ -194,6 +236,8 @@ pub struct Worker {
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
     proxima_triagem: u64,
+    proximo_indice: u64,
+    proximos_pontos: u64,
     gravado_em: u64,
     sujo: bool,
 }
@@ -247,6 +291,8 @@ impl Worker {
             nuvem,
             mensageiros: None,
             triador,
+            indexador: None,
+            analista: None,
             registro,
             estado,
             vigia,
@@ -257,6 +303,8 @@ impl Worker {
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
             proxima_triagem: agora_,
+            proximo_indice: agora_,
+            proximos_pontos: agora_,
             gravado_em: 0,
             sujo: true,
         };
@@ -270,6 +318,20 @@ impl Worker {
     #[must_use]
     pub fn com_mensageiros(mut self, coletor: Box<dyn ColetorDeMensageiros>) -> Self {
         self.mensageiros = Some(coletor);
+        self
+    }
+
+    /// Liga a atualização do índice local (spec 10).
+    #[must_use]
+    pub fn com_indice(mut self, indexador: Box<dyn Indexador>) -> Self {
+        self.indexador = Some(indexador);
+        self
+    }
+
+    /// Liga a análise dos pontos de atenção (spec 10).
+    #[must_use]
+    pub fn com_pontos(mut self, analista: Box<dyn Analista>) -> Self {
+        self.analista = Some(analista);
         self
     }
 
@@ -443,9 +505,52 @@ impl Worker {
             self.proxima_triagem = agora_ + self.config.triagem.intervalo_minutos.max(1) * 60;
             self.passo_da_triagem(cancelar, agora_);
         }
+        if agora_ >= self.proximo_indice && !cancelar.load(Ordering::Relaxed) {
+            self.proximo_indice = agora_ + INTERVALO_DO_INDICE;
+            self.passo_do_indice(cancelar);
+        }
+        if agora_ >= self.proximos_pontos && !cancelar.load(Ordering::Relaxed) {
+            self.proximos_pontos = agora_ + INTERVALO_DOS_PONTOS;
+            self.passo_dos_pontos();
+        }
         if self.sujo || agora_.saturating_sub(self.gravado_em) >= 10 {
             self.gravar_estado();
         }
+    }
+
+    fn passo_do_indice(&mut self, cancelar: &AtomicBool) {
+        let Some(mut i) = self.indexador.take() else {
+            return;
+        };
+        match i.atualizar(cancelar) {
+            Ok(Some(r)) => {
+                let _ = self.registro.registrar(&Evento::Indice {
+                    embutidos: r.embutidos,
+                    mantidos: r.mantidos,
+                    removidos: r.removidos,
+                });
+            }
+            Ok(None) => {}
+            Err(f) => self.falhou("indice", f),
+        }
+        self.indexador = Some(i);
+    }
+
+    fn passo_dos_pontos(&mut self) {
+        let Some(mut a) = self.analista.take() else {
+            return;
+        };
+        match a.analisar() {
+            Ok(r) => {
+                let _ = self.registro.registrar(&Evento::Pontos {
+                    novos: r.novos,
+                    reabertos: r.reabertos,
+                    fechados: r.fechados,
+                });
+            }
+            Err(f) => self.falhou("pontos", f),
+        }
+        self.analista = Some(a);
     }
 
     fn passo_da_nuvem(&mut self, cancelar: &AtomicBool, agora_: u64) {

@@ -11,8 +11,8 @@ use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
-    ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
-    ResumoDeMensageiros, Triador, Worker,
+    Analista, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador, ResumoDaNuvem,
+    ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -319,4 +319,74 @@ fn mensageiros_so_rodam_ligados_e_no_intervalo_do_arquivo() {
     assert_eq!(n.get(), 2);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("mensageiros mensagens=5 novos=3"), "{log}");
+}
+
+// -- índice local e pontos de atenção (spec 10) ----------------------------------------------
+
+struct IndexadorFalso(Rc<Cell<u32>>, bool);
+impl Indexador for IndexadorFalso {
+    fn atualizar(&mut self, _: &AtomicBool) -> Result<Option<ResumoDoIndice>, Falha> {
+        self.0.set(self.0.get() + 1);
+        if self.1 {
+            return Ok(None);
+        }
+        Ok(Some(ResumoDoIndice {
+            embutidos: 3,
+            mantidos: 7,
+            removidos: 1,
+        }))
+    }
+}
+
+struct AnalistaFalso(Rc<Cell<u32>>);
+impl Analista for AnalistaFalso {
+    fn analisar(&mut self) -> Result<ResumoDosPontos, Falha> {
+        self.0.set(self.0.get() + 1);
+        Ok(ResumoDosPontos {
+            novos: 2,
+            reabertos: 0,
+            fechados: 1,
+        })
+    }
+}
+
+#[test]
+fn indice_de_meia_em_meia_hora_e_pontos_de_seis_em_seis_horas() {
+    let c = cenario();
+    let (i, p) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_indice(Box::new(IndexadorFalso(i.clone(), false)))
+        .com_pontos(Box::new(AnalistaFalso(p.clone())));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!((i.get(), p.get()), (1, 1), "a primeira volta já roda");
+    w.passo(t0 + 60, Duration::from_millis(1), &nao);
+    assert_eq!((i.get(), p.get()), (1, 1));
+    w.passo(t0 + 31 * 60, Duration::from_millis(1), &nao);
+    assert_eq!((i.get(), p.get()), (2, 1));
+    w.passo(t0 + 6 * 3600 + 5, Duration::from_millis(1), &nao);
+    assert_eq!((i.get(), p.get()), (3, 2));
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(
+        log.contains("indice embutidos=3 mantidos=7 removidos=1"),
+        "{log}"
+    );
+    assert!(
+        log.contains("pontos novos=2 reabertos=0 fechados=1"),
+        "{log}"
+    );
+}
+
+#[test]
+fn indice_sem_modelo_baixado_nao_e_falha() {
+    let c = cenario();
+    let i = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_indice(Box::new(IndexadorFalso(i.clone(), true)));
+    w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
+    assert_eq!(i.get(), 1);
+    assert_eq!(w.estado.falhas, 0);
 }
