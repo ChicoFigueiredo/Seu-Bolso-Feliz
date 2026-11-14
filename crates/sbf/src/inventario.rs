@@ -133,7 +133,14 @@ impl AppDoInventario {
                     inventario.caminho(),
                     &crate::triagem::Insumos::do_ambiente(chaveiro_da_ia),
                 ) {
-                    Ok(servico) => janela.ligar_triagem(Box::new(servico)),
+                    Ok(servico) => {
+                        // O painel do agente contínuo lê o estado dele na pasta de dados.
+                        let servico = match sbf_chaveiro::pasta_de_dados_do_app() {
+                            Ok(p) => servico.com_agente(p.join("agente.sqlite")),
+                            Err(_) => servico,
+                        };
+                        janela.ligar_triagem(Box::new(servico));
+                    }
                     Err(e) if janela.mensagem.is_none() => {
                         janela.mensagem = Some(sbf_janela::janela::Mensagem {
                             texto: format!("Triagem por IA indisponível: {e}"),
@@ -161,6 +168,7 @@ impl AppDoInventario {
                 match crate::App::novo(janela, consulta, Box::new(inventario), barra) {
                     Ok(mut app) => {
                         app.estacao = ligacao;
+                        app.mostrar_worker = true;
                         self.janela = Some(app);
                     }
                     Err(e) => {

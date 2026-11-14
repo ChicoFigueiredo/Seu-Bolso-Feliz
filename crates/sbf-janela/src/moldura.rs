@@ -29,6 +29,9 @@ pub struct EstadoDaBarra {
     /// barra mostra o aviso com ícone e texto, e o texto inteiro no tooltip.
     pub aviso_de_disco: Option<String>,
     pub ultima_copia: Option<String>,
+    /// O estado do worker local (`sbf worker`): "Worker: rodando · coleta há 5 min · fila 12"
+    /// ou "Worker: parado". `None` na demonstração (não há worker).
+    pub worker: Option<String>,
     /// Selo à direita do título ("Demonstração · dados fictícios").
     pub selo: Option<String>,
 }

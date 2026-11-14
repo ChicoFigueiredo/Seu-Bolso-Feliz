@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Layout, RichText, ScrollArea, Ui};
 use sbf_ia::NivelDeConfianca;
+use sbf_triagem::agente::{Painel, TipoDeRegra};
 use sbf_triagem::piloto::{FAIXA_ALTA, FAIXA_BAIXA, FAIXA_MEDIA, RelatorioDoPiloto};
 use sbf_triagem::rodada::{Progresso, SituacaoDaRodada};
 use sbf_triagem::servico::{ConfiguracaoDeIa, ProvedorEscolhido, ServicoDeTriagem};
@@ -27,11 +28,15 @@ use crate::tema;
 /// O que a tela pede ao serviço. Aplicado fora do quadro.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcaoDaTriagem {
-    Iniciar { piloto: bool },
+    Iniciar {
+        piloto: bool,
+    },
     Pausar,
     Retomar,
     Aceitar(Vec<i64>),
     Recusar(Vec<i64>),
+    /// Apaga uma regra aprendida pelo agente contínuo.
+    ApagarRegra(i64),
     SalvarConfiguracao(ConfiguracaoDeIa),
     TestarConexao,
 }
@@ -59,6 +64,8 @@ pub struct EstadoDaTriagem {
     pub erro: Option<String>,
     /// Opções → IA → Chaves e contas.
     pub chaves: crate::chaves_ia::ChavesDeIa,
+    /// O painel do agente contínuo, como foi lido por último.
+    painel: Option<Painel>,
 }
 
 impl std::fmt::Debug for EstadoDaTriagem {
@@ -125,6 +132,7 @@ impl EstadoDaTriagem {
             }
             Err(e) => self.erro = Some(e),
         }
+        self.painel = servico.painel_do_agente();
         let existentes: HashSet<i64> = self
             .grupos
             .iter()
@@ -229,6 +237,73 @@ fn cartao_da_rodada(ui: &mut Ui, p: &Progresso, pedidos: &mut Vec<Pedido>) {
                 pedidos.push(Pedido::Triagem(AcaoDaTriagem::Retomar));
             }
         });
+    });
+}
+
+/// O painel do agente contínuo (spec 09): o que chegou, o que foi sugerido, as regras que ele
+/// aprendeu com as suas decisões (cada uma se apaga) e o acerto da semana.
+fn painel_do_agente(ui: &mut Ui, p: &Painel, pedidos: &mut Vec<Pedido>) {
+    let cores = tema::paleta(ui.ctx());
+    componentes::cartao(ui, |ui| {
+        ui.horizontal(|ui| {
+            componentes::titulo(ui, "Agente contínuo", 14.0);
+            ui.label(
+                RichText::new("sugere e você confirma; nunca aplica sozinho")
+                    .size(12.0)
+                    .color(cores.tinta_suave),
+            );
+        });
+        let acerto = p.acerto_da_semana().map_or_else(
+            || "sem decisões ainda".to_owned(),
+            |a| format!("{:.0}%", a * 100.0),
+        );
+        ui.label(
+            RichText::new(format!(
+                "Chegaram na semana: {} · sugeridas: {} · esperando você: {} ({} prontas para confirmar) · na fila: {}",
+                p.chegaram, p.sugeridas, p.abertas, p.prontas, p.na_fila
+            ))
+            .size(12.5)
+            .color(cores.tinta_suave),
+        );
+        ui.label(
+            RichText::new(format!(
+                "Acerto da semana: {acerto} ({} aceitas, {} recusadas)",
+                p.aceitas_da_semana, p.recusadas_da_semana
+            ))
+            .size(12.5),
+        );
+        egui::CollapsingHeader::new(format!("Regras aprendidas ({})", p.regras.len()))
+            .id_salt("regras-aprendidas")
+            .show(ui, |ui| {
+                if p.regras.is_empty() {
+                    ui.label(
+                        RichText::new(
+                            "Nenhuma ainda: a regra nasce com 3 confirmações suas sem nenhuma recusa.",
+                        )
+                        .size(12.0)
+                        .color(cores.tinta_suave),
+                    );
+                }
+                for r in &p.regras {
+                    ui.horizontal(|ui| {
+                        let o_que = match r.tipo {
+                            TipoDeRegra::Categoria => "categoria",
+                            TipoDeRegra::TipoDocumento => "tipo de documento",
+                        };
+                        ui.label(format!(
+                            "{} → {o_que} {} ({} confirmações)",
+                            r.quando, r.valor, r.exemplos
+                        ));
+                        if ui
+                            .small_button("Apagar")
+                            .on_hover_text("Ela só volta com 3 confirmações novas suas")
+                            .clicked()
+                        {
+                            pedidos.push(Pedido::Triagem(AcaoDaTriagem::ApagarRegra(r.id)));
+                        }
+                    });
+                }
+            });
     });
 }
 
@@ -387,6 +462,10 @@ pub fn area(ui: &mut Ui, estado: &mut EstadoDaTriagem, pedidos: &mut Vec<Pedido>
         ui.ctx().request_repaint_after(Duration::from_millis(500));
     }
     cartao_da_rodada(ui, &progresso, pedidos);
+    if let Some(p) = &estado.painel {
+        ui.add_space(6.0);
+        painel_do_agente(ui, p, pedidos);
+    }
     if let Some(r) = estado
         .servico
         .as_deref()

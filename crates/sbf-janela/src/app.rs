@@ -809,6 +809,17 @@ impl AppCasca for AppSbf {
             SegmentoStatus::novo("copia", format!("Última cópia: {}", traco(&ultima_copia)))
                 .icone("backup"),
         );
+        if let Some(w) = &self.barra.worker {
+            let parado = w.ends_with("parado");
+            v.push(
+                SegmentoStatus::novo("worker", w.clone())
+                    .icone(if parado { "sync_disabled" } else { "sync" })
+                    .dica(
+                        "O worker local coleta pastas e nuvens e roda a triagem com a janela \
+                         fechada. `sbf worker instalar` o liga como serviço do usuário.",
+                    ),
+            );
+        }
         if let Some(s) = &self.barra.selo {
             v.push(
                 SegmentoStatus::novo("selo", s.clone())

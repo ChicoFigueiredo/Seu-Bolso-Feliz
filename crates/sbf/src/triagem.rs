@@ -25,7 +25,7 @@ use sbf_ia::{
     Registro, Resposta, ResultadoDeIa,
 };
 use sbf_inventario::sugestao::RegistroDaIa;
-use sbf_triagem::rodada::{RastroDeFalhas, configuracao_da_fila};
+use sbf_triagem::rodada::{RastroDeFalhas, configuracao_da_fila, configuracao_da_fila_v2};
 use sbf_triagem::servico::{ProvedorEscolhido, TriagemDoInventario, configuracao_salva};
 use sbf_triagem::sugestoes::gasto_do_mes_dezmilesimos;
 
@@ -137,11 +137,25 @@ fn openrouter(
     Ok(Arc::new(o))
 }
 
-/// Monta o serviço de triagem sobre `banco` (o `inventario.sqlite`, já migrado).
+/// As peças que rodam uma triagem: o motor da fila, o registro do que saiu e o provedor.
+pub struct Motor {
+    /// A fila do motor (cache, ritmo, degraus).
+    pub fila: Arc<Fila>,
+    /// O registro de `saida_ia`, marcado com o id de cada rodada.
+    pub registro: Arc<RegistroDaIa>,
+    /// O provedor principal (serve ao teste de conexão e dá o nome da rodada).
+    pub principal: Arc<dyn Provedor>,
+    /// O rastro de falhas transitórias (o item falho é adiado, não "não classificado").
+    pub rastro: RastroDeFalhas,
+}
+
+/// Monta o [`Motor`] sobre `banco` (o `inventario.sqlite`, já migrado). `agente = true` usa o
+/// prompt `triagem-v2` (o agente contínuo); `false`, o `triagem-v1` da rodada manual. Os dois
+/// convivem no cache porque a versão entra na chave.
 ///
 /// # Errors
 /// Falha ao abrir o banco ou o portão de rede do OpenRouter.
-pub fn montar(banco: &Path, insumos: &Insumos) -> Result<TriagemDoInventario, String> {
+pub fn montar_motor(banco: &Path, insumos: &Insumos, agente: bool) -> Result<Motor, String> {
     let config = configuracao_salva(banco);
     let sem_chave = || -> Arc<dyn Provedor> {
         Arc::new(SemProvedor {
@@ -183,13 +197,32 @@ pub fn montar(banco: &Path, insumos: &Insumos) -> Result<TriagemDoInventario, St
     };
     let registro = Arc::new(RegistroDaIa::abrir(banco, None).map_err(|e| e.to_string())?);
     let rastro = RastroDeFalhas::default();
+    let usar_reserva = config.reserva.is_some_and(|r| r != config.principal);
     let fila = Arc::new(Fila::nova(
         rastro.embrulhar(Arc::clone(&principal)),
         reserva.map(|r| rastro.embrulhar(r)),
         Arc::clone(&registro) as Arc<dyn Registro>,
-        configuracao_da_fila(config.reserva.is_some_and(|r| r != config.principal)),
+        if agente {
+            configuracao_da_fila_v2(usar_reserva)
+        } else {
+            configuracao_da_fila(usar_reserva)
+        },
     ));
-    Ok(TriagemDoInventario::nova(banco, fila, registro, principal)?.com_rastro(rastro))
+    Ok(Motor {
+        fila,
+        registro,
+        principal,
+        rastro,
+    })
+}
+
+/// Monta o serviço de triagem sobre `banco` (o `inventario.sqlite`, já migrado).
+///
+/// # Errors
+/// Falha ao abrir o banco ou o portão de rede do OpenRouter.
+pub fn montar(banco: &Path, insumos: &Insumos) -> Result<TriagemDoInventario, String> {
+    let m = montar_motor(banco, insumos, false)?;
+    Ok(TriagemDoInventario::nova(banco, m.fila, m.registro, m.principal)?.com_rastro(m.rastro))
 }
 
 #[cfg(test)]

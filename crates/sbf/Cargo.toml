@@ -24,6 +24,9 @@ sbf-ia = { path = "../sbf-ia" }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-processo = { path = "../sbf-processo" }
 sbf-mcp = { path = "../sbf-mcp" }
+sbf-coleta = { path = "../sbf-coleta" }
+sbf-worker = { path = "../sbf-worker" }
+ctrlc = { version = "3", features = ["termination"] }
 zeroize = { workspace = true }
 
 [dev-dependencies]

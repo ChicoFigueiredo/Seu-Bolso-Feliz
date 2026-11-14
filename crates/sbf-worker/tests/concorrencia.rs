@@ -119,9 +119,14 @@ fn varredura_triagem_e_leitor_ao_mesmo_tempo_sem_busy_e_sem_perder_nada() {
     let n = |sql: &str| -> i64 { ver.query_row(sql, [], |l| l.get(0)).unwrap() };
     assert_eq!(n("SELECT COUNT(*) FROM origem"), 300);
     assert_eq!(n("SELECT COUNT(*) FROM achado"), 300);
-    assert_eq!(n("SELECT COUNT(*) FROM sugestao_ia"), 400 + 400, "thread + processo");
     assert_eq!(
-        ver.query_row("PRAGMA journal_mode", [], |l| l.get::<_, String>(0)).unwrap(),
+        n("SELECT COUNT(*) FROM sugestao_ia"),
+        400 + 400,
+        "thread + processo"
+    );
+    assert_eq!(
+        ver.query_row("PRAGMA journal_mode", [], |l| l.get::<_, String>(0))
+            .unwrap(),
         "wal"
     );
 }

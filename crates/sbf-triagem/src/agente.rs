@@ -818,7 +818,7 @@ impl Agente {
     ///
     /// # Errors
     /// Falha do SQLite.
-    pub fn painel(&self, inv: &Connection, na_fila: usize) -> Resultado<Painel> {
+    pub fn painel(&self, inv: &Connection) -> Resultado<Painel> {
         let chegaram: i64 = self.estado.query_row(
             "SELECT COUNT(*) FROM chegada WHERE inicial = 0
                 AND vista_em >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 day')",
@@ -844,6 +844,19 @@ impl Agente {
             [crate::sugestoes::NAO_CLASSIFICADO],
             |l| Ok((l.get(0)?, l.get(1)?)),
         )?;
+        // Uma conta aproximada (sem as duplicatas nem os pares de conciliação): serve ao painel.
+        let na_fila: i64 = inv.query_row(
+            "SELECT (SELECT COUNT(*) FROM achado a WHERE a.estado IN ('novo', 'duvida')
+                        AND COALESCE(a.decidido_por, '') <> 'usuario'
+                        AND NOT EXISTS (SELECT 1 FROM sugestao_ia s WHERE s.alvo_tipo = 'achado'
+                                          AND s.alvo_id = a.content_hash AND s.estado = 'aberta'))
+                  + (SELECT COUNT(*) FROM registro r WHERE r.estado <> 'promovido'
+                        AND r.movimentacao_id IS NULL AND COALESCE(r.decidido_por, '') <> 'usuario'
+                        AND NOT EXISTS (SELECT 1 FROM sugestao_ia s WHERE s.alvo_tipo = 'registro'
+                                          AND s.alvo_id = CAST(r.id AS TEXT) AND s.estado = 'aberta'))",
+            [],
+            |l| l.get(0),
+        )?;
         let mut prontas = 0;
         let mut c = inv.prepare(
             "SELECT confianca FROM sugestao_ia WHERE estado = 'aberta' AND campo <> ?1 AND confianca >= 0.85",
@@ -861,7 +874,7 @@ impl Agente {
             regras: self.regras()?,
             aceitas_da_semana: aceitas,
             recusadas_da_semana: recusadas,
-            na_fila,
+            na_fila: usize::try_from(na_fila).unwrap_or(0),
         })
     }
 }
