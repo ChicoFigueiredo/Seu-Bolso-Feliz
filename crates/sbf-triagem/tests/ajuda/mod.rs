@@ -2,15 +2,14 @@
 //! Reaproveita a fixture do `sbf-inventario` (`tests/comum`): `aplicar_schema_do_bun`.
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use rusqlite::{Connection, params};
-use sbf_ia::{
-    Consumo, ErroDeIa, NivelDeConfianca, Pedido, Provedor, Registro, Resposta, ResultadoDeIa, Saida,
-};
+use sbf_ia::{Consumo, Falso, Fila, Pedido, Provedor, Registro, Resposta, ResultadoDeIa};
 use sbf_inventario::banco::Inventario;
+use sbf_inventario::sugestao::RegistroDaIa;
+use sbf_triagem::rodada::configuracao_da_fila;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -144,94 +143,55 @@ pub fn contar(c: &Connection, sql: &str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------------------
-// Provedor falso
+// O motor, com o provedor falso do `sbf-ia`
 
-type Roteiro = Box<dyn FnMut(&Pedido) -> ResultadoDeIa<Value> + Send>;
-
-/// Responde com a função do teste e guarda cada pedido. Nenhum teste chama provedor real.
-pub struct Falso {
-    roteiro: Mutex<Roteiro>,
-    pub pedidos: Mutex<Vec<Pedido>>,
-    pub filas: Mutex<VecDeque<ResultadoDeIa<Value>>>,
+/// Uma resposta do provedor falso, com consumo fictício.
+pub fn resposta(json: Value) -> ResultadoDeIa<Resposta> {
+    Ok(Resposta {
+        json,
+        consumo: Consumo {
+            tokens_entrada: 1000,
+            tokens_saida: 200,
+            custo_dezmilesimos_usd: 150,
+            nominal: true,
+        },
+        modelo: "falso-modelo".into(),
+    })
 }
 
-impl Falso {
-    pub fn com(roteiro: impl FnMut(&Pedido) -> ResultadoDeIa<Value> + Send + 'static) -> Self {
-        Self {
-            roteiro: Mutex::new(Box::new(roteiro)),
-            pedidos: Mutex::new(Vec::new()),
-            filas: Mutex::new(VecDeque::new()),
-        }
-    }
+/// A fila do motor sobre o provedor falso e o `RegistroDaIa` do banco (sem espera de verdade).
+pub struct Montagem {
+    pub falso: Arc<Falso>,
+    pub fila: Arc<Fila>,
+    pub registro: Arc<RegistroDaIa>,
+}
 
-    /// Respostas em ordem; esgotadas, devolve `Outro`.
-    pub fn em_fila(respostas: Vec<ResultadoDeIa<Value>>) -> Self {
-        let falso = Self::com(|_| Err(ErroDeIa::Outro("sem resposta no roteiro".into())));
-        *falso.filas.lock().expect("fila") = respostas.into();
-        falso
+pub fn montar(banco: &Banco, falso: Falso) -> Montagem {
+    let falso = Arc::new(falso);
+    let registro = Arc::new(RegistroDaIa::abrir(&banco.caminho, None).expect("registro"));
+    let fila = Arc::new(
+        Fila::nova(
+            Arc::clone(&falso) as Arc<dyn Provedor>,
+            None,
+            Arc::clone(&registro) as Arc<dyn Registro>,
+            configuracao_da_fila(false),
+        )
+        .com_espera(|_, _| true),
+    );
+    Montagem {
+        falso,
+        fila,
+        registro,
     }
+}
 
-    pub fn chamadas(&self) -> usize {
-        self.pedidos.lock().expect("pedidos").len()
-    }
-
+impl Montagem {
     pub fn pedido(&self, i: usize) -> Pedido {
-        self.pedidos.lock().expect("pedidos")[i].clone()
-    }
-}
-
-impl Provedor for Falso {
-    fn nome(&self) -> &'static str {
-        "falso"
+        self.falso.pedidos()[i].clone()
     }
 
-    fn pedir(&self, pedido: &Pedido) -> ResultadoDeIa<Resposta> {
-        self.pedidos.lock().expect("pedidos").push(pedido.clone());
-        let proxima = self.filas.lock().expect("fila").pop_front();
-        let json = match proxima {
-            Some(r) => r?,
-            None => (self.roteiro.lock().expect("roteiro"))(pedido)?,
-        };
-        Ok(Resposta {
-            json,
-            consumo: Consumo {
-                tokens_entrada: 1000 + pedido.entrada.len() as u64 / 4,
-                tokens_saida: 200,
-                custo_dezmilesimos_usd: 150,
-                nominal: true,
-            },
-            modelo: match pedido.degrau {
-                sbf_ia::Degrau::Rapido => "falso-rapido".into(),
-                sbf_ia::Degrau::Forte => "falso-forte".into(),
-            },
-        })
-    }
-}
-
-/// Faz o papel do motor: registra a saída de cada chamada (sem o texto) em `saida_ia`.
-pub struct ComRegistro<'a> {
-    pub dentro: &'a dyn Provedor,
-    pub registro: &'a dyn Registro,
-    pub rodada_agora: i64,
-}
-
-impl Provedor for ComRegistro<'_> {
-    fn nome(&self) -> &'static str {
-        self.dentro.nome()
-    }
-
-    fn pedir(&self, pedido: &Pedido) -> ResultadoDeIa<Resposta> {
-        let r = self.dentro.pedir(pedido)?;
-        self.registro.registrar_saida(&Saida {
-            destinatario: "triagem".into(),
-            provedor: self.dentro.nome().into(),
-            modelo: r.modelo.clone(),
-            nivel: NivelDeConfianca::Completo,
-            bytes_enviados: pedido.entrada.len() as u64,
-            consumo: r.consumo,
-            quando: "2026-11-14T10:00:00Z".into(),
-        })?;
-        Ok(r)
+    pub fn chamadas(&self) -> u64 {
+        self.falso.chamadas()
     }
 }
 

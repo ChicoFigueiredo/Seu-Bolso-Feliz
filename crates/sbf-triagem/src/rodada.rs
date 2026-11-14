@@ -1,46 +1,52 @@
-//! Roda os lotes da triagem (spec 09, "Como gasta pouco", itens 2 e 3).
+//! Roda a triagem sobre a fila do motor (`sbf_ia::Fila`, spec 09, "Como gasta pouco").
 //!
-//! - **Lotes** de até 25 itens por chamada, com resposta validada item a item.
-//! - **Retentativa (IA-03):** o item cuja resposta não valeu volta **uma vez**, num lote
-//!   só dos inválidos; se falhar de novo, vira `nao_classificado` (uma sugestão `recusada`
-//!   com esse campo, que também o tira da fila desta versão do prompt).
-//! - **Dois degraus:** a primeira passada é no degrau [`Degrau::Rapido`]; o item cuja
-//!   confiança do campo-chave ficou abaixo de [`CONFIANCA_PARA_SUBIR`] sobe, num lote
-//!   próprio, para o [`Degrau::Forte`]. Nunca há terceiro degrau.
-//! - **Pausa e retomada:** [`Controle::pedir_pausa`] vale entre dois lotes. Retomar é
-//!   rodar de novo sobre a fila recalculada: o que já tem sugestão não volta (IA-04).
-//! - **Limite e teto:** o ritmo (esperar e continuar) é do motor, que embrulha o
-//!   `Provedor`. Se um `ErroDeIa::Limite` ou `Teto` chegar até aqui, a rodada fica
-//!   `pausada`, com o que já foi gravado.
+//! O motor cuida de: lotes de até 25 itens, cache por conteúdo (IA-04), retentativa única
+//! do item sem resposta válida (IA-03), dois degraus (confiança abaixo de 0,7 sobe para o
+//! forte, nunca para um terceiro), espera no limite e reserva só se ligada e abaixo do teto
+//! (IA-06), pausa, e o registro do que saiu (`saida_ia`, sem texto, IA-05).
 //!
-//! O cache e o registro do que saiu (`saida_ia`) são do motor: esta rodada só usa o
-//! `Provedor` que receber e nunca guarda o texto enviado.
+//! Esta rodada faz o que é do domínio: carrega os itens em **pedaços** de
+//! [`ITENS_POR_PEDACO`] (para não guardar 10 mil textos na memória), entrega cada pedaço à
+//! fila, valida a resposta item a item ([`crate::resposta`]) e grava as sugestões. O item
+//! que o motor devolve como `nao_classificado` vira uma sugestão `recusada` com esse campo
+//! (some da lista e não volta à fila desta versão do prompt). Retomar é rodar de novo sobre
+//! a fila recalculada: o que já tem sugestão não volta.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rusqlite::Connection;
-use sbf_ia::{Consumo, Degrau, ErroDeIa, Pedido, Provedor, Resposta};
-
-use crate::entrada::{Vocabulario, montar_lote, remontar};
-use crate::erro::Resultado;
-use crate::normalizar::normalizar;
-use crate::prompt::{
-    CONFIANCA_PARA_SUBIR, INSTRUCAO, ITENS_POR_LOTE, PROMPT_VERSAO, esquema, max_tokens_de_saida,
+use sbf_ia::{
+    ConfiguracaoDaFila, Controle, Degrau, Evento, Fila, Interrupcao, NivelDeConfianca, Relatorio,
 };
-use crate::resposta::{SugestaoValida, confianca_chave, interpretar};
+
+use crate::entrada::{Vocabulario, carregar_itens};
+use crate::erro::Resultado;
+use crate::formato::FormatoDaTriagem;
+use crate::normalizar::normalizar;
+use crate::prompt::{INSTRUCAO, ITENS_POR_LOTE, PROMPT_VERSAO, esquema, max_tokens_de_saida};
+use crate::resposta::{SugestaoValida, interpretar};
 use crate::sugestoes::{EstadoDaSugestao, NovaSugestao, atualizar_rodada, gravar, iniciar_rodada};
 use crate::tipos::{Alvo, Item};
 
-/// Falhas seguidas do provedor que encerram a rodada como `falhou`.
-pub const FALHAS_SEGUIDAS_PARA_ABORTAR: u32 = 3;
+/// Quantos itens se carregam por vez.
+pub const ITENS_POR_PEDACO: usize = 500;
+
+/// A configuração da fila do motor para a triagem: destinatário "triagem", nível Completo
+/// (D2), lotes de 25, escalonamento em 0,7.
+pub fn configuracao_da_fila(usar_reserva: bool) -> ConfiguracaoDaFila {
+    let mut c = ConfiguracaoDaFila::nova("triagem", PROMPT_VERSAO, INSTRUCAO, esquema());
+    c.nivel = NivelDeConfianca::Completo;
+    c.tamanho_do_lote = ITENS_POR_LOTE;
+    c.max_tokens_saida = max_tokens_de_saida(ITENS_POR_LOTE);
+    c.usar_reserva = usar_reserva;
+    c
+}
 
 #[derive(Debug, Clone)]
 pub struct ConfigDaRodada {
-    pub itens_por_lote: usize,
-    pub max_caracteres_do_lote: usize,
-    pub confianca_para_subir: f64,
     pub prompt_versao: String,
+    pub itens_por_pedaco: usize,
     /// O piloto (IA-09): não mostra à IA o que o classificador já pôs, não descarta
     /// sugestão igual ao valor atual e grava tudo como `obsoleta`.
     pub piloto: bool,
@@ -49,36 +55,10 @@ pub struct ConfigDaRodada {
 impl Default for ConfigDaRodada {
     fn default() -> Self {
         Self {
-            itens_por_lote: ITENS_POR_LOTE,
-            max_caracteres_do_lote: crate::entrada::LIMITE_DO_LOTE,
-            confianca_para_subir: CONFIANCA_PARA_SUBIR,
             prompt_versao: PROMPT_VERSAO.to_owned(),
+            itens_por_pedaco: ITENS_POR_PEDACO,
             piloto: false,
         }
-    }
-}
-
-/// O pedido de pausa, compartilhado com a thread da rodada.
-#[derive(Debug, Default)]
-pub struct Controle {
-    pausa: AtomicBool,
-}
-
-impl Controle {
-    pub fn novo() -> Arc<Self> {
-        Arc::new(Self::default())
-    }
-
-    pub fn pedir_pausa(&self) {
-        self.pausa.store(true, Ordering::SeqCst);
-    }
-
-    pub fn limpar(&self) {
-        self.pausa.store(false, Ordering::SeqCst);
-    }
-
-    pub fn pausa_pedida(&self) -> bool {
-        self.pausa.load(Ordering::SeqCst)
     }
 }
 
@@ -89,6 +69,7 @@ pub enum SituacaoDaRodada {
     Pausada,
     Concluida,
     Falhou,
+    Cancelada,
 }
 
 impl SituacaoDaRodada {
@@ -99,6 +80,7 @@ impl SituacaoDaRodada {
             Self::Pausada => "pausada",
             Self::Concluida => "concluida",
             Self::Falhou => "falhou",
+            Self::Cancelada => "cancelada",
         }
     }
 }
@@ -154,158 +136,6 @@ impl Progresso {
     }
 }
 
-fn somar(p: &mut Progresso, c: &Consumo) {
-    p.tokens_entrada += c.tokens_entrada;
-    p.tokens_saida += c.tokens_saida;
-    p.custo_dezmilesimos_usd += c.custo_dezmilesimos_usd;
-}
-
-type Resultados = Vec<Option<Vec<SugestaoValida>>>;
-
-/// Uma chamada: monta o pedido, chama, valida. Uma resposta fora do esquema conta como
-/// "nenhum item valeu" (a retentativa cuida), não como erro da rodada.
-fn chamar(
-    provedor: &dyn Provedor,
-    vocabulario: &Vocabulario,
-    itens: &[Item],
-    degrau: Degrau,
-    versao: &str,
-    progresso: &Mutex<Progresso>,
-) -> Result<(Resultados, String), ErroDeIa> {
-    let pedido = Pedido {
-        prompt_versao: versao.to_owned(),
-        instrucao: INSTRUCAO.to_owned(),
-        entrada: remontar(vocabulario, itens),
-        esquema: esquema(),
-        degrau,
-        max_tokens_saida: max_tokens_de_saida(itens.len()),
-    };
-    let resultado = provedor.pedir(&pedido);
-    if let Ok(mut p) = progresso.lock() {
-        p.chamadas += 1;
-    }
-    match resultado {
-        Ok(Resposta {
-            json,
-            consumo,
-            modelo,
-        }) => {
-            if let Ok(mut p) = progresso.lock() {
-                somar(&mut p, &consumo);
-            }
-            Ok((interpretar(&json, itens), modelo))
-        }
-        Err(ErroDeIa::RespostaInvalida(_)) => Ok((vec![None; itens.len()], String::new())),
-        Err(outro) => Err(outro),
-    }
-}
-
-/// O resultado final de um item do lote.
-#[derive(Debug, Clone)]
-enum Destino {
-    Sugestoes(Vec<SugestaoValida>, String),
-    NaoClassificado,
-    /// A chamada falhou antes de dar duas respostas: o item volta numa próxima rodada.
-    Adiado,
-}
-
-/// Processa um lote: primeira passada, retentativa dos inválidos e subida de degrau. O
-/// erro (se houve) vem junto com o que já deu certo, para não se perder.
-fn processar_lote(
-    provedor: &dyn Provedor,
-    vocabulario: &Vocabulario,
-    itens: &[Item],
-    config: &ConfigDaRodada,
-    progresso: &Mutex<Progresso>,
-) -> (Vec<Destino>, Option<ErroDeIa>) {
-    let mut destinos: Vec<Destino> = vec![Destino::Adiado; itens.len()];
-    let versao = config.prompt_versao.as_str();
-
-    let (primeira, modelo_rapido) = match chamar(
-        provedor,
-        vocabulario,
-        itens,
-        Degrau::Rapido,
-        versao,
-        progresso,
-    ) {
-        Ok(r) => r,
-        Err(e) => return (destinos, Some(e)),
-    };
-    let mut invalidos: Vec<usize> = Vec::new();
-    for (i, r) in primeira.into_iter().enumerate() {
-        match r {
-            Some(s) => destinos[i] = Destino::Sugestoes(s, modelo_rapido.clone()),
-            None => invalidos.push(i),
-        }
-    }
-
-    // IA-03: os inválidos voltam uma vez; na segunda, "não classificado".
-    let mut erro = None;
-    if !invalidos.is_empty() {
-        let reenvio: Vec<Item> = invalidos.iter().map(|i| itens[*i].clone()).collect();
-        match chamar(
-            provedor,
-            vocabulario,
-            &reenvio,
-            Degrau::Rapido,
-            versao,
-            progresso,
-        ) {
-            Ok((segunda, modelo)) => {
-                for (pos, r) in invalidos.iter().zip(segunda) {
-                    destinos[*pos] = match r {
-                        Some(s) => Destino::Sugestoes(s, modelo.clone()),
-                        None => Destino::NaoClassificado,
-                    };
-                }
-            }
-            Err(e) => erro = Some(e),
-        }
-    }
-
-    // Dois degraus: o que ficou incerto sobe para o forte, num lote só.
-    if erro.is_none() {
-        let incertos: Vec<usize> = destinos
-            .iter()
-            .enumerate()
-            .filter_map(|(i, d)| match d {
-                Destino::Sugestoes(s, _)
-                    if confianca_chave(&itens[i], s)
-                        .is_some_and(|c| c < config.confianca_para_subir) =>
-                {
-                    Some(i)
-                }
-                _ => None,
-            })
-            .collect();
-        if !incertos.is_empty() {
-            let reenvio: Vec<Item> = incertos.iter().map(|i| itens[*i].clone()).collect();
-            match chamar(
-                provedor,
-                vocabulario,
-                &reenvio,
-                Degrau::Forte,
-                versao,
-                progresso,
-            ) {
-                Ok((forte, modelo)) => {
-                    for (pos, r) in incertos.iter().zip(forte) {
-                        if let Some(s) = r {
-                            destinos[*pos] = Destino::Sugestoes(s, modelo.clone());
-                            if let Ok(mut p) = progresso.lock() {
-                                p.subiram_de_degrau += 1;
-                            }
-                        }
-                    }
-                }
-                Err(e) => erro = Some(e),
-            }
-        }
-    }
-    (destinos, erro)
-}
-
 /// A sugestão já diz o que o item tem hoje? Então não vale mostrar.
 fn igual_ao_atual(item: &Item, s: &SugestaoValida) -> bool {
     let igual = |atual: &Option<String>| {
@@ -324,73 +154,13 @@ fn igual_ao_atual(item: &Item, s: &SugestaoValida) -> bool {
         (Item::Registro(r), "categoria") => igual(&r.categoria),
         (Item::Registro(r), "fornecedor") => igual(&r.fornecedor),
         (Item::Registro(r), "conta") => igual(&r.conta),
-        (Item::Registro(r), "tipo") => {
-            normalizar(&r.tipo) == s.valor.as_str().map_or_else(String::new, normalizar)
-        }
+        (Item::Registro(r), "tipo") => s
+            .valor
+            .as_str()
+            .is_some_and(|v| normalizar(&r.tipo) == normalizar(v)),
         _ => false,
     }
 }
-
-fn gravar_lote(
-    conn: &Connection,
-    itens: &[Item],
-    destinos: &[Destino],
-    config: &ConfigDaRodada,
-    rodada_id: i64,
-    progresso: &Mutex<Progresso>,
-) -> Resultado<()> {
-    let estado = if config.piloto {
-        EstadoDaSugestao::Obsoleta
-    } else {
-        EstadoDaSugestao::Aberta
-    };
-    let tx = conn.unchecked_transaction()?;
-    let (mut sugestoes, mut nao_classificados, mut processados) = (0, 0, 0);
-    for (item, destino) in itens.iter().zip(destinos) {
-        let alvo: Alvo = item.alvo();
-        match destino {
-            Destino::Sugestoes(lista, modelo) => {
-                processados += 1;
-                for s in lista {
-                    if !config.piloto && igual_ao_atual(item, s) {
-                        continue;
-                    }
-                    gravar(
-                        &tx,
-                        &NovaSugestao::da_ia(
-                            &alvo,
-                            s,
-                            modelo,
-                            &config.prompt_versao,
-                            rodada_id,
-                            estado,
-                        ),
-                    )?;
-                    sugestoes += 1;
-                }
-            }
-            Destino::NaoClassificado => {
-                processados += 1;
-                nao_classificados += 1;
-                gravar(
-                    &tx,
-                    &NovaSugestao::nao_classificado(&alvo, &config.prompt_versao, rodada_id),
-                )?;
-            }
-            Destino::Adiado => {}
-        }
-    }
-    tx.commit()?;
-    if let Ok(mut p) = progresso.lock() {
-        p.processados += processados;
-        p.sugestoes += sugestoes;
-        p.nao_classificados += nao_classificados;
-    }
-    Ok(())
-}
-
-/// O resumo que a rodada devolve (o mesmo [`Progresso`] final).
-pub type ResumoDaRodada = Progresso;
 
 fn copiar(progresso: &Mutex<Progresso>) -> Progresso {
     progresso
@@ -415,22 +185,108 @@ fn gravar_andamento(
     )
 }
 
+/// O nome que fica em `sugestao_ia.modelo`: o relatório da fila não traz o nome do modelo,
+/// só o provedor e o degrau (o nome real está em `saida_ia`).
+fn rotulo_do_modelo(provedor: &str, degrau: Degrau) -> String {
+    let d = match degrau {
+        Degrau::Rapido => "rapido",
+        Degrau::Forte => "forte",
+    };
+    format!("{provedor}:{d}")
+}
+
+fn gravar_nao_classificado(
+    tx: &rusqlite::Transaction<'_>,
+    alvo: &Alvo,
+    config: &ConfigDaRodada,
+    rodada_id: i64,
+) -> Resultado<()> {
+    gravar(
+        tx,
+        &NovaSugestao::nao_classificado(alvo, &config.prompt_versao, rodada_id),
+    )?;
+    Ok(())
+}
+
+/// Grava o que um pedaço produziu. Devolve (itens decididos, sugestões gravadas, não
+/// classificados).
+fn gravar_pedaco(
+    conn: &Connection,
+    itens: &[Item],
+    relatorio: &Relatorio,
+    config: &ConfigDaRodada,
+    rodada_id: i64,
+) -> Resultado<(usize, usize, usize)> {
+    let estado = if config.piloto {
+        EstadoDaSugestao::Obsoleta
+    } else {
+        EstadoDaSugestao::Aberta
+    };
+    // Cada lote é interpretado uma vez, com os itens que ele levou.
+    let interpretados: Vec<_> = relatorio
+        .lotes
+        .iter()
+        .map(|lote| {
+            let do_lote: Vec<Item> = lote.indices.iter().map(|i| itens[*i].clone()).collect();
+            interpretar(&lote.json, &do_lote)
+        })
+        .collect();
+    let tx = conn.unchecked_transaction()?;
+    let (mut feitos, mut sugestoes, mut nao_classificados) = (0, 0, 0);
+    for (i, item) in itens.iter().enumerate() {
+        let alvo = item.alvo();
+        if relatorio.nao_classificados.contains(&i) {
+            gravar_nao_classificado(&tx, &alvo, config, rodada_id)?;
+            (feitos, nao_classificados) = (feitos + 1, nao_classificados + 1);
+            continue;
+        }
+        let Some(a) = relatorio.atribuicoes[i] else {
+            continue; // nunca tentado: volta numa próxima rodada
+        };
+        let lote = &relatorio.lotes[a.lote];
+        let Some(Some(lista)) = interpretados[a.lote].get(a.posicao) else {
+            gravar_nao_classificado(&tx, &alvo, config, rodada_id)?;
+            (feitos, nao_classificados) = (feitos + 1, nao_classificados + 1);
+            continue;
+        };
+        feitos += 1;
+        let modelo = rotulo_do_modelo(&lote.provedor, lote.degrau);
+        for s in lista {
+            if !config.piloto && igual_ao_atual(item, s) {
+                continue;
+            }
+            gravar(
+                &tx,
+                &NovaSugestao::da_ia(&alvo, s, &modelo, &config.prompt_versao, rodada_id, estado),
+            )?;
+            sugestoes += 1;
+        }
+    }
+    tx.commit()?;
+    Ok((feitos, sugestoes, nao_classificados))
+}
+
 /// Roda a triagem sobre `alvos` (a fila de [`crate::fila::selecionar`]).
 ///
-/// `progresso` é atualizado a cada lote para a janela ler de outra thread.
+/// `provedor` é o nome para `rodada_ia.provedor`; `ao_abrir` recebe o id da rodada assim que
+/// ela nasce (para marcar as saídas no registro). `progresso` é atualizado a cada evento da
+/// fila para a janela ler de outra thread. Pausar e cancelar vão pelo `controle` do motor.
 ///
 /// # Errors
-/// Falha do SQLite. Falha do provedor **não** é erro: vira a situação `Falhou` ou
-/// `Pausada` no resumo.
+/// Falha do SQLite. Falha do provedor **não** é erro: vira a situação no resumo.
+#[allow(clippy::too_many_arguments)]
 pub fn rodar(
     conn: &Connection,
-    provedor: &dyn Provedor,
+    fila: &Arc<Fila>,
+    provedor: &str,
     alvos: &[Alvo],
     config: &ConfigDaRodada,
     controle: &Controle,
     progresso: &Mutex<Progresso>,
-) -> Resultado<ResumoDaRodada> {
-    let rodada_id = iniciar_rodada(conn, provedor.nome(), config.piloto)?;
+    ao_abrir: &dyn Fn(i64),
+) -> Resultado<Progresso> {
+    let rodada_id = iniciar_rodada(conn, provedor, config.piloto)?;
+    ao_abrir(rodada_id);
     if let Ok(mut p) = progresso.lock() {
         *p = Progresso {
             situacao: SituacaoDaRodada::Rodando,
@@ -439,60 +295,72 @@ pub fn rodar(
             ..Progresso::ocioso()
         };
     }
-    let vocabulario = Vocabulario::do_banco(conn)?;
-    let mut posicao = 0;
-    let mut falhas_seguidas = 0;
+    let formato = Arc::new(FormatoDaTriagem::novo(Vocabulario::do_banco(conn)?));
     let mut situacao = SituacaoDaRodada::Concluida;
     let mut aviso: Option<String> = None;
 
-    while posicao < alvos.len() {
-        if controle.pausa_pedida() {
-            situacao = SituacaoDaRodada::Pausada;
-            aviso = Some("pausada por você".to_owned());
-            break;
-        }
-        let lote = montar_lote(
-            conn,
-            &alvos[posicao..],
-            !config.piloto,
-            &vocabulario,
-            config.itens_por_lote,
-            config.max_caracteres_do_lote,
-        )?;
-        posicao += lote.consumidos.max(1);
-        if lote.itens.is_empty() {
+    for pedaco in alvos.chunks(config.itens_por_pedaco.max(1)) {
+        let itens = carregar_itens(conn, pedaco, !config.piloto)?;
+        if itens.is_empty() {
             continue;
         }
-        let (destinos, erro) =
-            processar_lote(provedor, &vocabulario, &lote.itens, config, progresso);
-        gravar_lote(conn, &lote.itens, &destinos, config, rodada_id, progresso)?;
-        let andamento = copiar(progresso);
-        gravar_andamento(conn, rodada_id, &andamento, false)?;
-        match erro {
-            None => falhas_seguidas = 0,
-            Some(ErroDeIa::Limite { espera_segundos }) => {
-                situacao = SituacaoDaRodada::Pausada;
-                aviso = Some(format!("limite do provedor; tentar em {espera_segundos}s"));
-                break;
-            }
-            Some(ErroDeIa::Teto) => {
-                situacao = SituacaoDaRodada::Pausada;
-                aviso = Some("teto de gasto atingido".to_owned());
-                break;
-            }
-            Some(ErroDeIa::Indisponivel(motivo)) => {
-                situacao = SituacaoDaRodada::Falhou;
-                aviso = Some(format!("provedor indisponível: {motivo}"));
-                break;
-            }
-            Some(outro) => {
-                falhas_seguidas += 1;
-                if falhas_seguidas >= FALHAS_SEGUIDAS_PARA_ABORTAR {
-                    situacao = SituacaoDaRodada::Falhou;
-                    aviso = Some(format!("{outro}"));
-                    break;
+        let base = copiar(progresso);
+        let (canal, fio) = fila.iniciar(itens.clone(), Arc::clone(&formato), controle.clone());
+        loop {
+            match canal.recv_timeout(Duration::from_millis(100)) {
+                Ok(evento) => aplicar_evento(progresso, &base, &evento),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if fio.is_finished() {
+                        break;
+                    }
                 }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
+        }
+        for evento in canal.try_iter() {
+            aplicar_evento(progresso, &base, &evento);
+        }
+        let relatorio = fio
+            .join()
+            .map_err(|_| crate::ErroDaTriagem::Outro("a fila da IA entrou em pânico".to_owned()))?;
+        let (feitos, sugestoes, nao_classificados) =
+            gravar_pedaco(conn, &itens, &relatorio, config, rodada_id)?;
+        if let Ok(mut p) = progresso.lock() {
+            p.processados = base.processados + feitos;
+            p.sugestoes = base.sugestoes + sugestoes;
+            p.nao_classificados = base.nao_classificados + nao_classificados;
+            p.chamadas = base.chamadas + u32::try_from(relatorio.chamadas).unwrap_or(u32::MAX);
+            p.subiram_de_degrau = base.subiram_de_degrau + relatorio.escalonados;
+            p.tokens_entrada = base.tokens_entrada + relatorio.consumo.tokens_entrada;
+            p.tokens_saida = base.tokens_saida + relatorio.consumo.tokens_saida;
+            p.custo_dezmilesimos_usd =
+                base.custo_dezmilesimos_usd + relatorio.consumo.custo_dezmilesimos_usd;
+        }
+        gravar_andamento(conn, rodada_id, &copiar(progresso), false)?;
+        if let Some(interrupcao) = relatorio.interrupcao {
+            (situacao, aviso) = match interrupcao {
+                Interrupcao::Cancelada => (
+                    SituacaoDaRodada::Cancelada,
+                    Some("cancelada por você".to_owned()),
+                ),
+                Interrupcao::Teto => (
+                    SituacaoDaRodada::Pausada,
+                    Some("teto de gasto atingido".to_owned()),
+                ),
+                Interrupcao::LimiteSemFim => (
+                    SituacaoDaRodada::Pausada,
+                    Some("o limite do provedor não passou; retome mais tarde".to_owned()),
+                ),
+                Interrupcao::Indisponivel(m) => (
+                    SituacaoDaRodada::Falhou,
+                    Some(format!("provedor indisponível: {m}")),
+                ),
+                Interrupcao::FalhaDoRegistro(m) => (
+                    SituacaoDaRodada::Falhou,
+                    Some(format!("não foi possível registrar o que saiu: {m}")),
+                ),
+            };
+            break;
         }
     }
 
@@ -508,4 +376,35 @@ pub fn rodar(
         situacao != SituacaoDaRodada::Pausada,
     )?;
     Ok(final_)
+}
+
+/// Os eventos da fila viram o andamento do pedaço, somado ao que veio antes (`base`).
+fn aplicar_evento(progresso: &Mutex<Progresso>, base: &Progresso, evento: &Evento) {
+    let Ok(mut p) = progresso.lock() else {
+        return;
+    };
+    match evento {
+        Evento::LoteConcluido {
+            itens_feitos,
+            chamadas,
+            consumo,
+            ..
+        } => {
+            p.processados = base.processados + itens_feitos;
+            p.chamadas = base.chamadas + u32::try_from(*chamadas).unwrap_or(u32::MAX);
+            p.tokens_entrada = base.tokens_entrada + consumo.tokens_entrada;
+            p.tokens_saida = base.tokens_saida + consumo.tokens_saida;
+            p.custo_dezmilesimos_usd = base.custo_dezmilesimos_usd + consumo.custo_dezmilesimos_usd;
+            p.aviso = None;
+        }
+        Evento::EsperandoLimite { espera_segundos } => {
+            p.aviso = Some(format!(
+                "limite do provedor; esperando {espera_segundos}s e continuando"
+            ));
+        }
+        Evento::TrocouParaReserva => p.aviso = Some("usando a reserva".to_owned()),
+        Evento::Pausada => p.situacao = SituacaoDaRodada::Pausada,
+        Evento::Retomada => p.situacao = SituacaoDaRodada::Rodando,
+        _ => {}
+    }
 }

@@ -72,13 +72,13 @@ fn valor_do_campo(item: &Item, campo: &str, valor: &Value) -> Option<Value> {
             let v = normalizar(valor.as_str()?);
             ["sim", "nao", "incerto"]
                 .contains(&v.as_str())
-                .then(|| Value::String(v))
+                .then_some(Value::String(v))
         }
         (Item::Achado(_), "tipo_documento") => {
             let v = normalizar(valor.as_str()?).replace(' ', "_");
             TIPOS_DE_DOCUMENTO
                 .contains(&v.as_str())
-                .then(|| Value::String(v))
+                .then_some(Value::String(v))
         }
         (Item::Achado(_), "fornecedor")
         | (Item::Registro(_), "fornecedor" | "categoria" | "conta") => texto(valor, 120),
@@ -91,7 +91,7 @@ fn valor_do_campo(item: &Item, campo: &str, valor: &Value) -> Option<Value> {
             let v = normalizar(valor.as_str()?);
             TIPOS_DE_REGISTRO
                 .contains(&v.as_str())
-                .then(|| Value::String(v))
+                .then_some(Value::String(v))
         }
         (Item::Registro(r), "duplicata_de") => {
             let id = inteiro(valor)?;
@@ -123,6 +123,29 @@ fn sugestao_valida(item: &Item, bruta: &Value) -> Option<SugestaoValida> {
         confianca,
         justificativa,
     })
+}
+
+/// A confiança do campo-chave de um item da resposta, sem saber o tipo do item (o `Formato`
+/// da fila do motor não o conhece): vale `e_financeiro` válido ou `categoria` não vazia.
+pub fn confianca_chave_generica(entrada: &Value) -> Option<f64> {
+    entrada
+        .get("sugestoes")?
+        .as_array()?
+        .iter()
+        .filter_map(|s| {
+            let campo = s.get("campo")?.as_str()?;
+            let valor = s.get("valor")?;
+            let valido = match campo {
+                "e_financeiro" => valor
+                    .as_str()
+                    .is_some_and(|v| ["sim", "nao", "incerto"].contains(&normalizar(v).as_str())),
+                "categoria" => valor.as_str().is_some_and(|v| !v.trim().is_empty()),
+                _ => false,
+            };
+            let c = s.get("confianca")?.as_f64()?;
+            (valido && (0.0..=1.0).contains(&c)).then_some(c)
+        })
+        .reduce(f64::max)
 }
 
 /// Interpreta a resposta de um lote. O resultado tem uma posição por item de `itens`:

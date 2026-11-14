@@ -9,7 +9,8 @@
 //! | [`prompt`] | o prompt versionado e o JSON Schema da resposta |
 //! | [`resposta`] | valida a resposta do modelo, item a item |
 //! | [`sugestoes`] | grava e lista `sugestao_ia`, `rodada_ia` |
-//! | [`rodada`] | roda os lotes: dois degraus, retentativa, "não classificado" (IA-03) |
+//! | [`formato`] | o `Formato` da fila do motor: entrada do lote e confiança por item |
+//! | [`rodada`] | roda a fila do motor sobre a fila da triagem e grava as sugestões (IA-03) |
 //! | [`aceite`] | aceitar e recusar em lote, uma decisão por item (IA-07, IA-08) |
 //! | [`piloto`] | o acerto contra as decisões já tomadas (IA-09) |
 //! | [`servico`] | o trait pequeno que a janela usa (iniciar, pausar, retomar, progresso) |
@@ -21,6 +22,7 @@ pub mod aceite;
 pub mod entrada;
 pub mod erro;
 pub mod fila;
+pub mod formato;
 pub mod normalizar;
 pub mod piloto;
 pub mod prompt;

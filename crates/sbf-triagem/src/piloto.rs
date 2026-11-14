@@ -247,6 +247,35 @@ pub fn calcular(conn: &Connection, rodada_id: i64) -> Resultado<RelatorioDoPilot
     Ok(relatorio)
 }
 
+/// Roda o piloto: a amostra de [`TAMANHO_DO_PILOTO`] itens já decididos, a rodada em modo
+/// piloto e o relatório. Os argumentos de fila são os de [`crate::rodada::rodar`].
+///
+/// # Errors
+/// Falha do SQLite.
+#[allow(clippy::too_many_arguments)]
+pub fn rodar_piloto(
+    conn: &Connection,
+    fila: &std::sync::Arc<sbf_ia::Fila>,
+    provedor: &str,
+    n: usize,
+    controle: &sbf_ia::Controle,
+    progresso: &std::sync::Mutex<crate::rodada::Progresso>,
+    ao_abrir: &dyn Fn(i64),
+) -> Resultado<RelatorioDoPiloto> {
+    let alvos = amostra(conn, n)?;
+    let config = crate::rodada::ConfigDaRodada {
+        piloto: true,
+        ..crate::rodada::ConfigDaRodada::default()
+    };
+    let resumo = crate::rodada::rodar(
+        conn, fila, provedor, &alvos, &config, controle, progresso, ao_abrir,
+    )?;
+    let id = resumo
+        .rodada_id
+        .ok_or_else(|| crate::ErroDaTriagem::Outro("a rodada não abriu".to_owned()))?;
+    calcular(conn, id)
+}
+
 #[cfg(test)]
 mod testes {
     use serde_json::json;
@@ -273,28 +302,4 @@ mod testes {
         assert!(!bate("categoria", &json!("Mercado"), &json!("Saúde")));
         assert!(bate("valor", &json!(18750), &json!(18750)));
     }
-}
-
-/// Roda o piloto: a amostra de [`TAMANHO_DO_PILOTO`] itens já decididos, a rodada em modo
-/// piloto e o relatório.
-///
-/// # Errors
-/// Falha do SQLite.
-pub fn rodar_piloto(
-    conn: &Connection,
-    provedor: &dyn sbf_ia::Provedor,
-    n: usize,
-    controle: &crate::rodada::Controle,
-    progresso: &std::sync::Mutex<crate::rodada::Progresso>,
-) -> Resultado<RelatorioDoPiloto> {
-    let alvos = amostra(conn, n)?;
-    let config = crate::rodada::ConfigDaRodada {
-        piloto: true,
-        ..crate::rodada::ConfigDaRodada::default()
-    };
-    let resumo = crate::rodada::rodar(conn, provedor, &alvos, &config, controle, progresso)?;
-    let id = resumo
-        .rodada_id
-        .ok_or_else(|| crate::ErroDaTriagem::Outro("a rodada não abriu".to_owned()))?;
-    calcular(conn, id)
 }

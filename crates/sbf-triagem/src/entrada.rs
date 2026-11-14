@@ -9,7 +9,8 @@
 //!   fim 1000);
 //! - trecho de registro: até [`LIMITE_DO_TRECHO`] caracteres, e só quando o registro não
 //!   tem descrição nem fornecedor;
-//! - lote: até [`crate::prompt::ITENS_POR_LOTE`] itens e [`LIMITE_DO_LOTE`] caracteres.
+//! - lote: até [`crate::prompt::ITENS_POR_LOTE`] itens (a fila do motor corta; com o texto
+//!   limitado a 4000 caracteres por item, um lote cheio tem no máximo ~100 mil caracteres).
 
 use std::fmt::Write as _;
 
@@ -20,7 +21,6 @@ use crate::normalizar::{cortar, truncar_texto};
 use crate::tipos::{Alvo, Item, ItemDeAchado, ItemDeRegistro};
 
 pub const LIMITE_DO_TRECHO: usize = 800;
-pub const LIMITE_DO_LOTE: usize = 80_000;
 /// Quantos nomes de origem de um achado vão ao modelo.
 pub const NOMES_POR_ACHADO: usize = 3;
 /// Quantos registros parecidos vão por registro.
@@ -52,17 +52,6 @@ impl Vocabulario {
             contas: lista("conta_provavel", 15)?,
         })
     }
-}
-
-/// Um lote pronto para a chamada.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LoteMontado {
-    /// O texto de `Pedido.entrada`.
-    pub entrada: String,
-    /// Os itens, na ordem de `n` (o primeiro é o `n = 1`).
-    pub itens: Vec<Item>,
-    /// Quantos alvos da lista de entrada o lote consumiu (inclui os que sumiram do banco).
-    pub consumidos: usize,
 }
 
 /// `-R$ 23,40`, `R$ 187,50`.
@@ -267,49 +256,27 @@ pub fn cabecalho(vocabulario: &Vocabulario) -> String {
     s
 }
 
-/// Monta um lote com os primeiros `alvos`, parando em `max_itens` ou quando o texto passar
-/// de `max_caracteres` (o primeiro item entra sempre). Alvos que sumiram do banco são
-/// pulados e contam como consumidos.
+/// Carrega os itens de `alvos` (os que sumiram do banco ficam de fora). `mostrar_atuais`
+/// como em [`carregar_item`].
 ///
 /// # Errors
 /// Falha do SQLite.
-pub fn montar_lote(
+pub fn carregar_itens(
     conn: &Connection,
     alvos: &[Alvo],
     mostrar_atuais: bool,
-    vocabulario: &Vocabulario,
-    max_itens: usize,
-    max_caracteres: usize,
-) -> Resultado<LoteMontado> {
-    let mut entrada = cabecalho(vocabulario);
-    let mut itens = Vec::new();
-    let mut consumidos = 0;
+) -> Resultado<Vec<Item>> {
+    let mut itens = Vec::with_capacity(alvos.len());
     for alvo in alvos {
-        if itens.len() >= max_itens {
-            break;
+        if let Some(item) = carregar_item(conn, alvo, mostrar_atuais)? {
+            itens.push(item);
         }
-        let Some(item) = carregar_item(conn, alvo, mostrar_atuais)? else {
-            consumidos += 1;
-            continue;
-        };
-        let bloco = bloco_do_item(itens.len() + 1, &item);
-        if !itens.is_empty() && entrada.len() + bloco.len() > max_caracteres {
-            break;
-        }
-        entrada.push_str(&bloco);
-        itens.push(item);
-        consumidos += 1;
     }
-    Ok(LoteMontado {
-        entrada,
-        itens,
-        consumidos,
-    })
+    Ok(itens)
 }
 
-/// Remonta um lote com itens já carregados (a retentativa e a subida de degrau), numerando
-/// de novo de 1.
-pub fn remontar(vocabulario: &Vocabulario, itens: &[Item]) -> String {
+/// A entrada de um lote: o cabeçalho e os itens numerados de 1, na ordem recebida.
+pub fn montar_entrada(vocabulario: &Vocabulario, itens: &[&Item]) -> String {
     let mut entrada = cabecalho(vocabulario);
     for (i, item) in itens.iter().enumerate() {
         entrada.push_str(&bloco_do_item(i + 1, item));

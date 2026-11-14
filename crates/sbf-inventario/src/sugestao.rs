@@ -8,6 +8,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use rusqlite::{Connection, Transaction, params};
 use sbf_ia::{ErroDeIa, NivelDeConfianca, Registro, ResultadoDeIa, Saida};
@@ -110,8 +111,11 @@ fn erro_de_ia(e: rusqlite::Error) -> ErroDeIa {
 #[derive(Debug)]
 pub struct RegistroDaIa {
     conexao: Mutex<Connection>,
-    rodada_id: Option<i64>,
+    /// `SEM_RODADA` quando nenhuma rodada está aberta.
+    rodada_id: AtomicI64,
 }
+
+const SEM_RODADA: i64 = i64::MIN;
 
 impl RegistroDaIa {
     /// Abre o banco em `caminho`, já migrado (versão 3). `rodada_id` entra em cada
@@ -129,8 +133,15 @@ impl RegistroDaIa {
     pub fn sobre(conexao: Connection, rodada_id: Option<i64>) -> Self {
         Self {
             conexao: Mutex::new(conexao),
-            rodada_id,
+            rodada_id: AtomicI64::new(rodada_id.unwrap_or(SEM_RODADA)),
         }
+    }
+
+    /// Passa a marcar as próximas saídas com a rodada `id` (a rodada nasce depois do
+    /// registro, na hora de iniciar a triagem).
+    pub fn definir_rodada(&self, id: Option<i64>) {
+        self.rodada_id
+            .store(id.unwrap_or(SEM_RODADA), Ordering::SeqCst);
     }
 
     fn conexao(&self) -> ResultadoDeIa<std::sync::MutexGuard<'_, Connection>> {
@@ -158,7 +169,7 @@ impl Registro for RegistroDaIa {
                 i64::try_from(saida.consumo.custo_dezmilesimos_usd).unwrap_or(i64::MAX),
                 saida.consumo.nominal,
                 saida.quando,
-                self.rodada_id,
+                Some(self.rodada_id.load(Ordering::SeqCst)).filter(|r| *r != SEM_RODADA),
             ],
         )
         .map_err(erro_de_ia)?;

@@ -3,24 +3,24 @@
 //! ([`ServicoDeTriagem`]), com duas implementações:
 //!
 //! - [`TriagemFicticia`]: dados inventados, para o modo demonstração e os testes da janela;
-//! - [`TriagemDoInventario`]: sobre o `inventario.sqlite` e um `Provedor` qualquer. O
-//!   coordenador a liga ao motor real (`sbf-ia`) passando o provedor embrulhado com cache,
-//!   registro do que saiu e ritmo.
+//! - [`TriagemDoInventario`]: sobre o `inventario.sqlite` e a `Fila` do motor (`sbf-ia`),
+//!   montada pelo coordenador com o provedor principal, a reserva e o `RegistroDaIa`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use sbf_ia::{Degrau, NivelDeConfianca, Pedido, Provedor};
+use sbf_ia::{Controle, Degrau, Fila, NivelDeConfianca, Pedido, Provedor};
 use sbf_inventario::comando::{Comandos, IdDecisao};
+use sbf_inventario::sugestao::RegistroDaIa;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::aceite::{self, ResultadoDoAceite};
 use crate::fila::{OpcoesDaFila, selecionar};
 use crate::piloto::{self, FAIXA_ALTA, FAIXA_BAIXA, FAIXA_MEDIA, Placar, RelatorioDoPiloto};
-use crate::rodada::{ConfigDaRodada, Controle, Progresso, SituacaoDaRodada, rodar};
+use crate::rodada::{ConfigDaRodada, Progresso, SituacaoDaRodada, rodar};
 use crate::sugestoes::{
     self, FiltroDeSugestoes, GrupoDeSugestoes, SugestaoListada, agrupar, listar_abertas,
 };
@@ -422,8 +422,10 @@ const CHAVE_DA_CONFIGURACAO: &str = "triagem.configuracao";
 /// thread própria, com a sua conexão.
 pub struct TriagemDoInventario {
     caminho: PathBuf,
+    fila: Arc<Fila>,
+    registro: Arc<RegistroDaIa>,
     provedor: Arc<dyn Provedor>,
-    controle: Arc<Controle>,
+    controle: Controle,
     progresso: Arc<Mutex<Progresso>>,
     relatorio: Arc<Mutex<Option<RelatorioDoPiloto>>>,
     thread: Option<JoinHandle<()>>,
@@ -439,9 +441,17 @@ impl std::fmt::Debug for TriagemDoInventario {
 }
 
 impl TriagemDoInventario {
+    /// `fila` e `registro` são os que o coordenador montou (o `registro` é o mesmo que a
+    /// fila usa: a rodada o marca com o id dela); `provedor` serve ao teste de conexão.
+    ///
     /// # Errors
     /// Falha ao abrir o banco.
-    pub fn nova(caminho: impl AsRef<Path>, provedor: Arc<dyn Provedor>) -> Result<Self, String> {
+    pub fn nova(
+        caminho: impl AsRef<Path>,
+        fila: Arc<Fila>,
+        registro: Arc<RegistroDaIa>,
+        provedor: Arc<dyn Provedor>,
+    ) -> Result<Self, String> {
         let caminho = caminho.as_ref().to_path_buf();
         let conn = sugestoes::abrir(&caminho).map_err(|e| e.to_string())?;
         let configuracao = conn
@@ -455,6 +465,8 @@ impl TriagemDoInventario {
             .unwrap_or_default();
         Ok(Self {
             caminho,
+            fila,
+            registro,
             provedor,
             controle: Controle::novo(),
             progresso: Arc::new(Mutex::new(Progresso::ocioso())),
@@ -482,10 +494,12 @@ impl RodadaDeTriagem for TriagemDoInventario {
             return Err("já há uma rodada em andamento".to_owned());
         }
         self.esperar();
-        self.controle.limpar();
+        self.controle.retomar();
         let conn = sugestoes::abrir(&self.caminho).map_err(|e| e.to_string())?;
-        let provedor = Arc::clone(&self.provedor);
-        let controle = Arc::clone(&self.controle);
+        let fila_do_motor = Arc::clone(&self.fila);
+        let registro = Arc::clone(&self.registro);
+        let nome = self.provedor.nome();
+        let controle = self.controle.clone();
         let progresso = Arc::clone(&self.progresso);
         let relatorio = Arc::clone(&self.relatorio);
         self.thread = Some(std::thread::spawn(move || {
@@ -495,13 +509,16 @@ impl RodadaDeTriagem for TriagemDoInventario {
                     p.aviso = Some(motivo);
                 }
             };
+            let ao_abrir = |id: i64| registro.definir_rodada(Some(id));
             if piloto {
                 match piloto::rodar_piloto(
                     &conn,
-                    provedor.as_ref(),
+                    &fila_do_motor,
+                    nome,
                     piloto::TAMANHO_DO_PILOTO,
                     &controle,
                     &progresso,
+                    &ao_abrir,
                 ) {
                     Ok(r) => {
                         if let Ok(mut slot) = relatorio.lock() {
@@ -510,35 +527,45 @@ impl RodadaDeTriagem for TriagemDoInventario {
                     }
                     Err(e) => falhou(e.to_string()),
                 }
+                registro.definir_rodada(None);
                 return;
             }
-            let fila = match selecionar(&conn, &OpcoesDaFila::padrao()) {
+            let alvos = match selecionar(&conn, &OpcoesDaFila::padrao()) {
                 Ok(f) => f,
                 Err(e) => return falhou(e.to_string()),
             };
-            if let Err(e) = sugestoes::gravar_regras(&conn, &fila.regras) {
+            if let Err(e) = sugestoes::gravar_regras(&conn, &alvos.regras) {
                 return falhou(e.to_string());
             }
             if let Err(e) = rodar(
                 &conn,
-                provedor.as_ref(),
-                &fila.alvos,
+                &fila_do_motor,
+                nome,
+                &alvos.alvos,
                 &ConfigDaRodada::default(),
                 &controle,
                 &progresso,
+                &ao_abrir,
             ) {
                 falhou(e.to_string());
             }
+            registro.definir_rodada(None);
         }));
         Ok(())
     }
 
     fn pausar(&mut self) {
-        self.controle.pedir_pausa();
+        self.controle.pausar();
     }
 
     fn retomar(&mut self) -> Result<(), String> {
-        self.iniciar(false)
+        if self.rodando() {
+            self.controle.retomar();
+            Ok(())
+        } else {
+            // A rodada terminou (pausada por limite ou teto): recalcula a fila e segue.
+            self.iniciar(false)
+        }
     }
 
     fn progresso(&self) -> Progresso {
