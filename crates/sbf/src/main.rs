@@ -230,9 +230,64 @@ fn app_de_demonstracao() -> Result<App, String> {
         _ => {}
     }
     janela.ligar_estacao(Box::new(livro.clone()));
+    // A caixa de entrada fictícia (fatia 3): rascunhos ligados aos documentos do acervo e as
+    // movimentações do livro como base de edição.
+    let documentos: Vec<sbf_inventario::Ref> = sbf_inventario::Consulta::tabela(
+        &consulta,
+        &sbf_inventario::consulta::PedidoDeTabela::Area {
+            area: sbf_inventario::consulta::Area::Documentos,
+            filtro: sbf_inventario::consulta::Filtro::default(),
+        },
+    )
+    .map(|t| {
+        t.linhas
+            .into_iter()
+            .filter_map(|l| l.alvo)
+            .take(5)
+            .collect()
+    })
+    .unwrap_or_default();
+    let caixa = sbf_janela::caixa::demonstracao(&documentos, Box::new(livro.clone()));
+    janela.ligar_caixa(Box::new(caixa.clone()));
+    preparar_cena_da_caixa(&caixa);
     let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
     App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
         .map_err(|e| format!("os temas não carregaram: {e}"))
+}
+
+/// `SBF_CENA` da caixa: deixa a demonstração num estado que mostra pendente, aceita e recusada
+/// (`caixa-pendente`, `caixa-recusa`).
+fn preparar_cena_da_caixa(caixa: &sbf_janela::caixa::CaixaFicticia) {
+    use sbf_inventario::alteracao::CampoLadoALado;
+    use sbf_janela::caixa::{Editor, FonteDaCaixa};
+    let mut c = caixa.clone();
+    match std::env::var("SBF_CENA").as_deref() {
+        Ok("caixa-pendente") | Ok("caixa-recusa") => {
+            let _ = c.aprovar("r1");
+            let _ = c.aprovar("r3");
+            caixa.servidor_aceita_tudo();
+            let _ = c.aprovar("r4");
+            if std::env::var("SBF_CENA").as_deref() == Ok("caixa-recusa") {
+                let Ok(fila) = c.escritas() else { return };
+                if let Some(e) = fila.first() {
+                    caixa.servidor_recusa(
+                        &e.id,
+                        "O rascunho mudou no servidor depois que você aprovou.",
+                        vec![
+                            CampoLadoALado::novo("Valor", "R$ 458,10", "R$ 460,00"),
+                            CampoLadoALado::novo(
+                                "Conta ou cartão",
+                                "Cartão Azul",
+                                "Conta corrente Exemplo",
+                            ),
+                            CampoLadoALado::novo("Fornecedor", "Mercado Delta", "Mercado Delta"),
+                        ],
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";

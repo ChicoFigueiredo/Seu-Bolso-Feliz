@@ -247,10 +247,7 @@ fn acoes_pela_casca_gravam_e_desfazem() {
         .iter()
         .find(|a| a.id == "lotes.enviar")
         .expect("enviar");
-    assert_eq!(
-        enviar.motivo(),
-        Some("Chega na fatia 3, com a caixa de entrada")
-    );
+    assert_eq!(enviar.motivo(), Some("Ainda não ligado a esta janela"));
 }
 
 #[test]

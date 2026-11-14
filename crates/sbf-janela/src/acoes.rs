@@ -1099,6 +1099,19 @@ pub struct ContextoDasAcoes {
     pub estacao_ativa: bool,
     /// A área aberta é a das Sugestões de conciliação.
     pub nas_sugestoes: bool,
+    /// O envio do lote atual ao servidor (fatia 3).
+    pub envio_do_lote: EnvioNoContexto,
+}
+
+/// Se Enviar ao servidor pode rodar no lote atual.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EnvioNoContexto {
+    /// A caixa não está ligada a esta janela.
+    #[default]
+    NaoLigado,
+    Pronto,
+    /// Por que não: "Escolha um lote", "O lote ainda não está aprovado"…
+    Indisponivel(String),
 }
 
 fn todos_de(selecao: &[Ref], tipos: &[Tipo]) -> bool {
@@ -1207,7 +1220,11 @@ pub fn disponibilidade(id: IdAcao, c: &ContextoDasAcoes) -> Disponibilidade {
             }
         }
         I::AprovarLote | I::DesaprovarLote => exige(c.lote_atual.is_some(), "Escolha um lote"),
-        I::EnviarAoServidor => Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned()),
+        I::EnviarAoServidor => match &c.envio_do_lote {
+            EnvioNoContexto::NaoLigado => Desabilitada(MOTIVO_NAO_LIGADO.to_owned()),
+            EnvioNoContexto::Pronto => Habilitada,
+            EnvioNoContexto::Indisponivel(m) => Desabilitada(m.clone()),
+        },
         I::RegrasDeSenha => exige(c.pdf_ligado, MOTIVO_NAO_LIGADO),
         I::AbrirPdfProtegido if c.ferramenta_ocupada => {
             Desabilitada("Outra ferramenta está rodando".to_owned())
@@ -1493,15 +1510,22 @@ mod testes {
     }
 
     #[test]
-    fn enviar_ao_servidor_sempre_desabilitado_com_o_motivo() {
-        let c = ContextoDasAcoes {
+    fn enviar_ao_servidor_segue_o_contexto_da_caixa() {
+        let mut c = ContextoDasAcoes {
             lote_atual: Some(Ref::nova(Tipo::Lote, "1")),
             ..Default::default()
         };
         assert_eq!(
             disponibilidade(I::EnviarAoServidor, &c),
-            Disponibilidade::Desabilitada("Chega na fatia 3, com a caixa de entrada".to_owned())
+            Disponibilidade::Desabilitada(MOTIVO_NAO_LIGADO.to_owned())
         );
+        c.envio_do_lote = EnvioNoContexto::Indisponivel("O lote ainda não está aprovado".into());
+        assert_eq!(
+            disponibilidade(I::EnviarAoServidor, &c),
+            Disponibilidade::Desabilitada("O lote ainda não está aprovado".to_owned())
+        );
+        c.envio_do_lote = EnvioNoContexto::Pronto;
+        assert!(disponibilidade(I::EnviarAoServidor, &c).habilitada());
     }
 
     #[test]

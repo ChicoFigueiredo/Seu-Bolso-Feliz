@@ -112,6 +112,8 @@ pub enum Pedido {
     RevogarEstacao(Ref),
     /// Renomear uma estação.
     RenomearEstacao(Ref, String),
+    // Caixa de entrada e edição (fatia 3).
+    Caixa(crate::caixa_ui::PedidoDaCaixa),
 }
 
 impl Pedido {

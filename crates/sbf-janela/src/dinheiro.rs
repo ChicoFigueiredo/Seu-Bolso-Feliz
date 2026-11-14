@@ -9,8 +9,8 @@
 
 use egui::{Align, CornerRadius, FontId, Frame, Layout, Margin, RichText, Stroke, Ui, vec2};
 use sbf_inventario::alteracao::{
-    Alteracao, Alteracoes, Credencial, EstadoDaAlteracao, EstadoDaRede, EstadoDaSincronizacao,
-    Recusa, Sincronizacao,
+    Alteracao, Alteracoes, CampoLadoALado, Credencial, EstadoDaAlteracao, EstadoDaRede,
+    EstadoDaSincronizacao, Recusa, Sincronizacao,
 };
 use sbf_inventario::consulta::{Area, Celula, Coluna, Indicador, Linha, PainelDeArea, Tabela};
 use sbf_inventario::{Ref, Tipo};
@@ -465,8 +465,31 @@ fn desenhar_tabela(
 /// O componente **lado a lado** de uma recusa: "Sua versão" × "No servidor agora", com o
 /// que difere marcado (cor e ícone, nunca só cor), e Refazer sobre a nova / Descartar.
 pub fn lado_a_lado(ui: &mut Ui, a: &Alteracao, recusa: &Recusa, pedidos: &mut Vec<Pedido>) {
+    lado_a_lado_de_campos(
+        ui,
+        &a.id,
+        &recusa.motivo,
+        &recusa.campos,
+        Pedido::RefazerAlteracao(a.id.clone()),
+        Pedido::DescartarAlteracao(a.id.clone()),
+        pedidos,
+    );
+}
+
+/// O mesmo componente, para qualquer coisa que tenha "sua versão" e "no servidor agora"
+/// (a caixa de entrada e a edição usam). `chave` identifica a grade; `refazer` e
+/// `descartar` são os pedidos dos dois botões.
+pub fn lado_a_lado_de_campos(
+    ui: &mut Ui,
+    chave: &str,
+    motivo: &str,
+    campos: &[CampoLadoALado],
+    refazer: Pedido,
+    descartar: Pedido,
+    pedidos: &mut Vec<Pedido>,
+) {
     let p = tema::paleta(ui.ctx());
-    ui.label(RichText::new(&recusa.motivo).color(p.tinta_suave));
+    ui.label(RichText::new(motivo).color(p.tinta_suave));
     ui.add_space(6.0);
     let largura = ((ui.available_width() - 12.0) / 2.0).max(160.0);
     ui.horizontal_top(|ui| {
@@ -492,11 +515,11 @@ pub fn lado_a_lado(ui: &mut Ui, a: &Alteracao, recusa: &Recusa, pedidos: &mut Ve
                                 .color(p.tinta_suave),
                         );
                         ui.add_space(4.0);
-                        egui::Grid::new(("lado", &a.id, servidor))
+                        egui::Grid::new(("lado", chave, servidor))
                             .num_columns(2)
                             .spacing(vec2(12.0, 4.0))
                             .show(ui, |ui| {
-                                for c in &recusa.campos {
+                                for c in campos {
                                     ui.label(RichText::new(&c.rotulo).color(p.tinta_suave));
                                     let v = if servidor { &c.servidor } else { &c.sua };
                                     if c.difere() {
@@ -533,7 +556,7 @@ pub fn lado_a_lado(ui: &mut Ui, a: &Alteracao, recusa: &Recusa, pedidos: &mut Ve
             .on_hover_text("Aplica a sua mudança sobre o que está no servidor agora")
             .clicked()
         {
-            pedidos.push(Pedido::RefazerAlteracao(a.id.clone()));
+            pedidos.push(refazer.clone());
         }
         if ui
             .button((
@@ -543,7 +566,7 @@ pub fn lado_a_lado(ui: &mut Ui, a: &Alteracao, recusa: &Recusa, pedidos: &mut Ve
             .on_hover_text("Mantém a versão do servidor")
             .clicked()
         {
-            pedidos.push(Pedido::DescartarAlteracao(a.id.clone()));
+            pedidos.push(descartar.clone());
         }
     });
     ui.label(
@@ -634,6 +657,7 @@ pub fn area_sincronizacao(
     ui: &mut Ui,
     estacao: Option<&dyn EstacaoDoLivro>,
     pareamento: Option<&dyn Pareamento>,
+    caixa: Option<&dyn crate::caixa::FonteDaCaixa>,
     hoje: &str,
     vista: &mut Vista,
     pedidos: &mut Vec<Pedido>,
@@ -759,6 +783,14 @@ pub fn area_sincronizacao(
                     }
                 },
             );
+            if let Some(c) = caixa {
+                secao(
+                    ui,
+                    "Caixa de entrada e edição",
+                    "aprovações, correções e edições do livro-caixa",
+                    |ui| crate::caixa_ui::secoes_da_sincronizacao(ui, c, hoje, pedidos),
+                );
+            }
             let estacoes = est.estacoes().unwrap_or_default();
             secao(
                 ui,

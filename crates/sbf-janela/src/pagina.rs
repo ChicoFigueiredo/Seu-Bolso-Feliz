@@ -335,6 +335,8 @@ pub fn texto_do_rastro(alvo: &Ref, rotulo: &str, rastro: &Rastro) -> String {
 #[derive(Clone, Copy)]
 pub struct ContextoDaPagina<'a> {
     pub estacao: Option<&'a dyn crate::dinheiro::EstacaoDoLivro>,
+    /// A caixa de entrada e a edição (fatia 3): Editar, Ratear, Excluir e a marca de pendente.
+    pub caixa: Option<&'a dyn crate::caixa::FonteDaCaixa>,
     pub hoje: &'a str,
 }
 
@@ -342,6 +344,7 @@ impl std::fmt::Debug for ContextoDaPagina<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ContextoDaPagina")
             .field("estacao", &self.estacao.is_some())
+            .field("caixa", &self.caixa.is_some())
             .field("hoje", &self.hoje)
             .finish()
     }
@@ -436,6 +439,11 @@ pub fn desenhar(
                 .clicked()
             {
                 crate::navegacao::pedir_abrir(ui.ctx(), pedidos, Destino::Item(alvo.clone()), true);
+            }
+            if alvo.tipo == Tipo::Movimentacao
+                && let Some(caixa) = contexto.caixa
+            {
+                crate::caixa_ui::acoes_da_movimentacao(ui, caixa, alvo, pedidos);
             }
         });
     });
