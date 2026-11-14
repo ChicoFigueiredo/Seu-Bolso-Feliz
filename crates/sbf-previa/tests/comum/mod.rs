@@ -18,10 +18,23 @@ use zeroize::Zeroizing;
 
 pub const SENHA: &str = "senha-ficticia-Previa-42";
 
+/// `CARGO_TARGET_TMPDIR`, salvo se algum componente do caminho for oculto (ex.:
+/// `CARGO_TARGET_DIR=~/.cache/...`): ali o AppArmor do `qpdf` nega `open` ("Permission denied",
+/// exit 2). Nesse caso usa `/tmp`, que ele permite para `*.pdf`.
+fn raiz_das_pastas() -> PathBuf {
+    let alvo = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let oculto = alvo.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .is_some_and(|n| n.starts_with('.') && n != "." && n != "..")
+    });
+    if oculto { PathBuf::from("/tmp") } else { alvo }
+}
+
 pub fn pasta() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix("sbf-previa-teste-")
-        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .tempdir_in(raiz_das_pastas())
         .expect("pasta de teste")
 }
 
@@ -105,18 +118,20 @@ pub fn cifrar(pasta: &Path, nome: &str, base: &[u8], senha: &str) -> PathBuf {
     let entrada = pasta.join(format!("{nome}-base.pdf"));
     let saida = pasta.join(format!("{nome}.pdf"));
     std::fs::write(&entrada, base).expect("base");
-    let status = Command::new("qpdf")
+    let saida_qpdf = Command::new("qpdf")
         .arg("--encrypt")
         .arg(format!("--user-password={senha}"))
         .arg("--owner-password=dono-ficticio-77")
         .args(["--bits=256", "--"])
         .arg(&entrada)
         .arg(&saida)
-        .status()
+        .output()
         .expect("qpdf instalado");
+    let status = saida_qpdf.status;
     assert!(
         status.code() == Some(0) || status.code() == Some(3),
-        "qpdf --encrypt: {status}"
+        "qpdf --encrypt: {status}: {}",
+        String::from_utf8_lossy(&saida_qpdf.stderr)
     );
     saida
 }
