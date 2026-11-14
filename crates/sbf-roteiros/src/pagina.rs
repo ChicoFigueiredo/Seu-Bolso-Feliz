@@ -143,6 +143,23 @@ const TRECHOS_DE_CONFIRMACAO: &[&str] = &[
     "confirmacao de identidade",
     "verify your identity",
     "confirm your identity",
+/// `trecho` aparece em `texto` como palavra (ou frase) inteira? "2fa" não casa dentro de
+/// "x2fab" nem de um hash. Os dois já vêm em minúsculas e sem acento.
+fn contem_trecho(texto: &str, trecho: &str) -> bool {
+    let mut inicio = 0;
+    while let Some(p) = texto[inicio..].find(trecho) {
+        let a = inicio + p;
+        let b = a + trecho.len();
+        let antes = texto[..a].chars().next_back();
+        let depois = texto[b..].chars().next();
+        if !antes.is_some_and(char::is_alphanumeric) && !depois.is_some_and(char::is_alphanumeric) {
+            return true;
+        }
+        inicio = a + trecho.chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
 ];
 
 fn sem_acento(s: &str) -> String {
@@ -210,7 +227,7 @@ impl Pagina {
             || quadros.contains("h-captcha")
             || quadros.contains("turnstile")
             || quadros.contains("captcha")
-            || TRECHOS_DE_CAPTCHA.iter().any(|t| texto.contains(t))
+            || TRECHOS_DE_CAPTCHA.iter().any(|t| contem_trecho(&texto, t))
         {
             return Some(MotivoDePausa::Captcha);
         }
@@ -219,10 +236,13 @@ impl Pagina {
             .iter()
             .flat_map(|f| &f.campos)
             .any(|c| c.autocomplete.eq_ignore_ascii_case("one-time-code"));
-        if campo_de_codigo || TRECHOS_DE_MFA.iter().any(|t| texto.contains(t)) {
+        if campo_de_codigo || TRECHOS_DE_MFA.iter().any(|t| contem_trecho(&texto, t)) {
             return Some(MotivoDePausa::Mfa);
         }
-        if TRECHOS_DE_CONFIRMACAO.iter().any(|t| texto.contains(t)) {
+        if TRECHOS_DE_CONFIRMACAO
+            .iter()
+            .any(|t| contem_trecho(&texto, t))
+        {
             return Some(MotivoDePausa::Confirmacao);
         }
         None
@@ -442,3 +462,28 @@ mod testes {
         );
     }
 }
+    #[test]
+    fn mfa_so_casa_palavra_inteira() {
+        for t in [
+            "Ative a 2FA da conta",
+            "Use o 2FA.",
+            "(2FA) obrigatório",
+            "Two-factor authentication",
+        ] {
+            assert_eq!(
+                com_texto(t).pausa_necessaria(),
+                Some(MotivoDePausa::Mfa),
+                "{t}"
+            );
+        }
+        for t in [
+            "classe x2fab e hash a1b2fa9c",
+            "abc2fa",
+            "2faz",
+            "token3 security codex",
+            "Extratos do mês. Baixar PDF",
+        ] {
+            assert_eq!(com_texto(t).pausa_necessaria(), None, "{t}");
+        }
+    }
+
