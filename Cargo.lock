@@ -4219,6 +4219,7 @@ dependencies = [
  "bancada-armazem",
  "proptest",
  "rusqlite",
+ "sbf-ia",
  "serde",
  "serde_json",
  "tempfile",

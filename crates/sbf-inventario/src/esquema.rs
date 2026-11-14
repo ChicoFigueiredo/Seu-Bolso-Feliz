@@ -12,3 +12,6 @@ pub const MIGRACAO_1_BASE_BUN: &str = include_str!("../sql/0001-base-bun-v2.sql"
 /// Migração 2: decisões, lotes, `decidido_por` e índices. O trigger só de acréscimo
 /// em `decisao` é instalado em Rust, via `bancada_armazem`.
 pub const MIGRACAO_2_DECISOES_E_LOTES: &str = include_str!("../sql/0002-decisoes-e-lotes.sql");
+
+/// Migração 3: a triagem por IA (spec 09): sugestões, rodadas, o que saiu e o cache.
+pub const MIGRACAO_3_TRIAGEM: &str = include_str!("../sql/0003-triagem.sql");

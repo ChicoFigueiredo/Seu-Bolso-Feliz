@@ -46,9 +46,9 @@ fn inv01_abrir_e_ver_o_plano_nao_mudam_o_banco() {
     assert!(plano.precisa_migrar());
     assert!(plano.faz_copia);
     assert_eq!(plano.versao_atual, 0);
-    assert_eq!(plano.versao_final, 2);
+    assert_eq!(plano.versao_final, 3);
     let versoes: Vec<u32> = plano.passos.iter().map(|p| p.versao).collect();
-    assert_eq!(versoes, vec![1, 2]);
+    assert_eq!(versoes, vec![1, 2, 3]);
     assert!(plano.passos[0].descricao.contains("adota o banco do Bun"));
     assert_eq!(inventario.caminho(), caminho.as_path());
     drop(inventario);
@@ -114,7 +114,7 @@ fn inv01_migrar_faz_a_copia_antes() {
     let feita = inventario.migrar(&copia).unwrap();
     assert_eq!(feita.copia.as_deref(), Some(copia.as_path()));
     assert!(feita.adotou_o_bun);
-    assert_eq!((feita.versao_inicial, feita.versao_final), (0, 2));
+    assert_eq!((feita.versao_inicial, feita.versao_final), (0, 3));
 
     // A cópia é o banco de antes: versão 0 do Bun, sem o log, com os mesmos dados.
     let c = Connection::open(&copia).unwrap();
@@ -177,19 +177,19 @@ fn inv01_depois_de_migrar_abrir_de_novo_nao_muda_nada() {
     drop(inventario);
     let antes = bytes(&caminho);
     let inventario = Inventario::abrir(&caminho).unwrap();
-    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(2));
+    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(3));
     assert!(!inventario.plano().unwrap().precisa_migrar());
     drop(inventario);
     assert_eq!(bytes(&caminho), antes);
 }
 
 #[test]
-fn inv02_banco_do_bun_2_vira_user_version_2() {
+fn inv02_banco_do_bun_2_vira_user_version_3() {
     let pasta = tempfile::tempdir().unwrap();
     let inventario = inventario_migrado(pasta.path());
     let c = inventario.conexao();
-    assert_eq!(valor(c, "PRAGMA user_version"), "2");
-    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(2));
+    assert_eq!(valor(c, "PRAGMA user_version"), "3");
+    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(3));
     // decidido_por veio de classificado_por / extraido_por.
     assert_eq!(
         valor(
@@ -234,7 +234,7 @@ fn inv02_banco_vazio_e_banco_do_bun_terminam_com_o_mesmo_esquema() {
     assert_eq!(novo.estado(), EstadoDoBanco::Vazio);
     let plano = novo.plano().unwrap();
     assert!(!plano.faz_copia);
-    assert_eq!(plano.passos.len(), 2);
+    assert_eq!(plano.passos.len(), 3);
     let feita = novo.migrar(pasta.path().join("nao-usada.sqlite")).unwrap();
     assert_eq!(feita.copia, None);
     assert!(!pasta.path().join("nao-usada.sqlite").exists());
@@ -252,13 +252,13 @@ fn inv02_rust_recusa_banco_mais_novo_sem_tocar_nele() {
     drop(inventario);
     Connection::open(&caminho)
         .unwrap()
-        .execute_batch("PRAGMA user_version = 3")
+        .execute_batch("PRAGMA user_version = 4")
         .unwrap();
     let antes = bytes(&caminho);
     match Inventario::abrir(&caminho) {
         Err(ErroDoBanco::MaisNovo {
-            encontrada: 3,
-            suportada: 2,
+            encontrada: 4,
+            suportada: 3,
         }) => {}
         outro => panic!("esperava MaisNovo, veio {outro:?}"),
     }
@@ -363,7 +363,7 @@ fn migrar_com_andamento_avisa_cada_etapa_antes_de_comecar() {
         })
         .unwrap();
     assert!(feita.adotou_o_bun);
-    assert_eq!(feita.versao_final, 2);
+    assert_eq!(feita.versao_final, 3);
     let nomes: Vec<String> = etapas
         .borrow()
         .iter()
@@ -379,6 +379,7 @@ fn migrar_com_andamento_avisa_cada_etapa_antes_de_comecar() {
             "ConferenciaDaCopia",
             "Adocao",
             "Migracao2",
+            "Migracao3",
             "Conferencia"
         ]
     );
@@ -392,9 +393,9 @@ fn migrar_com_andamento_avisa_cada_etapa_antes_de_comecar() {
             etapas.borrow_mut().push(e)
         })
         .unwrap();
-    assert_eq!(etapas.borrow().len(), 3);
+    assert_eq!(etapas.borrow().len(), 4);
     assert!(matches!(etapas.borrow()[0], E::Migracao { versao: 1, .. }));
-    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(2));
+    assert_eq!(inventario.estado(), EstadoDoBanco::Rust(3));
     assert!(novo.exists());
     // A primeira decisão funciona no banco recém-criado.
     assert_eq!(

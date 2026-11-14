@@ -35,6 +35,9 @@ pub mod relatorios;
 pub mod visao_geral;
 pub mod vistas;
 
+// Triagem por IA (spec 09): obsolescência das sugestões e o registro do que saiu.
+pub mod sugestao;
+
 // PDF protegido: alvos, regras, tentativas e pendência por falha.
 pub mod protegidos;
 
