@@ -44,7 +44,7 @@ fn inv10_montar_lote_com_documentos_e_registros() {
     assert_eq!(valor(inv.conexao(), "SELECT COUNT(*) FROM decisao"), n);
     // Achado que não é Documento não entra.
     let erro = inv.adicionar_ao_lote(&lote, &[achado(1)]).unwrap_err();
-    assert!(matches!(erro, ErroDeComando::PromocaoNaoSeDesfaz), "{erro}");
+    assert!(matches!(erro, ErroDeComando::NaoSeAplica { .. }), "{erro}");
     inv.remover_do_lote(&lote, &[registro(2)]).unwrap();
     let c = inv.conexao();
     assert_eq!(itens(c, "1"), format!("achado:{},registro:1", hash(2)));

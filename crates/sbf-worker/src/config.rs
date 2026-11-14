@@ -112,6 +112,77 @@ impl Config {
     }
 }
 
+/// Por que uma pasta não pode ser vigiada.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PastaRecusada {
+    /// O caminho não é absoluto.
+    #[error("A pasta precisa ser um caminho absoluto.")]
+    NaoAbsoluta,
+    /// É (ou contém, ou está dentro d)o cofre.
+    #[error("O cofre nunca é vigiado.")]
+    Cofre,
+    /// Área excluída (sistema, lixo, backups...).
+    #[error("Esta pasta é uma área excluída ({0}) e não pode ser vigiada.")]
+    AreaExcluida(String),
+    /// Pasta de outra pessoa.
+    #[error("Esta pasta é de outra pessoa e não pode ser vigiada.")]
+    OutraPessoa,
+    /// Já está na lista.
+    #[error("Esta pasta já é vigiada.")]
+    Repetida,
+}
+
+/// Confere se `raiz` pode ser vigiada: absoluta, fora do cofre, fora das áreas excluídas e
+/// das pastas de outras pessoas (`sbf_coleta::areas`).
+///
+/// # Errors
+/// O motivo da recusa.
+pub fn validar_pasta(raiz: &Path, cofre: &Path) -> Result<(), PastaRecusada> {
+    if !raiz.is_absolute() {
+        return Err(PastaRecusada::NaoAbsoluta);
+    }
+    if raiz.starts_with(cofre) || cofre.starts_with(raiz) {
+        return Err(PastaRecusada::Cofre);
+    }
+    let classe = sbf_coleta::areas::classe_do_caminho(&raiz.to_string_lossy());
+    if classe.regra.ignorar || classe.regra.motivo == Some("cofre") {
+        return Err(PastaRecusada::Cofre);
+    }
+    match classe.regra.motivo {
+        Some("outra-pessoa") => Err(PastaRecusada::OutraPessoa),
+        Some(m) => Err(PastaRecusada::AreaExcluida(m.to_owned())),
+        None => Ok(()),
+    }
+}
+
+impl Config {
+    /// Acrescenta a pasta vigiada `raiz` (fonte `disco:<nome>`), depois de validá-la.
+    ///
+    /// # Errors
+    /// O motivo da recusa.
+    pub fn adicionar_pasta(&mut self, raiz: &Path, cofre: &Path) -> Result<(), PastaRecusada> {
+        validar_pasta(raiz, cofre)?;
+        if self.pastas.iter().any(|p| p.raiz == raiz) {
+            return Err(PastaRecusada::Repetida);
+        }
+        let nome = raiz
+            .file_name()
+            .map_or_else(|| "raiz".to_owned(), |n| n.to_string_lossy().to_lowercase());
+        self.pastas.push(PastaVigiada {
+            fonte: format!("disco:{nome}"),
+            raiz: raiz.to_path_buf(),
+        });
+        Ok(())
+    }
+
+    /// Tira a pasta `raiz` da lista; `false` se não estava.
+    pub fn remover_pasta(&mut self, raiz: &Path) -> bool {
+        let antes = self.pastas.len();
+        self.pastas.retain(|p| p.raiz != raiz);
+        self.pastas.len() != antes
+    }
+}
+
 /// A hora local (0 a 23) de um instante unix.
 #[must_use]
 pub fn hora_local(agora: u64, fuso_horas: i64) -> u32 {
@@ -165,5 +236,42 @@ mod testes {
         let c = Config::carregar(&d.path().join("y.json")).unwrap();
         assert!(c.triagem.ligada);
         assert_eq!(c.triagem.lote, 25);
+    }
+
+    #[test]
+    fn pasta_vigiada_recusa_cofre_area_excluida_e_outra_pessoa_e_salva_atomico() {
+        let d = tempfile::tempdir().unwrap();
+        let cofre = d.path().join("cofre");
+        std::fs::create_dir_all(&cofre).unwrap();
+        let mut c = Config::default();
+        assert_eq!(
+            c.adicionar_pasta(&cofre.join("acervo"), &cofre),
+            Err(PastaRecusada::Cofre)
+        );
+        assert_eq!(
+            c.adicionar_pasta(Path::new("/mnt/d/Chico/financas"), &cofre),
+            Err(PastaRecusada::Cofre)
+        );
+        assert_eq!(
+            c.adicionar_pasta(Path::new("relativa"), &cofre),
+            Err(PastaRecusada::NaoAbsoluta)
+        );
+        assert!(matches!(
+            c.adicionar_pasta(Path::new("/mnt/e2/Pessoal/Chico/node_modules"), &cofre),
+            Err(PastaRecusada::AreaExcluida(_) | PastaRecusada::OutraPessoa)
+        ));
+        let boa = d.path().join("Downloads");
+        c.adicionar_pasta(&boa, &cofre).unwrap();
+        assert_eq!(c.pastas[0].fonte, "disco:downloads");
+        assert_eq!(c.adicionar_pasta(&boa, &cofre), Err(PastaRecusada::Repetida));
+        let arq = d.path().join("worker.json");
+        c.salvar(&arq).unwrap();
+        assert_eq!(Config::carregar(&arq).unwrap(), c);
+        assert!(std::fs::read_dir(d.path()).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp")));
+        assert!(c.remover_pasta(&boa) && !c.remover_pasta(&boa));
     }
 }
