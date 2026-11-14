@@ -19,10 +19,24 @@ pub const CPF_ULTIMOS_5: &str = "24725";
 pub const CPF_PRIMEIROS_5: &str = "52998";
 pub const SENHA_PROPRIA: &str = "senha-ficticia-Beta-90";
 
+/// `CARGO_TARGET_TMPDIR`, salvo se algum componente do caminho for oculto (ex.:
+/// `CARGO_TARGET_DIR=~/.cache/...`): ali o AppArmor do `qpdf` nega `open` ("Permission denied",
+/// exit 2) e o teste cairia por causa do ambiente. Nesse caso usa `/tmp`, que ele permite
+/// para `*.pdf`.
+fn raiz_das_pastas() -> PathBuf {
+    let alvo = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let oculto = alvo.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .is_some_and(|n| n.starts_with('.') && n != "." && n != "..")
+    });
+    if oculto { PathBuf::from("/tmp") } else { alvo }
+}
+
 pub fn pasta() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix("sbf-pdf-teste-")
-        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .tempdir_in(raiz_das_pastas())
         .expect("pasta de teste")
 }
 
@@ -169,18 +183,20 @@ pub fn cifrar(pasta: &Path, nome: &str, base: &[u8], senha: &str, cifra: Cifra) 
         Cifra::Aes256 => qpdf.args(["--bits=256"]),
         Cifra::Aes256ComObjectStreams => qpdf.args(["--bits=256"]),
     };
-    qpdf.arg("--");
     if cifra == Cifra::Aes256ComObjectStreams {
         qpdf.arg("--object-streams=generate");
     }
-    let status = qpdf
+    let saida_qpdf = qpdf
+        .arg("--")
         .arg(&entrada)
         .arg(&saida)
-        .status()
+        .output()
         .expect("qpdf instalado");
+    let status = saida_qpdf.status;
     assert!(
         status.code() == Some(0) || status.code() == Some(3),
-        "qpdf --encrypt: {status}"
+        "qpdf --encrypt: {status}: {}",
+        String::from_utf8_lossy(&saida_qpdf.stderr)
     );
     saida
 }
