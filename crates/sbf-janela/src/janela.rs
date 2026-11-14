@@ -1531,7 +1531,19 @@ impl Janela {
     /// Liga o serviço de triagem por IA (a fictícia, na demonstração; a do inventário, no
     /// real). Sem ele, a área e Opções → IA dizem que a triagem não está ligada.
     pub fn ligar_triagem(&mut self, servico: Box<dyn sbf_triagem::servico::ServicoDeTriagem>) {
+        let chaves = std::mem::take(&mut self.triagem.chaves);
         self.triagem = crate::triagem::EstadoDaTriagem::com_servico(servico);
+        self.triagem.chaves = chaves;
+    }
+
+    /// Liga Opções → IA → Chaves e contas: o chaveiro (ou a guarda da demonstração) e o
+    /// `claude` achado. Independe de a triagem estar ligada.
+    pub fn ligar_chaves_de_ia(
+        &mut self,
+        guarda: Option<Box<dyn crate::chaves_ia::GuardaDeChaves>>,
+        claude: Option<std::path::PathBuf>,
+    ) {
+        self.triagem.chaves = crate::chaves_ia::ChavesDeIa::nova(guarda, claude);
     }
 
     /// Aplica um pedido da triagem por IA. Aceitar grava uma decisão do usuário por item

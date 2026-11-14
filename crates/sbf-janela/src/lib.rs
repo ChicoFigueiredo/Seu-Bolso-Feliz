@@ -13,6 +13,7 @@ pub mod app;
 pub mod areas;
 pub mod caixa;
 pub mod caixa_ui;
+pub mod chaves_ia;
 pub mod componentes;
 pub mod composta;
 pub mod demonstracao;

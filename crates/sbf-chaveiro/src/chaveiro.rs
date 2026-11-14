@@ -225,6 +225,11 @@ impl Chaveiro {
         Self::chave_de_ia_de(provedor).is_ok_and(|c| self.guarda.rotulos().contains(&c))
     }
 
+    /// Apaga a chave do provedor de IA (sem erro se já não havia).
+    pub fn apagar_chave_de_ia(&self, provedor: &str) -> Result<(), ErroDoChaveiro> {
+        Ok(self.guarda.apagar(&Self::chave_de_ia_de(provedor)?)?)
+    }
+
     // ---------------- Credencial de estação ----------------
 
     /// A chave `estacao:<servidor>`, se `servidor` serve de rótulo.
