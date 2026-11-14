@@ -42,6 +42,8 @@ pub struct Bot {
     /// O dono dos dados dos chats da lista configurada.
     pub dono: Uuid,
     pub alertas: Option<crate::agenda::ContextoDeAlertas>,
+    /// Onde o offset do `getUpdates` fica em `canais_estado` (só os testes mudam).
+    pub chave_do_offset: String,
     tentativas: HashMap<i64, Vec<Instant>>,
     offset: Option<i64>,
 }
@@ -100,6 +102,7 @@ impl Bot {
             autorizados,
             dono,
             alertas: None,
+            chave_do_offset: CHAVE_DO_OFFSET.to_owned(),
             tentativas: HashMap::new(),
             offset: None,
         }
@@ -266,7 +269,7 @@ impl Bot {
 
     async fn ler_offset(&mut self) -> Result<(), ErroDeCanal> {
         if self.offset.is_none() {
-            self.offset = repo::ler_estado_do_servico(&self.banco, CHAVE_DO_OFFSET)
+            self.offset = repo::ler_estado_do_servico(&self.banco, &self.chave_do_offset)
                 .await?
                 .and_then(|v| v.parse().ok());
         }
@@ -294,7 +297,8 @@ impl Bot {
         if n > 0
             && let Some(o) = self.offset
         {
-            repo::gravar_estado_do_servico(&self.banco, CHAVE_DO_OFFSET, &o.to_string()).await?;
+            repo::gravar_estado_do_servico(&self.banco, &self.chave_do_offset, &o.to_string())
+                .await?;
         }
         Ok(n)
     }
