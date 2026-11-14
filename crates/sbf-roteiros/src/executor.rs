@@ -421,15 +421,18 @@ fn executar_passo(
         Passo::PreencherSenha { seletor, rotulo } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             let segredo = c.senhas.senha_de_site(rotulo).map_err(ErroDeRoteiro::Chaveiro)?;
-            c.navegador.preencher_segredo(seletor, &segredo)?;
+            // Entra na lista de limpeza ANTES de ir ao campo: se a falha repetir o valor, some.
             usados.push(segredo);
+            let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
+            c.navegador.preencher_segredo(seletor, segredo)?;
             Ok(())
         }
         Passo::PreencherCpf { seletor } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             let segredo = c.senhas.cpf().map_err(ErroDeRoteiro::Chaveiro)?;
-            c.navegador.preencher_segredo(seletor, &segredo)?;
             usados.push(segredo);
+            let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
+            c.navegador.preencher_segredo(seletor, segredo)?;
             Ok(())
         }
         Passo::Baixar { seletor, nome } => {
