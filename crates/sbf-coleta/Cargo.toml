@@ -1,0 +1,23 @@
+[package]
+name = "sbf-coleta"
+description = "Coleta do inventário em fontes externas, sem egui. Hoje: Google Drive e OneDrive via rclone (porte de coletar-nuvem.ts)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Só o `Rclone` (caminho confiável, ambiente mínimo, configuração própria do SBF).
+sbf-estante = { path = "../sbf-estante" }
+regex = "1"
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
