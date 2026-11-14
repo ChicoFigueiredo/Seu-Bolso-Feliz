@@ -5211,6 +5211,7 @@ dependencies = [
  "rmcp",
  "rusqlite",
  "sbf-ia",
+ "sbf-indice",
  "sbf-inventario",
  "sbf-triagem",
  "serde",

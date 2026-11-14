@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rusqlite::types::Value as Sql;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
@@ -42,7 +43,25 @@ fn erro<E: std::fmt::Display>(e: E) -> String {
 pub struct Nucleo {
     banco: PathBuf,
     livro: Option<PathBuf>,
+    semelhantes: Semelhantes,
 }
+
+/// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
+#[derive(Clone)]
+struct Semelhantes(Option<(Arc<dyn sbf_indice::Busca>, sbf_ia::NivelDeConfianca)>);
+
+impl std::fmt::Debug for Semelhantes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Semelhantes")
+            .field("ligada", &self.0.is_some())
+            .finish()
+    }
+}
+
+/// O máximo de trechos por chamada de `buscar_semelhantes`.
+pub const MAXIMO_DE_SEMELHANTES: usize = 20;
+/// O `destinatario` de `saida_ia` para esta ferramenta.
+pub const DESTINATARIO_MCP: &str = "mcp:buscar_semelhantes";
 
 /// A paginação comum: `limite` (1 a 100, padrão 25) e `deslocamento` (quantos pular).
 #[derive(Debug, Clone, Copy, Default)]
@@ -209,7 +228,74 @@ impl Nucleo {
         Ok(Self {
             banco: banco.to_path_buf(),
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
+            semelhantes: Semelhantes(None),
         })
+    }
+
+    /// Liga `buscar_semelhantes` ao índice local. `nivel` é o nível de confiança deste
+    /// cliente MCP (um destinatário novo nasce mascarado).
+    #[must_use]
+    pub fn com_busca(
+        mut self,
+        busca: Arc<dyn sbf_indice::Busca>,
+        nivel: sbf_ia::NivelDeConfianca,
+    ) -> Self {
+        self.semelhantes = Semelhantes(Some((busca, nivel)));
+        self
+    }
+
+    // ---------------------------------------------------------------- buscar_semelhantes
+
+    /// Os trechos do índice local mais parecidos com `texto` (achados, registros e
+    /// movimentações), mascarados no nível do cliente. O que saiu fica em `saida_ia`. Para
+    /// ler o item inteiro, use `ver_texto_do_achado` ou `ver_registro`.
+    ///
+    /// # Errors
+    /// Índice não ligado, texto vazio, falha da busca ou do registro da saída.
+    pub fn buscar_semelhantes(&self, texto: &str, limite: Option<i64>) -> Resultado {
+        let Some((busca, nivel)) = &self.semelhantes.0 else {
+            return Err(
+                "o índice local não está ligado (abra o app e deixe o worker indexar)".to_owned(),
+            );
+        };
+        let texto = texto.trim();
+        if texto.is_empty() {
+            return Err("diga o texto a buscar".to_owned());
+        }
+        let k = usize::try_from(limite.unwrap_or(5))
+            .unwrap_or(5)
+            .clamp(1, MAXIMO_DE_SEMELHANTES);
+        let achados = busca.parecidos(texto, k, None).map_err(erro)?;
+        let itens: Vec<Value> = achados
+            .iter()
+            .map(|p| {
+                json!({
+                    "tipo": p.item.tipo,
+                    "id": p.item.id,
+                    "nota": (f64::from(p.nota) * 1000.0).round() / 1000.0,
+                    "trecho": sbf_indice::perguntar::mascarar(&p.texto, *nivel),
+                })
+            })
+            .collect();
+        let resposta = json!({ "itens": itens });
+        let bytes = resposta.to_string().len() as u64;
+        if !itens.is_empty() {
+            use sbf_ia::Registro as _;
+            let registro =
+                sbf_inventario::sugestao::RegistroDaIa::abrir(&self.banco, None).map_err(erro)?;
+            registro
+                .registrar_saida(&sbf_ia::Saida {
+                    destinatario: DESTINATARIO_MCP.to_owned(),
+                    provedor: "mcp".to_owned(),
+                    modelo: "-".to_owned(),
+                    nivel: *nivel,
+                    bytes_enviados: bytes,
+                    consumo: sbf_ia::Consumo::default(),
+                    quando: sbf_ia::agora_rfc3339(),
+                })
+                .map_err(|e| format!("não deu para registrar a saída: {e}"))?;
+        }
+        Ok(resposta)
     }
 
     fn leitura(&self) -> Result<Connection, String> {
