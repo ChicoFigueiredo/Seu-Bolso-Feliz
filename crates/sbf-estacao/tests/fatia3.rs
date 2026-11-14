@@ -804,6 +804,58 @@ fn cx07_envio_idempotente_promove_so_apos_o_aceite_e_retoma_pela_metade() {
 }
 
 #[test]
+fn envio_pula_registro_nao_aprovado_e_achado_descartado_sem_abortar_nem_travar() {
+    let c = cena();
+    let mut i = inventario_com_lote();
+    i.inv.aprovar_lote(&i.lote).unwrap();
+    // Depois da aprovação o usuário marcou o registro 2 como divergente, e o achado do
+    // documento 0 foi descartado.
+    i.inv
+        .conexao()
+        .execute("UPDATE registro SET estado = 'divergente' WHERE id = 2", [])
+        .unwrap();
+    let leitor = LeitorDeCofre::novo(&i.cofre);
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert_eq!(resumo.pulados, 1, "{resumo:?}");
+    assert_eq!(resumo.enviados, 1);
+    assert!(resumo.falhas.is_empty(), "{:?}", resumo.falhas);
+    assert!(
+        resumo.lote_promovido,
+        "o que sobrou foi aceito: o lote fecha"
+    );
+    assert_eq!(
+        estado_dos_registros(&i.inv),
+        ["promovido", "divergente", "aprovado"]
+    );
+    // Reenviar não trava nem reenvia.
+    let antes = c.s.estado.lock().unwrap().pedidos_de_documento;
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert!(resumo.falhas.is_empty());
+    assert_eq!(c.s.estado.lock().unwrap().pedidos_de_documento, antes);
+
+    // Achado descartado: o documento não vai.
+    let c = cena();
+    let mut i = inventario_com_lote();
+    i.inv.aprovar_lote(&i.lote).unwrap();
+    i.inv
+        .conexao()
+        .execute(
+            "UPDATE achado SET estado = 'descartado' WHERE content_hash = ?1",
+            [&i.hashes[0]],
+        )
+        .unwrap();
+    let leitor = LeitorDeCofre::novo(&i.cofre);
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert_eq!(resumo.pulados, 1);
+    assert_eq!(resumo.enviados, 1);
+    assert_eq!(c.s.estado.lock().unwrap().pedidos_de_documento, 1);
+    assert_eq!(
+        estado_dos_registros(&i.inv),
+        ["aprovado", "promovido", "aprovado"]
+    );
+}
+
+#[test]
 fn envio_reenviado_ao_servidor_devolve_o_mesmo_documento_e_arquivo_alterado_falha() {
     let c = cena();
     let mut i = inventario_com_lote();

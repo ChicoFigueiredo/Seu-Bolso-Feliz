@@ -68,12 +68,25 @@ pub struct DocumentoDoLote {
     pub registros_a_promover: Vec<String>,
     /// Registros deste documento no lote que já estão `promovido`.
     pub registros_promovidos: usize,
+    /// Registros deste documento no lote que não estão `aprovado` nem `promovido`
+    /// (`extraido`, `conferido`, `divergente`): não são enviados nem promovidos.
+    pub registros_pulados: usize,
+    /// O achado foi `descartado`: o documento não é enviado.
+    pub descartado: bool,
 }
 
 impl DocumentoDoLote {
     /// Nada mais a fazer: há registros no lote e todos já foram promovidos.
     pub fn concluido(&self) -> bool {
         self.registros_a_promover.is_empty() && self.registros_promovidos > 0
+    }
+
+    /// Não entra no envio: achado descartado, ou só tem registros que o usuário não aprovou.
+    pub fn pulado(&self) -> bool {
+        self.descartado
+            || (self.registros_pulados > 0
+                && self.registros_a_promover.is_empty()
+                && self.registros_promovidos == 0)
     }
 }
 
@@ -111,6 +124,9 @@ pub struct ResumoDoEnvio {
     pub promovidos: usize,
     /// Registros do lote que não vêm de documento.
     pub sem_documento: usize,
+    /// Documentos que não foram enviados porque o achado foi descartado ou os registros
+    /// não estão aprovados (não é falha: o lote termina sem eles).
+    pub pulados: usize,
     pub falhas: Vec<FalhaDoEnvio>,
     /// O lote ganhou `promovido_em` (todos os documentos aceitos).
     pub lote_promovido: bool,
@@ -173,7 +189,7 @@ pub fn documentos_do_lote(
            UNION
            SELECT r.content_hash FROM lote_item i JOIN registro r ON r.id = CAST(i.alvo_id AS INTEGER)
             WHERE i.lote_id = ?1 AND i.alvo_tipo = 'registro' AND r.content_hash IS NOT NULL)
-         SELECT a.content_hash, a.mime_type, a.extensao, a.caminho_acervo,
+         SELECT a.content_hash, a.mime_type, a.extensao, a.caminho_acervo, a.estado,
                 (SELECT o.filename FROM origem o WHERE o.content_hash = a.content_hash
                   ORDER BY o.id LIMIT 1)
            FROM docs JOIN achado a ON a.content_hash = docs.h ORDER BY a.content_hash",
@@ -183,15 +199,23 @@ pub fn documentos_do_lote(
         Option<String>,
         Option<String>,
         Option<String>,
+        String,
         Option<String>,
     );
     let base: Vec<Achado> = st
         .query_map([id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
+            Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+            ))
         })?
         .collect::<Result<_, _>>()?;
     let mut documentos = Vec::with_capacity(base.len());
-    for (hash, mime, extensao, caminho, filename) in base {
+    for (hash, mime, extensao, caminho, estado_do_achado, filename) in base {
         let mut st = conn.prepare(
             "SELECT r.id, r.estado FROM lote_item i JOIN registro r ON r.id = CAST(i.alvo_id AS INTEGER)
               WHERE i.lote_id = ?1 AND i.alvo_tipo = 'registro' AND r.content_hash = ?2
@@ -205,9 +229,14 @@ pub fn documentos_do_lote(
             tipo_mime: mime.unwrap_or_else(|| "application/octet-stream".to_owned()),
             caminho_acervo: caminho,
             registros_promovidos: registros.iter().filter(|(_, e)| e == "promovido").count(),
+            registros_pulados: registros
+                .iter()
+                .filter(|(_, e)| e != "promovido" && e != "aprovado")
+                .count(),
+            descartado: estado_do_achado == "descartado",
             registros_a_promover: registros
                 .into_iter()
-                .filter(|(_, e)| e != "promovido")
+                .filter(|(_, e)| e == "aprovado")
                 .map(|(r, _)| r.to_string())
                 .collect(),
             content_hash: hash,
@@ -279,6 +308,12 @@ pub fn enviar_lote(
             progresso(&andamento);
             continue;
         }
+        if doc.pulado() {
+            resumo.pulados += 1;
+            andamento.feitos += 1;
+            progresso(&andamento);
+            continue;
+        }
         let falha = |motivo: String| FalhaDoEnvio {
             content_hash: doc.content_hash.clone(),
             nome: doc.nome.clone(),
@@ -330,15 +365,23 @@ pub fn enviar_lote(
                         .iter()
                         .map(|r| Ref::nova(Tipo::Registro, r.clone()))
                         .collect();
-                    resumo.promovidos += alvos.len();
-                    promover(
+                    let quantos = alvos.len();
+                    // O servidor já aceitou o documento: se o inventário recusar promover
+                    // (estado mudou no meio), vira falha deste documento, não aborta o lote.
+                    match promover(
                         inventario,
                         alvos,
                         format!(
                             "o servidor aceitou o documento {} no envio do lote {}",
                             resposta.source_document_id, lote.chave
                         ),
-                    )?;
+                    ) {
+                        Ok(()) => resumo.promovidos += quantos,
+                        Err(e) => {
+                            resumo.falhas.push(falha(e.to_string()));
+                            andamento.falhas += 1;
+                        }
+                    }
                 }
                 andamento.feitos += 1;
             }
