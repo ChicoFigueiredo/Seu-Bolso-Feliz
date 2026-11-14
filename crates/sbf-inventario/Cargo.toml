@@ -19,3 +19,7 @@ proptest = { workspace = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "gerar_escala"
+test = true
