@@ -49,9 +49,26 @@ pub fn centavos_do_numeric(texto: &str) -> Result<Centavos, ValorInvalido> {
     Ok(if negativo { -centavos } else { centavos })
 }
 
+/// Centavos como texto de `numeric` (`1250` → `"12.50"`, `-5` → `"-0.05"`), sem ponto
+/// flutuante, para ir ao Postgres como `text` com `::numeric`.
+pub fn numeric_de_centavos(centavos: Centavos) -> String {
+    let sinal = if centavos < 0 { "-" } else { "" };
+    let abs = centavos.unsigned_abs();
+    format!("{sinal}{}.{:02}", abs / 100, abs % 100)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn centavos_viram_numeric_e_voltam() {
+        for c in [0, 5, 10, 1250, -5, -123_456, i64::MAX / 2] {
+            assert_eq!(centavos_do_numeric(&numeric_de_centavos(c)), Ok(c), "{c}");
+        }
+        assert_eq!(numeric_de_centavos(1250), "12.50");
+        assert_eq!(numeric_de_centavos(-5), "-0.05");
+    }
 
     #[test]
     fn valores_com_duas_casas() {

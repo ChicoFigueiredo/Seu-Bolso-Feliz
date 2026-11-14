@@ -5,21 +5,27 @@
 //!
 //! Só este crate tem a URL do banco, que chega por `SBF_DATABASE_URL` e nunca por argv.
 
+pub mod acoes;
 pub mod alteracoes;
+pub mod armazenamento;
 pub mod banco;
 pub mod credencial;
+pub mod delta;
 pub mod dinheiro;
+pub mod documentos;
 pub mod estacoes;
 pub mod google;
 pub mod http;
 pub mod livro;
+pub mod rascunhos;
 mod valores;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -27,10 +33,11 @@ use deadpool_postgres::Pool;
 use sbf_contrato::{Colecao, Estado, VERSAO_DO_CONTRATO};
 use zeroize::Zeroizing;
 
+use crate::armazenamento::{Armazenamento, ArmazenamentoAusente, VercelBlob};
 use crate::banco::sql_instante;
 use crate::estacoes::{EstacaoAutenticada, ler_estacao};
 use crate::google::VerificadorGoogle;
-use crate::http::{ErroHttp, com_etag, contratos_aceitos};
+use crate::http::{ContratoDoPedido, ErroHttp, com_etag, contratos_aceitos};
 
 /// O dia de corte quando o dono não escolheu um (grill Q14).
 pub const DIA_DE_CORTE_PADRAO: u8 = 20;
@@ -45,6 +52,8 @@ pub struct EstadoDoServidor {
     pub google: Arc<VerificadorGoogle>,
     /// A versão das regras: a versão do binário (ADR-012).
     pub regras: String,
+    /// Onde os bytes dos documentos enviados ficam (spec 08).
+    pub armazenamento: Arc<dyn Armazenamento>,
 }
 
 /// As rotas da API, com a checagem de contrato e o log de acesso.
@@ -59,6 +68,12 @@ pub fn rotas(estado: EstadoDoServidor) -> Router {
             post(estacoes::revogar),
         )
         .route("/api/{versao}/alteracoes", post(alteracoes::receber))
+        .route(
+            "/api/{versao}/documentos",
+            post(documentos::enviar).layer(DefaultBodyLimit::max(
+                sbf_contrato::TAMANHO_MAXIMO_DO_DOCUMENTO + 1024 * 1024,
+            )),
+        )
         .route_layer(axum::middleware::from_fn(http::exigir_contrato));
     Router::new()
         .merge(api)
@@ -109,14 +124,29 @@ async fn ver_estado(
     }))
 }
 
-/// `GET /livro/{colecao}`: a coleção inteira, com `ETag` (grill Q5).
+/// `GET /livro/{colecao}`. Na v1, a coleção inteira, com `ETag` (grill Q5); na v2, o delta
+/// por cursor ([`delta`]).
 async fn ver_colecao(
     State(estado): State<EstadoDoServidor>,
     quem: EstacaoAutenticada,
-    Path((_versao, colecao)): Path<(String, String)>,
+    Extension(contrato): Extension<ContratoDoPedido>,
+    Path((versao, colecao)): Path<(String, String)>,
+    Query(parametros): Query<delta::Parametros>,
     cabecalhos: HeaderMap,
 ) -> Result<Response, ErroHttp> {
+    if contrato.0 >= 2 {
+        return Ok(delta::ver(
+            State(estado),
+            quem,
+            Extension(contrato),
+            Path((versao, colecao)),
+            Query(parametros),
+        )
+        .await?
+        .into_response());
+    }
     let colecao = Colecao::do_caminho(&colecao)
+        .filter(|c| c.desde_a_versao() <= contrato.0)
         .ok_or_else(|| ErroHttp::nao_encontrado("coleção desconhecida"))?;
     let cliente = estado.banco.get().await?;
     let linhas = livro::ler_colecao(&**cliente, colecao, quem.dono).await?;
@@ -183,10 +213,22 @@ pub async fn servir(config: Configuracao) -> Result<(), ErroDoServidor> {
         config.google_client_id.clone(),
         Box::new(google::ChavesDoGoogle::nova()?),
     );
+    // O token do Blob vem só da variável de ambiente, lida aqui, uma vez.
+    let armazenamento: Arc<dyn Armazenamento> = match VercelBlob::do_ambiente() {
+        Some(blob) => Arc::new(blob),
+        None => {
+            eprintln!(
+                "sbf servidor: {} ausente: o envio de documentos fica desligado",
+                armazenamento::VARIAVEL_DO_TOKEN
+            );
+            Arc::new(ArmazenamentoAusente)
+        }
+    };
     let estado = EstadoDoServidor {
         banco,
         google: Arc::new(google),
         regras: config.regras.clone(),
+        armazenamento,
     };
     let ouvinte = tokio::net::TcpListener::bind(config.endereco)
         .await

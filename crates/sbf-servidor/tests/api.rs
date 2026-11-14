@@ -155,7 +155,10 @@ async fn dono_isolado_em_todas_as_colecoes() {
     let b = semear(&amb, dono_b).await;
     let (_e, credencial) = amb.parear(&email_a, &sub_a, "Estação A").await;
 
-    for colecao in Colecao::TODAS {
+    for colecao in Colecao::TODAS
+        .into_iter()
+        .filter(|c| c.desde_a_versao() == 1)
+    {
         let r = amb
             .get(&format!("/api/v1/livro/{}", colecao.caminho()), &credencial)
             .await;
@@ -386,8 +389,8 @@ async fn contrato_antigo_e_mais_novo_sao_recusados_antes_da_credencial() {
     let r = amb.get("/api/v0/estado", &cred).await;
     assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
     assert_eq!(r.corpo["codigo"], "contrato_antigo");
-    assert_eq!(r.corpo["contratos_aceitos"], json!([1]));
-    let r = amb.get("/api/v2/livro/contas", &cred).await;
+    assert_eq!(r.corpo["contratos_aceitos"], json!([1, 2]));
+    let r = amb.get("/api/v3/livro/contas", &cred).await;
     assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
     assert_eq!(r.corpo["codigo"], "contrato_mais_novo");
     // Mesmo sem credencial, o contrato vem antes.
@@ -402,7 +405,7 @@ async fn estado_traz_dia_de_corte_padrao_20_ou_o_do_dono() {
     let (_e, cred) = amb.parear(&email, &sub, "Estação").await;
     let r = amb.get("/api/v1/estado", &cred).await;
     assert_eq!(r.corpo["dia_de_corte"], 20);
-    assert_eq!(r.corpo["contrato"], 1);
+    assert_eq!(r.corpo["contrato"], 2);
     assert_eq!(r.corpo["regras"], "0.1.0-teste");
     assert_eq!(r.corpo["fuso"], "America/Sao_Paulo");
     assert!(r.corpo["hora_do_servidor"].as_str().unwrap().ends_with('Z'));
@@ -472,7 +475,7 @@ async fn mudar_categoria_aceita_e_recusada_lado_a_lado() {
         .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.corpo);
     let aceita: RespostaDaAlteracao = serde_json::from_slice(&r.bruto).unwrap();
-    let RespostaDaAlteracao::Aceita { id, linhas } = &aceita else {
+    let RespostaDaAlteracao::Aceita { id, linhas, .. } = &aceita else {
         panic!("deveria ser aceita: {:?}", r.corpo)
     };
     assert_eq!(*id, id1);
