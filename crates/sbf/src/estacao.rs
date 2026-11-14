@@ -52,7 +52,7 @@ fn servidor_de(base: &str) -> Result<(Servidor, Option<(String, String)>), Strin
 }
 
 /// A configuração da estação deste app.
-fn configuracao(
+pub(crate) fn configuracao(
     pasta_de_dados: &Path,
     guarda: Arc<dyn GuardaDeCredencial>,
     servidor: &str,
@@ -382,6 +382,19 @@ pub fn ligar(
                 estacao: estacao.clone(),
                 andamento: Arc::new(Mutex::new(AndamentoDoPareamento::Parado)),
             }));
+            // A caixa de entrada e a edição (spec 08) falam com a mesma estação. O envio de lote
+            // só existe com o cofre aberto (precisa do `inventario.sqlite` e dos originais).
+            let porta = cofre.map(|c| {
+                Arc::new(crate::caixa::EnvioReal::novo(
+                    estacao.clone(),
+                    c.to_path_buf(),
+                )) as Arc<dyn crate::caixa::PortaDoEnvio>
+            });
+            janela.ligar_caixa(Box::new(crate::caixa::CaixaDaEstacao::nova(
+                estacao.clone(),
+                escritas.clone(),
+                porta,
+            )));
             let composta = ConsultaComposta::nova(inventario, Some(Box::new(livro.clone())));
             (
                 Box::new(composta),
