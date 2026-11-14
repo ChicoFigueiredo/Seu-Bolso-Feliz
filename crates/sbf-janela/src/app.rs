@@ -903,6 +903,8 @@ impl AppCasca for AppSbf {
                 let janela = self.janela.get_mut();
                 let mut pedidos = Vec::new();
                 crate::triagem::opcoes_ia(ui, &mut janela.triagem, &mut pedidos);
+                ui.add_space(12.0);
+                crate::triagem::opcoes_chaves(ui, &mut janela.triagem, &mut pedidos);
                 for p in pedidos {
                     janela.pedir(p);
                 }

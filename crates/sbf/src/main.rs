@@ -262,6 +262,14 @@ fn app_de_demonstracao() -> Result<App, String> {
     janela.ligar_caixa(Box::new(caixa.clone()));
     // A triagem por IA fictícia: dados inventados, nenhum provedor é chamado.
     janela.ligar_triagem(Box::new(sbf_triagem::servico::TriagemFicticia::nova()));
+    // As chaves da demonstração: uma guarda em memória com uma chave inventada.
+    janela.ligar_chaves_de_ia(
+        Some(Box::new(sbf_janela::chaves_ia::GuardaFicticia::com_chave(
+            "openrouter",
+            "sk-or-v1-ficticia-0000a1b2",
+        ))),
+        Some(std::path::PathBuf::from("/home/exemplo/.local/bin/claude")),
+    );
     let cena = preparar_cena_da_caixa(&caixa, &consulta, &livro, &mut janela);
     let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
     let mut app = App::novo(janela, Box::new(consulta), Box::new(comandos), barra)

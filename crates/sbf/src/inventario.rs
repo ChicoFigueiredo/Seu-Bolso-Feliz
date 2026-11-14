@@ -124,6 +124,7 @@ impl AppDoInventario {
                 f.carregar_preferencias();
                 f.faxinar_sobras_em_segundo_plano();
                 let chaveiro_da_ia = f.chaveiro.clone();
+                let chaves_da_ia = f.chaveiro.clone();
                 janela.ferramentas = Some(f);
                 // A triagem por IA (spec 09): o `claude` do usuário como principal e, só se
                 // houver chave no chaveiro e a reserva ligada, o OpenRouter. Nada é chamado
@@ -141,6 +142,12 @@ impl AppDoInventario {
                     }
                     Err(_) => {}
                 }
+                // Opções → IA → Chaves e contas: o mesmo chaveiro e o mesmo `claude` do provedor.
+                janela.ligar_chaves_de_ia(
+                    chaves_da_ia
+                        .map(|c| Box::new(c) as Box<dyn sbf_janela::chaves_ia::GuardaDeChaves>),
+                    crate::triagem::resolver_claude(),
+                );
                 janela.pre_carregar_visao_geral(inventario.caminho().to_path_buf());
                 if let Some(t) = aviso {
                     janela.mensagem = Some(sbf_janela::janela::Mensagem {

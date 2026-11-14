@@ -20,6 +20,7 @@ sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
 # Só para o acervo fictício da demonstração (o anexo do e-mail liga ao achado pelo sha256).
 sha2 = "0.11"
+zeroize = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

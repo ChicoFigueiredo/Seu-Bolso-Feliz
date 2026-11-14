@@ -499,3 +499,43 @@ fn intervalo_conexao_tema_previa_e_nova_regra() {
         .is_err()
     );
 }
+
+#[test]
+fn opcoes_ia_com_chaves_e_contas_desenha_em_todos_os_temas() {
+    use sbf_janela::chaves_ia::GuardaFicticia;
+    let mut b = Banco::novo();
+    b.casca
+        .app
+        .janela()
+        .ligar_triagem(Box::new(sbf_triagem::servico::TriagemFicticia::nova()));
+    for (guarda, claude) in [
+        (None, None),
+        (
+            Some(GuardaFicticia::com_chave(
+                "openrouter",
+                "sk-or-v1-ficticia-0000a1b2",
+            )),
+            Some(std::path::PathBuf::from("/casa/exemplo/.local/bin/claude")),
+        ),
+    ] {
+        b.casca.app.janela().ligar_chaves_de_ia(
+            guarda.map(|g| Box::new(g) as Box<dyn sbf_janela::chaves_ia::GuardaDeChaves>),
+            claude,
+        );
+        b.casca.estado.ribbon.bastidores_abertos = true;
+        b.casca.estado.secao_bastidores = Some("opcoes".into());
+        for t in sbf_janela::tema::temas() {
+            bancada_casca::pedir(&b.ctx, PedidoCasca::Tema(t.id.clone()));
+            b.quadro();
+            b.quadro();
+        }
+    }
+    // Apagar com confirmação na tela.
+    b.casca
+        .app
+        .janela()
+        .triagem
+        .chaves
+        .pedir_para_apagar("openrouter");
+    b.quadro();
+}

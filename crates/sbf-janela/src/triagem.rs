@@ -57,6 +57,8 @@ pub struct EstadoDaTriagem {
     pub testando: bool,
     /// O último erro de leitura.
     pub erro: Option<String>,
+    /// Opções → IA → Chaves e contas.
+    pub chaves: crate::chaves_ia::ChavesDeIa,
 }
 
 impl std::fmt::Debug for EstadoDaTriagem {
@@ -465,6 +467,17 @@ fn rotulo_do_nivel(n: NivelDeConfianca) -> &'static str {
     }
 }
 
+/// Opções → IA → Chaves e contas (aparece mesmo com a triagem desligada).
+pub fn opcoes_chaves(ui: &mut Ui, estado: &mut EstadoDaTriagem, pedidos: &mut Vec<Pedido>) {
+    crate::chaves_ia::secao(
+        ui,
+        &mut estado.chaves,
+        estado.testando,
+        estado.teste.as_ref(),
+        pedidos,
+    );
+}
+
 /// Opções → IA: provedor principal, reserva, tetos, nível e o teste de conexão.
 pub fn opcoes_ia(ui: &mut Ui, estado: &mut EstadoDaTriagem, pedidos: &mut Vec<Pedido>) {
     let cores = tema::paleta(ui.ctx());
@@ -626,6 +639,7 @@ mod testes {
             let mut saida = ctx.run_ui(entrada, |ui| {
                 area(ui, &mut estado, &mut pedidos);
                 opcoes_ia(ui, &mut estado, &mut pedidos);
+                opcoes_chaves(ui, &mut estado, &mut pedidos);
             });
             saida.textures_delta.clear();
         }
