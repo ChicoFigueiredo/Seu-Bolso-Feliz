@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS execucao (
   motivo       TEXT,
   baixados     INTEGER NOT NULL DEFAULT 0,
   novos        INTEGER NOT NULL DEFAULT 0,
-  continuar    INTEGER NOT NULL DEFAULT 0
+  continuar    INTEGER NOT NULL DEFAULT 0,
+  pid          INTEGER
 );
 CREATE INDEX IF NOT EXISTS execucao_roteiro ON execucao(roteiro_id, id);
 CREATE TABLE IF NOT EXISTS evento (
@@ -573,8 +574,8 @@ impl BancoDeRoteiros {
         gatilho: &str,
     ) -> Resultado<i64> {
         self.conn.execute(
-            "INSERT INTO execucao (roteiro_id, versao_id, gatilho) VALUES (?1,?2,?3)",
-            params![roteiro_id, versao_id, gatilho],
+            "INSERT INTO execucao (roteiro_id, versao_id, gatilho, pid) VALUES (?1,?2,?3,?4)",
+            params![roteiro_id, versao_id, gatilho, std::process::id()],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -713,17 +714,58 @@ impl BancoDeRoteiros {
             .collect())
     }
 
-    /// Marca como falhas as execuções que ficaram `rodando` ou `aguardando` de uma vida
-    /// anterior do processo (o worker caiu no meio).
+    /// Marca como falhas as execuções que ficaram `rodando` ou `aguardando` de um processo que
+    /// já não existe (o worker caiu no meio). No Linux confere `/proc/<pid>`; nos outros
+    /// sistemas, só as de mais de 6 horas.
     ///
     /// # Errors
     /// Banco.
     pub fn encerrar_orfas(&self) -> Resultado<usize> {
-        Ok(self.conn.execute(
-            "UPDATE execucao SET estado = 'falhou', motivo = 'interrompida: o processo parou antes do fim',
-               concluida_em = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-             WHERE estado IN ('rodando','aguardando_usuario')",
-            [],
+        let mut st = self.conn.prepare(
+            "SELECT id, pid, iniciada_unix, strftime('%s','now') FROM execucao
+              WHERE estado IN ('rodando','aguardando_usuario')",
+        )?;
+        let linhas = st
+            .query_map([], |l| {
+                Ok((
+                    l.get::<_, i64>(0)?,
+                    l.get::<_, Option<i64>>(1)?,
+                    l.get::<_, i64>(2)?,
+                    l.get::<_, String>(3)?.parse::<i64>().unwrap_or(0),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut n = 0;
+        for (id, pid, inicio, agora) in linhas {
+            let viva = match pid {
+                #[cfg(target_os = "linux")]
+                Some(p) => std::path::Path::new(&format!("/proc/{p}")).exists(),
+                _ => agora - inicio < 6 * 3600,
+            };
+            if !viva {
+                self.finalizar(
+                    id,
+                    EstadoDaExecucao::Falhou,
+                    Some("interrompida: o processo parou antes do fim"),
+                    0,
+                    0,
+                )?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
+    /// O roteiro tem uma execução rodando ou esperando o usuário?
+    ///
+    /// # Errors
+    /// Banco.
+    pub fn em_execucao(&self, roteiro_id: i64) -> Resultado<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM execucao WHERE roteiro_id = ?1
+                             AND estado IN ('rodando','aguardando_usuario'))",
+            [roteiro_id],
+            |l| l.get(0),
         )?)
     }
 

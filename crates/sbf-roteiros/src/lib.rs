@@ -28,6 +28,7 @@ pub mod inventario;
 pub mod navegador;
 pub mod pagina;
 pub mod passo;
+pub mod servico;
 pub mod site_falso;
 
 pub use banco::{
