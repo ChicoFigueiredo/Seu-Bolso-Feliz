@@ -4326,6 +4326,7 @@ dependencies = [
  "egui",
  "rusqlite",
  "sbf-chaveiro",
+ "sbf-coletor",
  "sbf-contrato",
  "sbf-disco",
  "sbf-estacao",
