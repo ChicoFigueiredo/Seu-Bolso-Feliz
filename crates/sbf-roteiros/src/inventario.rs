@@ -53,24 +53,6 @@ impl<'a> NoInventario<'a> {
         format!("roteiro:{}", self.roteiro)
     }
 
-    fn varredura(&mut self) -> Resultado<i64> {
-        if let Some(v) = self.varredura {
-            return Ok(v);
-        }
-        let fonte = self.fonte();
-        self.conn.execute(
-            "INSERT OR IGNORE INTO fonte (id, tipo, descricao, escopo) VALUES (?1, 'conexao', ?2, 'dentro')",
-            params![fonte, format!("Roteiro {}", self.roteiro)],
-        )?;
-        let id: i64 = self.conn.query_row(
-            "INSERT INTO varredura (fonte_id, etapa, escopo, responsavel) VALUES (?1, 'E2', ?2, ?3) RETURNING id",
-            params![fonte, format!("execucao {}", self.execucao), RESPONSAVEL],
-            |l| l.get(0),
-        )?;
-        self.varredura = Some(id);
-        Ok(id)
-    }
-
     /// Fecha a varredura (se abriu alguma).
     ///
     /// # Errors
@@ -103,7 +85,11 @@ impl<'a> NoInventario<'a> {
             let _ = std::fs::set_permissions(pasta, std::fs::Permissions::from_mode(0o700));
         }
         if !destino.exists() || std::fs::metadata(&destino)?.len() != tamanho {
-            let tmp = destino.with_extension(format!("parcial-{}", std::process::id()));
+            // nome único: duas threads do mesmo processo podem copiar o mesmo conteúdo
+            let unico = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let tmp = destino.with_extension(format!("parcial-{}-{unico}", std::process::id()));
             let feito = (|| -> std::io::Result<()> {
                 std::fs::copy(origem, &tmp)?;
                 #[cfg(unix)]
@@ -130,18 +116,6 @@ impl Destino for NoInventario<'_> {
     fn receber(&mut self, arquivo: &Path, nome: &str) -> Resultado<Recebido> {
         self.vistos += 1;
         let chave = chave_da_origem(&self.roteiro, self.execucao, nome);
-        let ja_chave: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT 1 FROM origem WHERE origin_key = ?1",
-                [&chave],
-                |l| l.get(0),
-            )
-            .optional()?;
-        if ja_chave.is_some() {
-            self.repetidos += 1;
-            return Ok(Recebido::Repetido);
-        }
         let tamanho = std::fs::metadata(arquivo)?.len();
         let hash = sha256_do_arquivo(arquivo)?;
         let ext = arquivo
@@ -150,22 +124,47 @@ impl Destino for NoInventario<'_> {
             .unwrap_or("")
             .to_lowercase();
         let fonte = self.fonte();
+        // Conferir e gravar numa transação só, com a trava de escrita já tomada: a janela e o
+        // worker podem receber o mesmo conteúdo ao mesmo tempo e só um deles o cria.
+        let tx = rusqlite::Transaction::new_unchecked(
+            self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let ja_chave: Option<i64> = tx
+            .query_row(
+                "SELECT 1 FROM origem WHERE origin_key = ?1",
+                [&chave],
+                |l| l.get(0),
+            )
+            .optional()?;
         // O mesmo conteúdo já veio deste roteiro: não vira outra origem.
-        let ja_conteudo: Option<i64> = self
-            .conn
+        let ja_conteudo: Option<i64> = tx
             .query_row(
                 "SELECT 1 FROM origem WHERE content_hash = ?1 AND fonte_id = ?2 LIMIT 1",
                 params![hash, fonte],
                 |l| l.get(0),
             )
             .optional()?;
-        if ja_conteudo.is_some() {
+        if ja_chave.is_some() || ja_conteudo.is_some() {
+            drop(tx);
             self.repetidos += 1;
             return Ok(Recebido::Repetido);
         }
-        let varredura = self.varredura()?;
-        let existente: Option<Option<String>> = self
-            .conn
+        let varredura = match self.varredura {
+            Some(v) => v,
+            None => {
+                tx.execute(
+                    "INSERT OR IGNORE INTO fonte (id, tipo, descricao, escopo) VALUES (?1, 'conexao', ?2, 'dentro')",
+                    params![fonte, format!("Roteiro {}", self.roteiro)],
+                )?;
+                tx.query_row(
+                    "INSERT INTO varredura (fonte_id, etapa, escopo, responsavel) VALUES (?1, 'E2', ?2, ?3) RETURNING id",
+                    params![fonte, format!("execucao {}", self.execucao), RESPONSAVEL],
+                    |l| l.get(0),
+                )?
+            }
+        };
+        let existente: Option<Option<String>> = tx
             .query_row(
                 "SELECT caminho_acervo FROM achado WHERE content_hash = ?1",
                 [&hash],
@@ -174,10 +173,11 @@ impl Destino for NoInventario<'_> {
             .optional()?;
         let novo_conteudo = existente.is_none();
         if novo_conteudo {
-            self.conn.execute(
+            tx.execute(
                 "INSERT INTO achado (content_hash, file_size_bytes, mime_type, extensao, camada,
                    data_chave, data_chave_tipo)
-                 VALUES (?1, ?2, ?3, ?4, 'A', date('now'), 'arquivo')",
+                 VALUES (?1, ?2, ?3, ?4, 'A', date('now'), 'arquivo')
+                 ON CONFLICT(content_hash) DO NOTHING",
                 params![
                     hash,
                     i64::try_from(tamanho).unwrap_or(i64::MAX),
@@ -186,10 +186,11 @@ impl Destino for NoInventario<'_> {
                 ],
             )?;
         }
-        self.conn.execute(
-            "INSERT OR IGNORE INTO origem (content_hash, fonte_id, varredura_id, origin_type,
+        tx.execute(
+            "INSERT INTO origem (content_hash, fonte_id, varredura_id, origin_type,
                origin_key, local_mtime, filename, file_size_bytes)
-             VALUES (?1, ?2, ?3, 'roteiro', ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?5, ?6)",
+             VALUES (?1, ?2, ?3, 'roteiro', ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?5, ?6)
+             ON CONFLICT(origin_key) DO NOTHING",
             params![
                 hash,
                 fonte,
@@ -199,6 +200,8 @@ impl Destino for NoInventario<'_> {
                 i64::try_from(tamanho).unwrap_or(i64::MAX)
             ],
         )?;
+        tx.commit()?;
+        self.varredura = Some(varredura);
         let sem_copia = existente.is_none_or(|e| e.is_none());
         if sem_copia && tamanho <= LIMITE_COPIA_BYTES {
             self.copiar(arquivo, &hash, &ext, tamanho)?;

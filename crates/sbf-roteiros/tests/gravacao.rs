@@ -210,6 +210,15 @@ fn ro_04_grava_com_ia_executa_sem_ia_e_conserta_so_apos_aprovacao() {
             .all(|s| s.destinatario == "roteiros" && s.bytes_enviados > 0)
     );
     banco.concluir_gravacao(id, &gravado.passos).unwrap();
+    banco
+        .finalizar(
+            exec_g,
+            sbf_roteiros::EstadoDaExecucao::Concluida,
+            None,
+            0,
+            0,
+        )
+        .unwrap();
     destino.fechar("concluida").unwrap();
     let json_gravado = serde_json::to_string(&banco.versao_ativa(id).unwrap().2).unwrap();
     assert!(!json_gravado.contains(SENHA) && !json_gravado.contains(CPF));
