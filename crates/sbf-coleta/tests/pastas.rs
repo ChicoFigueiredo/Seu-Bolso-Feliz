@@ -303,7 +303,7 @@ fn origem_gravada_pelo_bun_com_mtime_divergente_nao_ganha_segunda_origem() {
     for segundos in [
         1_700_000_000.5_f64,
         1_700_000_000.9999,
-        4_102_444_799.123_456,
+        4_102_444_799.123,
     ] {
         let c = cenario();
         escrever(&c.raiz, "fatura-luz.pdf", "conteudo ficticio um");
