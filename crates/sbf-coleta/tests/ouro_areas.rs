@@ -43,7 +43,12 @@ fn classes_batem_com_o_typescript() {
             Camada::C => "C",
         };
         assert_eq!(camada, c.camada, "camada de {:?}", c.caminho);
-        assert_eq!(k.regra.motivo.map(str::to_owned), c.motivo, "motivo de {:?}", c.caminho);
+        assert_eq!(
+            k.regra.motivo.map(str::to_owned),
+            c.motivo,
+            "motivo de {:?}",
+            c.caminho
+        );
         assert_eq!(k.regra.ignorar, c.ignorar, "ignorar de {:?}", c.caminho);
         assert_eq!(k.raiz, c.raiz, "raiz de {:?}", c.caminho);
     }
@@ -53,7 +58,12 @@ fn classes_batem_com_o_typescript() {
 fn nomes_batem_com_o_typescript() {
     for n in &ouro().nomes {
         assert_eq!(extensao_de(&n.nome), n.ext, "extensao de {:?}", n.nome);
-        assert_eq!(nome_financeiro(&n.nome), n.financeiro, "financeiro {:?}", n.nome);
+        assert_eq!(
+            nome_financeiro(&n.nome),
+            n.financeiro,
+            "financeiro {:?}",
+            n.nome
+        );
     }
 }
 

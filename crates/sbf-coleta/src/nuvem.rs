@@ -536,7 +536,11 @@ impl<'a> ColetaDeNuvem<'a> {
                SELECT l.content_hash FROM origem l
                 WHERE l.local_filepath = ?1 || substr(origem.mensagem_ref, ?2)
                   AND l.content_hash IS NOT NULL LIMIT 1)
-             WHERE fonte_id = ?3 AND content_hash IS NULL AND mensagem_ref LIKE ?4 ESCAPE '\\'",
+             WHERE fonte_id = ?3 AND content_hash IS NULL AND mensagem_ref LIKE ?4 ESCAPE '\\'
+               AND EXISTS (
+                SELECT 1 FROM origem l
+                 WHERE l.local_filepath = ?1 || substr(origem.mensagem_ref, ?2)
+                   AND l.content_hash IS NOT NULL)",
             params![
                 prefixo,
                 i64::try_from(self.remoto.chars().count() + 1).unwrap_or(i64::MAX),
