@@ -21,7 +21,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 sha2 = "0.10"
-regex = "1"
 # Tirar acento ao comparar com a lista de bloqueio (MIT OR Apache-2.0).
 unicode-normalization = "0.1"
 # Chave e máscara do WebSocket do CDP (MIT OR Apache-2.0).

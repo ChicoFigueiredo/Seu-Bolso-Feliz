@@ -614,7 +614,7 @@ fn ro_02_a_ia_so_navega_para_http_ou_https() {
         .unwrap();
     assert!(matches!(r, Proposta::Passo { .. }));
 }
-#[test]
+
 #[test]
 fn ro_04_a_proposta_de_clicar_mostra_o_que_ha_no_alvo() {
     let mut nav = site(false);
@@ -636,6 +636,37 @@ fn ro_04_a_proposta_de_clicar_mostra_o_que_ha_no_alvo() {
     );
     assert!(alvo.contains("button"), "e a tag: {alvo}");
 }
+
+#[test]
+fn ro_01_numero_longo_no_seletor_nao_vai_a_ia_e_a_resposta_volta_ao_seletor_de_verdade() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    let p = nav.paginas.get_mut("login").unwrap();
+    p.elementos.push(clicavel("#conta-12345678901", "Baixar"));
+    let mut e = sbf_roteiros::falso::Elemento::com_texto("Baixar");
+    e.candidato.tipo = "button".into();
+    nav.elementos.insert("#conta-12345678901".into(), e);
+    let ia = Falso::com_roteiro(vec![
+        // a IA só conhece o seletor mascarado
+        passo(json!({"tipo": "clicar", "seletor": "#conta-•••"}), "baixar"),
+        resposta(json!({"acao": "fim"})),
+    ]);
+    let g = gravar(&mut nav, &guia_de(&ia), d.path()).unwrap();
+    for p in ia.pedidos() {
+        assert!(
+            !p.entrada.contains("12345678901"),
+            "número longo na entrada"
+        );
+    }
+    assert_eq!(
+        g.passos.last(),
+        Some(&Passo::Clicar {
+            seletor: "#conta-12345678901".into()
+        })
+    );
+}
+
+#[test]
 fn ro_01_provedor_que_falha_depois_de_receber_o_pedido_deixa_a_saida_registrada() {
     use sbf_ia::ErroDeIa;
     for (erro, saidas) in [

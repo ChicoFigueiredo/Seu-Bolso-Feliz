@@ -150,6 +150,16 @@ impl Guia<'_> {
         p.para_texto()
     }
 
+    /// O texto de um passo (leva o seletor) como a IA o vê: sem número longo, salvo no nível
+    /// completo.
+    fn passo_para_ia(&self, texto: &str) -> String {
+        if self.nivel == NivelDeConfianca::Completo {
+            texto.to_owned()
+        } else {
+            crate::pagina::mascarar_texto(texto)
+        }
+    }
+
     /// A última barreira: o pedido inteiro (objetivo, passos, motivo da recusa, a página)
     /// passa pela limpeza de segredos antes de sair.
     fn limpar_pedido(&self, texto: &str, usados: &[Segredo]) -> String {
@@ -179,6 +189,7 @@ impl Guia<'_> {
                 quando: agora_rfc3339(),
             })?;
         }
+        let r = resposta?;
         validar_esquema(&pedido.esquema, &r.json)
             .map_err(|e| ErroDeRoteiro::Ia(ErroDeIa::RespostaInvalida(e)))?;
         Ok(r.json)
@@ -195,7 +206,6 @@ impl Guia<'_> {
             if self.tem_cpf { "sim" } else { "não" }
         )
     }
-        let r = resposta?;
 
     /// Propõe o próximo passo da gravação. `recusada` leva o motivo da proposta anterior que o
     /// usuário ou os filtros recusaram.
@@ -233,7 +243,11 @@ impl Guia<'_> {
             entrada.push_str("(nenhum)\n");
         }
         for (i, p) in aceitos.iter().enumerate() {
-            entrada.push_str(&format!("{}. {}\n", i + 1, p.descricao()));
+            entrada.push_str(&format!(
+                "{}. {}\n",
+                i + 1,
+                self.passo_para_ia(&p.descricao())
+            ));
         }
         if let Some(r) = recusada {
             entrada.push_str(&format!("A proposta anterior foi recusada: {r}\n"));
@@ -262,11 +276,20 @@ impl Guia<'_> {
                     .to_owned(),
             }),
             Some("passo") => {
-                let passo = com_host_da_pagina(passo_de(&j["passo"])?, pagina);
+                // O seletor que a IA viu pode ter número longo mascarado ou segredo trocado:
+                // volta ao de verdade antes dos filtros.
+                let mapa = pagina.seletores_vistos_pela_ia(
+                    &self.segredos_para_limpar(usados),
+                    self.nivel != NivelDeConfianca::Completo,
+                );
+                let passo = passo_de(&j["passo"])?.com_seletor_mapeado(&mapa);
+                let passo = com_host_da_pagina(passo, pagina);
                 conferir_proposta(&passo, pagina, &self.rotulos_de_senha)?;
+                let alvo = descrever_alvo(&passo, pagina);
                 Ok(Proposta::Passo {
                     passo,
                     explicacao: j["explicacao"].as_str().unwrap_or("").to_owned(),
+                    alvo,
                 })
             }
             _ => Err(ErroDeRoteiro::Invalido("a IA não disse o que fazer".into())),
@@ -285,11 +308,9 @@ impl Guia<'_> {
         falho: usize,
         motivo_da_falha: &str,
         pagina: &Pagina,
-                let alvo = descrever_alvo(&passo, pagina);
     ) -> Resultado<(Vec<Passo>, String)> {
         self.propor_conserto_limpando(roteiro, falho, motivo_da_falha, pagina, &[])
     }
-                    alvo,
 
     /// Como [`Self::propor_conserto`], mas limpa também os `usados` (os segredos que a
     /// execução digitou) de tudo o que vai à IA.
@@ -311,12 +332,16 @@ impl Guia<'_> {
         );
         for (i, p) in roteiro.passos.iter().enumerate() {
             let marca = if i == falho { "  <-- FALHOU" } else { "" };
-            entrada.push_str(&format!("{}. {}{marca}\n", i + 1, p.descricao()));
+            entrada.push_str(&format!(
+                "{}. {}{marca}\n",
+                i + 1,
+                self.passo_para_ia(&p.descricao())
+            ));
         }
         if let Some(p) = roteiro.passos.get(falho) {
             entrada.push_str(&format!(
                 "\nO passo que falhou, em JSON: {}\nMotivo: {motivo_da_falha}\n",
-                serde_json::to_string(p).unwrap_or_default()
+                self.passo_para_ia(&serde_json::to_string(p).unwrap_or_default())
             ));
         }
         entrada.push_str("\nPágina atual:\n");
@@ -340,11 +365,15 @@ impl Guia<'_> {
                 "a IA não conseguiu propor um conserto".into(),
             ));
         }
+        let mapa = pagina.seletores_vistos_pela_ia(
+            &self.segredos_para_limpar(usados),
+            self.nivel != NivelDeConfianca::Completo,
+        );
         let novos: Vec<Passo> = j["passos"]
             .as_array()
             .ok_or_else(|| ErroDeRoteiro::Invalido("conserto sem passos".into()))?
             .iter()
-            .map(|p| passo_de(p).map(|p| com_host_da_pagina(p, pagina)))
+            .map(|p| passo_de(p).map(|p| com_host_da_pagina(p.com_seletor_mapeado(&mapa), pagina)))
             .collect::<Resultado<_>>()?;
         for p in &novos {
             conferir_proposta(p, pagina, &self.rotulos_de_senha)?;
@@ -400,35 +429,6 @@ fn campo_na_pagina<'a>(pagina: &'a Pagina, seletor: &str) -> Option<&'a crate::p
         .find(|c| c.seletor == seletor)
 }
 
-/// O elemento tem texto ou rótulo (aria-label, title, alt) que se possa ler? Campos contam
-/// pelo rótulo ou pelo nome.
-fn tem_nome_acessivel(pagina: &Pagina, seletor: &str) -> bool {
-    if let Some(e) = pagina.elementos.iter().find(|e| e.seletor == seletor) {
-        return !e.texto.trim().is_empty() || !e.rotulo.trim().is_empty();
-    }
-    if let Some(c) = campo_na_pagina(pagina, seletor) {
-        return !c.rotulo.trim().is_empty() || !c.nome.trim().is_empty();
-    }
-    true
-}
-
-/// Os filtros que toda proposta da IA passa antes de chegar ao usuário.
-fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resultado<()> {
-    let recusa = |m: &str| Err(ErroDeRoteiro::Invalido(m.to_owned()));
-    let existe = |s: &str| {
-        pagina.elementos.iter().any(|e| e.seletor == s)
-            || campo_na_pagina(pagina, s).is_some()
-            || pagina.tabelas.iter().any(|t| t.seletor == s)
-            || pagina.formularios.iter().any(|f| f.seletor == s)
-    };
-    match passo {
-        Passo::Navegar { url } => {
-            if let Some(b) = bloqueio::avaliar_url(url) {
-                return Err(ErroDeRoteiro::Bloqueado(b));
-            }
-            Ok(())
-        }
-        Passo::Clicar { seletor } | Passo::Baixar { seletor, .. } => {
 /// O que há no elemento do passo, como a página o mostra (para a aprovação do usuário).
 fn descrever_alvo(passo: &Passo, pagina: &Pagina) -> String {
     let seletor = match passo {
@@ -471,6 +471,38 @@ fn descrever_alvo(passo: &Passo, pagina: &Pagina) -> String {
     String::new()
 }
 
+/// O elemento tem texto ou rótulo (aria-label, title, alt) que se possa ler? Campos contam
+/// pelo rótulo ou pelo nome.
+fn tem_nome_acessivel(pagina: &Pagina, seletor: &str) -> bool {
+    if let Some(e) = pagina.elementos.iter().find(|e| e.seletor == seletor) {
+        return !e.texto.trim().is_empty() || !e.rotulo.trim().is_empty();
+    }
+    if let Some(c) = campo_na_pagina(pagina, seletor) {
+        return !c.rotulo.trim().is_empty() || !c.nome.trim().is_empty();
+    }
+    true
+}
+
+/// Os filtros que toda proposta da IA passa antes de chegar ao usuário.
+fn conferir_proposta(passo: &Passo, pagina: &Pagina, rotulos: &[String]) -> Resultado<()> {
+    let recusa = |m: &str| Err(ErroDeRoteiro::Invalido(m.to_owned()));
+    let existe = |s: &str| {
+        pagina.elementos.iter().any(|e| e.seletor == s)
+            || campo_na_pagina(pagina, s).is_some()
+            || pagina.tabelas.iter().any(|t| t.seletor == s)
+            || pagina.formularios.iter().any(|f| f.seletor == s)
+    };
+    match passo {
+        Passo::Navegar { url } => {
+            if !crate::passo::url_navegavel(url) {
+                return recusa("só se navega para endereços http e https");
+            }
+            if let Some(b) = bloqueio::avaliar_url(url) {
+                return Err(ErroDeRoteiro::Bloqueado(b));
+            }
+            Ok(())
+        }
+        Passo::Clicar { seletor } | Passo::Baixar { seletor, .. } => {
             if !existe(seletor) {
                 return recusa("o seletor não está na página");
             }
@@ -494,9 +526,6 @@ fn descrever_alvo(passo: &Passo, pagina: &Pagina) -> String {
                 return recusa("campo de senha só se preenche com a senha do chaveiro");
             }
             Ok(())
-            if !crate::passo::url_navegavel(url) {
-                return recusa("só se navega para endereços http e https");
-            }
         }
         Passo::PreencherSenha {
             seletor, rotulo, ..
