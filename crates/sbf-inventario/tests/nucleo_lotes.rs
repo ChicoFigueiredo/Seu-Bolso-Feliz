@@ -180,7 +180,7 @@ fn inv10_lote_inexistente() {
 }
 
 #[test]
-fn promocao_nao_se_desfaz_e_desfazer_ultima_pula_a_promocao() {
+fn promocao_nao_se_desfaz_e_desfazer_ultima_recusa_sem_desfazer_nada() {
     let (_p, mut inv) = novo();
     let lote = inv.criar_lote("Lote P").unwrap();
     inv.adicionar_ao_lote(&lote, &[registro(1)]).unwrap();
@@ -191,13 +191,24 @@ fn promocao_nao_se_desfaz_e_desfazer_ultima_pula_a_promocao() {
 
     // Pedir para desfazer a promoção, diretamente, é recusado com uma mensagem clara.
     let erro = inv.desfazer(ids[0]).unwrap_err();
-    assert!(matches!(erro, ErroDeComando::NaoSeAplica { .. }), "{erro}");
+    assert!(matches!(erro, ErroDeComando::PromocaoNaoSeDesfaz), "{erro}");
     assert!(erro.to_string().contains("promoção"), "{erro}");
     assert_eq!(estado(inv.conexao(), 1), "promovido");
 
-    // "Desfazer decisão" não escolhe a promoção: o registro continua promovido.
-    let _ = inv.desfazer_ultima();
+    // "Desfazer decisão" recusa quando a última é a promoção e não desfaz a anterior.
+    let erro = inv.desfazer_ultima().unwrap_err();
+    assert_eq!(
+        erro.to_string(),
+        "A promoção ao servidor não se desfaz; para corrigir, edite no livro-caixa."
+    );
     assert_eq!(estado(inv.conexao(), 1), "promovido");
+    assert_eq!(
+        valor(
+            inv.conexao(),
+            "SELECT COUNT(*) FROM decisao WHERE desfaz IS NOT NULL"
+        ),
+        "0"
+    );
     assert_eq!(
         valor(
             inv.conexao(),

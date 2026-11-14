@@ -268,6 +268,32 @@ struct Nucleo<'a> {
 }
 
 impl Nucleo<'_> {
+    /// Uma origem gravada pelo Bun pode ter a chave com a ultima casa do `mtimeMs` diferente
+    /// (precisao do float). Casa por (caminho, tamanho, mtime em ms, truncado ou arredondado,
+    /// como o `toISOString` do Node) para nao criar uma segunda origem do mesmo arquivo.
+    fn origem_equivalente(&self, texto: &str, tamanho: u64, meta: &Metadata) -> Resultado<bool> {
+        let Ok(t) = meta.modified() else {
+            return Ok(false);
+        };
+        let truncado = iso_de(t);
+        let arredondado = iso_de(t + std::time::Duration::from_micros(500));
+        let achou: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM origem WHERE local_filepath = ?1 AND file_size_bytes = ?2
+                   AND local_mtime IN (?3, ?4) LIMIT 1",
+                params![
+                    texto,
+                    i64::try_from(tamanho).unwrap_or(i64::MAX),
+                    truncado,
+                    arredondado
+                ],
+                |l| l.get(0),
+            )
+            .optional()?;
+        Ok(achou.is_some())
+    }
+
     /// `classe`: a classe da pasta do arquivo. `agregar`: onde somar o que for só contado.
     #[allow(clippy::too_many_arguments)]
     fn arquivo(
@@ -328,7 +354,7 @@ impl Nucleo<'_> {
                 |l| l.get(0),
             )
             .optional()?;
-        if ja.is_some() {
+        if ja.is_some() || self.origem_equivalente(&texto, tamanho, &meta)? {
             c.repetidos += 1;
             return Ok(Destino::Repetido);
         }
