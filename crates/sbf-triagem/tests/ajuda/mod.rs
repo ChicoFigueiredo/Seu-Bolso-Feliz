@@ -168,10 +168,19 @@ pub struct Montagem {
 
 pub fn montar(banco: &Banco, falso: Falso) -> Montagem {
     let falso = Arc::new(falso);
+    montar_com_falso(banco, falso.clone(), falso as Arc<dyn Provedor>)
+}
+
+/// A fila sobre um provedor qualquer (por exemplo, embrulhado no rastro de falhas).
+pub fn montar_com(banco: &Banco, provedor: Arc<dyn Provedor>) -> Montagem {
+    montar_com_falso(banco, Arc::new(Falso::com_roteiro(Vec::new())), provedor)
+}
+
+fn montar_com_falso(banco: &Banco, falso: Arc<Falso>, provedor: Arc<dyn Provedor>) -> Montagem {
     let registro = Arc::new(RegistroDaIa::abrir(&banco.caminho, None).expect("registro"));
     let fila = Arc::new(
         Fila::nova(
-            Arc::clone(&falso) as Arc<dyn Provedor>,
+            provedor,
             None,
             Arc::clone(&registro) as Arc<dyn Registro>,
             configuracao_da_fila(false),

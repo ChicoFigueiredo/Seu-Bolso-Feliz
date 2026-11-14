@@ -50,6 +50,9 @@ pub struct ConfigDaRodada {
     /// O piloto (IA-09): não mostra à IA o que o classificador já pôs, não descarta
     /// sugestão igual ao valor atual e grava tudo como `obsoleta`.
     pub piloto: bool,
+    /// Onde se vê quais lotes falharam por erro do provedor (`Outro`). Sem ele, o motor
+    /// os devolve como "não classificado". Com ele, esses itens ficam adiados.
+    pub rastro: Option<RastroDeFalhas>,
 }
 
 impl Default for ConfigDaRodada {
@@ -58,8 +61,65 @@ impl Default for ConfigDaRodada {
             prompt_versao: PROMPT_VERSAO.to_owned(),
             itens_por_pedaco: ITENS_POR_PEDACO,
             piloto: false,
+            rastro: None,
         }
     }
+}
+
+/// Embrulha o provedor para lembrar o que falhou por erro transitório (`Outro`). O motor
+/// trata essa falha como "não classificado"; a triagem a trata como "adiado": o item não
+/// é gravado e volta à fila na próxima rodada. Só resposta inválida repetida vira
+/// "não classificado".
+#[derive(Debug, Clone, Default)]
+pub struct RastroDeFalhas(Arc<Mutex<Vec<String>>>);
+
+struct Rastreado {
+    dentro: Arc<dyn sbf_ia::Provedor>,
+    rastro: RastroDeFalhas,
+}
+
+impl sbf_ia::Provedor for Rastreado {
+    fn nome(&self) -> &'static str {
+        self.dentro.nome()
+    }
+    fn pedir(&self, pedido: &sbf_ia::Pedido) -> sbf_ia::ResultadoDeIa<sbf_ia::Resposta> {
+        let r = self.dentro.pedir(pedido);
+        if let Err(sbf_ia::ErroDeIa::Outro(_)) = &r
+            && let Ok(mut v) = self.rastro.0.lock()
+        {
+            v.push(pedido.entrada.clone());
+        }
+        r
+    }
+    fn nova_rodada(&self) {
+        self.dentro.nova_rodada();
+    }
+    fn dentro_do_teto(&self) -> bool {
+        self.dentro.dentro_do_teto()
+    }
+}
+
+impl RastroDeFalhas {
+    /// O provedor a passar para a `Fila`.
+    pub fn embrulhar(&self, dentro: Arc<dyn sbf_ia::Provedor>) -> Arc<dyn sbf_ia::Provedor> {
+        Arc::new(Rastreado {
+            dentro,
+            rastro: self.clone(),
+        })
+    }
+
+    fn tomar(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .map_or_else(|_| Vec::new(), |mut v| std::mem::take(&mut *v))
+    }
+}
+
+/// O item aparece numa entrada que falhou? (compara o corpo do bloco, sem o número.)
+fn falhou_por_erro_do_provedor(item: &Item, falhas: &[String]) -> bool {
+    let bloco = crate::entrada::bloco_do_item(1, item);
+    let corpo = bloco.split_once('\n').map_or(bloco.as_str(), |(_, c)| c);
+    falhas.iter().any(|e| e.contains(corpo))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +276,7 @@ fn gravar_pedaco(
     relatorio: &Relatorio,
     config: &ConfigDaRodada,
     rodada_id: i64,
+    falhas: &[String],
 ) -> Resultado<(usize, usize, usize)> {
     let estado = if config.piloto {
         EstadoDaSugestao::Obsoleta
@@ -236,6 +297,9 @@ fn gravar_pedaco(
     for (i, item) in itens.iter().enumerate() {
         let alvo = item.alvo();
         if relatorio.nao_classificados.contains(&i) {
+            if falhou_por_erro_do_provedor(item, falhas) {
+                continue; // adiado: volta à fila na próxima rodada
+            }
             gravar_nao_classificado(&tx, &alvo, config, rodada_id)?;
             (feitos, nao_classificados) = (feitos + 1, nao_classificados + 1);
             continue;
@@ -305,6 +369,9 @@ pub fn rodar(
             continue;
         }
         let base = copiar(progresso);
+        if let Some(r) = &config.rastro {
+            r.tomar();
+        }
         let (canal, fio) = fila.iniciar(itens.clone(), Arc::clone(&formato), controle.clone());
         loop {
             match canal.recv_timeout(Duration::from_millis(100)) {
@@ -323,8 +390,13 @@ pub fn rodar(
         let relatorio = fio
             .join()
             .map_err(|_| crate::ErroDaTriagem::Outro("a fila da IA entrou em pânico".to_owned()))?;
+        let falhas = config
+            .rastro
+            .as_ref()
+            .map(RastroDeFalhas::tomar)
+            .unwrap_or_default();
         let (feitos, sugestoes, nao_classificados) =
-            gravar_pedaco(conn, &itens, &relatorio, config, rodada_id)?;
+            gravar_pedaco(conn, &itens, &relatorio, config, rodada_id, &falhas)?;
         if let Ok(mut p) = progresso.lock() {
             p.processados = base.processados + feitos;
             p.sugestoes = base.sugestoes + sugestoes;

@@ -458,3 +458,76 @@ fn vocabulario_do_usuario_vai_no_cabecalho_do_lote() {
     assert!(entrada.starts_with("categorias já usadas: Mercado"));
     assert!(entrada.contains("contas já usadas: Banco Alfa"));
 }
+
+#[test]
+fn falha_transitoria_do_provedor_adia_os_itens_e_resposta_invalida_repetida_nao_classifica() {
+    use sbf_triagem::rodada::RastroDeFalhas;
+    let (banco, ids) = banco_com_registros(3);
+    let c = banco.conexao();
+    let rastro = RastroDeFalhas::default();
+    let progresso = Mutex::new(Progresso::ocioso());
+    let config = ConfigDaRodada {
+        rastro: Some(rastro.clone()),
+        ..ConfigDaRodada::default()
+    };
+
+    // 1) Erro transitório: nada é gravado e os itens voltam à fila.
+    let falso = std::sync::Arc::new(Falso::com_funcao(|_| {
+        Err(ErroDeIa::Outro("rede caiu".into()))
+    }));
+    let m = montar_com(&banco, rastro.embrulhar(falso.clone()));
+    let fila = selecionar(&c, &OpcoesDaFila::padrao()).expect("fila");
+    let r = rodar(
+        &c,
+        &m.fila,
+        "falso",
+        &fila.alvos,
+        &config,
+        &Controle::novo(),
+        &progresso,
+        &|_| {},
+    )
+    .expect("rodar");
+    assert_eq!(r.nao_classificados, 0);
+    assert_eq!(r.processados, 0);
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM sugestao_ia"), 0);
+    assert_eq!(
+        selecionar(&c, &OpcoesDaFila::padrao())
+            .expect("fila")
+            .alvos
+            .len(),
+        3
+    );
+
+    // 2) Resposta inválida duas vezes: "não classificado" de verdade.
+    let falso = std::sync::Arc::new(Falso::com_funcao(|_| {
+        Err(ErroDeIa::RespostaInvalida("lixo".into()))
+    }));
+    let m = montar_com(&banco, rastro.embrulhar(falso));
+    let r = rodar(
+        &c,
+        &m.fila,
+        "falso",
+        &fila.alvos,
+        &config,
+        &Controle::novo(),
+        &progresso,
+        &|_| {},
+    )
+    .expect("rodar");
+    assert_eq!(r.nao_classificados, 3);
+    assert_eq!(
+        contar(
+            &c,
+            "SELECT COUNT(*) FROM sugestao_ia WHERE campo = 'nao_classificado'"
+        ),
+        3
+    );
+    assert!(
+        selecionar(&c, &OpcoesDaFila::padrao())
+            .expect("fila")
+            .alvos
+            .is_empty()
+    );
+    let _ = ids;
+}

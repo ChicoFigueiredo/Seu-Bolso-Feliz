@@ -430,6 +430,7 @@ pub struct TriagemDoInventario {
     relatorio: Arc<Mutex<Option<RelatorioDoPiloto>>>,
     thread: Option<JoinHandle<()>>,
     configuracao: ConfiguracaoDeIa,
+    rastro: Option<crate::rodada::RastroDeFalhas>,
 }
 
 impl std::fmt::Debug for TriagemDoInventario {
@@ -473,7 +474,16 @@ impl TriagemDoInventario {
             relatorio: Arc::new(Mutex::new(None)),
             thread: None,
             configuracao,
+            rastro: None,
         })
+    }
+
+    /// O rastro que embrulha o provedor da `Fila`: falha transitória adia o item em vez de
+    /// marcá-lo "não classificado".
+    #[must_use]
+    pub fn com_rastro(mut self, rastro: crate::rodada::RastroDeFalhas) -> Self {
+        self.rastro = Some(rastro);
+        self
     }
 
     fn rodando(&self) -> bool {
@@ -500,6 +510,7 @@ impl RodadaDeTriagem for TriagemDoInventario {
         let registro = Arc::clone(&self.registro);
         let nome = self.provedor.nome();
         let controle = self.controle.clone();
+        let rastro = self.rastro.clone();
         let progresso = Arc::clone(&self.progresso);
         let relatorio = Arc::clone(&self.relatorio);
         self.thread = Some(std::thread::spawn(move || {
@@ -542,7 +553,10 @@ impl RodadaDeTriagem for TriagemDoInventario {
                 &fila_do_motor,
                 nome,
                 &alvos.alvos,
-                &ConfigDaRodada::default(),
+                &ConfigDaRodada {
+                    rastro,
+                    ..ConfigDaRodada::default()
+                },
                 &controle,
                 &progresso,
                 &ao_abrir,
