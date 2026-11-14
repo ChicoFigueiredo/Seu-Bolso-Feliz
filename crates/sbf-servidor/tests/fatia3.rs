@@ -1007,3 +1007,71 @@ async fn rascunho_de_outro_tipo_nao_e_lancado_pelo_desktop() {
     assert_eq!(r.corpo["motivo"], "regra_violada");
     assert!(r.corpo["mensagem"].as_str().unwrap().contains("web"));
 }
+
+#[tokio::test]
+async fn corrigir_e_aprovar_recusam_ids_de_outro_dono() {
+    let Some(c) = cena().await else { return };
+    let (_outro, _e, _s) = novo_dono(&c.amb).await;
+    let (outro_dono, _e2, _s2) = novo_dono(&c.amb).await;
+    let alheia = semear(&c.amb, outro_dono).await;
+    let (_lote, ids) = semear_lote(&c.amb, c.dono, c.s.conta, 2, 0).await;
+    let antes = contar(
+        &c.amb,
+        "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+        c.dono,
+    )
+    .await;
+
+    // Corrigir com a categoria de outro dono.
+    let base = versao_de(&c.amb, &c.cred, "rascunhos", ids[0]).await;
+    let dados = json!({
+        "schema_version": 1, "draft_type": "transaction", "transaction_type": "expense",
+        "amount_cents": 500, "event_date": "2026-11-11", "financial_product_id": c.s.conta,
+        "category_id": alheia.categoria, "description": "X"
+    });
+    let r = c
+        .amb
+        .post(
+            "/api/v2/alteracoes",
+            &c.cred,
+            proposta(
+                json!({"tipo": "corrigir_rascunho", "rascunho": ids[0], "dados": dados}),
+                ("rascunhos", ids[0]),
+                &[("rascunhos", ids[0], &base)],
+            ),
+        )
+        .await;
+    assert_eq!(r.corpo["resultado"], "recusada", "{:?}", r.corpo);
+    assert_eq!(r.corpo["motivo"], "referencia_nao_encontrada");
+
+    // Aprovar um rascunho cujo draft_data aponta a conta de outro dono.
+    c.amb
+        .sql(&format!(
+            "UPDATE public.draft_records SET draft_data = jsonb_set(draft_data, '{{financial_product_id}}', to_jsonb('{}'::text)) WHERE id = '{}'",
+            alheia.conta, ids[1]
+        ))
+        .await;
+    let base = versao_de(&c.amb, &c.cred, "rascunhos", ids[1]).await;
+    let r = c
+        .amb
+        .post(
+            "/api/v2/alteracoes",
+            &c.cred,
+            proposta(
+                json!({"tipo": "aprovar_rascunho", "rascunho": ids[1]}),
+                ("rascunhos", ids[1]),
+                &[("rascunhos", ids[1], &base)],
+            ),
+        )
+        .await;
+    assert_eq!(r.corpo["resultado"], "recusada", "{:?}", r.corpo);
+    assert_eq!(
+        contar(
+            &c.amb,
+            "SELECT count(*) FROM public.transactions WHERE user_id = $1",
+            c.dono
+        )
+        .await,
+        antes
+    );
+}

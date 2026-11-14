@@ -765,6 +765,9 @@ async fn corrigir(
     if let Err(mensagem) = conferir_correcao(&atual.tipo, dados) {
         return pedido_invalido(mensagem);
     }
+    if let Some(mensagem) = id_de_outro_dono(t, dono, dados).await? {
+        return recusa(CodigoDeErro::ReferenciaNaoEncontrada, mensagem);
+    }
     t.execute(
         "UPDATE public.draft_records SET draft_data = $3, draft_schema_version = 1, status = 'corrected', \
          corrections = jsonb_build_object('manual_edit', true, 'edited_at', now()), \
@@ -776,6 +779,33 @@ async fn corrigir(
         linhas: vec![rascunho_agora(t, dono, id).await?],
         excluidas: vec![],
     })
+}
+
+/// Os ids que o `draft_data` v1 aponta (conta, categoria, fornecedor) precisam ser do dono:
+/// o `draft_data` vem do cliente (ou da ingestão) e `fn_materialize_draft_record` não confere.
+/// `Some(mensagem)` quando algum id não existe para o dono.
+async fn id_de_outro_dono(
+    t: &Transaction<'_>,
+    dono: Uuid,
+    dados: &serde_json::Value,
+) -> Result<Option<String>, tokio_postgres::Error> {
+    for (campo, tabela, nome) in [
+        ("financial_product_id", "financial_products", "a conta"),
+        ("category_id", "categories", "a categoria"),
+        ("supplier_id", "suppliers", "o fornecedor"),
+    ] {
+        let Some(id) = dados
+            .get(campo)
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+        else {
+            continue;
+        };
+        if !existe(t, tabela, dono, id).await? {
+            return Ok(Some(format!("{nome} escolhida não existe no servidor")));
+        }
+    }
+    Ok(None)
 }
 
 /// Aprova e lança um rascunho. `Ok(Err(mensagem))`: o rascunho não pode virar movimentação.
@@ -805,6 +835,9 @@ async fn aprovar_um(
         Ok(p) => p,
         Err(erros) => return Ok(Err(erros.join("; "))),
     };
+    if let Some(mensagem) = id_de_outro_dono(t, dono, &dados).await? {
+        return Ok(Err(mensagem));
+    }
     t.execute(
         "UPDATE public.draft_records SET status = 'approved', approved_at = now(), approved_by = $3 \
          WHERE id = $1 AND user_id = $2",
