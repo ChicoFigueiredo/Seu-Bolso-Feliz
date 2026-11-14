@@ -4325,6 +4325,7 @@ dependencies = [
  "eframe",
  "egui",
  "rusqlite",
+ "sbf-canais",
  "sbf-chaveiro",
  "sbf-coletor",
  "sbf-contrato",
@@ -4340,6 +4341,28 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "sbf-canais"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "deadpool-postgres",
+ "getrandom 0.3.4",
+ "reqwest",
+ "sbf-coletor",
+ "sbf-contrato",
+ "sbf-livro",
+ "sbf-servidor",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-postgres",
  "uuid",
  "zeroize",
 ]
