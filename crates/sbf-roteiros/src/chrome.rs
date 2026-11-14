@@ -16,6 +16,26 @@
 //!   conferir com `elementFromPoint` que o ponto é do elemento (nada o cobre). A senha só
 //!   passa por [`crate::cdp::Cdp::inserir_texto_secreto`].
 
+//!
+//! # O perfil, as senhas do Chrome e os cookies
+//!
+//! O perfil é dedicado ao SBF (fora do cofre, `0700`) e **exclusivo por processo**: um
+//! arquivo de trava impede dois Chromes no mesmo perfil. Antes de abrir, o SBF escreve as
+//! `Preferences` com o gerenciador de senhas e o preenchimento automático desligados, e apaga
+//! os dados de formulário e de login (`Web Data`, `Login Data`) ao abrir e ao fechar: a senha
+//! do site vem do chaveiro e nunca fica no Chrome. **O risco que sobra são os cookies**: a
+//! sessão do site fica no perfil entre uma execução e outra (é o que evita refazer o login a
+//! cada vez) e vale para quem ler a pasta de dados do app. Quem quiser sessão nenhuma apaga a
+//! pasta `roteiros/perfil`.
+//!
+//! # A porta de controle
+//!
+//! O CDP é falado por `--remote-debugging-port=0` (porta aleatória, só em `127.0.0.1`, lida do
+//! `DevToolsActivePort`), e não por `--remote-debugging-pipe`: o pipe pede passar descritores
+//! extras ao filho (`pre_exec`), que é `unsafe`, e o workspace proíbe `unsafe`. O Chrome só
+//! aceita WebSocket de quem não manda `Origin` (nunca passamos `--remote-allow-origins`), mas
+//! qualquer processo do mesmo usuário na máquina pode conectar enquanto a janela está aberta.
+
 use crate::bloqueio::{Bloqueio, Candidato, script_da_ponte};
 use crate::cdp::{Cdp, http_json};
 use crate::erro::{ErroDeRoteiro, Resultado};
@@ -86,9 +106,114 @@ pub fn localizar_chrome() -> Option<PathBuf> {
     None
 }
 
+/// A trava do perfil: dois Chromes no mesmo perfil brigam pelo `DevToolsActivePort` e pelos
+/// cookies, e um apagaria a porta do outro. Fica de pé enquanto o [`Chrome`] existir.
+#[derive(Debug)]
+pub struct TravaDoPerfil {
+    _arquivo: std::fs::File,
+}
+
+impl TravaDoPerfil {
+    /// Pega a trava exclusiva do perfil.
+    ///
+    /// # Errors
+    /// O perfil já está em uso por outro processo (ou outro Chrome deste).
+    pub fn obter(perfil: &Path) -> Resultado<Self> {
+        std::fs::create_dir_all(perfil)?;
+        let arquivo = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(perfil.join(".sbf-roteiros.lock"))?;
+        match arquivo.try_lock() {
+            Ok(()) => Ok(Self { _arquivo: arquivo }),
+            Err(std::fs::TryLockError::WouldBlock) => Err(erro(
+                "o perfil do Chrome dos roteiros já está em uso por outro roteiro",
+            )),
+            Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+        }
+    }
+}
+
+/// Escreve (ou completa) as `Preferences` do perfil com o que o SBF não quer no Chrome: o
+/// gerenciador de senhas, o login automático e o preenchimento de endereços e cartões.
+///
+/// # Errors
+/// Disco.
+pub fn preparar_preferencias(perfil: &Path) -> Resultado<()> {
+    let pasta = perfil.join("Default");
+    std::fs::create_dir_all(&pasta)?;
+    let arquivo = pasta.join("Preferences");
+    let mut v: Value = std::fs::read_to_string(&arquivo)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    v["credentials_enable_service"] = json!(false);
+    v["credentials_enable_autosignin"] = json!(false);
+    for (grupo, chave) in [
+        ("profile", "password_manager_enabled"),
+        ("autofill", "profile_enabled"),
+        ("autofill", "credit_card_enabled"),
+    ] {
+        if !v[grupo].is_object() {
+            v[grupo] = json!({});
+        }
+        v[grupo][chave] = json!(false);
+    }
+    std::fs::write(&arquivo, serde_json::to_vec(&v).unwrap_or_default())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&arquivo, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Apaga o que o Chrome guardou de formulário e de login no perfil (nunca os cookies). Só com o
+/// Chrome fechado.
+pub fn apagar_dados_de_formulario(perfil: &Path) {
+    for nome in [
+        "Web Data",
+        "Web Data-journal",
+        "Login Data",
+        "Login Data-journal",
+        "Login Data For Account",
+        "Login Data For Account-journal",
+    ] {
+        let _ = std::fs::remove_file(perfil.join("Default").join(nome));
+    }
+}
+
+/// Os argumentos do Chrome. A porta é aleatória (`0`) e só em `127.0.0.1`; nada de
+/// `--remote-allow-origins`.
+#[must_use]
+pub fn argumentos_do_chrome(perfil: &Path, sem_janela: bool, sem_sandbox: bool) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "--remote-debugging-port=0".into(),
+        format!("--user-data-dir={}", perfil.display()),
+        "--no-first-run".into(),
+        "--no-default-browser-check".into(),
+        "--password-store=basic".into(),
+        "--disable-background-networking".into(),
+        "--disable-features=Translate,PasswordLeakDetection".into(),
+        "--disable-save-password-bubble".into(),
+    ];
+    if sem_janela {
+        args.push("--headless=new".into());
+    }
+    if sem_sandbox {
+        args.push("--no-sandbox".into());
+    }
+    args.push("about:blank".into());
+    args
+}
+
 /// O Chrome aberto.
 #[derive(Debug)]
 pub struct Chrome {
+    _trava: TravaDoPerfil,
+    perfil: PathBuf,
     filho: Child,
     pagina: Cdp,
     navegador: Cdp,
@@ -117,25 +242,17 @@ impl Chrome {
             use std::os::unix::fs::PermissionsExt as _;
             let _ = std::fs::set_permissions(&o.perfil, std::fs::Permissions::from_mode(0o700));
         }
+        // Exclusivo: só quem tem a trava mexe no DevToolsActivePort e nas Preferences.
+        let trava = TravaDoPerfil::obter(&o.perfil)?;
+        apagar_dados_de_formulario(&o.perfil);
+        preparar_preferencias(&o.perfil)?;
         let arquivo_da_porta = o.perfil.join("DevToolsActivePort");
         let _ = std::fs::remove_file(&arquivo_da_porta);
-        let mut args: Vec<String> = vec![
-            "--remote-debugging-port=0".into(),
-            format!("--user-data-dir={}", o.perfil.display()),
-            "--no-first-run".into(),
-            "--no-default-browser-check".into(),
-            "--password-store=basic".into(),
-            "--disable-background-networking".into(),
-            "--disable-features=Translate,PasswordLeakDetection".into(),
-            "--disable-save-password-bubble".into(),
-        ];
-        if o.sem_janela {
-            args.push("--headless=new".into());
-        }
-        if std::env::var_os("SBF_CHROME_SEM_SANDBOX").is_some() {
-            args.push("--no-sandbox".into());
-        }
-        args.push("about:blank".into());
+        let args = argumentos_do_chrome(
+            &o.perfil,
+            o.sem_janela,
+            std::env::var_os("SBF_CHROME_SEM_SANDBOX").is_some(),
+        );
         let mut cmd = sbf_processo::comando(
             &programa,
             &args,
@@ -174,6 +291,8 @@ impl Chrome {
         let montado = Self::conectar(porta, &mut filho);
         match montado {
             Ok((pagina, navegador, ws_pagina)) => Ok(Self {
+                _trava: trava,
+                perfil: o.perfil.clone(),
                 filho,
                 pagina,
                 navegador,
@@ -246,14 +365,20 @@ impl Chrome {
     pub fn fechar(mut self) {
         let _ = self.navegador.chamar("Browser.close", &json!({}));
         let limite = Instant::now() + Duration::from_secs(3);
+        let mut saiu = false;
         while Instant::now() < limite {
             if self.filho.try_wait().ok().flatten().is_some() {
-                return;
+                saiu = true;
+                break;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        let _ = self.filho.kill();
-        let _ = self.filho.wait();
+        if !saiu {
+            let _ = self.filho.kill();
+            let _ = self.filho.wait();
+        }
+        // Com o Chrome fora, nada de formulário nem de login fica no perfil.
+        apagar_dados_de_formulario(&self.perfil);
     }
 
     /// Espera o carregamento terminar (evento de load ou `readyState`).
@@ -550,5 +675,87 @@ impl Navegador for Chrome {
 
     fn trazer_para_frente(&mut self) {
         let _ = self.pagina.chamar("Page.bringToFront", &json!({}));
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn preferencias_desligam_senhas_e_preenchimento_e_guardam_o_resto() {
+        let d = tempfile::tempdir().unwrap();
+        let pasta = d.path().join("Default");
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(
+            pasta.join("Preferences"),
+            r#"{"credentials_enable_service":true,"profile":{"name":"SBF","password_manager_enabled":true},"autofill":{"profile_enabled":true},"outra":1}"#,
+        )
+        .unwrap();
+        preparar_preferencias(d.path()).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(pasta.join("Preferences")).unwrap())
+                .unwrap();
+        assert_eq!(v["credentials_enable_service"], false);
+        assert_eq!(v["profile"]["password_manager_enabled"], false);
+        assert_eq!(v["autofill"]["profile_enabled"], false);
+        assert_eq!(v["autofill"]["credit_card_enabled"], false);
+        assert_eq!(v["profile"]["name"], "SBF", "o resto do perfil fica");
+        assert_eq!(v["outra"], 1);
+        // perfil novo e arquivo corrompido também ficam certos
+        let d2 = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d2.path().join("Default")).unwrap();
+        std::fs::write(d2.path().join("Default/Preferences"), "{lixo").unwrap();
+        preparar_preferencias(d2.path()).unwrap();
+        let v: Value = serde_json::from_str(
+            &std::fs::read_to_string(d2.path().join("Default/Preferences")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["autofill"]["credit_card_enabled"], false);
+    }
+
+    #[test]
+    fn dados_de_formulario_e_login_sao_apagados_e_os_cookies_ficam() {
+        let d = tempfile::tempdir().unwrap();
+        let pasta = d.path().join("Default");
+        std::fs::create_dir_all(&pasta).unwrap();
+        for n in ["Web Data", "Login Data", "Login Data-journal", "Cookies"] {
+            std::fs::write(pasta.join(n), "x").unwrap();
+        }
+        apagar_dados_de_formulario(d.path());
+        assert!(!pasta.join("Web Data").exists());
+        assert!(!pasta.join("Login Data").exists());
+        assert!(!pasta.join("Login Data-journal").exists());
+        assert!(pasta.join("Cookies").exists(), "a sessão do site fica");
+    }
+
+    #[test]
+    fn o_perfil_e_exclusivo_por_processo() {
+        let d = tempfile::tempdir().unwrap();
+        let primeira = TravaDoPerfil::obter(d.path()).unwrap();
+        let segunda = TravaDoPerfil::obter(d.path());
+        assert!(segunda.is_err(), "dois Chromes no mesmo perfil");
+        drop(primeira);
+        assert!(TravaDoPerfil::obter(d.path()).is_ok(), "solta ao fechar");
+    }
+
+    #[test]
+    fn a_porta_de_controle_e_aleatoria_e_sem_origem_liberada() {
+        let args = argumentos_do_chrome(Path::new("/tmp/p"), true, false);
+        assert!(args.contains(&"--remote-debugging-port=0".to_owned()));
+        assert!(
+            args.iter()
+                .all(|a| !a.starts_with("--remote-allow-origins"))
+        );
+        assert!(
+            args.iter()
+                .all(|a| !a.starts_with("--remote-debugging-address"))
+        );
+        assert!(args.contains(&"--headless=new".to_owned()));
+        assert!(!args.contains(&"--no-sandbox".to_owned()));
+        assert!(
+            argumentos_do_chrome(Path::new("/tmp/p"), false, true)
+                .contains(&"--no-sandbox".to_owned())
+        );
     }
 }
