@@ -23,6 +23,7 @@ use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
 use crate::EstadoDoServidor;
+use crate::armazenamento::Armazenamento;
 use crate::estacoes::EstacaoAutenticada;
 use crate::http::{ContratoDoPedido, ErroHttp};
 
@@ -180,6 +181,54 @@ pub async fn enviar(
             "o sha256 precisa ter 64 hexadecimais minúsculos",
         ));
     }
+    if hex(&Sha256::digest(&pedido.bytes)) != pedido.sha256 {
+        return Err(ErroHttp::pedido_invalido(
+            "o sha256 não é o dos bytes enviados",
+        ));
+    }
+    let origem = OrigemDoEnvio {
+        origem: "desktop",
+        detalhe: serde_json::json!({ "origem": "desktop", "estacao": quem.id }),
+    };
+    let resposta = guardar(
+        &estado.banco,
+        estado.armazenamento.as_ref(),
+        quem.dono,
+        &origem,
+        &pedido.nome,
+        pedido.id_no_inventario,
+        pedido.bytes,
+    )
+    .await?;
+    Ok(Json(resposta))
+}
+
+/// De onde o documento veio: o rótulo vai para `metadata.origin` do job e o detalhe para
+/// `metadata` da execução.
+#[derive(Debug, Clone)]
+pub struct OrigemDoEnvio {
+    pub origem: &'static str,
+    pub detalhe: serde_json::Value,
+}
+
+/// O caminho único de entrada de um documento (o `POST /documentos` e o bot do Telegram):
+/// valida formato e tamanho, grava os bytes e cria `source_documents` + `ingestion_jobs`,
+/// idempotente pelo SHA-256 do dono.
+pub async fn guardar(
+    banco: &deadpool_postgres::Pool,
+    armazenamento: &dyn Armazenamento,
+    dono: Uuid,
+    origem: &OrigemDoEnvio,
+    nome: &str,
+    id_no_inventario: Option<String>,
+    bytes: Vec<u8>,
+) -> Result<RespostaDoDocumento, ErroHttp> {
+    let pedido = Pedido {
+        sha256: hex(&Sha256::digest(&bytes)),
+        nome: nome_seguro(nome),
+        id_no_inventario,
+        bytes,
+    };
     if pedido.bytes.is_empty() {
         return Err(ErroHttp::pedido_invalido("o arquivo está vazio"));
     }
@@ -188,11 +237,6 @@ pub async fn enviar(
             axum::http::StatusCode::PAYLOAD_TOO_LARGE,
             CodigoDeErro::ArquivoGrande,
             "o arquivo é maior que o servidor aceita",
-        ));
-    }
-    if hex(&Sha256::digest(&pedido.bytes)) != pedido.sha256 {
-        return Err(ErroHttp::pedido_invalido(
-            "o sha256 não é o dos bytes enviados",
         ));
     }
     if pedido.nome.is_empty() {
@@ -204,24 +248,22 @@ pub async fn enviar(
             "formato não aceito: use PDF, CSV, XLSX, OFX, XML, PNG, JPG ou WEBP",
         ));
     };
-
-    let mut cliente = estado.banco.get().await?;
+    let mut cliente = banco.get().await?;
     // Caminho rápido: já existe, com job.
-    if let Some(resposta) = existente(&**cliente, quem.dono, &pedido).await? {
-        return Ok(Json(resposta));
+    if let Some(resposta) = existente(&**cliente, dono, &pedido).await? {
+        return Ok(resposta);
     }
 
     // O PUT no Blob vem ANTES da transação (e da trava): não se segura transação aberta
     // durante a rede. A chave sai do sha256 (identifica o conteúdo), então repetir o PUT
     // (concorrência, falha depois dele) regrava os mesmos bytes no mesmo lugar e não deixa
     // blob órfão. Se o documento já existe (só sem job), o blob dele já está lá.
-    let ja_tem_documento = documento_do_dono(&**cliente, quem.dono, &pedido.sha256)
+    let ja_tem_documento = documento_do_dono(&**cliente, dono, &pedido.sha256)
         .await?
         .is_some();
-    let chave = format!("{}/{}/{}", quem.dono, pedido.sha256, pedido.nome);
+    let chave = format!("{}/{}/{}", dono, pedido.sha256, pedido.nome);
     if !ja_tem_documento {
-        estado
-            .armazenamento
+        armazenamento
             .gravar(&chave, &pedido.bytes, mime_da_extensao)
             .await
             .map_err(|e| {
@@ -238,16 +280,16 @@ pub async fn enviar(
     transacao
         .execute(
             "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-            &[&format!("{}:{}", quem.dono, pedido.sha256)],
+            &[&format!("{}:{}", dono, pedido.sha256)],
         )
         .await?;
-    if let Some(resposta) = existente(&*transacao, quem.dono, &pedido).await? {
-        return Ok(Json(resposta));
+    if let Some(resposta) = existente(&*transacao, dono, &pedido).await? {
+        return Ok(resposta);
     }
 
     // Um documento do mesmo conteúdo que ficou sem job (o pipeline o descartou) ganha o job
     // dele, sem novo `source_documents`.
-    let documento = match documento_do_dono(&*transacao, quem.dono, &pedido.sha256).await? {
+    let documento = match documento_do_dono(&*transacao, dono, &pedido.sha256).await? {
         Some(id) => id,
         None => {
             let documento = Uuid::new_v4();
@@ -260,7 +302,7 @@ pub async fn enviar(
                      VALUES ($1, $2, 'manual_upload', $3, $4, $5, $6, $7, 'active', $8)",
                     &[
                         &documento,
-                        &quem.dono,
+                        &dono,
                         &origem,
                         &pedido.nome,
                         &mime_da_extensao,
@@ -277,10 +319,7 @@ pub async fn enviar(
         .query_one(
             "INSERT INTO public.ingestion_runs (user_id, source_type, status, metadata) \
              VALUES ($1, 'manual_upload', 'running', $2) RETURNING id",
-            &[
-                &quem.dono,
-                &serde_json::json!({ "origem": "desktop", "estacao": quem.id }),
-            ],
+            &[&dono, &origem.detalhe],
         )
         .await?
         .try_get(0)?;
@@ -291,22 +330,22 @@ pub async fn enviar(
              VALUES ($1, $2, $3, 'discovered', $4, $5) RETURNING id",
             &[
                 &execucao,
-                &quem.dono,
+                &dono,
                 &documento,
                 &requires,
-                &serde_json::json!({ "filename": pedido.nome, "origin": "desktop" }),
+                &serde_json::json!({ "filename": pedido.nome, "origin": origem.origem }),
             ],
         )
         .await?
         .try_get(0)?;
     transacao.commit().await?;
-    Ok(Json(RespostaDoDocumento {
+    Ok(RespostaDoDocumento {
         source_document_id: documento,
         job_id: job,
         ja_existia: false,
         sha256: pedido.sha256,
         id_no_inventario: pedido.id_no_inventario,
-    }))
+    })
 }
 
 /// O `source_documents` do dono com este conteúdo, tenha job ou não.
