@@ -211,7 +211,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "O texto extraido de um achado, como a triagem o ve: ate 3000 caracteres do comeco e 1000 do fim."
+        description = "O texto extraido de um achado, como a triagem o ve: ate 3000 caracteres do comeco e 1000 do fim. Os numeros longos (CPF, conta, cartao) vem mascarados, no nivel de confianca deste cliente."
     )]
     fn ver_texto_do_achado(
         &self,
@@ -279,7 +279,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Busca por semelhanca de texto no indice local: trechos de achados, registros e movimentacoes parecidos com o texto dado, com tipo, id e nota. Os numeros longos (CPF, conta, cartao) vem mascarados; para ler o item inteiro use ver_texto_do_achado ou ver_registro. Erro se o indice ainda nao foi montado."
+        description = "Busca por semelhanca de texto no indice local: trechos de achados, registros e movimentacoes parecidos com o texto dado, com tipo, id e nota. Os numeros longos (CPF, conta, cartao) vem mascarados. Para o item inteiro use ver_registro; o texto de um achado so se o cliente tem esse direito. Erro se o indice ainda nao foi montado."
     )]
     fn buscar_semelhantes(
         &self,

@@ -248,7 +248,7 @@ impl Nucleo {
 
     /// Os trechos do índice local mais parecidos com `texto` (achados, registros e
     /// movimentações), mascarados no nível do cliente. O que saiu fica em `saida_ia`. Para
-    /// ler o item inteiro, use `ver_texto_do_achado` ou `ver_registro`.
+    /// ver o item inteiro, use `ver_registro`.
     ///
     /// # Errors
     /// Índice não ligado, texto vazio, falha da busca ou do registro da saída.
@@ -594,8 +594,17 @@ impl Nucleo {
         Ok(pg.envelope(total, itens))
     }
 
+    /// O nível de confiança deste cliente MCP: o da busca por semelhança, se ligada; senão o
+    /// padrão, mascarado (um destinatário novo nasce mascarado).
+    fn nivel(&self) -> sbf_ia::NivelDeConfianca {
+        self.semelhantes
+            .0
+            .as_ref()
+            .map_or(sbf_ia::NivelDeConfianca::Mascarado, |(_, n)| *n)
+    }
+
     /// O texto extraído de um achado, truncado como na triagem: 3000 caracteres do começo
-    /// e 1000 do fim.
+    /// e 1000 do fim, com os números longos mascarados no nível de confiança do cliente.
     ///
     /// # Errors
     /// Achado inexistente ou sem texto.
@@ -618,7 +627,7 @@ impl Nucleo {
                 "esse achado não tem texto extraído (o documento pode ser só imagem)".to_owned(),
             );
         };
-        let enviado = truncar_texto(&texto);
+        let enviado = sbf_indice::perguntar::mascarar(&truncar_texto(&texto), self.nivel());
         Ok(json!({
             "content_hash": content_hash.trim(),
             "estado": estado,
