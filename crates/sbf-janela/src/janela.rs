@@ -690,6 +690,7 @@ impl Janela {
         {
             self.cache.limpar();
         }
+        self.sondar_triagem(ui.ctx());
         match vista {
             Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
             None => {
@@ -1575,19 +1576,51 @@ impl Janela {
             A::Recusar(ids) => servico
                 .recusar(&ids)
                 .map(|n| format!("{n} sugestões recusadas. Nenhuma decisão foi gravada.")),
-            A::SalvarConfiguracao(c) => servico
-                .salvar_configuracao(c)
-                .map(|()| "Opções de IA salvas.".to_owned()),
+            // Os dois rodam fora do quadro: o resultado chega por `sondar_triagem`.
+            A::SalvarConfiguracao(c) => {
+                servico.iniciar_salvamento(c);
+                Ok("Salvando as opções de IA…".to_owned())
+            }
             A::TestarConexao => {
-                let r = servico.testar_conexao();
-                self.triagem.teste = Some(r.clone());
-                r.map(|_| "Conexão com o provedor verificada.".to_owned())
+                servico.iniciar_teste_de_conexao();
+                self.triagem.teste = None;
+                self.triagem.testando = true;
+                Ok("Testando a conexão com o provedor…".to_owned())
             }
         };
         self.triagem.atualizar();
         match resultado {
             Ok(t) => self.ok(t),
             Err(e) => self.erro(e),
+        }
+    }
+
+    /// Recolhe o que o teste de conexão e o salvamento de Opções → IA terminaram fora do
+    /// quadro. Chamado a cada quadro; não bloqueia.
+    fn sondar_triagem(&mut self, ctx: &egui::Context) {
+        use sbf_triagem::servico::Conclusao;
+        let Some(servico) = self.triagem.servico.as_deref_mut() else {
+            return;
+        };
+        let prontas = servico.sondar();
+        if servico.ocupado() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
+        for c in prontas {
+            match c {
+                Conclusao::Teste(r) => {
+                    self.triagem.testando = false;
+                    self.triagem.teste = Some(r.clone());
+                    match r {
+                        Ok(_) => self.ok("Conexão com o provedor verificada.".to_owned()),
+                        Err(e) => self.erro(e),
+                    }
+                }
+                Conclusao::Configuracao(Ok(())) => self.ok("Opções de IA salvas.".to_owned()),
+                Conclusao::Configuracao(Err(e)) => {
+                    self.erro(format!("Não deu para salvar as opções de IA: {e}"));
+                }
+            }
         }
     }
 
@@ -2730,5 +2763,29 @@ mod testes {
                 motivo: Some("valor diferente do boleto".into())
             }))
         );
+    }
+
+    #[test]
+    fn testar_conexao_e_salvar_nao_bloqueiam_e_o_resultado_chega_no_quadro() {
+        use sbf_triagem::servico::TriagemFicticia;
+        let ctx = egui::Context::default();
+        let mut j = Janela::nova();
+        j.ligar_triagem(Box::new(TriagemFicticia::nova()));
+        let servico = j.triagem.servico.as_deref_mut().expect("serviço");
+        servico.iniciar_teste_de_conexao();
+        let nova = servico.configuracao();
+        servico.iniciar_salvamento(nova);
+        j.triagem.testando = true;
+        j.sondar_triagem(&ctx);
+        assert!(!j.triagem.testando);
+        assert!(matches!(j.triagem.teste, Some(Ok(_))));
+        // A última conclusão (o salvamento) é a que fica na mensagem; nenhuma foi erro.
+        let m = j.mensagem.as_ref().expect("mensagem");
+        assert!(!m.erro);
+        assert!(m.texto.contains("salvas"), "{}", m.texto);
+        // Nada sobra para o quadro seguinte.
+        j.mensagem = None;
+        j.sondar_triagem(&ctx);
+        assert!(j.mensagem.is_none());
     }
 }

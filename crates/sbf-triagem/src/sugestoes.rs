@@ -28,6 +28,24 @@ pub fn abrir(caminho: impl AsRef<Path>) -> Resultado<Connection> {
     Ok(c)
 }
 
+/// O que o provedor `provedor` já gastou **neste mês** (UTC), em dezmilésimos de dólar, a
+/// partir de `saida_ia`. Só conta o que não é nominal (a assinatura Claude não gasta cota
+/// em dólar). Quem monta o OpenRouter restaura o teto do mês com este valor ao abrir o app.
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn gasto_do_mes_dezmilesimos(caminho: impl AsRef<Path>, provedor: &str) -> Resultado<u64> {
+    let c = abrir(caminho)?;
+    let soma: i64 = c.query_row(
+        "SELECT COALESCE(SUM(custo_dezmilesimos_usd), 0) FROM saida_ia
+          WHERE provedor = ?1 AND nominal = 0
+            AND substr(quando, 1, 7) = strftime('%Y-%m', 'now')",
+        [provedor],
+        |l| l.get(0),
+    )?;
+    Ok(u64::try_from(soma).unwrap_or(0))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EstadoDaSugestao {
     Aberta,
