@@ -163,6 +163,9 @@ pub struct Janela {
     erro_do_dialogo: Option<String>,
     /// A triagem por IA (spec 09): o serviço e o estado da tela.
     pub triagem: crate::triagem::EstadoDaTriagem,
+    /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
+    pub perguntar: crate::analise::EstadoDePerguntar,
+    pub pontos: crate::analise::EstadoDePontos,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -265,6 +268,8 @@ impl Janela {
             caixa_ui: crate::caixa_ui::EstadoDaCaixa::default(),
             erro_do_dialogo: None,
             triagem: crate::triagem::EstadoDaTriagem::default(),
+            perguntar: crate::analise::EstadoDePerguntar::default(),
+            pontos: crate::analise::EstadoDePontos::default(),
         }
     }
 
@@ -980,6 +985,12 @@ impl Janela {
                     );
                 }
             }
+            Destino::AreaFutura("perguntar") => {
+                crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
+            }
+            Destino::AreaFutura("pontos") => {
+                crate::analise::pontos(ui, &mut self.pontos, pedidos);
+            }
             Destino::AreaFutura(id) => {
                 if let Some(a) = areas::area_futura(id) {
                     componentes::fatia_futura(ui, a.icone, a.rotulo, a.fatia, a.motivo);
@@ -1534,6 +1545,16 @@ impl Janela {
         let chaves = std::mem::take(&mut self.triagem.chaves);
         self.triagem = crate::triagem::EstadoDaTriagem::com_servico(servico);
         self.triagem.chaves = chaves;
+    }
+
+    /// Liga Perguntar (RAG local, spec 10): o serviço real ou o da demonstração.
+    pub fn ligar_perguntar(&mut self, servico: Box<dyn sbf_indice::perguntar::ServicoDePerguntar>) {
+        self.perguntar = crate::analise::EstadoDePerguntar::com_servico(servico);
+    }
+
+    /// Liga os Pontos de atenção (spec 10): o serviço real ou o da demonstração.
+    pub fn ligar_pontos(&mut self, servico: Box<dyn sbf_pontos::ServicoDePontos>) {
+        self.pontos = crate::analise::EstadoDePontos::com_servico(servico);
     }
 
     /// Liga Opções → IA → Chaves e contas: o chaveiro (ou a guarda da demonstração) e o

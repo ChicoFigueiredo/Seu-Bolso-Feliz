@@ -113,9 +113,10 @@ fn reais(centavos: i64, simbolo: &str) -> String {
 }
 
 impl Impacto {
-    /// O texto da janela: `estimativa: R$ 144,00 por ano` ou `R$ 45,00 no ciclo`.
+    /// O texto sem o prefixo de estimativa: `R$ 144,00 por ano`. A janela mostra o selo
+    /// "estimativa" ao lado.
     #[must_use]
-    pub fn texto(&self) -> String {
+    pub fn valor_texto(&self) -> String {
         let valor = match self.unidade {
             Unidade::CentavosBrl => reais(self.valor, "R$"),
             Unidade::CentavosUsd => reais(self.valor, "US$"),
@@ -128,10 +129,16 @@ impl Impacto {
             "semana" => " na semana",
             _ => "",
         };
+        format!("{valor}{periodo}")
+    }
+
+    /// O texto de canais (Telegram): `estimativa: R$ 144,00 por ano` ou `R$ 45,00 no ciclo`.
+    #[must_use]
+    pub fn texto(&self) -> String {
         if self.estimativa {
-            format!("estimativa: {valor}{periodo}")
+            format!("estimativa: {}", self.valor_texto())
         } else {
-            format!("{valor}{periodo}")
+            self.valor_texto()
         }
     }
 }

@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use sbf_coleta::nuvem::{ColetaDeNuvem, Nuvem, PastasDoCofre};
 use sbf_coleta::pastas::{Opcoes, Varredor};
-use sbf_triagem::agente::{Agente, rodar_ciclo};
+use sbf_triagem::agente::{Agente, rodar_ciclo_com};
 use sbf_triagem::rodada::Progresso;
 use sbf_worker::estado::{EstadoDoWorker, agora, texto_da_barra};
 use sbf_worker::laco::{
@@ -166,6 +166,8 @@ struct TriadorReal {
     insumos: Insumos,
     motor: Option<Motor>,
     agente: Option<Agente>,
+    /// A busca por texto parecido (spec 10), quando o modelo e o índice existem.
+    busca: Option<sbf_indice::BuscaLocal>,
 }
 
 impl Triador for TriadorReal {
@@ -188,7 +190,10 @@ impl Triador for TriadorReal {
             controle.cancelar();
         }
         let progresso = Mutex::new(Progresso::ocioso());
-        let r = rodar_ciclo(
+        if self.busca.is_none() {
+            self.busca = crate::rag::busca_local(&self.dados.pasta);
+        }
+        let r = rodar_ciclo_com(
             &conn,
             agente,
             &motor.fila,
@@ -198,6 +203,7 @@ impl Triador for TriadorReal {
             &progresso,
             &|id| motor.registro.definir_rodada(Some(id)),
             Some(motor.rastro.clone()),
+            self.busca.as_ref().map(|b| b as &dyn sbf_indice::Busca),
         )
         .map_err(|_| Falha::Banco)?;
         motor.registro.definir_rodada(None);
@@ -265,13 +271,20 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
         insumos: Insumos::do_ambiente(None),
         motor: None,
         agente: None,
+        busca: None,
     });
     let mensageiros = Box::new(MensageirosReais {
         dados: dados.clone(),
     });
+    let dados_do_rag = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
         Ok(w) => {
-            let mut w = w.com_mensageiros(mensageiros);
+            let mut w = w
+                .com_mensageiros(mensageiros)
+                .com_indice(Box::new(crate::rag::IndexadorReal::novo(
+                    dados_do_rag.clone(),
+                )))
+                .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)));
             w.rodar(&parar);
             ExitCode::SUCCESS
         }

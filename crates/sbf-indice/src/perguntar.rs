@@ -177,14 +177,68 @@ pub fn perguntar(
     })
 }
 
+/// Um [`Registro`] em memória (demonstração e testes): guarda as saídas e o cache.
+#[derive(Debug, Default)]
+pub struct RegistroEmMemoria {
+    saidas: std::sync::Mutex<Vec<Saida>>,
+    cache: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+impl RegistroEmMemoria {
+    #[must_use]
+    pub fn novo() -> Self {
+        Self::default()
+    }
+
+    /// As saídas registradas até agora.
+    #[must_use]
+    pub fn saidas(&self) -> Vec<Saida> {
+        self.saidas.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+}
+
+impl Registro for RegistroEmMemoria {
+    fn registrar_saida(&self, saida: &Saida) -> sbf_ia::ResultadoDeIa<()> {
+        self.saidas
+            .lock()
+            .map_err(|_| sbf_ia::ErroDeIa::Outro("registro envenenado".into()))?
+            .push(saida.clone());
+        Ok(())
+    }
+    fn ler_cache(&self, chave: &str) -> sbf_ia::ResultadoDeIa<Option<serde_json::Value>> {
+        Ok(self.cache.lock().ok().and_then(|c| c.get(chave).cloned()))
+    }
+    fn gravar_cache(&self, chave: &str, json: &serde_json::Value) -> sbf_ia::ResultadoDeIa<()> {
+        if let Ok(mut c) = self.cache.lock() {
+            c.insert(chave.to_owned(), json.clone());
+        }
+        Ok(())
+    }
+}
+
 /// O serviço que a janela usa: uma pergunta, uma resposta. O real é montado no `sbf` (índice,
-/// embedder e provedor); a demonstração usa o fictício.
+/// embedder e provedor); a demonstração usa o fictício. Roda numa thread da janela: pode
+/// demorar (modelo, rede do provedor).
 pub trait ServicoDePerguntar: Send {
     /// # Errors
     /// Texto para mostrar ao usuário.
     fn perguntar(&mut self, pergunta: &str) -> Result<Resposta, String>;
-    /// Aviso a mostrar antes da primeira pergunta (download do modelo, índice vazio).
-    fn aviso(&self) -> Option<String> {
+
+    /// O modelo de busca já está na máquina? Sem ele, a janela avisa do download antes.
+    fn modelo_pronto(&self) -> bool {
+        true
+    }
+
+    /// Baixa o modelo de busca (~120 MB, uma vez). Só o app real, depois do aviso na janela.
+    ///
+    /// # Errors
+    /// Texto para mostrar ao usuário.
+    fn baixar_modelo(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Quantos trechos o índice tem hoje (`None`: não se sabe).
+    fn trechos_no_indice(&self) -> Option<usize> {
         None
     }
 }

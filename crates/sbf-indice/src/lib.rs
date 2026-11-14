@@ -22,7 +22,7 @@ pub mod indice;
 pub mod pedacos;
 pub mod perguntar;
 
-pub use busca::{Busca, BuscaLocal};
+pub use busca::{Busca, BuscaEmMemoria, BuscaLocal};
 pub use embedder::{Embedder, EmbedderFalso};
 #[cfg(feature = "modelo-real")]
 pub use embedder::{FastEmbedder, modelo_baixado};

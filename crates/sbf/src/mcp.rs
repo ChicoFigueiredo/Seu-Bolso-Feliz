@@ -52,6 +52,15 @@ pub fn rodar(args: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     };
+    // O índice local só liga se o modelo já está baixado e o worker já indexou (o MCP nunca
+    // baixa modelo). O cliente MCP nasce mascarado (ADR-015).
+    let nucleo = match sbf_chaveiro::pasta_de_dados_do_app()
+        .ok()
+        .and_then(|p| crate::rag::busca_local(&p))
+    {
+        Some(b) => nucleo.com_busca(std::sync::Arc::new(b), sbf_ia::NivelDeConfianca::Mascarado),
+        None => nucleo,
+    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

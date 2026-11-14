@@ -9,6 +9,8 @@
 
 pub mod acervo_ficticio;
 pub mod acoes;
+pub mod analise;
+pub mod analise_ficticia;
 pub mod app;
 pub mod areas;
 pub mod caixa;
