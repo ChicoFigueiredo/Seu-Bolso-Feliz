@@ -504,6 +504,7 @@ pub fn executar_passo(
             if let Some(b) = bloqueio::avaliar_url(url) {
                 return Err(ErroDeRoteiro::Bloqueado(b));
             }
+            c.navegador.fase_de_login(None);
             c.navegador.navegar(url)?;
             conferir_barrado(c)?;
             conferir_destino(c)
@@ -516,6 +517,8 @@ pub fn executar_passo(
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_elemento(c, i, seletor)?;
             let r = c.navegador.clicar(seletor);
+            // O clique que envia o login acabou: a fase de login (RO-02) termina com ele.
+            c.navegador.fase_de_login(None);
             conferir_barrado(c)?;
             r?;
             conferir_destino(c)
@@ -538,6 +541,7 @@ pub fn executar_passo(
         } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_host(c, i, host.as_deref())?;
+            c.navegador.fase_de_login(host.as_deref());
             let segredo = c
                 .senhas
                 .senha_de_site(rotulo)
@@ -551,6 +555,7 @@ pub fn executar_passo(
         Passo::PreencherCpf { seletor, host } => {
             esperar_visivel(c, i, seletor, c.opcoes.espera)?;
             conferir_host(c, i, host.as_deref())?;
+            c.navegador.fase_de_login(host.as_deref());
             let segredo = c.senhas.cpf().map_err(ErroDeRoteiro::Chaveiro)?;
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;

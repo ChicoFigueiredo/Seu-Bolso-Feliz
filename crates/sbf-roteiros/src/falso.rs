@@ -53,6 +53,8 @@ pub struct NavegadorFalso {
     pub quebrados: Vec<String>,
     /// Quando acende, a página "mfa" passa a valer como "painel" (o usuário resolveu o MFA).
     pub liberacao: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// As fases de login marcadas pelo executor, em ordem (`Some(host)` liga, `None` encerra).
+    pub fases_de_login: Vec<Option<String>>,
     pendentes: Vec<Bloqueio>,
 }
 
@@ -171,5 +173,9 @@ impl Navegador for NavegadorFalso {
 
     fn bloqueios(&mut self) -> Resultado<Vec<Bloqueio>> {
         Ok(std::mem::take(&mut self.pendentes))
+    }
+
+    fn fase_de_login(&mut self, host: Option<&str>) {
+        self.fases_de_login.push(host.map(str::to_owned));
     }
 }

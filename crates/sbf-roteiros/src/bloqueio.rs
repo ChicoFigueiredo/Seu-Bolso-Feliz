@@ -89,6 +89,9 @@ pub struct Candidato {
     pub eh_senha: bool,
     /// O elemento é um `input`/`textarea`/`select` (para os passos de preencher).
     pub eh_campo: bool,
+    /// O tipo do campo, como o **navegador** o entende (`password`, `text`, `tel`…; a tag em
+    /// minúsculas para o que não é `input`). Vazio quando não se sabe.
+    pub tipo: String,
 }
 
 impl Candidato {
@@ -116,6 +119,13 @@ pub struct Bloqueio {
 
 impl fmt::Display for Bloqueio {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.campo == "rede" {
+            return write!(
+                f,
+                "uma requisição de rede foi barrada (\"{}\"), e roteiro só consulta e baixa",
+                self.termo
+            );
+        }
         write!(
             f,
             "o campo \"{}\" do elemento indica \"{}\", e roteiro só consulta e baixa",

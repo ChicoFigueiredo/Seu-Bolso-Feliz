@@ -223,7 +223,76 @@ pub struct Cdp {
     proximo: u64,
     /// Eventos recebidos enquanto esperava uma resposta.
     pub eventos: VecDeque<Value>,
+    /// O nome do mundo isolado em que o SBF lê a página (RO-01/RO-02): a página não alcança
+    /// nada que o SBF define lá, nem troca os protótipos que ele usa.
+    mundo: Option<String>,
+    /// O quadro principal da aba (de `Page.getFrameTree`).
+    quadro: Option<String>,
+    /// O contexto de execução do mundo isolado no quadro principal, quando existe.
+    contexto: Option<i64>,
+    /// A política de rede do `Fetch` (desligada até [`Cdp::ativar_rede`]).
+    rede: Option<PoliticaDeRede>,
+    /// O que a política de rede barrou desde a última vez que o dono esvaziou a lista.
+    pub barrados_na_rede: Vec<(String, String)>,
+    /// Só na conexão do **navegador**: o alvo da aba vigiada. Qualquer outra página que
+    /// aparecer (janela nova aberta por script) é fechada antes de carregar.
+    alvo_proprio: Option<String>,
 }
+
+/// O que se barra na rede, decidido na hora, dentro do navegador (`Fetch.requestPaused`), antes
+/// de a requisição sair.
+#[derive(Debug, Clone, Default)]
+pub struct PoliticaDeRede {
+    /// O site em que o usuário aprovou usar a senha enquanto o passo de login roda: nesse
+    /// intervalo, requisição que não seja `GET`/`HEAD` para outro host é barrada.
+    pub host_de_login: Option<String>,
+}
+
+/// A decisão da política para uma requisição: `Some((campo, termo))` se barra.
+///
+/// - qualquer URL que case com a lista de bloqueio (RO-02), seja qual for o método e o tipo;
+/// - documento para um esquema que não é de rede (`file:`, `chrome:`, `ftp:`);
+/// - durante o login, método que muda estado para um host que não é o do login.
+#[must_use]
+pub fn decidir_requisicao(
+    url: &str,
+    metodo: &str,
+    tipo: &str,
+    host_de_login: Option<&str>,
+) -> Option<(String, String)> {
+    let esquema = url
+        .split_once(':')
+        .map_or("", |(e, _)| e)
+        .to_ascii_lowercase();
+    let de_rede = matches!(esquema.as_str(), "http" | "https" | "ws" | "wss");
+    if !de_rede {
+        if tipo == "Document" && !matches!(esquema.as_str(), "about" | "data" | "blob") {
+            return Some(("rede".to_owned(), format!("esquema {esquema}")));
+        }
+        return None;
+    }
+    if let Some(b) = crate::bloqueio::avaliar_url(url) {
+        return Some(("rede".to_owned(), b.termo));
+    }
+    if let Some(login) = host_de_login {
+        let mudanca = !matches!(
+            metodo.to_ascii_uppercase().as_str(),
+            "GET" | "HEAD" | "OPTIONS"
+        );
+        let host = crate::passo::host_de(url);
+        if mudanca && host.as_deref() != Some(login) {
+            return Some((
+                "rede".to_owned(),
+                "envio para outro site durante o login".to_owned(),
+            ));
+        }
+    }
+    None
+}
+
+/// Os tipos de requisição que passam pelo `Fetch`: navegação, XHR, fetch e beacons. Imagens,
+/// scripts e estilos seguem sem pausa (cada pausa custa uma ida e volta).
+const TIPOS_INTERCEPTADOS: &[&str] = &["Document", "XHR", "Fetch", "Ping"];
 
 impl Cdp {
     /// Conecta a um alvo: `ws_url` é o `webSocketDebuggerUrl` (`ws://127.0.0.1:porta/devtools/...`).
@@ -243,6 +312,12 @@ impl Cdp {
             ws: Ws::conectar(porta, &format!("/{caminho}"))?,
             proximo: 1,
             eventos: VecDeque::new(),
+            mundo: None,
+            quadro: None,
+            contexto: None,
+            rede: None,
+            barrados_na_rede: Vec::new(),
+            alvo_proprio: None,
         })
     }
 
@@ -252,22 +327,48 @@ impl Cdp {
     /// # Errors
     /// Erro do Chrome (só o `message`), prazo ou falha de rede.
     pub fn chamar(&mut self, metodo: &str, params: &Value) -> Resultado<Value> {
+        let id = self.enviar_chamada(metodo, params)?;
+        self.esperar_resposta(id, metodo)
+    }
+
+    /// Manda um método e devolve o `id`, sem esperar a resposta (veja [`Self::ler_ate`]).
+    ///
+    /// # Errors
+    /// Falha de rede.
+    pub fn enviar_chamada(&mut self, metodo: &str, params: &Value) -> Resultado<u64> {
         let id = self.proximo;
         self.proximo += 1;
         let msg = json!({"id": id, "method": metodo, "params": params}).to_string();
         self.ws.enviar(msg.as_bytes())?;
-        self.esperar_resposta(id, metodo)
+        Ok(id)
     }
 
     fn esperar_resposta(&mut self, id: u64, metodo: &str) -> Resultado<Value> {
         let limite = Instant::now() + Duration::from_secs(30);
         loop {
-            let resta = limite.saturating_duration_since(Instant::now());
-            if resta.is_zero() {
+            if let Some(r) = self.ler_ate(id, metodo, Duration::from_secs(1))? {
+                return Ok(r);
+            }
+            if Instant::now() >= limite {
                 return Err(erro(format!("o Chrome não respondeu a {metodo}")));
             }
-            let Some(texto) = self.ws.receber(resta.min(Duration::from_secs(1)))? else {
-                continue;
+        }
+    }
+
+    /// Lê por até `prazo` e devolve a resposta do `id`, se ela chegou. Os eventos que passam
+    /// são tratados e guardados.
+    ///
+    /// # Errors
+    /// Erro do Chrome (só o `message`) ou falha de rede.
+    pub fn ler_ate(&mut self, id: u64, metodo: &str, prazo: Duration) -> Resultado<Option<Value>> {
+        let limite = Instant::now() + prazo;
+        loop {
+            let resta = limite.saturating_duration_since(Instant::now());
+            if resta.is_zero() {
+                return Ok(None);
+            }
+            let Some(texto) = self.ws.receber(resta)? else {
+                return Ok(None);
             };
             let v: Value =
                 serde_json::from_str(&texto).map_err(|_| erro("mensagem do CDP ilegível"))?;
@@ -279,10 +380,10 @@ impl Cdp {
                         .unwrap_or("erro do Chrome");
                     return Err(erro(format!("{metodo}: {m}")));
                 }
-                return Ok(v.get("result").cloned().unwrap_or(Value::Null));
+                return Ok(Some(v.get("result").cloned().unwrap_or(Value::Null)));
             }
             if v.get("method").is_some() {
-                self.eventos.push_back(v);
+                self.registrar(v);
             }
         }
     }
@@ -302,9 +403,228 @@ impl Cdp {
                 && let Ok(v) = serde_json::from_str::<Value>(&texto)
                 && v.get("method").is_some()
             {
-                self.eventos.push_back(v);
+                self.registrar(v);
             }
         }
+    }
+
+    /// Trata um evento recebido: acompanha o mundo isolado, responde ao `Fetch` na hora e
+    /// guarda o resto em [`Self::eventos`].
+    fn registrar(&mut self, v: Value) {
+        let metodo = v["method"].as_str().unwrap_or("").to_owned();
+        match metodo.as_str() {
+            "Runtime.executionContextCreated" => {
+                let c = &v["params"]["context"];
+                let do_mundo = self.mundo.as_deref().is_some_and(|m| c["name"] == m);
+                let isolado = c["auxData"]["isDefault"] == false;
+                let do_quadro = match (&self.quadro, c["auxData"]["frameId"].as_str()) {
+                    (Some(q), Some(f)) => q == f,
+                    _ => true,
+                };
+                if do_mundo && isolado && do_quadro {
+                    self.contexto = c["id"].as_i64();
+                }
+            }
+            "Runtime.executionContextDestroyed" => {
+                if v["params"]["executionContextId"].as_i64() == self.contexto {
+                    self.contexto = None;
+                }
+            }
+            "Runtime.executionContextsCleared" => self.contexto = None,
+            "Fetch.requestPaused" => {
+                self.tratar_pedido(&v["params"], v["sessionId"].as_str());
+                return;
+            }
+            "Target.attachedToTarget" => self.anexar_filho(&v["params"]),
+            _ => {}
+        }
+        self.eventos.push_back(v);
+    }
+
+    /// Manda um comando sem esperar a resposta (a do `Fetch` tem de sair na hora, dentro da
+    /// leitura de eventos). A resposta chega depois e é descartada por não ter dono.
+    fn disparar(&mut self, sessao: Option<&str>, metodo: &str, params: &Value) {
+        let id = self.proximo;
+        self.proximo += 1;
+        let mut m = json!({"id": id, "method": metodo, "params": params});
+        if let Some(s) = sessao {
+            m["sessionId"] = json!(s);
+        }
+        let _ = self.ws.enviar(m.to_string().as_bytes());
+    }
+
+    fn tratar_pedido(&mut self, p: &Value, sessao: Option<&str>) {
+        let id = p["requestId"].as_str().unwrap_or("").to_owned();
+        let url = p["request"]["url"].as_str().unwrap_or("");
+        let metodo = p["request"]["method"].as_str().unwrap_or("GET");
+        let tipo = p["resourceType"].as_str().unwrap_or("");
+        let login = self.rede.as_ref().and_then(|r| r.host_de_login.clone());
+        match decidir_requisicao(url, metodo, tipo, login.as_deref()) {
+            Some(b) => {
+                self.barrados_na_rede.push(b);
+                self.disparar(
+                    sessao,
+                    "Fetch.failRequest",
+                    &json!({"requestId": id, "errorReason": "BlockedByClient"}),
+                );
+            }
+            None => self.disparar(sessao, "Fetch.continueRequest", &json!({"requestId": id})),
+        }
+    }
+
+    /// Um alvo novo entrou. Na conexão do navegador, página que não é a nossa (janela aberta
+    /// por script) é fechada antes de carregar; na da aba, um alvo filho (um iframe de outro
+    /// site, que o Chrome roda em outro processo) recebe a mesma política de rede, e só segue
+    /// depois de ligada.
+    fn anexar_filho(&mut self, p: &Value) {
+        let Some(sessao) = p["sessionId"].as_str().map(str::to_owned) else {
+            return;
+        };
+        if let Some(nosso) = self.alvo_proprio.clone() {
+            let info = &p["targetInfo"];
+            if info["type"] == "page"
+                && let Some(id) = info["targetId"].as_str()
+                && id != nosso
+            {
+                self.barrados_na_rede
+                    .push(("rede".to_owned(), "janela nova".to_owned()));
+                self.disparar(None, "Target.closeTarget", &json!({"targetId": id}));
+            }
+            self.disparar(Some(&sessao), "Runtime.runIfWaitingForDebugger", &json!({}));
+            return;
+        }
+        if self.rede.is_some() {
+            self.disparar(
+                Some(&sessao),
+                "Fetch.enable",
+                &json!({"patterns": padroes_do_fetch()}),
+            );
+            self.disparar(
+                Some(&sessao),
+                "Target.setAutoAttach",
+                &json!({"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}),
+            );
+        }
+        self.disparar(Some(&sessao), "Runtime.runIfWaitingForDebugger", &json!({}));
+    }
+
+    /// Liga a política de rede (`Fetch` e anexação automática de iframes de outro site).
+    ///
+    /// # Errors
+    /// Erro do Chrome.
+    pub fn ativar_rede(&mut self) -> Resultado<()> {
+        self.rede = Some(PoliticaDeRede::default());
+        self.chamar("Fetch.enable", &json!({"patterns": padroes_do_fetch()}))?;
+        self.chamar(
+            "Target.setAutoAttach",
+            &json!({"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}),
+        )?;
+        Ok(())
+    }
+
+    /// Na conexão do **navegador**: fecha, antes de carregar, qualquer página que não seja
+    /// `alvo` (a aba vigiada). A janela nova que um script abre não passa pela política de
+    /// rede da aba.
+    ///
+    /// # Errors
+    /// Erro do Chrome.
+    pub fn vigiar_janelas_novas(&mut self, alvo: &str) -> Resultado<()> {
+        self.alvo_proprio = Some(alvo.to_owned());
+        self.chamar(
+            "Target.setAutoAttach",
+            &json!({"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}),
+        )?;
+        Ok(())
+    }
+
+    /// O host do login aprovado enquanto o passo de login roda (`None` fora dele).
+    pub fn definir_host_de_login(&mut self, host: Option<String>) {
+        if let Some(r) = &mut self.rede {
+            r.host_de_login = host;
+        }
+    }
+
+    /// Escolhe o mundo isolado em que o SBF lê a página, no quadro principal `quadro`.
+    pub fn definir_mundo(&mut self, nome: &str, quadro: &str) {
+        self.mundo = Some(nome.to_owned());
+        self.quadro = Some(quadro.to_owned());
+        self.contexto = None;
+    }
+
+    /// O quadro principal da aba e a URL **que o navegador carregou** nele (do próprio
+    /// Chrome, nunca de JavaScript da página).
+    ///
+    /// # Errors
+    /// Erro do Chrome.
+    pub fn quadro_principal(&mut self) -> Resultado<(String, String)> {
+        let r = self.chamar("Page.getFrameTree", &json!({}))?;
+        let f = &r["frameTree"]["frame"];
+        let id = f["id"]
+            .as_str()
+            .ok_or_else(|| erro("o Chrome não informou o quadro principal"))?
+            .to_owned();
+        let url = f["url"].as_str().unwrap_or("").to_owned();
+        let fragmento = f["urlFragment"].as_str().unwrap_or("");
+        Ok((id, format!("{url}{fragmento}")))
+    }
+
+    fn contexto_isolado(&mut self) -> Resultado<i64> {
+        if self.contexto.is_none() {
+            // eventos que já chegaram e ainda não foram lidos
+            self.bombear(Duration::from_millis(1))?;
+        }
+        if let Some(c) = self.contexto {
+            return Ok(c);
+        }
+        let (Some(quadro), Some(nome)) = (self.quadro.clone(), self.mundo.clone()) else {
+            return Err(erro("o mundo isolado não foi preparado"));
+        };
+        let r = self.chamar(
+            "Page.createIsolatedWorld",
+            &json!({"frameId": quadro, "worldName": nome, "grantUniveralAccess": false}),
+        )?;
+        let id = r["executionContextId"]
+            .as_i64()
+            .ok_or_else(|| erro("o Chrome não criou o mundo isolado"))?;
+        self.contexto = Some(id);
+        Ok(id)
+    }
+
+    /// `Runtime.evaluate` **no mundo isolado** do SBF: a página não vê o que roda lá e não
+    /// troca os protótipos que o script usa. É daqui que sai tudo o que decide algo (o
+    /// elemento, o campo, o que a IA lê).
+    ///
+    /// # Errors
+    /// Erro do Chrome ou exceção no script.
+    pub fn avaliar_isolado(&mut self, expressao: &str) -> Resultado<Value> {
+        let mut ultima = erro("o mundo isolado não respondeu");
+        for _ in 0..3 {
+            let contexto = match self.contexto_isolado() {
+                Ok(c) => c,
+                Err(e) => {
+                    ultima = e;
+                    continue;
+                }
+            };
+            match self.chamar(
+                "Runtime.evaluate",
+                &json!({"expression": expressao, "returnByValue": true,
+                        "awaitPromise": false, "contextId": contexto}),
+            ) {
+                Ok(r) => {
+                    if r.get("exceptionDetails").is_some() {
+                        return Err(erro("o script do SBF lançou uma exceção"));
+                    }
+                    return Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null));
+                }
+                Err(e) => {
+                    // o contexto morreu numa navegação: recria e tenta de novo
+                    self.contexto = None;
+                    ultima = e;
+                }
+            }
+        }
+        Err(ultima)
     }
 
     /// `Runtime.evaluate` de uma expressão que devolve JSON (`returnByValue`).
@@ -346,6 +666,15 @@ impl Cdp {
     }
 }
 
+fn padroes_do_fetch() -> Value {
+    Value::Array(
+        TIPOS_INTERCEPTADOS
+            .iter()
+            .map(|t| json!({"urlPattern": "*", "resourceType": t, "requestStage": "Request"}))
+            .collect(),
+    )
+}
+
 /// Escapa `texto` como conteúdo de string JSON, acrescentando a `saida`.
 fn escapar_json(texto: &str, saida: &mut String) {
     for c in texto.chars() {
@@ -367,6 +696,26 @@ fn escapar_json(texto: &str, saida: &mut String) {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn a_politica_de_rede_barra_a_lista_o_envio_de_login_e_esquemas_de_arquivo() {
+        // a lista de bloqueio vale para qualquer método e tipo
+        assert!(decidir_requisicao("https://b.example/api/pagar", "POST", "Fetch", None).is_some());
+        assert!(
+            decidir_requisicao("https://b.example/transferir", "GET", "Document", None).is_some()
+        );
+        assert!(decidir_requisicao("https://b.example/extrato", "GET", "Document", None).is_none());
+        // no login, envio que muda estado só para o host aprovado
+        let login = Some("b.example");
+        assert!(decidir_requisicao("https://b.example/login", "POST", "Document", login).is_none());
+        assert!(decidir_requisicao("https://evil.example/c", "POST", "Fetch", login).is_some());
+        assert!(decidir_requisicao("https://evil.example/c", "GET", "Document", login).is_none());
+        // fora do login, POST comum passa
+        assert!(decidir_requisicao("https://evil.example/c", "POST", "Fetch", None).is_none());
+        // esquemas que não são de rede
+        assert!(decidir_requisicao("file:///etc/passwd", "GET", "Document", None).is_some());
+        assert!(decidir_requisicao("data:text/plain,oi", "GET", "Document", None).is_none());
+    }
 
     #[test]
     fn escapar_json_confere_com_serde() {

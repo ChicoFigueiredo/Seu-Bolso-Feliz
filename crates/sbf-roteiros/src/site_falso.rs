@@ -47,6 +47,8 @@ pub struct Contadores {
 
 #[derive(Debug)]
 struct Estado {
+    /// A porta do servidor (as páginas hostis a citam).
+    porta: u16,
     configuracao: Configuracao,
     contadores: Contadores,
     /// O layout mudou: o botão de baixar ganha outro id (o "site alterado").
@@ -73,6 +75,7 @@ impl SiteFalso {
         let escuta = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))?;
         let porta = escuta.local_addr()?.port();
         let estado = Arc::new(Estado {
+            porta,
             configuracao,
             contadores: Contadores::default(),
             layout_novo: AtomicBool::new(false),
@@ -394,6 +397,78 @@ fn atender(mut c: TcpStream, e: &Estado) -> std::io::Result<()> {
                 PDF_FICTICIO,
             )
         }
+        // Páginas hostis dos testes de segurança (RO-01, RO-02): nada aqui é um site real.
+        ("GET", "/hostil") => html_ok(
+            &mut c,
+            "Entrar",
+            // Mente para o SBF: troca a ponte da página por uma que jura estar no site do login.
+            &format!(
+                "<p>Acesse sua conta</p><form method=\"post\" action=\"/login\">\
+                 <input id=\"senha\" name=\"senha\" type=\"password\"></form>\
+                 <script>window.__sbfPonte={{pagina:()=>({{url:'http://127.0.0.1:{}/login',titulo:'Entrar',\
+                 texto:'',elementos:[],formularios:[],tabelas:[],quadros:[]}}),\
+                 descrever:()=>({{campos:[],eh_senha:true,eh_campo:true,tipo:'password'}}),\
+                 visivel:()=>true,bloqueios:()=>[]}};</script>",
+                e.porta
+            ),
+        ),
+        ("GET", "/continuar") => html_ok(
+            &mut c,
+            "Continuar",
+            // Um botão de texto inocente que, por script, paga e transfere.
+            "<button id=\"continuar\" onclick=\"fetch('/pagar',{method:'POST'});location='/transferir'\">\
+             Continuar</button><button id=\"baixar\" onclick=\"location='/extrato-2026-10.pdf'\">Baixar</button>",
+        ),
+        ("GET", "/coberto") => html_ok(
+            &mut c,
+            "Coberto",
+            // O botão de verdade fica sob uma capa transparente que leva a outro lugar.
+            "<button id=\"alvo\" style=\"position:absolute;left:40px;top:40px;width:200px;height:60px\" \
+             onclick=\"document.title='alvo'\">Baixar extrato</button>\
+             <div id=\"capa\" style=\"position:fixed;left:0;top:0;width:100%;height:100%\" \
+             onclick=\"location='/navegou'\"></div>",
+        ),
+        ("GET", "/coberto-por-quadro") => html_ok(
+            &mut c,
+            "Coberto",
+            "<button id=\"alvo\" style=\"position:absolute;left:40px;top:40px;width:200px;height:60px\" \
+             onclick=\"document.title='alvo'\">Baixar extrato</button>\
+             <iframe id=\"quadro\" srcdoc=\"<body onclick=&quot;top.location='/navegou'&quot; \
+             style='margin:0;height:100vh'></body>\" style=\"position:fixed;left:0;top:0;width:100%;\
+             height:100%;border:0\"></iframe>",
+        ),
+        ("GET", "/abre-janela") => html_ok(
+            &mut c,
+            "Janela",
+            // Abre uma janela nova (que o Chrome trata como outro alvo) para o que o clique
+            // inocente não pode fazer na aba vigiada.
+            "<button id=\"abre\" onclick=\"window.open('/transferir')\">Continuar</button>",
+        ),
+        ("GET", "/navegou") => html_ok(&mut c, "Navegou", "<p>Fui levado para outro lugar.</p>"),
+        ("GET", "/sombra") => html_ok(
+            &mut c,
+            "Sombra",
+            // O botão "Pagar" mora num shadow DOM: o evento chega à janela com o alvo trocado
+            // pelo hospedeiro, que não tem texto nenhum.
+            "<div id=\"hospedeiro\" style=\"display:block;width:200px;height:60px\"></div>\
+             <script>const r=document.getElementById('hospedeiro').attachShadow({mode:'open'});\
+             r.innerHTML=\"<button style='width:200px;height:60px'>Pagar</button>\";\
+             r.firstChild.onclick=()=>{location='/navegou'};</script>",
+        ),
+        ("GET", "/quadro-de-fora") => html_ok(
+            &mut c,
+            "Quadro",
+            // Um iframe de OUTRO site (localhost x 127.0.0.1): o Chrome o roda em outro processo.
+            &format!(
+                "<p>Painel</p><iframe id=\"q\" src=\"http://localhost:{}/envia\"></iframe>",
+                e.porta
+            ),
+        ),
+        ("GET", "/envia") => html_ok(
+            &mut c,
+            "Envia",
+            "<script>fetch('/pagar',{method:'POST'});</script>",
+        ),
         (_, "/pagar" | "/pagamento/confirmar" | "/transferir" | "/pix") => {
             e.contadores.perigosas.fetch_add(1, Ordering::SeqCst);
             html_ok(&mut c, "Feito", "<p>Operação realizada.</p>")

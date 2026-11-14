@@ -3,10 +3,18 @@
 //! - Abre o Chrome pela regra única de processo externo (`sbf-processo`: caminho absoluto de
 //!   confiança, ambiente mínimo), com `--remote-debugging-port=0` e a porta lida do
 //!   `DevToolsActivePort` do perfil. O CDP só escuta em `127.0.0.1`.
-//! - Injeta a ponte ([`crate::bloqueio::script_da_ponte`]) em todo documento novo: ela barra
-//!   clique e envio perigosos na fase de captura e entrega a página simplificada.
-//! - O clique é de verdade (`Input.dispatchMouseEvent` no centro do elemento). A senha só passa
-//!   por [`crate::cdp::Cdp::inserir_texto_secreto`].
+//! - Injeta a ponte ([`crate::bloqueio::script_da_ponte`]) em todo documento novo, em **dois
+//!   mundos**: no mundo isolado `sbf` (de onde o SBF lê tudo o que decide algo: o elemento, o
+//!   campo, a página que a IA vê) e no mundo principal (só para barrar cedo o clique e o
+//!   envio). A página é hostil: o que ela disser em JavaScript (`window.__sbfPonte`, a URL
+//!   que ela jura ter) nunca entra numa decisão. A URL do alvo vem do **Chrome**
+//!   (`Page.getFrameTree`), não da página.
+//! - A rede é vigiada pelo `Fetch` (documento, XHR, fetch e beacons, também nos iframes de
+//!   outro site): URL da lista de bloqueio nunca sai, e durante o passo de login só sai envio
+//!   que muda estado para o host aprovado.
+//! - O clique é de verdade (`Input.dispatchMouseEvent` no centro do elemento), depois de
+//!   conferir com `elementFromPoint` que o ponto é do elemento (nada o cobre). A senha só
+//!   passa por [`crate::cdp::Cdp::inserir_texto_secreto`].
 
 use crate::bloqueio::{Bloqueio, Candidato, script_da_ponte};
 use crate::cdp::{Cdp, http_json};
@@ -18,6 +26,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
+
+/// O nome do mundo isolado do SBF.
+const MUNDO: &str = "sbf";
 
 fn erro(m: impl Into<String>) -> ErroDeRoteiro {
     ErroDeRoteiro::Navegador(m.into())
@@ -198,16 +209,28 @@ impl Chrome {
             }
             std::thread::sleep(Duration::from_millis(100));
         };
-        let navegador = Cdp::conectar(&ws_navegador)?;
+        let mut navegador = Cdp::conectar(&ws_navegador)?;
+        // O alvo da aba é o último pedaço do endereço (`/devtools/page/<id>`).
+        let alvo = ws_pagina.rsplit('/').next().unwrap_or("").to_owned();
+        navegador.vigiar_janelas_novas(&alvo)?;
         let mut pagina = Cdp::conectar(&ws_pagina)?;
         pagina.chamar("Page.enable", &json!({}))?;
         pagina.chamar("Runtime.enable", &json!({}))?;
+        let (quadro, _) = pagina.quadro_principal()?;
+        pagina.definir_mundo(MUNDO, &quadro);
         pagina.chamar("Runtime.addBinding", &json!({"name": "sbfBloqueio"}))?;
         let ponte = script_da_ponte();
+        // O mundo isolado primeiro: o ouvinte dele é o primeiro da fila de captura.
+        pagina.chamar(
+            "Page.addScriptToEvaluateOnNewDocument",
+            &json!({"source": ponte, "worldName": MUNDO}),
+        )?;
         pagina.chamar(
             "Page.addScriptToEvaluateOnNewDocument",
             &json!({"source": ponte}),
         )?;
+        pagina.ativar_rede()?;
+        pagina.avaliar_isolado(&ponte)?;
         pagina.avaliar(&ponte)?;
         Ok((pagina, navegador, ws_pagina))
     }
@@ -239,7 +262,10 @@ impl Chrome {
         loop {
             self.pagina.bombear(Duration::from_millis(100))?;
             self.absorver_eventos();
-            let pronto = self.pagina.avaliar("document.readyState")?;
+            let pronto = self
+                .pagina
+                .avaliar_isolado("document.readyState")
+                .unwrap_or(Value::Null);
             if pronto == "complete" {
                 // um instante para a ponte do novo documento e a navegação pendente
                 std::thread::sleep(Duration::from_millis(80));
@@ -254,6 +280,12 @@ impl Chrome {
     /// Passa os eventos de bloqueio da fila para `barrados`; devolve se houve navegação.
     fn absorver_eventos(&mut self) -> bool {
         let mut navegou = false;
+        // A conexão do navegador só é lida aqui: é onde se fecha a janela nova antes de ela
+        // carregar.
+        let _ = self.navegador.bombear(Duration::from_millis(1));
+        for (campo, termo) in self.navegador.barrados_na_rede.drain(..) {
+            self.barrados.push(Bloqueio { campo, termo });
+        }
         while let Some(e) = self.pagina.eventos.pop_front() {
             match e["method"].as_str() {
                 Some("Runtime.bindingCalled") if e["params"]["name"] == "sbfBloqueio" => {
@@ -271,6 +303,10 @@ impl Chrome {
                 _ => {}
             }
         }
+        // O que a política de rede barrou (vem de dentro do navegador, não da página).
+        for (campo, termo) in self.pagina.barrados_na_rede.drain(..) {
+            self.barrados.push(Bloqueio { campo, termo });
+        }
         navegou
     }
 
@@ -283,27 +319,53 @@ impl Chrome {
         Ok(())
     }
 
+    /// Chama a ponte **no mundo isolado**. Se o documento ainda não a tem (página de erro,
+    /// `about:blank`, mundo recriado), injeta e tenta de novo.
     fn ponte(&mut self, chamada: &str) -> Resultado<Value> {
-        let expr = format!("(window.__sbfPonte ? window.__sbfPonte.{chamada} : null)");
-        let v = self.pagina.avaliar(&expr)?;
-        if v.is_null() && self.pagina.avaliar("!!window.__sbfPonte")? == Value::Bool(false) {
-            // documento sem a ponte (página de erro, about:blank): injeta e tenta de novo
-            self.pagina.avaliar(&script_da_ponte())?;
-            return self.pagina.avaliar(&expr);
+        let expr = format!(
+            "(()=>{{const p=window.__sbfPonte;return p?{{ok:true,v:p.{chamada}}}:{{ok:false}}}})()"
+        );
+        for _ in 0..2 {
+            let r = self.pagina.avaliar_isolado(&expr)?;
+            if r["ok"] == Value::Bool(true) {
+                return Ok(r["v"].clone());
+            }
+            self.pagina.avaliar_isolado(&script_da_ponte())?;
         }
-        Ok(v)
+        Err(erro("a ponte do SBF não subiu na página"))
+    }
+
+    /// Uma chamada da aba que um clique pode travar (`window.open` espera a janela nova, que o
+    /// Chrome segura até alguém responder): enquanto espera, atende a conexão do navegador,
+    /// que fecha a janela.
+    fn chamar_atendendo_janelas(&mut self, metodo: &str, params: &Value) -> Resultado<Value> {
+        let id = self.pagina.enviar_chamada(metodo, params)?;
+        let limite = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(r) = self.pagina.ler_ate(id, metodo, Duration::from_millis(40))? {
+                return Ok(r);
+            }
+            let _ = self.navegador.bombear(Duration::from_millis(2));
+            if Instant::now() >= limite {
+                return Err(erro(format!("o Chrome não respondeu a {metodo}")));
+            }
+        }
+    }
+
+    /// A URL que o **Chrome** carregou no quadro principal. É a única em que o executor
+    /// confia para decidir onde a senha pode ir.
+    fn url_confiavel(&mut self) -> Resultado<String> {
+        Ok(self.pagina.quadro_principal()?.1)
     }
 
     fn focar(&mut self, seletor: &str) -> Resultado<()> {
-        let s = literal(seletor);
-        let ok = self.pagina.avaliar(&format!(
-            "(()=>{{const e=document.querySelector({s});if(!e)return false;e.scrollIntoView({{block:'center'}});\
-             e.focus();if(e.select)e.select();return true}})()"
-        ))?;
+        let ok = self.ponte(&format!("focarCampo({})", literal(seletor)))?;
         if ok == Value::Bool(true) {
             Ok(())
         } else {
-            Err(erro("o campo não existe"))
+            Err(erro(
+                "o campo não existe ou não ficou com o foco (a página o tirou dele)",
+            ))
         }
     }
 }
@@ -327,6 +389,7 @@ impl Navegador for Chrome {
         if v.is_null() {
             return Ok(None);
         }
+        let tipo = v["tipo"].as_str().unwrap_or("").to_owned();
         let campos = v["campos"]
             .as_array()
             .map(|a| {
@@ -344,18 +407,18 @@ impl Navegador for Chrome {
             campos,
             eh_senha: v["eh_senha"] == Value::Bool(true),
             eh_campo: v["eh_campo"] == Value::Bool(true),
+            tipo,
         }))
     }
 
     fn clicar(&mut self, seletor: &str) -> Resultado<()> {
-        let s = literal(seletor);
-        let centro = self.pagina.avaliar(&format!(
-            "(()=>{{const e=document.querySelector({s});if(!e)return null;e.scrollIntoView({{block:'center'}});\
-             const r=e.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]}})()"
-        ))?;
+        let alvo = self.ponte(&format!("alvoDeClique({})", literal(seletor)))?;
+        if let Some(e) = alvo.get("erro").and_then(Value::as_str) {
+            return Err(erro(e));
+        }
         let (Some(x), Some(y)) = (
-            centro.get(0).and_then(Value::as_f64),
-            centro.get(1).and_then(Value::as_f64),
+            alvo.get("x").and_then(Value::as_f64),
+            alvo.get("y").and_then(Value::as_f64),
         ) else {
             return Err(erro("o elemento não existe"));
         };
@@ -365,7 +428,7 @@ impl Navegador for Chrome {
             ("mousePressed", "left", 1),
             ("mouseReleased", "left", 1),
         ] {
-            self.pagina.chamar(
+            self.chamar_atendendo_janelas(
                 "Input.dispatchMouseEvent",
                 &json!({"type": tipo, "x": x, "y": y, "button": botao, "clickCount": cliques}),
             )?;
@@ -419,11 +482,13 @@ impl Navegador for Chrome {
                         && !nome.ends_with(".tmp")
                 });
             if let Some(p) = novo {
-                // espera o tamanho estabilizar
-                let t1 = std::fs::metadata(&p)?.len();
-                std::thread::sleep(Duration::from_millis(250));
-                if std::fs::metadata(&p)?.len() == t1 {
-                    return Ok(p);
+                // espera o tamanho estabilizar; o Chrome renomeia o arquivo ao terminar, e um
+                // nome que some no meio da conferência é só "ainda não terminou"
+                if let Ok(t1) = std::fs::metadata(&p).map(|m| m.len()) {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if std::fs::metadata(&p).map(|m| m.len()).ok() == Some(t1) {
+                        return Ok(p);
+                    }
                 }
             }
             if Instant::now() >= limite {
@@ -433,11 +498,7 @@ impl Navegador for Chrome {
     }
 
     fn ler_tabela(&mut self, seletor: &str) -> Resultado<Vec<Vec<String>>> {
-        let s = literal(seletor);
-        let v = self.pagina.avaliar(&format!(
-            "(()=>{{const t=document.querySelector({s});if(!t)return null;\
-             return Array.from(t.rows).map(r=>Array.from(r.cells).map(c=>c.innerText.trim()))}})()"
-        ))?;
+        let v = self.ponte(&format!("tabela({})", literal(seletor)))?;
         let linhas = v.as_array().ok_or_else(|| erro("a tabela não existe"))?;
         Ok(linhas
             .iter()
@@ -455,30 +516,36 @@ impl Navegador for Chrome {
 
     fn pagina(&mut self) -> Resultado<Pagina> {
         let v = self.ponte("pagina()")?;
-        if v.is_null() {
-            return Ok(Pagina::default());
-        }
-        serde_json::from_value(v).map_err(|_| erro("a página simplificada veio malformada"))
+        let mut p: Pagina = if v.is_null() {
+            Pagina::default()
+        } else {
+            serde_json::from_value(v).map_err(|_| erro("a página simplificada veio malformada"))?
+        };
+        // A URL é a que o Chrome carregou, não a que o JavaScript da página informa.
+        p.url = self.url_confiavel()?;
+        Ok(p)
     }
 
     fn bloqueios(&mut self) -> Resultado<Vec<Bloqueio>> {
         self.pagina.bombear(Duration::from_millis(30))?;
         self.absorver_eventos();
-        // Reserva: o que a ponte guardou na própria página.
-        if self.barrados.is_empty() {
-            let v = self.pagina.avaliar(
-                "(()=>{const b=window.__sbfBloqueios||[];window.__sbfBloqueios=[];return b})()",
-            )?;
-            if let Some(a) = v.as_array() {
-                for b in a {
-                    self.barrados.push(Bloqueio {
-                        campo: b["campo"].as_str().unwrap_or("").to_owned(),
-                        termo: b["termo"].as_str().unwrap_or("").to_owned(),
-                    });
-                }
+        // Reserva: o que a ponte do mundo isolado guardou.
+        if self.barrados.is_empty()
+            && let Ok(v) = self.ponte("pegarBloqueios()")
+            && let Some(a) = v.as_array()
+        {
+            for b in a {
+                self.barrados.push(Bloqueio {
+                    campo: b["campo"].as_str().unwrap_or("").to_owned(),
+                    termo: b["termo"].as_str().unwrap_or("").to_owned(),
+                });
             }
         }
         Ok(std::mem::take(&mut self.barrados))
+    }
+
+    fn fase_de_login(&mut self, host: Option<&str>) {
+        self.pagina.definir_host_de_login(host.map(str::to_owned));
     }
 
     fn trazer_para_frente(&mut self) {

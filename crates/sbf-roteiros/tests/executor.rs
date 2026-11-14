@@ -655,3 +655,37 @@ fn ro_02_cair_numa_pagina_de_pagamento_por_redirecionamento_aborta() {
     );
     assert!(!nav.chamadas.iter().any(|c| c.starts_with("baixar")));
 }
+
+#[test]
+fn ro_02_o_executor_marca_a_fase_de_login_ao_digitar_e_a_encerra_no_clique() {
+    let d = tempfile::tempdir().unwrap();
+    let mut nav = site(false);
+    let passos = vec![
+        Passo::Navegar {
+            url: "http://127.0.0.1:1/login".into(),
+        },
+        Passo::PreencherCpf {
+            seletor: "#cpf".into(),
+            host: Some("127.0.0.1".into()),
+        },
+        Passo::PreencherSenha {
+            seletor: "#senha".into(),
+            rotulo: "banco-ficticio".into(),
+            host: Some("127.0.0.1".into()),
+        },
+        Passo::Clicar {
+            seletor: "#entrar".into(),
+        },
+    ];
+    let r = rodar(&mut nav, passos, &PausaFalsa::default(), d.path());
+    assert_eq!(r.rel.fim, Fim::Concluida);
+    assert_eq!(
+        nav.fases_de_login,
+        vec![
+            None, // navegar
+            Some("127.0.0.1".to_owned()),
+            Some("127.0.0.1".to_owned()),
+            None, // o clique que envia o login
+        ]
+    );
+}
