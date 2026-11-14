@@ -54,6 +54,9 @@ pub enum Acao {
     Responder {
         resposta: String,
     },
+    // Envio ao servidor (spec 08): o servidor aceitou o documento. O alvo é um registro
+    // aprovado (vira `promovido`, terminal) ou o lote (ganha `promovido_em`).
+    Promover,
     // PDF protegido (spec 06, item 6): só com a confirmação do usuário.
     /// O alvo é o fornecedor. `tipo_de_documento` é o tipo do achado, ou `*` para todos.
     GuardarRegraDeSenha {

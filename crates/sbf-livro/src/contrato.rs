@@ -472,7 +472,7 @@ fn todas<'a, L: 'a, T>(linhas: &'a [L], f: impl Fn(&'a L) -> Resultado<T>) -> Re
 }
 
 /// Acrescenta as linhas de uma coleção ao livro. Coleções sem regra no livro (apelidos,
-/// contratos, documentos) são ignoradas aqui; a estação as guarda à parte.
+/// contratos, documentos, rascunhos) são ignoradas aqui; a estação as guarda à parte.
 pub fn acrescentar(livro: &mut LivroCaixa, linhas: &LinhasDaColecao) -> Resultado<()> {
     match linhas {
         LinhasDaColecao::Instituicoes(v) => {
@@ -517,7 +517,9 @@ pub fn acrescentar(livro: &mut LivroCaixa, linhas: &LinhasDaColecao) -> Resultad
         }
         LinhasDaColecao::Apelidos(_)
         | LinhasDaColecao::Contratos(_)
-        | LinhasDaColecao::Documentos(_) => {}
+        | LinhasDaColecao::Documentos(_)
+        | LinhasDaColecao::LotesDeRascunhos(_)
+        | LinhasDaColecao::Rascunhos(_) => {}
     }
     Ok(())
 }

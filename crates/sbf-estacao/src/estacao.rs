@@ -13,6 +13,7 @@
 use crate::alteracoes;
 use crate::cache::{CacheDoLivro, apagar_arquivos};
 use crate::credencial::{CredencialDaEstacao, GuardaDeCredencial};
+use crate::escrita::{ErroDeEscrita, Escrita, Escritas, LoteNaCaixa, ResultadoDeEscrita};
 use crate::pareamento::Pareador;
 use crate::servidor::{ClienteDoServidor, Servidor};
 use crate::sincronizacao::{Desfecho, Sincronizador, estacao_da_janela};
@@ -21,7 +22,7 @@ use bancada_rede::{
     Catalogo, ConfiguracaoDaRede, ErroDeRede, Instante, ProvedorOAuth, Rede, Relogio,
     RelogioDoSistema,
 };
-use sbf_contrato::VERSAO_DO_CONTRATO;
+use sbf_contrato::{Acao, Colecao, Id, VERSAO_DO_CONTRATO};
 use sbf_inventario::alteracao::{
     Alteracao, Alteracoes, ErroDeAlteracao, Estacao, EstadoDaRede, EstadoDaSincronizacao,
     OpcaoDeCategoria, PedidoDeAlteracao, ResultadoDeAlteracao, Sincronizacao, Troca,
@@ -236,6 +237,12 @@ impl EstacaoLocal {
                 .and_then(|t| t.fim.clone());
             comum.esta_estacao = esta_estacao(cache);
         }
+    }
+
+    /// O cliente do servidor (clone barato), para rodar fora do quadro o que bloqueia, como
+    /// [`crate::enviar_lote`].
+    pub fn cliente(&self) -> ClienteDoServidor {
+        self.cliente.clone()
     }
 
     pub fn configuracao(&self) -> &ConfiguracaoDaEstacao {
@@ -542,5 +549,67 @@ impl Alteracoes for EstacaoLocal {
             Some(c) => alteracoes::categorias(c),
             None => Ok(Vec::new()),
         }
+    }
+}
+
+impl EstacaoLocal {
+    fn cache_para_escrever_v2(&mut self) -> ResultadoDeEscrita<&mut CacheDoLivro> {
+        if travar(&self.comum).revogada {
+            return Err(ErroDeEscrita::EstacaoRevogada);
+        }
+        let versao = self.config.servidor.versao_do_contrato();
+        self.abrir_cache();
+        let cache = self
+            .cache
+            .as_mut()
+            .ok_or_else(|| ErroDeEscrita::Local("ainda não há cópia do livro-caixa".to_owned()))?;
+        if cache
+            .estado_do_servidor()?
+            .is_some_and(|e| e.contrato > versao)
+        {
+            return Err(ErroDeEscrita::ContratoMaisNovo);
+        }
+        Ok(cache)
+    }
+}
+
+impl Escritas for EstacaoLocal {
+    fn caixa_de_entrada(&self, so_a_decidir: bool) -> ResultadoDeEscrita<Vec<LoteNaCaixa>> {
+        match &self.cache {
+            Some(c) => Ok(c.caixa_de_entrada(so_a_decidir)?),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn enfileirar(&mut self, acao: Acao) -> ResultadoDeEscrita<Escrita> {
+        let agora = self.agora();
+        self.cache_para_escrever_v2()?.enfileirar(acao, &agora)
+    }
+
+    fn escritas(&self, so_em_aberto: bool) -> ResultadoDeEscrita<Vec<Escrita>> {
+        let Some(cache) = &self.cache else {
+            return Ok(Vec::new());
+        };
+        Ok(cache
+            .escritas()?
+            .into_iter()
+            .filter(|e| !so_em_aberto || e.estado.em_aberto())
+            .collect())
+    }
+
+    fn pendentes(&self) -> ResultadoDeEscrita<std::collections::HashSet<(Colecao, Id)>> {
+        match &self.cache {
+            Some(c) => Ok(c.itens_pendentes()?),
+            None => Ok(Default::default()),
+        }
+    }
+
+    fn refazer_escrita(&mut self, id: Id) -> ResultadoDeEscrita<Escrita> {
+        let agora = self.agora();
+        self.cache_para_escrever_v2()?.refazer_escrita(id, &agora)
+    }
+
+    fn descartar_escrita(&mut self, id: Id) -> ResultadoDeEscrita<()> {
+        self.cache_para_escrever_v2()?.descartar_escrita(id)
     }
 }

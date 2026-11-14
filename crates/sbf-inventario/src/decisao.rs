@@ -310,6 +310,22 @@ pub(crate) fn efeitos_da_acao(
             };
             um(campo::ESTADO, json!({"estado": estado}))
         }
+        (Acao::Promover, AlvoTipo::Registro) => match estado_do_registro(tx, id)?.as_str() {
+            // Já promovido: nada a gravar (o envio de um lote retoma sem repetir decisão).
+            "promovido" => Ok(vec![]),
+            "aprovado" => um(campo::ESTADO, json!({"estado": "promovido"})),
+            _ => Err(nao()),
+        },
+        (Acao::Promover, AlvoTipo::Lote) => {
+            let ja: Option<String> =
+                tx.query_row("SELECT promovido_em FROM lote WHERE id = ?1", [id], |l| {
+                    l.get(0)
+                })?;
+            if ja.is_some() {
+                return Ok(vec![]);
+            }
+            um(campo::PROMOVIDO_EM, json!({"promovido_em": em}))
+        }
         (Acao::Responder { resposta }, AlvoTipo::Pendencia) => {
             Ok(vec![pendencia::responder(id, resposta, em)])
         }

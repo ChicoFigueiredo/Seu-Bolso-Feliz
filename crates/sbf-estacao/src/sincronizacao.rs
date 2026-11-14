@@ -15,10 +15,11 @@
 use crate::alteracoes::aplicar_resposta;
 use crate::cache::{CacheDoLivro, ErroDoCache, apagar_arquivos};
 use crate::credencial::GuardaDeCredencial;
+use crate::escrita::EstadoDaEscrita;
 use crate::servidor::{ClienteDoServidor, ErroDoServidor};
 use crate::texto::instante_iso;
 use bancada_rede::Relogio;
-use sbf_contrato::{Colecao, Estacao, Estado, Id};
+use sbf_contrato::{CodigoDeErro, Colecao, Estacao, Estado, Id};
 use sbf_inventario::alteracao::{EstadoDaAlteracao, Troca};
 use std::cmp::Ordering;
 use std::path::Path;
@@ -176,8 +177,12 @@ impl Sincronizador<'_> {
         let so_leitura = estado.contrato > self.cliente.servidor().versao_do_contrato();
 
         // As alterações só vão se a fila é desta mesma estação e o servidor não é mais novo.
+        let v2 = self.cliente.servidor().versao_do_contrato() >= 2;
         if !so_leitura && !outra_estacao {
             self.enviar_alteracoes(cache, contas)?;
+            if v2 {
+                self.enviar_escritas(cache, contas)?;
+            }
         }
         for estacao in cache.revogacoes_pedidas()? {
             if let Ok(id) = estacao.parse::<Id>() {
@@ -189,24 +194,54 @@ impl Sincronizador<'_> {
             cache.esquecer_revogacao(&estacao)?;
         }
 
-        let etags = if outra_estacao {
-            Default::default()
-        } else {
-            cache.etags()?
-        };
-        let mut novas = Vec::new();
-        for colecao in Colecao::TODAS {
-            if let Some(nova) = self
-                .cliente
-                .colecao(colecao, etags.get(&colecao).map(String::as_str))?
-            {
-                contas.colecoes.push(colecao.caminho().to_owned());
-                novas.push((nova.linhas, nova.etag));
+        let copia_de;
+        if v2 {
+            // Contrato v2: o que mudou desde o cursor de cada coleção (sem cursor, a coleção
+            // inteira).
+            let cursores = if outra_estacao {
+                Default::default()
+            } else {
+                cache.cursores()?
+            };
+            let mut deltas = Vec::with_capacity(Colecao::TODAS.len());
+            for colecao in Colecao::TODAS {
+                let delta = self.cliente.delta(colecao, cursores.get(&colecao))?;
+                if delta.completo || delta.linhas.quantas() > 0 || !delta.excluidas.is_empty() {
+                    contas.colecoes.push(colecao.caminho().to_owned());
+                }
+                deltas.push(delta);
             }
+            copia_de = self.agora();
+            let linhas = cache.trocar_com_deltas(&estado, &deltas, &copia_de)?;
+            contas.linhas = i64::try_from(linhas).unwrap_or(i64::MAX);
+            // O que o usuário fez e o servidor ainda não aceitou continua visível.
+            cache
+                .reaplicar_escritas()
+                .map_err(|e| Parada::Cache(ErroDoCache(e.to_string())))?;
+        } else {
+            let etags = if outra_estacao {
+                Default::default()
+            } else {
+                cache.etags()?
+            };
+            let versao = self.cliente.servidor().versao_do_contrato();
+            let mut novas = Vec::new();
+            for colecao in Colecao::TODAS
+                .into_iter()
+                .filter(|c| c.desde_a_versao() <= versao)
+            {
+                if let Some(nova) = self
+                    .cliente
+                    .colecao(colecao, etags.get(&colecao).map(String::as_str))?
+                {
+                    contas.colecoes.push(colecao.caminho().to_owned());
+                    novas.push((nova.linhas, nova.etag));
+                }
+            }
+            copia_de = self.agora();
+            let linhas = cache.trocar(&estado, &novas, &copia_de)?;
+            contas.linhas = i64::try_from(linhas).unwrap_or(i64::MAX);
         }
-        let copia_de = self.agora();
-        let linhas = cache.trocar(&estado, &novas, &copia_de)?;
-        contas.linhas = i64::try_from(linhas).unwrap_or(i64::MAX);
 
         let estacoes = self.cliente.estacoes()?;
         cache.gravar_estacoes(&estacoes)?;
@@ -219,6 +254,49 @@ impl Sincronizador<'_> {
             regras_mais_novas,
             so_leitura,
         })
+    }
+
+    /// As escritas da fila nova (contrato v2), da mais antiga para a mais nova. A rede que cai
+    /// para a troca no ponto em que estava: o que não foi respondido continua Aguardando e
+    /// vai de novo com o mesmo id.
+    fn enviar_escritas(&self, cache: &mut CacheDoLivro, contas: &mut Contas) -> Result<(), Parada> {
+        let fila: Vec<_> = cache
+            .escritas()?
+            .into_iter()
+            .filter(|e| e.estado == EstadoDaEscrita::Aguardando)
+            .collect();
+        for escrita in fila {
+            let agora = self.agora();
+            match self.cliente.propor(&escrita.proposta) {
+                Ok(resposta) => {
+                    contas.enviadas += 1;
+                    match cache.aplicar_resposta_da_escrita(escrita.id, resposta, &agora) {
+                        Ok(true) => contas.aceitas += 1,
+                        Ok(false) => contas.recusadas += 1,
+                        Err(e) => return Err(Parada::Cache(ErroDoCache(e.to_string()))),
+                    }
+                }
+                // Servidor que ainda não conhece a Ação: fica Aguardando.
+                Err(ErroDoServidor::Api {
+                    codigo: Some(CodigoDeErro::AcaoAindaNaoAceita),
+                    ..
+                }) => {}
+                // Pedido que o servidor considera inválido: recusa local, para o usuário ver.
+                Err(ErroDoServidor::Api {
+                    status: 422 | 413,
+                    mensagem,
+                    ..
+                }) => {
+                    contas.enviadas += 1;
+                    contas.recusadas += 1;
+                    cache
+                        .recusar_localmente(escrita.id, &mensagem, &agora)
+                        .map_err(|e| Parada::Cache(ErroDoCache(e.to_string())))?;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
     }
 
     fn enviar_alteracoes(
