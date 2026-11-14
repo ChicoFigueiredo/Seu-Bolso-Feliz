@@ -108,11 +108,16 @@ fn pareamento_guarda_a_credencial_so_no_chaveiro() {
 /// EST-06 e Q5: centavos inteiros; a segunda troca usa a ETag e não muda nada.
 #[test]
 fn troca_com_etag_e_centavos_inteiros() {
+    // CX-09: a estação que fala o contrato v1 (a da fatia 2) continua funcionando.
     let s = ServidorDoContrato::iniciar();
     let pasta = tempfile::tempdir().unwrap();
     let guarda = GuardaEmMemoria::default();
     s.credencial_pronta(&guarda);
-    let c = cliente(&s, pasta.path(), &guarda);
+    let config = s.config(pasta.path(), &guarda);
+    let c = ClienteDoServidor::novo(
+        config.rede().unwrap(),
+        config.servidor().clone().com_versao_do_contrato(1),
+    );
     let caminho = caminho_do_cache(pasta.path(), HOST);
     assert!(matches!(
         sincronizador(&c, &guarda).trocar(&caminho),
@@ -247,7 +252,7 @@ fn versao_do_contrato_e_das_regras() {
     let caminho = caminho_do_cache(pasta.path(), HOST);
     let config = s.config(pasta.path(), &guarda);
 
-    s.mexer(|e| e.aceitos = vec![2, 3]);
+    s.mexer(|e| e.aceitos = vec![3, 4]);
     let c = cliente(&s, pasta.path(), &guarda);
     assert_eq!(
         sincronizador(&c, &guarda).trocar(&caminho),
@@ -263,8 +268,8 @@ fn versao_do_contrato_e_das_regras() {
     );
 
     s.mexer(|e| {
-        e.aceitos = vec![1, 2];
-        e.contrato = 2;
+        e.aceitos = vec![2, 3];
+        e.contrato = 3;
         e.regras = "0.2.0".into();
     });
     match sincronizador(&c, &guarda).trocar(&caminho) {

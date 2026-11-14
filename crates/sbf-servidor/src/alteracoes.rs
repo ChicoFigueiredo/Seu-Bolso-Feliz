@@ -1,34 +1,31 @@
-//! `POST /alteracoes` (grill Q6/Q7): a primeira escrita de ponta a ponta, mudar a
-//! categoria de uma movimentação. Numa transação só: confere a versão de base de cada
-//! linha tocada com a linha travada (`FOR UPDATE`), aplica inteira ou recusa, e grava a
-//! proposta com a resposta em `alteracoes` (reenviar o mesmo `id` devolve a mesma
-//! resposta).
+//! `POST /alteracoes` (grill Q6/Q7; spec 08): numa transação só, confere a versão de base de
+//! cada linha tocada com a linha travada (`FOR UPDATE`), aplica a Ação inteira ou recusa, e
+//! grava a proposta com a resposta em `alteracoes` (reenviar o mesmo `id` devolve a mesma
+//! resposta). As Ações estão em [`crate::acoes`].
 
+use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
-use sbf_contrato::{
-    Acao, CodigoDeErro, Colecao, LinhaAgora, PropostaDeAlteracao, RespostaDaAlteracao,
-};
+use sbf_contrato::{Acao, CodigoDeErro, PropostaDeAlteracao, RespostaDaAlteracao};
 use uuid::Uuid;
 
 use crate::EstadoDoServidor;
-use crate::banco::sql_versao;
+use crate::acoes;
 use crate::estacoes::EstacaoAutenticada;
-use crate::http::ErroHttp;
-use crate::livro::ler_movimentacao;
+use crate::http::{ContratoDoPedido, ErroHttp};
 
-/// As Ações que este servidor aplica, pelo `tipo` do fio.
-const ACOES_ACEITAS: [&str; 1] = ["mudar_categoria_da_movimentacao"];
+pub use crate::acoes::validar;
 
 /// `POST /alteracoes`.
 pub async fn receber(
     State(estado): State<EstadoDoServidor>,
     quem: EstacaoAutenticada,
+    Extension(contrato): Extension<ContratoDoPedido>,
     corpo: Bytes,
 ) -> Result<Json<RespostaDaAlteracao>, ErroHttp> {
-    let proposta = ler_proposta(&corpo)?;
+    let proposta = ler_proposta(&corpo, contrato.0)?;
     validar(&proposta)?;
     let mut cliente = estado.banco.get().await?;
 
@@ -37,20 +34,13 @@ pub async fn receber(
         return Ok(Json(resposta));
     }
 
-    let transacao = cliente.transaction().await?;
-    let resposta = match &proposta.acao {
-        Acao::MudarCategoriaDaMovimentacao {
-            movimentacao,
-            categoria,
-        } => mudar_categoria(&transacao, quem.dono, &proposta, *movimentacao, *categoria).await?,
+    let mut transacao = cliente.transaction().await?;
+    let resposta = acoes::aplicar(&mut transacao, quem.dono, &proposta).await?;
+    let resultado = match resposta {
+        RespostaDaAlteracao::Aceita { .. } => "aceita",
+        RespostaDaAlteracao::Recusada { .. } => "recusada",
     };
-    let (acao, resultado) = (
-        tipo_da_acao(&proposta.acao),
-        match resposta {
-            RespostaDaAlteracao::Aceita { .. } => "aceita",
-            RespostaDaAlteracao::Recusada { .. } => "recusada",
-        },
-    );
+    let acao = proposta.acao.tipo();
     let proposta_json = serde_json::to_value(&proposta).map_err(ErroHttp::interno)?;
     let resposta_json = serde_json::to_value(&resposta).map_err(ErroHttp::interno)?;
     let gravadas = transacao
@@ -80,22 +70,24 @@ pub async fn receber(
     Ok(Json(resposta))
 }
 
-fn tipo_da_acao(acao: &Acao) -> &'static str {
-    match acao {
-        Acao::MudarCategoriaDaMovimentacao { .. } => "mudar_categoria_da_movimentacao",
-    }
-}
-
-/// Lê o corpo. Uma Ação com `tipo` que o servidor não conhece é
+/// Lê o corpo. Uma Ação com `tipo` que esta versão do contrato não conhece é
 /// [`CodigoDeErro::AcaoAindaNaoAceita`]; o resto fora do contrato é pedido inválido.
-pub fn ler_proposta(corpo: &[u8]) -> Result<PropostaDeAlteracao, ErroHttp> {
+pub fn ler_proposta(
+    corpo: &[u8],
+    versao_do_contrato: u32,
+) -> Result<PropostaDeAlteracao, ErroHttp> {
     let valor: serde_json::Value = serde_json::from_slice(corpo)
         .map_err(|_| ErroHttp::pedido_invalido("o corpo não é JSON"))?;
+    let aceitas: &[&str] = if versao_do_contrato >= 2 {
+        &Acao::TIPOS
+    } else {
+        &Acao::TIPOS_DA_V1
+    };
     if let Some(tipo) = valor
         .get("acao")
         .and_then(|a| a.get("tipo"))
         .and_then(|t| t.as_str())
-        && !ACOES_ACEITAS.contains(&tipo)
+        && !aceitas.contains(&tipo)
     {
         return Err(ErroHttp::novo(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -105,32 +97,6 @@ pub fn ler_proposta(corpo: &[u8]) -> Result<PropostaDeAlteracao, ErroHttp> {
     }
     serde_json::from_value(valor)
         .map_err(|_| ErroHttp::pedido_invalido("a alteração não segue o contrato"))
-}
-
-/// A proposta é coerente: o item é o da Ação e há versão de base para cada linha tocada
-/// (e só para elas).
-pub fn validar(proposta: &PropostaDeAlteracao) -> Result<(), ErroHttp> {
-    match &proposta.acao {
-        Acao::MudarCategoriaDaMovimentacao { movimentacao, .. } => {
-            if proposta.item.colecao != Colecao::Movimentacoes || proposta.item.id != *movimentacao
-            {
-                return Err(ErroHttp::pedido_invalido(
-                    "o item da alteração não é a movimentação da ação",
-                ));
-            }
-            let [base] = proposta.versoes_de_base.as_slice() else {
-                return Err(ErroHttp::pedido_invalido(
-                    "mudar a categoria toca uma linha: mande uma versão de base",
-                ));
-            };
-            if base.colecao != Colecao::Movimentacoes || base.id != *movimentacao {
-                return Err(ErroHttp::pedido_invalido(
-                    "a versão de base não é a da movimentação",
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 async fn resposta_guardada(
@@ -157,96 +123,4 @@ async fn resposta_guardada(
     serde_json::from_value(resposta)
         .map(Some)
         .map_err(ErroHttp::interno)
-}
-
-fn recusada(
-    proposta: &PropostaDeAlteracao,
-    motivo: CodigoDeErro,
-    mensagem: &str,
-    agora: Vec<LinhaAgora>,
-) -> RespostaDaAlteracao {
-    RespostaDaAlteracao::Recusada {
-        id: proposta.id,
-        motivo,
-        mensagem: mensagem.into(),
-        sua_versao: Box::new(proposta.clone()),
-        no_servidor_agora: agora,
-    }
-}
-
-const SQL_TRAVAR_MOVIMENTACAO: &str = concat!(
-    "SELECT ",
-    sql_versao!("updated_at"),
-    " AS versao FROM public.transactions WHERE id = $1 AND user_id = $2 FOR UPDATE"
-);
-
-async fn mudar_categoria(
-    transacao: &tokio_postgres::Transaction<'_>,
-    dono: Uuid,
-    proposta: &PropostaDeAlteracao,
-    movimentacao: Uuid,
-    categoria: Option<Uuid>,
-) -> Result<RespostaDaAlteracao, ErroHttp> {
-    let travada = transacao
-        .query_opt(SQL_TRAVAR_MOVIMENTACAO, &[&movimentacao, &dono])
-        .await?;
-    let Some(travada) = travada else {
-        return Ok(recusada(
-            proposta,
-            CodigoDeErro::ItemNaoEncontrado,
-            "a movimentação não existe mais no servidor",
-            vec![],
-        ));
-    };
-    let versao_agora: String = travada.try_get("versao")?;
-    let base = &proposta.versoes_de_base[0].versao;
-    if base.0 != versao_agora {
-        let agora = ler_movimentacao(transacao, dono, movimentacao)
-            .await?
-            .map(|m| LinhaAgora::Movimentacoes(Box::new(m)))
-            .into_iter()
-            .collect();
-        return Ok(recusada(
-            proposta,
-            CodigoDeErro::VersaoDeBaseDivergente,
-            "a movimentação mudou no servidor depois da sua cópia",
-            agora,
-        ));
-    }
-    if let Some(categoria) = categoria {
-        let existe = transacao
-            .query_opt(
-                "SELECT 1 FROM public.categories WHERE id = $1 AND user_id = $2",
-                &[&categoria, &dono],
-            )
-            .await?
-            .is_some();
-        if !existe {
-            let agora = ler_movimentacao(transacao, dono, movimentacao)
-                .await?
-                .map(|m| LinhaAgora::Movimentacoes(Box::new(m)))
-                .into_iter()
-                .collect();
-            return Ok(recusada(
-                proposta,
-                CodigoDeErro::ReferenciaNaoEncontrada,
-                "a categoria escolhida não existe no servidor",
-                agora,
-            ));
-        }
-    }
-    // O gatilho `trg_transactions_updated_at` muda `updated_at`, e com ele a versão.
-    transacao
-        .execute(
-            "UPDATE public.transactions SET category_id = $3 WHERE id = $1 AND user_id = $2",
-            &[&movimentacao, &dono, &categoria],
-        )
-        .await?;
-    let linha = ler_movimentacao(transacao, dono, movimentacao)
-        .await?
-        .ok_or_else(|| ErroHttp::interno("a movimentação alterada sumiu"))?;
-    Ok(RespostaDaAlteracao::Aceita {
-        id: proposta.id,
-        linhas: vec![LinhaAgora::Movimentacoes(Box::new(linha))],
-    })
 }

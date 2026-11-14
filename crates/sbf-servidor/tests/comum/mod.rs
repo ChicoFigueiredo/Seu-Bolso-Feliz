@@ -129,6 +129,7 @@ pub fn url_de_teste() -> Option<String> {
 pub struct Ambiente {
     pub app: Router,
     pub banco: deadpool_postgres::Pool,
+    pub armazenamento: sbf_servidor::armazenamento::ArmazenamentoFalso,
 }
 
 pub async fn ambiente() -> Option<Ambiente> {
@@ -136,14 +137,17 @@ pub async fn ambiente() -> Option<Ambiente> {
     let banco = sbf_servidor::abrir_banco(&url)
         .await
         .expect("banco de teste");
+    let armazenamento = sbf_servidor::armazenamento::ArmazenamentoFalso::novo();
     let estado = sbf_servidor::EstadoDoServidor {
         banco: banco.clone(),
         google: Arc::new(verificador()),
         regras: "0.1.0-teste".into(),
+        armazenamento: Arc::new(armazenamento.clone()),
     };
     Some(Ambiente {
         app: sbf_servidor::rotas(estado),
         banco,
+        armazenamento,
     })
 }
 
@@ -242,6 +246,39 @@ impl Ambiente {
         (r.corpo["estacao"].clone(), credencial)
     }
 
+    /// Um pedido com corpo bruto (multipart).
+    pub async fn pedir_bruto(
+        &self,
+        caminho: &str,
+        credencial: &str,
+        tipo_de_conteudo: &str,
+        corpo: Vec<u8>,
+    ) -> Resposta {
+        let r = Request::builder()
+            .method("POST")
+            .uri(caminho)
+            .header("authorization", format!("Bearer {credencial}"))
+            .header("content-type", tipo_de_conteudo)
+            .body(Body::from(corpo))
+            .expect("pedido");
+        let resposta = self.app.clone().oneshot(r).await.expect("resposta");
+        let status = resposta.status();
+        let bruto = resposta
+            .into_body()
+            .collect()
+            .await
+            .expect("corpo")
+            .to_bytes()
+            .to_vec();
+        let corpo = serde_json::from_slice(&bruto).unwrap_or(Value::Null);
+        Resposta {
+            status,
+            etag: None,
+            corpo,
+            bruto,
+        }
+    }
+
     pub async fn sql(&self, sql: &str) {
         let c = self.banco.get().await.expect("conexão");
         c.batch_execute(sql).await.expect("sql de teste");
@@ -268,6 +305,10 @@ pub struct Semeado {
     pub movimentacao_vinte: uuid::Uuid,
     pub categoria: uuid::Uuid,
     pub outra_categoria: uuid::Uuid,
+    pub conta: uuid::Uuid,
+    pub centro: uuid::Uuid,
+    pub rateio: uuid::Uuid,
+    pub fornecedor: uuid::Uuid,
 }
 
 /// Semeia uma linha (pelo menos) em cada uma das 19 coleções do dono, com valores
@@ -353,5 +394,83 @@ INSERT INTO public.recurring_instances (id, user_id, recurring_template_id, expe
         movimentacao_vinte: mov20,
         categoria: cat,
         outra_categoria: cat2,
+        conta,
+        centro,
+        rateio,
+        fornecedor: forn,
     }
+}
+
+/// Um multipart com os campos de texto e o arquivo, na ordem do contrato.
+pub fn multipart(
+    campos: &[(&str, &str)],
+    arquivo: Option<(&str, &str, &[u8])>,
+) -> (String, Vec<u8>) {
+    let limite = "----sbf-teste-limite";
+    let mut corpo = Vec::new();
+    for (nome, valor) in campos {
+        corpo.extend_from_slice(
+            format!(
+                "--{limite}\r\nContent-Disposition: form-data; name=\"{nome}\"\r\n\r\n{valor}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    if let Some((nome_do_arquivo, tipo, bytes)) = arquivo {
+        corpo.extend_from_slice(
+            format!(
+                "--{limite}\r\nContent-Disposition: form-data; name=\"arquivo\"; filename=\"{nome_do_arquivo}\"\r\nContent-Type: {tipo}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        corpo.extend_from_slice(bytes);
+        corpo.extend_from_slice(b"\r\n");
+    }
+    corpo.extend_from_slice(format!("--{limite}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={limite}"), corpo)
+}
+
+/// Um lote com rascunhos de movimentação. `validos` rascunhos completos e `invalidos` sem
+/// conta. Devolve (lote, ids dos rascunhos na ordem de criação).
+pub async fn semear_lote(
+    amb: &Ambiente,
+    dono: uuid::Uuid,
+    conta: uuid::Uuid,
+    validos: usize,
+    invalidos: usize,
+) -> (uuid::Uuid, Vec<uuid::Uuid>) {
+    let lote = uuid::Uuid::new_v4();
+    amb.sql(&format!(
+        "INSERT INTO public.draft_batches (id, user_id, name, status, total_drafts) VALUES ('{lote}', '{dono}', 'Lote exemplo', 'open', {})",
+        validos + invalidos
+    ))
+    .await;
+    let mut ids = Vec::new();
+    for i in 0..(validos + invalidos) {
+        let id = uuid::Uuid::new_v4();
+        let dados = if i < validos {
+            json!({
+                "schema_version": 1, "draft_type": "transaction", "direction": "outflow",
+                "transaction_type": "expense", "amount_cents": 1250 + i as i64,
+                "event_date": "2026-11-10", "financial_product_id": conta,
+                "description": format!("Rascunho {i}"),
+                "provenance": {"field_sources": {}}
+            })
+        } else {
+            json!({
+                "schema_version": 1, "draft_type": "transaction", "direction": "outflow",
+                "transaction_type": "expense", "amount_cents": 500,
+                "event_date": "2026-11-10", "description": "Sem conta",
+                "provenance": {"field_sources": {}}
+            })
+        };
+        amb.sql(&format!(
+            "INSERT INTO public.draft_records (id, batch_id, user_id, draft_type, status, draft_data, draft_schema_version, created_at) \
+             VALUES ('{id}', '{lote}', '{dono}', 'transaction', 'pending_review', '{}'::jsonb, 1, now() + interval '{i} seconds')",
+            dados.to_string().replace('\'', "''")
+        ))
+        .await;
+        ids.push(id);
+    }
+    (lote, ids)
 }

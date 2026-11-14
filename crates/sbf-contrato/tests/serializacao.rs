@@ -49,7 +49,7 @@ fn todas_as_colecoes_aparecem_uma_vez() {
     for c in Colecao::TODAS {
         assert!(vistas.insert(c), "{c:?} repetida");
     }
-    assert_eq!(vistas.len(), 19);
+    assert_eq!(vistas.len(), 21);
 }
 
 #[test]
@@ -145,6 +145,7 @@ fn aceita_e_recusada_lado_a_lado() {
     let aceita = RespostaDaAlteracao::Aceita {
         id: id(9),
         linhas: vec![LinhaAgora::Movimentacoes(Box::new(movimentacao()))],
+        excluidas: vec![],
     };
     let fio = serde_json::to_value(&aceita).unwrap();
     assert_eq!(fio["resultado"], "aceita");
@@ -247,6 +248,125 @@ fn estado_leva_os_documentos_a_revisar() {
 
 #[test]
 fn prefixo_da_versao() {
-    assert_eq!(prefixo(VERSAO_DO_CONTRATO), "/api/v1");
+    assert_eq!(prefixo(VERSAO_DO_CONTRATO), "/api/v2");
+    assert_eq!(prefixo(PRIMEIRA_VERSAO_DO_CONTRATO), "/api/v1");
     const { assert!(PRIMEIRA_VERSAO_DO_CONTRATO <= VERSAO_DO_CONTRATO) };
+}
+
+#[test]
+fn colecoes_novas_so_existem_na_v2() {
+    assert_eq!(Colecao::LotesDeRascunhos.caminho(), "lotes-de-rascunhos");
+    assert_eq!(Colecao::Rascunhos.caminho(), "rascunhos");
+    assert_eq!(Colecao::LotesDeRascunhos.desde_a_versao(), 2);
+    assert_eq!(Colecao::Rascunhos.desde_a_versao(), 2);
+    for c in Colecao::TODAS {
+        if !matches!(c, Colecao::LotesDeRascunhos | Colecao::Rascunhos) {
+            assert_eq!(c.desde_a_versao(), 1, "{c:?}");
+        }
+    }
+}
+
+#[test]
+fn as_acoes_novas_tem_o_formato_fixado_e_o_tipo_bate() {
+    let acoes = vec![
+        Acao::CorrigirRascunho {
+            rascunho: id(1),
+            dados: json!({"schema_version": 1}),
+        },
+        Acao::AprovarRascunho { rascunho: id(1) },
+        Acao::RecusarRascunho {
+            rascunho: id(1),
+            motivo: "duplicado".into(),
+        },
+        Acao::AprovarLoteDeRascunhos { lote: id(2) },
+        Acao::EditarMovimentacao {
+            movimentacao: id(3),
+            edicao: EdicaoDaMovimentacao {
+                descricao: Some("Padaria".into()),
+                data: "2026-11-10".into(),
+                valor: 1250,
+                conta: id(4),
+                fornecedor: None,
+                centro: None,
+                notas: None,
+            },
+        },
+        Acao::ExcluirMovimentacao {
+            movimentacao: id(3),
+        },
+        Acao::RatearMovimentacao {
+            movimentacao: id(3),
+            rateios: vec![NovoRateio {
+                id: id(5),
+                centro: id(6),
+                valor: 1250,
+                nota: None,
+            }],
+        },
+        Acao::ConciliarRascunho {
+            rascunho: id(1),
+            movimentacao: id(3),
+        },
+        Acao::MudarCategoriaDaMovimentacao {
+            movimentacao: id(3),
+            categoria: None,
+        },
+    ];
+    assert_eq!(acoes.len(), Acao::TIPOS.len());
+    for a in acoes {
+        let fio = serde_json::to_value(&a).unwrap();
+        assert_eq!(fio["tipo"], a.tipo());
+        assert!(Acao::TIPOS.contains(&a.tipo()));
+        let volta: Acao = serde_json::from_value(fio).unwrap();
+        assert_eq!(volta, a);
+    }
+}
+
+#[test]
+fn aceita_da_v1_sem_excluidas_ainda_le() {
+    let fio = json!({ "resultado": "aceita", "id": id(9), "linhas": [] });
+    let r: RespostaDaAlteracao = serde_json::from_value(fio).unwrap();
+    assert!(matches!(r, RespostaDaAlteracao::Aceita { ref excluidas, .. } if excluidas.is_empty()));
+}
+
+#[test]
+fn delta_ida_e_volta_com_cursor_opaco() {
+    let d = DeltaDaColecao {
+        cursor: Cursor("abc".into()),
+        completo: false,
+        linhas: LinhasDaColecao::Movimentacoes(vec![]),
+        excluidas: vec![id(7)],
+    };
+    let fio = serde_json::to_value(&d).unwrap();
+    assert_eq!(fio["cursor"], "abc");
+    assert_eq!(fio["linhas"]["colecao"], "movimentacoes");
+    assert_eq!(serde_json::from_value::<DeltaDaColecao>(fio).unwrap(), d);
+}
+
+#[test]
+fn rascunho_ida_e_volta() {
+    let r = Rascunho {
+        id: id(1),
+        versao: Versao("1".into()),
+        lote: Some(id(2)),
+        documento: None,
+        tipo: TipoDeRascunho::Movimentacao,
+        estado: EstadoDoRascunho::PendenteDeRevisao,
+        dados: json!({"schema_version": 1, "amount_cents": 1250}),
+        versao_do_esquema: 1,
+        correcoes: None,
+        confianca_percentual: Some(85),
+        conciliacao: EstadoDaConciliacao::NaoVerificado,
+        movimentacao_conciliada: None,
+        lancado_como: None,
+        criado_em: None,
+    };
+    let fio = serde_json::to_value(LinhasDaColecao::Rascunhos(vec![r.clone()])).unwrap();
+    assert_eq!(fio["linhas"][0]["estado"], "pendente_de_revisao");
+    assert!(EstadoDoRascunho::Corrigido.pendente());
+    assert!(!EstadoDoRascunho::Lancado.pendente());
+    let LinhasDaColecao::Rascunhos(v) = serde_json::from_value(fio).unwrap() else {
+        panic!()
+    };
+    assert_eq!(v, vec![r]);
 }

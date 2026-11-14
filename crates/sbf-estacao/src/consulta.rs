@@ -72,6 +72,8 @@ fn linhas_do_cache(cache: &CacheDoLivro, colecao: Colecao) -> Result<LinhasDaCol
         Colecao::Recorrentes => L::Recorrentes(cache.linhas(colecao)?),
         Colecao::Ocorrencias => L::Ocorrencias(cache.linhas(colecao)?),
         Colecao::Documentos => L::Documentos(cache.linhas(colecao)?),
+        Colecao::LotesDeRascunhos => L::LotesDeRascunhos(cache.linhas(colecao)?),
+        Colecao::Rascunhos => L::Rascunhos(cache.linhas(colecao)?),
     })
 }
 

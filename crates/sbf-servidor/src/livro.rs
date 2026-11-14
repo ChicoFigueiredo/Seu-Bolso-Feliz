@@ -45,6 +45,11 @@ pub async fn ler_colecao<C: GenericClient>(
         Colecao::Recorrentes => ler!(SQL_RECORRENTES, recorrente, Recorrentes),
         Colecao::Ocorrencias => ler!(SQL_OCORRENCIAS, ocorrencia, Ocorrencias),
         Colecao::Documentos => ler!(SQL_DOCUMENTOS, documento, Documentos),
+        Colecao::LotesDeRascunhos => ler!(SQL_LOTES, lote, LotesDeRascunhos),
+        Colecao::Rascunhos => {
+            let sql = format!("{SQL_RASCUNHOS} WHERE d.user_id = $1 ORDER BY d.id");
+            ler!(sql.as_str(), rascunho, Rascunhos)
+        }
     })
 }
 
@@ -57,6 +62,66 @@ pub async fn ler_movimentacao<C: GenericClient>(
     let sql = format!("{SQL_MOVIMENTACOES} WHERE t.user_id = $1 AND t.id = $2");
     let linha = cliente.query_opt(sql.as_str(), &[&dono, &id]).await?;
     Ok(linha.as_ref().map(movimentacao).transpose()?)
+}
+
+/// Um rascunho do dono, como está agora.
+pub async fn ler_rascunho<C: GenericClient>(
+    cliente: &C,
+    dono: Uuid,
+    id: Uuid,
+) -> Result<Option<Rascunho>, ErroHttp> {
+    let sql = format!("{SQL_RASCUNHOS} WHERE d.user_id = $1 AND d.id = $2");
+    let linha = cliente.query_opt(sql.as_str(), &[&dono, &id]).await?;
+    Ok(linha.as_ref().map(rascunho).transpose()?)
+}
+
+/// Um lote de rascunhos do dono, como está agora.
+pub async fn ler_lote<C: GenericClient>(
+    cliente: &C,
+    dono: Uuid,
+    id: Uuid,
+) -> Result<Option<LoteDeRascunhos>, ErroHttp> {
+    let sql = format!("{SQL_LOTES_BASE} WHERE b.user_id = $1 AND b.id = $2");
+    let linha = cliente.query_opt(sql.as_str(), &[&dono, &id]).await?;
+    Ok(linha.as_ref().map(lote).transpose()?)
+}
+
+/// Os rateios de uma movimentação do dono, na ordem do id.
+pub async fn ler_rateios_da_movimentacao<C: GenericClient>(
+    cliente: &C,
+    dono: Uuid,
+    movimentacao: Uuid,
+) -> Result<Vec<Rateio>, ErroHttp> {
+    let sql =
+        format!("{SQL_RATEIOS_BASE} WHERE a.user_id = $1 AND a.transaction_id = $2 ORDER BY a.id");
+    let linhas = cliente.query(sql.as_str(), &[&dono, &movimentacao]).await?;
+    Ok(mapear(&linhas, rateio)?)
+}
+
+/// Rateios cujas movimentações mudaram depois de `(versao, id)`, na ordem
+/// `(versao da movimentação, id do rateio)`, com a versão de cada um (para o cursor).
+pub async fn ler_rateios_depois<C: GenericClient>(
+    cliente: &C,
+    dono: Uuid,
+    depois: (i64, Uuid),
+) -> Result<Vec<(i64, Rateio)>, ErroHttp> {
+    let sql = format!(
+        "SELECT a.id, a.transaction_id AS movimentacao, a.financial_center_id AS centro, \
+         a.amount::text AS valor, a.note AS nota, {} AS criado_em, \
+         (extract(epoch from t.updated_at) * 1000000)::bigint AS vt \
+         FROM public.transaction_allocations a JOIN public.transactions t ON t.id = a.transaction_id \
+         WHERE a.user_id = $1 AND ((extract(epoch from t.updated_at) * 1000000)::bigint, a.id) > ($2, $3) \
+         ORDER BY vt, a.id",
+        sql_instante!("a.created_at")
+    );
+    let linhas = cliente
+        .query(sql.as_str(), &[&dono, &depois.0, &depois.1])
+        .await?;
+    linhas
+        .iter()
+        .map(|l| Ok((Leitor(l).valor::<i64>("vt")?, rateio(l)?)))
+        .collect::<Result<_, ErroDeLeitura>>()
+        .map_err(Into::into)
 }
 
 fn mapear<T>(
@@ -157,6 +222,48 @@ const SQL_RATEIOS: &str = concat!(
     "amount::text AS valor, note AS nota, ",
     sql_instante!("created_at"),
     " AS criado_em FROM public.transaction_allocations WHERE user_id = $1 ORDER BY id"
+);
+
+/// Sem `WHERE`.
+const SQL_RATEIOS_BASE: &str = concat!(
+    "SELECT a.id, a.transaction_id AS movimentacao, a.financial_center_id AS centro, ",
+    "a.amount::text AS valor, a.note AS nota, ",
+    sql_instante!("a.created_at"),
+    " AS criado_em FROM public.transaction_allocations a"
+);
+
+/// Sem `WHERE`.
+const SQL_LOTES_BASE: &str = concat!(
+    "SELECT b.id, ",
+    sql_versao!("b.updated_at"),
+    " AS versao, b.name AS nome, b.status AS estado, COALESCE(b.total_drafts, 0) AS total, ",
+    "COALESCE(b.approved_count, 0) AS aprovados, COALESCE(b.rejected_count, 0) AS recusados, ",
+    "b.source_document_id AS documento, ",
+    sql_instante!("b.created_at"),
+    " AS criado_em FROM public.draft_batches b"
+);
+
+const SQL_LOTES: &str = concat!(
+    "SELECT b.id, ",
+    sql_versao!("b.updated_at"),
+    " AS versao, b.name AS nome, b.status AS estado, COALESCE(b.total_drafts, 0) AS total, ",
+    "COALESCE(b.approved_count, 0) AS aprovados, COALESCE(b.rejected_count, 0) AS recusados, ",
+    "b.source_document_id AS documento, ",
+    sql_instante!("b.created_at"),
+    " AS criado_em FROM public.draft_batches b WHERE b.user_id = $1 ORDER BY b.id"
+);
+
+/// Sem `WHERE`.
+const SQL_RASCUNHOS: &str = concat!(
+    "SELECT d.id, ",
+    sql_versao!("d.updated_at"),
+    " AS versao, d.batch_id AS lote, d.source_document_id AS documento, d.draft_type AS tipo, ",
+    "d.status AS estado, d.draft_data AS dados, d.draft_schema_version::int AS versao_do_esquema, ",
+    "d.corrections AS correcoes, (d.confidence_score * 100)::int AS confianca, ",
+    "d.reconciliation_status AS conciliacao, d.reconciled_transaction_id AS movimentacao_conciliada, ",
+    "d.posted_record_id AS lancado_como, ",
+    sql_instante!("d.created_at"),
+    " AS criado_em FROM public.draft_records d"
 );
 
 const SQL_CATEGORIAS: &str = concat!(
@@ -612,6 +719,44 @@ fn documento(r: &Row) -> Result<Documento, ErroDeLeitura> {
         assunto_do_email: l.texto_opc("assunto_do_email")?,
         remetente_do_email: l.texto_opc("remetente_do_email")?,
         recebido_em: l.texto_opc("recebido_em")?,
+        criado_em: l.texto_opc("criado_em")?,
+    })
+}
+
+fn lote(r: &Row) -> Result<LoteDeRascunhos, ErroDeLeitura> {
+    let l = Leitor(r);
+    Ok(LoteDeRascunhos {
+        id: l.id("id")?,
+        versao: l.versao()?,
+        nome: l.texto_opc("nome")?,
+        estado: l.fechado("estado", v::estado_do_lote)?,
+        total: l.inteiro("total")?,
+        aprovados: l.inteiro("aprovados")?,
+        recusados: l.inteiro("recusados")?,
+        documento: l.id_opc("documento")?,
+        criado_em: l.texto_opc("criado_em")?,
+    })
+}
+
+fn rascunho(r: &Row) -> Result<Rascunho, ErroDeLeitura> {
+    let l = Leitor(r);
+    let tipo_texto = l.texto("tipo")?;
+    let versao_do_esquema = i16::try_from(l.inteiro("versao_do_esquema")?).unwrap_or(0);
+    let dados: serde_json::Value = l.valor("dados")?;
+    Ok(Rascunho {
+        id: l.id("id")?,
+        versao: l.versao()?,
+        lote: l.id_opc("lote")?,
+        documento: l.id_opc("documento")?,
+        tipo: l.fechado("tipo", v::tipo_de_rascunho)?,
+        estado: l.fechado("estado", v::estado_do_rascunho)?,
+        dados: crate::rascunhos::dados_v1(&tipo_texto, &dados, versao_do_esquema),
+        versao_do_esquema,
+        correcoes: l.valor::<Option<serde_json::Value>>("correcoes")?,
+        confianca_percentual: l.inteiro_opc("confianca")?,
+        conciliacao: l.fechado("conciliacao", v::estado_da_conciliacao)?,
+        movimentacao_conciliada: l.id_opc("movimentacao_conciliada")?,
+        lancado_como: l.id_opc("lancado_como")?,
         criado_em: l.texto_opc("criado_em")?,
     })
 }

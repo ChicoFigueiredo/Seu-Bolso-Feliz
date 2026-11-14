@@ -3,8 +3,10 @@
 
 use bancada_rede::{Endereco, ErroDeRede, Pedido, Rede, Resposta};
 use sbf_contrato::{
-    CodigoDeErro, Colecao, ErroDaApi, Estacao, Estacoes, Estado, Id, LinhasDaColecao, Pareamento,
-    PedidoDePareamento, PropostaDeAlteracao, RespostaDaAlteracao, VERSAO_DO_CONTRATO, prefixo,
+    CAMPO_ARQUIVO, CAMPO_ID_NO_INVENTARIO, CAMPO_NOME_ORIGINAL, CAMPO_SHA256, CodigoDeErro,
+    Colecao, Cursor, DeltaDaColecao, ErroDaApi, Estacao, Estacoes, Estado, Id, LinhasDaColecao,
+    Pareamento, PedidoDePareamento, PropostaDeAlteracao, RespostaDaAlteracao, RespostaDoDocumento,
+    VERSAO_DO_CONTRATO, prefixo,
 };
 use serde::de::DeserializeOwned;
 use std::fmt;
@@ -12,6 +14,9 @@ use std::time::Duration;
 
 /// Prazo de uma coleção inteira (a de movimentações é a maior).
 const PRAZO_DA_COLECAO: Duration = Duration::from_secs(60);
+
+/// Prazo do envio de um documento (até 20 MiB por uma linha doméstica).
+const PRAZO_DO_DOCUMENTO: Duration = Duration::from_secs(180);
 
 /// Onde está o servidor: `https://host[:porta]`, sem caminho. O host é também a chave da
 /// credencial no chaveiro (`estacao:<host>`) e o nome da pasta do cache.
@@ -230,6 +235,83 @@ impl ClienteDoServidor {
         }))
     }
 
+    /// `GET /livro/{colecao}?desde=` (contrato v2): o que mudou desde o cursor. Sem cursor, a
+    /// coleção inteira (`completo`).
+    ///
+    /// # Errors
+    /// [`ErroDoServidor`].
+    pub fn delta(
+        &self,
+        colecao: Colecao,
+        desde: Option<&Cursor>,
+    ) -> Result<DeltaDaColecao, ErroDoServidor> {
+        let mut pedido = Pedido::get(self.servidor.url(&format!("/livro/{}", colecao.caminho())))
+            .autorizado()
+            .prazo(PRAZO_DA_COLECAO);
+        if let Some(c) = desde {
+            pedido = pedido.consulta("desde", c.0.clone());
+        }
+        let r = self.executar(pedido)?;
+        let delta: DeltaDaColecao = ler_json(&r, colecao.caminho())?;
+        if delta.linhas.colecao() != colecao {
+            return Err(ErroDoServidor::RespostaMalformada(format!(
+                "pedi {} e veio {}",
+                colecao.caminho(),
+                delta.linhas.colecao().caminho()
+            )));
+        }
+        Ok(delta)
+    }
+
+    /// `POST /documentos` (contrato v2): envia os bytes de um documento. Idempotente pelo
+    /// `sha256`: reenviar devolve o mesmo `source_document_id`.
+    ///
+    /// # Errors
+    /// [`ErroDoServidor`] (`SemRede` quando a rede cai: o envio retoma de onde parou).
+    pub fn enviar_documento(
+        &self,
+        sha256: &str,
+        nome: &str,
+        id_no_inventario: Option<&str>,
+        tipo_mime: &str,
+        bytes: &[u8],
+    ) -> Result<RespostaDoDocumento, ErroDoServidor> {
+        let limite = format!("sbf-{}", Id::new_v4().simple());
+        let mut corpo = Vec::with_capacity(bytes.len() + 512);
+        let mut campo = |nome: &str, valor: &str| {
+            corpo.extend_from_slice(
+                format!(
+                    "--{limite}\r\nContent-Disposition: form-data; name=\"{nome}\"\r\n\r\n{valor}\r\n"
+                )
+                .as_bytes(),
+            );
+        };
+        campo(CAMPO_SHA256, sha256);
+        campo(CAMPO_NOME_ORIGINAL, nome);
+        if let Some(id) = id_no_inventario {
+            campo(CAMPO_ID_NO_INVENTARIO, id);
+        }
+        let nome_seguro: String = nome
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\r' | '\n' | '\\'))
+            .collect();
+        corpo.extend_from_slice(
+            format!(
+                "--{limite}\r\nContent-Disposition: form-data; name=\"{CAMPO_ARQUIVO}\"; filename=\"{nome_seguro}\"\r\nContent-Type: {tipo_mime}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        corpo.extend_from_slice(bytes);
+        corpo.extend_from_slice(format!("\r\n--{limite}--\r\n").as_bytes());
+        let r = self.executar(
+            Pedido::post(self.servidor.url("/documentos"))
+                .autorizado()
+                .prazo(PRAZO_DO_DOCUMENTO)
+                .corpo(format!("multipart/form-data; boundary={limite}"), corpo),
+        )?;
+        ler_json(&r, "documento")
+    }
+
     /// `POST /estacoes/pareamento` (sem credencial).
     ///
     /// # Errors
@@ -292,7 +374,7 @@ mod testes {
     fn so_https_sem_caminho() {
         let s = Servidor::novo("https://sbf.exemplo.com.br/").expect("servidor");
         assert_eq!(s.host(), "sbf.exemplo.com.br");
-        assert_eq!(s.url("/estado"), "https://sbf.exemplo.com.br/api/v1/estado");
+        assert_eq!(s.url("/estado"), "https://sbf.exemplo.com.br/api/v2/estado");
         assert!(Servidor::novo("http://sbf.exemplo.com.br").is_err());
         assert!(Servidor::novo("https://sbf.exemplo.com.br/x").is_err());
         assert_eq!(

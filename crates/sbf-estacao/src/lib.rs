@@ -18,6 +18,8 @@ mod alteracoes;
 mod cache;
 mod consulta;
 mod credencial;
+mod envio;
+mod escrita;
 mod estacao;
 mod pareamento;
 mod pasta;
@@ -33,6 +35,14 @@ pub use cache::{
 pub use consulta::ConsultaDoLivro;
 pub use credencial::{
     CredencialDaEstacao, GuardaDeCredencial, GuardaEmMemoria, importar_credencial,
+};
+pub use envio::{
+    AndamentoDoEnvio, DocumentoDoLote, ErroDoEnvio, FalhaDoEnvio, LeitorDeCofre, LeitorDeOriginais,
+    ResumoDoEnvio, documentos_do_lote, enviar_lote,
+};
+pub use escrita::{
+    ErroDeEscrita, Escrita, Escritas, EstadoDaEscrita, ItemDaCaixa, LoteNaCaixa, RecusaDaEscrita,
+    ResultadoDeEscrita,
 };
 pub use estacao::{ConfiguracaoDaEstacao, EstacaoLocal, INTERVALO_PADRAO};
 pub use pareamento::{CAMINHO_DO_RETORNO, ErroDePareamento, Pareador, sistema_atual};

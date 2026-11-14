@@ -474,6 +474,21 @@ impl Inventario {
     }
 }
 
+impl Inventario {
+    /// Grava a decisão de promover (spec 08): o servidor aceitou o documento. Os alvos são
+    /// registros aprovados (viram `promovido`, terminal) ou o lote (`promovido_em`). Uma
+    /// transação só; `decidido_por` fica `usuario`. Já promovido não grava nada.
+    ///
+    /// Está aqui, e não no trait [`Comandos`], porque nenhuma tela oferece a decisão: só o
+    /// envio de um lote ao servidor.
+    ///
+    /// # Errors
+    /// Alvo que não existe, registro que não está aprovado, ou falha do banco.
+    pub fn promover(&mut self, alvos: &[Ref], motivo: &str) -> ResultadoDeComando<Vec<IdDecisao>> {
+        self.escrever(|tx| decisao::promover(tx, alvos, motivo))
+    }
+}
+
 impl Comandos for Inventario {
     fn executar(&mut self, pedido: &PedidoDeDecisao) -> ResultadoDeComando<Vec<IdDecisao>> {
         self.escrever(|tx| decisao::executar(tx, pedido))

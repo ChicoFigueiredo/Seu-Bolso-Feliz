@@ -20,6 +20,7 @@
 //! | lote / `criado` | `{"nome", "criado_em"}`, ou nulo (desfeito: o lote some) |
 //! | lote / `item` | `{"tipo": "achado"\|"registro", "id", "no_lote": bool}` |
 //! | lote / `aprovado_em` | `{"aprovado_em": instante ou nulo}` |
+//! | lote / `promovido_em` | `{"promovido_em": instante}` (o servidor aceitou os documentos do lote) |
 //!
 //! `decidido_por` não está em nenhuma forma: é derivado do log por
 //! [`recalcular_decidido_por`] (`usuario` enquanto houver decisão sua em vigor sobre o
@@ -52,6 +53,7 @@ pub mod campo {
     pub const CRIADO: &str = "criado";
     pub const ITEM: &str = "item";
     pub const APROVADO_EM: &str = "aprovado_em";
+    pub const PROMOVIDO_EM: &str = "promovido_em";
 }
 
 /// O texto que fecha uma pendência cuja sinalização foi desfeita.
@@ -122,7 +124,7 @@ impl AlvoTipo {
                 "valor_centavos",
             ],
             AlvoTipo::Pendencia => &["resposta", "resolvida_em"],
-            AlvoTipo::Lote => &["aprovado_em"],
+            AlvoTipo::Lote => &["aprovado_em", "promovido_em"],
             AlvoTipo::Fornecedor => &[],
         }
     }

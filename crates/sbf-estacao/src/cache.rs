@@ -12,7 +12,10 @@
 
 use bancada_armazem::{Armazem, Erro as ErroDoArmazem, Escada, Migracao, Pragmas};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use sbf_contrato::{Colecao, Estacoes, Estado, LinhaAgora, LinhasDaColecao, PropostaDeAlteracao};
+use sbf_contrato::{
+    Colecao, Cursor, DeltaDaColecao, Estacoes, Estado, ItemAlterado, LinhaAgora, LinhasDaColecao,
+    PropostaDeAlteracao,
+};
 use sbf_inventario::alteracao::{Alteracao, Troca};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -23,9 +26,10 @@ use std::time::Duration;
 /// O nome do arquivo do cache.
 pub const ARQUIVO_DO_CACHE: &str = "livro-caixa.sqlite";
 
-const MIGRACOES: &[Migracao] = &[Migracao::sql(
-    "cache do livro-caixa, trocas e alteracoes",
-    "CREATE TABLE meta (
+const MIGRACOES: &[Migracao] = &[
+    Migracao::sql(
+        "cache do livro-caixa, trocas e alteracoes",
+        "CREATE TABLE meta (
         chave TEXT PRIMARY KEY,
         valor TEXT NOT NULL
     ) WITHOUT ROWID;
@@ -66,7 +70,18 @@ const MIGRACOES: &[Migracao] = &[Migracao::sql(
     CREATE TABLE pedido_de_revogacao (
         estacao TEXT PRIMARY KEY
     ) WITHOUT ROWID;",
-)];
+    ),
+    Migracao::sql(
+        "delta por cursor e fila de escritas da fatia 3",
+        "ALTER TABLE colecao ADD COLUMN cursor TEXT;
+    CREATE TABLE escrita (
+        id         TEXT PRIMARY KEY,
+        estado     TEXT NOT NULL,
+        feita_em   TEXT NOT NULL,
+        dados      TEXT NOT NULL
+    );",
+    ),
+];
 
 /// Erro do cache (texto do SQLite ou do JSON; nunca dado secreto).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -169,10 +184,14 @@ fn linhas_serializadas(
             |l| l.id.to_string(),
             |l| l.versao.as_ref().map(|x| x.0.clone()),
         ),
+        LinhasDaColecao::LotesDeRascunhos(v) => comum!(v),
+        LinhasDaColecao::Rascunhos(v) => comum!(v),
     }
 }
 
-fn linha_agora(linha: &LinhaAgora) -> ResultadoDoCache<(Colecao, String, Option<String>, String)> {
+pub(crate) fn linha_agora(
+    linha: &LinhaAgora,
+) -> ResultadoDoCache<(Colecao, String, Option<String>, String)> {
     Ok(match linha {
         LinhaAgora::Movimentacoes(m) => (
             Colecao::Movimentacoes,
@@ -184,6 +203,18 @@ fn linha_agora(linha: &LinhaAgora) -> ResultadoDoCache<(Colecao, String, Option<
             Colecao::Rateios,
             r.id.to_string(),
             None,
+            serde_json::to_string(r)?,
+        ),
+        LinhaAgora::LotesDeRascunhos(l) => (
+            Colecao::LotesDeRascunhos,
+            l.id.to_string(),
+            Some(l.versao.0.clone()),
+            serde_json::to_string(l)?,
+        ),
+        LinhaAgora::Rascunhos(r) => (
+            Colecao::Rascunhos,
+            r.id.to_string(),
+            Some(r.versao.0.clone()),
             serde_json::to_string(r)?,
         ),
     })
@@ -210,7 +241,7 @@ fn subir_geracao(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 /// O cache aberto.
 #[derive(Debug)]
 pub struct CacheDoLivro {
-    armazem: Armazem,
+    pub(crate) armazem: Armazem,
 }
 
 impl CacheDoLivro {
@@ -253,7 +284,7 @@ impl CacheDoLivro {
     }
 
     /// A conexão de leitura (a de escrita, em memória).
-    fn ler(&self) -> &Connection {
+    pub(crate) fn ler(&self) -> &Connection {
         self.armazem
             .leitura()
             .unwrap_or_else(|_| self.armazem.conexao())
@@ -348,7 +379,7 @@ impl CacheDoLivro {
                     .optional()?;
                 if anterior.as_deref().is_some_and(|a| a != estacao) {
                     tx.execute_batch(
-                        "DELETE FROM linha; DELETE FROM colecao; DELETE FROM alteracao;
+                        "DELETE FROM linha; DELETE FROM colecao; DELETE FROM alteracao; DELETE FROM escrita;
                      DELETE FROM pedido_de_revogacao; DELETE FROM meta WHERE chave <> 'geracao';",
                     )?;
                 }
@@ -409,6 +440,155 @@ impl CacheDoLivro {
                     subir_geracao(tx)?;
                 }
                 Ok(())
+            })
+    }
+
+    /// Apaga linhas do cache (a Ação apagou, ou o servidor diz que não existem mais).
+    ///
+    /// # Errors
+    /// [`ErroDoCache`].
+    pub fn apagar_linhas(&mut self, itens: &[ItemAlterado]) -> ResultadoDoCache<()> {
+        self.armazem
+            .transacao_imediata(|tx| -> ResultadoDoCache<()> {
+                for i in itens {
+                    tx.execute(
+                        "DELETE FROM linha WHERE colecao = ?1 AND id = ?2",
+                        params![i.colecao.caminho(), i.id.to_string()],
+                    )?;
+                }
+                if !itens.is_empty() {
+                    subir_geracao(tx)?;
+                }
+                Ok(())
+            })
+    }
+
+    /// A versão (do servidor) de cada linha pedida, como o cache a tem. `None`: a linha não
+    /// está no cache.
+    ///
+    /// # Errors
+    /// [`ErroDoCache`].
+    pub fn versoes_das_linhas(
+        &self,
+        itens: &[ItemAlterado],
+    ) -> ResultadoDoCache<Vec<(ItemAlterado, Option<String>)>> {
+        let mut saida = Vec::with_capacity(itens.len());
+        for i in itens {
+            let v: Option<Option<String>> = self
+                .ler()
+                .query_row(
+                    "SELECT versao FROM linha WHERE colecao = ?1 AND id = ?2",
+                    params![i.colecao.caminho(), i.id.to_string()],
+                    |l| l.get(0),
+                )
+                .optional()?;
+            saida.push((i.clone(), v.flatten()));
+        }
+        Ok(saida)
+    }
+
+    /// Os cursores do delta, por coleção.
+    ///
+    /// # Errors
+    /// [`ErroDoCache`].
+    pub fn cursores(&self) -> ResultadoDoCache<HashMap<Colecao, Cursor>> {
+        let mut st = self
+            .ler()
+            .prepare("SELECT nome, cursor FROM colecao WHERE cursor IS NOT NULL")?;
+        let linhas = st.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?;
+        let mut mapa = HashMap::new();
+        for linha in linhas {
+            let (nome, cursor) = linha?;
+            if let Some(c) = Colecao::do_caminho(&nome) {
+                mapa.insert(c, Cursor(cursor));
+            }
+        }
+        Ok(mapa)
+    }
+
+    /// Como [`CacheDoLivro::trocar`], mas com deltas (contrato v2): cada coleção traz as
+    /// linhas novas ou mudadas, os ids apagados e o cursor novo. `completo` troca a coleção
+    /// inteira. Uma transação só.
+    ///
+    /// # Errors
+    /// [`ErroDoCache`]; nada muda.
+    pub fn trocar_com_deltas(
+        &mut self,
+        estado: &Estado,
+        deltas: &[DeltaDaColecao],
+        copia_de: &str,
+    ) -> ResultadoDoCache<usize> {
+        let estado_json = serde_json::to_string(estado)?;
+        let estacao = estado.estacao.id.to_string();
+        let mut preparadas = Vec::with_capacity(deltas.len());
+        for d in deltas {
+            preparadas.push((
+                d.linhas.colecao(),
+                linhas_serializadas(&d.linhas)?,
+                d.excluidas
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                d.completo,
+                d.cursor.0.clone(),
+            ));
+        }
+        self.armazem
+            .transacao_imediata(|tx| -> ResultadoDoCache<usize> {
+                let anterior: Option<String> = tx
+                    .query_row("SELECT valor FROM meta WHERE chave = 'estacao'", [], |l| {
+                        l.get(0)
+                    })
+                    .optional()?;
+                if anterior.as_deref().is_some_and(|a| a != estacao) {
+                    tx.execute_batch(
+                        "DELETE FROM linha; DELETE FROM colecao; DELETE FROM alteracao; DELETE FROM escrita;
+                     DELETE FROM pedido_de_revogacao; DELETE FROM meta WHERE chave <> 'geracao';",
+                    )?;
+                }
+                gravar_meta(tx, "estacao", &estacao)?;
+                gravar_meta(tx, "estado", &estado_json)?;
+                let mut total = 0;
+                let mut mudou = false;
+                for (colecao, linhas, excluidas, completo, cursor) in &preparadas {
+                    let nome = colecao.caminho();
+                    if *completo {
+                        tx.execute("DELETE FROM linha WHERE colecao = ?1", [nome])?;
+                    }
+                    for id in excluidas {
+                        tx.execute(
+                            "DELETE FROM linha WHERE colecao = ?1 AND id = ?2",
+                            params![nome, id],
+                        )?;
+                    }
+                    let mut st = tx.prepare_cached(
+                        "INSERT INTO linha (colecao, id, versao, dados) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT (colecao, id) DO UPDATE SET versao = excluded.versao,
+                            dados = excluded.dados",
+                    )?;
+                    for (id, versao, dados) in linhas {
+                        st.execute(params![nome, id, versao, dados])?;
+                    }
+                    let quantas: i64 = tx.query_row(
+                        "SELECT count(*) FROM linha WHERE colecao = ?1",
+                        [nome],
+                        |l| l.get(0),
+                    )?;
+                    tx.execute(
+                        "INSERT INTO colecao (nome, etag, cursor, trocada_em, linhas)
+                         VALUES (?1, NULL, ?2, ?3, ?4)
+                         ON CONFLICT (nome) DO UPDATE SET etag = NULL, cursor = excluded.cursor,
+                            trocada_em = excluded.trocada_em, linhas = excluded.linhas",
+                        params![nome, cursor, copia_de, quantas],
+                    )?;
+                    total += linhas.len() + excluidas.len();
+                    mudou |= !linhas.is_empty() || !excluidas.is_empty() || *completo;
+                }
+                gravar_meta(tx, "copia_de", copia_de)?;
+                if mudou {
+                    subir_geracao(tx)?;
+                }
+                Ok(total)
             })
     }
 

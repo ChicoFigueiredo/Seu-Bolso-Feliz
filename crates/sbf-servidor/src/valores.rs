@@ -224,6 +224,53 @@ pub fn origem_do_documento(v: &str) -> Option<OrigemDoDocumento> {
     })
 }
 
+pub fn estado_do_lote(v: &str) -> Option<EstadoDoLote> {
+    Some(match v {
+        "open" => EstadoDoLote::Aberto,
+        "reviewing" => EstadoDoLote::EmRevisao,
+        "approved" => EstadoDoLote::Aprovado,
+        "partial" => EstadoDoLote::Parcial,
+        "rejected" => EstadoDoLote::Recusado,
+        _ => return None,
+    })
+}
+
+pub fn tipo_de_rascunho(v: &str) -> Option<TipoDeRascunho> {
+    Some(match v {
+        "transaction" => TipoDeRascunho::Movimentacao,
+        "recurring_template" => TipoDeRascunho::Recorrente,
+        "liability" => TipoDeRascunho::Divida,
+        "consumption_metric" => TipoDeRascunho::MetricaDeConsumo,
+        _ => return None,
+    })
+}
+
+pub fn estado_do_rascunho(v: &str) -> Option<EstadoDoRascunho> {
+    Some(match v {
+        "pending_review" => EstadoDoRascunho::PendenteDeRevisao,
+        "approved" => EstadoDoRascunho::Aprovado,
+        "posted" => EstadoDoRascunho::Lancado,
+        "rejected" => EstadoDoRascunho::Recusado,
+        "corrected" => EstadoDoRascunho::Corrigido,
+        "archived" => EstadoDoRascunho::Arquivado,
+        _ => return None,
+    })
+}
+
+pub fn estado_da_conciliacao(v: &str) -> Option<EstadoDaConciliacao> {
+    Some(match v {
+        "not_checked" => EstadoDaConciliacao::NaoVerificado,
+        "no_match" => EstadoDaConciliacao::SemCorrespondencia,
+        "match_exact" => EstadoDaConciliacao::CorrespondenciaExata,
+        "match_fuzzy" => EstadoDaConciliacao::CorrespondenciaAproximada,
+        "match_duplicate" => EstadoDaConciliacao::PossivelDuplicata,
+        "match_recurrence" => EstadoDaConciliacao::CorrespondeARecorrente,
+        "confirmed_new" => EstadoDaConciliacao::ConfirmadoNovo,
+        "confirmed_duplicate" => EstadoDaConciliacao::ConfirmadoDuplicata,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

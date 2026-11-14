@@ -355,6 +355,62 @@ pub(crate) fn executar(
 }
 
 // ---------------------------------------------------------------------------------------
+// Promover (spec 08): o servidor aceitou o documento
+
+/// Promove registros aprovados (`estado = promovido`, terminal) ou o lote (`promovido_em`).
+/// Cada mudança é uma decisão do usuário, com o `motivo`. Um registro já promovido e um lote
+/// já promovido não gravam nada (o envio de um lote retoma sem repetir decisão).
+///
+/// Não é uma [`Acao`] do §10: nenhuma tela do inventário a oferece; só o envio ao servidor a
+/// pede.
+pub(crate) fn promover(
+    tx: &Transaction<'_>,
+    alvos: &[Ref],
+    motivo: &str,
+) -> ResultadoDeComando<Vec<IdDecisao>> {
+    let em = agora(tx)?;
+    let mut ids = Vec::new();
+    for alvo in alvos {
+        let tipo = resolver_alvo(tx, alvo)?;
+        let nao = || ErroDeComando::NaoSeAplica {
+            acao: "Promover".to_owned(),
+            alvo: alvo.clone(),
+        };
+        let efeito = match tipo {
+            AlvoTipo::Registro => match estado_do_registro(tx, &alvo.chave)?.as_str() {
+                "promovido" => continue,
+                "aprovado" => Efeito::novo(
+                    tipo,
+                    alvo.chave.as_str(),
+                    campo::ESTADO,
+                    json!({"estado": "promovido"}),
+                ),
+                _ => return Err(nao()),
+            },
+            AlvoTipo::Lote => {
+                let ja: Option<String> = tx.query_row(
+                    "SELECT promovido_em FROM lote WHERE id = ?1",
+                    [&alvo.chave],
+                    |l| l.get(0),
+                )?;
+                if ja.is_some() {
+                    continue;
+                }
+                Efeito::novo(
+                    tipo,
+                    alvo.chave.as_str(),
+                    campo::PROMOVIDO_EM,
+                    json!({"promovido_em": em}),
+                )
+            }
+            _ => return Err(nao()),
+        };
+        ids.push(gravar(tx, &efeito, Some(motivo), None, &em)?);
+    }
+    Ok(ids)
+}
+
+// ---------------------------------------------------------------------------------------
 // Desfazer
 
 fn ja_desfeita(tx: &Transaction<'_>, id: IdDecisao) -> ResultadoDeComando<bool> {

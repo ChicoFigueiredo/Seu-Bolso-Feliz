@@ -18,6 +18,15 @@
 //! | `GET  /estacoes`                 | —                      | [`Estacoes`]                         |
 //! | `POST /estacoes/{id}/revogar`    | —                      | [`Estacao`] (a revogada)             |
 //! | `POST /alteracoes`               | [`PropostaDeAlteracao`]| [`RespostaDaAlteracao`]              |
+//! | `GET  /livro/{colecao}?desde=C`  | —                      | [`DeltaDaColecao`] (v2)              |
+//! | `POST /documentos`               | multipart (v2)         | [`RespostaDoDocumento`]              |
+//!
+//! # Versão 2 (fatia 3)
+//!
+//! O servidor aceita a v1 e a v2. A v2 acrescenta as coleções `lotes-de-rascunhos` e
+//! `rascunhos` (só em `/api/v2`), as Ações de rascunho e de edição, o delta por cursor
+//! (`?desde=`, só leitura incremental) e o envio de documentos. Uma estação v1 continua
+//! como era: coleção inteira com `ETag`, uma Ação.
 //!
 //! `{colecao}` é o [`Colecao::caminho`]. A coleção vem **inteira** (grill Q5): o `ETag`
 //! é forte e muda quando qualquer linha muda; com `If-None-Match` igual, `304` sem corpo.
@@ -36,13 +45,21 @@
 
 mod alteracao;
 mod colecoes;
+mod delta;
+mod documento;
 mod erro;
 mod estacao;
 
 pub use alteracao::{
-    Acao, ItemAlterado, LinhaAgora, PropostaDeAlteracao, RespostaDaAlteracao, VersaoDeBase,
+    Acao, EdicaoDaMovimentacao, ItemAlterado, LinhaAgora, NovoRateio, PropostaDeAlteracao,
+    RespostaDaAlteracao, VersaoDeBase,
 };
 pub use colecoes::*;
+pub use delta::{Cursor, DeltaDaColecao};
+pub use documento::{
+    CAMPO_ARQUIVO, CAMPO_ID_NO_INVENTARIO, CAMPO_NOME_ORIGINAL, CAMPO_SHA256, RespostaDoDocumento,
+    TAMANHO_MAXIMO_DO_DOCUMENTO,
+};
 pub use erro::{CodigoDeErro, ErroDaApi};
 pub use estacao::{Estacao, Estacoes, Estado, Pareamento, PedidoDePareamento};
 
@@ -50,7 +67,7 @@ use serde::{Deserialize, Serialize};
 
 /// A versão do contrato desta compilação. Sobe a cada mudança incompatível dos tipos
 /// deste crate. O servidor aceita esta e a anterior (grill Q4).
-pub const VERSAO_DO_CONTRATO: u32 = 1;
+pub const VERSAO_DO_CONTRATO: u32 = 2;
 
 /// A menor versão de contrato que já existiu. O servidor nunca aceita menos que isto,
 /// mesmo quando é a "anterior" da atual.

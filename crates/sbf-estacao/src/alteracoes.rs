@@ -168,7 +168,10 @@ fn lado_a_lado(
     sua_base: Option<&Movimentacao>,
     no_servidor: Option<&Movimentacao>,
 ) -> ResultadoDeAlteracao<Vec<CampoLadoALado>> {
-    let Acao::MudarCategoriaDaMovimentacao { categoria, .. } = &proposta.acao;
+    let Acao::MudarCategoriaDaMovimentacao { categoria, .. } = &proposta.acao else {
+        // A fila antiga só guarda a Ação de categoria.
+        return Ok(Vec::new());
+    };
     let sua = sua_base.or(no_servidor).map(|m| Movimentacao {
         categoria: *categoria,
         ..m.clone()
@@ -203,7 +206,7 @@ fn lado_a_lado(
 fn movimentacao_agora(linhas: &[LinhaAgora]) -> Option<&Movimentacao> {
     linhas.iter().find_map(|l| match l {
         LinhaAgora::Movimentacoes(m) => Some(m.as_ref()),
-        LinhaAgora::Rateios(_) => None,
+        LinhaAgora::Rateios(_) | LinhaAgora::LotesDeRascunhos(_) | LinhaAgora::Rascunhos(_) => None,
     })
 }
 
