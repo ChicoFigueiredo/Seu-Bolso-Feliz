@@ -8,7 +8,9 @@
 //! 3. **Nuvem**: se a coleta está ligada em Opções › Nuvens, no intervalo configurado;
 //! 4. **Mensageiros**: se ligados em Opções › Mensageiros, WhatsApp e Telegram (só as conversas
 //!    que o usuário incluiu), no intervalo de `mensageiros.json`;
-//! 5. **Triagem**: um pequeno lote do agente, no horário configurado.
+//! 5. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
+//!    que já passaram do intervalo (spec 10, C1);
+//! 6. **Triagem**: um pequeno lote do agente, no horário configurado.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -155,6 +157,30 @@ pub trait ColetorDeNuvem {
     fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDaNuvem, Falha>;
 }
 
+/// O que uma passada dos roteiros agendados fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDeRoteiros {
+    /// Roteiros executados.
+    pub executados: usize,
+    /// Arquivos baixados.
+    pub baixados: usize,
+    /// Achados novos no inventário.
+    pub novos: usize,
+}
+
+/// A execução dos roteiros agendados (a real é `sbf_roteiros::servico`, montada no `sbf`).
+pub trait ColetorDeRoteiros {
+    /// Executa os roteiros que já passaram do intervalo em `agora_` (segundos Unix).
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn executar_devidos(
+        &mut self,
+        agora_: u64,
+        cancelar: &AtomicBool,
+    ) -> Result<ResumoDeRoteiros, Falha>;
+}
+
 /// O que um ciclo da triagem fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDaTriagem {
@@ -183,6 +209,7 @@ pub struct Worker {
     config: Config,
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
     mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
+    roteiros: Option<Box<dyn ColetorDeRoteiros>>,
     triador: Option<Box<dyn Triador>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
@@ -193,6 +220,7 @@ pub struct Worker {
     proxima_reconciliacao: u64,
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
+    proxima_roteiros: u64,
     proxima_triagem: u64,
     gravado_em: u64,
     sujo: bool,
@@ -246,6 +274,7 @@ impl Worker {
             config,
             nuvem,
             mensageiros: None,
+            roteiros: None,
             triador,
             registro,
             estado,
@@ -256,6 +285,7 @@ impl Worker {
             proxima_reconciliacao: agora_,
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
+            proxima_roteiros: agora_,
             proxima_triagem: agora_,
             gravado_em: 0,
             sujo: true,
@@ -270,6 +300,13 @@ impl Worker {
     #[must_use]
     pub fn com_mensageiros(mut self, coletor: Box<dyn ColetorDeMensageiros>) -> Self {
         self.mensageiros = Some(coletor);
+        self
+    }
+
+    /// Liga a execução dos roteiros agendados (sem mudar a assinatura de [`Worker::novo`]).
+    #[must_use]
+    pub fn com_roteiros(mut self, coletor: Box<dyn ColetorDeRoteiros>) -> Self {
+        self.roteiros = Some(coletor);
         self
     }
 
@@ -432,6 +469,13 @@ impl Worker {
             self.proxima_mensageiros = agora_ + minutos.max(1) * 60;
             self.passo_dos_mensageiros(cancelar, agora_);
         }
+        if self.dados.pasta.join("roteiros.sqlite").exists()
+            && agora_ >= self.proxima_roteiros
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.proxima_roteiros = agora_ + 5 * 60;
+            self.passo_dos_roteiros(cancelar, agora_);
+        }
         if self.config.triagem.ligada
             && agora_ >= self.proxima_triagem
             && self
@@ -480,6 +524,25 @@ impl Worker {
             Err(f) => self.falhou("mensageiros", f),
         }
         self.mensageiros = Some(m);
+    }
+
+    fn passo_dos_roteiros(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut r) = self.roteiros.take() else {
+            return;
+        };
+        match r.executar_devidos(agora_, cancelar) {
+            Ok(res) => {
+                if res.executados > 0 {
+                    let _ = self.registro.registrar(&Evento::Roteiros {
+                        executados: res.executados,
+                        baixados: res.baixados,
+                    });
+                }
+                self.coletou("roteiros", res.novos as u64, agora_);
+            }
+            Err(f) => self.falhou("roteiros", f),
+        }
+        self.roteiros = Some(r);
     }
 
     fn passo_da_triagem(&mut self, cancelar: &AtomicBool, agora_: u64) {

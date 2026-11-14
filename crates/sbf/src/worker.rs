@@ -269,9 +269,12 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
     let mensageiros = Box::new(MensageirosReais {
         dados: dados.clone(),
     });
+    let dados_dos_roteiros = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
         Ok(w) => {
-            let mut w = w.com_mensageiros(mensageiros);
+            let mut w = w.com_mensageiros(mensageiros).com_roteiros(Box::new(
+                crate::roteiros::RoteirosReais::novo(dados_dos_roteiros),
+            ));
             w.rodar(&parar);
             ExitCode::SUCCESS
         }

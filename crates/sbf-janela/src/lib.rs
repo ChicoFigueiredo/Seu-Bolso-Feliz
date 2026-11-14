@@ -33,6 +33,7 @@ pub mod opcoes_do_worker;
 pub mod pagina;
 pub mod painel;
 pub mod previa;
+pub mod roteiros;
 pub mod tabela;
 pub mod tema;
 pub mod triagem;

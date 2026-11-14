@@ -320,3 +320,42 @@ fn mensageiros_so_rodam_ligados_e_no_intervalo_do_arquivo() {
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("mensageiros mensagens=5 novos=3"), "{log}");
 }
+
+struct RoteirosFalsos(Rc<Cell<u32>>);
+impl sbf_worker::laco::ColetorDeRoteiros for RoteirosFalsos {
+    fn executar_devidos(
+        &mut self,
+        _: u64,
+        _: &AtomicBool,
+    ) -> Result<sbf_worker::laco::ResumoDeRoteiros, Falha> {
+        self.0.set(self.0.get() + 1);
+        Ok(sbf_worker::laco::ResumoDeRoteiros {
+            executados: 2,
+            baixados: 3,
+            novos: 1,
+        })
+    }
+}
+
+#[test]
+fn roteiros_so_rodam_com_o_banco_e_de_cinco_em_cinco_minutos() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_roteiros(Box::new(RoteirosFalsos(n.clone())));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 0, "sem roteiros.sqlite: nada a fazer");
+    std::fs::write(c.dados.pasta.join("roteiros.sqlite"), b"").unwrap();
+    w.passo(t0 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1);
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().origem, "roteiros");
+    w.passo(t0 + 60, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "antes dos 5 minutos");
+    w.passo(t0 + 5 * 60 + 5, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("roteiros executados=2 baixados=3"), "{log}");
+}

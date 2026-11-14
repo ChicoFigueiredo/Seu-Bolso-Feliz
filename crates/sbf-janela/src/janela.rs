@@ -163,6 +163,8 @@ pub struct Janela {
     erro_do_dialogo: Option<String>,
     /// A triagem por IA (spec 09): o serviço e o estado da tela.
     pub triagem: crate::triagem::EstadoDaTriagem,
+    /// Conexões › Roteiros (spec 10, C1).
+    pub roteiros: crate::roteiros::Roteiros,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -265,6 +267,7 @@ impl Janela {
             caixa_ui: crate::caixa_ui::EstadoDaCaixa::default(),
             erro_do_dialogo: None,
             triagem: crate::triagem::EstadoDaTriagem::default(),
+            roteiros: crate::roteiros::Roteiros::default(),
         }
     }
 
@@ -980,6 +983,7 @@ impl Janela {
                     );
                 }
             }
+            Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
             Destino::AreaFutura(id) => {
                 if let Some(a) = areas::area_futura(id) {
                     componentes::fatia_futura(ui, a.icone, a.rotulo, a.fatia, a.motivo);

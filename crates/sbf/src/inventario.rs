@@ -125,7 +125,24 @@ impl AppDoInventario {
                 f.faxinar_sobras_em_segundo_plano();
                 let chaveiro_da_ia = f.chaveiro.clone();
                 let chaves_da_ia = f.chaveiro.clone();
+                let chaveiro_dos_roteiros = f.chaveiro.clone();
                 janela.ferramentas = Some(f);
+                // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
+                // usuário. Nada roda até você clicar em Executar ou em Gravar novo.
+                if let Ok(dados) = sbf_chaveiro::pasta_de_dados_do_app()
+                    && sbf_chaveiro::garantir_fora_do_cofre(&dados, &self.pasta).is_ok()
+                {
+                    janela.roteiros.ligar(
+                        crate::roteiros::ambiente(&self.pasta, &dados),
+                        Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {
+                            banco: inventario.caminho().to_path_buf(),
+                            insumos: crate::triagem::Insumos::do_ambiente(
+                                chaveiro_dos_roteiros.clone(),
+                            ),
+                        })),
+                        chaveiro_dos_roteiros,
+                    );
+                }
                 // A triagem por IA (spec 09): o `claude` do usuário como principal e, só se
                 // houver chave no chaveiro e a reserva ligada, o OpenRouter. Nada é chamado
                 // aqui: o provedor só roda quando você clica em Iniciar ou em Testar conexão.

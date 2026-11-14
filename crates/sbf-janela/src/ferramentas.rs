@@ -116,6 +116,8 @@ pub struct Ferramentas {
     pub worker: crate::opcoes_do_worker::OpcoesDoWorker,
     /// Opções › Mensageiros (WhatsApp por QR, export do Telegram, conversas incluídas).
     pub mensageiros: crate::mensageiros::Mensageiros,
+    /// Opções › Chaveiro › Senhas de sites (roteiros).
+    pub senhas_de_sites: crate::roteiros::SenhasDeSites,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -185,6 +187,7 @@ impl Ferramentas {
             destino_da_copia: String::new(),
             nuvens: crate::nuvens::Nuvens::nova(cofre_para_nuvens),
             mensageiros: crate::mensageiros::Mensageiros::nova(cofre_para_mensageiros),
+            senhas_de_sites: crate::roteiros::SenhasDeSites::default(),
             tentar_estrategias_padrao: false,
             ultima_copia: None,
             tarefa: None,
@@ -848,6 +851,9 @@ impl Ferramentas {
         if manter {
             self.oferta = None;
         }
+        // Senhas de sites (roteiros): só rótulos, e a senha zerada ao guardar.
+        ui.add_space(12.0);
+        self.senhas_de_sites.ui(ui, &chaveiro);
     }
 
     /// Bastidores › Estante e cópia de segurança: os destinos (Opções).
