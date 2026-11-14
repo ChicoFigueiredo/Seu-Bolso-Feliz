@@ -201,7 +201,7 @@ impl Sincronizador<'_> {
             let cursores = if outra_estacao {
                 Default::default()
             } else {
-                cache.cursores()?
+                cache.cursores_para_pedir(self.relogio.agora().em_milissegundos())?
             };
             let mut deltas = Vec::with_capacity(Colecao::TODAS.len());
             for colecao in Colecao::TODAS {
@@ -212,7 +212,12 @@ impl Sincronizador<'_> {
                 deltas.push(delta);
             }
             copia_de = self.agora();
-            let linhas = cache.trocar_com_deltas(&estado, &deltas, &copia_de)?;
+            let linhas = cache.trocar_com_deltas(
+                &estado,
+                &deltas,
+                &copia_de,
+                self.relogio.agora().em_milissegundos(),
+            )?;
             contas.linhas = i64::try_from(linhas).unwrap_or(i64::MAX);
             // O que o usuário fez e o servidor ainda não aceitou continua visível.
             cache

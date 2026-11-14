@@ -6,7 +6,7 @@
 
 mod comum;
 
-use bancada_rede::RelogioDoSistema;
+use bancada_rede::{Instante, Relogio as _, RelogioDoSistema, RelogioFalso};
 use comum::*;
 use rusqlite::Connection;
 use sbf_contrato::{
@@ -500,6 +500,84 @@ fn delta_traz_so_o_que_mudou_e_aplica_as_exclusoes() {
     assert_eq!(
         cache.historico(1).unwrap()[0].colecoes,
         vec!["movimentacoes"]
+    );
+}
+
+#[test]
+fn a_estacao_pede_carga_completa_depois_de_24_horas_e_a_cada_50_sincronizacoes() {
+    let c = cena();
+    let relogio = RelogioFalso::novo(Instante::de_milissegundos(1_800_000_000_000));
+    let sinc = Sincronizador {
+        cliente: &c.cliente,
+        guarda: &c.guarda,
+        relogio: &relogio,
+        versao_das_regras: "0.1.0",
+    };
+    let livro_com_desde = |c: &Cena| {
+        let pedidos = c.s.http.pedidos();
+        let livro: Vec<_> = pedidos
+            .iter()
+            .filter(|p| p.caminho.contains("/livro/"))
+            .collect();
+        assert!(!livro.is_empty());
+        livro.iter().all(|p| p.valor_da_consulta("desde").is_some())
+    };
+    assert!(matches!(
+        sinc.trocar(&c.caminho),
+        Desfecho::Sincronizado { .. }
+    ));
+    // Logo depois: delta (todas com cursor).
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(livro_com_desde(&c), "a segunda troca devia ser delta");
+    // 25 horas depois: carga completa (sem cursor).
+    relogio.avancar(std::time::Duration::from_secs(25 * 3600));
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(
+        c.s.http
+            .pedidos()
+            .iter()
+            .filter(|p| p.caminho.contains("/livro/"))
+            .all(|p| p.valor_da_consulta("desde").is_none()),
+        "passadas 24 h a estação pede a coleção inteira"
+    );
+    // E volta a delta.
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(livro_com_desde(&c));
+    // A cada 50 deltas seguidos, uma completa (direto no cache: sem rede, sem demora).
+    let mut cache = c.cache();
+    let estado = cache.estado_do_servidor().unwrap().unwrap();
+    let agora = relogio.agora().em_milissegundos();
+    let delta = |cursor: &str| sbf_contrato::DeltaDaColecao {
+        cursor: sbf_contrato::Cursor(cursor.to_owned()),
+        completo: false,
+        linhas: sbf_contrato::LinhasDaColecao::Movimentacoes(vec![]),
+        excluidas: vec![],
+    };
+    assert!(
+        cache
+            .cursores_para_pedir(agora)
+            .unwrap()
+            .contains_key(&Colecao::Movimentacoes)
+    );
+    for n in 0..SINCRONIZACOES_ATE_A_CARGA_COMPLETA {
+        cache
+            .trocar_com_deltas(
+                &estado,
+                &[delta(&format!("c{n}"))],
+                "2026-11-14T12:00:00Z",
+                agora,
+            )
+            .unwrap();
+    }
+    assert!(
+        !cache
+            .cursores_para_pedir(agora)
+            .unwrap()
+            .contains_key(&Colecao::Movimentacoes),
+        "depois de {SINCRONIZACOES_ATE_A_CARGA_COMPLETA} deltas seguidos vem uma completa"
     );
 }
 

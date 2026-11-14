@@ -29,8 +29,8 @@ mod texto;
 
 pub use alteracoes::{SEM_CATEGORIA, rotulo_da_movimentacao};
 pub use cache::{
-    ARQUIVO_DO_CACHE, CacheDoLivro, ErroDoCache, RegistroDeAlteracao, ResultadoDoCache,
-    apagar_arquivos,
+    ARQUIVO_DO_CACHE, CacheDoLivro, ErroDoCache, HORAS_ATE_A_CARGA_COMPLETA, RegistroDeAlteracao,
+    ResultadoDoCache, SINCRONIZACOES_ATE_A_CARGA_COMPLETA, apagar_arquivos,
 };
 pub use consulta::ConsultaDoLivro;
 pub use credencial::{
