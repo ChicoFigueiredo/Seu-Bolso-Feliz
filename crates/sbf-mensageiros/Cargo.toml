@@ -1,0 +1,30 @@
+[package]
+name = "sbf-mensageiros"
+description = "Fontes em massa de mensageiros (WhatsApp e Telegram) para o inventário (ADR-014, ADR-017): trait FonteDeMensagens, mapeamento para achados, checkpoint, ponte do WhatsApp (processo externo, só leitura) e importação do export do Telegram Desktop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# As mesmas heurísticas de áreas e tipos do inventário, e o caminho do acervo.
+sbf-coleta = { path = "../sbf-coleta" }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+sha2 = "0.10"
+regex = "1"
+# Sessão do WhatsApp cifrada em disco (a chave fica no chaveiro). RustCrypto, MIT OR Apache-2.0.
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "zeroize"] }
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+bancada-segredos = { workspace = true, features = ["testes"] }
+
+[lints]
+workspace = true

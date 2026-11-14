@@ -4429,6 +4429,7 @@ dependencies = [
  "sbf-inventario",
  "sbf-janela",
  "sbf-mcp",
+ "sbf-mensageiros",
  "sbf-processo",
  "sbf-servidor",
  "sbf-triagem",
@@ -4650,6 +4651,26 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "sbf-mensageiros"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "bancada-segredos",
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "regex",
+ "rusqlite",
+ "sbf-chaveiro",
+ "sbf-coleta",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]
