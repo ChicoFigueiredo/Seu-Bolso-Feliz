@@ -104,3 +104,27 @@ Aceitar sugestões em lote grava **uma decisão por item**, pelo `Comandos` exis
 | IA-07 | Aceitar em lote grava uma decisão por item, e o desfazer funciona                         |
 | IA-08 | Uma decisão do usuário depois da sugestão a torna `obsoleta`                              |
 | IA-09 | O piloto de 200 itens mostra acerto contra as suas decisões já tomadas e o consumo         |
+
+## Agente contínuo (pedido do CEO em 2026-11-14; entra com o `sbf worker`, onda B)
+
+A triagem deixa de ser só uma rodada que você dispara. O `sbf worker` roda um **agente de triagem**
+que trabalha sozinho, dentro das mesmas regras: ele sugere e você confirma.
+
+- **Monitorar.** Cada achado ou registro novo, que vem da coleta de pastas, nuvens, e-mail ou
+  WhatsApp, entra na fila assim que chega. O agente processa em pequenos lotes, no ritmo da
+  assinatura, e em horário configurável.
+- **Aprender sem treinar modelo.** O aprendizado sai das suas decisões, em três camadas:
+  1. **Regras aprendidas (de graça).** Fornecedor e tipo dão a categoria, e padrão de remetente
+     ou de nome de arquivo dá o tipo de documento. A regra nasce quando você confirma o mesmo
+     resultado 3 vezes sem nenhuma recusa, e morre na primeira recusa.
+  2. **Exemplos no prompt.** Para cada item, vão até 8 decisões suas parecidas (mesmo
+     fornecedor, mesmo remetente, texto parecido pelo índice local da fatia 6). Até o índice
+     chegar, vão as decisões do mesmo fornecedor.
+  3. **Calibração.** O agente acompanha o acerto por campo e por faixa de confiança contra o
+     que você aceita e recusa. Uma faixa que erra mais do que diz passa a valer menos.
+- **Mostrar.** A área Triagem por IA ganha um painel com o que chegou, o que o agente sugeriu,
+  as regras aprendidas (você pode ver e apagar cada uma) e o acerto da semana.
+- **Avisar.** Um lote grande de sugestões de alta confiança vira um ponto de atenção, e pela
+  fatia 4 chega no Telegram: "37 sugestões prontas para confirmar".
+- **Nunca.** O agente não aplica nada sozinho, não passa por cima de decisão sua e não reabre
+  item `promovido`.
