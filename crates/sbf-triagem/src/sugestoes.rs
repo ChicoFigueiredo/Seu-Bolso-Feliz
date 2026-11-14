@@ -451,3 +451,30 @@ pub fn agrupar(sugestoes: Vec<SugestaoListada>) -> Vec<GrupoDeSugestoes> {
     });
     grupos
 }
+
+/// O usuário decidiu (decisão em vigor, não desfeita) o campo da sugestão `campo` deste
+/// alvo? Com `depois_de`, só conta decisão **posterior** a esse instante (o `criada_em` da
+/// sugestão). Campo sem decisão correspondente (`conta`, `duplicata_de`) nunca conta.
+///
+/// # Errors
+/// Falha do SQLite.
+pub(crate) fn usuario_decidiu_o_campo(
+    conn: &Connection,
+    alvo: &Alvo,
+    campo: &str,
+    depois_de: Option<&str>,
+) -> Resultado<bool> {
+    let Some((campo_da_decisao, _)) = crate::piloto::gabarito_do_campo(alvo.tipo(), campo) else {
+        return Ok(false);
+    };
+    Ok(conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM decisao d
+             WHERE d.alvo_tipo = ?1 AND d.alvo_id = ?2 AND d.campo = ?3
+               AND d.autor = 'usuario' AND d.desfaz IS NULL
+               AND NOT EXISTS (SELECT 1 FROM decisao x WHERE x.desfaz = d.id)
+               AND (?4 IS NULL OR d.em > ?4))",
+        params![alvo.tipo(), alvo.id(), campo_da_decisao, depois_de],
+        |l| l.get::<_, bool>(0),
+    )?)
+}

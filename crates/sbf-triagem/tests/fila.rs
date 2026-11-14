@@ -206,6 +206,31 @@ fn decisao_desfeita_nao_ensina() {
 }
 
 #[test]
+fn categoria_aceita_da_ia_nao_ensina_a_regra_so_a_do_usuario() {
+    let banco = banco_limpo();
+    let c = banco.conexao();
+    let a = inserir_registro(&c, &compra("2026-09-01", -1000, "X", Some("Loja Gama")));
+    let novo = inserir_registro(&c, &compra("2026-10-01", -2000, "X", Some("Loja Gama")));
+    let mut inv = banco.inventario();
+    // O usuário aceitou uma sugestão da IA (o motivo marca a origem): não é gabarito.
+    inv.executar(&PedidoDeDecisao {
+        acao: Acao::CorrigirCategoria("Casa".into()),
+        alvos: vec![reg(a)],
+        motivo: Some(sbf_triagem::aceite::MOTIVO_DA_DECISAO.to_owned()),
+    })
+    .expect("decidir");
+    drop(inv);
+
+    let fila = selecionar(&c, &OpcoesDaFila::padrao()).expect("fila");
+
+    assert!(
+        fila.regras.is_empty(),
+        "a IA não pode se ensinar com as próprias sugestões aceitas"
+    );
+    assert!(fila.alvos.contains(&Alvo::Registro(novo)));
+}
+
+#[test]
 fn par_de_conciliacao_ja_sugerido_fica_de_fora() {
     let banco = banco_limpo();
     let c = banco.conexao();

@@ -5,10 +5,17 @@
 //! entregue (migração `0005_versoes.sql`). Um cursor ausente é o zero: devolve a coleção
 //! inteira, com `completo: true`.
 //!
-//! Limite conhecido: uma linha gravada por uma transação que começou **antes** e terminou
-//! **depois** da leitura que produziu o cursor, com `updated_at` menor que o dele, não
-//! aparece no delta seguinte. Com um dono e transações de milissegundos, isso é raro e a
-//! carga completa (cursor ausente) o cura; a estação faz uma carga completa de vez em quando.
+//! Transações longas: uma linha gravada por uma transação que começou **antes** e terminou
+//! **depois** da leitura que produziu o cursor tem `updated_at` menor que o cursor e ficaria
+//! para sempre fora do delta. Duas defesas: (1) o delta lê as exclusões e as linhas em uma
+//! transação `REPEATABLE READ` (uma foto só); (2) o cursor recua [`MARGEM_DO_CURSOR_US`] em
+//! relação ao relógio **do banco** na hora da leitura, então o delta seguinte devolve de novo
+//! o que mudou nessa margem (a estação aplica linhas repetidas sem dano) e cobre transações
+//! de até essa duração. O que passar disso é curado pela carga completa (cursor ausente), que
+//! a estação pede periodicamente (`sbf_estacao::sincronizacao`).
+
+/// Quanto o cursor recua atrás do relógio do banco: 5 segundos, em microssegundos.
+pub const MARGEM_DO_CURSOR_US: i64 = 5_000_000;
 
 use axum::Extension;
 use axum::Json;
@@ -91,8 +98,17 @@ pub async fn ver(
         Some(texto) => Some(Posicao::decodificar(texto)?),
         None => None,
     };
-    let cliente = estado.banco.get().await?;
-    Ok(Json(calcular(&**cliente, colecao, quem.dono, desde).await?))
+    let mut cliente = estado.banco.get().await?;
+    // Uma foto só para as exclusões e as linhas.
+    let foto = cliente
+        .build_transaction()
+        .isolation_level(tokio_postgres::IsolationLevel::RepeatableRead)
+        .read_only(true)
+        .start()
+        .await?;
+    let delta = calcular(&*foto, colecao, quem.dono, desde).await?;
+    foto.commit().await?;
+    Ok(Json(delta))
 }
 
 async fn calcular<C: GenericClient>(
@@ -102,6 +118,12 @@ async fn calcular<C: GenericClient>(
     desde: Option<Posicao>,
 ) -> Result<DeltaDaColecao, ErroHttp> {
     let base = desde.unwrap_or(Posicao::ZERO);
+    // O relógio do banco na foto menos a margem: o piso do próximo cursor.
+    let agora_us: i64 = cliente
+        .query_one("SELECT (extract(epoch FROM now()) * 1000000)::bigint", &[])
+        .await?
+        .try_get(0)?;
+    let piso = (agora_us - MARGEM_DO_CURSOR_US).max(base.v);
     let depois = (base.v, base.i);
     // O maior `seq` das exclusões vem antes das linhas: uma exclusão que chegue entre as
     // duas leituras aparece de novo no delta seguinte (a estação a aplica de novo, sem dano).
@@ -118,19 +140,21 @@ async fn calcular<C: GenericClient>(
         maior_seq = maior_seq.max(linha.try_get::<_, i64>("seq")?);
     }
 
-    let (linhas, maior) = if colecao == Colecao::Rateios {
+    let linhas = if colecao == Colecao::Rateios {
         let achadas = ler_rateios_depois(cliente, dono, depois).await?;
-        let maior = achadas.last().map(|(v, r)| (*v, r.id));
-        (
-            LinhasDaColecao::Rateios(achadas.into_iter().map(|(_, r)| r).collect()),
-            maior,
-        )
+        LinhasDaColecao::Rateios(achadas.into_iter().map(|(_, r)| r).collect())
     } else {
-        filtrar(ler_colecao(cliente, colecao, dono).await?, depois)
+        filtrar(ler_colecao(cliente, colecao, dono).await?, depois).0
     };
-    let (v, i) = maior.unwrap_or(depois);
+    // O cursor anda até o piso (relógio do banco menos a margem), não até a maior linha: o
+    // que mudou depois do piso volta no próximo delta. Numa leitura sem cursor, também.
     Ok(DeltaDaColecao {
-        cursor: Posicao { v, i, x: maior_seq }.codificar(),
+        cursor: Posicao {
+            v: piso,
+            i: Uuid::nil(),
+            x: maior_seq,
+        }
+        .codificar(),
         completo: desde.is_none(),
         linhas,
         excluidas,

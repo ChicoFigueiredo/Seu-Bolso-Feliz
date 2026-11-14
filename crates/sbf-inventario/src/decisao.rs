@@ -436,6 +436,18 @@ pub(crate) fn desfazer(tx: &Transaction<'_>, id: IdDecisao) -> ResultadoDeComand
     }
     let alvo = AlvoTipo::de_codigo(&decisao.alvo_tipo)
         .ok_or_else(|| erro_de_banco(format!("alvo desconhecido: {}", decisao.alvo_tipo)))?;
+    if e_promocao(&decisao) {
+        return Err(ErroDeComando::NaoSeAplica {
+            acao: "Desfazer (a promoção não se desfaz: o servidor já aceitou o documento)".into(),
+            alvo: Ref::nova(
+                match alvo {
+                    AlvoTipo::Lote => Tipo::Lote,
+                    _ => Tipo::Registro,
+                },
+                decisao.alvo_id.clone(),
+            ),
+        });
+    }
     let em = agora(tx)?;
     if alvo == AlvoTipo::Lote {
         let lote_ref = Ref::nova(Tipo::Lote, decisao.alvo_id.clone());
@@ -510,15 +522,29 @@ fn campo_estatico(texto: &str) -> ResultadoDeComando<&'static str> {
     .ok_or_else(|| erro_de_banco(format!("campo desconhecido: {texto}")))
 }
 
+/// A decisão é uma promoção (registro `promovido` ou lote com `promovido_em`)? Terminal.
+fn e_promocao(d: &Decisao) -> bool {
+    d.campo == campo::PROMOVIDO_EM
+        || (d.campo == campo::ESTADO
+            && d.depois
+                .as_ref()
+                .and_then(|v| v.get("estado"))
+                .and_then(Value::as_str)
+                == Some("promovido"))
+}
+
 /// A última decisão do usuário ainda em vigor que não é um desfazer: o que "Desfazer
 /// decisão" desfaz. Chamadas seguidas voltam no tempo. As aprovações de registro feitas
-/// pela aprovação de um lote ficam de fora: desfazem-se com o lote.
+/// pela aprovação de um lote ficam de fora: desfazem-se com o lote. As promoções também
+/// ficam de fora (o servidor já aceitou o documento; promover não se desfaz).
 pub(crate) fn ultima_desfazivel(tx: &Transaction<'_>) -> ResultadoDeComando<Option<IdDecisao>> {
     Ok(tx
         .query_row(
             "SELECT d.id FROM decisao d
               WHERE d.autor = ?1 AND d.desfaz IS NULL
                 AND (d.motivo IS NULL OR d.motivo NOT LIKE ?2)
+                AND d.campo <> 'promovido_em'
+                AND NOT (d.campo = 'estado' AND json_extract(d.depois, '$.estado') = 'promovido')
                 AND NOT EXISTS (SELECT 1 FROM decisao x WHERE x.desfaz = d.id)
               ORDER BY d.id DESC LIMIT 1",
             params![AUTOR_USUARIO, format!("{}%", lote::PREFIXO_DO_MOTIVO)],

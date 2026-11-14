@@ -178,3 +178,31 @@ fn inv10_lote_inexistente() {
         Err(ErroDeComando::NaoEncontrado(_))
     ));
 }
+
+#[test]
+fn promocao_nao_se_desfaz_e_desfazer_ultima_pula_a_promocao() {
+    let (_p, mut inv) = novo();
+    let lote = inv.criar_lote("Lote P").unwrap();
+    inv.adicionar_ao_lote(&lote, &[registro(1)]).unwrap();
+    inv.aprovar_lote(&lote).unwrap();
+    assert_eq!(estado(inv.conexao(), 1), "aprovado");
+    let ids = inv.promover(&[registro(1)], "o servidor aceitou").unwrap();
+    assert_eq!(estado(inv.conexao(), 1), "promovido");
+
+    // Pedir para desfazer a promoção, diretamente, é recusado com uma mensagem clara.
+    let erro = inv.desfazer(ids[0]).unwrap_err();
+    assert!(matches!(erro, ErroDeComando::NaoSeAplica { .. }), "{erro}");
+    assert!(erro.to_string().contains("promoção"), "{erro}");
+    assert_eq!(estado(inv.conexao(), 1), "promovido");
+
+    // "Desfazer decisão" não escolhe a promoção: o registro continua promovido.
+    let _ = inv.desfazer_ultima();
+    assert_eq!(estado(inv.conexao(), 1), "promovido");
+    assert_eq!(
+        valor(
+            inv.conexao(),
+            "SELECT COUNT(*) FROM decisao WHERE desfaz IS NOT NULL AND alvo_tipo = 'registro' AND alvo_id = '1' AND depois LIKE '%promovido%'"
+        ),
+        "0"
+    );
+}

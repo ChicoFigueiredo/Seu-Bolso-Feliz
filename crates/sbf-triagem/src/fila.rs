@@ -104,10 +104,13 @@ pub fn categorias_aprendidas(conn: &Connection) -> Resultado<HashMap<(String, St
                 SELECT 1 FROM decisao d
                  WHERE d.alvo_tipo = 'registro' AND d.alvo_id = CAST(r.id AS TEXT)
                    AND d.campo = 'categoria' AND d.autor = 'usuario' AND d.desfaz IS NULL
+                   AND COALESCE(d.motivo, '') <> ?1
                    AND NOT EXISTS (SELECT 1 FROM decisao x WHERE x.desfaz = d.id)
                    AND json_extract(d.depois, '$.categoria_provavel') = r.categoria_provavel)",
     )?;
-    let linhas = consulta.query_map([], |l| {
+    // Aceitar uma sugestão da IA grava uma decisão "do usuário" com este motivo: não é
+    // gabarito, senão a regra gratuita se ensina com as próprias sugestões.
+    let linhas = consulta.query_map([crate::aceite::MOTIVO_DA_DECISAO], |l| {
         Ok((
             l.get::<_, Option<String>>(0)?,
             l.get::<_, Option<String>>(1)?,

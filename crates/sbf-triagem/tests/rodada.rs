@@ -531,3 +531,43 @@ fn falha_transitoria_do_provedor_adia_os_itens_e_resposta_invalida_repetida_nao_
     );
     let _ = ids;
 }
+
+#[test]
+fn usuario_que_decidiu_durante_a_rodada_nao_recebe_sugestao_naquele_campo() {
+    let (banco, ids) = banco_com_registros(2);
+    let caminho = banco.caminho.clone();
+    let (decidido, promovido) = (ids[0], ids[1]);
+    let m = montar(
+        &banco,
+        Falso::com_funcao(move |_| {
+            // Enquanto a IA pensa, o usuário decide a categoria de um registro e o outro é
+            // promovido.
+            let c = rusqlite::Connection::open(&caminho).expect("abrir");
+            c.execute(
+                "INSERT INTO decisao (alvo_tipo, alvo_id, campo, antes, depois, autor)
+                 VALUES ('registro', ?1, 'categoria', '{}', '{\"categoria_provavel\":\"Feita\"}', 'usuario')",
+                [decidido.to_string()],
+            )
+            .expect("decisao");
+            c.execute(
+                "UPDATE registro SET estado = 'promovido' WHERE id = ?1",
+                [promovido],
+            )
+            .expect("promover");
+            resposta(json!({"itens": [
+                {"n": 1, "sugestoes": [s("categoria", json!("Mercado"), 0.9)]},
+                {"n": 2, "sugestoes": [s("categoria", json!("Mercado"), 0.9)]},
+            ]}))
+        }),
+    );
+    rodar_fila(&banco, &m);
+    let c = banco.conexao();
+    assert_eq!(
+        contar(
+            &c,
+            "SELECT COUNT(*) FROM sugestao_ia WHERE campo = 'categoria' AND estado = 'aberta'"
+        ),
+        0,
+        "nada sugerido a quem já decidiu ou já foi promovido"
+    );
+}

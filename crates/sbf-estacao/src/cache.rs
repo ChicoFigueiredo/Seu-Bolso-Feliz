@@ -81,7 +81,18 @@ const MIGRACOES: &[Migracao] = &[
         dados      TEXT NOT NULL
     );",
     ),
+    Migracao::sql(
+        "carga completa periodica do delta",
+        "ALTER TABLE colecao ADD COLUMN completa_em_ms INTEGER;
+    ALTER TABLE colecao ADD COLUMN deltas_seguidos INTEGER NOT NULL DEFAULT 0;",
+    ),
 ];
+
+/// Depois de quantas horas desde a última carga completa a estação pede a coleção inteira.
+pub const HORAS_ATE_A_CARGA_COMPLETA: i64 = 24;
+
+/// Depois de quantos deltas seguidos a estação pede a coleção inteira.
+pub const SINCRONIZACOES_ATE_A_CARGA_COMPLETA: u32 = 50;
 
 /// Erro do cache (texto do SQLite ou do JSON; nunca dado secreto).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -506,6 +517,38 @@ impl CacheDoLivro {
         Ok(mapa)
     }
 
+    /// Os cursores que ainda valem para pedir um delta: a coleção que passou de
+    /// [`HORAS_ATE_A_CARGA_COMPLETA`] desde a última carga completa, ou que já teve
+    /// [`SINCRONIZACOES_ATE_A_CARGA_COMPLETA`] deltas seguidos, fica sem cursor (o servidor
+    /// devolve a coleção inteira e cura o que uma transação longa tenha deixado de fora).
+    ///
+    /// # Errors
+    /// [`ErroDoCache`].
+    pub fn cursores_para_pedir(&self, agora_ms: i64) -> ResultadoDoCache<HashMap<Colecao, Cursor>> {
+        let limite_ms = HORAS_ATE_A_CARGA_COMPLETA * 3_600_000;
+        let mut st = self.ler().prepare(
+            "SELECT nome, cursor FROM colecao WHERE cursor IS NOT NULL
+             AND completa_em_ms IS NOT NULL AND ?1 - completa_em_ms < ?2 AND ?1 >= completa_em_ms
+             AND deltas_seguidos < ?3",
+        )?;
+        let linhas = st.query_map(
+            params![
+                agora_ms,
+                limite_ms,
+                i64::from(SINCRONIZACOES_ATE_A_CARGA_COMPLETA)
+            ],
+            |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)),
+        )?;
+        let mut mapa = HashMap::new();
+        for linha in linhas {
+            let (nome, cursor) = linha?;
+            if let Some(c) = Colecao::do_caminho(&nome) {
+                mapa.insert(c, Cursor(cursor));
+            }
+        }
+        Ok(mapa)
+    }
+
     /// Como [`CacheDoLivro::trocar`], mas com deltas (contrato v2): cada coleção traz as
     /// linhas novas ou mudadas, os ids apagados e o cursor novo. `completo` troca a coleção
     /// inteira. Uma transação só.
@@ -517,6 +560,7 @@ impl CacheDoLivro {
         estado: &Estado,
         deltas: &[DeltaDaColecao],
         copia_de: &str,
+        agora_ms: i64,
     ) -> ResultadoDoCache<usize> {
         let estado_json = serde_json::to_string(estado)?;
         let estacao = estado.estacao.id.to_string();
@@ -575,11 +619,14 @@ impl CacheDoLivro {
                         |l| l.get(0),
                     )?;
                     tx.execute(
-                        "INSERT INTO colecao (nome, etag, cursor, trocada_em, linhas)
-                         VALUES (?1, NULL, ?2, ?3, ?4)
+                        "INSERT INTO colecao (nome, etag, cursor, trocada_em, linhas, completa_em_ms, deltas_seguidos)
+                         VALUES (?1, NULL, ?2, ?3, ?4, ?5, 0)
                          ON CONFLICT (nome) DO UPDATE SET etag = NULL, cursor = excluded.cursor,
-                            trocada_em = excluded.trocada_em, linhas = excluded.linhas",
-                        params![nome, cursor, copia_de, quantas],
+                            trocada_em = excluded.trocada_em, linhas = excluded.linhas,
+                            completa_em_ms = CASE WHEN ?6 THEN excluded.completa_em_ms
+                                                  ELSE colecao.completa_em_ms END,
+                            deltas_seguidos = CASE WHEN ?6 THEN 0 ELSE colecao.deltas_seguidos + 1 END",
+                        params![nome, cursor, copia_de, quantas, agora_ms, *completo],
                     )?;
                     total += linhas.len() + excluidas.len();
                     mudou |= !linhas.is_empty() || !excluidas.is_empty() || *completo;

@@ -20,13 +20,17 @@ use sbf_ia::{
     ConfiguracaoDaFila, Controle, Degrau, Evento, Fila, Interrupcao, NivelDeConfianca, Relatorio,
 };
 
+use crate::aceite::registro_promovido;
 use crate::entrada::{Vocabulario, carregar_itens};
 use crate::erro::Resultado;
 use crate::formato::FormatoDaTriagem;
 use crate::normalizar::normalizar;
 use crate::prompt::{INSTRUCAO, ITENS_POR_LOTE, PROMPT_VERSAO, esquema, max_tokens_de_saida};
 use crate::resposta::{SugestaoValida, interpretar};
-use crate::sugestoes::{EstadoDaSugestao, NovaSugestao, atualizar_rodada, gravar, iniciar_rodada};
+use crate::sugestoes::{
+    EstadoDaSugestao, NovaSugestao, atualizar_rodada, gravar, iniciar_rodada,
+    usuario_decidiu_o_campo,
+};
 use crate::tipos::{Alvo, Item};
 
 /// Quantos itens se carregam por vez.
@@ -318,6 +322,16 @@ fn gravar_pedaco(
         for s in lista {
             if !config.piloto && igual_ao_atual(item, s) {
                 continue;
+            }
+            // A rodada leva minutos: o usuário pode ter decidido este campo, ou o registro
+            // pode ter sido promovido, desde que a fila foi montada. Reconfere aqui, na
+            // transação que grava. (O piloto mede o acerto sobre decisões: não filtra.)
+            if !config.piloto {
+                let promovido =
+                    matches!(&alvo, Alvo::Registro(id) if registro_promovido(&tx, *id)?);
+                if promovido || usuario_decidiu_o_campo(&tx, &alvo, &s.campo, None)? {
+                    continue;
+                }
             }
             gravar(
                 &tx,

@@ -6,7 +6,7 @@
 
 mod comum;
 
-use bancada_rede::RelogioDoSistema;
+use bancada_rede::{Instante, Relogio as _, RelogioDoSistema, RelogioFalso};
 use comum::*;
 use rusqlite::Connection;
 use sbf_contrato::{
@@ -367,6 +367,29 @@ fn com_rascunhos(c: &Cena) {
 }
 
 #[test]
+fn rascunho_conciliado_nao_entra_na_caixa_nem_no_aprovar_lote() {
+    let c = cena();
+    c.s.mexer(|e| {
+        e.lotes = vec![lote(60, "Lote exemplo")];
+        let mut conciliado = rascunho(61, id(60), "Mercado Delta");
+        conciliado.conciliacao = sbf_contrato::EstadoDaConciliacao::ConfirmadoDuplicata;
+        e.rascunhos = vec![conciliado, rascunho(62, id(60), "Padaria Exemplo")];
+    });
+    let mut cache = c.sincronizar_e_ver();
+    let caixa = cache.caixa_de_entrada(true).unwrap();
+    assert_eq!(caixa[0].itens.len(), 1, "o conciliado não espera decisão");
+    assert_eq!(caixa[0].itens[0].rascunho.id, id(62));
+    cache
+        .enfileirar(Acao::AprovarLoteDeRascunhos { lote: id(60) }, AGORA)
+        .unwrap();
+    let r: Rascunho = cache
+        .linha(Colecao::Rascunhos, &id(61).to_string())
+        .unwrap()
+        .unwrap();
+    assert_ne!(r.estado, EstadoDoRascunho::Aprovado);
+}
+
+#[test]
 fn caixa_de_entrada_agrupa_por_lote_e_aprovar_vira_movimentacao() {
     let c = cena();
     com_rascunhos(&c);
@@ -477,6 +500,84 @@ fn delta_traz_so_o_que_mudou_e_aplica_as_exclusoes() {
     assert_eq!(
         cache.historico(1).unwrap()[0].colecoes,
         vec!["movimentacoes"]
+    );
+}
+
+#[test]
+fn a_estacao_pede_carga_completa_depois_de_24_horas_e_a_cada_50_sincronizacoes() {
+    let c = cena();
+    let relogio = RelogioFalso::novo(Instante::de_milissegundos(1_800_000_000_000));
+    let sinc = Sincronizador {
+        cliente: &c.cliente,
+        guarda: &c.guarda,
+        relogio: &relogio,
+        versao_das_regras: "0.1.0",
+    };
+    let livro_com_desde = |c: &Cena| {
+        let pedidos = c.s.http.pedidos();
+        let livro: Vec<_> = pedidos
+            .iter()
+            .filter(|p| p.caminho.contains("/livro/"))
+            .collect();
+        assert!(!livro.is_empty());
+        livro.iter().all(|p| p.valor_da_consulta("desde").is_some())
+    };
+    assert!(matches!(
+        sinc.trocar(&c.caminho),
+        Desfecho::Sincronizado { .. }
+    ));
+    // Logo depois: delta (todas com cursor).
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(livro_com_desde(&c), "a segunda troca devia ser delta");
+    // 25 horas depois: carga completa (sem cursor).
+    relogio.avancar(std::time::Duration::from_secs(25 * 3600));
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(
+        c.s.http
+            .pedidos()
+            .iter()
+            .filter(|p| p.caminho.contains("/livro/"))
+            .all(|p| p.valor_da_consulta("desde").is_none()),
+        "passadas 24 h a estação pede a coleção inteira"
+    );
+    // E volta a delta.
+    c.s.http.esquecer_pedidos();
+    sinc.trocar(&c.caminho);
+    assert!(livro_com_desde(&c));
+    // A cada 50 deltas seguidos, uma completa (direto no cache: sem rede, sem demora).
+    let mut cache = c.cache();
+    let estado = cache.estado_do_servidor().unwrap().unwrap();
+    let agora = relogio.agora().em_milissegundos();
+    let delta = |cursor: &str| sbf_contrato::DeltaDaColecao {
+        cursor: sbf_contrato::Cursor(cursor.to_owned()),
+        completo: false,
+        linhas: sbf_contrato::LinhasDaColecao::Movimentacoes(vec![]),
+        excluidas: vec![],
+    };
+    assert!(
+        cache
+            .cursores_para_pedir(agora)
+            .unwrap()
+            .contains_key(&Colecao::Movimentacoes)
+    );
+    for n in 0..SINCRONIZACOES_ATE_A_CARGA_COMPLETA {
+        cache
+            .trocar_com_deltas(
+                &estado,
+                &[delta(&format!("c{n}"))],
+                "2026-11-14T12:00:00Z",
+                agora,
+            )
+            .unwrap();
+    }
+    assert!(
+        !cache
+            .cursores_para_pedir(agora)
+            .unwrap()
+            .contains_key(&Colecao::Movimentacoes),
+        "depois de {SINCRONIZACOES_ATE_A_CARGA_COMPLETA} deltas seguidos vem uma completa"
     );
 }
 
@@ -700,6 +801,58 @@ fn cx07_envio_idempotente_promove_so_apos_o_aceite_e_retoma_pela_metade() {
     let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
     assert_eq!(resumo.retomados, 2);
     assert_eq!(resumo.enviados, 0);
+}
+
+#[test]
+fn envio_pula_registro_nao_aprovado_e_achado_descartado_sem_abortar_nem_travar() {
+    let c = cena();
+    let mut i = inventario_com_lote();
+    i.inv.aprovar_lote(&i.lote).unwrap();
+    // Depois da aprovação o usuário marcou o registro 2 como divergente, e o achado do
+    // documento 0 foi descartado.
+    i.inv
+        .conexao()
+        .execute("UPDATE registro SET estado = 'divergente' WHERE id = 2", [])
+        .unwrap();
+    let leitor = LeitorDeCofre::novo(&i.cofre);
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert_eq!(resumo.pulados, 1, "{resumo:?}");
+    assert_eq!(resumo.enviados, 1);
+    assert!(resumo.falhas.is_empty(), "{:?}", resumo.falhas);
+    assert!(
+        resumo.lote_promovido,
+        "o que sobrou foi aceito: o lote fecha"
+    );
+    assert_eq!(
+        estado_dos_registros(&i.inv),
+        ["promovido", "divergente", "aprovado"]
+    );
+    // Reenviar não trava nem reenvia.
+    let antes = c.s.estado.lock().unwrap().pedidos_de_documento;
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert!(resumo.falhas.is_empty());
+    assert_eq!(c.s.estado.lock().unwrap().pedidos_de_documento, antes);
+
+    // Achado descartado: o documento não vai.
+    let c = cena();
+    let mut i = inventario_com_lote();
+    i.inv.aprovar_lote(&i.lote).unwrap();
+    i.inv
+        .conexao()
+        .execute(
+            "UPDATE achado SET estado = 'descartado' WHERE content_hash = ?1",
+            [&i.hashes[0]],
+        )
+        .unwrap();
+    let leitor = LeitorDeCofre::novo(&i.cofre);
+    let resumo = enviar_lote(&c.cliente, &mut i.inv, &i.lote, &leitor, &mut |_| {}).unwrap();
+    assert_eq!(resumo.pulados, 1);
+    assert_eq!(resumo.enviados, 1);
+    assert_eq!(c.s.estado.lock().unwrap().pedidos_de_documento, 1);
+    assert_eq!(
+        estado_dos_registros(&i.inv),
+        ["aprovado", "promovido", "aprovado"]
+    );
 }
 
 #[test]

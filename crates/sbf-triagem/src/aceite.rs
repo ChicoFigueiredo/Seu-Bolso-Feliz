@@ -16,7 +16,7 @@ use sbf_inventario::comando::{Acao, Comandos, IdDecisao, PedidoDeDecisao};
 use serde_json::Value;
 
 use crate::erro::Resultado;
-use crate::sugestoes::{EstadoDaSugestao, SugestaoListada, marcar};
+use crate::sugestoes::{EstadoDaSugestao, SugestaoListada, marcar, usuario_decidiu_o_campo};
 use crate::tipos::Alvo;
 
 /// O motivo gravado em cada decisão aceita.
@@ -83,7 +83,7 @@ fn estado_da_sugestao(conn: &Connection, id: i64) -> Resultado<Option<String>> {
         .optional()?)
 }
 
-fn registro_promovido(conn: &Connection, id: i64) -> Resultado<bool> {
+pub(crate) fn registro_promovido(conn: &Connection, id: i64) -> Resultado<bool> {
     Ok(conn
         .query_row(
             "SELECT estado = 'promovido' OR movimentacao_id IS NOT NULL
@@ -171,6 +171,20 @@ pub fn aceitar(
             resultado
                 .ignoradas
                 .push((s.id, "o registro já foi promovido".to_owned()));
+            continue;
+        }
+        // O usuário já decidiu este campo depois da sugestão (por outro caminho): ela é velha.
+        let criada_em: String = conn.query_row(
+            "SELECT criada_em FROM sugestao_ia WHERE id = ?1",
+            [s.id],
+            |l| l.get(0),
+        )?;
+        if usuario_decidiu_o_campo(conn, &s.alvo, &s.campo, Some(&criada_em))? {
+            marcar(conn, &[s.id], EstadoDaSugestao::Obsoleta)?;
+            resultado.ignoradas.push((
+                s.id,
+                "o campo já foi decidido por você depois desta sugestão".to_owned(),
+            ));
             continue;
         }
         match acao_da_sugestao(&s) {
