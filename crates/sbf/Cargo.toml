@@ -16,6 +16,7 @@ eframe = { workspace = true }
 egui = { workspace = true }
 sbf-servidor = { path = "../sbf-servidor" }
 sbf-coletor = { path = "../sbf-coletor" }
+sbf-canais = { path = "../sbf-canais" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 sbf-contrato = { path = "../sbf-contrato" }

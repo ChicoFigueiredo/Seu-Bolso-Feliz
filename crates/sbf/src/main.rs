@@ -10,9 +10,11 @@
 //! - `sbf worker rodar|instalar|desinstalar|estado`: o worker local sem janela (`worker.rs`);
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf coletor-vps`: as coletas da VPS, Gmail e Pluggy (ADR-014; ver `coletor.rs`);
+//! - `sbf canais`: o bot do Telegram e os alertas, na VPS (ADR-014, ADR-017; ver `canais.rs`);
 //! - `sbf --versao`.
 
 mod caixa;
+mod canais;
 mod captura;
 mod coletor;
 mod entrada;
@@ -401,7 +403,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -448,6 +450,7 @@ fn main() -> ExitCode {
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("worker") => worker::rodar(&args[1..]),
+        Some("canais") => canais::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {

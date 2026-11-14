@@ -1,0 +1,32 @@
+[package]
+name = "sbf-canais"
+description = "O modo `sbf canais` (ADR-014, ADR-015, ADR-017): o bot do Telegram por long polling (entrada de documentos na caixa de entrada) e os alertas do livro-caixa, que rodam 24 h na VPS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-servidor = { path = "../sbf-servidor" }
+sbf-coletor = { path = "../sbf-coletor" }
+sbf-contrato = { path = "../sbf-contrato" }
+sbf-livro = { path = "../sbf-livro", default-features = false, features = ["contrato"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-serde_json-1"] }
+deadpool-postgres = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+getrandom = "0.3"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+sbf-servidor = { path = "../sbf-servidor" }
+
+[lints]
+workspace = true
