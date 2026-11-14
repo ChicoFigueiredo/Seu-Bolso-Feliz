@@ -124,7 +124,7 @@ impl eframe::App for App {
 /// `SBF_CAPTURA_ABRIR` (uma rota: `a-triar`, `fornecedor:Energia Exemplo`…),
 /// `SBF_CAPTURA_ABA` (o índice da aba da página), `SBF_CAPTURA_FOCO` (a rota do item em
 /// foco no dock: a prévia dele no painel) e `SBF_CENA` (`paleta`, `keytips`, `simples`,
-/// `bastidores`, `flutuante`, `previa-destacada`).
+/// `bastidores`, `chaves-ia`, `flutuante`, `previa-destacada`).
 fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     use sbf_janela::Destino;
     if let Ok(rota) = std::env::var("SBF_CAPTURA_ABRIR") {
@@ -151,6 +151,11 @@ fn preparar_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
         "bastidores" => {
             casca.estado.ribbon.bastidores_abertos = true;
             casca.estado.secao_bastidores = Some("opcoes".into());
+        }
+        "chaves-ia" => {
+            casca.estado.ribbon.bastidores_abertos = true;
+            casca.estado.secao_bastidores = Some("opcoes".into());
+            casca.app.janela().triagem.chaves.rolar_ate_aqui = 6;
         }
         "regras" => bancada_casca::executar(ctx, "ferramentas.regras-de-senha"),
         "mudar-categoria" => bancada_casca::executar(ctx, "livro.mudar-categoria"),

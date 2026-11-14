@@ -170,6 +170,8 @@ pub struct ChavesDeIa {
     pub claude: Option<PathBuf>,
     /// O último aviso: `Ok` ou `Err`.
     pub aviso: Option<Result<String, String>>,
+    /// Rola a página de Opções até esta seção nos próximos N quadros (o conteúdo cresce no quadro seguinte) (as capturas de tela usam).
+    pub rolar_ate_aqui: u8,
 }
 
 impl std::fmt::Debug for ChavesDeIa {
@@ -188,6 +190,7 @@ impl ChavesDeIa {
             linhas: Vec::new(),
             claude,
             aviso: None,
+            rolar_ate_aqui: 0,
         };
         s.reler();
         s
@@ -449,6 +452,10 @@ pub fn secao(
             ui.label(RichText::new(e).color(cores.perigo));
         }
         None => {}
+    }
+    if chaves.rolar_ate_aqui > 0 {
+        chaves.rolar_ate_aqui -= 1;
+        ui.scroll_with_delta(egui::vec2(0.0, -10_000.0));
     }
 }
 
