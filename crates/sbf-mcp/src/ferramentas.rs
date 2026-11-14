@@ -13,7 +13,9 @@ use sbf_triagem::entrada::carregar_item;
 use sbf_triagem::normalizar::{cortar, truncar_texto};
 use sbf_triagem::prompt::LIMITE_DA_JUSTIFICATIVA;
 use sbf_triagem::resposta::validar_sugestao;
-use sbf_triagem::sugestoes::{EstadoDaSugestao, NovaSugestao, atualizar_rodada, gravar, iniciar_rodada};
+use sbf_triagem::sugestoes::{
+    EstadoDaSugestao, NovaSugestao, atualizar_rodada, gravar, iniciar_rodada,
+};
 use sbf_triagem::{Alvo, fila};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -91,7 +93,8 @@ struct Onde {
 impl Onde {
     /// Todo `?` da condição vira o mesmo parâmetro numerado.
     fn e(&mut self, condicao: &str, valor: impl Into<Sql>) {
-        self.condicoes.push(condicao.replace('?', &format!("?{}", self.valores.len() + 1)));
+        self.condicoes
+            .push(condicao.replace('?', &format!("?{}", self.valores.len() + 1)));
         self.valores.push(valor.into());
     }
 
@@ -113,7 +116,9 @@ fn limpo(t: &Option<String>) -> Option<&str> {
 }
 
 fn curto(t: Option<String>, max: usize) -> Value {
-    t.map_or(Value::Null, |t| Value::String(cortar(&t.replace('\n', " "), max)))
+    t.map_or(Value::Null, |t| {
+        Value::String(cortar(&t.replace('\n', " "), max))
+    })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -219,12 +224,15 @@ impl Nucleo {
     /// Falha do SQLite.
     pub fn inventario_resumo(&self) -> Resultado {
         let c = self.leitura()?;
-        let n = |sql: &str| -> Result<i64, String> { c.query_row(sql, [], |l| l.get(0)).map_err(erro) };
+        let n =
+            |sql: &str| -> Result<i64, String> { c.query_row(sql, [], |l| l.get(0)).map_err(erro) };
         let por = |sql: &str| -> Result<Value, String> {
             let mut st = c.prepare(sql).map_err(erro)?;
             let mut m = serde_json::Map::new();
             for l in st
-                .query_map([], |l| Ok((l.get::<_, Option<String>>(0)?, l.get::<_, i64>(1)?)))
+                .query_map([], |l| {
+                    Ok((l.get::<_, Option<String>>(0)?, l.get::<_, i64>(1)?))
+                })
                 .map_err(erro)?
             {
                 let (k, v) = l.map_err(erro)?;
@@ -239,7 +247,9 @@ impl Nucleo {
                 |l| Ok((l.get(0)?, l.get(1)?)),
             )
             .map_err(erro)?;
-        let versao: i64 = c.query_row("PRAGMA user_version", [], |l| l.get(0)).map_err(erro)?;
+        let versao: i64 = c
+            .query_row("PRAGMA user_version", [], |l| l.get(0))
+            .map_err(erro)?;
         let triagem = versao >= i64::from(VERSAO_ATUAL);
         let abertas = if triagem {
             por("SELECT campo, COUNT(*) FROM sugestao_ia
@@ -308,7 +318,11 @@ impl Nucleo {
         }
         let onde = o.texto();
         let total: i64 = c
-            .query_row(&format!("SELECT COUNT(*) FROM registro WHERE {onde}"), params_from_iter(o.valores.iter()), |l| l.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM registro WHERE {onde}"),
+                params_from_iter(o.valores.iter()),
+                |l| l.get(0),
+            )
             .map_err(erro)?;
         let pg = Pagina::de(p.limite, p.deslocamento);
         let mut st = c
@@ -454,7 +468,11 @@ impl Nucleo {
         }
         let onde = o.texto();
         let total: i64 = c
-            .query_row(&format!("SELECT COUNT(*) FROM achado a WHERE {onde}"), params_from_iter(o.valores.iter()), |l| l.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM achado a WHERE {onde}"),
+                params_from_iter(o.valores.iter()),
+                |l| l.get(0),
+            )
             .map_err(erro)?;
         let pg = Pagina::de(p.limite, p.deslocamento);
         let mut st = c
@@ -510,7 +528,9 @@ impl Nucleo {
             return Err("não existe achado com esse content_hash".to_owned());
         };
         let Some(texto) = texto else {
-            return Err("esse achado não tem texto extraído (o documento pode ser só imagem)".to_owned());
+            return Err(
+                "esse achado não tem texto extraído (o documento pode ser só imagem)".to_owned(),
+            );
         };
         let enviado = truncar_texto(&texto);
         Ok(json!({
@@ -580,9 +600,12 @@ impl Nucleo {
                     .unwrap_or("")
                     .split(',')
                     .filter_map(|t| {
-                        aprendidas
-                            .get(&(chave.clone(), t.to_owned()))
-                            .map(|a| (t.to_owned(), json!({"categoria": a.categoria, "decisoes": a.exemplos})))
+                        aprendidas.get(&(chave.clone(), t.to_owned())).map(|a| {
+                            (
+                                t.to_owned(),
+                                json!({"categoria": a.categoria, "decisoes": a.exemplos}),
+                            )
+                        })
                     })
                     .collect();
                 json!({
@@ -610,7 +633,11 @@ impl Nucleo {
         }
         let onde = o.texto();
         let total: i64 = c
-            .query_row(&format!("SELECT COUNT(*) FROM decisao WHERE {onde}"), params_from_iter(o.valores.iter()), |l| l.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM decisao WHERE {onde}"),
+                params_from_iter(o.valores.iter()),
+                |l| l.get(0),
+            )
             .map_err(erro)?;
         let pg = Pagina::de(p.limite, p.deslocamento);
         let mut st = c
@@ -636,14 +663,20 @@ impl Nucleo {
     /// Sem cache do livro ou falha do SQLite.
     pub fn livro_movimentacoes(&self, p: &ParamsDoLivro) -> Resultado {
         let Some(caminho) = &self.livro else {
-            return Err("não há cache do livro-caixa nesta estação (sincronize o app primeiro)".to_owned());
+            return Err(
+                "não há cache do livro-caixa nesta estação (sincronize o app primeiro)".to_owned(),
+            );
         };
         let c = abrir_leitura(caminho).map_err(erro)?;
         let nomes = |colecao: &str| -> Result<BTreeMap<String, String>, String> {
-            let mut st = c.prepare("SELECT id, dados FROM linha WHERE colecao = ?1").map_err(erro)?;
+            let mut st = c
+                .prepare("SELECT id, dados FROM linha WHERE colecao = ?1")
+                .map_err(erro)?;
             let mut m = BTreeMap::new();
             for l in st
-                .query_map([colecao], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))
+                .query_map([colecao], |l| {
+                    Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?))
+                })
                 .map_err(erro)?
             {
                 let (id, dados) = l.map_err(erro)?;
@@ -658,7 +691,9 @@ impl Nucleo {
         };
         let categorias = nomes("categorias")?;
         let contas = nomes("contas")?;
-        let mut st = c.prepare("SELECT dados FROM linha WHERE colecao = 'movimentacoes' ORDER BY id").map_err(erro)?;
+        let mut st = c
+            .prepare("SELECT dados FROM linha WHERE colecao = 'movimentacoes' ORDER BY id")
+            .map_err(erro)?;
         let texto = limpo(&p.texto).map(str::to_lowercase);
         let categoria = limpo(&p.categoria).map(str::to_lowercase);
         let conta = limpo(&p.conta).map(str::to_lowercase);
@@ -672,12 +707,38 @@ impl Nucleo {
             let nome_cat = busca(&v, "categoria").and_then(|id| categorias.get(&id).cloned());
             let nome_conta = busca(&v, "conta").and_then(|id| contas.get(&id).cloned());
             let descricao = busca(&v, "descricao");
-            if let Some(de) = limpo(&p.de) && data.as_str() < de { continue; }
-            if let Some(ate) = limpo(&p.ate) && data.as_str() > ate { continue; }
-            if p.sem_categoria == Some(true) && nome_cat.is_some() { continue; }
-            if let Some(t) = &texto && !descricao.as_deref().unwrap_or("").to_lowercase().contains(t.as_str()) { continue; }
-            if let Some(k) = &categoria && nome_cat.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str()) { continue; }
-            if let Some(k) = &conta && nome_conta.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str()) { continue; }
+            if let Some(de) = limpo(&p.de)
+                && data.as_str() < de
+            {
+                continue;
+            }
+            if let Some(ate) = limpo(&p.ate)
+                && data.as_str() > ate
+            {
+                continue;
+            }
+            if p.sem_categoria == Some(true) && nome_cat.is_some() {
+                continue;
+            }
+            if let Some(t) = &texto
+                && !descricao
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(t.as_str())
+            {
+                continue;
+            }
+            if let Some(k) = &categoria
+                && nome_cat.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str())
+            {
+                continue;
+            }
+            if let Some(k) = &conta
+                && nome_conta.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str())
+            {
+                continue;
+            }
             achadas.push(json!({
                 "id": busca(&v, "id"),
                 "data": data,
@@ -727,7 +788,11 @@ impl Nucleo {
         }
         let onde = o.texto();
         let total: i64 = c
-            .query_row(&format!("SELECT COUNT(*) FROM sugestao_ia WHERE {onde}"), params_from_iter(o.valores.iter()), |l| l.get(0))
+            .query_row(
+                &format!("SELECT COUNT(*) FROM sugestao_ia WHERE {onde}"),
+                params_from_iter(o.valores.iter()),
+                |l| l.get(0),
+            )
             .map_err(erro)?;
         let pg = Pagina::de(p.limite, p.deslocamento);
         let mut st = c
@@ -761,7 +826,9 @@ impl Nucleo {
             return Err("a lista de sugestões veio vazia".to_owned());
         }
         if sugestoes.len() > MAXIMO_DE_SUGESTOES {
-            return Err(format!("no máximo {MAXIMO_DE_SUGESTOES} sugestões por chamada"));
+            return Err(format!(
+                "no máximo {MAXIMO_DE_SUGESTOES} sugestões por chamada"
+            ));
         }
         let leitura = self.leitura()?;
         if !tem_triagem(&leitura) {
@@ -798,7 +865,14 @@ impl Nucleo {
                         .map_err(erro)?;
                     gravar(
                         &escrita,
-                        &NovaSugestao::da_ia(alvo, v, MODELO_MCP, VERSAO_MCP, id, EstadoDaSugestao::Aberta),
+                        &NovaSugestao::da_ia(
+                            alvo,
+                            v,
+                            MODELO_MCP,
+                            VERSAO_MCP,
+                            id,
+                            EstadoDaSugestao::Aberta,
+                        ),
                     )
                     .map_err(erro)?;
                     gravadas += 1;
@@ -849,8 +923,9 @@ fn validar_proposta(
     c: &Connection,
     s: &SugestaoProposta,
 ) -> Result<(Alvo, sbf_triagem::resposta::SugestaoValida), String> {
-    let alvo = Alvo::de(s.alvo_tipo.trim(), s.alvo_id.trim())
-        .ok_or_else(|| "alvo_tipo deve ser \"achado\" ou \"registro\" (registro com id numérico)".to_owned())?;
+    let alvo = Alvo::de(s.alvo_tipo.trim(), s.alvo_id.trim()).ok_or_else(|| {
+        "alvo_tipo deve ser \"achado\" ou \"registro\" (registro com id numérico)".to_owned()
+    })?;
     let campos: &[&str] = match alvo {
         Alvo::Achado(_) => &CAMPOS_DO_ACHADO,
         Alvo::Registro(_) => &CAMPOS_DO_REGISTRO,
@@ -864,7 +939,9 @@ fn validar_proposta(
         ));
     }
     if s.justificativa.chars().count() > LIMITE_DA_JUSTIFICATIVA {
-        return Err(format!("justificativa passa de {LIMITE_DA_JUSTIFICATIVA} caracteres"));
+        return Err(format!(
+            "justificativa passa de {LIMITE_DA_JUSTIFICATIVA} caracteres"
+        ));
     }
     let (existe, decidido, promovido): (bool, bool, bool) = match &alvo {
         Alvo::Achado(h) => c
@@ -925,9 +1002,8 @@ fn linha_de_sugestao(l: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<Val
 }
 
 fn linha_de_decisao(l: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let json_curto = |t: Option<String>| -> Value {
-        t.map_or(Value::Null, |t| Value::String(cortar(&t, 200)))
-    };
+    let json_curto =
+        |t: Option<String>| -> Value { t.map_or(Value::Null, |t| Value::String(cortar(&t, 200))) };
     Ok(json!({
         "id": l.get::<_, i64>(0)?,
         "alvo_tipo": l.get::<_, String>(1)?,

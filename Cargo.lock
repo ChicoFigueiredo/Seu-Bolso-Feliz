@@ -4331,6 +4331,7 @@ dependencies = [
  "sbf-ia",
  "sbf-inventario",
  "sbf-janela",
+ "sbf-mcp",
  "sbf-processo",
  "sbf-servidor",
  "sbf-triagem",
@@ -4499,6 +4500,7 @@ version = "0.1.0"
 dependencies = [
  "rmcp",
  "rusqlite",
+ "sbf-ia",
  "sbf-inventario",
  "sbf-triagem",
  "serde",

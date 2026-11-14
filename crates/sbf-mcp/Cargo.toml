@@ -18,6 +18,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# A ajuda de testes da triagem (banco fictício migrado) é reaproveitada por caminho.
+sbf-ia = { path = "../sbf-ia" }
 
 [lints]
 workspace = true

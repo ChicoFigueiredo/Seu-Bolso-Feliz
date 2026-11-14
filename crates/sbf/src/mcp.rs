@@ -42,14 +42,20 @@ pub fn rodar(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
     let livro = livro.or_else(livro_da_estacao);
-    let nucleo = match Nucleo::novo(&Path::new(pasta).join("inventario.sqlite"), livro.as_deref()) {
+    let nucleo = match Nucleo::novo(
+        &Path::new(pasta).join("inventario.sqlite"),
+        livro.as_deref(),
+    ) {
         Ok(n) => n,
         Err(e) => {
             eprintln!("sbf mcp: {e}");
             return ExitCode::from(3);
         }
     };
-    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("sbf mcp: {e}");

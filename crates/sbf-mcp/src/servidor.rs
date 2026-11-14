@@ -162,53 +162,98 @@ fn responder(nome: &str, r: Result<Value, String>) -> Result<String, String> {
     let tamanho = match &r {
         Ok(t) | Err(t) => t.len(),
     };
-    eprintln!("sbf mcp: {nome} -> {tamanho} bytes{}", if r.is_err() { " (erro)" } else { "" });
+    eprintln!(
+        "sbf mcp: {nome} -> {tamanho} bytes{}",
+        if r.is_err() { " (erro)" } else { "" }
+    );
     r
 }
 
 #[tool_router]
 impl Servidor {
-    #[tool(description = "Totais do inventario: achados e registros por estado, quantos sem categoria, quantos o usuario ja decidiu, sugestoes abertas por campo e se ha livro-caixa. Comece por aqui.")]
+    #[tool(
+        description = "Totais do inventario: achados e registros por estado, quantos sem categoria, quantos o usuario ja decidiu, sugestoes abertas por campo e se ha livro-caixa. Comece por aqui."
+    )]
     fn inventario_resumo(&self) -> Result<String, String> {
         responder("inventario_resumo", self.nucleo.inventario_resumo())
     }
 
-    #[tool(description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Paginado.")]
-    fn buscar_registros(&self, Parameters(p): Parameters<PedidoDeRegistros>) -> Result<String, String> {
+    #[tool(
+        description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Paginado."
+    )]
+    fn buscar_registros(
+        &self,
+        Parameters(p): Parameters<PedidoDeRegistros>,
+    ) -> Result<String, String> {
         responder("buscar_registros", self.nucleo.buscar_registros(&p.into()))
     }
 
-    #[tool(description = "Um registro completo: campos, sub-registros, achado de origem, sugestoes abertas e decisoes do usuario.")]
+    #[tool(
+        description = "Um registro completo: campos, sub-registros, achado de origem, sugestoes abertas e decisoes do usuario."
+    )]
     fn ver_registro(&self, Parameters(p): Parameters<PedidoDeRegistro>) -> Result<String, String> {
         responder("ver_registro", self.nucleo.ver_registro(p.id))
     }
 
-    #[tool(description = "Busca achados (documentos unicos, pelo content_hash) por estado, tipo e texto. Use ver_texto_do_achado para ler o conteudo.")]
+    #[tool(
+        description = "Busca achados (documentos unicos, pelo content_hash) por estado, tipo e texto. Use ver_texto_do_achado para ler o conteudo."
+    )]
     fn buscar_achados(&self, Parameters(p): Parameters<PedidoDeAchados>) -> Result<String, String> {
         responder("buscar_achados", self.nucleo.buscar_achados(&p.into()))
     }
 
-    #[tool(description = "O texto extraido de um achado, como a triagem o ve: ate 3000 caracteres do comeco e 1000 do fim.")]
-    fn ver_texto_do_achado(&self, Parameters(p): Parameters<PedidoDeTexto>) -> Result<String, String> {
-        responder("ver_texto_do_achado", self.nucleo.ver_texto_do_achado(&p.content_hash))
+    #[tool(
+        description = "O texto extraido de um achado, como a triagem o ve: ate 3000 caracteres do comeco e 1000 do fim."
+    )]
+    fn ver_texto_do_achado(
+        &self,
+        Parameters(p): Parameters<PedidoDeTexto>,
+    ) -> Result<String, String> {
+        responder(
+            "ver_texto_do_achado",
+            self.nucleo.ver_texto_do_achado(&p.content_hash),
+        )
     }
 
-    #[tool(description = "Fornecedores dos registros, do mais frequente ao menos, com a contagem, quantos estao sem categoria e a categoria que o usuario ja fixou por tipo.")]
-    fn fornecedores(&self, Parameters(p): Parameters<PedidoDeFornecedores>) -> Result<String, String> {
+    #[tool(
+        description = "Fornecedores dos registros, do mais frequente ao menos, com a contagem, quantos estao sem categoria e a categoria que o usuario ja fixou por tipo."
+    )]
+    fn fornecedores(
+        &self,
+        Parameters(p): Parameters<PedidoDeFornecedores>,
+    ) -> Result<String, String> {
         responder("fornecedores", self.nucleo.fornecedores(&p.into()))
     }
 
-    #[tool(description = "As decisoes mais recentes do usuario no log (antes e depois), uteis para imitar o criterio dele.")]
-    fn decisoes_recentes(&self, Parameters(p): Parameters<PedidoDeDecisoes>) -> Result<String, String> {
-        responder("decisoes_recentes", self.nucleo.decisoes_recentes(&p.into()))
+    #[tool(
+        description = "As decisoes mais recentes do usuario no log (antes e depois), uteis para imitar o criterio dele."
+    )]
+    fn decisoes_recentes(
+        &self,
+        Parameters(p): Parameters<PedidoDeDecisoes>,
+    ) -> Result<String, String> {
+        responder(
+            "decisoes_recentes",
+            self.nucleo.decisoes_recentes(&p.into()),
+        )
     }
 
-    #[tool(description = "Movimentacoes do livro-caixa (copia local, so leitura) com categoria e conta por nome. Erro se a estacao nao tem copia.")]
-    fn livro_movimentacoes(&self, Parameters(p): Parameters<PedidoDoLivro>) -> Result<String, String> {
-        responder("livro_movimentacoes", self.nucleo.livro_movimentacoes(&p.into()))
+    #[tool(
+        description = "Movimentacoes do livro-caixa (copia local, so leitura) com categoria e conta por nome. Erro se a estacao nao tem copia."
+    )]
+    fn livro_movimentacoes(
+        &self,
+        Parameters(p): Parameters<PedidoDoLivro>,
+    ) -> Result<String, String> {
+        responder(
+            "livro_movimentacoes",
+            self.nucleo.livro_movimentacoes(&p.into()),
+        )
     }
 
-    #[tool(description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA.")]
+    #[tool(
+        description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA."
+    )]
     fn sugerir(&self, Parameters(p): Parameters<PedidoDeSugestoes>) -> Result<String, String> {
         let lista: Vec<SugestaoProposta> = p
             .sugestoes
@@ -225,9 +270,17 @@ impl Servidor {
         responder("sugerir", self.nucleo.sugerir(&lista))
     }
 
-    #[tool(description = "Sugestoes ainda abertas (aguardando o usuario), das regras, da IA e do MCP, mais novas primeiro.")]
-    fn sugestoes_abertas(&self, Parameters(p): Parameters<PedidoDeSugestoesAbertas>) -> Result<String, String> {
-        responder("sugestoes_abertas", self.nucleo.sugestoes_abertas(&p.into()))
+    #[tool(
+        description = "Sugestoes ainda abertas (aguardando o usuario), das regras, da IA e do MCP, mais novas primeiro."
+    )]
+    fn sugestoes_abertas(
+        &self,
+        Parameters(p): Parameters<PedidoDeSugestoesAbertas>,
+    ) -> Result<String, String> {
+        responder(
+            "sugestoes_abertas",
+            self.nucleo.sugestoes_abertas(&p.into()),
+        )
     }
 }
 
