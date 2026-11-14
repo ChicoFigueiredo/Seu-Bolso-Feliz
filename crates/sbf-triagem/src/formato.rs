@@ -5,24 +5,35 @@
 use sbf_ia::Formato;
 use serde_json::Value;
 
-use crate::entrada::{Vocabulario, montar_entrada};
+use crate::entrada::{Exemplos, Vocabulario, montar_entrada_com_exemplos};
 use crate::resposta::confianca_chave_generica;
 use crate::tipos::Item;
 
 #[derive(Debug, Clone, Default)]
 pub struct FormatoDaTriagem {
     pub vocabulario: Vocabulario,
+    /// Decisões do usuário parecidas com cada item (só na v2 do prompt).
+    pub exemplos: Exemplos,
 }
 
 impl FormatoDaTriagem {
     pub fn novo(vocabulario: Vocabulario) -> Self {
-        Self { vocabulario }
+        Self {
+            vocabulario,
+            exemplos: Exemplos::new(),
+        }
+    }
+
+    /// Com as decisões parecidas por item.
+    pub fn com_exemplos(mut self, exemplos: Exemplos) -> Self {
+        self.exemplos = exemplos;
+        self
     }
 }
 
 impl Formato<Item> for FormatoDaTriagem {
     fn montar_entrada(&self, itens: &[&Item]) -> String {
-        montar_entrada(&self.vocabulario, itens)
+        montar_entrada_com_exemplos(&self.vocabulario, itens, &self.exemplos)
     }
 
     /// A confiança do campo-chave de cada item (`n` = posição + 1). `None`: o item faltou ou

@@ -7,6 +7,7 @@
 //! - `sbf reprojetar --inventario <pasta-do-cofre>`: manutenção, refaz a projeção a partir
 //!   do log de decisões e imprime o resumo;
 //! - `sbf mcp --inventario <pasta-do-cofre>`: o servidor MCP local por stdio (ver `mcp.rs`);
+//! - `sbf worker rodar|instalar|desinstalar|estado`: o worker local sem janela (`worker.rs`);
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf coletor-vps`: as coletas da VPS, Gmail e Pluggy (ADR-014; ver `coletor.rs`);
 //! - `sbf --versao`.
@@ -20,6 +21,7 @@ mod inventario;
 mod mcp;
 mod servidor;
 mod triagem;
+mod worker;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -36,6 +38,9 @@ struct App {
     captura: Option<PathBuf>,
     quadros: u32,
     captura_pedida: bool,
+    /// A barra de status mostra o estado do worker (só no inventário real).
+    mostrar_worker: bool,
+    worker_lido: Option<std::time::Instant>,
     /// A cena da demonstração: a rota a abrir e os pedidos a fazer no primeiro quadro.
     cena: Option<(String, Vec<sbf_janela::Pedido>)>,
 }
@@ -60,6 +65,8 @@ impl App {
             quadros: 0,
             captura_pedida: false,
             cena: None,
+            mostrar_worker: false,
+            worker_lido: None,
         })
     }
 }
@@ -78,6 +85,19 @@ impl eframe::App for App {
                 .request_repaint_after(std::time::Duration::from_millis(
                     if estacao.sincronizando() { 200 } else { 1000 },
                 ));
+        }
+        if self.mostrar_worker
+            && self
+                .worker_lido
+                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(3))
+        {
+            // O worker escreve um arquivo de estado; a janela só o lê (não bloqueia).
+            self.casca.app.barra.worker = Some(worker::texto_da_barra_do_worker());
+            self.worker_lido = Some(std::time::Instant::now());
+        }
+        if self.mostrar_worker {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(3));
         }
         self.casca.desenhar(ui);
         if std::env::var_os("SBF_DEPURAR").is_some() {
@@ -381,7 +401,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf coletor-vps [gmail|pluggy|comparar] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -427,6 +447,7 @@ fn main() -> ExitCode {
         None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
+        Some("worker") => worker::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {

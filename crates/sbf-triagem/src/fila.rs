@@ -41,6 +41,9 @@ pub struct OpcoesDaFila {
     /// Registros com categoria, fornecedor e conta já preenchidos também entram.
     pub incluir_completos: bool,
     pub prompt_versao: String,
+    /// As categorias aprendidas já decididas por quem chama (o agente contínuo, que exige 3
+    /// confirmações e nenhuma recusa). `None`: as do log de decisões, como na rodada manual.
+    pub regras_categoria: Option<HashMap<(String, String), Aprendida>>,
 }
 
 impl OpcoesDaFila {
@@ -49,6 +52,7 @@ impl OpcoesDaFila {
             limite: None,
             incluir_completos: false,
             prompt_versao: crate::prompt::PROMPT_VERSAO.to_owned(),
+            regras_categoria: None,
         }
     }
 }
@@ -220,7 +224,10 @@ pub fn selecionar(conn: &Connection, opcoes: &OpcoesDaFila) -> Resultado<Fila> {
     };
     let sugeridos = ja_sugeridos(conn, &opcoes.prompt_versao)?;
     let em_par = registros_em_par_obvio(conn)?;
-    let aprendidas = categorias_aprendidas(conn)?;
+    let aprendidas = match &opcoes.regras_categoria {
+        Some(m) => m.clone(),
+        None => categorias_aprendidas(conn)?,
+    };
 
     let mut alvos: Vec<Alvo> = Vec::new();
     let mut regras: Vec<SugestaoDeRegra> = Vec::new();

@@ -275,11 +275,36 @@ pub fn carregar_itens(
     Ok(itens)
 }
 
+/// As decisões do usuário parecidas com cada item, por `tipo:id` do alvo (v2 do prompt).
+pub type Exemplos = std::collections::HashMap<String, Vec<String>>;
+
+/// A chave de um item em [`Exemplos`].
+pub fn chave_de_exemplos(alvo: &crate::tipos::Alvo) -> String {
+    format!("{}:{}", alvo.tipo(), alvo.id())
+}
+
 /// A entrada de um lote: o cabeçalho e os itens numerados de 1, na ordem recebida.
 pub fn montar_entrada(vocabulario: &Vocabulario, itens: &[&Item]) -> String {
+    montar_entrada_com_exemplos(vocabulario, itens, &Exemplos::new())
+}
+
+/// Como [`montar_entrada`], com as decisões parecidas de cada item logo depois do bloco dele.
+pub fn montar_entrada_com_exemplos(
+    vocabulario: &Vocabulario,
+    itens: &[&Item],
+    exemplos: &Exemplos,
+) -> String {
     let mut entrada = cabecalho(vocabulario);
     for (i, item) in itens.iter().enumerate() {
         entrada.push_str(&bloco_do_item(i + 1, item));
+        if let Some(lista) = exemplos.get(&chave_de_exemplos(&item.alvo()))
+            && !lista.is_empty()
+        {
+            entrada.push_str("decisões suas parecidas:\n");
+            for e in lista {
+                let _ = writeln!(entrada, "- {e}");
+            }
+        }
     }
     entrada
 }

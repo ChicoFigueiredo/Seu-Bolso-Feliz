@@ -194,6 +194,20 @@ pub trait ServicoDeTriagem: RodadaDeTriagem {
     fn sondar(&mut self) -> Vec<Conclusao>;
     /// Há teste ou gravação em andamento (a janela pede repintura).
     fn ocupado(&self) -> bool;
+
+    /// O painel do agente contínuo (chegaram, sugeridas, regras aprendidas, acerto da
+    /// semana). `None`: o agente não está ligado nesta máquina.
+    fn painel_do_agente(&self) -> Option<crate::agente::Painel> {
+        None
+    }
+
+    /// Apaga uma regra aprendida (ela só volta com 3 confirmações novas).
+    ///
+    /// # Errors
+    /// Texto para a tela.
+    fn apagar_regra_do_agente(&mut self, _id: i64) -> Result<(), String> {
+        Err("o agente de triagem não está ligado".to_owned())
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -213,6 +227,8 @@ pub struct TriagemFicticia {
     conclusoes: CaixaDeConclusoes,
     /// Itens por segundo da rodada fictícia.
     pub ritmo: usize,
+    /// As regras fictícias que o usuário apagou nesta sessão.
+    regras_apagadas: Vec<i64>,
 }
 
 impl Default for TriagemFicticia {
@@ -308,6 +324,7 @@ impl TriagemFicticia {
             proxima_decisao: 9000,
             conclusoes: CaixaDeConclusoes::default(),
             ritmo: 20,
+            regras_apagadas: Vec::new(),
         };
         f.piloto = Some(f.relatorio_ficticio());
         f
@@ -506,6 +523,52 @@ impl ServicoDeTriagem for TriagemFicticia {
     fn ocupado(&self) -> bool {
         self.conclusoes.ocupada()
     }
+
+    fn painel_do_agente(&self) -> Option<crate::agente::Painel> {
+        use crate::agente::{Painel, RegraAprendida, TipoDeRegra};
+        let regras = [
+            (
+                1,
+                TipoDeRegra::Categoria,
+                "mercado delta (compra)",
+                "Mercado",
+                5,
+            ),
+            (
+                2,
+                TipoDeRegra::Categoria,
+                "energia exemplo (pagamento)",
+                "Energia",
+                4,
+            ),
+            (3, TipoDeRegra::TipoDocumento, "fatura luz #", "fatura", 3),
+        ]
+        .into_iter()
+        .filter(|(id, ..)| !self.regras_apagadas.contains(id))
+        .map(|(id, tipo, quando, valor, exemplos)| RegraAprendida {
+            id,
+            tipo,
+            quando: quando.to_owned(),
+            valor: valor.to_owned(),
+            exemplos,
+        })
+        .collect();
+        Some(Painel {
+            chegaram: 42,
+            sugeridas: 37,
+            abertas: 29,
+            prontas: 21,
+            regras,
+            aceitas_da_semana: 31,
+            recusadas_da_semana: 4,
+            na_fila: 12,
+        })
+    }
+
+    fn apagar_regra_do_agente(&mut self, id: i64) -> Result<(), String> {
+        self.regras_apagadas.push(id);
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -579,6 +642,8 @@ pub struct TriagemDoInventario {
     configuracao: ConfiguracaoDeIa,
     rastro: Option<crate::rodada::RastroDeFalhas>,
     conclusoes: CaixaDeConclusoes,
+    /// O `agente.sqlite` do agente contínuo, se o painel dele deve aparecer.
+    agente: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for TriagemDoInventario {
@@ -616,6 +681,7 @@ impl TriagemDoInventario {
             configuracao,
             rastro: None,
             conclusoes: CaixaDeConclusoes::default(),
+            agente: None,
         })
     }
 
@@ -624,6 +690,13 @@ impl TriagemDoInventario {
     #[must_use]
     pub fn com_rastro(mut self, rastro: crate::rodada::RastroDeFalhas) -> Self {
         self.rastro = Some(rastro);
+        self
+    }
+
+    /// O painel do agente contínuo lê o estado dele em `caminho` (o `agente.sqlite`).
+    #[must_use]
+    pub fn com_agente(mut self, caminho: impl Into<PathBuf>) -> Self {
+        self.agente = Some(caminho.into());
         self
     }
 
@@ -796,5 +869,23 @@ impl ServicoDeTriagem for TriagemDoInventario {
 
     fn ocupado(&self) -> bool {
         self.conclusoes.ocupada()
+    }
+
+    fn painel_do_agente(&self) -> Option<crate::agente::Painel> {
+        let estado = self.agente.as_ref()?;
+        let agente = crate::agente::Agente::abrir(estado).ok()?;
+        let conn = sugestoes::abrir(&self.caminho).ok()?;
+        agente.painel(&conn).ok()
+    }
+
+    fn apagar_regra_do_agente(&mut self, id: i64) -> Result<(), String> {
+        let estado = self
+            .agente
+            .as_ref()
+            .ok_or_else(|| "o agente de triagem não está ligado".to_owned())?;
+        crate::agente::Agente::abrir(estado)
+            .and_then(|a| a.apagar_regra(id))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }

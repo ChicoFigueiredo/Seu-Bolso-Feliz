@@ -128,3 +128,17 @@ que trabalha sozinho, dentro das mesmas regras: ele sugere e você confirma.
   fatia 4 chega no Telegram: "37 sugestões prontas para confirmar".
 - **Nunca.** O agente não aplica nada sozinho, não passa por cima de decisão sua e não reabre
   item `promovido`.
+
+### Implementação do agente contínuo (onda B, `sbf worker`)
+
+- Binário: `sbf worker rodar|instalar|desinstalar|estado --inventario <cofre>`. `instalar` escreve
+  `~/.config/systemd/user/sbf-worker.service` (reinício `on-failure`) e roda `systemctl --user enable --now`;
+  `--sem-ligar` só gera o arquivo. Windows e macOS: "ainda não suportado" (use `sbf worker rodar` à mão).
+- Arquivos na pasta de dados do app (fora do cofre): `worker.json` (pastas vigiadas, intervalos, horário e
+  lote da triagem; a triagem nasce **desligada**), `worker-estado.json` (lido pela barra de status),
+  `worker.log` (rotacionado, só eventos tipados), `worker.lock`, `agente.sqlite` (regras, calibração, chegadas).
+- Prompt `triagem-v2` (v1 segue no cache): até 8 decisões suas do mesmo fornecedor por item.
+- Regra aprendida: 3 confirmações suas sem conflito nem recusa; recusa de sugestão dela a mata; apagar à mão
+  só deixa voltar com 3 confirmações novas. Aceite de sugestão da IA não conta.
+- Fora desta onda: texto extraído (E3) das pastas, índice de texto parecido (fatia 6), aviso no Telegram,
+  OpenRouter no worker (exige chaveiro aberto), regra por remetente de e-mail, launchd e serviço do Windows.

@@ -1570,6 +1570,9 @@ impl Janela {
                 Ok("Pausa pedida: vale ao fim do lote em andamento.".to_owned())
             }
             A::Retomar => servico.retomar().map(|()| "Rodada retomada.".to_owned()),
+            A::ApagarRegra(id) => servico
+                .apagar_regra_do_agente(id)
+                .map(|()| "Regra apagada. Ela só volta com 3 confirmações novas suas.".to_owned()),
             A::Aceitar(ids) => servico.aceitar(&ids, comandos).map(|r| {
                 self.decisoes_da_sessao.extend(&r.decisoes);
                 let mut texto = format!(
