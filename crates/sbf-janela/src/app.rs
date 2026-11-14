@@ -578,7 +578,12 @@ impl AppCasca for AppSbf {
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", futuras(&["caixa"])),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
-            GrupoNavegacao::novo("Fontes", futuras(&["conexoes", "alertas", "roteiros"])),
+            GrupoNavegacao::novo("Fontes", {
+                // Roteiros (spec 10, C1) já funcionam: o item não leva o selo de fatia.
+                let mut v = futuras(&["conexoes", "alertas"]);
+                v.push(ItemNavegacao::novo("roteiros", "Roteiros", "route"));
+                v
+            }),
             GrupoNavegacao::novo("Estação", estacao),
             GrupoNavegacao::novo("Análise", futuras(&["pontos", "destinatarios"])),
         ]
@@ -888,6 +893,17 @@ impl AppCasca for AppSbf {
                     self.barra.chaveiro.clone().unwrap_or_else(|| "—".into()),
                 );
                 ui.label(RichText::new("Os rótulos dos segredos aparecem aqui; os valores, nunca. Importar o cofre.enc chega quando o chaveiro for ligado a esta janela.").color(p.tinta_suave));
+                if self
+                    .janela
+                    .get_mut()
+                    .roteiros
+                    .rotulos_da_demonstracao()
+                    .len()
+                    > 0
+                {
+                    ui.add_space(12.0);
+                    self.janela.get_mut().roteiros.senhas_da_demonstracao_ui(ui);
+                }
             }
             "estante" => {
                 componentes::titulo(ui, "Estante e cópia de segurança", 18.0);

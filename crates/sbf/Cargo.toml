@@ -29,6 +29,7 @@ sbf-mcp = { path = "../sbf-mcp" }
 sbf-coleta = { path = "../sbf-coleta" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
+sbf-roteiros = { path = "../sbf-roteiros" }
 ctrlc = { version = "3", features = ["termination"] }
 zeroize = { workspace = true }
 

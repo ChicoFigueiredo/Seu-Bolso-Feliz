@@ -21,6 +21,7 @@ mod entrada;
 mod estacao;
 mod inventario;
 mod mcp;
+mod roteiros;
 mod servidor;
 mod triagem;
 mod worker;
@@ -291,6 +292,10 @@ fn app_de_demonstracao() -> Result<App, String> {
     .unwrap_or_default();
     let caixa = sbf_janela::caixa::demonstracao(&documentos, Box::new(livro.clone()));
     janela.ligar_caixa(Box::new(caixa.clone()));
+    // Roteiros fictícios: nenhum Chrome, nenhum site.
+    janela
+        .roteiros
+        .demonstracao(&std::env::var("SBF_CENA").unwrap_or_default());
     // A triagem por IA fictícia: dados inventados, nenhum provedor é chamado.
     janela.ligar_triagem(Box::new(sbf_triagem::servico::TriagemFicticia::nova()));
     // As chaves da demonstração: uma guarda em memória com uma chave inventada.
