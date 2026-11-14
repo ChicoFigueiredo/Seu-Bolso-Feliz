@@ -263,15 +263,20 @@ mod testes {
         let boa = d.path().join("Downloads");
         c.adicionar_pasta(&boa, &cofre).unwrap();
         assert_eq!(c.pastas[0].fonte, "disco:downloads");
-        assert_eq!(c.adicionar_pasta(&boa, &cofre), Err(PastaRecusada::Repetida));
+        assert_eq!(
+            c.adicionar_pasta(&boa, &cofre),
+            Err(PastaRecusada::Repetida)
+        );
         let arq = d.path().join("worker.json");
         c.salvar(&arq).unwrap();
         assert_eq!(Config::carregar(&arq).unwrap(), c);
-        assert!(std::fs::read_dir(d.path()).unwrap().all(|e| !e
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .contains(".tmp")));
+        assert!(
+            std::fs::read_dir(d.path()).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp"))
+        );
         assert!(c.remover_pasta(&boa) && !c.remover_pasta(&boa));
     }
 }

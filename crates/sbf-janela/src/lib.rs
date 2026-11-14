@@ -28,6 +28,7 @@ pub mod livro_ficticio;
 pub mod moldura;
 pub mod navegacao;
 pub mod nuvens;
+pub mod opcoes_do_worker;
 pub mod pagina;
 pub mod painel;
 pub mod previa;

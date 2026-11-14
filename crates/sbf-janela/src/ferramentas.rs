@@ -112,6 +112,8 @@ pub struct Ferramentas {
     pub destino_da_copia: String,
     /// Opções › Nuvens (conectar Drive e OneDrive, coleta, último backup).
     pub nuvens: crate::nuvens::Nuvens,
+    /// Opções › Worker (agente de triagem e pastas vigiadas, em `worker.json`).
+    pub worker: crate::opcoes_do_worker::OpcoesDoWorker,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -160,7 +162,12 @@ pub fn texto_da_situacao(s: Situacao) -> &'static str {
 impl Ferramentas {
     pub fn nova(banco: PathBuf, cofre: PathBuf) -> Self {
         let cofre_para_nuvens = cofre.clone();
+        let arquivo_do_worker = sbf_chaveiro::pasta_de_dados_do_app()
+            .ok()
+            .filter(|p| sbf_chaveiro::garantir_fora_do_cofre(p, &cofre).is_ok())
+            .map(|p| p.join("worker.json"));
         Self {
+            worker: crate::opcoes_do_worker::OpcoesDoWorker::nova(arquivo_do_worker, cofre.clone()),
             banco,
             cofre,
             chaveiro: None,
@@ -873,6 +880,11 @@ impl Ferramentas {
         }
     }
 
+    /// Opções › Worker.
+    pub fn worker_ui(&mut self, ui: &mut Ui) {
+        self.worker.ui(ui);
+    }
+
     /// Opções › Nuvens.
     pub fn nuvens_ui(&mut self, ui: &mut Ui) {
         let ativos = self.destinos.ativos().count();
@@ -1060,6 +1072,7 @@ impl Ferramentas {
     /// Lê os destinos e a opção do PDF guardados (sem arquivo, fica tudo vazio).
     pub fn carregar_preferencias(&mut self) {
         self.nuvens.carregar();
+        self.worker.carregar();
         if self.ultima_copia.is_none() {
             self.ultima_copia.clone_from(&self.nuvens.ultimo_backup);
         }

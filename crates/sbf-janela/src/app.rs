@@ -909,6 +909,8 @@ impl AppCasca for AppSbf {
                 if let Some(f) = self.janela.get_mut().ferramentas.as_mut() {
                     ui.add_space(12.0);
                     f.nuvens_ui(ui);
+                    ui.add_space(12.0);
+                    f.worker_ui(ui);
                 }
                 ui.add_space(12.0);
                 let janela = self.janela.get_mut();
