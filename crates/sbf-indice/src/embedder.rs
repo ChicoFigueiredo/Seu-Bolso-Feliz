@@ -118,7 +118,7 @@ mod real {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
-    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+    use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 
     use super::{Embedder, normalizar};
     use crate::erro::{ErroDoIndice, Resultado};
@@ -163,7 +163,7 @@ mod real {
         /// # Errors
         /// Falha de download ou de carga.
         pub fn novo(pasta_do_modelo: impl Into<PathBuf>) -> Resultado<Self> {
-            let opcoes = InitOptions::new(EmbeddingModel::MultilingualE5Small)
+            let opcoes = TextInitOptions::new(EmbeddingModel::MultilingualE5Small)
                 .with_cache_dir(pasta_do_modelo.into())
                 .with_show_download_progress(false);
             let modelo = TextEmbedding::try_new(opcoes)
