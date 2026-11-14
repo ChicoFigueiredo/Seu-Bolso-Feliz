@@ -36,8 +36,24 @@ use crate::tipos::{Alvo, Item};
 /// Quantos itens se carregam por vez.
 pub const ITENS_POR_PEDACO: usize = 500;
 
+/// A configuração da fila do motor para o agente contínuo (v2 do prompt, com as decisões
+/// parecidas). O resto é igual à v1.
+pub fn configuracao_da_fila_v2(usar_reserva: bool) -> ConfiguracaoDaFila {
+    let mut c = ConfiguracaoDaFila::nova(
+        "triagem",
+        crate::prompt::PROMPT_VERSAO_V2,
+        crate::prompt::instrucao_v2(),
+        esquema(),
+    );
+    c.nivel = NivelDeConfianca::Completo;
+    c.tamanho_do_lote = ITENS_POR_LOTE;
+    c.max_tokens_saida = max_tokens_de_saida(ITENS_POR_LOTE);
+    c.usar_reserva = usar_reserva;
+    c
+}
+
 /// A configuração da fila do motor para a triagem: destinatário "triagem", nível Completo
-/// (D2), lotes de 25, escalonamento em 0,7.
+/// (D2), lotes de 25, escalonamento em 0,7 (v1 do prompt).
 pub fn configuracao_da_fila(usar_reserva: bool) -> ConfiguracaoDaFila {
     let mut c = ConfiguracaoDaFila::nova("triagem", PROMPT_VERSAO, INSTRUCAO, esquema());
     c.nivel = NivelDeConfianca::Completo;
@@ -57,6 +73,8 @@ pub struct ConfigDaRodada {
     /// Onde se vê quais lotes falharam por erro do provedor (`Outro`). Sem ele, o motor
     /// os devolve como "não classificado". Com ele, esses itens ficam adiados.
     pub rastro: Option<RastroDeFalhas>,
+    /// As decisões do usuário parecidas com cada item (prompt v2, agente contínuo).
+    pub exemplos: Option<Arc<crate::entrada::Exemplos>>,
 }
 
 impl Default for ConfigDaRodada {
@@ -66,6 +84,7 @@ impl Default for ConfigDaRodada {
             itens_por_pedaco: ITENS_POR_PEDACO,
             piloto: false,
             rastro: None,
+            exemplos: None,
         }
     }
 }
@@ -373,7 +392,11 @@ pub fn rodar(
             ..Progresso::ocioso()
         };
     }
-    let formato = Arc::new(FormatoDaTriagem::novo(Vocabulario::do_banco(conn)?));
+    let mut formato = FormatoDaTriagem::novo(Vocabulario::do_banco(conn)?);
+    if let Some(e) = &config.exemplos {
+        formato = formato.com_exemplos((**e).clone());
+    }
+    let formato = Arc::new(formato);
     let mut situacao = SituacaoDaRodada::Concluida;
     let mut aviso: Option<String> = None;
 
