@@ -24,6 +24,7 @@ pub mod leitura;
 pub mod livro_ficticio;
 pub mod moldura;
 pub mod navegacao;
+pub mod nuvens;
 pub mod pagina;
 pub mod painel;
 pub mod previa;
