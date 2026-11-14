@@ -15,7 +15,6 @@ use std::path::{Component, Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sbf_inventario::banco::Inventario;
-use sbf_inventario::comando::{Acao, Comandos, PedidoDeDecisao};
 use sbf_inventario::referencia::{Ref, Tipo};
 use sha2::{Digest, Sha256};
 
@@ -179,13 +178,14 @@ pub fn documentos_do_lote(
                   ORDER BY o.id LIMIT 1)
            FROM docs JOIN achado a ON a.content_hash = docs.h ORDER BY a.content_hash",
     )?;
-    let base: Vec<(
+    type Achado = (
         String,
         Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
-    )> = st
+    );
+    let base: Vec<Achado> = st
         .query_map([id], |l| {
             Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
         })?
@@ -227,13 +227,9 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn promover(inv: &mut Inventario, alvos: Vec<Ref>, motivo: String) -> Result<(), ErroDoEnvio> {
-    inv.executar(&PedidoDeDecisao {
-        acao: Acao::Promover,
-        alvos,
-        motivo: Some(motivo),
-    })
-    .map(|_| ())
-    .map_err(|e| ErroDoEnvio::Inventario(e.to_string()))
+    inv.promover(&alvos, &motivo)
+        .map(|_| ())
+        .map_err(|e| ErroDoEnvio::Inventario(e.to_string()))
 }
 
 /// Envia o lote aprovado. Bloqueia (rede e disco): rode fora da thread da janela; o

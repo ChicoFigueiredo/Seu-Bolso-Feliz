@@ -260,12 +260,20 @@ impl Sincronizador<'_> {
     /// para a troca no ponto em que estava: o que não foi respondido continua Aguardando e
     /// vai de novo com o mesmo id.
     fn enviar_escritas(&self, cache: &mut CacheDoLivro, contas: &mut Contas) -> Result<(), Parada> {
-        let fila: Vec<_> = cache
+        let fila: Vec<Id> = cache
             .escritas()?
             .into_iter()
             .filter(|e| e.estado == EstadoDaEscrita::Aguardando)
+            .map(|e| e.id)
             .collect();
-        for escrita in fila {
+        for id in fila {
+            // Relê: o aceite da anterior pode ter mudado a versão de base desta.
+            let Some(escrita) = cache
+                .escrita(id)?
+                .filter(|e| e.estado == EstadoDaEscrita::Aguardando)
+            else {
+                continue;
+            };
             let agora = self.agora();
             match self.cliente.propor(&escrita.proposta) {
                 Ok(resposta) => {

@@ -102,6 +102,8 @@ pub struct Estado_ {
     pub derrubar_documento_numero: Option<usize>,
     /// Quantos pedidos de cada caminho chegaram (para provar reenvio).
     pub pedidos_de_documento: usize,
+    /// Aplica a próxima alteração e derruba a conexão antes de responder (a rede cai).
+    pub derrubar_resposta_da_alteracao: bool,
 }
 
 pub struct ServidorDoContrato {
@@ -148,6 +150,7 @@ impl ServidorDoContrato {
             documentos: Vec::new(),
             derrubar_documento_numero: None,
             pedidos_de_documento: 0,
+            derrubar_resposta_da_alteracao: false,
         }));
         let http = ServidorFalso::iniciar();
         let compartilhado = estado.clone();
@@ -307,12 +310,12 @@ fn tratar(estado: &Mutex<Estado_>, p: &PedidoRecebido) -> RespostaFalsa {
                 return erro(404, CodigoDeErro::NaoEncontrado);
             }
             if versao >= 2 {
-                return delta(&e, colecao, p.valor_da_consulta("desde"));
+                return delta(e, colecao, p.valor_da_consulta("desde"));
             }
             if p.cabecalho("if-none-match") == Some(etag.as_str()) {
                 return RespostaFalsa::status(304).cabecalho("etag", &etag);
             }
-            let linhas = todas_as_linhas(&e, colecao);
+            let linhas = todas_as_linhas(e, colecao);
             let resposta = json(&linhas).cabecalho("etag", &etag);
             if e.cortar == Some(colecao) {
                 resposta.cortar_apos(20)
@@ -322,7 +325,7 @@ fn tratar(estado: &Mutex<Estado_>, p: &PedidoRecebido) -> RespostaFalsa {
         }
         ("POST", "/documentos") if versao >= 2 => {
             e.pedidos_de_documento += 1;
-            return documento(e, p);
+            documento(e, p)
         }
         ("POST", "/alteracoes") => {
             let proposta: PropostaDeAlteracao = serde_json::from_slice(&p.corpo).unwrap();
@@ -331,6 +334,9 @@ fn tratar(estado: &Mutex<Estado_>, p: &PedidoRecebido) -> RespostaFalsa {
             }
             let resposta = alteracao(e, &proposta);
             e.respostas.insert(proposta.id, resposta.clone());
+            if std::mem::take(&mut e.derrubar_resposta_da_alteracao) {
+                return RespostaFalsa::derrubar();
+            }
             json(&resposta)
         }
         _ => erro(404, CodigoDeErro::NaoEncontrado),
@@ -598,11 +604,10 @@ fn tamanho_do_arquivo(corpo: &[u8]) -> usize {
         return 0;
     };
     let dados = &resto[c + 4..];
-    let fim = dados
+    dados
         .windows(4)
         .rposition(|w| w == b"\r\n--")
-        .unwrap_or(dados.len());
-    fim
+        .unwrap_or(dados.len())
 }
 
 fn documento(e: &mut Estado_, p: &PedidoRecebido) -> RespostaFalsa {
