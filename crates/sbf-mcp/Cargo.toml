@@ -1,0 +1,25 @@
+[package]
+name = "sbf-mcp"
+description = "Servidor MCP local (stdio) do SBF: o Claude consulta o inventário e o livro-caixa e propõe sugestões para a triagem. Nunca grava decisão."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-inventario = { workspace = true }
+sbf-triagem = { path = "../sbf-triagem" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# SDK oficial do MCP (Apache-2.0). Só servidor, por stdio.
+rmcp = { version = "3.10", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# A ajuda de testes da triagem (banco fictício migrado) é reaproveitada por caminho.
+sbf-ia = { path = "../sbf-ia" }
+
+[lints]
+workspace = true

@@ -23,6 +23,7 @@ sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-processo = { path = "../sbf-processo" }
+sbf-mcp = { path = "../sbf-mcp" }
 zeroize = { workspace = true }
 
 [dev-dependencies]

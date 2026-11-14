@@ -101,6 +101,35 @@ fn valor_do_campo(item: &Item, campo: &str, valor: &Value) -> Option<Value> {
     }
 }
 
+/// Valida o valor de **um** campo sugerido para `item` (o mesmo critério da resposta do
+/// modelo). `None`: campo fora da lista do tipo do item, valor inválido ou confiança fora
+/// de 0 a 1. Usado pelo servidor MCP, que recebe sugestões de um agente externo.
+pub fn validar_sugestao(
+    item: &Item,
+    campo: &str,
+    valor: &Value,
+    confianca: f64,
+    justificativa: Option<&str>,
+) -> Option<SugestaoValida> {
+    let valor = valor_do_campo(item, campo, valor)?;
+    if !(0.0..=1.0).contains(&confianca) {
+        return None;
+    }
+    let justificativa = justificativa
+        .map(str::trim)
+        .filter(|j| !j.is_empty())
+        .map_or_else(
+            || "sem justificativa do modelo".to_owned(),
+            |j| cortar(j, LIMITE_DA_JUSTIFICATIVA),
+        );
+    Some(SugestaoValida {
+        campo: campo.to_owned(),
+        valor,
+        confianca,
+        justificativa,
+    })
+}
+
 fn sugestao_valida(item: &Item, bruta: &Value) -> Option<SugestaoValida> {
     let campo = bruta.get("campo")?.as_str()?.to_owned();
     let valor = valor_do_campo(item, &campo, bruta.get("valor")?)?;
