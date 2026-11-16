@@ -1,6 +1,6 @@
 //! Capturas de tela do Controle mensal, só com dados fictícios.
 //!
-//! `SBF_CENA=ciclo|2050|pausada|editar|propostas SBF_CAPTURA=/caminho/cena.png \
+//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo SBF_CAPTURA=/caminho/cena.png \
 //!  xvfb-run -a cargo run -p sbf-janela --example captura_controle`
 //!
 //! Abre a janela da casca com o planejamento fictício ligado, arruma a cena, tira a foto da
@@ -113,7 +113,6 @@ impl App {
                 c.resumo_aberto = false;
                 c.filtro = Filtro::PausadosECancelados;
                 c.selecionada = Some(id("rec_streaming", h.seguinte()));
-                c.abrir_lateral(sbf_janela::controle_ui::AbaLateral::Detalhe);
                 c.aba_do_detalhe = AbaDoDetalhe::Pausas;
             }
             (1, "editar") => {
@@ -131,6 +130,46 @@ impl App {
                 {
                     *valor = "139,90".into();
                     *escopo = sbf_janela::controle::EscopoEscolhido::DaquiEmDiante;
+                }
+            }
+            (1, "rubricas") => c.resumo_aberto = true,
+            // Só o Detalhe no dock: a tabela de rubricas pede altura.
+            (2, "rubricas") => {
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "rubricas") => {
+                c.selecionar_recorrente("rec_salario");
+                c.aba_do_detalhe = AbaDoDetalhe::Rubricas;
+            }
+            (1, "documentos" | "anexar") => c.resumo_aberto = false,
+            (3, "documentos" | "anexar") => {
+                c.selecionar_recorrente("rec_energia");
+                c.aba_do_detalhe = AbaDoDetalhe::Documentos;
+            }
+            (4, "anexar") => {
+                janela.pedir(Pedido::Controle(PedidoDoControle::Acao(
+                    sbf_janela::controle::AcaoDoControle::AnexarDocumento,
+                )));
+            }
+            (1, "novo") => c.resumo_aberto = false,
+            (3, "novo") => c.selecionar_recorrente("rec_aluguel"),
+            (4, "novo") => {
+                janela.pedir(Pedido::Controle(PedidoDoControle::Acao(
+                    sbf_janela::controle::AcaoDoControle::AdicionarCompromisso,
+                )));
+            }
+            (7, "novo") => {
+                if let Some(d) = janela.controle.novo.as_mut() {
+                    use sbf_janela::compromisso::FrequenciaEscolhida;
+                    let f = &mut d.formulario;
+                    f.nome = "Presente da Ana".into();
+                    f.subgrupo = "Eventos".into();
+                    f.valor = "250,00".into();
+                    f.estimado = true;
+                    f.frequencia = FrequenciaEscolhida::Unica;
+                    f.data_unica = "15/02/2027".into();
+                    f.conta = "Nubank".into();
+                    f.centro = "Pessoal".into();
                 }
             }
             (1, "propostas") => {

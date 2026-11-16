@@ -176,6 +176,8 @@ pub struct Janela {
     pub planejamento: Option<crate::controle_ui::PlanejamentoLigado>,
     /// O que o Controle mensal guarda entre quadros.
     pub controle: crate::controle_ui::EstadoDoControle,
+    /// O que a janela lembra entre aberturas (zoom e o jeito do Controle mensal).
+    pub guardador: crate::preferencias_da_janela::Guardador,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -285,7 +287,36 @@ impl Janela {
             controle: crate::controle_ui::EstadoDoControle::novo(
                 sbf_planejamento::Data::hoje_em_sao_paulo(),
             ),
+            guardador: crate::preferencias_da_janela::Guardador::default(),
         }
+    }
+
+    /// As preferências de agora: o zoom que o egui está usando e o jeito do Controle.
+    pub fn preferencias_atuais(
+        &self,
+        zoom: f32,
+    ) -> crate::preferencias_da_janela::PreferenciasDaJanela {
+        crate::preferencias_da_janela::PreferenciasDaJanela {
+            zoom: Some(zoom),
+            controle: self.controle.preferencias(),
+        }
+    }
+
+    /// Onde guardar as preferências: ao lado das das Ferramentas (pasta de dados do app,
+    /// fora do cofre). Sem Ferramentas ligadas (demonstração, capturas), nada é guardado.
+    pub fn arquivo_das_preferencias(&self) -> Option<std::path::PathBuf> {
+        self.ferramentas
+            .as_ref()?
+            .arquivo_de_preferencias()
+            .map(|a| a.with_file_name(crate::preferencias_da_janela::NOME_DO_ARQUIVO))
+    }
+
+    /// Lê o que foi guardado, restaura o Controle e devolve o zoom guardado (se valer).
+    /// Chame uma vez, quando o arquivo já puder ser decidido.
+    pub fn restaurar_preferencias(&mut self, arquivo: Option<std::path::PathBuf>) -> Option<f32> {
+        let lidas = self.guardador.ligar(arquivo);
+        self.controle.aplicar_preferencias(&lidas.controle);
+        lidas.zoom_valido()
     }
 
     /// Liga o planejamento (o serviço real, ou o fictício da demonstração). O Controle
@@ -481,6 +512,14 @@ impl Janela {
 
     /// O item que o dock mostra: a última linha clicada, ou a página aberta.
     pub fn foco(&self) -> Option<Ref> {
+        // No Controle mensal, o painel Prévia mostra o documento aberto no detalhe.
+        if self.controle_no_centro() {
+            return self
+                .controle
+                .documento_em_previa
+                .as_deref()
+                .map(crate::rubricas::ref_do_documento);
+        }
         self.centro
             .selecao
             .foco
@@ -1079,6 +1118,21 @@ impl Janela {
 
     /// Um painel do dock.
     pub fn dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta, painel: PainelDoDock) {
+        // No Controle mensal, o Detalhe é o da linha escolhida na grade.
+        if painel == PainelDoDock::Detalhe && self.controle_no_centro() {
+            if let Some(pl) = self.planejamento.as_ref() {
+                let hoje = sbf_planejamento::Data::de_iso(&self.hoje)
+                    .unwrap_or_else(sbf_planejamento::Data::hoje_em_sao_paulo);
+                crate::controle_ui::detalhe_no_dock(
+                    ui,
+                    pl.0.as_ref(),
+                    &mut self.controle,
+                    hoje,
+                    &mut self.pedidos,
+                );
+            }
+            return;
+        }
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
@@ -1214,7 +1268,7 @@ impl Janela {
     }
 
     /// Os diálogos das Ações que pedem dados (corrigir, rejeitar, sinalizar, novo lote).
-    pub fn dialogos_ui(&mut self, ctx: &Context) {
+    pub fn dialogos_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
         if let Some(pl) = self.planejamento.as_ref() {
             let hoje = self.hoje_como_data();
             crate::controle_ui::desenhar_dialogo(
@@ -1223,6 +1277,7 @@ impl Janela {
                 &mut self.controle,
                 hoje,
                 &mut self.pedidos,
+                consulta,
             );
         }
         let Some(mut dialogo) = self.dialogo.take() else {
@@ -1737,10 +1792,23 @@ impl Janela {
 
     /// Um pedido do Controle mensal: abre o diálogo, aplica com `Autor::Usuario` ou resolve
     /// uma proposta do Claude. É aqui, fora do desenho, que o planejamento recebe escrita.
-    fn controle_pedido(&mut self, pedido: crate::controle_ui::PedidoDoControle) {
+    pub(crate) fn controle_pedido(&mut self, pedido: crate::controle_ui::PedidoDoControle) {
         use crate::controle::AcaoDoControle as A;
         use crate::controle_ui::{AbaLateral, PedidoDoControle as P, mensagem_de_erro};
         use sbf_planejamento::{Alteracao, Autor, Conciliacao};
+        // A prévia de documento não escreve no planejamento.
+        match &pedido {
+            P::PreviaDoDocumento(sha) => {
+                self.controle.documento_em_previa = Some(sha.clone());
+                return;
+            }
+            P::DestacarDocumento(sha) => {
+                self.previas
+                    .destacar(&crate::rubricas::ref_do_documento(sha));
+                return;
+            }
+            _ => {}
+        }
         let hoje = self.hoje_como_data();
         let Some(pl) = self.planejamento.as_mut() else {
             self.erro("O planejamento ainda não está ligado a esta janela.".to_owned());
@@ -1749,25 +1817,61 @@ impl Janela {
         let plan = pl.0.as_mut();
         let controle = &mut self.controle;
         // O resultado de uma escrita: mensagem no topo e releitura.
-        let terminar = |controle: &mut crate::controle_ui::EstadoDoControle,
-                            r: Result<sbf_planejamento::Recibo, sbf_planejamento::ErroDoPlanejamento>,
-                            ok: &str| {
-            controle.recarregar();
-            match r {
-                Ok(_) => {
-                    controle.mensagem = Some((ok.to_owned(), false));
-                    true
+        let terminar =
+            |controle: &mut crate::controle_ui::EstadoDoControle,
+             r: Result<sbf_planejamento::Recibo, sbf_planejamento::ErroDoPlanejamento>,
+             ok: &str| {
+                controle.recarregar();
+                match r {
+                    Ok(_) => {
+                        controle.mensagem = Some((ok.to_owned(), false));
+                        true
+                    }
+                    Err(e) => {
+                        controle.mensagem = Some((mensagem_de_erro(&e), true));
+                        false
+                    }
                 }
-                Err(e) => {
-                    controle.mensagem = Some((mensagem_de_erro(&e), true));
-                    false
-                }
-            }
-        };
+            };
         match pedido {
             P::Recarregar => controle.recarregar(),
             P::FecharDialogo => controle.dialogo = None,
             P::Acao(A::Propostas) => controle.abrir_lateral(AbaLateral::Propostas),
+            P::Acao(A::AdicionarCompromisso) => {
+                match crate::controle_ui::abrir_novo_compromisso(controle, &*plan, hoje) {
+                    Ok(d) => controle.novo = Some(d),
+                    Err(e) => controle.mensagem = Some((e, true)),
+                }
+            }
+            P::Acao(A::AnexarDocumento) => match crate::controle_ui::abrir_anexar(controle) {
+                Ok(s) => controle.anexar = Some(s),
+                Err(e) => controle.mensagem = Some((e, true)),
+            },
+            P::AplicarVarias(lista) => {
+                let pronto = match lista.last() {
+                    Some(Alteracao::CriarRecorrente { .. }) => "Compromisso criado.",
+                    Some(Alteracao::VincularDocumento { .. }) => "Documento anexado.",
+                    Some(Alteracao::DesvincularDocumento { .. }) => "Documento desvinculado.",
+                    _ => "Feito.",
+                };
+                let mut r = Ok(());
+                let mut ultimo = None;
+                for alteracao in lista {
+                    match plan.aplicar(alteracao, Autor::Usuario) {
+                        Ok(recibo) => ultimo = Some(recibo),
+                        Err(e) => {
+                            r = Err(e);
+                            break;
+                        }
+                    }
+                }
+                controle.recarregar();
+                controle.mensagem = Some(match (r, ultimo) {
+                    (Err(e), _) => (mensagem_de_erro(&e), true),
+                    (Ok(()), _) => (pronto.to_owned(), false),
+                });
+            }
+            P::PreviaDoDocumento(_) | P::DestacarDocumento(_) => {}
             P::Acao(A::ConfirmarConciliacao) => {
                 let Some(o) = controle.linha_selecionada().cloned() else {
                     return;
@@ -1801,10 +1905,12 @@ impl Janela {
                     controle.mensagem = Some(("Já está no limite do grupo.".into(), true));
                     return;
                 };
-                let (Ok(Some(eu)), Ok(Some(outra))) =
-                    (plan.recorrente(&o.id.recorrente), plan.recorrente(&v.id.recorrente))
-                else {
-                    controle.mensagem = Some(("O compromisso não existe mais. Recarregue.".into(), true));
+                let (Ok(Some(eu)), Ok(Some(outra))) = (
+                    plan.recorrente(&o.id.recorrente),
+                    plan.recorrente(&v.id.recorrente),
+                ) else {
+                    controle.mensagem =
+                        Some(("O compromisso não existe mais. Recarregue.".into(), true));
                     return;
                 };
                 let [a1, a2] = crate::controle::trocar_prioridade(&eu, &outra);
@@ -1813,12 +1919,10 @@ impl Janela {
                     .and_then(|_| plan.aplicar(a2, Autor::Usuario));
                 terminar(controle, r, "Prioridade trocada.");
             }
-            P::Acao(a) => {
-                match crate::controle_ui::abrir_dialogo(a, controle, &*plan, hoje) {
-                    Ok(d) => controle.dialogo = Some(d),
-                    Err(e) => controle.mensagem = Some((e, true)),
-                }
-            }
+            P::Acao(a) => match crate::controle_ui::abrir_dialogo(a, controle, &*plan, hoje) {
+                Ok(d) => controle.dialogo = Some(d),
+                Err(e) => controle.mensagem = Some((e, true)),
+            },
             P::Aplicar(alteracao) => {
                 let r = plan.aplicar(*alteracao, Autor::Usuario);
                 let ok = terminar(controle, r, "Aplicado.");

@@ -6,20 +6,24 @@
 //! [`crate::Janela::processar`] aplica fora do desenho, com `Autor::Usuario`. A decisão do que
 //! mostrar mora em [`crate::controle`], testada sem egui.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use egui::{
     Align, Color32, CornerRadius, FontId, Frame, Id, Layout, Margin, RichText, ScrollArea, Sense,
     Stroke, Ui,
 };
 use egui_extras::{Column, TableBuilder};
+use sbf_inventario::consulta::Consulta;
 use sbf_planejamento::{
-    Alteracao, Autor, Competencia, Controle, Data, EntradaDoHistorico, ErroDoPlanejamento,
-    EstadoDaProposta, Excecao, Filtro, IdOcorrencia, Natureza, Ocorrencia, Planejamento, Prazo,
-    Proposta, Recorrente, Simulacao,
+    Alteracao, AlvoDoDocumento, Autor, Competencia, Composicao, Controle, Data, DocumentoVinculado,
+    EntradaDoHistorico, ErroDoPlanejamento, EstadoDaProposta, Excecao, Filtro, Grupo, IdOcorrencia,
+    Natureza, Ocorrencia, Planejamento, Prazo, Proposta, Recorrente, Simulacao,
 };
 
 use crate::componentes;
+use crate::compromisso::{
+    FormularioDeCompromisso, FrequenciaEscolhida, NaturezaEscolhida, PrazoEscolhido,
+};
 use crate::controle::{
     self, AcaoDoControle, AlvoDoDialogo, AtualDaVersao, Cartao, ContextoDaLinha, EscopoEscolhido,
     Formulario, Grade, GrupoVm, ModoDoPeriodo, Navegador, PROXIMAS_DE_INICIO, SubgrupoVm,
@@ -28,6 +32,8 @@ use crate::controle::{
 use crate::formato;
 use crate::icones;
 use crate::navegacao::Pedido;
+use crate::preferencias_da_janela::PreferenciasDoControle;
+use crate::rubricas::{self, SeletorDeDocumento, TabelaDeRubricas};
 use crate::tema::{self, Paleta};
 
 /// O planejamento ligado à janela (o serviço real ou o fictício da demonstração).
@@ -46,6 +52,13 @@ pub enum PedidoDoControle {
     Acao(AcaoDoControle),
     /// Aplicar a alteração de um diálogo (já com a prévia vista).
     Aplicar(Box<Alteracao>),
+    /// Várias alterações em ordem (um grupo novo e o compromisso; um vínculo de documento).
+    /// Para na primeira que falha.
+    AplicarVarias(Vec<Alteracao>),
+    /// Mostra o documento (pelo `content_hash`) no painel Prévia do dock.
+    PreviaDoDocumento(String),
+    /// Abre a prévia do documento numa janela própria.
+    DestacarDocumento(String),
     FecharDialogo,
     ConfirmarProposta(String),
     RecusarProposta(String, String),
@@ -54,7 +67,6 @@ pub enum PedidoDoControle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbaLateral {
-    Detalhe,
     Propostas,
     Arquivados,
 }
@@ -62,6 +74,8 @@ pub enum AbaLateral {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbaDoDetalhe {
     Resumo,
+    Rubricas,
+    Documentos,
     Proximas,
     Versoes,
     Pausas,
@@ -70,8 +84,10 @@ pub enum AbaDoDetalhe {
 }
 
 impl AbaDoDetalhe {
-    const TODAS: [AbaDoDetalhe; 6] = [
+    const TODAS: [AbaDoDetalhe; 8] = [
         AbaDoDetalhe::Resumo,
+        AbaDoDetalhe::Rubricas,
+        AbaDoDetalhe::Documentos,
         AbaDoDetalhe::Proximas,
         AbaDoDetalhe::Versoes,
         AbaDoDetalhe::Pausas,
@@ -82,6 +98,8 @@ impl AbaDoDetalhe {
     fn rotulo(self) -> &'static str {
         match self {
             AbaDoDetalhe::Resumo => "Resumo",
+            AbaDoDetalhe::Rubricas => "Valores e rubricas",
+            AbaDoDetalhe::Documentos => "Documentos",
             AbaDoDetalhe::Proximas => "Próximas ocorrências",
             AbaDoDetalhe::Versoes => "Versões",
             AbaDoDetalhe::Pausas => "Pausas e cancelamento",
@@ -105,6 +123,8 @@ struct CacheDoControle {
     controle: Result<Controle, String>,
     grade: Grade,
     cartoes: Vec<Cartao>,
+    /// As linhas de entrada cujas rubricas não batem com o digitado, com o texto do aviso.
+    avisos: HashMap<IdOcorrencia, String>,
 }
 
 /// Uma proposta com o texto em português e o efeito simulado.
@@ -117,6 +137,7 @@ pub struct VmDaProposta {
 
 struct DetalheEmCache {
     recorrente: String,
+    competencia: Competencia,
     geracao: u64,
     meses: u16,
     dados: Result<DadosDoDetalhe, String>,
@@ -127,6 +148,54 @@ struct DadosDoDetalhe {
     proximas: Vec<Ocorrencia>,
     historico: Vec<EntradaDoHistorico>,
     excecoes: Vec<sbf_planejamento::ExcecaoGravada>,
+    composicao: Option<Composicao>,
+    /// Os documentos ligados só a esta ocorrência.
+    docs_da_ocorrencia: Vec<DocumentoVinculado>,
+    /// Os ligados ao compromisso inteiro.
+    docs_do_compromisso: Vec<DocumentoVinculado>,
+}
+
+/// O diálogo "Adicionar compromisso": o formulário e a prévia da última criação válida.
+#[derive(Debug, Clone)]
+pub struct NovoDialogo {
+    pub formulario: FormularioDeCompromisso,
+    pub grupos: Vec<Grupo>,
+    simulada: Option<(Alteracao, Result<Simulacao, String>)>,
+}
+
+impl NovoDialogo {
+    pub fn alteracao(&self) -> Result<Alteracao, String> {
+        self.formulario.alteracao()
+    }
+
+    /// A prévia que vale para o que está no formulário agora.
+    pub fn previa(&self) -> Option<&Result<Simulacao, String>> {
+        let atual = self.alteracao().ok()?;
+        self.simulada
+            .as_ref()
+            .filter(|(a, _)| *a == atual)
+            .map(|(_, s)| s)
+    }
+
+    pub fn atualizar_previa(&mut self, plan: &dyn Planejamento, hoje: Data) {
+        let Ok(alt) = self.alteracao() else {
+            return;
+        };
+        if self.simulada.as_ref().is_some_and(|(a, _)| *a == alt) {
+            return;
+        }
+        let r = plan.simular(&alt, hoje).map_err(|e| mensagem_de_erro(&e));
+        self.simulada = Some((alt, r));
+    }
+
+    pub fn pode_criar(&self) -> bool {
+        matches!(self.previa(), Some(Ok(_)))
+    }
+
+    /// As alterações em ordem: o grupo novo, se houver, e o compromisso.
+    pub fn alteracoes(&self) -> Result<Vec<Alteracao>, String> {
+        self.formulario.alteracoes(&self.grupos)
+    }
 }
 
 /// O que a área guarda entre quadros.
@@ -151,6 +220,13 @@ pub struct EstadoDoControle {
     ir_para_erro: Option<String>,
     atrasadas_abertas: bool,
     pub resumo_aberto: bool,
+    /// O diálogo de criar compromisso.
+    pub novo: Option<NovoDialogo>,
+    /// O seletor de "Anexar documento".
+    pub anexar: Option<SeletorDeDocumento>,
+    /// O documento (`content_hash`) mostrado no painel Prévia do dock.
+    pub documento_em_previa: Option<String>,
+    selecao_da_previa: Option<IdOcorrencia>,
     motivos_de_recusa: std::collections::HashMap<String, String>,
     recusando: Option<String>,
     cache: Option<CacheDoControle>,
@@ -192,6 +268,10 @@ impl EstadoDoControle {
             ir_para_erro: None,
             atrasadas_abertas: true,
             resumo_aberto: true,
+            novo: None,
+            anexar: None,
+            documento_em_previa: None,
+            selecao_da_previa: None,
             motivos_de_recusa: std::collections::HashMap::new(),
             recusando: None,
             cache: None,
@@ -209,6 +289,31 @@ impl EstadoDoControle {
 
     pub fn geracao(&self) -> u64 {
         self.geracao
+    }
+
+    /// O que a janela guarda entre aberturas.
+    pub fn preferencias(&self) -> PreferenciasDoControle {
+        let mut recolhidos: Vec<String> = self.recolhidos.iter().cloned().collect();
+        recolhidos.sort();
+        PreferenciasDoControle {
+            resumo_aberto: self.resumo_aberto,
+            atrasadas_abertas: self.atrasadas_abertas,
+            modo: self.navegador.modo,
+            filtro: self.filtro,
+            recolhidos,
+        }
+    }
+
+    /// Restaura o que foi guardado. O modo muda o período mostrado, que continua cobrindo
+    /// o mesmo ponto no tempo.
+    pub fn aplicar_preferencias(&mut self, p: &PreferenciasDoControle) {
+        self.resumo_aberto = p.resumo_aberto;
+        self.atrasadas_abertas = p.atrasadas_abertas;
+        if self.navegador.modo != p.modo {
+            self.navegador.trocar_modo(p.modo);
+        }
+        self.filtro = p.filtro;
+        self.recolhidos = p.recolhidos.iter().cloned().collect();
     }
 
     /// Abre ou fecha o painel lateral.
@@ -297,19 +402,46 @@ impl EstadoDoControle {
         let controle = plan
             .controle(&chave.periodo, chave.filtro, busca, hoje)
             .map_err(|e| e.to_string());
-        let (grade, cartoes) = match &controle {
+        let (grade, mut cartoes) = match &controle {
             Ok(c) => (controle::montar_grade(c), controle::cartoes(c, hoje)),
             Err(_) => (Grade::default(), Vec::new()),
         };
+        let mut avisos = HashMap::new();
+        let mut do_cartao: Vec<(String, String)> = Vec::new();
+        if let Ok(c) = &controle {
+            for (i, o) in c
+                .linhas
+                .iter()
+                .chain(c.atrasadas_de_antes.iter())
+                .enumerate()
+                .filter(|(_, o)| matches!(o.natureza, Natureza::Entrada))
+            {
+                if let Ok(Some(comp)) = plan.composicao(&o.id.recorrente, o.id.competencia)
+                    && let Some(t) = rubricas::aviso_de_divergencia(&comp, o.previsto)
+                {
+                    if i < c.linhas.len() {
+                        do_cartao.push((o.nome.clone(), t.clone()));
+                    }
+                    avisos.insert(o.id.clone(), t);
+                }
+            }
+        }
+        controle::avisar_nos_cartoes(&mut cartoes, &do_cartao);
         self.cache = Some(CacheDoControle {
             chave,
             controle,
             grade,
             cartoes,
+            avisos,
         });
     }
 
     fn garantir_selecao(&mut self, plan: &dyn Planejamento) {
+        // A prévia do documento vale para a linha em que foi aberta.
+        if self.selecao_da_previa != self.selecionada {
+            self.documento_em_previa = None;
+            self.selecao_da_previa.clone_from(&self.selecionada);
+        }
         let Some(id) = self.selecionada.clone() else {
             self.selecao = None;
             return;
@@ -326,51 +458,19 @@ impl EstadoDoControle {
     }
 
     fn garantir_lateral(&mut self, plan: &dyn Planejamento, hoje: Data) {
-        match self.lateral {
-            Some(AbaLateral::Propostas) => {
-                if self
-                    .propostas
-                    .as_ref()
-                    .is_none_or(|(g, _)| *g != self.geracao)
-                {
-                    self.propostas = Some((self.geracao, carregar_propostas(plan, hoje)));
-                }
-            }
-            Some(AbaLateral::Arquivados) => {
-                if self
-                    .arquivados
-                    .as_ref()
-                    .is_none_or(|(g, _)| *g != self.geracao)
-                {
-                    let v = plan
-                        .recorrentes(true)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|r| r.arquivado || r.excluido.is_some())
-                        .collect();
-                    self.arquivados = Some((self.geracao, v));
-                }
-            }
-            Some(AbaLateral::Detalhe) => {
-                let Some(id) = self.selecionada.as_ref().map(|i| i.recorrente.clone()) else {
-                    return;
-                };
-                let desatualizado = self.detalhe.as_ref().is_none_or(|d| {
-                    d.recorrente != id
-                        || d.geracao != self.geracao
-                        || d.meses != self.proximas_meses
-                });
-                if desatualizado {
-                    let desde = Competencia::de_data(self.navegador.periodo().inicio());
-                    self.detalhe = Some(DetalheEmCache {
-                        recorrente: id.clone(),
-                        geracao: self.geracao,
-                        meses: self.proximas_meses,
-                        dados: carregar_detalhe(plan, &id, desde, self.proximas_meses, hoje),
-                    });
-                }
-            }
-            None => {}
+        if self.lateral == Some(AbaLateral::Arquivados)
+            && self
+                .arquivados
+                .as_ref()
+                .is_none_or(|(g, _)| *g != self.geracao)
+        {
+            let v = plan
+                .recorrentes(true)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.arquivado || r.excluido.is_some())
+                .collect();
+            self.arquivados = Some((self.geracao, v));
         }
         // As propostas pendentes alimentam o botão do cabeçalho, mesmo com o painel fechado.
         if self
@@ -379,6 +479,30 @@ impl EstadoDoControle {
             .is_none_or(|(g, _)| *g != self.geracao)
         {
             self.propostas = Some((self.geracao, carregar_propostas(plan, hoje)));
+        }
+    }
+
+    /// Lê o detalhe da linha escolhida (uma vez por escolha, por geração e por janela de
+    /// próximas ocorrências).
+    fn garantir_detalhe(&mut self, plan: &dyn Planejamento, hoje: Data) {
+        let Some(id) = self.selecionada.clone() else {
+            return;
+        };
+        let desatualizado = self.detalhe.as_ref().is_none_or(|d| {
+            d.recorrente != id.recorrente
+                || d.competencia != id.competencia
+                || d.geracao != self.geracao
+                || d.meses != self.proximas_meses
+        });
+        if desatualizado {
+            let desde = Competencia::de_data(self.navegador.periodo().inicio());
+            self.detalhe = Some(DetalheEmCache {
+                recorrente: id.recorrente.clone(),
+                competencia: id.competencia,
+                geracao: self.geracao,
+                meses: self.proximas_meses,
+                dados: carregar_detalhe(plan, &id, desde, self.proximas_meses, hoje),
+            });
         }
     }
 
@@ -413,12 +537,24 @@ fn carregar_propostas(plan: &dyn Planejamento, hoje: Data) -> Vec<VmDaProposta> 
 
 fn carregar_detalhe(
     plan: &dyn Planejamento,
-    id: &str,
+    ocorrencia: &IdOcorrencia,
     desde: Competencia,
     meses: u16,
     hoje: Data,
 ) -> Result<DadosDoDetalhe, String> {
+    let id = ocorrencia.recorrente.as_str();
     let recorrente = plan.recorrente(id).map_err(|e| e.to_string())?;
+    let composicao = plan
+        .composicao(id, ocorrencia.competencia)
+        .map_err(|e| e.to_string())?;
+    let docs_da_ocorrencia = plan
+        .documentos(&AlvoDoDocumento::Ocorrencia {
+            id: ocorrencia.clone(),
+        })
+        .map_err(|e| e.to_string())?;
+    let docs_do_compromisso = plan
+        .documentos(&AlvoDoDocumento::Recorrente { id: id.to_owned() })
+        .map_err(|e| e.to_string())?;
     let proximas = plan
         .proximas(id, desde, meses, hoje)
         .map_err(|e| e.to_string())?;
@@ -429,6 +565,9 @@ fn carregar_detalhe(
         proximas,
         historico,
         excecoes,
+        composicao,
+        docs_da_ocorrencia,
+        docs_do_compromisso,
     })
 }
 
@@ -728,6 +867,13 @@ fn selo_do_estado(ui: &mut Ui, e: sbf_planejamento::EstadoDaOcorrencia) {
     r.on_hover_text(s.rotulo);
 }
 
+/// O triângulo de aviso (⚠): as rubricas do salário não batem com o digitado.
+fn triangulo_de_aviso(ui: &mut Ui, texto: &str) -> egui::Response {
+    let p = tema::paleta(ui.ctx());
+    ui.label(icones::icone_cor("warning", 15.0, p.aviso))
+        .on_hover_text(format!("Atenção: {texto}."))
+}
+
 fn texto_pequeno(ui: &mut Ui, t: impl Into<String>) {
     let p = tema::paleta(ui.ctx());
     ui.label(RichText::new(t.into()).size(11.5).color(p.tinta_suave));
@@ -748,6 +894,7 @@ pub fn area(
     estado.garantir_cache(plan, hoje);
     estado.garantir_selecao(plan);
     estado.garantir_lateral(plan, hoje);
+    estado.garantir_detalhe(plan, hoje);
     let p = tema::paleta(ui.ctx());
 
     if estado.lateral.is_some() {
@@ -770,7 +917,7 @@ pub fn area(
         .id_salt("controle-pagina")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            cabecalho(ui, estado);
+            cabecalho(ui, estado, pedidos);
             mensagem(ui, estado);
             ui.add_space(6.0);
             let cache = estado.cache.take();
@@ -829,7 +976,7 @@ fn teclado(ui: &mut Ui, estado: &mut EstadoDoControle) {
     estado.selecionada = Some(ids[novo].clone());
 }
 
-fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
+fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         componentes::titulo(ui, "Controle mensal", 20.0);
@@ -952,15 +1099,6 @@ fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
             estado.lateral = toggle(estado.lateral, AbaLateral::Propostas);
         }
         if ui
-            .selectable_label(
-                estado.lateral == Some(AbaLateral::Detalhe),
-                "Detalhe da linha",
-            )
-            .clicked()
-        {
-            estado.lateral = toggle(estado.lateral, AbaLateral::Detalhe);
-        }
-        if ui
             .selectable_label(estado.lateral == Some(AbaLateral::Arquivados), "Arquivados")
             .clicked()
         {
@@ -968,6 +1106,15 @@ fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
         }
         ui.separator();
         ui.checkbox(&mut estado.resumo_aberto, "Cartões do resumo");
+        ui.separator();
+        let def = controle::definicao(AcaoDoControle::AdicionarCompromisso);
+        if ui
+            .button(format!("{}  {}", icones::texto(def.icone), def.rotulo))
+            .on_hover_text(format!("{} ({})", def.dica, atalho_em_texto(def)))
+            .clicked()
+        {
+            pedidos.push(Pedido::Controle(PedidoDoControle::Acao(def.id)));
+        }
     });
 }
 
@@ -1049,14 +1196,24 @@ fn cartoes(ui: &mut Ui, v: &[Cartao]) {
                                     componentes::selo(ui, s, fundo, cor);
                                 });
                             }
-                            ui.label(
-                                RichText::new(&k.valor)
-                                    .font(FontId::new(18.0, crate::tema::familia_forte()))
-                                    .color(p.tinta),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(&k.valor)
+                                        .font(FontId::new(18.0, crate::tema::familia_forte()))
+                                        .color(p.tinta),
+                                );
+                                if let Some(a) = &k.aviso {
+                                    triangulo_de_aviso(ui, a);
+                                }
+                            });
                             for n in &k.notas {
                                 ui.add(egui::Label::new(
                                     RichText::new(n).size(11.0).color(p.tinta_suave),
+                                ));
+                            }
+                            if let Some(a) = &k.aviso {
+                                ui.add(egui::Label::new(
+                                    RichText::new(a).size(11.0).color(p.aviso),
                                 ));
                             }
                         });
@@ -1373,7 +1530,14 @@ fn grade(
                             } => {
                                 let sel = estado.selecionada.as_ref() == Some(&o.id);
                                 row.set_selected(sel);
-                                linha(&mut row, o, *nivel, projecao, &p);
+                                linha(
+                                    &mut row,
+                                    o,
+                                    *nivel,
+                                    projecao,
+                                    c.avisos.get(&o.id).map(String::as_str),
+                                    &p,
+                                );
                                 let r = row.response();
                                 if r.clicked() || r.secondary_clicked() {
                                     escolhida = Some(o.id.clone());
@@ -1460,6 +1624,7 @@ fn linha(
     o: &Ocorrencia,
     nivel: u8,
     projecao: bool,
+    aviso: Option<&str>,
     p: &Paleta,
 ) {
     let p = *p;
@@ -1535,6 +1700,9 @@ fn linha(
                     ui.label(RichText::new("est.").size(10.5).color(p.tinta_suave));
                     r.on_hover_text("Valor estimado, não confirmado.");
                 }
+                if let Some(a) = aviso {
+                    triangulo_de_aviso(ui, a);
+                }
             });
         }
     });
@@ -1574,10 +1742,9 @@ fn lateral(
     hoje: Data,
     pedidos: &mut Vec<Pedido>,
 ) {
-    let _ = plan;
+    let _ = (plan, hoje);
     ui.horizontal(|ui| {
         for (a, rot) in [
-            (AbaLateral::Detalhe, "Detalhe"),
             (AbaLateral::Propostas, "Propostas"),
             (AbaLateral::Arquivados, "Arquivados"),
         ] {
@@ -1598,7 +1765,6 @@ fn lateral(
     match estado.lateral {
         Some(AbaLateral::Propostas) => propostas_ui(ui, estado, pedidos),
         Some(AbaLateral::Arquivados) => arquivados_ui(ui, estado, pedidos),
-        Some(AbaLateral::Detalhe) => detalhe_ui(ui, estado, hoje),
         None => {}
     }
 }
@@ -1836,16 +2002,41 @@ fn arquivados_ui(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<P
     }
 }
 
-fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
+/// O detalhe da linha escolhida, no painel Detalhe do dock (o mesmo clique que escolhe a
+/// linha da grade). Sem linha escolhida, diz o que fazer.
+pub fn detalhe_no_dock(
+    ui: &mut Ui,
+    plan: &dyn Planejamento,
+    estado: &mut EstadoDoControle,
+    hoje: Data,
+    pedidos: &mut Vec<Pedido>,
+) {
+    estado.garantir_detalhe(plan, hoje);
+    detalhe_ui(ui, estado, hoje, pedidos);
+}
+
+/// O que um clique no detalhe pede; aplicado depois do desenho.
+enum EfeitoDoDetalhe {
+    IrParaLinha(String),
+    Previa(String),
+    Destacar(String),
+    Desvincular(String),
+    Anexar,
+}
+
+fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
     let Some(sel) = estado.linha_selecionada().cloned() else {
-        ui.add_space(20.0);
+        ui.add_space(6.0);
         ui.label(
-            RichText::new("Escolha uma linha da grade para ver o detalhe.").color(p.tinta_suave),
+            RichText::new(
+                "Clique numa linha da grade para ver o detalhe aqui. As Ações dela ficam na faixa de Ações e no menu do botão direito.",
+            )
+            .color(p.tinta_suave),
         );
         return;
     };
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         componentes::titulo(ui, &sel.nome, 16.0);
         selo_do_estado(ui, sel.estado);
     });
@@ -1858,19 +2049,6 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
             competencia_texto(sel.id.competencia)
         ),
     );
-    ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
-        for a in AbaDoDetalhe::TODAS {
-            if ui
-                .selectable_label(estado.aba_do_detalhe == a, a.rotulo())
-                .clicked()
-            {
-                estado.aba_do_detalhe = a;
-            }
-        }
-    });
-    ui.separator();
-    let aba = estado.aba_do_detalhe;
     let Some(d) = estado.detalhe.as_ref() else {
         return;
     };
@@ -1881,11 +2059,66 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
             return;
         }
     };
+    let tabela = dados
+        .composicao
+        .as_ref()
+        .map(|c| rubricas::tabela_de_rubricas(c, sel.previsto));
+    if let Some(a) = tabela.as_ref().and_then(|t| t.aviso.as_ref()) {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(icones::icone_cor("warning", 16.0, p.aviso));
+            ui.label(RichText::new(format!("Atenção: {a}.")).color(p.aviso));
+        });
+    }
+    ui.add_space(4.0);
+    let tem_rubricas = tabela.is_some();
+    let mut aba = estado.aba_do_detalhe;
+    if aba == AbaDoDetalhe::Rubricas && !tem_rubricas {
+        aba = AbaDoDetalhe::Resumo;
+    }
+    let n_docs = dados.docs_da_ocorrencia.len() + dados.docs_do_compromisso.len();
+    // Uma linha só: o painel do dock é baixo, e sete abas lado a lado quebram em quatro linhas.
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Ver").size(12.0).color(p.tinta_suave));
+        let rotulo_de = |a: AbaDoDetalhe| match a {
+            AbaDoDetalhe::Documentos if n_docs > 0 => format!("{} ({n_docs})", a.rotulo()),
+            _ => a.rotulo().to_owned(),
+        };
+        egui::ComboBox::from_id_salt("controle-aba-do-detalhe")
+            .selected_text(rotulo_de(aba))
+            .width((ui.available_width() - 6.0).max(120.0))
+            .show_ui(ui, |ui| {
+                for a in AbaDoDetalhe::TODAS {
+                    if a == AbaDoDetalhe::Rubricas && !tem_rubricas {
+                        continue;
+                    }
+                    ui.selectable_value(&mut aba, a, rotulo_de(a));
+                }
+            });
+    });
+    estado.aba_do_detalhe = aba;
+    ui.separator();
     let mut mais = false;
-    ScrollArea::vertical()
+    let mut efeitos: Vec<EfeitoDoDetalhe> = Vec::new();
+    // O painel do dock já rola na vertical; aqui só as tabelas largas rolam de lado.
+    ScrollArea::horizontal()
         .id_salt("controle-detalhe")
+        .auto_shrink([false, true])
         .show(ui, |ui| match aba {
             AbaDoDetalhe::Resumo => aba_resumo(ui, &sel, dados.recorrente.as_ref()),
+            AbaDoDetalhe::Rubricas => {
+                if let Some(t) = &tabela {
+                    aba_rubricas(ui, t, &mut efeitos);
+                }
+            }
+            AbaDoDetalhe::Documentos => aba_documentos(
+                ui,
+                &sel,
+                &dados.docs_da_ocorrencia,
+                &dados.docs_do_compromisso,
+                estado.documento_em_previa.as_deref(),
+                &mut efeitos,
+            ),
             AbaDoDetalhe::Proximas => {
                 mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
             }
@@ -1897,6 +2130,219 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
     if mais {
         estado.proximas_meses =
             (estado.proximas_meses + PROXIMAS_DE_INICIO).min(sbf_planejamento::HORIZONTE_MESES);
+    }
+    for e in efeitos {
+        match e {
+            EfeitoDoDetalhe::IrParaLinha(r) => estado.selecionar_recorrente(&r),
+            EfeitoDoDetalhe::Previa(h) => {
+                pedidos.push(Pedido::Controle(PedidoDoControle::PreviaDoDocumento(h)));
+            }
+            EfeitoDoDetalhe::Destacar(h) => {
+                pedidos.push(Pedido::Controle(PedidoDoControle::DestacarDocumento(h)));
+            }
+            EfeitoDoDetalhe::Desvincular(id) => {
+                pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
+                    Alteracao::DesvincularDocumento { id },
+                ])));
+            }
+            EfeitoDoDetalhe::Anexar => {
+                pedidos.push(Pedido::Controle(PedidoDoControle::Acao(
+                    AcaoDoControle::AnexarDocumento,
+                )));
+            }
+        }
+    }
+}
+
+fn celula_de_valor(ui: &mut Ui, v: sbf_planejamento::Centavos, forte: bool) {
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let t = RichText::new(reais(v));
+        ui.label(if forte { t.strong() } else { t });
+    });
+}
+
+/// A aba "Valores e rubricas": proventos, descontos, totais e o líquido contra o digitado.
+fn aba_rubricas(ui: &mut Ui, t: &TabelaDeRubricas, efeitos: &mut Vec<EfeitoDoDetalhe>) {
+    let p = tema::paleta(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Origem").color(p.tinta_suave).size(12.0));
+        ui.label(RichText::new(&t.origem).strong());
+        if let Some(h) = &t.documento
+            && ui
+                .small_button(format!("{}  Ver documento", icones::texto("visibility")))
+                .on_hover_text("Mostra o documento no painel Prévia")
+                .clicked()
+        {
+            efeitos.push(EfeitoDoDetalhe::Previa(h.clone()));
+        }
+    });
+    ui.add_space(6.0);
+    for (titulo, linhas, total) in [
+        ("Proventos", &t.proventos, t.total_proventos),
+        ("Descontos", &t.descontos, t.total_descontos),
+    ] {
+        ui.label(RichText::new(titulo).strong().size(13.5));
+        if linhas.is_empty() {
+            texto_pequeno(ui, "Nenhuma rubrica.");
+            continue;
+        }
+        egui::Grid::new(("controle-rubricas", titulo))
+            .num_columns(5)
+            .spacing([12.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                // O valor logo depois do nome: o painel do dock é estreito.
+                for c in ["Código", "Nome", "Valor", "Competência", "Prazo"] {
+                    ui.label(RichText::new(c).size(11.5).color(p.tinta_suave));
+                }
+                ui.end_row();
+                for l in linhas {
+                    ui.label(RichText::new(&l.codigo).size(12.0));
+                    match &l.recorrente {
+                        Some(r) => {
+                            if ui
+                                .link(&l.nome)
+                                .on_hover_text("Abre a linha deste desconto em folha")
+                                .clicked()
+                            {
+                                efeitos.push(EfeitoDoDetalhe::IrParaLinha(r.clone()));
+                            }
+                        }
+                        None => {
+                            ui.label(&l.nome);
+                        }
+                    }
+                    celula_de_valor(ui, l.valor, false);
+                    ui.label(RichText::new(&l.competencia).size(12.0));
+                    ui.label(RichText::new(&l.prazo).size(12.0));
+                    ui.end_row();
+                }
+                ui.label("");
+                ui.label(RichText::new(format!("Total de {}", titulo.to_lowercase())).strong());
+                celula_de_valor(ui, total, true);
+                ui.end_row();
+            });
+        ui.add_space(8.0);
+    }
+    egui::Grid::new("controle-rubricas-liquido")
+        .num_columns(2)
+        .spacing([14.0, 4.0])
+        .show(ui, |ui| {
+            campo(ui, "Líquido das rubricas", reais(t.liquido));
+            campo(
+                ui,
+                "Valor digitado",
+                t.digitado.map_or("sem valor".to_owned(), reais),
+            );
+        });
+    ui.add_space(4.0);
+    match &t.aviso {
+        Some(a) => {
+            componentes::aviso(
+                ui,
+                "warning",
+                &format!("Atenção: {a}."),
+                p.aviso_sutil,
+                p.borda,
+                p.aviso,
+            );
+        }
+        None => {
+            if t.digitado.is_some() {
+                texto_pequeno(ui, "As rubricas batem com o valor digitado.");
+            }
+        }
+    }
+}
+
+fn aba_documentos(
+    ui: &mut Ui,
+    sel: &Ocorrencia,
+    da_ocorrencia: &[DocumentoVinculado],
+    do_compromisso: &[DocumentoVinculado],
+    em_previa: Option<&str>,
+    efeitos: &mut Vec<EfeitoDoDetalhe>,
+) {
+    let p = tema::paleta(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button(format!(
+                "{}  Anexar documento…",
+                icones::texto("attach_file")
+            ))
+            .on_hover_text("Escolhe um achado do inventário e liga a esta linha ou ao compromisso")
+            .clicked()
+        {
+            efeitos.push(EfeitoDoDetalhe::Anexar);
+        }
+    });
+    texto_pequeno(
+        ui,
+        "Fatura e boleto cobram; só o comprovante prova o pagamento.",
+    );
+    ui.add_space(6.0);
+    for (titulo, docs) in [
+        (
+            format!("Só {}", competencia_texto(sel.id.competencia)),
+            da_ocorrencia,
+        ),
+        ("Do compromisso inteiro".to_owned(), do_compromisso),
+    ] {
+        ui.label(RichText::new(titulo).strong().size(13.5));
+        let linhas = rubricas::linhas_de_documentos(docs);
+        if linhas.is_empty() {
+            texto_pequeno(ui, "Nenhum documento vinculado.");
+            ui.add_space(6.0);
+            continue;
+        }
+        for l in &linhas {
+            let em_foco = em_previa == Some(l.sha256.as_str());
+            Frame::new()
+                .fill(if em_foco {
+                    p.superficie_3
+                } else {
+                    p.superficie_2
+                })
+                .stroke(Stroke::new(1.0, p.borda))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        componentes::selo(ui, l.tipo, p.info_sutil, p.info);
+                        ui.label(RichText::new(&l.nome).strong());
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(d) = &l.data {
+                            texto_pequeno(ui, d.clone());
+                        }
+                        if let Some(n) = l.nota {
+                            texto_pequeno(ui, format!("· {n}"));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Prévia").clicked() {
+                            efeitos.push(EfeitoDoDetalhe::Previa(l.sha256.clone()));
+                        }
+                        if ui
+                            .small_button("Destacar")
+                            .on_hover_text("Abre a prévia numa janela própria")
+                            .clicked()
+                        {
+                            efeitos.push(EfeitoDoDetalhe::Destacar(l.sha256.clone()));
+                        }
+                        if ui
+                            .small_button("Desvincular")
+                            .on_hover_text("Tira o vínculo; o documento continua no inventário")
+                            .clicked()
+                        {
+                            efeitos.push(EfeitoDoDetalhe::Desvincular(l.id.clone()));
+                        }
+                    });
+                });
+            ui.add_space(4.0);
+        }
+        ui.add_space(6.0);
     }
 }
 
@@ -2141,7 +2587,10 @@ pub fn desenhar_dialogo(
     estado: &mut EstadoDoControle,
     hoje: Data,
     pedidos: &mut Vec<Pedido>,
+    consulta: &dyn Consulta,
 ) {
+    desenhar_novo_compromisso(ctx, plan, estado, hoje, pedidos);
+    desenhar_anexar(ctx, estado, pedidos, consulta);
     let Some(mut d) = estado.dialogo.take() else {
         return;
     };
@@ -2191,6 +2640,406 @@ pub fn desenhar_dialogo(
     }
     if !fechar {
         estado.dialogo = Some(d);
+    }
+}
+
+/// Abre o formulário de compromisso novo. O grupo da linha escolhida vem preenchido.
+pub fn abrir_novo_compromisso(
+    estado: &EstadoDoControle,
+    plan: &dyn Planejamento,
+    hoje: Data,
+) -> Result<NovoDialogo, String> {
+    let grupos = plan.grupos().map_err(|e| e.to_string())?;
+    let posicao = plan
+        .recorrentes(true)
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|r| r.posicao)
+        .max()
+        .unwrap_or(0)
+        + 10;
+    let mut f = FormularioDeCompromisso::novo(hoje, &grupos, posicao);
+    if let Some(o) = estado.linha_selecionada()
+        && grupos.iter().any(|g| g.nome == o.grupo)
+    {
+        f.grupo.clone_from(&o.grupo);
+    }
+    Ok(NovoDialogo {
+        formulario: f,
+        grupos,
+        simulada: None,
+    })
+}
+
+/// Abre o seletor de "Anexar documento" sobre a linha escolhida.
+pub fn abrir_anexar(estado: &EstadoDoControle) -> Result<SeletorDeDocumento, String> {
+    let o = estado
+        .linha_selecionada()
+        .ok_or("Escolha uma linha do controle.")?;
+    let mut s = SeletorDeDocumento::novo(
+        o.id.recorrente.clone(),
+        o.nome.clone(),
+        Some(o.id.clone()),
+        o.id.competencia,
+    );
+    if matches!(o.natureza, Natureza::Entrada) {
+        s.tipo = sbf_planejamento::TipoDeDocumento::Contracheque;
+    }
+    Ok(s)
+}
+
+fn campo_de_texto(ui: &mut Ui, rotulo: &str, valor: &mut String, dica: &str, largura: f32) {
+    ui.label(rotulo);
+    ui.add(
+        egui::TextEdit::singleline(valor)
+            .hint_text(dica)
+            .desired_width(largura),
+    );
+    ui.end_row();
+}
+
+fn desenhar_novo_compromisso(
+    ctx: &egui::Context,
+    plan: &dyn Planejamento,
+    estado: &mut EstadoDoControle,
+    hoje: Data,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let Some(mut d) = estado.novo.take() else {
+        return;
+    };
+    d.atualizar_previa(plan, hoje);
+    let mut fechar = false;
+    let mut criar = false;
+    let resposta = egui::Modal::new(Id::new("controle-novo-compromisso")).show(ctx, |ui| {
+        ui.set_width(560.0);
+        componentes::titulo(ui, "Adicionar compromisso", 17.0);
+        texto_pequeno(
+            ui,
+            "Um compromisso é uma regra que gera uma linha por mês. Nada é gravado antes de Criar.",
+        );
+        ui.add_space(8.0);
+        ScrollArea::vertical()
+            .id_salt("controle-novo-rolagem")
+            .max_height((ctx.content_rect().height() - 330.0).max(180.0))
+            .show(ui, |ui| formulario_do_compromisso(ui, &mut d));
+        ui.add_space(8.0);
+        ui.separator();
+        previa_do_novo(ui, &d);
+        ui.add_space(10.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let motivo = match d.alteracao() {
+                Err(m) => m,
+                Ok(_) => "Sem prévia válida.".into(),
+            };
+            if ui
+                .add_enabled(d.pode_criar(), egui::Button::new("Criar compromisso"))
+                .on_disabled_hover_text(motivo)
+                .clicked()
+            {
+                criar = true;
+            }
+            if ui.button("Cancelar").clicked() {
+                fechar = true;
+            }
+        });
+    });
+    if resposta.should_close() {
+        fechar = true;
+    }
+    if criar && let Ok(v) = d.alteracoes() {
+        pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(v)));
+        fechar = true;
+    }
+    if !fechar {
+        estado.novo = Some(d);
+    }
+}
+
+fn formulario_do_compromisso(ui: &mut Ui, d: &mut NovoDialogo) {
+    let grupos = d.grupos.clone();
+    let f = &mut d.formulario;
+    egui::Grid::new("controle-form-novo")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            campo_de_texto(ui, "Nome", &mut f.nome, "Academia", 300.0);
+            ui.label("Grupo");
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("controle-novo-grupo")
+                    .selected_text(if f.grupo.is_empty() {
+                        "Escolha…"
+                    } else {
+                        f.grupo.as_str()
+                    })
+                    .show_ui(ui, |ui| {
+                        for g in &grupos {
+                            ui.selectable_value(&mut f.grupo, g.nome.clone(), &g.nome);
+                        }
+                    });
+                ui.add(
+                    egui::TextEdit::singleline(&mut f.grupo_novo)
+                        .hint_text("ou um grupo novo")
+                        .desired_width(150.0),
+                );
+            });
+            ui.end_row();
+            campo_de_texto(ui, "Subgrupo", &mut f.subgrupo, "opcional", 200.0);
+            ui.label("Natureza");
+            egui::ComboBox::from_id_salt("controle-novo-natureza")
+                .selected_text(f.natureza.rotulo())
+                .show_ui(ui, |ui| {
+                    for n in NaturezaEscolhida::TODAS {
+                        ui.selectable_value(&mut f.natureza, n, n.rotulo())
+                            .on_hover_text(n.dica());
+                    }
+                });
+            ui.end_row();
+            ui.label("Valor (R$)");
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    !f.sem_valor,
+                    egui::TextEdit::singleline(&mut f.valor)
+                        .hint_text("312,44")
+                        .desired_width(110.0),
+                );
+                ui.checkbox(&mut f.sem_valor, "sem valor")
+                    .on_hover_text("O valor ainda não é conhecido. Não conta como zero.");
+                ui.checkbox(&mut f.estimado, "estimado");
+            });
+            ui.end_row();
+            ui.label("Frequência");
+            egui::ComboBox::from_id_salt("controle-novo-frequencia")
+                .selected_text(f.frequencia.rotulo())
+                .show_ui(ui, |ui| {
+                    for fr in FrequenciaEscolhida::TODAS {
+                        ui.selectable_value(&mut f.frequencia, fr, fr.rotulo());
+                    }
+                });
+            ui.end_row();
+            match f.frequencia {
+                FrequenciaEscolhida::Mensal => {
+                    campo_de_texto(ui, "Dia do mês", &mut f.dia, "5", 60.0);
+                    campo_de_texto(ui, "Começa em", &mut f.desde, "11/2026", 90.0);
+                }
+                FrequenciaEscolhida::CadaNMeses => {
+                    campo_de_texto(ui, "A cada (meses)", &mut f.n_meses, "3", 60.0);
+                    campo_de_texto(ui, "Dia do mês", &mut f.dia, "5", 60.0);
+                    campo_de_texto(ui, "Primeira vez em", &mut f.desde, "11/2026", 90.0);
+                }
+                FrequenciaEscolhida::Anual => {
+                    campo_de_texto(ui, "Mês do ano (1–12)", &mut f.mes_do_ano, "12", 60.0);
+                    campo_de_texto(ui, "Dia do mês", &mut f.dia, "25", 60.0);
+                    campo_de_texto(ui, "Começa em", &mut f.desde, "11/2026", 90.0);
+                }
+                FrequenciaEscolhida::Unica => {
+                    campo_de_texto(ui, "Data", &mut f.data_unica, "15/02/2027", 110.0);
+                }
+            }
+            if f.frequencia != FrequenciaEscolhida::Unica {
+                ui.label("Prazo");
+                egui::ComboBox::from_id_salt("controle-novo-prazo")
+                    .selected_text(f.prazo.rotulo())
+                    .show_ui(ui, |ui| {
+                        for pz in PrazoEscolhido::TODOS {
+                            ui.selectable_value(&mut f.prazo, pz, pz.rotulo());
+                        }
+                    });
+                ui.end_row();
+                match f.prazo {
+                    PrazoEscolhido::SemFim => {}
+                    PrazoEscolhido::AteMes => {
+                        campo_de_texto(ui, "Até (não entra)", &mut f.ate_mes, "12/2027", 90.0);
+                    }
+                    PrazoEscolhido::Parcelas => {
+                        campo_de_texto(ui, "Parcelas", &mut f.parcelas, "12", 60.0);
+                    }
+                }
+            }
+            campo_de_texto(ui, "Conta", &mut f.conta, "opcional", 200.0);
+            campo_de_texto(ui, "Centro", &mut f.centro, "opcional", 200.0);
+        });
+    texto_pequeno(ui, f.natureza.dica());
+}
+
+fn previa_do_novo(ui: &mut Ui, d: &NovoDialogo) {
+    let p = tema::paleta(ui.ctx());
+    ui.label(RichText::new("Prévia").strong().size(13.5));
+    texto_pequeno(
+        ui,
+        "Nada foi gravado. Isto é o que passa a aparecer se você criar.",
+    );
+    ui.add_space(4.0);
+    match d.alteracao() {
+        Err(m) => {
+            ui.label(RichText::new(m).color(p.aviso));
+        }
+        Ok(_) => match d.previa() {
+            None => {
+                ui.label(RichText::new("Calculando…").color(p.tinta_suave));
+            }
+            Some(Err(e)) => {
+                componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
+            }
+            Some(Ok(s)) => resumo_da_simulacao(ui, s),
+        },
+    }
+}
+
+fn desenhar_anexar(
+    ctx: &egui::Context,
+    estado: &mut EstadoDoControle,
+    pedidos: &mut Vec<Pedido>,
+    consulta: &dyn Consulta,
+) {
+    let Some(mut s) = estado.anexar.take() else {
+        return;
+    };
+    s.buscar(consulta);
+    let mut fechar = false;
+    let mut anexar = false;
+    let mut ver: Option<String> = None;
+    let mut escolher: Option<String> = None;
+    let resposta = egui::Modal::new(Id::new("controle-anexar")).show(ctx, |ui| {
+        ui.set_width(600.0);
+        componentes::titulo(
+            ui,
+            &format!("Anexar documento · {}", s.nome_do_compromisso),
+            17.0,
+        );
+        texto_pequeno(
+            ui,
+            "Escolha um achado do inventário. Anexar não move nem apaga o arquivo.",
+        );
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut s.texto)
+                    .hint_text("Buscar por nome, fornecedor ou tipo")
+                    .desired_width(260.0),
+            );
+            ui.checkbox(
+                &mut s.filtrar_por_periodo,
+                format!("só perto de {}", competencia_texto(s.competencia)),
+            )
+            .on_hover_text("O mês da linha, os dois anteriores e o seguinte");
+            ui.checkbox(&mut s.filtrar_por_tipo, "só do tipo escolhido");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Tipo do vínculo");
+            let antes = s.tipo;
+            egui::ComboBox::from_id_salt("controle-anexar-tipo")
+                .selected_text(rubricas::rotulo_do_tipo(s.tipo))
+                .show_ui(ui, |ui| {
+                    for t in rubricas::TIPOS_DE_DOCUMENTO {
+                        ui.selectable_value(&mut s.tipo, t, rubricas::rotulo_do_tipo(t));
+                    }
+                });
+            if s.tipo != antes {
+                s.tipo_escolhido_a_mao = true;
+            }
+            if let Some(n) = rubricas::nota_do_tipo(s.tipo) {
+                texto_pequeno(ui, n);
+            }
+        });
+        ui.add_space(4.0);
+        if let Some(e) = &s.erro {
+            let p = tema::paleta(ui.ctx());
+            componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
+        }
+        let visiveis = s.visiveis();
+        texto_pequeno(
+            ui,
+            format!("{} de {} achados", visiveis.len(), s.candidatos.len()),
+        );
+        ScrollArea::vertical()
+            .id_salt("controle-anexar-lista")
+            .max_height(220.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                if visiveis.is_empty() {
+                    texto_pequeno(
+                        ui,
+                        "Nenhum achado com esses filtros. Solte o período ou o tipo.",
+                    );
+                }
+                for c in &visiveis {
+                    let marcado = s.escolhido.as_deref() == Some(c.sha256.as_str());
+                    let t = format!(
+                        "{}   ·   {}   ·   {}{}",
+                        c.nome,
+                        if c.tipo.is_empty() {
+                            "sem tipo"
+                        } else {
+                            c.tipo.as_str()
+                        },
+                        c.data
+                            .as_deref()
+                            .and_then(Data::de_iso)
+                            .map_or("sem data".to_owned(), data_texto),
+                        c.fornecedor
+                            .as_deref()
+                            .map(|f| format!("   ·   {f}"))
+                            .unwrap_or_default(),
+                    );
+                    if ui.selectable_label(marcado, t).clicked() {
+                        escolher = Some(c.sha256.clone());
+                    }
+                }
+            });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label("Vincular a");
+            if s.ocorrencia.is_some() {
+                ui.radio_value(
+                    &mut s.ao_compromisso_inteiro,
+                    false,
+                    format!("só {}", competencia_texto(s.competencia)),
+                );
+            }
+            ui.radio_value(&mut s.ao_compromisso_inteiro, true, "o compromisso inteiro");
+        });
+        ui.add_space(10.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let motivo = match s.alteracao() {
+                Err(m) => m,
+                Ok(_) => String::new(),
+            };
+            if ui
+                .add_enabled(s.alteracao().is_ok(), egui::Button::new("Anexar"))
+                .on_disabled_hover_text(motivo)
+                .clicked()
+            {
+                anexar = true;
+            }
+            if ui.button("Cancelar").clicked() {
+                fechar = true;
+            }
+            if let Some(h) = &s.escolhido
+                && ui
+                    .button("Ver prévia")
+                    .on_hover_text("Mostra o achado no painel Prévia, sem fechar o seletor")
+                    .clicked()
+            {
+                ver = Some(h.clone());
+            }
+        });
+    });
+    if resposta.should_close() {
+        fechar = true;
+    }
+    if let Some(h) = escolher {
+        s.escolher(&h);
+    }
+    if let Some(h) = ver {
+        pedidos.push(Pedido::Controle(PedidoDoControle::PreviaDoDocumento(h)));
+    }
+    if anexar && let Ok(alt) = s.alteracao() {
+        pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![alt])));
+        fechar = true;
+    }
+    if !fechar {
+        estado.anexar = Some(s);
     }
 }
 
@@ -2539,5 +3388,368 @@ mod testes {
             assert!(!p.texto.contains("rec_"));
             assert!(p.simulacao.is_ok());
         }
+    }
+
+    // ----------------------------------------------------------------- detalhe e rubricas
+
+    #[test]
+    fn clicar_no_salario_carrega_o_detalhe_com_rubricas_e_documentos() {
+        let (mut e, s) = estado_e_servico();
+        e.selecionar_recorrente("rec_salario");
+        assert_eq!(
+            e.selecionada.as_ref().map(|i| i.recorrente.as_str()),
+            Some("rec_salario")
+        );
+        e.garantir_selecao(&s);
+        e.garantir_detalhe(&s, hoje());
+        let d = e.detalhe.as_ref().expect("detalhe");
+        assert_eq!(d.recorrente, "rec_salario");
+        let dados = d.dados.as_ref().expect("dados");
+        let c = dados.composicao.as_ref().expect("composição do salário");
+        assert!(c.rubricas.len() >= 4);
+        assert!(c.rubricas.iter().any(|r| r.recorrente.is_some()));
+        // O contracheque está ligado ao compromisso inteiro.
+        assert_eq!(dados.docs_do_compromisso.len(), 1);
+        assert_eq!(
+            dados.docs_do_compromisso[0].tipo,
+            sbf_planejamento::TipoDeDocumento::Contracheque
+        );
+    }
+
+    #[test]
+    fn trocar_a_linha_troca_o_detalhe_e_larga_a_previa() {
+        let (mut e, s) = estado_e_servico();
+        e.selecionar_recorrente("rec_salario");
+        e.garantir_selecao(&s);
+        e.documento_em_previa = Some("abc".into());
+        e.garantir_selecao(&s);
+        assert_eq!(e.documento_em_previa.as_deref(), Some("abc"));
+        e.selecionar_recorrente("rec_internet");
+        e.garantir_selecao(&s);
+        assert_eq!(e.documento_em_previa, None);
+        e.garantir_detalhe(&s, hoje());
+        assert_eq!(e.detalhe.as_ref().unwrap().recorrente, "rec_internet");
+        assert!(
+            e.detalhe
+                .as_ref()
+                .unwrap()
+                .dados
+                .as_ref()
+                .unwrap()
+                .composicao
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn rubricas_que_nao_batem_avisam_na_linha_e_no_cartao_de_entradas() {
+        let (e, _) = estado_e_servico();
+        let c = e.cache.as_ref().unwrap();
+        let (id, texto) = c
+            .avisos
+            .iter()
+            .find(|(i, _)| i.recorrente == "rec_salario")
+            .expect("aviso do salário");
+        assert!(texto.starts_with("as rubricas somam R$ 8.226,00, o digitado é"));
+        assert_eq!(id.recorrente, "rec_salario");
+        let entradas = c.cartoes.iter().find(|k| k.id == "entradas").unwrap();
+        assert!(
+            entradas
+                .aviso
+                .as_deref()
+                .unwrap()
+                .contains("as rubricas somam")
+        );
+        // Os outros cartões não ganham triângulo.
+        assert!(c.cartoes.iter().filter(|k| k.aviso.is_some()).count() == 1);
+    }
+
+    #[test]
+    fn composicao_que_bate_tira_o_aviso() {
+        let (mut e, mut s) = estado_e_servico();
+        let rec = s.recorrente("rec_salario").unwrap().unwrap();
+        let mut c = s
+            .composicao("rec_salario", Competencia::de_data(hoje()))
+            .unwrap()
+            .unwrap();
+        // Ajusta o desconto até o líquido bater com os R$ 8.450,00 digitados.
+        let dif = c
+            .divergencia(Some(sbf_planejamento::Centavos(845_000)))
+            .unwrap();
+        c.rubricas[2].valor = sbf_planejamento::Centavos(c.rubricas[2].valor.0 + dif.0);
+        c.desde = Competencia::de_data(hoje());
+        c.origem = "contracheque 11/2026 (revisado)".into();
+        s.aplicar(
+            Alteracao::DefinirComposicao {
+                composicao: c,
+                versao_base: rec.versao_do_registro,
+            },
+            Autor::Usuario,
+        )
+        .expect("define a composição");
+        e.recarregar();
+        e.garantir_cache(&s, hoje());
+        assert!(
+            e.cache
+                .as_ref()
+                .unwrap()
+                .avisos
+                .keys()
+                .all(|i| i.recorrente != "rec_salario")
+        );
+        let entradas = e
+            .cache
+            .as_ref()
+            .unwrap()
+            .cartoes
+            .iter()
+            .find(|k| k.id == "entradas")
+            .unwrap();
+        assert_eq!(entradas.aviso, None);
+    }
+
+    // ----------------------------------------------------------------- documentos
+
+    #[test]
+    fn anexar_e_desvincular_um_documento_na_ocorrencia() {
+        let (mut e, mut s) = estado_e_servico();
+        e.selecionar_recorrente("rec_internet");
+        let mut seletor = abrir_anexar(&e).expect("seletor");
+        seletor.candidatos = vec![rubricas::Candidato {
+            sha256: "hash-do-boleto".into(),
+            nome: "boleto-internet.pdf".into(),
+            tipo: "boleto".into(),
+            data: Some("2026-11-12".into()),
+            fornecedor: None,
+        }];
+        seletor.escolher("hash-do-boleto");
+        seletor.ao_compromisso_inteiro = false;
+        let alvo = seletor.alvo();
+        assert!(matches!(alvo, AlvoDoDocumento::Ocorrencia { .. }));
+        s.aplicar(seletor.alteracao().unwrap(), Autor::Usuario)
+            .expect("vincula");
+        let lista = s.documentos(&alvo).unwrap();
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].tipo, sbf_planejamento::TipoDeDocumento::Boleto);
+        // O mesmo documento não vincula duas vezes ao mesmo alvo.
+        assert!(
+            s.aplicar(seletor.alteracao().unwrap(), Autor::Usuario)
+                .is_err()
+        );
+        // Não aparece no compromisso inteiro.
+        let inteiro = AlvoDoDocumento::Recorrente {
+            id: "rec_internet".into(),
+        };
+        assert!(s.documentos(&inteiro).unwrap().is_empty());
+        s.aplicar(
+            Alteracao::DesvincularDocumento {
+                id: lista[0].id.clone(),
+            },
+            Autor::Usuario,
+        )
+        .expect("desvincula");
+        assert!(s.documentos(&alvo).unwrap().is_empty());
+        assert!(
+            s.aplicar(
+                Alteracao::DesvincularDocumento {
+                    id: lista[0].id.clone()
+                },
+                Autor::Usuario
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn seletor_acha_o_contracheque_do_inventario_da_demonstracao() {
+        let (consulta, _) = crate::demonstracao::nova();
+        let (mut e, _) = estado_e_servico();
+        e.selecionar_recorrente("rec_salario");
+        let mut sel = abrir_anexar(&e).expect("seletor");
+        assert_eq!(sel.tipo, sbf_planejamento::TipoDeDocumento::Contracheque);
+        sel.buscar(&consulta);
+        let visiveis = sel.visiveis();
+        let n_visiveis = visiveis.len();
+        assert!(
+            visiveis
+                .iter()
+                .any(|c| c.nome == "contracheque-2026-11.pdf"),
+            "{:?}",
+            sel.candidatos.iter().map(|c| &c.nome).collect::<Vec<_>>()
+        );
+        // O filtro por tipo tira a fatura da lista de contracheques.
+        assert!(visiveis.iter().all(|c| !c.nome.starts_with("fatura")));
+        sel.filtrar_por_tipo = false;
+        assert!(sel.visiveis().len() > n_visiveis);
+        // Procurar por texto estreita a busca.
+        sel.texto = "contracheque".into();
+        sel.buscar(&consulta);
+        assert!(!sel.candidatos.is_empty());
+        assert!(sel.candidatos.len() < 10);
+    }
+
+    // ----------------------------------------------------------------- compromisso novo
+
+    #[test]
+    fn adicionar_compromisso_mostra_a_previa_e_cria_o_plano_avulso() {
+        let (mut e, mut s) = estado_e_servico();
+        e.selecionar_recorrente("rec_aluguel");
+        let mut d = abrir_novo_compromisso(&e, &s, hoje()).expect("diálogo");
+        // O grupo da linha escolhida já vem preenchido.
+        assert_eq!(d.formulario.grupo, "Lar");
+        assert!(!d.pode_criar());
+        d.formulario.nome = "Presente da Ana".into();
+        d.formulario.valor = "250,00".into();
+        d.formulario.frequencia = FrequenciaEscolhida::Unica;
+        d.formulario.data_unica = "15/02/2027".into();
+        d.formulario.subgrupo = "Eventos".into();
+        d.atualizar_previa(&s, hoje());
+        assert!(d.pode_criar(), "{:?}", d.previa());
+        let sim = d.previa().unwrap().as_ref().unwrap();
+        assert_eq!(sim.meses_afetados, vec![Competencia { ano: 2027, mes: 2 }]);
+        assert_eq!(
+            sim.mudancas[0],
+            (
+                Competencia { ano: 2027, mes: 2 },
+                None,
+                Some(sbf_planejamento::Centavos(25_000))
+            )
+        );
+        // Nada foi gravado antes de criar.
+        assert!(
+            s.recorrentes(false)
+                .unwrap()
+                .iter()
+                .all(|r| r.nome != "Presente da Ana")
+        );
+        for a in d.alteracoes().unwrap() {
+            s.aplicar(a, Autor::Usuario).expect("cria");
+        }
+        let criada = s
+            .recorrentes(false)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.nome == "Presente da Ana")
+            .expect("criado");
+        assert_eq!(criada.subgrupo.as_deref(), Some("Eventos"));
+        let fev = s
+            .proximas(&criada.id, Competencia { ano: 2027, mes: 2 }, 1, hoje())
+            .unwrap();
+        assert_eq!(fev.len(), 1);
+        assert_eq!(fev[0].previsto, Some(sbf_planejamento::Centavos(25_000)));
+    }
+
+    #[test]
+    fn formulario_invalido_nao_tem_previa_nem_cria() {
+        let (e, s) = estado_e_servico();
+        let mut d = abrir_novo_compromisso(&e, &s, hoje()).expect("diálogo");
+        d.formulario.nome = "Curso".into();
+        d.formulario.valor = "12,345".into();
+        d.atualizar_previa(&s, hoje());
+        assert!(d.alteracao().unwrap_err().contains("Valor inválido"));
+        assert!(d.previa().is_none());
+        assert!(!d.pode_criar());
+    }
+
+    #[test]
+    fn grupo_novo_e_criado_antes_do_compromisso() {
+        let (e, mut s) = estado_e_servico();
+        let mut d = abrir_novo_compromisso(&e, &s, hoje()).expect("diálogo");
+        d.formulario.nome = "Ração".into();
+        d.formulario.valor = "89,90".into();
+        d.formulario.grupo_novo = "Pets".into();
+        let v = d.alteracoes().unwrap();
+        assert_eq!(v.len(), 2);
+        for a in v {
+            s.aplicar(a, Autor::Usuario).expect("aplica");
+        }
+        assert!(s.grupos().unwrap().iter().any(|g| g.nome == "Pets"));
+        assert!(
+            s.recorrentes(false)
+                .unwrap()
+                .iter()
+                .any(|r| r.nome == "Ração" && r.grupo == "Pets")
+        );
+    }
+
+    // ----------------------------------------------------------------- preferências
+
+    #[test]
+    fn preferencias_do_controle_vao_e_voltam() {
+        let (mut e, _) = estado_e_servico();
+        e.resumo_aberto = false;
+        e.atrasadas_abertas = false;
+        e.navegador.trocar_modo(ModoDoPeriodo::MesCivil);
+        e.filtro = Filtro::SemValor;
+        let g = e.cache.as_ref().unwrap().grade.grupos[0].clone();
+        e.recolhidos.insert(chave_do_grupo(&g));
+        let p = e.preferencias();
+        // Vai para o arquivo e volta numa janela nova.
+        let pasta = tempfile::tempdir().unwrap();
+        let arquivo = pasta.path().join("p.json");
+        crate::preferencias_da_janela::PreferenciasDaJanela {
+            zoom: Some(1.2),
+            controle: p.clone(),
+        }
+        .salvar(&arquivo)
+        .unwrap();
+        let lidas = crate::preferencias_da_janela::PreferenciasDaJanela::carregar(&arquivo);
+        assert_eq!(lidas.zoom_valido(), Some(1.2));
+        let mut novo = EstadoDoControle::novo(hoje());
+        assert!(novo.resumo_aberto && novo.atrasadas_abertas);
+        novo.aplicar_preferencias(&lidas.controle);
+        assert!(!novo.resumo_aberto);
+        assert!(!novo.atrasadas_abertas);
+        assert_eq!(novo.navegador.modo, ModoDoPeriodo::MesCivil);
+        assert_eq!(novo.filtro, Filtro::SemValor);
+        assert!(novo.recolhidos.contains(&chave_do_grupo(&g)));
+        assert_eq!(novo.preferencias(), p);
+    }
+
+    #[test]
+    fn janela_guarda_ao_mudar_e_restaura_na_proxima_abertura() {
+        use crate::janela::Janela;
+        let pasta = tempfile::tempdir().unwrap();
+        let arquivo = pasta.path().join("dados").join("p.json");
+        let mut j = Janela::nova();
+        j.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
+        j.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje())));
+        assert_eq!(j.restaurar_preferencias(Some(arquivo.clone())), None);
+        assert_eq!(j.guardador.quadro(&j.preferencias_atuais(1.0)), Ok(true));
+        // Sem mudar nada, não grava de novo.
+        assert_eq!(j.guardador.quadro(&j.preferencias_atuais(1.0)), Ok(false));
+        j.controle.resumo_aberto = false;
+        assert_eq!(j.guardador.quadro(&j.preferencias_atuais(1.0)), Ok(true));
+        assert_eq!(j.guardador.quadro(&j.preferencias_atuais(1.3)), Ok(true));
+        // Janela nova, mesmo arquivo.
+        let mut k = Janela::nova();
+        k.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
+        k.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje())));
+        assert_eq!(k.restaurar_preferencias(Some(arquivo)), Some(1.3));
+        assert!(!k.controle.resumo_aberto);
+    }
+
+    #[test]
+    fn previa_de_documento_vira_o_foco_do_dock_so_no_controle() {
+        use crate::janela::Janela;
+        let mut j = Janela::nova();
+        j.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
+        j.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje())));
+        assert!(j.controle_no_centro());
+        assert_eq!(j.foco(), None);
+        j.controle_pedido(PedidoDoControle::PreviaDoDocumento("h1".into()));
+        assert_eq!(j.foco(), Some(rubricas::ref_do_documento("h1")));
+    }
+
+    #[test]
+    fn adicionar_e_anexar_estao_na_lista_de_acoes() {
+        use crate::controle::{ContextoDaLinha, disponibilidade};
+        let c = ContextoDaLinha::default();
+        assert!(disponibilidade(AcaoDoControle::AdicionarCompromisso, &c).is_ok());
+        assert!(disponibilidade(AcaoDoControle::AnexarDocumento, &c).is_err());
+        assert_eq!(
+            controle::acao_do_codigo("controle.adicionar"),
+            Some(AcaoDoControle::AdicionarCompromisso)
+        );
     }
 }
