@@ -24,15 +24,18 @@ pub enum PainelDoDock {
     /// A prévia do arquivo do item em foco (a miniatura; [`crate::previa`]). Visível por
     /// padrão, embaixo do Detalhe.
     Previa,
+    /// Os arquivos soltos na janela e o que o reconhecimento achou ([`crate::reconhecimento`]).
+    Reconhecimento,
 }
 
 impl PainelDoDock {
-    pub const TODOS: [PainelDoDock; 5] = [
+    pub const TODOS: [PainelDoDock; 6] = [
         PainelDoDock::Detalhe,
         PainelDoDock::Origens,
         PainelDoDock::Texto,
         PainelDoDock::Historico,
         PainelDoDock::Previa,
+        PainelDoDock::Reconhecimento,
     ];
 
     pub fn titulo(self) -> &'static str {
@@ -42,6 +45,7 @@ impl PainelDoDock {
             PainelDoDock::Texto => "Texto extraído",
             PainelDoDock::Historico => "Histórico de decisões",
             PainelDoDock::Previa => "Prévia",
+            PainelDoDock::Reconhecimento => "Reconhecimento",
         }
     }
 
@@ -52,6 +56,7 @@ impl PainelDoDock {
             PainelDoDock::Texto => "description",
             PainelDoDock::Historico => "history",
             PainelDoDock::Previa => "visibility",
+            PainelDoDock::Reconhecimento => "upload_file",
         }
     }
 }
@@ -91,6 +96,8 @@ pub fn desenhar(
         PainelDoDock::Historico => historico(ui, leitor, foco, decisoes_da_sessao, pedidos),
         // A prévia precisa do estado da janela (a fila de fundo): `Janela::dock_ui`.
         PainelDoDock::Previa => vazio(ui, "Selecione um achado ou documento."),
+        // Precisa do estado da janela: `Janela::dock_ui`.
+        PainelDoDock::Reconhecimento => vazio(ui, "Solte um arquivo na janela para reconhecer."),
     }
 }
 

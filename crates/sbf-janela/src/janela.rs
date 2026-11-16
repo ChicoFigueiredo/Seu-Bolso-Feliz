@@ -132,7 +132,7 @@ pub struct Janela {
     relatorios: EstadoDosRelatorios,
     pub lote_atual: Option<Ref>,
     pub paineis_visiveis: Vec<PainelDoDock>,
-    pedidos: Vec<Pedido>,
+    pub(crate) pedidos: Vec<Pedido>,
     pub dialogo: Option<Dialogo>,
     pub mensagem: Option<Mensagem>,
     decisoes_da_sessao: Vec<IdDecisao>,
@@ -174,6 +174,8 @@ pub struct Janela {
     /// O planejamento do controle mensal (spec 11). `None`: a área mostra o selo da fatia e
     /// a janela abre onde sempre abriu.
     pub planejamento: Option<crate::controle_ui::PlanejamentoLigado>,
+    /// O arrastar de arquivos para a janela e o reconhecimento deles.
+    pub reconhecimento: crate::reconhecimento::Reconhecimento,
     /// O que o Controle mensal guarda entre quadros.
     pub controle: crate::controle_ui::EstadoDoControle,
     /// O que a janela lembra entre aberturas (zoom e o jeito do Controle mensal).
@@ -289,6 +291,7 @@ impl Janela {
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
+            reconhecimento: crate::reconhecimento::Reconhecimento::default(),
             controle: crate::controle_ui::EstadoDoControle::novo(
                 sbf_planejamento::Data::hoje_em_sao_paulo(),
             ),
@@ -1151,6 +1154,10 @@ impl Janela {
                     &mut self.pedidos,
                 );
             }
+            return;
+        }
+        if painel == PainelDoDock::Reconhecimento {
+            self.reconhecimento_ui(ui);
             return;
         }
         let foco = self.foco();

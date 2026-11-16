@@ -1,6 +1,6 @@
 //! Capturas de tela do Controle mensal, só com dados fictícios.
 //!
-//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo SBF_CAPTURA=/caminho/cena.png \
+//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo|arrastar SBF_CAPTURA=/caminho/cena.png \
 //!  xvfb-run -a cargo run -p sbf-janela --example captura_controle`
 //!
 //! Abre a janela da casca com o planejamento fictício ligado, arruma a cena, tira a foto da
@@ -177,6 +177,21 @@ impl App {
                     f.centro = "Pessoal".into();
                 }
             }
+            (1, "arrastar") => {
+                c.resumo_aberto = false;
+                // Só o painel Reconhecimento no dock: o cartão pede altura.
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("detalhe"));
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "arrastar") => {
+                let arquivo = std::env::temp_dir().join("contracheque-2026-10.pdf");
+                let _ = std::fs::write(&arquivo, b"arquivo ficticio");
+                janela.soltar_arquivos(vec![arquivo], Some(ctx));
+            }
+            (9, "arrastar") => {
+                // O usuário confirma a primeira sugestão (vincular); a segunda fica à espera.
+                janela.confirmar_sugestao(0, 0);
+            }
             (1, "propostas") => {
                 c.resumo_aberto = false;
                 c.abrir_lateral(sbf_janela::controle_ui::AbaLateral::Propostas);
@@ -226,6 +241,7 @@ fn main() -> std::process::ExitCode {
     let mut janela = Janela::nova();
     janela.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
     janela.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje())));
+    sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);
     let barra = EstadoDaBarra {
         inventario: "Modo demonstração · dados fictícios".to_owned(),
         selo: Some("Demonstração · dados fictícios".to_owned()),

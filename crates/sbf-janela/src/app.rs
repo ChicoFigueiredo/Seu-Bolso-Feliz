@@ -110,6 +110,7 @@ pub fn id_do_painel(p: PainelDoDock) -> &'static str {
         PainelDoDock::Texto => "texto",
         PainelDoDock::Historico => "historico",
         PainelDoDock::Previa => "previa",
+        PainelDoDock::Reconhecimento => "reconhecimento",
     }
 }
 
@@ -254,6 +255,22 @@ impl AppSbf {
                 texto: "Não deu para guardar as preferências da janela.".to_owned(),
                 erro: true,
             });
+        }
+    }
+
+    /// O arrastar de arquivos: lê o input do quadro, e ao soltar faz o painel Reconhecimento
+    /// aparecer (a casca alterna painéis; só pede quando ele está fechado).
+    fn arrastar(&mut self, ctx: &egui::Context) {
+        let j = self.janela.get_mut();
+        j.arrastar_ui(ctx);
+        if std::mem::take(&mut j.reconhecimento.painel_pedido) {
+            let id = id_do_painel(PainelDoDock::Reconhecimento);
+            if !self.paineis_visiveis.get(id).copied().unwrap_or(false) {
+                // A casca atende no fim do quadro; o espelho só muda no próximo, então
+                // marca já para não pedir duas vezes.
+                self.paineis_visiveis.insert(id.to_owned(), true);
+                bancada_casca::executar(ctx, ids::painel(id));
+            }
         }
     }
 
@@ -828,6 +845,7 @@ impl AppCasca for AppSbf {
         };
         if local == Local::Centro {
             self.guardar_preferencias(&ctx);
+            self.arrastar(&ctx);
         }
         let AppSbf {
             janela,
@@ -870,7 +888,10 @@ impl AppCasca for AppSbf {
                 // de rubricas, documentos) precisa da altura, e `Ver decisões` o abre.
                 if matches!(
                     p,
-                    PainelDoDock::Origens | PainelDoDock::Texto | PainelDoDock::Historico
+                    PainelDoDock::Origens
+                        | PainelDoDock::Texto
+                        | PainelDoDock::Historico
+                        | PainelDoDock::Reconhecimento
                 ) {
                     d = d.escondido();
                 }
