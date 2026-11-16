@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 2;
+pub const VERSAO_DO_ESQUEMA: u32 = 3;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -156,6 +156,12 @@ const MIGRACOES: &[&str] = &[
         chave TEXT PRIMARY KEY,
         valor TEXT NOT NULL
     );
+    ",
+    // 3: o início do acompanhamento passa de competência (AAAA-MM) para data (AAAA-MM-DD);
+    // o valor antigo vira o dia 1 do mês.
+    "
+    UPDATE configuracao SET valor = valor || '-01'
+    WHERE chave = 'inicio_do_acompanhamento' AND length(valor) = 7;
     ",
 ];
 
@@ -299,7 +305,7 @@ pub(crate) struct Dados {
     pub conciliacoes: HashMap<String, Vec<Conciliacao>>,
     pub grupos: Vec<Grupo>,
     /// O início do acompanhamento, se definido.
-    pub inicio: Option<Competencia>,
+    pub inicio: Option<Data>,
 }
 
 impl Dados {
@@ -621,7 +627,7 @@ pub(crate) fn carregar_dados(conexao: &Connection) -> Resultado<Dados> {
 pub(crate) const CHAVE_INICIO: &str = "inicio_do_acompanhamento";
 
 /// O início do acompanhamento gravado na configuração.
-pub(crate) fn ler_inicio(conexao: &Connection) -> Resultado<Option<Competencia>> {
+pub(crate) fn ler_inicio(conexao: &Connection) -> Resultado<Option<Data>> {
     conexao
         .query_row(
             "SELECT valor FROM configuracao WHERE chave = ?1",
@@ -630,7 +636,8 @@ pub(crate) fn ler_inicio(conexao: &Connection) -> Resultado<Option<Competencia>>
         )
         .optional()?
         .as_deref()
-        .map(ler_competencia)
+        // Tolera o valor antigo (competência): vira o dia 1.
+        .map(|t| ler_data(t).or_else(|_| ler_competencia(t).map(|c| c.dia(1))))
         .transpose()
 }
 

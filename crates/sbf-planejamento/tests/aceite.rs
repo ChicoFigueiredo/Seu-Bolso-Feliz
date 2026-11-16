@@ -1718,7 +1718,7 @@ fn abrir_cria_o_arquivo_com_permissao_0600_e_os_dados_sobrevivem() {
         & 0o777;
     assert_eq!(modo, 0o600);
     let banco = Banco::abrir(&caminho).expect("reabrir");
-    assert_eq!(banco.versao_do_esquema().expect("versão"), 2);
+    assert_eq!(banco.versao_do_esquema().expect("versão"), 3);
     let s = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
     assert!(s.recorrente(&id).expect("ler").is_some());
 }
@@ -1768,28 +1768,28 @@ fn resto_antigo() -> NovoRecorrente {
 fn inicio_do_acompanhamento_e_gravado_com_historico_do_usuario() {
     let mut s = servico();
     assert_eq!(s.inicio_do_acompanhamento().expect("início"), None);
-    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+    s.definir_inicio_do_acompanhamento(dia(2026, 11, 1))
         .expect("definir");
     assert_eq!(
         s.inicio_do_acompanhamento().expect("início"),
-        Some(comp(2026, 11))
+        Some(dia(2026, 11, 1))
     );
-    s.definir_inicio_do_acompanhamento(comp(2026, 10))
+    s.definir_inicio_do_acompanhamento(dia(2026, 10, 20))
         .expect("redefinir");
     assert_eq!(
         s.inicio_do_acompanhamento().expect("início"),
-        Some(comp(2026, 10))
+        Some(dia(2026, 10, 20))
     );
     let h = s.historico(Some("configuracao"), 10).expect("histórico");
     assert_eq!(h.len(), 2);
     assert_eq!(h[0].autor, Autor::Usuario);
-    assert!(h[0].alteracao.contains("2026-10"));
+    assert!(h[0].alteracao.contains("2026-10-20"));
 }
 
 #[test]
 fn antes_do_inicio_do_acompanhamento_nada_esta_em_atraso_sem_adiar() {
     let mut s = servico_com_saldo(vec![saldo(100_000, "2026-11-16T09:00:00Z")]);
-    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+    s.definir_inicio_do_acompanhamento(dia(2026, 11, 1))
         .expect("início");
     // Streaming com primeira versão em 2026-10 (outubro vencido, sem pago informado).
     let id = criar(&mut s, streaming());
@@ -1830,7 +1830,7 @@ fn antes_do_inicio_do_acompanhamento_nada_esta_em_atraso_sem_adiar() {
 #[test]
 fn antes_do_inicio_o_adiar_sem_data_continua_devida_e_aparece_no_ciclo() {
     let mut s = servico();
-    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+    s.definir_inicio_do_acompanhamento(dia(2026, 11, 1))
         .expect("início");
     let id = criar(&mut s, streaming());
     s.aplicar(
@@ -1852,7 +1852,85 @@ fn antes_do_inicio_o_adiar_sem_data_continua_devida_e_aparece_no_ciclo() {
         .controle(&Periodo::Ciclo(ciclo), Filtro::Todos, None, HOJE)
         .expect("ciclo");
     // O ciclo começa em 20/11: outubro (adiado) e novembro (dia 5, vencido) são "de antes".
-    let comps: Vec<_> = c.atrasadas_de_antes.iter().map(|o| o.id.competencia).collect();
+    let comps: Vec<_> = c
+        .atrasadas_de_antes
+        .iter()
+        .map(|o| o.id.competencia)
+        .collect();
     assert_eq!(comps, [comp(2026, 10), comp(2026, 11)]);
     assert_eq!(c.resumo.em_atraso, Centavos(3500 * 2));
+}
+
+#[test]
+fn inicio_por_data_compara_o_vencimento_original_e_nao_a_competencia() {
+    let hoje = dia(2026, 12, 1);
+    let mut s = servico();
+    s.definir_inicio_do_acompanhamento(dia(2026, 11, 20))
+        .expect("início");
+    let cedo = criar(
+        &mut s,
+        novo(
+            "Conta do dia 10 Exemplo",
+            "Essencial",
+            1,
+            Natureza::Saida,
+            Prazo::SemFim,
+            Some(5000),
+            Certeza::Confirmado,
+            Frequencia::Mensal { dia: 10 },
+        ),
+    );
+    let tarde = criar(
+        &mut s,
+        novo(
+            "Conta do dia 25 Exemplo",
+            "Essencial",
+            2,
+            Natureza::Saida,
+            Prazo::SemFim,
+            Some(7000),
+            Certeza::Confirmado,
+            Frequencia::Mensal { dia: 25 },
+        ),
+    );
+    let c = s
+        .controle(&mes(2026, 11), Filtro::Todos, None, hoje)
+        .expect("novembro");
+    let estado = |id: &str| {
+        c.linhas
+            .iter()
+            .find(|o| o.id.recorrente == id)
+            .expect("linha")
+            .estado
+    };
+    // Mesma competência (novembro), mas o vencimento de 10/11 é anterior ao início.
+    assert_eq!(estado(&cedo), EstadoDaOcorrencia::Prevista);
+    assert_eq!(estado(&tarde), EstadoDaOcorrencia::EmAtraso);
+    assert_eq!(c.resumo.em_atraso, Centavos(7000));
+    assert!(c.atrasadas_de_antes.is_empty(), "outubro é histórico");
+}
+
+#[test]
+fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
+    let pasta = tempfile::tempdir().expect("pasta");
+    let caminho = pasta.path().join("planejamento.sqlite");
+    {
+        let banco = Banco::abrir(&caminho).expect("abrir");
+        let c = banco.conexao();
+        c.execute(
+            "INSERT INTO configuracao (chave, valor) VALUES ('inicio_do_acompanhamento', '2026-10')",
+            [],
+        )
+        .expect("config");
+        c.pragma_update(None, "user_version", 2_i64)
+            .expect("versão");
+    }
+    let s = PlanejamentoSqlite::novo(
+        Banco::abrir(&caminho).expect("reabrir"),
+        Box::new(SemSaldos),
+    );
+    assert_eq!(
+        s.inicio_do_acompanhamento().expect("início"),
+        Some(dia(2026, 10, 1))
+    );
 }

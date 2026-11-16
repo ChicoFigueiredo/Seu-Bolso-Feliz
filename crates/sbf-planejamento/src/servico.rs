@@ -797,12 +797,12 @@ impl Planejamento for PlanejamentoSqlite {
 
 /// Atalho para quem lê conciliações de um recorrente (a importação e os testes).
 impl PlanejamentoSqlite {
-    /// O início do acompanhamento: antes dele, o que não tem pagamento informado não é
-    /// "em atraso" (pago vazio é "não informado"). `None` = não definido.
+    /// O início do acompanhamento (data): o que vence (originalmente) antes dela e não tem
+    /// pagamento informado não é "em atraso" (pago vazio é "não informado"). `None` = não definido.
     ///
     /// # Errors
     /// Falha do SQLite.
-    pub fn inicio_do_acompanhamento(&self) -> Resultado<Option<Competencia>> {
+    pub fn inicio_do_acompanhamento(&self) -> Resultado<Option<Data>> {
         banco::ler_inicio(self.banco.conexao())
     }
 
@@ -810,13 +810,13 @@ impl PlanejamentoSqlite {
     ///
     /// # Errors
     /// Falha do SQLite.
-    pub fn definir_inicio_do_acompanhamento(&mut self, competencia: Competencia) -> Resultado<()> {
+    pub fn definir_inicio_do_acompanhamento(&mut self, inicio: Data) -> Resultado<()> {
         let agora = rfc3339(self.agora());
         let tx = self.banco.conexao_mut().transaction()?;
         tx.execute(
             "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
              ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor",
-            params![banco::CHAVE_INICIO, competencia.to_string()],
+            params![banco::CHAVE_INICIO, inicio.to_string()],
         )?;
         let id = novo_id(&tx, "hist")?;
         tx.execute(
@@ -826,10 +826,10 @@ impl PlanejamentoSqlite {
                 id,
                 agora,
                 json(&Autor::Usuario)?,
-                format!("Definiu o início do acompanhamento em {competencia}."),
+                format!("Definiu o início do acompanhamento em {inicio}."),
                 json(&serde_json::json!({
                     "tipo": "definir_inicio_do_acompanhamento",
-                    "competencia": competencia.to_string(),
+                    "inicio": inicio.to_string(),
                 }))?
             ],
         )?;

@@ -45,7 +45,7 @@ fn passo_em_meses(frequencia: &Frequencia) -> i32 {
 /// As exceções e conciliações de um recorrente, indexadas por ocorrência.
 struct Contexto<'a> {
     /// O início do acompanhamento: antes dele, sem pago informado, nada está em atraso.
-    inicio: Option<Competencia>,
+    inicio: Option<Data>,
     excecoes: HashMap<&'a IdOcorrencia, Vec<&'a ExcecaoGravada>>,
     conciliacoes: HashMap<&'a IdOcorrencia, Vec<&'a Conciliacao>>,
 }
@@ -55,7 +55,7 @@ impl<'a> Contexto<'a> {
         recorrente: &Recorrente,
         excecoes: &'a [ExcecaoGravada],
         conciliacoes: &'a [Conciliacao],
-        inicio: Option<Competencia>,
+        inicio: Option<Data>,
     ) -> Contexto<'a> {
         let mut por_excecao: HashMap<&IdOcorrencia, Vec<&ExcecaoGravada>> = HashMap::new();
         for e in excecoes
@@ -115,8 +115,8 @@ pub fn projetar(
     projetar_desde(recorrente, excecoes, conciliacoes, de, ate, hoje, None)
 }
 
-/// Como [`projetar`], com o início do acompanhamento: uma ocorrência de competência
-/// anterior a ele, sem pagamento informado, nunca fica `EmAtraso` (pago vazio é "não
+/// Como [`projetar`], com o início do acompanhamento: uma ocorrência de vencimento
+/// original anterior a essa data, sem pagamento informado, nunca fica `EmAtraso` (pago vazio é "não
 /// informado", não "não pago"), salvo se tiver `Excecao::Adiar`, que diz que ainda é devida.
 pub fn projetar_desde(
     recorrente: &Recorrente,
@@ -125,7 +125,7 @@ pub fn projetar_desde(
     de: Competencia,
     ate: Competencia,
     hoje: Data,
-    inicio: Option<Competencia>,
+    inicio: Option<Data>,
 ) -> Vec<Ocorrencia> {
     let total = de.meses_ate(ate);
     projetar_competencias_desde(
@@ -156,7 +156,7 @@ pub fn projetar_competencias_desde(
     conciliacoes: &[Conciliacao],
     competencias: impl IntoIterator<Item = Competencia>,
     hoje: Data,
-    inicio: Option<Competencia>,
+    inicio: Option<Data>,
 ) -> Vec<Ocorrencia> {
     let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio);
     competencias
@@ -232,7 +232,7 @@ fn ocorrencia_em(
     let estado = if let (Some(s), false) = (motivo_da_supressao, tem_pago) {
         s
     } else {
-        let antes_do_inicio = contexto.inicio.is_some_and(|i| c < i);
+        let antes_do_inicio = contexto.inicio.is_some_and(|i| vencimento_original < i);
         // Antes do início, só o adiar diz que ainda é devida.
         let pode_atrasar = !antes_do_inicio || decisoes.adiar.is_some();
         estado_da(
@@ -803,7 +803,7 @@ mod testes {
             comp(2026, 9),
             comp(2026, 12),
             HOJE,
-            Some(comp(2026, 11)),
+            Some(Data::nova(2026, 11, 1).expect("data")),
         );
         use EstadoDaOcorrencia::*;
         let estados: Vec<_> = o.iter().map(|x| x.estado).collect();
@@ -818,7 +818,7 @@ mod testes {
             comp(2026, 10),
             comp(2026, 10),
             HOJE,
-            Some(comp(2026, 11)),
+            Some(Data::nova(2026, 11, 1).expect("data")),
         );
         assert_eq!(o[0].estado, PagoInformado);
     }
