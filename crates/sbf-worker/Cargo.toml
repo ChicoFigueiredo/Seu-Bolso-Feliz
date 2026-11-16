@@ -1,0 +1,22 @@
+[package]
+name = "sbf-worker"
+description = "O worker local do Seu Bolso Feliz (ADR-014): laço com agenda, trava de instância única, log rotacionado sem conteúdo, arquivo de estado para a janela e o serviço do usuário (systemd). Sem egui e sem provedor de IA real."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-coleta = { path = "../sbf-coleta" }
+sbf-processo = { path = "../sbf-processo" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sbf-inventario = { workspace = true }
+
+[lints]
+workspace = true

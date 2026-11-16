@@ -29,6 +29,16 @@ export interface GmailMessage {
   sizeEstimate: number;
 }
 
+export interface GmailRawMessage {
+  id: string;
+  threadId: string;
+  labelIds?: string[];
+  internalDate: string;
+  sizeEstimate: number;
+  /** RFC 822 em base64url. */
+  raw: string;
+}
+
 export interface GmailPayload {
   mimeType: string;
   headers: GmailHeader[];
@@ -192,6 +202,14 @@ export class GmailClient {
     return this.apiRequest<GmailMessage>(`/messages/${messageId}`, {
       format: "full",
     });
+  }
+
+  /**
+   * Mensagem inteira em RFC 822 (base64url em `raw`), para guardar o .eml
+   * bruto — corpo, cabeçalhos e anexos exatamente como chegaram.
+   */
+  async getRawMessage(messageId: string): Promise<GmailRawMessage> {
+    return this.apiRequest<GmailRawMessage>(`/messages/${messageId}`, { format: "raw" });
   }
 
   /**

@@ -1,0 +1,1102 @@
+{
+ "aviso": "Dados ficticios para os testes de ouro do sbf-livro.",
+ "hoje": "2026-11-13",
+ "instante": "2026-11-13T10:00:00-03:00",
+ "donos": {
+  "a": {
+   "id": "00000000-0000-4000-8000-0000000000a0",
+   "livro": {
+    "corte": 20,
+    "instituicoes": [
+     {
+      "id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Banco Exemplo",
+      "tipo": "bank",
+      "ativa": true
+     }
+    ],
+    "contas": [
+     {
+      "id": "00000000-0000-4000-8000-000000000200",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Conta Alfa",
+      "tipo": "checking_account",
+      "saldo": 523456,
+      "limite": null,
+      "ativa": true,
+      "ordem": 1
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000201",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Poupanca Beta",
+      "tipo": "savings_account",
+      "saldo": 100010,
+      "limite": null,
+      "ativa": true,
+      "ordem": 2
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000202",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Cartao Gama",
+      "tipo": "credit_card",
+      "saldo": 0,
+      "limite": 800000,
+      "ativa": true,
+      "ordem": 3
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000203",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Cartao Delta",
+      "tipo": "credit_card",
+      "saldo": 0,
+      "limite": 300000,
+      "ativa": true,
+      "ordem": 4
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000204",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Conta Inativa",
+      "tipo": "checking_account",
+      "saldo": 99900,
+      "limite": null,
+      "ativa": false,
+      "ordem": 5
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000205",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Emprestimo Epsilon",
+      "tipo": "personal_loan",
+      "saldo": -540000,
+      "limite": null,
+      "ativa": true,
+      "ordem": 6
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000206",
+      "instituicao_id": "00000000-0000-4000-8000-000000000100",
+      "nome": "Investimento Zeta",
+      "tipo": "investment",
+      "saldo": 1000000,
+      "limite": null,
+      "ativa": true,
+      "ordem": null
+     }
+    ],
+    "cartoes": [
+     {
+      "id": "00000000-0000-4000-8000-000000000300",
+      "conta_id": "00000000-0000-4000-8000-000000000202",
+      "final_do_numero": "1234",
+      "bandeira": "visa",
+      "limite": 800000,
+      "dia_de_fechamento": 24,
+      "dia_de_vencimento": 5,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000301",
+      "conta_id": "00000000-0000-4000-8000-000000000203",
+      "final_do_numero": "5678",
+      "bandeira": "master",
+      "limite": 300000,
+      "dia_de_fechamento": 8,
+      "dia_de_vencimento": 15,
+      "ativo": true
+     }
+    ],
+    "faturas": [
+     {
+      "id": "00000000-0000-4000-8000-000000000400",
+      "cartao_id": "00000000-0000-4000-8000-000000000300",
+      "mes_de_referencia": "2026-10-01",
+      "inicio": "2026-09-25",
+      "fechamento": "2026-10-24",
+      "vencimento": "2026-11-05",
+      "total": 150000,
+      "pago": 150000,
+      "status": "paid"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000401",
+      "cartao_id": "00000000-0000-4000-8000-000000000300",
+      "mes_de_referencia": "2026-11-01",
+      "inicio": "2026-10-25",
+      "fechamento": "2026-11-24",
+      "vencimento": "2026-12-05",
+      "total": 81234,
+      "pago": 0,
+      "status": "open"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000402",
+      "cartao_id": "00000000-0000-4000-8000-000000000300",
+      "mes_de_referencia": "2026-09-01",
+      "inicio": "2026-08-25",
+      "fechamento": "2026-09-24",
+      "vencimento": "2026-10-05",
+      "total": 30000,
+      "pago": 10000,
+      "status": "overdue"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000403",
+      "cartao_id": "00000000-0000-4000-8000-000000000301",
+      "mes_de_referencia": "2026-11-01",
+      "inicio": "2026-10-09",
+      "fechamento": "2026-11-08",
+      "vencimento": "2026-11-15",
+      "total": 0,
+      "pago": 0,
+      "status": "open"
+     }
+    ],
+    "itens_de_fatura": [
+     {
+      "id": "00000000-0000-4000-8000-000000003000",
+      "fatura_id": "00000000-0000-4000-8000-000000000401",
+      "movimentacao_id": "00000000-0000-4000-8000-000000001004",
+      "descricao": "Compra 4",
+      "valor": 8990,
+      "data_da_compra": "2026-10-30",
+      "parcela": null,
+      "total_de_parcelas": null,
+      "fornecedor_id": "00000000-0000-4000-8000-000000000b00"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000003001",
+      "fatura_id": "00000000-0000-4000-8000-000000000401",
+      "movimentacao_id": null,
+      "descricao": "Compra sem movimentacao",
+      "valor": 4321,
+      "data_da_compra": "2026-11-07",
+      "parcela": null,
+      "total_de_parcelas": null,
+      "fornecedor_id": "00000000-0000-4000-8000-000000000b00"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000003002",
+      "fatura_id": "00000000-0000-4000-8000-000000000402",
+      "movimentacao_id": null,
+      "descricao": "Compra antiga",
+      "valor": 30000,
+      "data_da_compra": "2026-09-01",
+      "parcela": null,
+      "total_de_parcelas": null,
+      "fornecedor_id": null
+     }
+    ],
+    "movimentacoes": [
+     {
+      "id": "00000000-0000-4000-8000-000000001001",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "income",
+      "valor": 400000,
+      "descricao": "Movimentacao 1",
+      "data": "2026-10-25",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001002",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "refund",
+      "valor": 5025,
+      "descricao": "Movimentacao 2",
+      "data": "2026-11-02",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001003",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 12040,
+      "descricao": "Movimentacao 3",
+      "data": "2026-10-28",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": "00000000-0000-4000-8000-000000000b00",
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001004",
+      "conta_id": "00000000-0000-4000-8000-000000000202",
+      "tipo": "expense",
+      "valor": 8990,
+      "descricao": "Movimentacao 4",
+      "data": "2026-10-30",
+      "data_competencia": null,
+      "fatura_id": "00000000-0000-4000-8000-000000000401",
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": "00000000-0000-4000-8000-000000000b00",
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001005",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "statement_payment",
+      "valor": 150000,
+      "descricao": "Movimentacao 5",
+      "data": "2026-11-05",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001006",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "fee",
+      "valor": 1500,
+      "descricao": "Movimentacao 6",
+      "data": "2026-11-10",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001007",
+      "conta_id": "00000000-0000-4000-8000-000000000202",
+      "tipo": "interest_charge",
+      "valor": 733,
+      "descricao": "Movimentacao 7",
+      "data": "2026-11-08",
+      "data_competencia": null,
+      "fatura_id": "00000000-0000-4000-8000-000000000401",
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001008",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "liability_payment",
+      "valor": 45000,
+      "descricao": "Movimentacao 8",
+      "data": "2026-11-09",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": "00000000-0000-4000-8000-000000000600",
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001009",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 20000,
+      "descricao": "Movimentacao 9",
+      "data": "2026-11-16",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100a",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 7500,
+      "descricao": "Movimentacao 10",
+      "data": "2026-11-01",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100b",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "liability_payment",
+      "valor": 45000,
+      "descricao": "Movimentacao 11",
+      "data": "2026-11-18",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": "00000000-0000-4000-8000-000000000601",
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100c",
+      "conta_id": "00000000-0000-4000-8000-000000000202",
+      "tipo": "expense",
+      "valor": 6000,
+      "descricao": "Movimentacao 12",
+      "data": "2026-11-12",
+      "data_competencia": null,
+      "fatura_id": "00000000-0000-4000-8000-000000000401",
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100d",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "adjustment",
+      "valor": 3300,
+      "descricao": "Movimentacao 13",
+      "data": "2026-11-03",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100e",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 100000,
+      "descricao": "Movimentacao 14",
+      "data": "2026-09-15",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-00000000100f",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "income",
+      "valor": 300000,
+      "descricao": "Movimentacao 15",
+      "data": "2026-09-25",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001010",
+      "conta_id": "00000000-0000-4000-8000-000000000201",
+      "tipo": "expense",
+      "valor": 4567,
+      "descricao": "Movimentacao 16",
+      "data": "2026-11-13",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001011",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 1000,
+      "descricao": "Movimentacao 17",
+      "data": "2026-11-20",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001012",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "income",
+      "valor": 50000,
+      "descricao": "Movimentacao 18",
+      "data": "2026-11-14",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": false,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001013",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 10,
+      "descricao": "Movimentacao 19",
+      "data": "2026-11-11",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": "00000000-0000-4000-8000-000000000b00",
+      "ocorrencia_id": "00000000-0000-4000-8000-000000000806",
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001014",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 20,
+      "descricao": "Movimentacao 20",
+      "data": "2026-11-11",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001015",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "tipo": "expense",
+      "valor": 30000,
+      "descricao": "Movimentacao 21",
+      "data": "2026-11-04",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001016",
+      "conta_id": "00000000-0000-4000-8000-000000000203",
+      "tipo": "expense",
+      "valor": 12345,
+      "descricao": "Compra no cartao sem fatura",
+      "data": "2026-11-06",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": "00000000-0000-4000-8000-000000000a00",
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     }
+    ],
+    "transferencias": [
+     {
+      "id": "00000000-0000-4000-8000-000000004000",
+      "conta_origem_id": "00000000-0000-4000-8000-000000000200",
+      "conta_destino_id": "00000000-0000-4000-8000-000000000201",
+      "valor": 50000,
+      "descricao": "Para a poupanca",
+      "data": "2026-11-06",
+      "confirmada": true
+     }
+    ],
+    "dividas": [
+     {
+      "id": "00000000-0000-4000-8000-000000000500",
+      "conta_id": "00000000-0000-4000-8000-000000000205",
+      "nome": "Emprestimo Epsilon",
+      "tipo": "personal_loan",
+      "valor_original": 1000000,
+      "saldo_devedor": 540000,
+      "taxa": {
+       "milionesimos": 15000
+      },
+      "tipo_de_taxa": "monthly",
+      "sistema": "price",
+      "total_de_parcelas": 24,
+      "parcelas_pagas": 12,
+      "inicio": "2025-11-10",
+      "fim": null,
+      "status": "active",
+      "fornecedor_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000501",
+      "conta_id": "00000000-0000-4000-8000-000000000205",
+      "nome": "Financiamento Curto",
+      "tipo": "personal_loan",
+      "valor_original": 1000000,
+      "saldo_devedor": 100000,
+      "taxa": {
+       "milionesimos": 15000
+      },
+      "tipo_de_taxa": "monthly",
+      "sistema": "price",
+      "total_de_parcelas": 3,
+      "parcelas_pagas": 3,
+      "inicio": "2025-11-10",
+      "fim": null,
+      "status": "active",
+      "fornecedor_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000502",
+      "conta_id": "00000000-0000-4000-8000-000000000205",
+      "nome": "Divida Quitada",
+      "tipo": "personal_loan",
+      "valor_original": 1000000,
+      "saldo_devedor": 0,
+      "taxa": {
+       "milionesimos": 15000
+      },
+      "tipo_de_taxa": "monthly",
+      "sistema": "price",
+      "total_de_parcelas": 10,
+      "parcelas_pagas": 10,
+      "inicio": "2025-11-10",
+      "fim": null,
+      "status": "paid_off",
+      "fornecedor_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000503",
+      "conta_id": "00000000-0000-4000-8000-000000000205",
+      "nome": "Parcelado Sem Juros",
+      "tipo": "personal_loan",
+      "valor_original": 1000000,
+      "saldo_devedor": 10000,
+      "taxa": {
+       "milionesimos": 0
+      },
+      "tipo_de_taxa": "monthly",
+      "sistema": "sac",
+      "total_de_parcelas": 7,
+      "parcelas_pagas": 0,
+      "inicio": "2025-11-10",
+      "fim": null,
+      "status": "active",
+      "fornecedor_id": null
+     }
+    ],
+    "parcelas": [
+     {
+      "id": "00000000-0000-4000-8000-000000000600",
+      "divida_id": "00000000-0000-4000-8000-000000000500",
+      "numero": 13,
+      "vencimento": "2026-11-10",
+      "total": 45000,
+      "principal": null,
+      "juros": null,
+      "seguro": null,
+      "tarifa": null,
+      "pago": 45000,
+      "data_do_pagamento": null,
+      "status": "paid"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000601",
+      "divida_id": "00000000-0000-4000-8000-000000000500",
+      "numero": 14,
+      "vencimento": "2026-12-10",
+      "total": 45000,
+      "principal": null,
+      "juros": null,
+      "seguro": null,
+      "tarifa": null,
+      "pago": 0,
+      "data_do_pagamento": null,
+      "status": "pending"
+     }
+    ],
+    "recorrentes": [
+     {
+      "id": "00000000-0000-4000-8000-000000000700",
+      "nome": "Assinatura Video",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 3990,
+      "valor_variavel": false,
+      "frequencia": "monthly",
+      "dia_do_mes": 15,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000701",
+      "nome": "Conta de Luz",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 18000,
+      "valor_variavel": true,
+      "frequencia": "monthly",
+      "dia_do_mes": 17,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000702",
+      "nome": "Seguro Anual",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 120000,
+      "valor_variavel": false,
+      "frequencia": "annual",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000703",
+      "nome": "Academia Pausada",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 9900,
+      "valor_variavel": false,
+      "frequencia": "monthly",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": false
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000704",
+      "nome": "Salario",
+      "tipo": "income",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 400000,
+      "valor_variavel": false,
+      "frequencia": "monthly",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000705",
+      "nome": "Feira",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 15000,
+      "valor_variavel": false,
+      "frequencia": "weekly",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000706",
+      "nome": "Personalizada Sem Intervalo",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": 5000,
+      "valor_variavel": false,
+      "frequencia": "custom",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000707",
+      "nome": "Sem Valor",
+      "tipo": "expense",
+      "conta_id": "00000000-0000-4000-8000-000000000200",
+      "valor": null,
+      "valor_variavel": false,
+      "frequencia": "monthly",
+      "dia_do_mes": null,
+      "intervalo_dias": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "inicia_em": "2026-01-01",
+      "termina_em": null,
+      "ativo": true
+     }
+    ],
+    "ocorrencias": [
+     {
+      "id": "00000000-0000-4000-8000-000000000800",
+      "recorrente_id": "00000000-0000-4000-8000-000000000700",
+      "data_esperada": "2026-11-15",
+      "valor_esperado": 3990,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000801",
+      "recorrente_id": "00000000-0000-4000-8000-000000000701",
+      "data_esperada": "2026-11-17",
+      "valor_esperado": null,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000802",
+      "recorrente_id": "00000000-0000-4000-8000-000000000700",
+      "data_esperada": "2026-10-15",
+      "valor_esperado": 3990,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000803",
+      "recorrente_id": "00000000-0000-4000-8000-000000000700",
+      "data_esperada": "2026-12-15",
+      "valor_esperado": 3990,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000804",
+      "recorrente_id": "00000000-0000-4000-8000-000000000703",
+      "data_esperada": "2026-11-16",
+      "valor_esperado": 9900,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000805",
+      "recorrente_id": "00000000-0000-4000-8000-000000000705",
+      "data_esperada": "2026-11-09",
+      "valor_esperado": 15000,
+      "valor_real": null,
+      "status": "paid",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000806",
+      "recorrente_id": "00000000-0000-4000-8000-000000000705",
+      "data_esperada": "2026-11-11",
+      "valor_esperado": 15000,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": "00000000-0000-4000-8000-000000001013"
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000807",
+      "recorrente_id": "00000000-0000-4000-8000-000000000702",
+      "data_esperada": "2026-11-19",
+      "valor_esperado": 120000,
+      "valor_real": null,
+      "status": "pending",
+      "data_do_pagamento": null,
+      "movimentacao_id": null
+     }
+    ],
+    "centros": [
+     {
+      "id": "00000000-0000-4000-8000-000000000900",
+      "nome": "Alfa Projeto",
+      "tipo": "projeto",
+      "status": "active",
+      "descricao": null,
+      "icone": null,
+      "cor": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000901",
+      "nome": "Beta Pessoa",
+      "tipo": "pessoa",
+      "status": "active",
+      "descricao": null,
+      "icone": null,
+      "cor": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000902",
+      "nome": "Gama Arquivado",
+      "tipo": "projeto",
+      "status": "archived",
+      "descricao": null,
+      "icone": null,
+      "cor": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000000903",
+      "nome": "Delta Vazio",
+      "tipo": "negocio",
+      "status": "active",
+      "descricao": null,
+      "icone": null,
+      "cor": null
+     }
+    ],
+    "rateios": [
+     {
+      "id": "00000000-0000-4000-8000-000000002001",
+      "movimentacao_id": "00000000-0000-4000-8000-00000000100e",
+      "centro_id": "00000000-0000-4000-8000-000000000900",
+      "valor": 40000,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002002",
+      "movimentacao_id": "00000000-0000-4000-8000-00000000100e",
+      "centro_id": "00000000-0000-4000-8000-000000000901",
+      "valor": 60000,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002003",
+      "movimentacao_id": "00000000-0000-4000-8000-00000000100f",
+      "centro_id": "00000000-0000-4000-8000-000000000901",
+      "valor": 300000,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002004",
+      "movimentacao_id": "00000000-0000-4000-8000-000000001003",
+      "centro_id": "00000000-0000-4000-8000-000000000900",
+      "valor": 12040,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002005",
+      "movimentacao_id": "00000000-0000-4000-8000-000000001004",
+      "centro_id": "00000000-0000-4000-8000-000000000900",
+      "valor": 5000,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002006",
+      "movimentacao_id": "00000000-0000-4000-8000-00000000100d",
+      "centro_id": "00000000-0000-4000-8000-000000000901",
+      "valor": 3300,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002007",
+      "movimentacao_id": "00000000-0000-4000-8000-000000001015",
+      "centro_id": "00000000-0000-4000-8000-000000000900",
+      "valor": 30000,
+      "nota": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000002008",
+      "movimentacao_id": "00000000-0000-4000-8000-000000001002",
+      "centro_id": "00000000-0000-4000-8000-000000000900",
+      "valor": 2000,
+      "nota": null
+     }
+    ],
+    "categorias": [
+     {
+      "id": "00000000-0000-4000-8000-000000000a00",
+      "nome": "Mercado",
+      "pai_id": null,
+      "ativa": true
+     }
+    ],
+    "tags": [
+     {
+      "id": "00000000-0000-4000-8000-000000000c00",
+      "nome": "viagem"
+     }
+    ],
+    "tags_das_movimentacoes": [
+     [
+      "00000000-0000-4000-8000-000000001003",
+      "00000000-0000-4000-8000-000000000c00"
+     ]
+    ],
+    "fornecedores": [
+     {
+      "id": "00000000-0000-4000-8000-000000000b00",
+      "nome": "Padaria Exemplo",
+      "nome_fantasia": "Padaria Exemplo",
+      "razao_social": "Padaria Exemplo Ltda",
+      "ativo": true
+     }
+    ],
+    "documentos_a_revisar": 0
+   }
+  },
+  "b": {
+   "id": "00000000-0000-4000-8000-0000000000b0",
+   "livro": {
+    "corte": 20,
+    "instituicoes": [
+     {
+      "id": "00000000-0000-4000-8000-000000000b02",
+      "nome": "Banco Outro",
+      "tipo": "bank",
+      "ativa": true
+     }
+    ],
+    "contas": [
+     {
+      "id": "00000000-0000-4000-8000-000000000b01",
+      "instituicao_id": "00000000-0000-4000-8000-000000000b02",
+      "nome": "Conta do Outro",
+      "tipo": "checking_account",
+      "saldo": 77700,
+      "limite": null,
+      "ativa": true,
+      "ordem": 1
+     }
+    ],
+    "movimentacoes": [
+     {
+      "id": "00000000-0000-4000-8000-000000001384",
+      "conta_id": "00000000-0000-4000-8000-000000000b01",
+      "tipo": "expense",
+      "valor": 99999,
+      "descricao": "Movimentacao 900",
+      "data": "2026-11-10",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     },
+     {
+      "id": "00000000-0000-4000-8000-000000001385",
+      "conta_id": "00000000-0000-4000-8000-000000000b01",
+      "tipo": "income",
+      "valor": 88888,
+      "descricao": "Movimentacao 901",
+      "data": "2026-11-10",
+      "data_competencia": null,
+      "fatura_id": null,
+      "parcela_id": null,
+      "categoria_id": null,
+      "fornecedor_id": null,
+      "ocorrencia_id": null,
+      "documento_id": null,
+      "confirmada": true,
+      "versao": null
+     }
+    ],
+    "centros": [
+     {
+      "id": "00000000-0000-4000-8000-000000000b03",
+      "nome": "Centro do Outro",
+      "tipo": "projeto",
+      "status": "active",
+      "descricao": null,
+      "icone": null,
+      "cor": null
+     }
+    ]
+   }
+  }
+ }
+}

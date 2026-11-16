@@ -1,0 +1,30 @@
+[package]
+name = "sbf-pdf"
+description = "Abertura de PDF protegido do Seu Bolso Feliz: estratégias de senha, tentativa em memória (lopdf) e extração por pdftotext pela entrada padrão, sem cópia decifrada em disco."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-inventario = { workspace = true }
+# A regra única de como chamar um programa externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
+rusqlite = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+# Decifra o PDF em memória (MIT). Versão fixada pelo spike de 2026-11-12; sem as features
+# padrão (chrono, rayon).
+lopdf = { version = "=0.47.0", default-features = false }
+# canonical_fingerprint (MIT OR Apache-2.0), igual ao computeCanonicalFingerprint do Bun.
+sha2 = "0.11"
+# Contagem de letras (\p{L}) como no e3-extrair.ts (MIT OR Apache-2.0).
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

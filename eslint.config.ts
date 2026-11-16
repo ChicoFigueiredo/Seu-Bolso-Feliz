@@ -23,6 +23,8 @@ export default tseslint.config(
       ".next/",
       "**/.next/",
       "docs-html/",
+      // Symlink para o cofre do inventário financeiro (ADR-011): documentos, não código.
+      "financas/",
       // Ferramental e saída do sync do design system (claude.ai/design). São
       // gitignorados e contêm bundle vendorizado do React — ~2400 erros que
       // afogam qualquer erro real do projeto.
@@ -40,6 +42,11 @@ export default tseslint.config(
       "src/",
       "build.ts",
       "styles/",
+      // Workspace Rust do desktop (ADR-012): os .ts/.js dali são geradores de
+      // fixtures de ouro e a ponte que roda dentro do Chrome, cobertos pelos
+      // testes do cargo. `target/` é saída do cargo.
+      "crates/",
+      "target/",
     ],
   },
 );

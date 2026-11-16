@@ -1,0 +1,33 @@
+[package]
+name = "sbf-estacao"
+description = "O lado da estação: pareamento, credencial no chaveiro, cache local do livro-caixa, sincronização e alterações. Sem egui."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# A bancada-rede pelo caminho final, ao lado das outras crates da bancada (ADR-018).
+bancada-rede = { path = "../../../bancada/crates/bancada-rede" }
+bancada-armazem = { workspace = true }
+bancada-segredos = { workspace = true }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+sbf-inventario = { workspace = true }
+sbf-contrato = { path = "../sbf-contrato" }
+sbf-livro = { path = "../sbf-livro" }
+# Id das alterações (UUID v4, como o contrato pede) (MIT OR Apache-2.0).
+uuid = { version = "1", features = ["v4", "serde"] }
+# SHA-256 dos originais, conferido antes de enviar (MIT OR Apache-2.0).
+sha2 = "0.10"
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+bancada-rede = { path = "../../../bancada/crates/bancada-rede", features = ["testes"] }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

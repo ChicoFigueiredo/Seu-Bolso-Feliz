@@ -1,0 +1,215 @@
+//! Nome do arquivo na estante: porte fiel de `workers/inventario/src/vista-nome.ts`
+//! (`trechoDeNome`, `nomeNaVista`) e de `PASTA_DO_TIPO` de `vista-ciclos.ts`.
+//!
+//! O teste `tests/nomes_ts.rs` compara com saídas geradas pelo próprio TypeScript (Bun).
+//!
+//! # Campos do banco que viram caminho
+//!
+//! O fornecedor e o nome original passam por [`trecho_de_nome`]. A data-chave, o ciclo e a
+//! extensão entram no caminho como estão, então só entram **no formato** (achado A1 da
+//! revisão de segurança da fatia 1): data `AAAA-MM-DD`, ciclo `AAAA-MM` e extensão
+//! `[a-z0-9]{1,10}`. Fora do formato, a data sai do nome, o ciclo vira `a-classificar` e a
+//! extensão some. Para todo valor válido o nome é o mesmo do TypeScript.
+
+use unicode_normalization::UnicodeNormalization;
+
+/// Marca combinante que o `\p{Diacritic}` do JavaScript tira depois do NFD.
+fn e_diacritico(c: char) -> bool {
+    matches!(c,
+        '\u{0300}'..='\u{036F}'
+        | '\u{1AB0}'..='\u{1AFF}'
+        | '\u{1DC0}'..='\u{1DFF}'
+        | '\u{20D0}'..='\u{20FF}'
+        | '\u{FE20}'..='\u{FE2F}')
+}
+
+/// Trecho seguro para nome de arquivo: sem acento, sem barra, minúsculo, com no máximo
+/// `max` caracteres e sem hífen no fim. Igual a `trechoDeNome` do TypeScript.
+#[must_use]
+pub fn trecho_de_nome(texto: Option<&str>, max: usize) -> String {
+    let Some(texto) = texto else {
+        return String::new();
+    };
+    let sem_acento: String = texto.nfd().filter(|c| !e_diacritico(*c)).collect();
+    let minusculo = sem_acento.to_lowercase();
+    // `[^a-z0-9]+` vira um hífen só.
+    let mut trecho = String::with_capacity(minusculo.len());
+    for c in minusculo.chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            trecho.push(c);
+        } else if !trecho.ends_with('-') {
+            trecho.push('-');
+        }
+    }
+    // `^-+|-+$`, o corte em `max` (tudo já é ASCII) e de novo o hífen do fim.
+    let aparado = trecho.trim_matches('-');
+    let cortado: String = aparado.chars().take(max).collect();
+    cortado.trim_end_matches('-').to_owned()
+}
+
+/// Trecho com o limite padrão de 40 caracteres.
+#[must_use]
+pub fn trecho_padrao(texto: Option<&str>) -> String {
+    trecho_de_nome(texto, 40)
+}
+
+/// `n` dígitos ASCII.
+fn digitos(texto: &str) -> bool {
+    !texto.is_empty() && texto.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Partes de tamanho fixo, só de dígitos, separadas por hífen.
+fn no_formato(texto: &str, tamanhos: &[usize]) -> bool {
+    let partes: Vec<&str> = texto.split('-').collect();
+    partes.len() == tamanhos.len()
+        && partes
+            .iter()
+            .zip(tamanhos)
+            .all(|(parte, tamanho)| parte.len() == *tamanho && digitos(parte))
+}
+
+/// `AAAA-MM-DD`.
+#[must_use]
+pub fn data_no_formato(data: &str) -> bool {
+    no_formato(data, &[4, 2, 2])
+}
+
+/// `AAAA-MM`.
+#[must_use]
+pub fn ciclo_no_formato(ciclo: &str) -> bool {
+    no_formato(ciclo, &[4, 2])
+}
+
+/// `[a-z0-9]{1,10}`.
+#[must_use]
+pub fn extensao_no_formato(extensao: &str) -> bool {
+    (1..=10).contains(&extensao.len())
+        && extensao
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// O que o nome do arquivo usa de um achado.
+#[derive(Debug, Clone, Copy)]
+pub struct DadosDoNome<'a> {
+    /// Data-chave `AAAA-MM-DD`.
+    pub data_chave: Option<&'a str>,
+    /// Fornecedor como apareceu.
+    pub fornecedor: Option<&'a str>,
+    /// Valor em centavos (o sinal é ignorado).
+    pub valor_centavos: Option<i64>,
+    /// Hash do conteúdo (os 8 primeiros caracteres entram no nome).
+    pub content_hash: &'a str,
+    /// Extensão sem ponto.
+    pub extensao: Option<&'a str>,
+    /// Nome do primeiro arquivo de origem, usado se não há fornecedor.
+    pub nome_original: Option<&'a str>,
+}
+
+/// `\.[^.]+$`: tira a última extensão do nome.
+fn sem_extensao(nome: &str) -> &str {
+    match nome.rfind('.') {
+        Some(posicao) if posicao + 1 < nome.len() => &nome[..posicao],
+        _ => nome,
+    }
+}
+
+/// Os primeiros 8 caracteres do hash (os `slice(0, 8)` do TypeScript contam UTF-16, mas
+/// o hash é hexadecimal).
+fn oito(hash: &str) -> String {
+    hash.chars().take(8).collect()
+}
+
+/// `data_fornecedor_valor_hash8.ext`. Igual a `nomeNaVista` do TypeScript.
+#[must_use]
+pub fn nome_na_vista(d: &DadosDoNome<'_>) -> String {
+    let fornecedor = {
+        let direto = trecho_padrao(d.fornecedor);
+        if direto.is_empty() {
+            trecho_padrao(d.nome_original.map(sem_extensao))
+        } else {
+            direto
+        }
+    };
+    let valor = d.valor_centavos.map(|centavos| {
+        let absoluto = centavos.unsigned_abs();
+        format!("{},{:02}", absoluto / 100, absoluto % 100)
+    });
+    let partes: Vec<String> = [
+        d.data_chave
+            .filter(|data| data_no_formato(data))
+            .map(str::to_owned),
+        Some(fornecedor),
+        valor,
+        Some(oito(d.content_hash)),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|p| !p.is_empty())
+    .collect();
+    let extensao = d
+        .extensao
+        .filter(|e| extensao_no_formato(e))
+        .map(|e| format!(".{e}"))
+        .unwrap_or_default();
+    format!("{}{extensao}", partes.join("_"))
+}
+
+/// Pasta do tipo de documento (`PASTA_DO_TIPO` do `vista-ciclos.ts`); o resto é `outros`.
+#[must_use]
+pub fn pasta_do_tipo(tipo: Option<&str>) -> &'static str {
+    match tipo.unwrap_or("") {
+        "fatura" => "faturas",
+        "boleto" => "boletos",
+        "comprovante" => "comprovantes",
+        "extrato" => "extratos",
+        "nota_fiscal" | "nfe" => "notas-fiscais",
+        "contracheque" => "contracheques",
+        "informe_rendimentos" => "informes-de-rendimentos",
+        "irpf" => "irpf",
+        "contrato" => "contratos",
+        "recibo" => "recibos",
+        "pedido" => "pedidos",
+        "cobranca" => "cobrancas",
+        _ => "outros",
+    }
+}
+
+/// Pasta da estante onde o documento mora: `<ciclo>/<tipo>` ou `a-classificar/<tipo>` (sem
+/// ciclo, ou com um ciclo fora do formato `AAAA-MM`).
+#[must_use]
+pub fn pasta_na_estante(ciclo: Option<&str>, tipo: Option<&str>) -> String {
+    let raiz = ciclo
+        .filter(|c| ciclo_no_formato(c))
+        .unwrap_or("a-classificar");
+    format!("{raiz}/{}", pasta_do_tipo(tipo))
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn formatos_de_data_ciclo_e_extensao() {
+        assert!(data_no_formato("2026-10-25"));
+        assert!(ciclo_no_formato("2026-10"));
+        assert!(extensao_no_formato("pdf"));
+        assert!(extensao_no_formato("jpeg2000"));
+        for ruim in [
+            "",
+            "2026-10",
+            "2026-10-2",
+            "2026-10-25/..",
+            "../../FORA",
+            "２０２６-10-25",
+        ] {
+            assert!(!data_no_formato(ruim), "{ruim}");
+        }
+        for ruim in ["", "2026", "2026-1", "2026-10-25", "../../..", "2026-1a"] {
+            assert!(!ciclo_no_formato(ruim), "{ruim}");
+        }
+        for ruim in ["", "PDF", "p.df", "../x", "abcdefghijk", "pdf/", "pdf "] {
+            assert!(!extensao_no_formato(ruim), "{ruim}");
+        }
+    }
+}

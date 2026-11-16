@@ -1,0 +1,30 @@
+[package]
+name = "sbf-coletor"
+description = "O modo `sbf coletor-vps` (ADR-014): as coletas que rodam 24 h na VPS (varredura do Gmail e sincronização da Pluggy), porte dos workers Bun gmail-scanner e pluggy-sync."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-servidor = { path = "../sbf-servidor" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-serde_json-1", "with-chrono-0_4"] }
+deadpool-postgres = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+
+[lints]
+workspace = true

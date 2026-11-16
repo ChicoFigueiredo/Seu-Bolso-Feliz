@@ -48,6 +48,9 @@
     },
     {
       "path": "workers/pluggy-sync"
+    },
+    {
+      "path": "workers/inventario"
     }
   ]
 }

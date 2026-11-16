@@ -1,0 +1,51 @@
+[package]
+name = "sbf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# O modelo de embeddings local (FastEmbed, ONNX Runtime) para o RAG. Fora do build padrão
+# porque o `ort` baixa a biblioteca nativa na compilação. O app que se entrega liga esta
+# feature: `cargo build --features modelo-real`.
+modelo-real = ["sbf-indice/modelo-real"]
+
+[dependencies]
+sbf-janela = { path = "../sbf-janela" }
+bancada-casca = { path = "../../../bancada/crates/bancada-casca" }
+sbf-inventario = { workspace = true }
+sbf-estacao = { path = "../sbf-estacao" }
+bancada-rede = { path = "../../../bancada/crates/bancada-rede" }
+sbf-disco = { path = "../sbf-disco" }
+eframe = { workspace = true }
+egui = { workspace = true }
+sbf-servidor = { path = "../sbf-servidor" }
+sbf-coletor = { path = "../sbf-coletor" }
+sbf-canais = { path = "../sbf-canais" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+sbf-contrato = { path = "../sbf-contrato" }
+serde_json = { workspace = true }
+sbf-triagem = { path = "../sbf-triagem" }
+sbf-ia = { path = "../sbf-ia" }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+sbf-processo = { path = "../sbf-processo" }
+sbf-mcp = { path = "../sbf-mcp" }
+sbf-coleta = { path = "../sbf-coleta" }
+sbf-worker = { path = "../sbf-worker" }
+sbf-mensageiros = { path = "../sbf-mensageiros" }
+sbf-roteiros = { path = "../sbf-roteiros" }
+sbf-indice = { path = "../sbf-indice" }
+sbf-pontos = { path = "../sbf-pontos" }
+sbf-livro = { path = "../sbf-livro" }
+ctrlc = { version = "3", features = ["termination"] }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rusqlite = { workspace = true }
+
+[lints]
+workspace = true

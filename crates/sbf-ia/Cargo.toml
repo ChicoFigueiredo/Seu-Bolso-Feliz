@@ -1,0 +1,26 @@
+[package]
+name = "sbf-ia"
+description = "Motor de IA do SBF: provedores (Claude Code headless, OpenRouter, falso), registro do que saiu, cache e ritmo (spec 09)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+# SHA-256 da chave do cache (MIT OR Apache-2.0).
+sha2 = "0.11"
+# Chamar o `claude` sob a regra única de processo externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
+# Portão de rede da bancada (HTTPS só para o catálogo, chave vinda de um Segredo).
+bancada-rede = { path = "../../../bancada/crates/bancada-rede" }
+
+[dev-dependencies]
+bancada-rede = { path = "../../../bancada/crates/bancada-rede", features = ["testes"] }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

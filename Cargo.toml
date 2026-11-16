@@ -1,0 +1,53 @@
+# Workspace Rust do Seu Bolso Feliz desktop (ADR-012). Convive com o monorepo Bun.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+# Versões comuns. Crate novo pede `{ workspace = true }`; nenhum agente edita este bloco.
+[workspace.dependencies]
+bancada-armazem = { path = "../bancada/crates/bancada-armazem" }
+bancada-segredos = { path = "../bancada/crates/bancada-segredos" }
+sbf-inventario = { path = "crates/sbf-inventario" }
+
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zeroize = { version = "1.9", features = ["derive"] }
+
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui_extras = "0.36"
+egui_tiles = "0.17"
+
+tempfile = "3"
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Explícito de propósito: a abertura de PDF protegido depende de `catch_unwind` para não
+# derrubar o app (e não deixar segredo em memória) se o decifrador entrar em pânico.
+# Com `panic = "abort"` isso quebra em silêncio. Não mude sem rever `sbf-pdf`.
+panic = "unwind"

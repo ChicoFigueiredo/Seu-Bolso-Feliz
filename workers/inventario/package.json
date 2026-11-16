@@ -1,0 +1,15 @@
+{
+  "name": "@sbf/worker-inventario",
+  "private": true,
+  "description": "Inventário financeiro local: cofre e índice SQLite fora do app (ADR-011).",
+  "scripts": {
+    "init": "bun run src/init.ts"
+  },
+  "dependencies": {
+    "@sbf/db": "workspace:*",
+    "@sbf/domain": "workspace:*",
+    "@sbf/financial-connectors": "workspace:*",
+    "@sbf/worker-gmail-scanner": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  }
+}

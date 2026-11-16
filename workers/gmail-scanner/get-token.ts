@@ -3,6 +3,7 @@
  *
  * Uso: bun run workers/gmail-scanner/get-token.ts
  *   ou: bun run get:gmail-token (via script no package.json raiz)
+ *   --gravar: grava o refresh_token nos .env em vez de imprimi-lo
  *
  * Fluxo:
  *  1. Lê GOOGLE_MAIL_CLIENT_ID e GOOGLE_MAIL_CLIENT_SECRET do .env
@@ -12,6 +13,8 @@
  *  5. Troca o code por access_token + refresh_token
  *  6. Exibe o refresh_token para adicionar ao .env
  */
+
+import { trocarVariavel } from "./src/env-file";
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
 const REDIRECT_PORT = 8976;
@@ -128,6 +131,29 @@ const server = Bun.serve({
     }
 
     console.log("🎉 Tokens obtidos com sucesso!\n");
+
+    if (process.argv.includes("--gravar")) {
+      // Grava direto nos .env que já têm a variável (o .env.local vence o .env
+      // no Bun, então trocar só um deles não adianta), sem imprimir o token.
+      const gravados: string[] = [];
+      for (const arquivo of [".env", ".env.local", "apps/web/.env.local"]) {
+        const f = Bun.file(arquivo);
+        if (!(await f.exists())) continue;
+        const texto = await f.text();
+        if (arquivo !== ".env" && !/^GMAIL_REFRESH_TOKEN=/m.test(texto)) continue;
+        await Bun.write(
+          arquivo,
+          trocarVariavel(texto, "GMAIL_REFRESH_TOKEN", tokens.refresh_token),
+        );
+        gravados.push(arquivo);
+      }
+      console.log(`✅ GMAIL_REFRESH_TOKEN atualizado em: ${gravados.join(", ")}\n`);
+      server.stop();
+      setTimeout(() => process.exit(0), 100);
+      return new Response("Token gravado. Pode fechar esta aba.", {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
     console.log("━".repeat(60));
     console.log("\n📌 Adicione esta linha ao seu arquivo .env na raiz do projeto:\n");
     console.log(`   GMAIL_REFRESH_TOKEN=${tokens.refresh_token}`);

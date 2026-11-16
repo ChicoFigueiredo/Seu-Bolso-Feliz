@@ -224,6 +224,16 @@
         "pdfjs-dist": "5.4.296",
       },
     },
+    "workers/inventario": {
+      "name": "@sbf/worker-inventario",
+      "dependencies": {
+        "@sbf/db": "workspace:*",
+        "@sbf/domain": "workspace:*",
+        "@sbf/financial-connectors": "workspace:*",
+        "@sbf/worker-gmail-scanner": "workspace:*",
+        "drizzle-orm": "^0.45.2",
+      },
+    },
     "workers/local-scanner": {
       "name": "@sbf/worker-local-scanner",
       "version": "0.0.1",
@@ -1070,6 +1080,8 @@
     "@sbf/worker-gmail-scanner": ["@sbf/worker-gmail-scanner@workspace:workers/gmail-scanner"],
 
     "@sbf/worker-ingestion": ["@sbf/worker-ingestion@workspace:workers/ingestion"],
+
+    "@sbf/worker-inventario": ["@sbf/worker-inventario@workspace:workers/inventario"],
 
     "@sbf/worker-local-scanner": ["@sbf/worker-local-scanner@workspace:workers/local-scanner"],
 

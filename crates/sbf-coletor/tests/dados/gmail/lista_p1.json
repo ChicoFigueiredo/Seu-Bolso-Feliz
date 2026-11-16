@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "id": "m-001",
+      "threadId": "t-001"
+    },
+    {
+      "id": "m-002",
+      "threadId": "t-002"
+    }
+  ],
+  "nextPageToken": "pagina-2",
+  "resultSizeEstimate": 3
+}

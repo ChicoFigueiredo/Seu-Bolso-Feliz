@@ -1,0 +1,15 @@
+[package]
+name = "sbf-contrato"
+description = "Tipos do contrato HTTP entre a estação e o servidor do Seu Bolso Feliz (fatia 2). Serde, sem lógica."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+uuid = { version = "1", features = ["serde"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

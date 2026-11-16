@@ -1,6 +1,6 @@
 # ADR-010 — A Vercel e os workers conversam por uma fila no Postgres
 
-**Data:** 2026-08-30 · **Status:** aceita
+**Data:** 2026-08-30 · **Status:** aceita · **Complementada por:** ADR-013 (2026-11-12), que cria o canal HTTPS das estações; a fila continua valendo para os workers do servidor
 
 ## Contexto
 

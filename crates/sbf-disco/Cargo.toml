@@ -1,0 +1,17 @@
+[package]
+name = "sbf-disco"
+description = "Aviso de disco sem cifra (ADR-015): descobre se o volume de um caminho é cifrado (LUKS, BitLocker, FileVault). Genérico, sem egui, nunca falha."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# A regra única de como chamar um programa externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

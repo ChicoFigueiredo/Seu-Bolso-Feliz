@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5d217be75a56a16fdace876f59916d8900d4f6e5e7aed88ffc80d34fdfeb7546 # shrinks to passos = [Executar { acao: 0, alvo: 0, extra: 0 }]
+cc 769222dade9a4fcad6c9b1c82bf37858fc5a0c5885c2db888ec96839fa32e2ab # shrinks to passos = [Executar { acao: 224, alvo: 152, extra: 0 }, Desfazer(0), Executar { acao: 0, alvo: 0, extra: 0 }, Desfazer(2), DesfazerUltima, DesfazerUltima, Executar { acao: 194, alvo: 7, extra: 0 }]

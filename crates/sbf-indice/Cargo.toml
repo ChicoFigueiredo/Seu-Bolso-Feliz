@@ -1,0 +1,30 @@
+[package]
+name = "sbf-indice"
+description = "Índice local de busca por semelhança (ADR-015, spec 10): embeddings na estação, indice.sqlite e a área Perguntar. O modelo real fica atrás da feature `modelo-real`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# O embedder real (FastEmbed, ONNX). Fica de fora do build padrão: puxa o `ort`, que baixa a
+# biblioteca nativa do ONNX Runtime na compilação. O app real liga esta feature.
+modelo-real = ["dep:fastembed"]
+
+[dependencies]
+sbf-ia = { path = "../sbf-ia" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+sha2 = "0.11"
+# Embeddings multilíngues locais (Apache-2.0), por ONNX Runtime (MIT OR Apache-2.0).
+fastembed = { version = "7.7", optional = true, default-features = false, features = ["onnx", "ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sbf-inventario = { workspace = true }
+
+[lints]
+workspace = true

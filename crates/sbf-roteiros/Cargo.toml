@@ -1,0 +1,34 @@
+[package]
+name = "sbf-roteiros"
+description = "Roteiros do SBF (ADR-016, spec 10 C1): navegam em sites sem API por CDP para consultar e baixar documentos. Senha só em memória, lista de bloqueio no navegador e no executor, pausa para MFA e CAPTCHA, gravação guiada por IA."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Os provedores de IA (a gravação e o conserto usam o trait Provedor, nunca um real nos testes).
+sbf-ia = { path = "../sbf-ia" }
+# Origem, achado e cópia ao cofre: as mesmas regras da coleta (caminho_no_acervo, limites).
+sbf-coleta = { path = "../sbf-coleta" }
+# Só para o adaptador FonteDeSenhas sobre o Chaveiro.
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+# Abrir o Chrome sob a regra única de processo externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+sha2 = "0.10"
+# Tirar acento ao comparar com a lista de bloqueio (MIT OR Apache-2.0).
+unicode-normalization = "0.1"
+# Chave e máscara do WebSocket do CDP (MIT OR Apache-2.0).
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

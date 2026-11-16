@@ -1,0 +1,62 @@
+[
+  {
+    "texto": "",
+    "impressao": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "texto": "   ",
+    "impressao": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "texto": "Fatura BANCO ALFA",
+    "impressao": "2cbf26aa7b30ba33f7da5958de99d1bd6e2cbcddda6b27164a1af5d0227b579f"
+  },
+  {
+    "texto": "  Vencimento\t10/12/2026\r\n  Valor R$ 1.234,56  \n\n",
+    "impressao": "342ffeb3311d569ab0b49649b2394c280c62586f76342f432b8b211ddf8b050f"
+  },
+  {
+    "texto": "João da Conceição Fictício — Ação",
+    "impressao": "1a6eace26ed15a64a6186bb7f8b28d510d4e8f04073e8a532717a533060584cd"
+  },
+  {
+    "texto": "a  b c d e f　g h",
+    "impressao": "1b6548f6b3c51dba45b79a649dca9145d2e5e94d4fc11f1987a3c2b765a57116"
+  },
+  {
+    "texto": "linha separada paragrafo",
+    "impressao": "6e26b73dca8618ee3220134ed11f1dd81b20367095de83bcd484a8db0bb008af"
+  },
+  {
+    "texto": "com﻿bom﻿",
+    "impressao": "2d780e8ebe249d230c045cb5c1bbce36a567a08f446f3c3c1a2dad060509653f"
+  },
+  {
+    "texto": "nelnao e espaco no js",
+    "impressao": "74cbe656199d82403d32fb90090892878381f638cdcc7950668a5761d336c9ed"
+  },
+  {
+    "texto": "zero​width nao e espaco",
+    "impressao": "6d487bddeb06b23281a0cf20754e820d990de7ec7909b94e1dc1c80dfb770ecd"
+  },
+  {
+    "texto": "ΟΔΟΣ ΟΔΟΣ.",
+    "impressao": "0b71f76cc65a3b3487c9dafe201f1ae694a3a3f5ca2a553cc70cd9c04fb4b818"
+  },
+  {
+    "texto": "İstanbul ǅ ß ẞ Ω",
+    "impressao": "fbcddfc015e45f727894b63c72af1351b1ce6821c389eb453f18595ef1591e01"
+  },
+  {
+    "texto": "emoji 🔑 e 𝐀",
+    "impressao": "881349426847eea9793547a816e3c179670d38e88ac0306fadce7f4c472ca433"
+  },
+  {
+    "texto": "\u000b\fvt e ff\u000b",
+    "impressao": "499e5b7c31c07890e5dee332c1363b24b74d4c92c33f6af41cbde948f3c66d40"
+  },
+  {
+    "texto": "05/11/2026      MERCADO EXEMPLO LTDA                         123,45\n07/11/2026      POSTO FICTICIO     250,00\f",
+    "impressao": "b959c7acefca350c5952ef4ab84d27749bb1ba5d1cb22631164c46ce82196249"
+  }
+]

@@ -1,0 +1,56 @@
+{
+  "id": "m-002",
+  "threadId": "t-002",
+  "labelIds": [
+    "Label_1"
+  ],
+  "snippet": "Extrato",
+  "internalDate": "1773852400000",
+  "sizeEstimate": 4096,
+  "payload": {
+    "mimeType": "multipart/mixed",
+    "headers": [
+      {
+        "name": "Subject",
+        "value": "Extrato e cópia"
+      },
+      {
+        "name": "From",
+        "value": "Banco Exemplo <extrato@banco.test>"
+      },
+      {
+        "name": "To",
+        "value": "dono.ficticio@example.com"
+      },
+      {
+        "name": "Date",
+        "value": "Wed, 18 Mar 2026 09:06:40 -0300"
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "1",
+        "mimeType": "application/octet-stream",
+        "filename": "extrato.ofx",
+        "headers": [],
+        "body": {
+          "attachmentId": "a-002",
+          "size": 48
+        }
+      },
+      {
+        "partId": "2",
+        "mimeType": "application/pdf",
+        "filename": "copia.pdf",
+        "headers": [],
+        "body": {
+          "attachmentId": "a-003",
+          "size": 42
+        }
+      }
+    ]
+  }
+}

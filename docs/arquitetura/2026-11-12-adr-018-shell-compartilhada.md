@@ -1,0 +1,65 @@
+# ADR-018 — A shell egui é compartilhada com o Chess Studio, num repositório próprio
+
+**Data:** 2026-11-12 · **Status:** aceita
+
+## Contexto e decisão
+
+O Chess Studio (`/mnt/d/Chico/chess-studio`, ADR-0005 de lá) já tem quase tudo o que o
+desktop precisa:
+
+- Ribbon com KeyTips;
+- lista única de Ações, atalhos e Paleta;
+- dock e painéis;
+- temas por tokens;
+- i18n Fluent;
+- `chess-vault`, `chess-net` e as migrações do `chess-store`.
+
+O problema é que a shell vive dentro do binário Bevy, e os painéis recebem o `World` do
+Bevy.
+
+**Decisão:**
+
+- **Base do desktop:** o desktop do SBF usa eframe, ou seja, egui sem Bevy.
+- **Biblioteca compartilhada:**
+  - Num repositório próprio, sem Bevy, vão quatro peças: a shell, o chaveiro (a partir do
+    `chess-vault`), o portão de rede (a partir do `chess-net`) e a mecânica de SQLite
+    (migrações e PRAGMAs).
+  - Os dois projetos a usam como dependência git fixada.
+  - O SBF é o primeiro cliente. O Chess Studio migra depois de fechar a homologação.
+- **Nome e língua:**
+  - A biblioteca se chama `bancada`, num repositório `ChicoFigueiredo/bancada`, com as
+    crates `bancada-casca` (shell), `bancada-segredos`, `bancada-rede` e
+    `bancada-armazem`.
+  - Os identificadores ficam em português, tanto no SBF quanto na `bancada`, sem
+    acento e inclusive no mecânico, por decisão do CEO. O Chess Studio, cujo CLAUDE.md
+    pede identificadores em inglês, ganha uma exceção para o que vem da `bancada`.
+- **Licenças:**
+  - A biblioteca segue o ADR-0004 do Chess Studio: MIT OR Apache-2.0, sem a família GPL.
+  - O SBF em si não tem política de licenças, porque é software pessoal e não é
+    distribuído.
+- **Visual:**
+  - Do Chess Studio vêm shell, componentes e densidade.
+  - Do `@sbf/design-system` e dos `ui-tokens` vêm cores, tipografia e temas.
+  - A geometria é a densa do Chess: raio de 4 a 8 px, sem pílula, exceto em status
+    e chips.
+  - Os ícones são Material Symbols Rounded, como no web. Por isso a biblioteca aceita
+    a família de ícones de cada app.
+  - A navegação é feita por um painel de áreas à esquerda, como no Outlook. O Ribbon
+    mostra as Ações da área aberta.
+  - Todo nome é link para a página do item, com Voltar e Avançar, e Ctrl+clique abre a
+    página num painel flutuante. É regra da shell, não de tela.
+  - Cada tela nasce como protótipo navegável e só vira egui depois de aprovada.
+
+## Opções descartadas
+
+- **Bevy + bevy_egui como está.** É um motor de jogo num app de finanças, e o modo sem
+  janela teria que fugir do Bevy de qualquer jeito.
+- **Copiar a shell e divergir.** Dois Ribbons para manter.
+- **A biblioteca dentro do repositório do Chess Studio.** O SBF passaria a seguir o
+  ritmo de outro projeto.
+
+## Consequências
+
+- Até o Chess Studio migrar, existe código duplicado.
+- Os painéis passam a receber um contexto genérico no lugar do `World`.
+- As janelas destacadas viram viewports do egui.

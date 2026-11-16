@@ -1,0 +1,58 @@
+# cargo-deny do workspace Rust do SBF. O SBF não tem política de licença própria (decisão de
+# 2026-11-12), mas as dependências seguem a mesma lista permissiva da bancada (ADR-018), mais
+# MPL-2.0. Execute: cargo deny check
+
+[graph]
+all-features = false
+
+[licenses]
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+# Exceções por crate, só quando inevitáveis e justificadas aqui.
+exceptions = [
+    # bancada-casca → egui → epaint: as fontes padrão do egui (Ubuntu-Light, Noto Emoji,
+    # emoji-icon-font) vêm como dado, não como código. OFL-1.1 e Ubuntu Font Licence são
+    # licenças de fonte permissivas para embutir; o código do crate é MIT OR Apache-2.0.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+    # bancada-casca → eframe → egui-winit → arboard (área de transferência), só no Windows.
+    # Boost Software License 1.0: permissiva, aprovada pela OSI, sem cláusula copyleft.
+    { crate = "clipboard-win", allow = ["BSL-1.0"] },
+    { crate = "error-code", allow = ["BSL-1.0"] },
+    # sbf-estacao → bancada-rede → ureq (rustls) → webpki-roots: a lista de raízes CA da
+    # Mozilla, como dado. CDLA-Permissive-2.0 é licença permissiva de dados (a mesma exceção da
+    # bancada e do Chess Studio).
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+]
+
+[licenses.private]
+# Os crates do próprio workspace não publicam e não declaram licença.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[advisories]
+# Cada ignore é justificado aqui.
+ignore = [
+    # zbus_names, zvariant e zvariant_derive marcados "sem manutenção" (não é vulnerabilidade).
+    # Chegam pelo D-Bus no Linux: acessibilidade do egui (accesskit_unix, bancada-casca) e
+    # Secret Service do keyring (bancada-segredos). Sem alternativa até o zbus seguir a nova
+    # linha; reavaliar ao atualizar egui/eframe e keyring.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant sem manutenção, via D-Bus (accesskit e keyring); ver comentário acima" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names sem manutenção, via D-Bus (accesskit e keyring); ver comentário acima" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive sem manutenção, via D-Bus (accesskit e keyring); ver comentário acima" },
+]
