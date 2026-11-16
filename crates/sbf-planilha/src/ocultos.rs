@@ -339,9 +339,20 @@ pub fn confirmar_ocultos(
                 recorrente: NovoRecorrente {
                     nome: a.fornecedor.clone(),
                     grupo: GRUPO_DOS_ACHADOS.to_owned(),
-                    subgrupo: Some(if a.no_cartao { "No cartão" } else { "Débito em conta" }.to_owned()),
+                    subgrupo: Some(
+                        if a.no_cartao {
+                            "No cartão"
+                        } else {
+                            "Débito em conta"
+                        }
+                        .to_owned(),
+                    ),
                     posicao: i as i64 + 1,
-                    natureza: if a.no_cartao { Natureza::DentroDaFatura } else { Natureza::Saida },
+                    natureza: if a.no_cartao {
+                        Natureza::DentroDaFatura
+                    } else {
+                        Natureza::Saida
+                    },
                     prazo: Prazo::Desconhecido,
                     primeira_versao: Versao {
                         id: String::new(),

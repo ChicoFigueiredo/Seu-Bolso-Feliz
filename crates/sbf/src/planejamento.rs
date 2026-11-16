@@ -4,6 +4,7 @@
 //! sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar]
 //! sbf planejamento ocultos  --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar]
 //! sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar]
+//! sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar]
 //! ```
 //!
 //! A saída padrão mostra só contagens. `--detalhar` mostra a prévia linha a linha no
@@ -14,14 +15,18 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use sbf_planejamento::{Centavos, Competencia, Data, Periodo, Planejamento};
+use sbf_planejamento::{
+    Alteracao, AlvoDoDocumento, Autor, Centavos, Competencia, Data, Periodo, Planejamento,
+    TipoDeDocumento,
+};
 use sbf_planilha::conciliacao::{self, ConfigConciliacao};
+use sbf_planilha::contracheque;
 use sbf_planilha::importacao;
 use sbf_planilha::leitura;
 use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
 
-const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
+const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
 
 type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 
@@ -53,6 +58,9 @@ struct Opcoes {
     aba: Option<String>,
     mapa: Option<PathBuf>,
     ciclo: Option<String>,
+    arquivo: Option<PathBuf>,
+    achado: Option<String>,
+    recorrente: Option<String>,
     confirmar: bool,
     detalhar: bool,
 }
@@ -72,6 +80,9 @@ fn ler_opcoes(args: &[String]) -> Result<Opcoes, String> {
             "--aba" => o.aba = Some(valor("--aba")?),
             "--mapa" => o.mapa = Some(valor("--mapa")?.into()),
             "--ciclo" => o.ciclo = Some(valor("--ciclo")?),
+            "--arquivo" => o.arquivo = Some(valor("--arquivo")?.into()),
+            "--achado" => o.achado = Some(valor("--achado")?),
+            "--recorrente" => o.recorrente = Some(valor("--recorrente")?),
             "--confirmar" => o.confirmar = true,
             "--detalhar" => o.detalhar = true,
             outro => return Err(format!("opção desconhecida: {outro}")),
@@ -96,6 +107,7 @@ fn rodar_com(args: &[String], abrir: Abrir<'_>, saida: &mut dyn Write) -> ExitCo
         "importar" => importar(&opcoes, abrir, saida),
         "ocultos" => achar_ocultos(&opcoes, abrir, saida),
         "conciliar" => conciliar(&opcoes, abrir, saida),
+        "contracheque" => contracheque(&opcoes, abrir, saida),
         _ => Err(format!("subcomando desconhecido\n{USO}")),
     };
     match resultado {
@@ -301,6 +313,202 @@ fn conciliar(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<(), 
     ))
 }
 
+/// O texto do contracheque: de um PDF (`pdftotext -layout`, sem shell), de um `.txt` ou do
+/// achado do inventário (só leitura). Devolve o texto, o sha256 e o nome para mostrar.
+fn texto_do_contracheque(o: &Opcoes) -> Result<(String, String, String), String> {
+    match (&o.arquivo, &o.achado) {
+        (Some(_), Some(_)) | (None, None) => {
+            Err("use --arquivo ou --achado (um dos dois)".to_owned())
+        }
+        (Some(arquivo), None) => {
+            let sha = leitura::sha256_do_arquivo(arquivo).map_err(|e| e.to_string())?;
+            let nome = arquivo.file_name().map_or_else(
+                || "contracheque".to_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let e_pdf = arquivo
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+            let texto = if e_pdf {
+                let saida = std::process::Command::new("pdftotext")
+                    .arg("-layout")
+                    .arg(arquivo)
+                    .arg("-")
+                    .output()
+                    .map_err(|e| format!("não deu para rodar o pdftotext: {e}"))?;
+                if !saida.status.success() {
+                    return Err("o pdftotext não leu o PDF".to_owned());
+                }
+                String::from_utf8_lossy(&saida.stdout).into_owned()
+            } else {
+                std::fs::read_to_string(arquivo)
+                    .map_err(|e| format!("não deu para ler o arquivo: {e}"))?
+            };
+            Ok((texto, sha, nome))
+        }
+        (None, Some(achado)) => {
+            let cofre = exige(&o.inventario, "--inventario")?;
+            let conn = abrir_inventario(cofre)?;
+            let texto: String = conn
+                .query_row(
+                    "SELECT conteudo FROM texto WHERE content_hash = ?1",
+                    [achado],
+                    |l| l.get(0),
+                )
+                .map_err(|_| "o achado não tem texto extraído no inventário".to_owned())?;
+            Ok((
+                texto,
+                achado.clone(),
+                format!("contracheque {}", &achado[..achado.len().min(8)]),
+            ))
+        }
+    }
+}
+
+fn contracheque(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<(), String> {
+    let cofre = exige(&o.inventario, "--inventario")?;
+    let (texto, sha, nome) = texto_do_contracheque(o)?;
+    let mut plan = abrir(cofre)?;
+    contracheque_com(o, &texto, &sha, &nome, &mut *plan, saida)
+}
+
+fn contracheque_com(
+    o: &Opcoes,
+    texto: &str,
+    sha: &str,
+    nome: &str,
+    plan: &mut dyn Planejamento,
+    saida: &mut dyn Write,
+) -> Result<(), String> {
+    let c = contracheque::ler(texto).map_err(|e| e.to_string())?;
+    let recorrente = match &o.recorrente {
+        Some(id) => plan
+            .recorrente(id)
+            .map_err(|e| e.to_string())?
+            .ok_or("o recorrente não existe")?,
+        None => {
+            let mut candidatos: Vec<_> = plan
+                .recorrentes(false)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|r| {
+                    r.natureza == sbf_planejamento::Natureza::Entrada
+                        && sbf_planilha::texto::normalizar(&r.nome).contains("salario")
+                })
+                .collect();
+            match candidatos.len() {
+                1 => candidatos.remove(0),
+                0 => return Err("não achei o recorrente do salário (use --recorrente)".to_owned()),
+                _ => {
+                    return Err("há mais de um recorrente de salário (use --recorrente)".to_owned());
+                }
+            }
+        }
+    };
+    let composicao = c.composicao(&recorrente.id, sha);
+    let digitado = recorrente
+        .versoes
+        .iter()
+        .rev()
+        .find(|v| v.desde <= c.pagamento)
+        .or_else(|| recorrente.versoes.first())
+        .and_then(|v| v.valor);
+
+    es(writeln!(
+        saida,
+        "contracheque: competencia={} rubricas={} bruto={} descontos={} liquido={} {}",
+        c.pagamento,
+        c.rubricas.len(),
+        reais(c.bruto),
+        reais(c.descontos),
+        reais(c.liquido),
+        if c.conferido {
+            "conferido"
+        } else {
+            "NAO CONFERIDO (a soma das rubricas nao bate com o liquido)"
+        }
+    ))?;
+    match composicao.divergencia(digitado) {
+        Some(dif) => es(writeln!(
+            saida,
+            "salario digitado={} diverge das rubricas em {}",
+            reais(digitado),
+            reais(Some(dif))
+        ))?,
+        None if digitado.is_some() => {
+            es(writeln!(saida, "salario digitado confere com as rubricas"))?
+        }
+        None => es(writeln!(saida, "salario sem valor digitado"))?,
+    }
+    for k in c.consignacoes_com_prazo() {
+        es(writeln!(
+            saida,
+            "consignacao {}: inicio {:02}/{:04}, prazo {}, termina {:02}/{:04}",
+            k.nome, k.inicio.mes, k.inicio.ano, k.prazo, k.termina.mes, k.termina.ano
+        ))?;
+    }
+    if o.detalhar {
+        for r in &c.rubricas {
+            es(writeln!(
+                saida,
+                "rubrica {} | {} | {:?} | {}",
+                r.codigo.as_deref().unwrap_or("-"),
+                r.nome,
+                r.tipo,
+                reais(Some(r.valor))
+            ))?;
+        }
+    }
+    if !o.confirmar {
+        return es(writeln!(saida, "nada foi gravado (use --confirmar)"));
+    }
+    let igual = plan
+        .composicao(&recorrente.id, c.pagamento)
+        .map_err(|e| e.to_string())?
+        .is_some_and(|a| a.desde == composicao.desde && a.rubricas == composicao.rubricas);
+    if !igual {
+        plan.aplicar(
+            Alteracao::DefinirComposicao {
+                composicao,
+                versao_base: recorrente.versao_do_registro,
+            },
+            Autor::Importacao,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let alvo = AlvoDoDocumento::Recorrente {
+        id: recorrente.id.clone(),
+    };
+    let ja_vinculado = plan
+        .documentos(&alvo)
+        .map_err(|e| e.to_string())?
+        .iter()
+        .any(|d| d.sha256 == sha);
+    if !ja_vinculado {
+        plan.aplicar(
+            Alteracao::VincularDocumento {
+                alvo,
+                sha256: sha.to_owned(),
+                tipo_documento: TipoDeDocumento::Contracheque,
+                nome: nome.to_owned(),
+                data: Some(c.pagamento.dia(1)),
+            },
+            Autor::Importacao,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    es(writeln!(
+        saida,
+        "gravado: composicao={} documento={}",
+        if igual { "ja existia" } else { "definida" },
+        if ja_vinculado {
+            "ja vinculado"
+        } else {
+            "vinculado"
+        }
+    ))
+}
+
 /// `sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM`: define o início do
 /// acompanhamento. Antes dele, ocorrência sem pagamento informado não vira "em atraso" (a
 /// planilha importada é histórico); só o que o usuário adiou continua devido.
@@ -319,11 +527,14 @@ fn acompanhar(args: &[String]) -> ExitCode {
             Competencia::de_texto(texto).ok_or_else(|| format!("competência inválida: {texto}"))?;
         let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
             .map_err(|e| e.to_string())?;
-        let mut plan =
-            sbf_planejamento::PlanejamentoSqlite::novo(banco, Box::new(sbf_planejamento::SemSaldos));
+        let mut plan = sbf_planejamento::PlanejamentoSqlite::novo(
+            banco,
+            Box::new(sbf_planejamento::SemSaldos),
+        );
         // O acompanhamento começa no primeiro dia do ciclo (corte no dia 20).
         let corte = sbf_planejamento::DiaDeCorte::novo(20).expect("20 é um dia de corte válido");
-        let inicio = sbf_planejamento::Ciclo::do_mes(competencia.ano, competencia.mes, corte).inicio;
+        let inicio =
+            sbf_planejamento::Ciclo::do_mes(competencia.ano, competencia.mes, corte).inicio;
         plan.definir_inicio_do_acompanhamento(inicio)
             .map_err(|e| e.to_string())?;
         Ok(inicio)
@@ -429,5 +640,129 @@ mod testes {
                 .expect("utf8")
                 .contains("STREAMING FICTICIO")
         );
+    }
+
+    const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
+
+    fn falso_com_salario(valor: i64) -> Falso {
+        use sbf_planejamento::*;
+        let mut f = Falso::default();
+        f.aplicar(
+            Alteracao::CriarRecorrente {
+                recorrente: NovoRecorrente {
+                    nome: "Salário".into(),
+                    grupo: "Salário".into(),
+                    subgrupo: None,
+                    posicao: 0,
+                    natureza: Natureza::Entrada,
+                    prazo: Prazo::SemFim,
+                    primeira_versao: Versao {
+                        id: String::new(),
+                        desde: Competencia { ano: 2026, mes: 9 },
+                        valor: Some(Centavos(valor)),
+                        certeza: Certeza::Estimado,
+                        fonte: Fonte::Usuario,
+                        frequencia: Frequencia::Mensal { dia: 5 },
+                        conta: None,
+                        centro: None,
+                        fornecedor: None,
+                        categoria: None,
+                        nota: None,
+                    },
+                },
+                origem: None,
+            },
+            Autor::Usuario,
+        )
+        .expect("criar");
+        f
+    }
+
+    fn opcoes_do_contracheque(confirmar: bool) -> Opcoes {
+        Opcoes {
+            inventario: Some(PathBuf::from("/c")),
+            confirmar,
+            ..Opcoes::default()
+        }
+    }
+
+    fn rodar_contracheque(plan: &mut Falso, confirmar: bool) -> String {
+        let mut saida = Vec::new();
+        contracheque_com(
+            &opcoes_do_contracheque(confirmar),
+            CONTRACHEQUE,
+            "abc123",
+            "c.pdf",
+            plan,
+            &mut saida,
+        )
+        .expect("contracheque");
+        String::from_utf8(saida).expect("utf8")
+    }
+
+    #[test]
+    fn contracheque_previa_nao_grava_e_nao_mostra_dados_pessoais() {
+        let mut plan = falso_com_salario(569_950);
+        let t = rodar_contracheque(&mut plan, false);
+        assert!(t.contains("rubricas=9"), "{t}");
+        assert!(t.contains("conferido"), "{t}");
+        assert!(t.contains("salario digitado confere"), "{t}");
+        assert!(
+            t.contains(
+                "consignacao CAIXA CONSIGNACOES SINCR: inicio 10/2024, prazo 96, termina 09/2032"
+            ),
+            "{t}"
+        );
+        assert!(t.contains("nada foi gravado"));
+        assert!(!t.contains("PESSOA") && !t.contains("c000000"));
+        assert!(plan.composicoes.is_empty() && plan.documentos.is_empty());
+    }
+
+    #[test]
+    fn contracheque_mostra_divergencia_com_o_salario_digitado() {
+        let mut plan = falso_com_salario(550_000);
+        let t = rodar_contracheque(&mut plan, false);
+        assert!(t.contains("diverge das rubricas em R$ 199,50"), "{t}");
+    }
+
+    #[test]
+    fn contracheque_confirmar_define_composicao_e_vincula_uma_vez() {
+        let mut plan = falso_com_salario(569_950);
+        rodar_contracheque(&mut plan, true);
+        assert_eq!(plan.composicoes.len(), 1);
+        let c = &plan.composicoes[0];
+        assert_eq!(c.desde, Competencia { ano: 2026, mes: 10 });
+        assert_eq!(c.origem, "contracheque 10/2026");
+        assert_eq!(c.documento.as_deref(), Some("abc123"));
+        assert_eq!(c.liquido(), Centavos(569_950));
+        assert_eq!(plan.documentos.len(), 1);
+        assert_eq!(
+            plan.documentos[0].tipo,
+            sbf_planejamento::TipoDeDocumento::Contracheque
+        );
+        // De novo: nada novo.
+        let antes = plan.aplicadas.len();
+        let t = rodar_contracheque(&mut plan, true);
+        assert!(
+            t.contains("ja existia") && t.contains("ja vinculado"),
+            "{t}"
+        );
+        assert_eq!(plan.aplicadas.len(), antes);
+    }
+
+    #[test]
+    fn contracheque_sem_salario_ou_com_dois_pede_recorrente() {
+        let mut plan = Falso::default();
+        let mut saida = Vec::new();
+        let e = contracheque_com(
+            &opcoes_do_contracheque(false),
+            CONTRACHEQUE,
+            "a",
+            "n",
+            &mut plan,
+            &mut saida,
+        )
+        .expect_err("sem salario");
+        assert!(e.contains("--recorrente"));
     }
 }

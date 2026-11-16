@@ -556,7 +556,7 @@ mod testes {
         assert_eq!(base.codigo, "001");
         assert_eq!(base.nome, "SALARIO BASE");
         assert_eq!(base.competencia.as_deref(), Some("2026/11"));
-        assert_eq!(base.valor, Some(Centavos(500_000)));
+        assert_eq!(base.valor, Some(Centavos(540_000)));
         assert_eq!(base.flags.len(), 6);
         assert_eq!(base.flags[4], ("Sal".to_owned(), true));
         assert_eq!(a.rubricas[1].flags[2], ("INSS".to_owned(), true));

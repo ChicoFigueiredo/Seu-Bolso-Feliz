@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 
 use sbf_planejamento::{
-    Alteracao, Autor, Centavos, Certeza, Competencia, Data, Escopo, EstadoDaOcorrencia, Excecao,
-    Fonte, Frequencia, Grupo, IdOcorrencia, MudancaDeVersao, Natureza, NovoRecorrente,
-    OrigemImportada, Planejamento, Prazo, Recorrente, Versao,
+    Alteracao, Autor, Centavos, Certeza, Competencia, Composicao, Data, Escopo, EstadoDaOcorrencia,
+    Excecao, Fonte, Frequencia, Grupo, IdOcorrencia, MudancaDeVersao, Natureza, NovoRecorrente,
+    OrigemImportada, Planejamento, Prazo, Recorrente, TipoDeRubrica, Versao,
 };
 
 use crate::Resultado;
@@ -108,6 +108,37 @@ pub struct Previa {
     pub conflitos: Vec<Conflito>,
     pub ignorados: Vec<Ignorado>,
     pub faltantes: Vec<Faltante>,
+    /// As rubricas do painel lateral, para o recorrente do salário.
+    pub composicao: Option<ComposicaoPrevia>,
+}
+
+/// As rubricas do painel, antes de saber o id do recorrente do salário.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComposicaoPrevia {
+    pub desde: Competencia,
+    pub origem: String,
+    pub rubricas: Vec<RubricaPrevia>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RubricaPrevia {
+    pub rubrica: sbf_planejamento::Rubrica,
+    /// O nome do item da grade (desconto em folha) a que a consignação se liga.
+    pub ligar_a: Option<String>,
+}
+
+impl ComposicaoPrevia {
+    pub fn liquido(&self) -> Centavos {
+        Centavos(
+            self.rubricas
+                .iter()
+                .map(|r| match r.rubrica.tipo {
+                    TipoDeRubrica::Provento => r.rubrica.valor.0,
+                    TipoDeRubrica::Desconto => -r.rubrica.valor.0,
+                })
+                .sum(),
+        )
+    }
 }
 
 impl Previa {
@@ -133,6 +164,8 @@ pub struct Confirmacao {
     pub atualizados: u32,
     pub pagos_informados: u32,
     pub adiadas: u32,
+    /// Composições (rubricas) do salário gravadas.
+    pub composicoes: u32,
 }
 
 /// O que se sabe de uma linha (ou do salário) antes de decidir criar, casar ou atualizar.
@@ -192,6 +225,7 @@ pub fn previa_com_mapa(
             &mut faltantes,
         ));
     }
+    let composicao = composicao_da_aba(aba, &candidatos, competencia, &mut faltantes);
     let ignorados = aba
         .subtotais
         .iter()
@@ -236,6 +270,7 @@ pub fn previa_com_mapa(
         conflitos: Vec::new(),
         ignorados,
         faltantes,
+        composicao,
     };
 
     let hoje = Data::hoje_em_sao_paulo();
@@ -338,6 +373,115 @@ fn casar_por_nome<'a>(
         .filter(|r| !usados.contains(&r.id) && normalizar(&r.nome) == nome);
     let primeiro = mesmos.clone().find(|r| normalizar(&r.grupo) == grupo);
     primeiro.or_else(|| mesmos.next())
+}
+
+/// Classifica pelas flags do painel; sem flag, pelo código do contracheque.
+fn tipo_da_rubrica(r: &crate::leitura::Rubrica) -> Option<TipoDeRubrica> {
+    let ligada = |nome: &str| r.flags.iter().any(|(n, on)| *on && normalizar(n) == nome);
+    if ligada("sal") {
+        return Some(TipoDeRubrica::Provento);
+    }
+    if ["consig", "saude", "inss", "prev", "ir"]
+        .iter()
+        .any(|n| ligada(n))
+    {
+        return Some(TipoDeRubrica::Desconto);
+    }
+    match r.codigo.chars().next() {
+        Some('2') => Some(TipoDeRubrica::Provento),
+        Some('3' | '4') => Some(TipoDeRubrica::Desconto),
+        _ => None,
+    }
+}
+
+fn palavras_fortes(nome: &str) -> Vec<String> {
+    normalizar(nome)
+        .split(' ')
+        .filter(|p| p.len() >= 4)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// O item de desconto em folha da grade que casa com a consignação: mesmo valor e nome
+/// parecido; na falta, o único com o mesmo valor.
+fn item_da_consignacao(candidatos: &[Candidato], nome: &str, valor: Centavos) -> Option<String> {
+    let folha: Vec<&Candidato> = candidatos
+        .iter()
+        .filter(|c| c.natureza == Natureza::DescontoEmFolha && c.versao.valor == Some(valor))
+        .collect();
+    let n = normalizar(nome);
+    let fortes = palavras_fortes(nome);
+    let parecido = folha.iter().find(|c| {
+        let cn = normalizar(&c.nome);
+        cn.contains(&n)
+            || n.contains(&cn)
+            || palavras_fortes(&c.nome).iter().any(|p| fortes.contains(p))
+    });
+    match (parecido, folha.as_slice()) {
+        (Some(c), _) => Some(c.nome.clone()),
+        (None, [unico]) => Some(unico.nome.clone()),
+        _ => None,
+    }
+}
+
+fn composicao_da_aba(
+    aba: &AbaLida,
+    candidatos: &[Candidato],
+    competencia: Competencia,
+    faltantes: &mut Vec<Faltante>,
+) -> Option<ComposicaoPrevia> {
+    aba.salario.as_ref()?;
+    let mut rubricas = Vec::new();
+    let mut converter = |r: &crate::leitura::Rubrica, consignacao: bool| {
+        let nome = if r.nome.is_empty() {
+            r.nome_painel.clone().unwrap_or_default()
+        } else {
+            r.nome.clone()
+        };
+        let tipo = if consignacao {
+            Some(TipoDeRubrica::Desconto)
+        } else {
+            tipo_da_rubrica(r)
+        };
+        let (Some(tipo), Some(valor)) = (tipo, r.valor.or(r.valores[0])) else {
+            faltantes.push(Faltante {
+                linha: r.linha,
+                nome,
+                o_que: "rubrica do painel sem tipo ou sem valor (fora da composição)".to_owned(),
+            });
+            return;
+        };
+        let ligar_a = (consignacao && tipo == TipoDeRubrica::Desconto)
+            .then(|| item_da_consignacao(candidatos, &nome, valor))
+            .flatten();
+        let comp = r.competencia.as_deref().and_then(|c| {
+            let (a, m) = c.split_once('/')?;
+            Competencia::nova(a.parse().ok()?, m.parse().ok()?)
+        });
+        rubricas.push(RubricaPrevia {
+            rubrica: sbf_planejamento::Rubrica {
+                codigo: Some(r.codigo.clone()),
+                nome,
+                tipo,
+                valor,
+                competencia: comp,
+                prazo: None,
+                recorrente: None,
+            },
+            ligar_a,
+        });
+    };
+    for r in &aba.rubricas {
+        converter(r, false);
+    }
+    for r in &aba.consignacoes {
+        converter(r, true);
+    }
+    (!rubricas.is_empty()).then(|| ComposicaoPrevia {
+        desde: competencia,
+        origem: format!("planilha {}", aba.nome),
+        rubricas,
+    })
 }
 
 fn candidato_do_salario(
@@ -644,6 +788,9 @@ fn adiar_sem_data(
 /// Aplica a prévia: grupos, recorrentes novos, atualizações e pagos informados.
 pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Confirmacao> {
     let mut c = Confirmacao::default();
+    // Nome do item da grade -> id do recorrente, para ligar as consignações e achar o salário.
+    let mut ids: Vec<(String, String)> = Vec::new();
+    let mut salario_id: Option<String> = None;
     for g in &previa.grupos_novos {
         plan.aplicar(
             Alteracao::CriarGrupo {
@@ -663,6 +810,13 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
             Autor::Importacao,
         )?;
         c.criados += 1;
+        ids.push((n.recorrente.nome.clone(), recibo.alvo.clone()));
+        if n.linha == LINHA_DO_SALARIO
+            && n.recorrente.nome == NOME_DO_SALARIO
+            && n.recorrente.natureza == Natureza::Entrada
+        {
+            salario_id = Some(recibo.alvo.clone());
+        }
         if let Some(p) = &n.pago {
             plan.aplicar(
                 excecao_de_pago(&recibo.alvo, &n.recorrente.prazo, p),
@@ -676,6 +830,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
         }
     }
     for e in &previa.existentes {
+        ids.push((e.nome.clone(), e.recorrente.clone()));
+        if e.linha == LINHA_DO_SALARIO && e.nome == NOME_DO_SALARIO {
+            salario_id = Some(e.recorrente.clone());
+        }
         if let (CasadoPor::Nome, Some(p)) = (e.por, &e.pago) {
             plan.aplicar(
                 excecao_de_pago(&e.recorrente, &Prazo::Desconhecido, p),
@@ -690,6 +848,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
         }
     }
     for a in &previa.atualizaveis {
+        ids.push((a.nome.clone(), a.recorrente.clone()));
+        if a.linha == LINHA_DO_SALARIO && a.nome == NOME_DO_SALARIO {
+            salario_id = Some(a.recorrente.clone());
+        }
         plan.aplicar(
             Alteracao::Editar {
                 recorrente: a.recorrente.clone(),
@@ -715,6 +877,44 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
                 Autor::Importacao,
             )?;
             c.pagos_informados += 1;
+        }
+    }
+    if let (Some(comp), Some(salario)) = (&previa.composicao, salario_id) {
+        let composicao = Composicao {
+            recorrente: salario.clone(),
+            desde: comp.desde,
+            rubricas: comp
+                .rubricas
+                .iter()
+                .map(|r| {
+                    let mut rubrica = r.rubrica.clone();
+                    rubrica.recorrente = r.ligar_a.as_ref().and_then(|nome| {
+                        ids.iter()
+                            .find(|(n, _)| n == nome)
+                            .map(|(_, id)| id.clone())
+                    });
+                    rubrica
+                })
+                .collect(),
+            documento: None,
+            origem: comp.origem.clone(),
+        };
+        // Idempotente: a mesma composição na mesma competência não é regravada.
+        let igual = plan.composicao(&salario, comp.desde)?.is_some_and(|atual| {
+            atual.desde == composicao.desde && atual.rubricas == composicao.rubricas
+        });
+        if !igual {
+            let versao_base = plan
+                .recorrente(&salario)?
+                .map_or(1, |r| r.versao_do_registro);
+            plan.aplicar(
+                Alteracao::DefinirComposicao {
+                    composicao,
+                    versao_base,
+                },
+                Autor::Importacao,
+            )?;
+            c.composicoes += 1;
         }
     }
     Ok(c)
@@ -862,6 +1062,60 @@ mod testes {
             .map(|v| v.0)
             .sum();
         assert_eq!(caixa, 150_000 + 18_050 + 9_000 + 30);
+    }
+
+    // Rubricas do painel (CEO: salário digitado, rubricas explicam o líquido)
+    #[test]
+    fn rubricas_do_painel_viram_composicao_do_salario_idempotente() {
+        let mut plan = Falso::default();
+        let a = aba();
+        let p = previa(&a, SHA, &plan, COMP).expect("previa");
+        let comp = p.composicao.as_ref().expect("composicao");
+        // Líquido das rubricas confere com o salário líquido importado.
+        assert_eq!(
+            Some(comp.liquido()),
+            por_nome(&p, "Salário").recorrente.primeira_versao.valor
+        );
+        confirmar(&p, &mut plan).expect("confirmar");
+        assert_eq!(plan.composicoes.len(), 1);
+        let c = &plan.composicoes[0];
+        let sal = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome == "Salário")
+            .expect("sal");
+        assert_eq!(c.recorrente, sal.id);
+        assert_eq!(c.desde, COMP);
+        assert_eq!(c.origem, "planilha 2026.11");
+        assert_eq!(c.rubricas.len(), 4);
+        assert_eq!(c.liquido(), sal.versoes[0].valor.expect("valor"));
+        let tipo = |cod: &str| {
+            c.rubricas
+                .iter()
+                .find(|r| r.codigo.as_deref() == Some(cod))
+                .expect(cod)
+        };
+        assert_eq!(tipo("001").tipo, TipoDeRubrica::Provento);
+        assert_eq!(tipo("210").tipo, TipoDeRubrica::Desconto);
+        let plano = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome.starts_with("Plano"))
+            .expect("plano");
+        assert_eq!(tipo("301").recorrente.as_deref(), Some(plano.id.as_str()));
+        let emp = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome.starts_with("Empr"))
+            .expect("emp");
+        assert_eq!(tipo("302").recorrente.as_deref(), Some(emp.id.as_str()));
+        assert_eq!(tipo("210").recorrente, None);
+        // Reimportar não regrava.
+        let antes = plan.aplicadas.len();
+        let p2 = previa(&a, SHA, &plan, COMP).expect("previa");
+        let c2 = confirmar(&p2, &mut plan).expect("confirmar");
+        assert_eq!(c2.composicoes, 0);
+        assert_eq!(plan.aplicadas.len(), antes);
     }
 
     // AC-04 e AC-29
