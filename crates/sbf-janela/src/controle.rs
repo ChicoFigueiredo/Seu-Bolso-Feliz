@@ -1055,7 +1055,7 @@ pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 18] = [
         icone: "search",
         dica: "Procura no extrato do banco o que casa com as ocorrências do período e deixa como sugestão",
         grupo: "Extrato",
-        atalho: at(true, true, false, Key::U),
+        atalho: at(true, true, false, Key::Y),
         keytip: "S",
     },
 ];

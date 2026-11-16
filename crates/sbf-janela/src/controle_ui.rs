@@ -2259,12 +2259,13 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
         .auto_shrink([false, true])
         .show(ui, |ui| match aba {
             AbaDoDetalhe::Resumo => {
-                aba_resumo(ui, &sel, dados.recorrente.as_ref());
+                // Os movimentos primeiro: é o que se decide ali (confirmar, escolher outro).
                 if let Some(vm) = &vm_movimentos {
-                    ui.add_space(8.0);
                     dispensou_oferta =
                         movimentos::secao(ui, vm, &sel.id, &mut conciliar_aberto, oferta, pedidos);
+                    ui.add_space(8.0);
                 }
+                aba_resumo(ui, &sel, dados.recorrente.as_ref());
                 ui.add_space(8.0);
                 secao_do_detalhe(ui, &p, "Próximas ocorrências");
                 mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
