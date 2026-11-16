@@ -32,6 +32,9 @@ pub struct ItemDoMapa {
     /// Dia do vencimento, quando a planilha não o traz (o salário, por exemplo).
     #[serde(default)]
     pub dia: Option<u8>,
+    /// O usuário declarou que a ocorrência do mês importado está devida (adiada sem data).
+    #[serde(default)]
+    pub em_atraso: bool,
 }
 
 /// Um recorrente que não está na planilha (entrada recorrente, bolão...).

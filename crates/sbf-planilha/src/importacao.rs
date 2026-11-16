@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 
 use sbf_planejamento::{
-    Alteracao, Autor, Centavos, Certeza, Competencia, Data, Escopo, Excecao, Fonte, Frequencia,
-    Grupo, IdOcorrencia, MudancaDeVersao, Natureza, NovoRecorrente, OrigemImportada, Planejamento,
-    Prazo, Recorrente, Versao,
+    Alteracao, Autor, Centavos, Certeza, Competencia, Data, Escopo, EstadoDaOcorrencia, Excecao,
+    Fonte, Frequencia, Grupo, IdOcorrencia, MudancaDeVersao, Natureza, NovoRecorrente,
+    OrigemImportada, Planejamento, Prazo, Recorrente, Versao,
 };
 
 use crate::Resultado;
@@ -238,6 +238,7 @@ pub fn previa_com_mapa(
         faltantes,
     };
 
+    let hoje = Data::hoje_em_sao_paulo();
     for c in candidatos {
         let origem = c.origem.clone().unwrap_or_else(|| OrigemImportada {
             arquivo_sha256: sha256.to_owned(),
@@ -246,13 +247,14 @@ pub fn previa_com_mapa(
         });
         if let Some(id) = plan.origem_importada(&origem)? {
             usados.insert(id.clone());
+            let adiar = pendente_de_adiar(plan, &id, c.adiar, hoje)?;
             p.existentes.push(ItemExistente {
                 linha: c.linha,
                 nome: c.nome,
                 recorrente: id,
                 por: CasadoPor::Origem,
                 pago: None,
-                adiar: None,
+                adiar,
             });
             continue;
         }
@@ -275,6 +277,7 @@ pub fn previa_com_mapa(
             continue;
         };
         usados.insert(r.id.clone());
+        let adiar = pendente_de_adiar(plan, &r.id, c.adiar, hoje)?;
         let vigente = versao_vigente(r, competencia);
         match (c.versao.valor, vigente.and_then(|v| v.valor)) {
             (Some(novo), atual) if Some(novo) != atual => {
@@ -296,7 +299,7 @@ pub fn previa_com_mapa(
                         valor_novo: novo,
                         desde: competencia,
                         pago: c.pago,
-                        adiar: c.adiar,
+                        adiar,
                     });
                 }
             }
@@ -306,7 +309,7 @@ pub fn previa_com_mapa(
                 recorrente: r.id.clone(),
                 por: CasadoPor::Nome,
                 pago: c.pago,
-                adiar: c.adiar,
+                adiar,
             }),
         }
     }
@@ -525,6 +528,8 @@ fn candidato_da_linha(
         },
         outro => (outro, None),
     };
+    // O usuário declarou (no mapa) que a ocorrência do mês está devida.
+    let adiar = adiar.or(item.filter(|i| i.em_atraso).map(|_| ocorrencia));
     let certeza = if valor.is_some() && l.previsto != Some(Centavos(0)) && l.erros.is_empty() {
         Certeza::Confirmado
     } else {
@@ -580,6 +585,28 @@ fn excecao_de_pago(recorrente: &str, prazo: &Prazo, pago: &PagoDoMes) -> Alterac
             data: None::<Data>,
         },
     }
+}
+
+/// A ocorrência a adiar, a menos que o planejamento já a mostre como adiada (idempotência:
+/// o trait não lista exceções, então olha o estado da ocorrência em `proximas`).
+fn pendente_de_adiar(
+    plan: &dyn Planejamento,
+    recorrente: &str,
+    comp: Option<Competencia>,
+    hoje: Data,
+) -> Resultado<Option<Competencia>> {
+    let Some(comp) = comp else { return Ok(None) };
+    let ja = plan
+        .proximas(recorrente, comp, 1, hoje)?
+        .iter()
+        .any(|o| o.id.competencia == comp && o.estado == EstadoDaOcorrencia::Adiada);
+    Ok((!ja).then_some(comp))
+}
+
+fn prazo_de(plan: &dyn Planejamento, recorrente: &str) -> Resultado<Prazo> {
+    Ok(plan
+        .recorrente(recorrente)?
+        .map_or(Prazo::Desconhecido, |r| r.prazo))
 }
 
 fn adiar_sem_data(
@@ -648,8 +675,9 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
             )?;
             c.pagos_informados += 1;
         }
-        if let (CasadoPor::Nome, Some(comp)) = (e.por, e.adiar) {
-            adiar_sem_data(plan, &e.recorrente, &Prazo::Desconhecido, comp)?;
+        if let Some(comp) = e.adiar {
+            let prazo = prazo_de(plan, &e.recorrente)?;
+            adiar_sem_data(plan, &e.recorrente, &prazo, comp)?;
             c.adiadas += 1;
         }
     }
@@ -669,7 +697,8 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
         )?;
         c.atualizados += 1;
         if let Some(comp) = a.adiar {
-            adiar_sem_data(plan, &a.recorrente, &Prazo::Desconhecido, comp)?;
+            let prazo = prazo_de(plan, &a.recorrente)?;
+            adiar_sem_data(plan, &a.recorrente, &prazo, comp)?;
             c.adiadas += 1;
         }
         if let Some(p) = &a.pago {
@@ -1088,5 +1117,54 @@ mod testes {
                 .iter()
                 .any(|f| f.o_que.contains("dia do salário"))
         );
+    }
+
+    #[test]
+    fn em_atraso_no_mapa_adia_uma_vez_inclusive_em_item_existente() {
+        let mut plan = Falso::default();
+        let a = aba();
+        // Primeira importação, sem o mapa: nada adiado.
+        confirmar(&previa(&a, SHA, &plan, COMP).expect("p"), &mut plan).expect("c");
+        assert!(
+            plan.excecoes
+                .iter()
+                .all(|(_, e)| !matches!(e, Excecao::Adiar { .. }))
+        );
+        // Reimportação com o mapa novo: o item que já existe ganha a exceção que falta.
+        let mapa = Mapa::de_json(r#"{"itens":[{"descricao":"Luz Exemplo","em_atraso":true}]}"#)
+            .expect("mapa");
+        let p = previa_com_mapa(&a, SHA, &plan, COMP, &mapa).expect("previa");
+        assert!(p.novos.is_empty());
+        let luz = p
+            .existentes
+            .iter()
+            .find(|e| e.nome == "Luz Exemplo")
+            .expect("luz");
+        assert_eq!((luz.por, luz.adiar), (CasadoPor::Origem, Some(COMP)));
+        assert_eq!(p.existentes.iter().filter(|e| e.adiar.is_some()).count(), 1);
+        let c = confirmar(&p, &mut plan).expect("c2");
+        assert_eq!(c.adiadas, 1);
+        // De novo: já está adiada, não grava outra.
+        let p2 = previa_com_mapa(&a, SHA, &plan, COMP, &mapa).expect("previa 2");
+        assert!(p2.existentes.iter().all(|e| e.adiar.is_none()));
+        let c2 = confirmar(&p2, &mut plan).expect("c3");
+        assert_eq!(c2.adiadas, 0);
+        let n = plan
+            .excecoes
+            .iter()
+            .filter(|(_, e)| matches!(e, Excecao::Adiar { .. }))
+            .count();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn em_atraso_no_mapa_vale_para_item_novo() {
+        let mapa = Mapa::de_json(r#"{"itens":[{"descricao":"Luz Exemplo","em_atraso":true}]}"#)
+            .expect("mapa");
+        let mut plan = Falso::default();
+        let p = previa_com_mapa(&aba(), SHA, &plan, COMP, &mapa).expect("previa");
+        assert_eq!(por_nome(&p, "Luz Exemplo").adiar, Some(COMP));
+        let c = confirmar(&p, &mut plan).expect("c");
+        assert_eq!(c.adiadas, 1);
     }
 }
