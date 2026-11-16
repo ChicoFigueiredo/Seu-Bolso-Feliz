@@ -24,6 +24,18 @@
 
 use std::fmt;
 
+mod banco;
+mod escrita;
+mod projecao;
+mod resumo;
+mod servico;
+
+pub use banco::Banco;
+pub use projecao::{
+    projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
+};
+pub use servico::PlanejamentoSqlite;
+
 use serde::{Deserialize, Serialize};
 
 pub use sbf_livro::{Centavos, Ciclo, Data, DiaDeCorte};
@@ -150,6 +162,9 @@ pub enum Natureza {
     DescontoEmFolha,
     /// Dinheiro de passagem (bolão): fica fora de receita e de despesa.
     Passagem { sentido: Sentido },
+    /// Compra no cartão de crédito: aparece e é rastreada, mas o caixa sai pela fatura, que já
+    /// está no plano. Fica fora das saídas de caixa para não contar duas vezes.
+    DentroDaFatura,
 }
 
 /// Quando a regra gera ocorrência.
@@ -423,6 +438,8 @@ pub struct Resumo {
     /// Saídas de caixa: sem desconto em folha e sem dinheiro de passagem.
     pub saidas_de_caixa_previstas: Centavos,
     pub descontos_em_folha: Centavos,
+    /// Compras no cartão do período: já estão dentro das faturas, fora das saídas de caixa.
+    pub compras_no_cartao: Centavos,
     pub em_atraso: Centavos,
     /// Ocorrências sem valor ou só com pago informado.
     pub a_conferir: u32,
@@ -736,6 +753,13 @@ pub trait Planejamento {
     fn sugestao_de_conciliacao(&self, ocorrencia: &IdOcorrencia) -> Resultado<Option<Conciliacao>> {
         let _ = ocorrencia;
         Ok(None)
+    }
+
+    /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
+    /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
+    fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
+        let _ = recorrente;
+        Ok(Vec::new())
     }
 }
 
