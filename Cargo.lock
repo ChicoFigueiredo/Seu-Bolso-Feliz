@@ -5426,6 +5426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-reconhecimento"
+version = "0.1.0"
+dependencies = [
+ "sbf-planejamento",
+ "sbf-planilha",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sbf-roteiros"
 version = "0.1.0"
 dependencies = [

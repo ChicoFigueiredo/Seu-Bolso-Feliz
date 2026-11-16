@@ -1,0 +1,15 @@
+[package]
+name = "sbf-reconhecimento"
+description = "Reconhecimento de um arquivo solto na janela: inventário, texto, leitores locais, IA e sugestões (spec 11)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-planejamento = { path = "../sbf-planejamento" }
+sbf-planilha = { path = "../sbf-planilha" }
+thiserror.workspace = true
+
+[lints]
+workspace = true
