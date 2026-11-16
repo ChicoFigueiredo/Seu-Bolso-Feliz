@@ -78,6 +78,10 @@ pub struct AppSbf {
     paineis_visiveis: BTreeMap<String, bool>,
     tema_atual: String,
     textos: Textos,
+    /// O zoom do egui no último quadro (o Ctrl + e o Ctrl − mudam ele sem avisar a casca).
+    zoom_visto: f32,
+    /// Um zoom guardado que a casca ainda não aplicou: enquanto isso, nada é gravado.
+    zoom_restaurando: Option<f32>,
 }
 
 impl std::fmt::Debug for AppSbf {
@@ -167,6 +171,53 @@ impl AppSbf {
             paineis_visiveis,
             tema_atual: tema::TEMA_PADRAO.to_owned(),
             textos: Textos::pt_br(),
+            zoom_visto: 1.0,
+            zoom_restaurando: None,
+        }
+    }
+
+    /// Lembra entre aberturas o zoom e o jeito do Controle mensal. Roda a cada quadro do
+    /// centro; só toca o disco quando algo mudou.
+    fn guardar_preferencias(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        let j = self.janela.get_mut();
+        if !j.guardador.resolvido() {
+            // Sem as Ferramentas (demonstração, capturas) não há pasta de dados: nada a guardar.
+            if j.ferramentas.is_none() {
+                return;
+            }
+            let arquivo = j.arquivo_das_preferencias();
+            let guardado = j.restaurar_preferencias(arquivo);
+            self.zoom_visto = zoom;
+            if let Some(z) = guardado
+                && (z - zoom).abs() > 1e-3
+            {
+                self.zoom_restaurando = Some(z);
+                bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(z));
+                ctx.request_repaint();
+                return;
+            }
+        }
+        if let Some(z) = self.zoom_restaurando {
+            if (zoom - z).abs() > 1e-3 {
+                ctx.request_repaint();
+                return;
+            }
+            self.zoom_restaurando = None;
+            self.zoom_visto = zoom;
+        }
+        if (zoom - self.zoom_visto).abs() > 1e-3 {
+            // O Ctrl + e o Ctrl − mexem no zoom do egui; a casca precisa saber, senão ela o
+            // desfaz na próxima troca de tema.
+            bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(zoom));
+            self.zoom_visto = zoom;
+        }
+        let atual = j.preferencias_atuais(zoom);
+        if j.guardador.quadro(&atual).is_err() {
+            j.mensagem = Some(Mensagem {
+                texto: "Não deu para guardar as preferências da janela.".to_owned(),
+                erro: true,
+            });
         }
     }
 
@@ -638,7 +689,11 @@ impl AppCasca for AppSbf {
                 0,
                 GrupoNavegacao::novo(
                     "Controle",
-                    vec![ItemNavegacao::novo("controle", "Controle mensal", "calendar_month")],
+                    vec![ItemNavegacao::novo(
+                        "controle",
+                        "Controle mensal",
+                        "calendar_month",
+                    )],
                 ),
             );
         }
@@ -729,6 +784,9 @@ impl AppCasca for AppSbf {
             );
             return;
         };
+        if local == Local::Centro {
+            self.guardar_preferencias(&ctx);
+        }
         let AppSbf {
             janela,
             consulta,
@@ -740,7 +798,7 @@ impl AppCasca for AppSbf {
             Local::Centro => {
                 janela.mensagem_ui(ui);
                 janela.desenhar_destino(ui, consulta.as_ref(), &destino, None);
-                janela.dialogos_ui(&ctx);
+                janela.dialogos_ui(&ctx, consulta.as_ref());
                 janela.ferramentas_ui(&ctx);
                 janela.previas_ui(&ctx, consulta.as_ref());
             }

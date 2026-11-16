@@ -113,7 +113,6 @@ impl App {
                 c.resumo_aberto = false;
                 c.filtro = Filtro::PausadosECancelados;
                 c.selecionada = Some(id("rec_streaming", h.seguinte()));
-                c.abrir_lateral(sbf_janela::controle_ui::AbaLateral::Detalhe);
                 c.aba_do_detalhe = AbaDoDetalhe::Pausas;
             }
             (1, "editar") => {

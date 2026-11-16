@@ -127,7 +127,7 @@ impl MolduraProvisoria {
             .show(ui, |ui| self.janela.centro_ui(ui, consulta));
 
         self.janela.flutuantes_ui(&ctx, consulta);
-        self.janela.dialogos_ui(&ctx);
+        self.janela.dialogos_ui(&ctx, consulta);
         self.janela.previas_ui(&ctx, consulta);
         self.janela.processar(&ctx, consulta, comandos);
     }
