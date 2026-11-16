@@ -24,6 +24,8 @@
 //! (módulos novos neste crate); o agente da janela escreve contra [`Reconhecedor`] e
 //! [`ReconhecedorFicticio`]. Mudar um tipo público exige avisar o integrador.
 
+pub mod salario;
+
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;

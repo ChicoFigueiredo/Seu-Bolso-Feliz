@@ -5071,6 +5071,7 @@ dependencies = [
  "sbf-planilha",
  "sbf-pontos",
  "sbf-processo",
+ "sbf-reconhecimento",
  "sbf-roteiros",
  "sbf-servidor",
  "sbf-triagem",
@@ -5429,8 +5430,17 @@ dependencies = [
 name = "sbf-reconhecimento"
 version = "0.1.0"
 dependencies = [
+ "lopdf",
+ "rusqlite",
+ "sbf-coleta",
+ "sbf-ia",
+ "sbf-inventario",
+ "sbf-pdf",
  "sbf-planejamento",
  "sbf-planilha",
+ "sbf-triagem",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
