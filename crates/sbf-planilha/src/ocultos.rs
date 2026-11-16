@@ -255,8 +255,13 @@ pub fn previa_de_ocultos(
     let mut novos = Vec::new();
     let mut divergentes = Vec::new();
     for a in detectar(conn, cfg)? {
+        if mapa.ignora(&a.fornecedor) {
+            continue;
+        }
         let m = casados(&a.fornecedor, &existentes, mapa);
         match m.as_slice() {
+            // Citado no mapa (item ou extra): já coberto, mesmo sem recorrente criado ainda.
+            [] if mapa.fornecedores().any(|(_, f)| parecidos(f, &a.fornecedor)) => {}
             [] => novos.push(a),
             [r] if r.natureza == Natureza::Saida => {
                 let Some(v) = vigente(r, competencia.seguinte()) else {
@@ -535,6 +540,20 @@ mod testes {
         let p2 = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP)
             .expect("previa 2");
         assert!(p2.novos.is_empty() && p2.divergentes.is_empty() && p2.grupo_novo.is_none());
+    }
+
+    #[test]
+    fn mapa_ignora_e_cobre_fornecedores_de_itens_e_extras() {
+        let mapa = Mapa::de_json(
+            r#"{"itens":[{"descricao":"Ginastica","fornecedor":"ACADEMIA Y"}],
+                "extras":[{"nome":"Cafezinho","grupo":"Extras","natureza":"saida","dia":22,"fornecedor":"CAFE W","certeza":"estimado"}],
+                "ignorar_fornecedores":["streaming  x","luz energia"]}"#,
+        )
+        .expect("mapa");
+        let plan = plano();
+        let p = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP).expect("previa");
+        assert!(p.novos.is_empty(), "{:?}", p.novos);
+        assert!(p.grupo_novo.is_none());
     }
 
     #[test]
