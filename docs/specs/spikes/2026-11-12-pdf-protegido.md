@@ -96,14 +96,14 @@ layout. Fica como alternativa só se o poppler virar problema no Windows.
 13 fixtures × 6 opções × (senha certa e senha errada). Os tempos são a mediana de 15
 rodadas por documento, em ms.
 
-| Opção                        | Decifra RC4-40/128, AES-128/256, objstm | Senha no argv/environ   | Cópia decifrada em disco | Texto contra `pdftotext -layout`                              | Senha errada × corrompido | Tempo (ms)     | Multiplataforma                                               | Licença                                        | Dependência externa |
-| ---------------------------- | --------------------------------------- | ----------------------- | ------------------------ | ------------------------------------------------------------- | ------------------------- | -------------- | ------------------------------------------------------------- | ---------------------------------------------- | ------------------- |
-| A1 pdf-extract nativo        | "abre", mas **texto vazio, sem erro**   | não (em processo)       | não                      | 0/7 campos, 0% das linhas                                     | sim (via lopdf)           | 0,6–14         | sim                                                           | MIT                                            | nenhuma             |
-| A1b lopdf 0.47 + pdf-extract | sim, 10/10                              | não (em processo)       | não                      | 7/7 campos, 100% das linhas normalizadas, colunas perdidas    | sim                       | 8–15           | sim                                                           | MIT; closure MIT/Apache/BSD-3/Unicode-3.0/Zlib | nenhuma             |
-| A2 lopdf `extract_text`      | sim, 10/10                              | não (em processo)       | não                      | 7/7 campos, mas cada coluna numa linha (55%), linha desfeita  | sim                       | 1–8            | sim                                                           | MIT                                            | nenhuma             |
-| B1 qpdf → tmp 0700           | sim, 10/10                              | não (stdin)             | **sim**                  | idêntico byte a byte                                          | sim (stderr)              | 62–76          | binários de qpdf e poppler; **AppArmor no Ubuntu** (abaixo)   | qpdf Apache-2.0; poppler GPL (processo à parte) | qpdf + pdftotext    |
-| B2 qpdf → pipe → pdftotext   | sim, 10/10                              | não (stdin)             | não (só pipe)            | idêntico byte a byte                                          | sim (stderr)              | 61–66          | binários de qpdf e poppler; AppArmor restringe a leitura      | idem                                           | qpdf + pdftotext    |
-| **C lopdf → stdin pdftotext** | **sim, 10/10**                         | **não (nem chega ao filho)** | **não**             | **idêntico byte a byte**                                      | **sim (erro tipado)**     | **35–46**      | lopdf em todo lugar; pdftotext já é dependência do inventário | MIT (+ poppler em processo à parte)            | pdftotext           |
+| Opção                         | Decifra RC4-40/128, AES-128/256, objstm | Senha no argv/environ        | Cópia decifrada em disco | Texto contra `pdftotext -layout`                             | Senha errada × corrompido | Tempo (ms) | Multiplataforma                                               | Licença                                         | Dependência externa |
+| ----------------------------- | --------------------------------------- | ---------------------------- | ------------------------ | ------------------------------------------------------------ | ------------------------- | ---------- | ------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
+| A1 pdf-extract nativo         | "abre", mas **texto vazio, sem erro**   | não (em processo)            | não                      | 0/7 campos, 0% das linhas                                    | sim (via lopdf)           | 0,6–14     | sim                                                           | MIT                                             | nenhuma             |
+| A1b lopdf 0.47 + pdf-extract  | sim, 10/10                              | não (em processo)            | não                      | 7/7 campos, 100% das linhas normalizadas, colunas perdidas   | sim                       | 8–15       | sim                                                           | MIT; closure MIT/Apache/BSD-3/Unicode-3.0/Zlib  | nenhuma             |
+| A2 lopdf `extract_text`       | sim, 10/10                              | não (em processo)            | não                      | 7/7 campos, mas cada coluna numa linha (55%), linha desfeita | sim                       | 1–8        | sim                                                           | MIT                                             | nenhuma             |
+| B1 qpdf → tmp 0700            | sim, 10/10                              | não (stdin)                  | **sim**                  | idêntico byte a byte                                         | sim (stderr)              | 62–76      | binários de qpdf e poppler; **AppArmor no Ubuntu** (abaixo)   | qpdf Apache-2.0; poppler GPL (processo à parte) | qpdf + pdftotext    |
+| B2 qpdf → pipe → pdftotext    | sim, 10/10                              | não (stdin)                  | não (só pipe)            | idêntico byte a byte                                         | sim (stderr)              | 61–66      | binários de qpdf e poppler; AppArmor restringe a leitura      | idem                                            | qpdf + pdftotext    |
+| **C lopdf → stdin pdftotext** | **sim, 10/10**                          | **não (nem chega ao filho)** | **não**                  | **idêntico byte a byte**                                     | **sim (erro tipado)**     | **35–46**  | lopdf em todo lugar; pdftotext já é dependência do inventário | MIT (+ poppler em processo à parte)             | pdftotext           |
 
 O vigia inspecionou 329 processos filhos, todos lidos vivos, e fez 329 varreduras
 completas de `/proc`. Achou **zero** ocorrências da senha em cmdline ou environ. Com
@@ -115,12 +115,12 @@ original ficou byte a byte igual em todas as rodadas.
 
 ### Senha errada × corrompido
 
-| Caso                                     | lopdf (A1b, A2, C)                                                | qpdf (B1, B2)                                                                          |
-| ---------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Senha errada                             | `Error::InvalidPassword` (tipado)                                 | rc=2 e `invalid password` no stderr (texto em inglês, não traduzido)                   |
-| Lixo com cabeçalho `%PDF`                | `failed parsing cross reference table`                            | rc=2 e outra mensagem                                                                  |
-| Truncado (o `/Encrypt` some com o trailer) | abre reparado (`xref_recovery = Some(Reconstructed)`) e sem texto | rc=3 (avisos: "file is damaged") e sem texto                                          |
-| `/U` danificado                          | `InvalidPassword` **mesmo com a senha certa**                     | `invalid password` **mesmo com a senha certa**                                         |
+| Caso                                       | lopdf (A1b, A2, C)                                                | qpdf (B1, B2)                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Senha errada                               | `Error::InvalidPassword` (tipado)                                 | rc=2 e `invalid password` no stderr (texto em inglês, não traduzido) |
+| Lixo com cabeçalho `%PDF`                  | `failed parsing cross reference table`                            | rc=2 e outra mensagem                                                |
+| Truncado (o `/Encrypt` some com o trailer) | abre reparado (`xref_recovery = Some(Reconstructed)`) e sem texto | rc=3 (avisos: "file is damaged") e sem texto                         |
+| `/U` danificado                            | `InvalidPassword` **mesmo com a senha certa**                     | `invalid password` **mesmo com a senha certa**                       |
 
 Duas regras saem disso.
 
@@ -173,12 +173,12 @@ Consequências:
 `tempfile::Builder::new().prefix("sbf-pdf-").permissions(0o700).tempdir_in(base)`, com um
 filho que cria a pasta, grava `decifrado.pdf` e então falha:
 
-| Como o processo morreu                                       | Pasta 0700 | Sobrou depois                       |
-| ------------------------------------------------------------ | ---------- | ----------------------------------- |
-| retorno normal ou `?` no meio (5 opções × 26 rodadas)        | sim        | não (0 sobras)                      |
-| `panic!` com `panic = "unwind"` (padrão)                     | sim        | **não**: o Drop roda no unwind      |
-| `std::process::abort()`, equivalente a `panic = "abort"`     | sim        | **sim**                             |
-| SIGKILL                                                      | sim        | **sim**                             |
+| Como o processo morreu                                   | Pasta 0700 | Sobrou depois                  |
+| -------------------------------------------------------- | ---------- | ------------------------------ |
+| retorno normal ou `?` no meio (5 opções × 26 rodadas)    | sim        | não (0 sobras)                 |
+| `panic!` com `panic = "unwind"` (padrão)                 | sim        | **não**: o Drop roda no unwind |
+| `std::process::abort()`, equivalente a `panic = "abort"` | sim        | **sim**                        |
+| SIGKILL                                                  | sim        | **sim**                        |
 
 Também deixam sobra, pelo mesmo motivo: `std::process::exit`, queda de energia e OOM
 killer. Isso não é testado; é a semântica conhecida de destrutores que não rodam.

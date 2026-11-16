@@ -6,15 +6,15 @@ Fontes em massa que entram pelo inventário (ADR-014) e rodam no `sbf worker`. C
 
 ## O que é real e o que é adaptador
 
-| Parte | Estado |
-|---|---|
-| Trait `FonteDeMensagens`, mapeamento, gravador, checkpoint, ciclo, ligação no worker | **Real**, testado com fonte falsa |
-| Importação do export JSON do Telegram Desktop | **Real**, testada com export fictício |
-| Sessão do WhatsApp cifrada (AES-256-GCM, chave no chaveiro) | **Real**, testada |
-| Protocolo e lado do SBF da ponte do WhatsApp (processo externo, JSON por stdio) | **Real**, testado com canal falso e com um processo `sh` falso |
-| Pareamento por QR (fluxo, desenho do QR, Opções › Mensageiros) | **Real** no lado do SBF; o QR vem da ponte |
-| A ponte em si (o executável que fala o protocolo do WhatsApp) | **Não existe ainda.** Falta escrevê-la e validá-la com uma conta de teste. |
-| Telegram por MTProto (`grammers`) | **Não feito**; o export cobre o caso |
+| Parte                                                                                | Estado                                                                     |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Trait `FonteDeMensagens`, mapeamento, gravador, checkpoint, ciclo, ligação no worker | **Real**, testado com fonte falsa                                          |
+| Importação do export JSON do Telegram Desktop                                        | **Real**, testada com export fictício                                      |
+| Sessão do WhatsApp cifrada (AES-256-GCM, chave no chaveiro)                          | **Real**, testada                                                          |
+| Protocolo e lado do SBF da ponte do WhatsApp (processo externo, JSON por stdio)      | **Real**, testado com canal falso e com um processo `sh` falso             |
+| Pareamento por QR (fluxo, desenho do QR, Opções › Mensageiros)                       | **Real** no lado do SBF; o QR vem da ponte                                 |
+| A ponte em si (o executável que fala o protocolo do WhatsApp)                        | **Não existe ainda.** Falta escrevê-la e validá-la com uma conta de teste. |
+| Telegram por MTProto (`grammers`)                                                    | **Não feito**; o export cobre o caso                                       |
 
 Nada aqui foi conectado ao WhatsApp nem ao Telegram: os testes só usam fontes falsas.
 

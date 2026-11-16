@@ -48,21 +48,21 @@ onde parou. O incremental usa `last_synced_at` (ou 7 dias) e não usa checkpoint
 Nada de segredo em argv (aparece em `ps`) nem em log. `Debug` e mensagens de erro nunca os
 mostram.
 
-| Variável                    | Obrigatória | Uso                                                            |
-| --------------------------- | ----------- | -------------------------------------------------------------- |
-| `SBF_DATABASE_URL`          | sim         | Postgres (Neon). A mesma do `sbf servidor`.                    |
-| `GOOGLE_MAIL_CLIENT_ID`     | Gmail       | OAuth2 do Gmail (as mesmas do worker Bun).                     |
-| `GOOGLE_MAIL_CLIENT_SECRET` | Gmail       | Segredo do cliente OAuth2.                                     |
-| `GMAIL_REFRESH_TOKEN`       | Gmail       | Refresh token. Só permissão de leitura.                        |
-| `PLUGGY_CLIENT_ID`          | Pluggy      | Credenciais da Pluggy (as mesmas do worker Bun).               |
-| `PLUGGY_CLIENT_SECRET`      | Pluggy      |                                                                |
-| `BLOB_READ_WRITE_TOKEN`     | Gmail       | Vercel Blob, onde os anexos ficam (a mesma do `sbf servidor`). |
-| `LOCAL_USER_ID`             | não         | Substituto do dono, **validado** contra `public.users`.        |
-| `SBF_COLETOR_GMAIL_INTERVALO_MIN`  | não  | Minutos entre ciclos do Gmail. Padrão 15. `0` desliga.         |
-| `SBF_COLETOR_PLUGGY_INTERVALO_MIN` | não  | Minutos entre ciclos da Pluggy. Padrão 360. `0` desliga.       |
-| `SBF_COLETOR_GMAIL_ROTULO`  | não         | Rótulo varrido na agenda. Padrão `Comprovantes`.               |
-| `SBF_COLETOR_GMAIL_CONSULTA`| não         | Consulta extra do Gmail na agenda. Padrão vazia.               |
-| `SBF_COLETOR_GMAIL_COMPLETA_HORAS` | não  | De quantas em quantas horas o Gmail faz varredura completa. Padrão 168 (7 dias). |
+| Variável                           | Obrigatória | Uso                                                                              |
+| ---------------------------------- | ----------- | -------------------------------------------------------------------------------- |
+| `SBF_DATABASE_URL`                 | sim         | Postgres (Neon). A mesma do `sbf servidor`.                                      |
+| `GOOGLE_MAIL_CLIENT_ID`            | Gmail       | OAuth2 do Gmail (as mesmas do worker Bun).                                       |
+| `GOOGLE_MAIL_CLIENT_SECRET`        | Gmail       | Segredo do cliente OAuth2.                                                       |
+| `GMAIL_REFRESH_TOKEN`              | Gmail       | Refresh token. Só permissão de leitura.                                          |
+| `PLUGGY_CLIENT_ID`                 | Pluggy      | Credenciais da Pluggy (as mesmas do worker Bun).                                 |
+| `PLUGGY_CLIENT_SECRET`             | Pluggy      |                                                                                  |
+| `BLOB_READ_WRITE_TOKEN`            | Gmail       | Vercel Blob, onde os anexos ficam (a mesma do `sbf servidor`).                   |
+| `LOCAL_USER_ID`                    | não         | Substituto do dono, **validado** contra `public.users`.                          |
+| `SBF_COLETOR_GMAIL_INTERVALO_MIN`  | não         | Minutos entre ciclos do Gmail. Padrão 15. `0` desliga.                           |
+| `SBF_COLETOR_PLUGGY_INTERVALO_MIN` | não         | Minutos entre ciclos da Pluggy. Padrão 360. `0` desliga.                         |
+| `SBF_COLETOR_GMAIL_ROTULO`         | não         | Rótulo varrido na agenda. Padrão `Comprovantes`.                                 |
+| `SBF_COLETOR_GMAIL_CONSULTA`       | não         | Consulta extra do Gmail na agenda. Padrão vazia.                                 |
+| `SBF_COLETOR_GMAIL_COMPLETA_HORAS` | não         | De quantas em quantas horas o Gmail faz varredura completa. Padrão 168 (7 dias). |
 
 O dono sai do banco (a linha com `role = 'owner'`), como no Bun (`resolveOwnerId`);
 `LOCAL_USER_ID` só substitui, e um valor que não existe faz o processo falhar na largada.
@@ -153,19 +153,19 @@ de centavos (`Math.round` do JavaScript).
 
 Diferentes, de propósito:
 
-| Assunto | Bun | Rust |
-| --- | --- | --- |
-| Documento + job | duas gravações; documento sem job se o job falhar, e a fase 1 o esconde para sempre | uma transação; some tudo ou nada |
-| `ingestion_runs` (Gmail) | uma execução por varredura, mesmo vazia | só nasce no primeiro documento novo |
-| `draft_batches` (Pluggy) | um lote por sync, mesmo vazio | só nasce no primeiro draft novo |
-| Chave no blob | `<dono>/<uuid>/<nome>` | `<dono>/<sha256>/<nome>` (repetir o envio não deixa blob órfão) |
-| Falha ao ler uma mensagem | aborta a varredura inteira | conta erro e segue |
-| Falha de uma conexão Pluggy | aborta o processo, as outras conexões não rodam | conta falha, segue, sai com código 1 |
-| Checkpoint do Gmail | não usava (`ingestion_checkpoints` só na Pluggy) | `source_type = gmail`, `after:` incremental |
-| Contadores do checkpoint | lê e reescreve (corrida) | `SET col = col + n` no banco |
-| Reconciliação, regra 3 | consultava até `AAAA-MM-31`, que o Postgres recusa em meses de 28/30 dias (a reconciliação do draft falhava "sem ser crítico") | até o último dia real do mês |
-| Data torta no draft | exceção do Zod interrompe a conexão | erro do item; segue |
-| `last_synced_at` | `split("T")[0]` do texto do driver | data UTC do instante |
+| Assunto                     | Bun                                                                                                                            | Rust                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Documento + job             | duas gravações; documento sem job se o job falhar, e a fase 1 o esconde para sempre                                            | uma transação; some tudo ou nada                                |
+| `ingestion_runs` (Gmail)    | uma execução por varredura, mesmo vazia                                                                                        | só nasce no primeiro documento novo                             |
+| `draft_batches` (Pluggy)    | um lote por sync, mesmo vazio                                                                                                  | só nasce no primeiro draft novo                                 |
+| Chave no blob               | `<dono>/<uuid>/<nome>`                                                                                                         | `<dono>/<sha256>/<nome>` (repetir o envio não deixa blob órfão) |
+| Falha ao ler uma mensagem   | aborta a varredura inteira                                                                                                     | conta erro e segue                                              |
+| Falha de uma conexão Pluggy | aborta o processo, as outras conexões não rodam                                                                                | conta falha, segue, sai com código 1                            |
+| Checkpoint do Gmail         | não usava (`ingestion_checkpoints` só na Pluggy)                                                                               | `source_type = gmail`, `after:` incremental                     |
+| Contadores do checkpoint    | lê e reescreve (corrida)                                                                                                       | `SET col = col + n` no banco                                    |
+| Reconciliação, regra 3      | consultava até `AAAA-MM-31`, que o Postgres recusa em meses de 28/30 dias (a reconciliação do draft falhava "sem ser crítico") | até o último dia real do mês                                    |
+| Data torta no draft         | exceção do Zod interrompe a conexão                                                                                            | erro do item; segue                                             |
+| `last_synced_at`            | `split("T")[0]` do texto do driver                                                                                             | data UTC do instante                                            |
 
 ## O que ficou de fora
 

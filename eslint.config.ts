@@ -42,6 +42,11 @@ export default tseslint.config(
       "src/",
       "build.ts",
       "styles/",
+      // Workspace Rust do desktop (ADR-012): os .ts/.js dali são geradores de
+      // fixtures de ouro e a ponte que roda dentro do Chrome, cobertos pelos
+      // testes do cargo. `target/` é saída do cargo.
+      "crates/",
+      "target/",
     ],
   },
 );

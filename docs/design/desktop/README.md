@@ -13,42 +13,42 @@ Os dois arquivos são gerados por `scripts/desktop/gerar-temas.py` e conferidos 
 
 ## Mapeamento: token do SBF para papel do Chess
 
-| Papel (Chess)    | Token do SBF                  | Observação                                              |
-| ---------------- | ----------------------------- | ------------------------------------------------------- |
-| `surface-0`      | `--bg`                        | Fundo da janela                                         |
-| `surface-1`      | `--surface`                   | Painéis, dock, diálogos                                 |
-| `surface-2`      | `--surface-2`                 | Ribbon, cabeçalhos, campos, barra de status             |
-| `surface-3`      | `--hover-2`                   | Hover. `--hover` fica sem papel (é quase igual a surface-1) |
-| `surface-4`      | `--line`                      | Derivado (D1)                                           |
-| `border`         | `--line`                      | Decorativo. `--line-soft` fica sem papel                |
-| `border-strong`  | `--text-3`                    | Derivado (D2)                                           |
-| `ink`            | `--text`                      |                                                         |
-| `ink-muted`      | `--text-3`                    | `--text-2` e `--text-4` ficam sem papel                 |
-| `ink-disabled`   | `--text-5`                    | Isento de contraste                                     |
-| `accent`         | `--primary`                   | O verde é a cor de ação, no lugar do âmbar do Chess     |
-| `accent-hover`   | `--primary-dark`              |                                                         |
-| `accent-pressed` | derivado                      | D3                                                      |
-| `on-accent`      | `--on-primary`                |                                                         |
-| `accent-subtle`  | `--primary-soft`              |                                                         |
-| `accent-border`  | `--primary-line`              | Extra do SBF (contorno de chip), decorativo             |
-| `accent-ink`     | `--primary-ink`               |                                                         |
-| `focus-ring`     | `--text`                      | Derivado (D4)                                           |
-| `info`           | `--secondary-ink`             | Texto do azul ardósia (D5)                              |
-| `info-subtle`    | `--secondary-soft`            | Extra                                                   |
-| `info-border`    | `--secondary-line`            | Extra, decorativo                                       |
-| `success`        | `--success`                   |                                                         |
-| `success-subtle` | `--primary-soft`              | Extra, como em `toneStyles.success`                     |
-| `warning`        | `--warn`                      | Âmbar                                                   |
-| `warning-subtle` | `--warn-soft`                 | Extra                                                   |
-| `warning-border` | `--warn-line`                 | Extra, decorativo                                       |
-| `danger`         | `--danger`                    |                                                         |
-| `danger-subtle`  | `--warn-soft`                 | Extra, como em `toneStyles.danger` (o SBF não tem fundo vermelho próprio) |
-| `gold`           | `--accent`                    | Extra. O `--accent` do SBF é o dourado, não a cor de ação; por isso o nome mudou, para não colidir com o `accent` do Chess |
-| `gold-subtle`    | `--accent-soft`               | Extra                                                   |
-| `gold-ink`       | `--accent-ink`                | Extra. `--accent-ink-2` fica sem papel                  |
-| `hero-bg`, `hero-text`, `hero-sub`, `hero-accent` | `--hero-*` | Extra: faixa dos dois números principais. `--hero-soft` fica sem papel |
-| `toast-bg`, `toast-text`, `toast-icon` | `--toast-*` | Extra: aviso transitório                       |
-| `scrim`          | derivado                      | D6                                                      |
+| Papel (Chess)                                     | Token do SBF       | Observação                                                                                                                 |
+| ------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `surface-0`                                       | `--bg`             | Fundo da janela                                                                                                            |
+| `surface-1`                                       | `--surface`        | Painéis, dock, diálogos                                                                                                    |
+| `surface-2`                                       | `--surface-2`      | Ribbon, cabeçalhos, campos, barra de status                                                                                |
+| `surface-3`                                       | `--hover-2`        | Hover. `--hover` fica sem papel (é quase igual a surface-1)                                                                |
+| `surface-4`                                       | `--line`           | Derivado (D1)                                                                                                              |
+| `border`                                          | `--line`           | Decorativo. `--line-soft` fica sem papel                                                                                   |
+| `border-strong`                                   | `--text-3`         | Derivado (D2)                                                                                                              |
+| `ink`                                             | `--text`           |                                                                                                                            |
+| `ink-muted`                                       | `--text-3`         | `--text-2` e `--text-4` ficam sem papel                                                                                    |
+| `ink-disabled`                                    | `--text-5`         | Isento de contraste                                                                                                        |
+| `accent`                                          | `--primary`        | O verde é a cor de ação, no lugar do âmbar do Chess                                                                        |
+| `accent-hover`                                    | `--primary-dark`   |                                                                                                                            |
+| `accent-pressed`                                  | derivado           | D3                                                                                                                         |
+| `on-accent`                                       | `--on-primary`     |                                                                                                                            |
+| `accent-subtle`                                   | `--primary-soft`   |                                                                                                                            |
+| `accent-border`                                   | `--primary-line`   | Extra do SBF (contorno de chip), decorativo                                                                                |
+| `accent-ink`                                      | `--primary-ink`    |                                                                                                                            |
+| `focus-ring`                                      | `--text`           | Derivado (D4)                                                                                                              |
+| `info`                                            | `--secondary-ink`  | Texto do azul ardósia (D5)                                                                                                 |
+| `info-subtle`                                     | `--secondary-soft` | Extra                                                                                                                      |
+| `info-border`                                     | `--secondary-line` | Extra, decorativo                                                                                                          |
+| `success`                                         | `--success`        |                                                                                                                            |
+| `success-subtle`                                  | `--primary-soft`   | Extra, como em `toneStyles.success`                                                                                        |
+| `warning`                                         | `--warn`           | Âmbar                                                                                                                      |
+| `warning-subtle`                                  | `--warn-soft`      | Extra                                                                                                                      |
+| `warning-border`                                  | `--warn-line`      | Extra, decorativo                                                                                                          |
+| `danger`                                          | `--danger`         |                                                                                                                            |
+| `danger-subtle`                                   | `--warn-soft`      | Extra, como em `toneStyles.danger` (o SBF não tem fundo vermelho próprio)                                                  |
+| `gold`                                            | `--accent`         | Extra. O `--accent` do SBF é o dourado, não a cor de ação; por isso o nome mudou, para não colidir com o `accent` do Chess |
+| `gold-subtle`                                     | `--accent-soft`    | Extra                                                                                                                      |
+| `gold-ink`                                        | `--accent-ink`     | Extra. `--accent-ink-2` fica sem papel                                                                                     |
+| `hero-bg`, `hero-text`, `hero-sub`, `hero-accent` | `--hero-*`         | Extra: faixa dos dois números principais. `--hero-soft` fica sem papel                                                     |
+| `toast-bg`, `toast-text`, `toast-icon`            | `--toast-*`        | Extra: aviso transitório                                                                                                   |
+| `scrim`                                           | derivado           | D6                                                                                                                         |
 
 Sem papel no desktop (por ora): `--hover`, `--line-soft`, `--text-2`, `--text-4`, `--primary-soft-2`, `--primary-tint`, `--paid-bg`, `--secondary` (o pigmento puro), `--secondary-text*`, `--secondary-hover`, `--accent-ink-2`, `--hero-soft`, `--header-bg`, `--nav-bg` (translúcidos, pensados para o web). Se uma tela precisar de um deles, o papel entra nos dois arquivos, nunca como hex solto.
 
@@ -109,18 +109,18 @@ A primeira checagem reprovou 22 pares, todos em temas claros e todos em cores do
 
 "Pior par" é o menor contraste da cor entre as superfícies onde ela aparece (fundo, superfícies 1 a 3, `accent-subtle`/`primary-soft`, ou `warn-soft` no caso do `--warn`); em todos os casos o pior era sobre `primary-soft` (ou `warn-soft`).
 
-| Tema   | Token      | Antes → depois    | Pior par: antes → depois |
-| ------ | ---------- | ----------------- | ------------------------ |
-| sálvia | `--text-3` | #66736d → #616d68 | 4,24 → 4,61              |
-| sálvia | `--success`| #2f7d5a → #2d7756 | 4,28 → 4,63              |
-| ocre   | `--text-3` | #746b5a → #716858 | 4,42 → 4,61              |
-| ocre   | `--success`| #367d57 → #337552 | 4,17 → 4,63              |
-| ocre   | `--warn`   | #93601f → #905e1e | 4,50 → 4,65              |
-| azul   | `--text-3` | #63737e → #5c6b76 | 4,11 → 4,61              |
-| azul   | `--success`| #2f7d5a → #2c7554 | 4,19 → 4,66              |
-| linho  | `--text-3` | #6e6f66 → #696a61 | 4,27 → 4,60              |
-| linho  | `--success`| #3a7a5c → #377458 | 4,28 → 4,64              |
-| menta  | `--text-3` | #5f7268 → #5c6e65 | 4,37 → 4,61              |
-| menta  | `--success`| #2a8060 → #277759 | 4,10 → 4,62              |
+| Tema   | Token       | Antes → depois    | Pior par: antes → depois |
+| ------ | ----------- | ----------------- | ------------------------ |
+| sálvia | `--text-3`  | #66736d → #616d68 | 4,24 → 4,61              |
+| sálvia | `--success` | #2f7d5a → #2d7756 | 4,28 → 4,63              |
+| ocre   | `--text-3`  | #746b5a → #716858 | 4,42 → 4,61              |
+| ocre   | `--success` | #367d57 → #337552 | 4,17 → 4,63              |
+| ocre   | `--warn`    | #93601f → #905e1e | 4,50 → 4,65              |
+| azul   | `--text-3`  | #63737e → #5c6b76 | 4,11 → 4,61              |
+| azul   | `--success` | #2f7d5a → #2c7554 | 4,19 → 4,66              |
+| linho  | `--text-3`  | #6e6f66 → #696a61 | 4,27 → 4,60              |
+| linho  | `--success` | #3a7a5c → #377458 | 4,28 → 4,64              |
+| menta  | `--text-3`  | #5f7268 → #5c6e65 | 4,37 → 4,61              |
+| menta  | `--success` | #2a8060 → #277759 | 4,10 → 4,62              |
 
 Efeito colateral: qualquer cópia do hex antigo fora do `tokens.css` (por exemplo `apps/web/public/offline.html`, `#66736d`) fica defasada em relação ao tema.

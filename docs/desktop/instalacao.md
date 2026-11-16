@@ -24,11 +24,11 @@ O SmartScreen avisa porque o app não é assinado (Mais informações, Executar 
 
 O app chama três programas externos. Sem eles ele abre, mas perde a função indicada.
 
-| Programa   | Pacote Debian   | Para quê                                          | No `.deb`  |
-| ---------- | --------------- | ------------------------------------------------- | ---------- |
-| `pdftotext` | `poppler-utils` | Texto dos PDFs, inclusive os protegidos           | Depends    |
-| `qpdf`     | `qpdf`          | Decifrar PDF protegido (em memória, sem arquivo)  | Depends    |
-| `rclone`   | `rclone`        | Estante e cópia de segurança do cofre no Drive    | Recommends |
+| Programa    | Pacote Debian   | Para quê                                         | No `.deb`  |
+| ----------- | --------------- | ------------------------------------------------ | ---------- |
+| `pdftotext` | `poppler-utils` | Texto dos PDFs, inclusive os protegidos          | Depends    |
+| `qpdf`      | `qpdf`          | Decifrar PDF protegido (em memória, sem arquivo) | Depends    |
+| `rclone`    | `rclone`        | Estante e cópia de segurança do cofre no Drive   | Recommends |
 
 Para guardar segredos no chaveiro do sistema, o Linux precisa de um Secret Service
 (GNOME Keyring ou KWallet). Sem ele o app usa o arquivo de fallback, cifrado por uma senha
@@ -48,11 +48,11 @@ a cópia antes. Até a primeira decisão sua, nada muda no banco.
 
 A pasta de dados do app (nunca dentro do cofre):
 
-| Sistema | Pasta                                                   |
-| ------- | ------------------------------------------------------- |
+| Sistema | Pasta                                                                |
+| ------- | -------------------------------------------------------------------- |
 | Linux   | `$XDG_DATA_HOME/seu-bolso-feliz` ou `~/.local/share/seu-bolso-feliz` |
-| Windows | `%APPDATA%\Seu Bolso Feliz`                             |
-| macOS   | `~/Library/Application Support/Seu Bolso Feliz`         |
+| Windows | `%APPDATA%\Seu Bolso Feliz`                                          |
+| macOS   | `~/Library/Application Support/Seu Bolso Feliz`                      |
 
 - **Chaveiro**: senhas e CPF ficam no keyring do sistema (serviço "Seu Bolso Feliz"). Sem
   keyring, ficam no arquivo cifrado `segredos.cifrado` em `<pasta de dados>/chaveiro/`

@@ -146,19 +146,19 @@ consultar e baixar documentos.
 
 ## Matriz de aceite
 
-| ID    | Critério                                                                                         |
-| ----- | ------------------------------------------------------------------------------------------------ |
-| RO-01 | A senha nunca aparece no que vai à IA, em log, em argv ou no roteiro gravado                      |
-| RO-02 | Clique e envio em "Pagar", "Transferir", "PIX" etc. são bloqueados, e o roteiro aborta com motivo |
-| RO-03 | MFA ou CAPTCHA pausam e passam a vez ao usuário; Continuar retoma do passo certo                  |
+| ID    | Critério                                                                                                              |
+| ----- | --------------------------------------------------------------------------------------------------------------------- |
+| RO-01 | A senha nunca aparece no que vai à IA, em log, em argv ou no roteiro gravado                                          |
+| RO-02 | Clique e envio em "Pagar", "Transferir", "PIX" etc. são bloqueados, e o roteiro aborta com motivo                     |
+| RO-03 | MFA ou CAPTCHA pausam e passam a vez ao usuário; Continuar retoma do passo certo                                      |
 | RO-04 | O roteiro gravado roda sem IA no site falso; um site alterado faz a IA propor um conserto, que só vale após aprovação |
-| RO-05 | O arquivo baixado vira achado no inventário com origem `roteiro:`, sem duplicar                   |
-| RG-01 | Nenhum teste baixa modelo; o `Embedder` falso é determinístico                                    |
-| RG-02 | O índice é incremental: reindexar sem mudanças não recalcula embeddings                           |
-| RG-03 | Em "Perguntar", só os k trechos recuperados saem para o destinatário, e o registro fica em `saida_ia` |
-| PA-01 | Cada regra tem teste com fixture fictícia que gera exatamente o ponto esperado                    |
-| PA-02 | Um ponto não se repete enquanto aberto; resolvido ou ignorado não volta sem mudança da evidência  |
-| PA-03 | A estimativa de impacto aparece marcada como estimativa                                          |
+| RO-05 | O arquivo baixado vira achado no inventário com origem `roteiro:`, sem duplicar                                       |
+| RG-01 | Nenhum teste baixa modelo; o `Embedder` falso é determinístico                                                        |
+| RG-02 | O índice é incremental: reindexar sem mudanças não recalcula embeddings                                               |
+| RG-03 | Em "Perguntar", só os k trechos recuperados saem para o destinatário, e o registro fica em `saida_ia`                 |
+| PA-01 | Cada regra tem teste com fixture fictícia que gera exatamente o ponto esperado                                        |
+| PA-02 | Um ponto não se repete enquanto aberto; resolvido ou ignorado não volta sem mudança da evidência                      |
+| PA-03 | A estimativa de impacto aparece marcada como estimativa                                                               |
 
 ## Supervisão
 

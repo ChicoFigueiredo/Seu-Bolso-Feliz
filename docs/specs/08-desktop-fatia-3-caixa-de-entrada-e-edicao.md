@@ -30,23 +30,23 @@ O desktop passa a **escrever** no livro-caixa. Ao fim da fatia:
 
 Novas coleções, só leitura pela sincronização:
 
-| Coleção               | Tabela          | Observação                                |
-| --------------------- | --------------- | ----------------------------------------- |
-| `lotes-de-rascunhos`  | `draft_batches` | todas as do dono                          |
-| `rascunhos`           | `draft_records` | `draft_data` vai como JSON v1 já migrado  |
+| Coleção              | Tabela          | Observação                               |
+| -------------------- | --------------- | ---------------------------------------- |
+| `lotes-de-rascunhos` | `draft_batches` | todas as do dono                         |
+| `rascunhos`          | `draft_records` | `draft_data` vai como JSON v1 já migrado |
 
 Novas Ações (`Acao`), além de `MudarCategoriaDaMovimentacao`:
 
-| Ação                         | Toca                                    | Efeito no servidor                                                   |
-| ---------------------------- | --------------------------------------- | -------------------------------------------------------------------- |
-| `CorrigirRascunho`           | o rascunho                              | grava `draft_data` v1, `status = corrected`, `corrections.manual_edit` |
-| `AprovarRascunho`            | o rascunho                              | `approved` e chama `fn_materialize_draft_record` na mesma transação   |
-| `RecusarRascunho { motivo }` | o rascunho                              | `rejected`, motivo em `corrections.rejection_reason`                  |
-| `AprovarLoteDeRascunhos`     | o lote e cada rascunho pendente dele    | aprova e materializa um a um, tudo ou nada                            |
-| `EditarMovimentacao`         | a movimentação                          | descrição, data, valor (centavos), conta, fornecedor, centro, notas   |
-| `ExcluirMovimentacao`        | a movimentação e os rateios dela        | apaga as duas coisas                                                  |
-| `RatearMovimentacao`         | a movimentação e os rateios dela        | troca o conjunto de rateios inteiro; a soma tem de bater com o valor  |
-| `ConciliarRascunho { movimentacao }` | o rascunho e a movimentação     | `reconciliation_status = confirmed_duplicate`, aponta a movimentação  |
+| Ação                                 | Toca                                 | Efeito no servidor                                                     |
+| ------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------- |
+| `CorrigirRascunho`                   | o rascunho                           | grava `draft_data` v1, `status = corrected`, `corrections.manual_edit` |
+| `AprovarRascunho`                    | o rascunho                           | `approved` e chama `fn_materialize_draft_record` na mesma transação    |
+| `RecusarRascunho { motivo }`         | o rascunho                           | `rejected`, motivo em `corrections.rejection_reason`                   |
+| `AprovarLoteDeRascunhos`             | o lote e cada rascunho pendente dele | aprova e materializa um a um, tudo ou nada                             |
+| `EditarMovimentacao`                 | a movimentação                       | descrição, data, valor (centavos), conta, fornecedor, centro, notas    |
+| `ExcluirMovimentacao`                | a movimentação e os rateios dela     | apaga as duas coisas                                                   |
+| `RatearMovimentacao`                 | a movimentação e os rateios dela     | troca o conjunto de rateios inteiro; a soma tem de bater com o valor   |
+| `ConciliarRascunho { movimentacao }` | o rascunho e a movimentação          | `reconciliation_status = confirmed_duplicate`, aponta a movimentação   |
 
 A versão de base é sempre `updated_at` da linha. Uma linha que não tem `updated_at` ganha a coluna
 na migração `0005_versoes.sql`, com trigger que a atualiza.
@@ -83,18 +83,18 @@ id, excluida_em)` gravada por trigger.
 
 ## Matriz de aceite
 
-| ID     | Critério                                                                                 |
-| ------ | ---------------------------------------------------------------------------------------- |
-| CX-01  | Aprovar um rascunho cria a movimentação no Postgres de teste, pela função existente       |
-| CX-02  | Aprovar um lote com um rascunho inválido não aprova nenhum (tudo ou nada)                |
-| CX-03  | Alteração com versão de base velha é recusada e nada muda no banco                       |
-| CX-04  | Reenviar a mesma proposta devolve a mesma resposta                                       |
-| CX-05  | Ratear com soma diferente do valor é pedido inválido                                     |
-| CX-06  | Delta traz só o que mudou e as exclusões; duas leituras seguidas sem mudança vêm vazias   |
-| CX-07  | Envio de lote idempotente por `sha256`; registros viram `promovido` só após o aceite      |
-| CX-08  | A fila de alterações sobrevive a reabrir a estação e esvazia em ordem                    |
-| CX-09  | Contrato v1 continua aceito (a estação da fatia 2 não quebra)                            |
-| CX-10  | A janela mostra pendente, aceita e recusada; atalhos A, R e Shift+A funcionam            |
+| ID    | Critério                                                                                |
+| ----- | --------------------------------------------------------------------------------------- |
+| CX-01 | Aprovar um rascunho cria a movimentação no Postgres de teste, pela função existente     |
+| CX-02 | Aprovar um lote com um rascunho inválido não aprova nenhum (tudo ou nada)               |
+| CX-03 | Alteração com versão de base velha é recusada e nada muda no banco                      |
+| CX-04 | Reenviar a mesma proposta devolve a mesma resposta                                      |
+| CX-05 | Ratear com soma diferente do valor é pedido inválido                                    |
+| CX-06 | Delta traz só o que mudou e as exclusões; duas leituras seguidas sem mudança vêm vazias |
+| CX-07 | Envio de lote idempotente por `sha256`; registros viram `promovido` só após o aceite    |
+| CX-08 | A fila de alterações sobrevive a reabrir a estação e esvazia em ordem                   |
+| CX-09 | Contrato v1 continua aceito (a estação da fatia 2 não quebra)                           |
+| CX-10 | A janela mostra pendente, aceita e recusada; atalhos A, R e Shift+A funcionam           |
 
 Todos os testes usam o Postgres de teste em Docker com dados **fictícios**
 (`scripts/desktop/postgres-de-teste.sh`).

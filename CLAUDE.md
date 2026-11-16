@@ -164,13 +164,13 @@ Slice 1 (inventory on the desktop) follows `docs/specs/06-desktop-fatia-1-invent
 its acceptance report is `docs/specs/06-desktop-fatia-1-aceite.md`. Identifiers are all
 in Portuguese without accents (ADR-018), including mechanical ones.
 
-| Crate | What it is |
-|---|---|
-| `crates/sbf-inventario` | Owns `inventario.sqlite`: migrations (Bun schema "2" = migration 1), append-only decision log, projection, undo, `reprojetar`, lots, the 12 views, §11 reports, relations, totals and rastro. Seams: `referencia.rs` (`Tipo`, `Ref`), `consulta.rs` (`Consulta`), `comando.rs` (`Comandos`). |
-| `crates/sbf-janela` | The window content on top of `bancada-casca`: areas, item pages, links, Rastro, §10 actions, lots, reports, tools. `demonstracao` is a fictional in-memory dataset. |
-| `crates/sbf` | The binary: `sbf --demonstracao` or `sbf --inventario <vault-folder>`. |
-| `crates/sbf-chaveiro`, `crates/sbf-pdf` | Keyring import of the old `cofre.enc`; protected PDFs decrypted in memory (never a decrypted copy on disk, never a password in argv). |
-| `crates/sbf-estante`, `crates/sbf-disco` | Drive shelf and encrypted backup via rclone; unencrypted-disk warning. |
+| Crate                                    | What it is                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/sbf-inventario`                  | Owns `inventario.sqlite`: migrations (Bun schema "2" = migration 1), append-only decision log, projection, undo, `reprojetar`, lots, the 12 views, §11 reports, relations, totals and rastro. Seams: `referencia.rs` (`Tipo`, `Ref`), `consulta.rs` (`Consulta`), `comando.rs` (`Comandos`). |
+| `crates/sbf-janela`                      | The window content on top of `bancada-casca`: areas, item pages, links, Rastro, §10 actions, lots, reports, tools. `demonstracao` is a fictional in-memory dataset.                                                                                                                          |
+| `crates/sbf`                             | The binary: `sbf --demonstracao` or `sbf --inventario <vault-folder>`.                                                                                                                                                                                                                       |
+| `crates/sbf-chaveiro`, `crates/sbf-pdf`  | Keyring import of the old `cofre.enc`; protected PDFs decrypted in memory (never a decrypted copy on disk, never a password in argv).                                                                                                                                                        |
+| `crates/sbf-estante`, `crates/sbf-disco` | Drive shelf and encrypted backup via rclone; unencrypted-disk warning.                                                                                                                                                                                                                       |
 
 The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (private on GitHub:
 `ChicoFigueiredo/bancada`; `bancada-casca`,

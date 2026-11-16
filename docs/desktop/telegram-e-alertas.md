@@ -25,19 +25,19 @@ polling e precisa reiniciar sem atrasar as coletas.
 
 ## Variáveis
 
-| variável | para quê |
-| --- | --- |
-| `SBF_DATABASE_URL` | o Postgres (obrigatória) |
-| `SBF_TELEGRAM_TOKEN` | o token do BotFather (obrigatória para servir) |
-| `SBF_TELEGRAM_CHATS` | chat_ids autorizados sem código, separados por vírgula (opcional) |
-| `BLOB_READ_WRITE_TOKEN` | o armazenamento dos documentos que chegam pelo bot |
-| `LOCAL_USER_ID` | substituto validado do dono (opcional; o padrão é o `owner` do banco) |
-| `SBF_ALERTAS_DIAS` | avisa conta que vence em até N dias (padrão `3`) |
-| `SBF_ALERTAS_HORAS` | horários da agenda, de São Paulo, `HH:MM,HH:MM` (padrão `08:00`) |
-| `SBF_ALERTAS_SILENCIO` | janela sem aviso, `HH:MM-HH:MM` (padrão `22:00-07:00`) |
-| `SBF_ALERTAS_RESUMO` | `1` liga o resumo diário, no primeiro horário do dia |
-| `SBF_ALERTAS_LIMIAR_PERCENTUAL` | gasto fora do padrão: % acima da média (padrão `50`) |
-| `SBF_ALERTAS_LIMIAR_MINIMO` | gasto fora do padrão: centavos acima da média (padrão `10000`) |
+| variável                        | para quê                                                              |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `SBF_DATABASE_URL`              | o Postgres (obrigatória)                                              |
+| `SBF_TELEGRAM_TOKEN`            | o token do BotFather (obrigatória para servir)                        |
+| `SBF_TELEGRAM_CHATS`            | chat_ids autorizados sem código, separados por vírgula (opcional)     |
+| `BLOB_READ_WRITE_TOKEN`         | o armazenamento dos documentos que chegam pelo bot                    |
+| `LOCAL_USER_ID`                 | substituto validado do dono (opcional; o padrão é o `owner` do banco) |
+| `SBF_ALERTAS_DIAS`              | avisa conta que vence em até N dias (padrão `3`)                      |
+| `SBF_ALERTAS_HORAS`             | horários da agenda, de São Paulo, `HH:MM,HH:MM` (padrão `08:00`)      |
+| `SBF_ALERTAS_SILENCIO`          | janela sem aviso, `HH:MM-HH:MM` (padrão `22:00-07:00`)                |
+| `SBF_ALERTAS_RESUMO`            | `1` liga o resumo diário, no primeiro horário do dia                  |
+| `SBF_ALERTAS_LIMIAR_PERCENTUAL` | gasto fora do padrão: % acima da média (padrão `50`)                  |
+| `SBF_ALERTAS_LIMIAR_MINIMO`     | gasto fora do padrão: centavos acima da média (padrão `10000`)        |
 
 O token nunca aparece em log, `Debug` nem mensagem de erro (a Bot API o leva na URL; os erros
 de rede são impressos sem ela).
@@ -76,13 +76,13 @@ abre é recusado com a razão.
 
 ## Alertas
 
-| alerta | regra |
-| --- | --- |
-| conta a vencer | compromisso aberto (saída não confirmada, ocorrência pendente de recorrente, fatura de cartão em aberto) que vence em até N dias |
-| conta vencida | o mesmo, com vencimento no passado (até 90 dias) |
-| cobrança duplicada | mesmo fornecedor e mesmo valor, mais de uma vez no mesmo ciclo (atual e anterior); parcelas ficam de fora |
+| alerta               | regra                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| conta a vencer       | compromisso aberto (saída não confirmada, ocorrência pendente de recorrente, fatura de cartão em aberto) que vence em até N dias                  |
+| conta vencida        | o mesmo, com vencimento no passado (até 90 dias)                                                                                                  |
+| cobrança duplicada   | mesmo fornecedor e mesmo valor, mais de uma vez no mesmo ciclo (atual e anterior); parcelas ficam de fora                                         |
 | gasto fora do padrão | gasto da categoria no ciclo acima da média dos 3 ciclos anteriores + limiar (50% e R$ 100,00 por padrão), só com histórico de pelo menos 2 ciclos |
-| sugestões da triagem | **não existe na VPS**: as sugestões prontas são locais. O ponto de extensão é `alertas::FonteDeAlertas`; hoje nenhuma fonte extra está ligada |
+| sugestões da triagem | **não existe na VPS**: as sugestões prontas são locais. O ponto de extensão é `alertas::FonteDeAlertas`; hoje nenhuma fonte extra está ligada     |
 
 As duas primeiras portam os compromissos da tela Hoje (`painel-hoje.ts`) sem o corte do
 ciclo, para não perder o vencimento do ciclo seguinte nem a vencida de ciclo antigo. As duas
@@ -97,11 +97,11 @@ seguintes são novas: o domínio TS não tinha regra de alerta.
 
 ## Nível de confiança (ADR-015)
 
-| nível | o que sai |
-| --- | --- |
+| nível              | o que sai                                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | mascarado (padrão) | nome do fornecedor e valor; nenhuma sequência de 6 ou mais dígitos (conta, cartão, CPF, linha digitável) vira `•••`; sem o nome da conta |
-| parcial | os mesmos números, com os 4 últimos dígitos; com o nome da conta |
-| completo | o texto como está no livro |
+| parcial            | os mesmos números, com os 4 últimos dígitos; com o nome da conta                                                                         |
+| completo           | o texto como está no livro                                                                                                               |
 
 A tabela `canais_saidas` registra cada mensagem: destinatário, tipo, nível, tamanho em bytes,
 se foi entregue e quando. **Nunca o texto.** A migração é `packages/db/migrations/0006_canais.sql`

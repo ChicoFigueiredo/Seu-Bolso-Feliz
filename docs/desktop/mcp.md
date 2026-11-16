@@ -47,18 +47,18 @@ Reinicie o Claude Desktop depois de salvar.
 Todas devolvem JSON enxuto. As listas são paginadas (`limite` de 1 a 100, padrão 25; `deslocamento`;
 a resposta traz `total` e `proximo_deslocamento` enquanto houver mais). Valores em centavos.
 
-| Ferramenta | Para quê |
-| --- | --- |
-| `inventario_resumo` | Totais por estado, registros sem categoria, decididos por você, sugestões abertas. |
-| `buscar_registros` | Filtros: `texto`, `fornecedor`, `categoria`, `de`/`ate`, `estado`, `sem_categoria`. |
-| `ver_registro` | Um registro com sub-registros, sugestões abertas e decisões. |
-| `buscar_achados` | Filtros: `estado`, `tipo`, `texto` (arquivo, assunto, fornecedor). |
-| `ver_texto_do_achado` | Texto extraído, truncado como na triagem (3000 do começo, 1000 do fim). |
-| `fornecedores` | Contagem, quantos sem categoria e a categoria que você já fixou. |
-| `decisoes_recentes` | O log das suas decisões, para o Claude imitar o seu critério. |
-| `livro_movimentacoes` | Movimentações do cache do livro-caixa, com categoria e conta por nome. |
-| `sugerir` | Grava sugestões `{alvo_tipo, alvo_id, campo, valor, confianca, justificativa}`. |
-| `sugestoes_abertas` | O que está esperando a sua confirmação. |
+| Ferramenta            | Para quê                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `inventario_resumo`   | Totais por estado, registros sem categoria, decididos por você, sugestões abertas.  |
+| `buscar_registros`    | Filtros: `texto`, `fornecedor`, `categoria`, `de`/`ate`, `estado`, `sem_categoria`. |
+| `ver_registro`        | Um registro com sub-registros, sugestões abertas e decisões.                        |
+| `buscar_achados`      | Filtros: `estado`, `tipo`, `texto` (arquivo, assunto, fornecedor).                  |
+| `ver_texto_do_achado` | Texto extraído, truncado como na triagem (3000 do começo, 1000 do fim).             |
+| `fornecedores`        | Contagem, quantos sem categoria e a categoria que você já fixou.                    |
+| `decisoes_recentes`   | O log das suas decisões, para o Claude imitar o seu critério.                       |
+| `livro_movimentacoes` | Movimentações do cache do livro-caixa, com categoria e conta por nome.              |
+| `sugerir`             | Grava sugestões `{alvo_tipo, alvo_id, campo, valor, confianca, justificativa}`.     |
+| `sugestoes_abertas`   | O que está esperando a sua confirmação.                                             |
 
 `sugerir` valida item a item e devolve o motivo de cada recusa. Recusa alvo inexistente, item que
 você já decidiu, registro promovido, campo fora da lista da triagem (achado: `e_financeiro`,

@@ -11,12 +11,12 @@ passa por cima de decisão sua.
 
 ## Decisões do CEO (2026-11-14)
 
-| #  | Decisão                                                                                       |
-| -- | --------------------------------------------------------------------------------------------- |
-| D1 | **Rota principal:** a assinatura Claude Max do CEO, chamando o Claude Code em modo headless (`claude -p`), sem custo por token. **Reserva:** o OpenRouter, com chave no chaveiro e teto de gasto. |
-| D2 | **Nível de confiança** do destinatário "triagem" é **completo** (ADR-015 item 1): o texto extraído vai inteiro. A imagem só vai quando não há texto. |
-| D3 | A IA sugere e o CEO confirma em lote; nada se aplica sozinho.                                 |
-| D4 | Piloto de 200 itens antes da rodada inteira, medindo acerto e consumo.                        |
+| #   | Decisão                                                                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | **Rota principal:** a assinatura Claude Max do CEO, chamando o Claude Code em modo headless (`claude -p`), sem custo por token. **Reserva:** o OpenRouter, com chave no chaveiro e teto de gasto. |
+| D2  | **Nível de confiança** do destinatário "triagem" é **completo** (ADR-015 item 1): o texto extraído vai inteiro. A imagem só vai quando não há texto.                                              |
+| D3  | A IA sugere e o CEO confirma em lote; nada se aplica sozinho.                                                                                                                                     |
+| D4  | Piloto de 200 itens antes da rodada inteira, medindo acerto e consumo.                                                                                                                            |
 
 ## Como gasta pouco
 
@@ -59,9 +59,9 @@ fica gravado.**
 
 ## O que a IA sugere
 
-| Para            | Campos sugeridos                                                                  |
-| --------------- | --------------------------------------------------------------------------------- |
-| Achado pendente | `e_financeiro` (sim, não ou incerto), tipo de documento, fornecedor, data-chave, valor |
+| Para            | Campos sugeridos                                                                                      |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| Achado pendente | `e_financeiro` (sim, não ou incerto), tipo de documento, fornecedor, data-chave, valor                |
 | Registro        | categoria, fornecedor normalizado, conta provável, tipo, e se parece duplicata de outro registro (id) |
 
 Cada sugestão traz `confianca` (de 0 a 1) e uma justificativa curta (até 140 caracteres) que
@@ -71,10 +71,10 @@ aparece na tela.
 
 - **`sugestao_ia`:**
   `(id, alvo_tipo, alvo_id, campo, valor_json, confianca, justificativa, modelo, prompt_versao,
-  rodada_id, criada_em, estado CHECK (estado IN ('aberta','aceita','recusada','obsoleta')))`.
+rodada_id, criada_em, estado CHECK (estado IN ('aberta','aceita','recusada','obsoleta')))`.
   Uma sugestão fica `obsoleta` quando o usuário decide aquele campo por outro caminho.
 - **`rodada_ia`:** `(id, iniciada_em, terminada_em, itens, chamadas, custo_nominal_centavos_usd,
-  provedor, situacao)`.
+provedor, situacao)`.
 - **`saida_ia`:** o registro do que saiu (veja acima).
 - **`cache_ia`:** `(chave, resposta_json, criada_em)`.
 
@@ -93,16 +93,16 @@ Aceitar sugestões em lote grava **uma decisão por item**, pelo `Comandos` exis
 
 ## Matriz de aceite
 
-| ID    | Critério                                                                                  |
-| ----- | ----------------------------------------------------------------------------------------- |
-| IA-01 | Itens com decisão do usuário ou `promovido` nunca entram na fila                          |
-| IA-02 | O fornecedor com categoria aprendida é resolvido sem chamada                              |
-| IA-03 | Resposta inválida tenta de novo uma vez e depois vira "não classificado"                  |
-| IA-04 | Repetir uma rodada sobre os mesmos itens faz zero chamadas (cache)                        |
-| IA-05 | O prompt nunca aparece em argv nem em log; `saida_ia` não guarda texto                    |
+| ID    | Critério                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------ |
+| IA-01 | Itens com decisão do usuário ou `promovido` nunca entram na fila                           |
+| IA-02 | O fornecedor com categoria aprendida é resolvido sem chamada                               |
+| IA-03 | Resposta inválida tenta de novo uma vez e depois vira "não classificado"                   |
+| IA-04 | Repetir uma rodada sobre os mesmos itens faz zero chamadas (cache)                         |
+| IA-05 | O prompt nunca aparece em argv nem em log; `saida_ia` não guarda texto                     |
 | IA-06 | Um erro de limite pausa e retoma; o OpenRouter só entra se estiver ligado e abaixo do teto |
-| IA-07 | Aceitar em lote grava uma decisão por item, e o desfazer funciona                         |
-| IA-08 | Uma decisão do usuário depois da sugestão a torna `obsoleta`                              |
+| IA-07 | Aceitar em lote grava uma decisão por item, e o desfazer funciona                          |
+| IA-08 | Uma decisão do usuário depois da sugestão a torna `obsoleta`                               |
 | IA-09 | O piloto de 200 itens mostra acerto contra as suas decisões já tomadas e o consumo         |
 
 ## Agente contínuo (pedido do CEO em 2026-11-14; entra com o `sbf worker`, onda B)
