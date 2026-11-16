@@ -20,7 +20,11 @@ use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
 use sbf_pdf::texto::{LIMITE_DO_TEXTO, cortar_como_o_js, impressao_canonica};
 use sbf_pdf::{Desfecho, Ferramentas, FonteDeSegredos, OpcoesDaRodada, PdfProtegido};
-use sbf_planejamento::{Banco, Planejamento as _, PlanejamentoSqlite, SemSaldos, TipoDeDocumento};
+use sbf_planejamento::{
+    Banco, Centavos, Competencia, Conciliacao, Data, Planejamento, PlanejamentoSqlite, Recorrente,
+    SemSaldos, TipoDeDocumento,
+};
+use sbf_planilha::movimentos::MovimentosDaPluggy;
 use sbf_triagem::Alvo;
 use sbf_triagem::rodada::{
     ConfigDaRodada, Progresso, RastroDeFalhas, SituacaoDaRodada, configuracao_da_fila, rodar,
@@ -650,7 +654,8 @@ impl ReconhecedorDoCofre {
             return Situacao::Pulada("o cofre ainda não tem planejamento".to_owned());
         }
         let plan = match Banco::abrir(&caminho) {
-            Ok(b) => PlanejamentoSqlite::novo(b, Box::new(SemSaldos)),
+            Ok(b) => PlanejamentoSqlite::novo(b, Box::new(SemSaldos))
+                .com_movimentos(Box::new(MovimentosDaPluggy::do_cofre(&self.cofre))),
             Err(_) => return Situacao::Falhou("não deu para abrir o planejamento".to_owned()),
         };
         let recorrente = match recorrente_do_salario(&plan, None) {
@@ -709,32 +714,69 @@ impl ReconhecedorDoCofre {
                 uso: Box::new(uso),
             });
         }
-        if let (Some(credito), Some(liquido)) = (c.credito, c.liquido) {
-            // O Salário do mês ainda sem pagamento informado nem conciliação.
-            match plan.proximas(&recorrente.id, c.pagamento, 1, credito) {
-                Ok(ocorrencias) => {
-                    if let Some(o) = ocorrencias.iter().find(|o| {
-                        o.id.competencia == c.pagamento
-                            && o.pago_informado.is_none()
-                            && o.conciliado.is_none()
-                    }) {
-                        sugestoes.push(Sugestao::InformarRecebido {
-                            rotulo: format!(
-                                "Informar recebido em {:02}/{:02} pelo líquido",
-                                credito.dia, credito.mes
-                            ),
-                            ocorrencia: o.id.clone(),
-                            valor: liquido,
-                            data: credito,
-                        });
-                    }
-                }
-                Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
-            }
+        // O crédito não se adivinha pela data impressa no contracheque: se o extrato tem o
+        // crédito, sugere-se conciliar com ele; senão, nada.
+        match sugerir_conciliacao(&plan, &recorrente, c.pagamento, c.liquido) {
+            Ok(Some(s)) => sugestoes.push(s),
+            Ok(None) => {}
+            Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
         }
         estado.sugestoes = sugestoes;
         Situacao::Feita
     }
+}
+
+/// A sugestão de conciliar o recorrente do salário com o crédito do extrato, se há um só
+/// candidato com pelo menos duas das três provas (documento, valor exato do líquido, conta
+/// ou assinatura). Empate no topo não sugere nada; ocorrência já conciliada também não.
+fn sugerir_conciliacao(
+    plan: &PlanejamentoSqlite,
+    recorrente: &Recorrente,
+    competencia: Competencia,
+    liquido: Option<Centavos>,
+) -> Result<Option<Sugestao>, sbf_planejamento::ErroDoPlanejamento> {
+    let hoje = Data::hoje_em_sao_paulo();
+    let Some(ocorrencia) = plan
+        .proximas(&recorrente.id, competencia, 1, hoje)?
+        .into_iter()
+        .find(|o| o.id.competencia == competencia && o.conciliado.is_none())
+    else {
+        return Ok(None);
+    };
+    let candidatos = plan.candidatos_de_conciliacao(&ocorrencia.id)?;
+    // 1 (o documento é o contracheque deste mês) + o valor exato + a conta ou a assinatura.
+    let pontuados: Vec<(u8, &sbf_planejamento::MovimentoCandidato)> = candidatos
+        .iter()
+        .filter(|c| c.movimento.valor.0 > 0)
+        .map(|c| {
+            let exato = liquido.is_some_and(|l| c.movimento.valor == l);
+            let conta = c.mesma_conta || c.bate_assinatura;
+            (1 + u8::from(exato) + u8::from(conta), c)
+        })
+        .filter(|(provas, _)| *provas >= 2)
+        .collect();
+    let Some(melhor) = pontuados.iter().map(|(p, _)| *p).max() else {
+        return Ok(None);
+    };
+    let mut do_topo = pontuados.iter().filter(|(p, _)| *p == melhor);
+    let (Some((provas, c)), None) = (do_topo.next(), do_topo.next()) else {
+        return Ok(None);
+    };
+    let m = &c.movimento;
+    Ok(Some(Sugestao::Conciliar {
+        rotulo: format!(
+            "Conciliar o {} · {:02}/{} com o crédito de {:02}/{:02} no extrato",
+            recorrente.nome, competencia.mes, competencia.ano, m.data.dia, m.data.mes
+        ),
+        conciliacao: Conciliacao {
+            ocorrencia: ocorrencia.id,
+            movimento: m.movimento.clone(),
+            valor: Centavos(m.valor.0.abs()),
+            data: m.data,
+            confirmada: false,
+        },
+        provas: *provas,
+    }))
 }
 
 struct SoltarAoSair<'a>(&'a AtomicBool);

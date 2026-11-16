@@ -112,7 +112,8 @@ impl AppDoInventario {
                             sbf_planejamento::PlanejamentoSqlite::novo(
                                 banco,
                                 crate::mcp::saldos_do_cofre(&self.pasta),
-                            ),
+                            )
+                            .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
                         )),
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }

@@ -287,11 +287,18 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
                         ))?;
                     }
                 }
-                Sugestao::InformarRecebido { data, .. } => {
+                Sugestao::Conciliar {
+                    conciliacao,
+                    provas,
+                    ..
+                } => {
                     es(writeln!(
                         saida,
-                        "  credito em {:02}/{:02}/{:04}",
-                        data.dia, data.mes, data.ano
+                        "  credito em {:02}/{:02}/{:04} provas={provas}/{}",
+                        conciliacao.data.dia,
+                        conciliacao.data.mes,
+                        conciliacao.data.ano,
+                        sbf_reconhecimento::PROVAS_POSSIVEIS
                     ))?;
                 }
                 Sugestao::Vincular { .. } => {}

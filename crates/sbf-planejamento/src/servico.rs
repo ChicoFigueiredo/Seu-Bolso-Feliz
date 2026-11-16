@@ -8,19 +8,23 @@ use std::fmt;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+mod extrato;
+
 use crate::banco::{
     self, Banco, Dados, agora_unix, carregar_dados, carregar_um, de_json, de_rfc3339, json,
     novo_id, rfc3339,
 };
+use crate::conciliacao::normalizar;
 use crate::escrita::aplicar_na;
 use crate::projecao::{projetar_competencias_desde, projetar_desde};
 use crate::resumo;
 use crate::{
-    Alteracao, AlvoDoDocumento, Autor, Centavos, Competencia, Composicao, Conciliacao, Controle,
-    Data, DocumentoVinculado, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaOcorrencia,
-    EstadoDaProposta, Excecao, ExcecaoGravada, Filtro, FonteDeSaldos, Grupo, HORIZONTE_MESES,
-    Natureza, Ocorrencia, OrigemImportada, Periodo, Planejamento, Proposta, Recibo, Recorrente,
-    Resultado, Simulacao, TotaisDoMes,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Centavos, Competencia, Composicao, Conciliacao,
+    ContaDoPlanejamento, Controle, Data, DocumentoVinculado, EntradaDoHistorico,
+    ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta, Excecao, ExcecaoGravada, Filtro,
+    FonteDeMovimentos, FonteDeSaldos, Grupo, HORIZONTE_MESES, MovimentoCandidato, Natureza,
+    Ocorrencia, OrigemImportada, ParDeConta, Periodo, Planejamento, Proposta, Recibo, Recorrente,
+    Resultado, SemMovimentos, Simulacao, TotaisDoMes,
 };
 
 /// Quantos meses para trás o controle procura o que está em atraso.
@@ -33,6 +37,8 @@ const VALIDADE_DA_PROPOSTA_S: i64 = 7 * 24 * 3600;
 pub struct PlanejamentoSqlite {
     pub banco: Banco,
     pub saldos: Box<dyn FonteDeSaldos>,
+    /// O extrato (a Pluggy no inventário); sem ele, nenhuma sugestão de conciliação.
+    pub movimentos: Box<dyn FonteDeMovimentos>,
     relogio: Box<dyn Fn() -> i64 + Send>,
 }
 
@@ -49,8 +55,16 @@ impl PlanejamentoSqlite {
         PlanejamentoSqlite {
             banco,
             saldos,
+            movimentos: Box::new(SemMovimentos),
             relogio: Box::new(agora_unix),
         }
+    }
+
+    /// Liga o extrato: de onde vêm os candidatos, as sugestões de conciliação e as contas.
+    #[must_use]
+    pub fn com_movimentos(mut self, movimentos: Box<dyn FonteDeMovimentos>) -> PlanejamentoSqlite {
+        self.movimentos = movimentos;
+        self
     }
 
     /// Troca o relógio (segundos Unix UTC): os testes fixam o "agora" das propostas e do
@@ -69,28 +83,6 @@ impl PlanejamentoSqlite {
 // ---------------------------------------------------------------------------------------
 // Leitura: ajudantes
 // ---------------------------------------------------------------------------------------
-
-fn sem_acento(c: char) -> char {
-    match c {
-        'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
-        'é' | 'è' | 'ê' | 'ë' => 'e',
-        'í' | 'ì' | 'î' | 'ï' => 'i',
-        'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
-        'ú' | 'ù' | 'û' | 'ü' => 'u',
-        'ç' => 'c',
-        'ñ' => 'n',
-        outro => outro,
-    }
-}
-
-/// Minúsculas e sem acento: a busca acha "Empréstimo" por "emprestimo" e "EMPRÉSTIMO".
-fn normalizar(texto: &str) -> String {
-    texto
-        .chars()
-        .flat_map(char::to_lowercase)
-        .map(sem_acento)
-        .collect()
-}
 
 fn passa_no_filtro(o: &Ocorrencia, filtro: Filtro, hoje: Data) -> bool {
     use EstadoDaOcorrencia::*;
@@ -826,6 +818,33 @@ impl Planejamento for PlanejamentoSqlite {
         competencia: Competencia,
     ) -> Resultado<Option<Composicao>> {
         banco::ler_composicao(self.banco.conexao(), recorrente, competencia)
+    }
+
+    fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
+        extrato::contas(self)
+    }
+
+    fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
+        extrato::pares_sugeridos(self)
+    }
+
+    fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
+        Ok(extrato::contas_do_extrato(self))
+    }
+
+    fn assinatura(&self, recorrente: &str) -> Resultado<Option<Assinatura>> {
+        extrato::assinatura(self, recorrente)
+    }
+
+    fn candidatos_de_conciliacao(
+        &self,
+        ocorrencia: &crate::IdOcorrencia,
+    ) -> Resultado<Vec<MovimentoCandidato>> {
+        extrato::candidatos(self, ocorrencia)
+    }
+
+    fn buscar_conciliacoes(&mut self, periodo: &Periodo, hoje: Data) -> Resultado<usize> {
+        extrato::buscar(self, periodo, hoje)
     }
 
     /// Para uma ocorrência, devolve também os documentos da regra (o recorrente): um

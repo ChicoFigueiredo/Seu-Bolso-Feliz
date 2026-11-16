@@ -1,85 +1,29 @@
-//! Sugestões de conciliação: para cada ocorrência do período, procura no inventário a
-//! transação de valor igual (ou bem próximo) na janela do vencimento e grava
-//! `Conciliar { confirmada: false }` (D15). Uma transação serve a uma só ocorrência.
+//! Sugestões de conciliação para o CLI (`sbf planejamento conciliar`): um adaptador fino sobre
+//! o módulo puro [`sbf_planejamento::conciliacao`]. Para cada ocorrência do período, procura no
+//! inventário o movimento de valor igual (ou bem próximo) na janela do vencimento, na conta
+//! certa quando há par confirmado, ou pela assinatura, e grava
+//! `Conciliar { confirmada: false }` (D15). Um movimento serve a uma só ocorrência.
+//!
+//! O serviço (`Planejamento::buscar_conciliacoes`) faz o mesmo sem passar por aqui; este
+//! adaptador existe porque o CLI ainda aceita o mapa de fornecedores da planilha, que corta
+//! os candidatos por fornecedor.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
+use sbf_planejamento::conciliacao::{self, Alvo, pode_conciliar, tem_como_casar, valor_esperado};
 use sbf_planejamento::{
-    Alteracao, Autor, Centavos, Conciliacao, Data, EstadoDaOcorrencia, Filtro, Natureza,
-    Ocorrencia, Periodo, Planejamento, Sentido,
+    Alteracao, Autor, Conciliacao, Data, Filtro, MovimentoDoExtrato, Ocorrencia, Periodo,
+    Planejamento,
 };
 
+use crate::Resultado;
 use crate::mapa::Mapa;
+use crate::movimentos::registros_entre;
 use crate::texto::normalizar;
-use crate::{ErroPlanilha, Resultado};
 
-#[derive(Debug, Clone)]
-pub struct ConfigConciliacao {
-    /// Dias antes e depois do vencimento.
-    pub janela_dias: i64,
-    /// Tolerância relativa, em %.
-    pub tolerancia_pct: i64,
-    /// Tolerância absoluta mínima. Vale a maior das duas.
-    pub tolerancia_minima: Centavos,
-    /// `tipo` do inventário que nunca é pagamento de compromisso.
-    pub tipos_excluidos: Vec<String>,
-}
-
-impl Default for ConfigConciliacao {
-    fn default() -> Self {
-        ConfigConciliacao {
-            janela_dias: 5,
-            tolerancia_pct: 1,
-            tolerancia_minima: Centavos(100),
-            tipos_excluidos: [
-                "transferencia_interna",
-                "pagamento_fatura",
-                "investimento",
-                "estorno",
-            ]
-            .map(str::to_owned)
-            .to_vec(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Transacao {
-    id: i64,
-    referencia: String,
-    data: Data,
-    valor: i64,
-    fornecedor: Option<String>,
-}
-
-fn erro(e: rusqlite::Error) -> ErroPlanilha {
-    ErroPlanilha::Inventario(e.to_string())
-}
-
-fn conta_para_conciliar(o: &Ocorrencia) -> bool {
-    !matches!(o.natureza, Natureza::DescontoEmFolha)
-        && o.conciliado.is_none()
-        && !o.sugestao_de_conciliacao
-        && matches!(
-            o.estado,
-            EstadoDaOcorrencia::Prevista
-                | EstadoDaOcorrencia::PagoInformado
-                | EstadoDaOcorrencia::Parcial
-                | EstadoDaOcorrencia::EmAtraso
-                | EstadoDaOcorrencia::Adiada
-        )
-}
-
-fn entra(o: &Ocorrencia) -> bool {
-    matches!(
-        o.natureza,
-        Natureza::Entrada
-            | Natureza::Passagem {
-                sentido: Sentido::Entrada
-            }
-    )
-}
+/// Os parâmetros da conciliação (os do módulo puro).
+pub type ConfigConciliacao = conciliacao::Config;
 
 /// Calcula as sugestões, sem gravar.
 pub fn sugerir(
@@ -91,84 +35,80 @@ pub fn sugerir(
     hoje: Data,
 ) -> Resultado<Vec<Conciliacao>> {
     let controle = plan.controle(periodo, Filtro::Todos, None, hoje)?;
-    let ocorrencias: Vec<&Ocorrencia> = controle
+    let pares: HashMap<String, String> = plan
+        .contas()?
+        .into_iter()
+        .filter_map(|c| Some((c.apelido, c.conta_do_extrato?)))
+        .collect();
+    let mut alvos = Vec::new();
+    for o in controle
         .linhas
         .iter()
         .chain(controle.atrasadas_de_antes.iter())
-        .filter(|o| {
-            conta_para_conciliar(o) && o.previsto.or(o.pago_informado).is_some_and(|v| v.0 > 0)
-        })
-        .collect();
+        .filter(|o| pode_conciliar(o))
+    {
+        let composicao = plan.composicao(&o.id.recorrente, o.id.competencia)?;
+        let alvo = Alvo {
+            esperado: valor_esperado(o, composicao.as_ref()),
+            conta_exigida: o
+                .conta
+                .as_deref()
+                .and_then(|a| pares.get(a.trim()))
+                .cloned(),
+            assinatura: plan.assinatura(&o.id.recorrente)?,
+            ocorrencia: o.clone(),
+        };
+        if tem_como_casar(&alvo) {
+            alvos.push(alvo);
+        }
+    }
     let (Some(menor), Some(maior)) = (
-        ocorrencias.iter().map(|o| o.vencimento).min(),
-        ocorrencias.iter().map(|o| o.vencimento).max(),
+        alvos.iter().map(|a| a.ocorrencia.vencimento).min(),
+        alvos.iter().map(|a| a.ocorrencia.vencimento).max(),
     ) else {
         return Ok(Vec::new());
     };
-    let de = menor.somar_dias(-cfg.janela_dias);
-    let ate = maior.somar_dias(cfg.janela_dias);
-    let transacoes = transacoes_entre(conn, de, ate, cfg)?;
-
-    // Todos os pares possíveis, do melhor ao pior; cada lado serve uma vez.
-    let mut pares: Vec<(i64, i64, usize, usize)> = Vec::new(); // (diferença, dias, ocorrência, transação)
-    for (i, o) in ocorrencias.iter().enumerate() {
-        let alvo = o.previsto.or(o.pago_informado).map_or(0, |v| v.0);
-        let tolerancia = (alvo * cfg.tolerancia_pct / 100).max(cfg.tolerancia_minima.0);
-        let forn = mapa
-            .item(&o.nome)
-            .and_then(|m| m.fornecedor.clone())
-            .or_else(|| o.fornecedor.clone())
-            .map(|f| normalizar(&f));
-        for (j, t) in transacoes.iter().enumerate() {
-            if (t.valor > 0) != entra(o) {
-                continue;
-            }
-            let dias = o.vencimento.dias_ate(t.data).abs();
-            let diferenca = (t.valor.abs() - alvo).abs();
-            if dias > cfg.janela_dias || diferenca > tolerancia {
-                continue;
-            }
-            if let Some(f) = &forn
-                && t.fornecedor.as_deref().map(normalizar).as_ref() != Some(f)
-            {
-                continue;
-            }
-            pares.push((diferenca, dias, i, j));
-        }
-    }
-    pares.sort_by_key(|&(d, dias, i, j)| (d, dias, i, transacoes[j].id));
-    // Transação disputada por duas ocorrências com a mesma pontuação é ambígua: não se
-    // sugere (o usuário decide), em vez de sortear e repetir a sugestão a cada rodada.
-    let ambiguas: HashSet<usize> = pares
+    let janela = alvos
         .iter()
-        .filter(|a| {
-            pares
-                .iter()
-                .any(|b| b.3 == a.3 && b.2 != a.2 && (b.0, b.1) == (a.0, a.1))
-        })
-        .map(|a| a.3)
+        .filter_map(|a| a.assinatura.as_ref())
+        .map(|a| i64::from(a.janela_dias))
+        .max()
+        .unwrap_or(0)
+        .max(cfg.janela_dias);
+    let registros = registros_entre(conn, menor.somar_dias(-janela), maior.somar_dias(janela))?;
+    let fornecedores: HashMap<&str, Option<&str>> = registros
+        .iter()
+        .map(|r| (r.movimento.movimento.as_str(), r.fornecedor.as_deref()))
         .collect();
-    pares.retain(|p| !ambiguas.contains(&p.3));
-    let mut ocorrencias_usadas = HashSet::new();
-    let mut transacoes_usadas = HashSet::new();
-    let mut sugestoes = Vec::new();
-    for (_, _, i, j) in pares {
-        if ocorrencias_usadas.contains(&i) || transacoes_usadas.contains(&j) {
-            continue;
-        }
-        ocorrencias_usadas.insert(i);
-        transacoes_usadas.insert(j);
-        let t = &transacoes[j];
-        sugestoes.push(Conciliacao {
-            ocorrencia: ocorrencias[i].id.clone(),
-            movimento: t.referencia.clone(),
-            valor: Centavos(t.valor.abs()),
-            data: t.data,
-            confirmada: false,
-        });
-    }
-    sugestoes.sort_by(|a, b| a.ocorrencia.cmp(&b.ocorrencia));
-    Ok(sugestoes)
+    let movimentos: Vec<MovimentoDoExtrato> =
+        registros.iter().map(|r| r.movimento.clone()).collect();
+    // O mapa da planilha, quando diz o fornecedor do item, exige o mesmo no movimento.
+    let filtro = |o: &Ocorrencia, m: &MovimentoDoExtrato| {
+        let Some(f) = mapa
+            .item(&o.nome)
+            .and_then(|i| i.fornecedor.clone())
+            .or_else(|| o.fornecedor.clone())
+            .map(|f| normalizar(&f))
+        else {
+            return true;
+        };
+        fornecedores
+            .get(m.movimento.as_str())
+            .copied()
+            .flatten()
+            .map(normalizar)
+            .as_ref()
+            == Some(&f)
+    };
+    // O adaptador não enxerga as conciliações já gravadas (o trait não as lista); o serviço
+    // (`buscar_conciliacoes`) sim. Aqui só valem o `pode_conciliar` e as ocorrências marcadas.
+    Ok(conciliacao::sugerir(
+        &alvos,
+        &movimentos,
+        &HashSet::new(),
+        cfg,
+        Some(&filtro),
+    ))
 }
 
 /// Calcula e grava as sugestões. Devolve quantas gravou.
@@ -188,58 +128,16 @@ pub fn conciliar(
     Ok(n)
 }
 
-fn transacoes_entre(
-    conn: &Connection,
-    de: Data,
-    ate: Data,
-    cfg: &ConfigConciliacao,
-) -> Resultado<Vec<Transacao>> {
-    let iso = |d: Data| format!("{:04}-{:02}-{:02}", d.ano, d.mes, d.dia);
-    let mut st = conn
-        .prepare(
-            "SELECT id, external_ref, tipo, data, valor_centavos, fornecedor_normalizado
-             FROM registro
-             WHERE external_ref IS NOT NULL AND valor_centavos <> 0 AND data >= ?1 AND data <= ?2",
-        )
-        .map_err(erro)?;
-    let linhas = st
-        .query_map(rusqlite::params![iso(de), iso(ate)], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-                r.get::<_, Option<String>>(5)?,
-            ))
-        })
-        .map_err(erro)?;
-    let mut saida = Vec::new();
-    for l in linhas {
-        let (id, referencia, tipo, data, valor, fornecedor) = l.map_err(erro)?;
-        if cfg.tipos_excluidos.contains(&tipo) {
-            continue;
-        }
-        let Some(data) = Data::de_iso(&data) else {
-            continue;
-        };
-        saida.push(Transacao {
-            id,
-            referencia,
-            data,
-            valor,
-            fornecedor,
-        });
-    }
-    Ok(saida)
-}
-
 #[cfg(test)]
 mod testes {
     use super::*;
     use crate::falso::Falso;
-    use crate::fixtura::{inventario_ficticio, registro};
-    use sbf_planejamento::{Certeza, Competencia, Fonte, IdOcorrencia};
+    use crate::fixtura::{inventario_ficticio, registro, registro_completo};
+    use sbf_planejamento::Centavos;
+    use sbf_planejamento::{
+        Assinatura, Certeza, Competencia, Composicao, ContaDoPlanejamento, EstadoDaOcorrencia,
+        Fonte, IdOcorrencia, Natureza, Rubrica, TipoDeRubrica,
+    };
 
     fn ocorrencia(rec: &str, nome: &str, dia: u8, previsto: i64) -> Ocorrencia {
         Ocorrencia {
@@ -464,5 +362,139 @@ mod testes {
                 .movimento,
             "pluggy:txn_entrada"
         );
+    }
+
+    fn entrada(rec: &str, dia: u8, previsto: i64, conta: &str) -> Ocorrencia {
+        Ocorrencia {
+            natureza: Natureza::Entrada,
+            conta: Some(conta.to_owned()),
+            ..ocorrencia(rec, "Salário", dia, previsto)
+        }
+    }
+
+    #[test]
+    fn conta_e_exigida_com_par_confirmado_e_ignorada_sem_par() {
+        let c = inventario_ficticio();
+        registro_completo(
+            &c,
+            "pluggy:txn_o",
+            "credito",
+            "2026-11-05",
+            150_000,
+            Some("BANCO · 2"),
+            "EMPRESA",
+        );
+        registro_completo(
+            &c,
+            "pluggy:txn_x",
+            "credito",
+            "2026-11-07",
+            150_000,
+            Some("BANCO · 1"),
+            "EMPRESA",
+        );
+        let mut p = Falso {
+            ocorrencias: vec![entrada("r1", 5, 150_000, "CX-0630")],
+            ..Falso::default()
+        };
+        let cfg = ConfigConciliacao::default();
+        let sem = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("sem par");
+        assert_eq!(sem[0].movimento, "pluggy:txn_o");
+        p.contas = vec![ContaDoPlanejamento {
+            apelido: "CX-0630".to_owned(),
+            conta_do_extrato: Some("BANCO · 1".to_owned()),
+        }];
+        let com = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("com par");
+        assert_eq!(com[0].movimento, "pluggy:txn_x");
+    }
+
+    #[test]
+    fn assinatura_acha_o_credito_com_valor_diferente() {
+        let c = inventario_ficticio();
+        registro_completo(
+            &c,
+            "pluggy:txn_plr",
+            "credito",
+            "2026-11-06",
+            912_345,
+            Some("BANCO · 1"),
+            "SALARIO EMPRESA",
+        );
+        let mut p = Falso {
+            ocorrencias: vec![entrada("r1", 5, 500_000, "CX-0630")],
+            ..Falso::default()
+        };
+        let cfg = ConfigConciliacao::default();
+        assert!(
+            sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE)
+                .expect("sem")
+                .is_empty()
+        );
+        p.assinaturas.insert(
+            "r1".to_owned(),
+            Assinatura {
+                texto: "salário empresa".to_owned(),
+                janela_dias: 4,
+            },
+        );
+        let s = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("com");
+        assert_eq!(s[0].movimento, "pluggy:txn_plr");
+        assert_eq!(s[0].valor, Centavos(912_345));
+    }
+
+    #[test]
+    fn liquido_da_composicao_e_o_alvo() {
+        let c = inventario_ficticio();
+        registro_completo(
+            &c,
+            "pluggy:txn_digitado",
+            "credito",
+            "2026-11-05",
+            700_000,
+            None,
+            "X",
+        );
+        registro_completo(
+            &c,
+            "pluggy:txn_liquido",
+            "credito",
+            "2026-11-06",
+            480_000,
+            None,
+            "X",
+        );
+        let rubrica = |tipo, valor| Rubrica {
+            codigo: None,
+            nome: "r".to_owned(),
+            tipo,
+            valor: Centavos(valor),
+            competencia: None,
+            prazo: None,
+            recorrente: None,
+        };
+        let p = Falso {
+            ocorrencias: vec![entrada("r1", 5, 700_000, "CX-0630")],
+            composicoes: vec![Composicao {
+                recorrente: "r1".to_owned(),
+                desde: Competencia { ano: 2026, mes: 11 },
+                rubricas: vec![
+                    rubrica(TipoDeRubrica::Provento, 600_000),
+                    rubrica(TipoDeRubrica::Desconto, 120_000),
+                ],
+                documento: None,
+                origem: "teste".to_owned(),
+            }],
+            ..Falso::default()
+        };
+        let s = sugerir(
+            &c,
+            &p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("sugerir");
+        assert_eq!(s[0].movimento, "pluggy:txn_liquido");
     }
 }

@@ -10,7 +10,9 @@ use egui::{
     Stroke, StrokeKind, Ui,
 };
 use sbf_planejamento::{AlvoDoDocumento, Centavos, IdOcorrencia, TipoDeRubrica};
-use sbf_reconhecimento::{EstadoDoTexto, Reconhecido, Situacao, Sugestao, UsoDeRubricas};
+use sbf_reconhecimento::{
+    EstadoDoTexto, PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao, UsoDeRubricas,
+};
 
 use crate::componentes;
 use crate::controle::{competencia_texto, data_texto, reais};
@@ -425,12 +427,51 @@ fn sugestao(
         (Sugestao::UsarRubricas { uso, .. }, Some(m)) => {
             rubricas_em_grupos(ui, p, cartao, s, uso, m, !(feita || ignorada), pedidos);
         }
-        (Sugestao::InformarRecebido { valor, .. }, _) => {
+        (
+            Sugestao::Conciliar {
+                conciliacao,
+                provas,
+                ..
+            },
+            _,
+        ) => {
+            componentes::selo(
+                ui,
+                &format!("{provas} provas batem"),
+                if *provas >= PROVAS_POSSIVEIS {
+                    p.sucesso_sutil
+                } else {
+                    p.info_sutil
+                },
+                if *provas >= PROVAS_POSSIVEIS {
+                    p.sucesso
+                } else {
+                    p.info
+                },
+            );
             pequeno(
                 ui,
-                format!("O Salário do mês fica pago em {}.", reais(*valor)),
+                format!(
+                    "Crédito de {} em {}. Confirmar liga o Salário do mês a ele.",
+                    reais(conciliacao.valor),
+                    data_texto(conciliacao.data)
+                ),
                 p.tinta_suave,
             );
+            let liquido = match c.resultado().map(|r| &r.reconhecido) {
+                Some(Reconhecido::Contracheque { contracheque, .. }) => contracheque.liquido,
+                _ => None,
+            };
+            if let Some(l) = liquido.filter(|l| *l != conciliacao.valor) {
+                aviso_com_triangulo(
+                    ui,
+                    p,
+                    &format!(
+                        "O crédito difere do líquido do contracheque ({}).",
+                        reais(l)
+                    ),
+                );
+            }
         }
         _ => {}
     }

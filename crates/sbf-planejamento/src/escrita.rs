@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::banco::{self, carregar_um, json, novo_id};
 use crate::projecao::{projetar_competencias, versao_vigente};
 use crate::{
-    Alteracao, AlvoDoDocumento, Autor, Competencia, Composicao, Conciliacao, Data,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Competencia, Composicao, Conciliacao, Data,
     ErroDoPlanejamento, Escopo, Excecao, Exclusao, Frequencia, IdOcorrencia, MudancaDeVersao,
     NovoRecorrente, OrigemImportada, Prazo, Recibo, Recorrente, Resultado, TipoDeDocumento, Versao,
 };
@@ -102,12 +102,22 @@ pub(crate) fn aplicar_na(
             data,
         } => vincular_documento(c, alvo, sha256, *tipo_documento, nome, *data, autor, agora)?,
         Alteracao::DesvincularDocumento { id } => desvincular_documento(c, id)?,
-        // Costura de 2026-11-16: o agente do motor implementa.
-        Alteracao::MapearConta { .. } | Alteracao::DefinirAssinatura { .. } => {
-            return Err(crate::ErroDoPlanejamento::Invalida(
-                "contas e assinaturas ainda não são gravadas".to_owned(),
-            ));
-        }
+        Alteracao::MapearConta {
+            apelido,
+            conta_do_extrato,
+        } => mapear_conta(c, apelido, conta_do_extrato.as_deref(), autor, agora)?,
+        Alteracao::DefinirAssinatura {
+            recorrente,
+            assinatura,
+            versao_base,
+        } => definir_assinatura(
+            c,
+            recorrente,
+            assinatura.as_ref(),
+            *versao_base,
+            autor,
+            agora,
+        )?,
     };
 
     let alteracao_id = if feito.grava_historico {
@@ -953,6 +963,93 @@ fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
         alvo: id.to_owned(),
         recorrente: Some(recorrente),
         resumo: "Desvinculou um documento.".into(),
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+// ---------------------------------------------------------------------------------------
+// Contas do extrato e assinaturas
+// ---------------------------------------------------------------------------------------
+
+/// A maior janela de uma assinatura, em dias.
+const JANELA_MAXIMA_DA_ASSINATURA: u8 = 60;
+
+/// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato. Nada é apagado: desfazer
+/// deixa a linha sem conta.
+fn mapear_conta(
+    c: &Connection,
+    apelido: &str,
+    conta_do_extrato: Option<&str>,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let apelido = apelido.trim();
+    nao_vazio(apelido, "o apelido da conta")?;
+    let conta = conta_do_extrato.map(str::trim);
+    if let Some(conta) = conta {
+        nao_vazio(conta, "a conta do extrato")?;
+    }
+    c.execute(
+        "INSERT INTO contas_do_planejamento (apelido, conta_do_extrato, quando, autor)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (apelido) DO UPDATE
+         SET conta_do_extrato = excluded.conta_do_extrato, quando = excluded.quando,
+             autor = excluded.autor",
+        params![apelido, conta, agora, json(autor)?],
+    )?;
+    Ok(Feito {
+        alvo: apelido.to_owned(),
+        recorrente: None,
+        resumo: if conta.is_some() {
+            format!("Confirmou a conta do extrato de {apelido}.")
+        } else {
+            format!("Desfez o par de conta de {apelido}.")
+        },
+        versao_nova: 0,
+        grava_historico: true,
+    })
+}
+
+/// Define (ou tira, com `None`) a assinatura de um recorrente. Confere a versão de base como
+/// as demais regras do recorrente; não muda a projeção, então não sobe a versão.
+fn definir_assinatura(
+    c: &Connection,
+    recorrente: &str,
+    assinatura: Option<&Assinatura>,
+    base: i64,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let rec = carregar_com_base(c, recorrente, base)?;
+    let (texto, janela) = match assinatura {
+        Some(a) => {
+            if crate::conciliacao::normalizar(&a.texto).trim().is_empty() {
+                return invalida("o texto da assinatura não pode ficar vazio");
+            }
+            if a.janela_dias == 0 || a.janela_dias > JANELA_MAXIMA_DA_ASSINATURA {
+                return invalida("a janela da assinatura vai de 1 a 60 dias");
+            }
+            (Some(a.texto.trim()), Some(i64::from(a.janela_dias)))
+        }
+        None => (None, None),
+    };
+    c.execute(
+        "INSERT INTO assinaturas (recorrente_id, texto, janela_dias, quando, autor)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (recorrente_id) DO UPDATE
+         SET texto = excluded.texto, janela_dias = excluded.janela_dias,
+             quando = excluded.quando, autor = excluded.autor",
+        params![rec.id, texto, janela, agora, json(autor)?],
+    )?;
+    Ok(Feito {
+        alvo: rec.id.clone(),
+        recorrente: Some(rec.id),
+        resumo: if assinatura.is_some() {
+            "Definiu a assinatura do extrato.".to_owned()
+        } else {
+            "Tirou a assinatura do extrato.".to_owned()
+        },
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
     })

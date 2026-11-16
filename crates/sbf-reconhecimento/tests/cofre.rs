@@ -16,8 +16,8 @@ use sbf_planejamento::{
     NovoRecorrente, Planejamento, PlanejamentoSqlite, Prazo, SemSaldos, Versao,
 };
 use sbf_reconhecimento::{
-    Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, Reconhecedor, ReconhecedorDoCofre,
-    Reconhecido, Resultado, Situacao, Sugestao,
+    Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, PROVAS_POSSIVEIS, Reconhecedor,
+    ReconhecedorDoCofre, Reconhecido, Resultado, Situacao, Sugestao,
 };
 use zeroize::Zeroizing;
 
@@ -112,7 +112,7 @@ impl Cenario {
                             certeza: Certeza::Estimado,
                             fonte: Fonte::Usuario,
                             frequencia: Frequencia::Mensal { dia: 5 },
-                            conta: None,
+                            conta: Some("CX-0630".into()),
                             centro: None,
                             fornecedor: None,
                             categoria: None,
@@ -812,21 +812,40 @@ fn pdf_protegido_com_regra_do_chaveiro_abre_e_grava_o_texto() {
     assert_eq!(tudo, 0);
 }
 
-fn recebido(r: &Resultado) -> Option<&Sugestao> {
+fn conciliar_sugerido(r: &Resultado) -> Option<&Sugestao> {
     r.sugestoes
         .iter()
-        .find(|s| matches!(s, Sugestao::InformarRecebido { .. }))
+        .find(|s| matches!(s, Sugestao::Conciliar { .. }))
 }
 
+/// Um crédito no extrato do inventário (a Pluggy).
+fn credito(c: &Cenario, id: &str, data: &str, valor: i64, conta: &str, descricao: &str) {
+    let conn = c.conexao();
+    conn.execute(
+        "INSERT OR IGNORE INTO fonte (id, tipo, descricao) VALUES ('conexao:pluggy', 'conexao', 'x')",
+        [],
+    )
+    .expect("fonte");
+    conn.execute(
+        "INSERT INTO registro (external_ref, fonte_id, tipo, data, data_tipo, valor_centavos,
+                               descricao_original, conta_provavel, extraido_por)
+         VALUES (?1, 'conexao:pluggy', 'credito', ?2, 'pagamento', ?3, ?4, ?5, 'pluggy@1')",
+        rusqlite::params![id, data, valor, descricao, conta],
+    )
+    .expect("registro");
+}
+
+const LIQUIDO_DE_2026: i64 = 2_460_522;
+
 #[test]
-fn contracheque_de_2026_sugere_vincular_duas_composicoes_e_informar_recebido() {
+fn contracheque_de_2026_sugere_vincular_e_duas_composicoes_e_nada_de_recebimento_sem_credito() {
     let c = cenario();
-    let id = c.planejamento_com_salario(2_000_000);
+    c.planejamento_com_salario(2_000_000);
     let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
 
     let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
 
-    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
+    assert_eq!(r.sugestoes.len(), 2, "{:?}", r.sugestoes);
     assert!(matches!(r.sugestoes[0], Sugestao::Vincular { .. }));
     match &r.sugestoes[1] {
         Sugestao::UsarRubricas { rotulo, uso } => {
@@ -839,7 +858,7 @@ fn contracheque_de_2026_sugere_vincular_duas_composicoes_e_informar_recebido() {
             assert_eq!(comps.len(), 2);
             assert_eq!(comps[0].desde, Competencia { ano: 2026, mes: 10 });
             assert_eq!(comps[1].desde, Competencia { ano: 2026, mes: 11 });
-            assert_eq!(uso.liquido_do_mes(), Centavos(2_460_522));
+            assert_eq!(uso.liquido_do_mes(), Centavos(LIQUIDO_DE_2026));
             // A divergência compara as fixas com o digitado (R$ 20.000,00).
             let fixas = uso.liquido_das_fixas(&marcacao);
             assert_eq!(
@@ -849,21 +868,7 @@ fn contracheque_de_2026_sugere_vincular_duas_composicoes_e_informar_recebido() {
         }
         outra => panic!("{outra:?}"),
     }
-    match &r.sugestoes[2] {
-        Sugestao::InformarRecebido {
-            rotulo,
-            ocorrencia,
-            valor,
-            data,
-        } => {
-            assert_eq!(rotulo, "Informar recebido em 13/10 pelo líquido");
-            assert_eq!(ocorrencia.recorrente, id);
-            assert_eq!(ocorrencia.competencia, Competencia { ano: 2026, mes: 10 });
-            assert_eq!(*valor, Centavos(2_460_522));
-            assert_eq!(data.to_string(), "2026-10-13");
-        }
-        outra => panic!("{outra:?}"),
-    }
+    assert!(conciliar_sugerido(&r).is_none());
     assert!(
         r.avisos.iter().any(|a| a.contains("não entra no total")),
         "{:?}",
@@ -872,33 +877,225 @@ fn contracheque_de_2026_sugere_vincular_duas_composicoes_e_informar_recebido() {
 }
 
 #[test]
-fn informar_recebido_so_aparece_quando_a_ocorrencia_ainda_nao_tem_pago_informado() {
+fn com_o_credito_exato_no_extrato_sugere_conciliar_com_duas_provas() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    // A data impressa no contracheque é 13/10; o crédito caiu em 08/10, em outra conta.
+    credito(
+        &c,
+        "pluggy:txn_sal",
+        "2026-10-08",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0001",
+        "SALARIO EMPRESA FICTICIA",
+    );
+    credito(
+        &c,
+        "pluggy:txn_outro",
+        "2026-10-09",
+        123_456,
+        "BANCO FICTICIO · 0001",
+        "PIX RECEBIDO",
+    );
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
+    let Some(Sugestao::Conciliar {
+        rotulo,
+        conciliacao,
+        provas,
+    }) = conciliar_sugerido(&r)
+    else {
+        panic!("{:?}", r.sugestoes);
+    };
+    assert_eq!(
+        rotulo,
+        "Conciliar o Salário · 10/2026 com o crédito de 08/10 no extrato"
+    );
+    assert_eq!(conciliacao.movimento, "pluggy:txn_sal");
+    assert_eq!(conciliacao.valor, Centavos(LIQUIDO_DE_2026));
+    assert_eq!(conciliacao.data.to_string(), "2026-10-08");
+    assert_eq!(conciliacao.ocorrencia.recorrente, id);
+    assert_eq!(
+        conciliacao.ocorrencia.competencia,
+        Competencia { ano: 2026, mes: 10 }
+    );
+    assert_eq!(*provas, 2);
+    assert!(
+        !r.sugestoes
+            .iter()
+            .any(|s| s.rotulo().contains("Informar recebido"))
+    );
+}
+
+#[test]
+fn com_par_de_conta_e_assinatura_o_credito_de_valor_diferente_tem_duas_provas_e_o_exato_tres() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    let mut plan = c.plan();
+    plan.aplicar(
+        Alteracao::MapearConta {
+            apelido: "CX-0630".into(),
+            conta_do_extrato: Some("BANCO FICTICIO · 0001".into()),
+        },
+        Autor::Usuario,
+    )
+    .expect("par");
+    let base = plan
+        .recorrente(&id)
+        .expect("ler")
+        .expect("existe")
+        .versao_do_registro;
+    plan.aplicar(
+        Alteracao::DefinirAssinatura {
+            recorrente: id.clone(),
+            assinatura: Some(sbf_planejamento::Assinatura {
+                texto: "salario empresa".into(),
+                janela_dias: 10,
+            }),
+            versao_base: base,
+        },
+        Autor::Usuario,
+    )
+    .expect("assinatura");
+    drop(plan);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+
+    // Só um crédito de valor diferente (PLR): documento + assinatura/conta = 2 provas.
+    credito(
+        &c,
+        "pluggy:txn_plr",
+        "2026-10-08",
+        3_100_000,
+        "BANCO FICTICIO · 0001",
+        "SALARIO EMPRESA FICTICIA",
+    );
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+    let Some(Sugestao::Conciliar {
+        conciliacao,
+        provas,
+        ..
+    }) = conciliar_sugerido(&r)
+    else {
+        panic!("{:?}", r.sugestoes);
+    };
+    assert_eq!(conciliacao.movimento, "pluggy:txn_plr");
+    assert_eq!(*provas, 2);
+
+    // Com o crédito exato também: o exato (3 provas) vence sozinho.
+    credito(
+        &c,
+        "pluggy:txn_exato",
+        "2026-10-09",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0001",
+        "SALARIO EMPRESA FICTICIA",
+    );
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+    let Some(Sugestao::Conciliar {
+        conciliacao,
+        provas,
+        ..
+    }) = conciliar_sugerido(&r)
+    else {
+        panic!("{:?}", r.sugestoes);
+    };
+    assert_eq!(conciliacao.movimento, "pluggy:txn_exato");
+    assert_eq!(*provas, PROVAS_POSSIVEIS);
+}
+
+#[test]
+fn credito_de_outro_valor_sem_conta_nem_assinatura_nao_sugere() {
     let c = cenario();
     c.planejamento_com_salario(2_000_000);
+    credito(
+        &c,
+        "pluggy:txn_pix",
+        "2026-10-08",
+        777_700,
+        "BANCO FICTICIO · 0001",
+        "PIX RECEBIDO",
+    );
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(conciliar_sugerido(&r).is_none(), "{:?}", r.sugestoes);
+}
+
+#[test]
+fn dois_creditos_exatos_empatados_nao_sugerem() {
+    let c = cenario();
+    c.planejamento_com_salario(2_000_000);
+    credito(
+        &c,
+        "pluggy:txn_a",
+        "2026-10-07",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0001",
+        "TRANSFERENCIA",
+    );
+    credito(
+        &c,
+        "pluggy:txn_b",
+        "2026-10-08",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0002",
+        "TRANSFERENCIA",
+    );
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(conciliar_sugerido(&r).is_none(), "{:?}", r.sugestoes);
+}
+
+#[test]
+fn confirmar_a_conciliacao_grava_confirmada_e_a_sugestao_nao_volta() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    credito(
+        &c,
+        "pluggy:txn_sal",
+        "2026-10-08",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0001",
+        "SALARIO EMPRESA FICTICIA",
+    );
     let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
     let r = c.reconhecedor(None);
 
     let primeira = ok(c.rodar(&r, &arquivo).0);
-    let s = recebido(&primeira).expect("sugere o recebido");
+    let s = conciliar_sugerido(&primeira).expect("sugere conciliar");
+    let alteracoes = s.alteracoes(&primeira.sha256, &primeira.nome, 0, None);
+    assert_eq!(alteracoes.len(), 1);
+    assert!(matches!(
+        &alteracoes[0],
+        Alteracao::Conciliar { conciliacao } if conciliacao.confirmada
+    ));
     let mut plan = c.plan();
-    for a in s.alteracoes(&primeira.sha256, &primeira.nome, 0, None) {
+    for a in alteracoes {
         plan.aplicar(a, Autor::Usuario).expect("aplicar");
     }
+    let o = plan
+        .proximas(
+            &id,
+            Competencia { ano: 2026, mes: 10 },
+            1,
+            sbf_planejamento::Data::nova(2026, 10, 20).expect("data"),
+        )
+        .expect("proximas");
+    assert_eq!(o[0].conciliado, Some(Centavos(LIQUIDO_DE_2026)));
     drop(plan);
 
     let segunda = ok(c.rodar(&r, &arquivo).0);
-    assert!(recebido(&segunda).is_none(), "{:?}", segunda.sugestoes);
-}
-
-#[test]
-fn contracheque_sem_data_de_credito_nao_sugere_informar_recebido() {
-    let c = cenario();
-    c.planejamento_com_salario(550_000);
-    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
-
-    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
-
-    assert!(recebido(&r).is_none());
+    assert!(
+        conciliar_sugerido(&segunda).is_none(),
+        "{:?}",
+        segunda.sugestoes
+    );
 }
 
 #[test]
