@@ -25,8 +25,12 @@ fn livro_da_estacao() -> Option<PathBuf> {
 /// Abre o serviço de planejamento (spec 11) no arquivo dado. Ponto único de ligação: o
 /// MCP só conhece o trait `Planejamento`; quando o serviço real for integrado ao binário,
 /// é aqui que ele entra.
-fn abrir_planejamento(_arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
-    Err("o serviço de planejamento ainda não foi integrado a este binário".to_owned())
+fn abrir_planejamento(arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
+    let banco = sbf_planejamento::Banco::abrir(arquivo).map_err(|e| e.to_string())?;
+    Ok(Box::new(sbf_planejamento::PlanejamentoSqlite::novo(
+        banco,
+        Box::new(sbf_planejamento::SemSaldos),
+    )))
 }
 
 pub fn rodar(args: &[String]) -> ExitCode {
