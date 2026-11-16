@@ -68,6 +68,14 @@ pub struct Subtotal {
     pub grupo: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TotalDeGrupo {
+    pub linha: u32,
+    /// O grupo em vigor na linha.
+    pub grupo: String,
+    pub valor: Option<Centavos>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Salario {
     pub previsto: Option<Centavos>,
@@ -102,6 +110,8 @@ pub struct AbaLida {
     /// Código do meio para a descrição (`Salário` para `Desconto Contracheque`).
     pub legenda: Vec<(String, String)>,
     pub subtotais: Vec<Subtotal>,
+    /// Totais de grupo (número na coluna B). Só para conferência.
+    pub totais_de_grupo: Vec<TotalDeGrupo>,
 }
 
 impl AbaLida {
@@ -302,10 +312,29 @@ fn ler_faixa(aba: &str, faixa: &Range<Cel>) -> AbaLida {
     let ultima = faixa.end().map_or(0, |(r, _)| r + 1);
     let mut linhas = Vec::new();
     let mut subtotais = Vec::new();
+    let mut totais_de_grupo = Vec::new();
     let mut grupo = String::new();
 
     for n in PRIMEIRA_LINHA..=ultima {
-        let b = l.texto(n, COL_GRUPO);
+        // Só texto não numérico abre grupo. Número em B (ou texto que é só número) é o total
+        // do grupo, só para conferência; erro de fórmula em B não abre nada.
+        let mut b = None;
+        match l.v(n, COL_GRUPO) {
+            Valor::Texto(t) => match centavos_de_texto(&t) {
+                Some(total) => totais_de_grupo.push(TotalDeGrupo {
+                    linha: n,
+                    grupo: grupo.clone(),
+                    valor: Some(total),
+                }),
+                None => b = Some(t),
+            },
+            Valor::Numero(x) => totais_de_grupo.push(TotalDeGrupo {
+                linha: n,
+                grupo: grupo.clone(),
+                valor: centavos_de_f64(x),
+            }),
+            _ => {}
+        }
         let c = l.texto(n, COL_DESCRICAO);
         if let Some(b) = &b {
             grupo = b.clone();
@@ -395,6 +424,7 @@ fn ler_faixa(aba: &str, faixa: &Range<Cel>) -> AbaLida {
         consignacoes,
         legenda,
         subtotais,
+        totais_de_grupo,
     }
 }
 
@@ -540,6 +570,24 @@ mod testes {
             a.descricao_do_meio("salario"),
             Some("Desconto Contracheque")
         );
+    }
+
+    #[test]
+    fn numero_em_b_e_total_do_grupo_e_nao_abre_grupo() {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let arq = pasta.path().join("c.xlsx");
+        crate::fixtura::planilha_de_casos(&arq);
+        let a = ler_aba(&arq, ABA).expect("aba");
+        let grupos: Vec<(&str, &str)> =
+            a.linhas.iter().map(|l| (l.descricao.as_str(), l.grupo.as_str())).collect();
+        assert_eq!(grupos[0], ("A", "Essencial"));
+        assert_eq!(grupos[1], ("B", "Essencial"));
+        assert_eq!(grupos[2], ("C", "Essencial")); // erro em B não abre grupo
+        assert_eq!(grupos[3], ("Zero Com Obs", "Lar"));
+        assert!(a.subtotais.is_empty());
+        let totais: Vec<Option<Centavos>> = a.totais_de_grupo.iter().map(|t| t.valor).collect();
+        assert_eq!(totais, [Some(Centavos(123_450)), Some(Centavos(30_000))]);
+        assert!(a.totais_de_grupo.iter().all(|t| t.grupo == "Essencial"));
     }
 
     #[test]

@@ -228,3 +228,37 @@ pub fn registro(
     )
     .expect("insert");
 }
+
+/// Casos de borda de grupo (B numérico) e previsto zero, aba `2026.11`.
+pub fn planilha_de_casos(caminho: &Path) {
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    ws.set_name(ABA).expect("nome");
+    let data = Format::new().set_num_format("dd/mm/yyyy");
+    let dt = ExcelDateTime::from_ymd(2026, 11, 10).expect("data");
+    ws.write_string(6, 1, "Essencial").expect("c");
+    ws.write_string(6, 2, "A").expect("c");
+    ws.write_number(6, 8, 100.0).expect("c");
+    ws.write_number(7, 1, 1234.5).expect("c"); // total do grupo, com linha
+    ws.write_string(7, 2, "B").expect("c");
+    ws.write_number(7, 8, 50.0).expect("c");
+    ws.write_string(8, 1, "300").expect("c"); // total como texto, sem linha
+    ws.write_formula(9, 1, Formula::new("=NOMEINEXISTENTE()").set_result("#NAME?")).expect("c");
+    ws.write_string(9, 2, "C").expect("c");
+    ws.write_number(9, 8, 10.0).expect("c");
+    ws.write_string(10, 1, "Lar").expect("c");
+    ws.write_string(10, 2, "Zero Com Obs").expect("c");
+    ws.write_number(10, 4, 80.0).expect("c");
+    ws.write_number(10, 8, 0.0).expect("c");
+    ws.write_string(10, 11, "atrasado").expect("c");
+    ws.write_string(11, 2, "Zero Sem Unitario").expect("c");
+    ws.write_number(11, 8, 0.0).expect("c");
+    ws.write_string(11, 11, "obs").expect("c");
+    ws.write_string(12, 2, "Zero Sem Obs").expect("c");
+    ws.write_number(12, 4, 50.0).expect("c");
+    ws.write_number(12, 8, 0.0).expect("c");
+    for r in [6, 7, 9, 10, 11, 12] {
+        ws.write_datetime_with_format(r, 6, &dt, &data).expect("c");
+    }
+    wb.save(caminho).expect("salvar");
+}
