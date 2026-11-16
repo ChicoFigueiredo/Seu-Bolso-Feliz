@@ -14,6 +14,8 @@ pub struct Falso {
     pub aplicadas: Vec<(Alteracao, Autor)>,
     /// O que `controle` devolve nas linhas.
     pub ocorrencias: Vec<Ocorrencia>,
+    pub composicoes: Vec<Composicao>,
+    pub documentos: Vec<DocumentoVinculado>,
 }
 
 fn nao_suportado<T>() -> Resultado<T> {
@@ -201,6 +203,32 @@ impl Planejamento for Falso {
                 versao_nova = r.versao_do_registro;
                 alvo = r.id.clone();
             }
+            Alteracao::DefinirComposicao { composicao, .. } => {
+                alvo = composicao.recorrente.clone();
+                self.composicoes.retain(|c| {
+                    !(c.recorrente == composicao.recorrente && c.desde == composicao.desde)
+                });
+                self.composicoes.push(composicao.clone());
+            }
+            Alteracao::VincularDocumento {
+                alvo: a,
+                sha256,
+                tipo_documento,
+                nome,
+                data,
+            } => {
+                self.documentos.push(DocumentoVinculado {
+                    id: format!("doc{n}"),
+                    alvo: a.clone(),
+                    sha256: sha256.clone(),
+                    tipo: *tipo_documento,
+                    nome: nome.clone(),
+                    data: *data,
+                    quando: "2026-11-16T00:00:00Z".to_owned(),
+                    autor: autor.clone(),
+                    desvinculado: false,
+                });
+            }
             _ => return nao_suportado(),
         }
         self.aplicadas.push((alteracao, autor));
@@ -230,6 +258,28 @@ impl Planejamento for Falso {
 
     fn historico(&self, _: Option<&str>, _: u32) -> Resultado<Vec<EntradaDoHistorico>> {
         Ok(Vec::new())
+    }
+
+    fn composicao(
+        &self,
+        recorrente: &str,
+        competencia: Competencia,
+    ) -> Resultado<Option<Composicao>> {
+        Ok(self
+            .composicoes
+            .iter()
+            .filter(|c| c.recorrente == recorrente && c.desde <= competencia)
+            .max_by_key(|c| c.desde)
+            .cloned())
+    }
+
+    fn documentos(&self, alvo: &AlvoDoDocumento) -> Resultado<Vec<DocumentoVinculado>> {
+        Ok(self
+            .documentos
+            .iter()
+            .filter(|d| &d.alvo == alvo && !d.desvinculado)
+            .cloned()
+            .collect())
     }
 
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>> {

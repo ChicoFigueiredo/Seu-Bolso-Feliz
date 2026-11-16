@@ -154,10 +154,10 @@ pub fn planilha_ficticia(caminho: &Path) {
     {
         ws.write_string(2, 32 + i as u16, *h).expect("celula");
     }
-    ws.write_string(3, 24, "001 SALARIO BASE 2026/11 5.000,00")
+    ws.write_string(3, 24, "001 SALARIO BASE 2026/11 5.400,00")
         .expect("celula");
     ws.write_string(3, 27, "Salario base").expect("celula");
-    ws.write_number(3, 28, 5000.0).expect("celula");
+    ws.write_number(3, 28, 5400.0).expect("celula");
     ws.write_number(3, 32, 0.0).expect("celula");
     ws.write_number(3, 36, 1.0).expect("celula");
     ws.write_string(4, 24, "210 INSS 2026/11 400,00")
