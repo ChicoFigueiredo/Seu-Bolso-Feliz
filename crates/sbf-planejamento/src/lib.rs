@@ -940,13 +940,13 @@ mod testes {
         let c = Composicao {
             recorrente: "sal".into(),
             desde: Competencia { ano: 2026, mes: 11 },
-            rubricas: vec![r(TipoDeRubrica::Provento, 1_000_00), r(TipoDeRubrica::Desconto, 250_00)],
+            rubricas: vec![r(TipoDeRubrica::Provento, 100000), r(TipoDeRubrica::Desconto, 25000)],
             documento: None,
             origem: "teste".into(),
         };
-        assert_eq!(c.liquido(), Centavos(750_00));
-        assert_eq!(c.divergencia(Some(Centavos(750_00))), None);
-        assert_eq!(c.divergencia(Some(Centavos(700_00))), Some(Centavos(50_00)));
+        assert_eq!(c.liquido(), Centavos(75000));
+        assert_eq!(c.divergencia(Some(Centavos(75000))), None);
+        assert_eq!(c.divergencia(Some(Centavos(70000))), Some(Centavos(5000)));
         assert_eq!(c.divergencia(None), None);
     }
 
