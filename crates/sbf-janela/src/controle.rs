@@ -12,6 +12,8 @@ use sbf_planejamento::{
     Resumo, Saldo, Sentido,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::formato;
 
 /// Quantos meses para trás a navegação deixa ir (conferir o que passou).
@@ -65,7 +67,8 @@ pub fn mes_por_extenso(c: Competencia) -> String {
 // Navegação de período
 // ---------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModoDoPeriodo {
     /// O ciclo 20–19 (a aba do mês na planilha). Padrão (D9).
     #[default]
@@ -588,6 +591,8 @@ pub struct Cartao {
     pub selo: Option<&'static str>,
     pub dica: Option<String>,
     pub tom: Tom,
+    /// Um aviso com triângulo (⚠): as rubricas do salário não batem com o digitado.
+    pub aviso: Option<String>,
 }
 
 /// O saldo é de ontem ou mais velho que isso? (D10: passou de 1 dia, está desatualizado.)
@@ -637,6 +642,23 @@ fn notas_dos_saldos(saldos: &[sbf_planejamento::Saldo], hoje: Data) -> Vec<Strin
     notas
 }
 
+/// Põe o triângulo de aviso no cartão "Entradas previstas": uma linha por entrada cujas
+/// rubricas não batem com o digitado.
+pub fn avisar_nos_cartoes(cartoes: &mut [Cartao], avisos: &[(String, String)]) {
+    if avisos.is_empty() {
+        return;
+    }
+    if let Some(c) = cartoes.iter_mut().find(|c| c.id == "entradas") {
+        c.aviso = Some(
+            avisos
+                .iter()
+                .map(|(nome, texto)| format!("{nome}: {texto}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+}
+
 /// Os sete cartões do topo, na ordem. Cada número vem do [`Resumo`], rastreável às linhas.
 pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
     let r: &Resumo = &c.resumo;
@@ -662,6 +684,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
             "O último saldo coletado da Pluggy, por conta. Passou de 1 dia, aparece desatualizado."
                 .into(),
         ),
+        aviso: None,
         tom: if desatualizado {
             Tom::Aviso
         } else {
@@ -693,6 +716,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         notas,
         selo: None,
         dica: Some("O que entra no período. A data de disponibilidade pode vir antes da data do crédito; as duas aparecem.".into()),
+        aviso: None,
         tom: Tom::Neutro,
     });
 
@@ -703,6 +727,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         notas: Vec::new(),
         selo: None,
         dica: Some("Sem desconto em folha e sem dinheiro de passagem.".into()),
+        aviso: None,
         tom: Tom::Neutro,
     });
 
@@ -716,6 +741,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
             "Compras no cartão de crédito. O caixa sai pela fatura, que já está nas saídas; por isso não somam de novo."
                 .into(),
         ),
+        aviso: None,
         tom: Tom::Neutro,
     });
 
@@ -726,6 +752,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         notas: vec!["À parte: não sai do caixa de novo.".into()],
         selo: None,
         dica: Some("O salário entra pelo líquido. Estas consignações aparecem, mas não entram nas saídas de caixa.".into()),
+        aviso: None,
         tom: Tom::Neutro,
     });
 
@@ -741,6 +768,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         },
         selo: None,
         dica: None,
+        aviso: None,
         tom: if r.em_atraso > Centavos::ZERO {
             Tom::Perigo
         } else {
@@ -755,6 +783,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         notas: Vec::new(),
         selo: None,
         dica: Some("Ocorrências sem valor, ou só com pago informado e sem conciliação.".into()),
+        aviso: None,
         tom: if r.a_conferir > 0 {
             Tom::Aviso
         } else {
@@ -783,6 +812,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
                 r.lacunas.join("\n• ")
             )
         }),
+        aviso: None,
         tom: if r.livre_e_estimativa { Tom::Aviso } else { Tom::Neutro },
     });
     v
@@ -794,6 +824,8 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AcaoDoControle {
+    AdicionarCompromisso,
+    AnexarDocumento,
     Editar,
     Pausar,
     Retomar,
@@ -843,7 +875,27 @@ const fn at(ctrl: bool, shift: bool, alt: bool, tecla: egui::Key) -> AtalhoDoCon
 use egui::Key;
 
 /// A lista das Ações do controle mensal (Ribbon, menu da linha e Paleta leem daqui).
-pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 15] = [
+pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 17] = [
+    DefinicaoDoControle {
+        id: AcaoDoControle::AdicionarCompromisso,
+        codigo: "controle.adicionar",
+        rotulo: "Adicionar compromisso",
+        icone: "add_circle",
+        dica: "Cria um compromisso novo: nome, valor, frequência e prazo, com prévia",
+        grupo: "Novo",
+        atalho: at(true, false, true, Key::N),
+        keytip: "N",
+    },
+    DefinicaoDoControle {
+        id: AcaoDoControle::AnexarDocumento,
+        codigo: "controle.anexar-documento",
+        rotulo: "Anexar documento",
+        icone: "attach_file",
+        dica: "Liga um documento do inventário a esta ocorrência ou ao compromisso inteiro",
+        grupo: "Documentos",
+        atalho: at(true, false, true, Key::A),
+        keytip: "V",
+    },
     DefinicaoDoControle {
         id: AcaoDoControle::Editar,
         codigo: "controle.editar",
@@ -1024,7 +1076,10 @@ pub struct ContextoDaLinha<'a> {
 /// `Ok` se a Ação vale agora; senão o motivo, em português.
 pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(), String> {
     use EstadoDaOcorrencia as E;
-    if a == AcaoDoControle::Propostas {
+    if matches!(
+        a,
+        AcaoDoControle::Propostas | AcaoDoControle::AdicionarCompromisso
+    ) {
         return Ok(());
     }
     if a == AcaoDoControle::Restaurar {
@@ -1043,7 +1098,10 @@ pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(),
     }
     let paga = matches!(o.estado, E::Conciliada | E::PagoInformado);
     match a {
-        AcaoDoControle::Editar | AcaoDoControle::Mover | AcaoDoControle::Excluir => Ok(()),
+        AcaoDoControle::Editar
+        | AcaoDoControle::Mover
+        | AcaoDoControle::Excluir
+        | AcaoDoControle::AnexarDocumento => Ok(()),
         AcaoDoControle::Pausar => {
             if suprimida(o.estado) {
                 Err("Este mês já está pausado ou cancelado.".into())
@@ -1116,7 +1174,9 @@ pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(),
                 Ok(())
             }
         }
-        AcaoDoControle::Restaurar | AcaoDoControle::Propostas => Ok(()),
+        AcaoDoControle::Restaurar
+        | AcaoDoControle::Propostas
+        | AcaoDoControle::AdicionarCompromisso => Ok(()),
     }
 }
 
@@ -1943,7 +2003,11 @@ mod testes {
         assert!(livre.dica.as_deref().unwrap().contains("desatualizado"));
         let disp = v.iter().find(|x| x.id == "disponivel").unwrap();
         assert_eq!(disp.selo, Some("desatualizado"));
-        assert_eq!(disp.notas.len(), 3, "uma nota por conta com saldo e a da coleta");
+        assert_eq!(
+            disp.notas.len(),
+            3,
+            "uma nota por conta com saldo e a da coleta"
+        );
         assert!(disp.notas.iter().any(|n| n.contains("coleta 16/11/2026")));
         let ent = v.iter().find(|x| x.id == "entradas").unwrap();
         assert!(
