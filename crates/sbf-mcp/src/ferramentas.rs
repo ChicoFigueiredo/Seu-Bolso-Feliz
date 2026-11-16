@@ -44,6 +44,7 @@ pub struct Nucleo {
     banco: PathBuf,
     livro: Option<PathBuf>,
     semelhantes: Semelhantes,
+    plano: Option<crate::plano::Plano>,
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -229,6 +230,7 @@ impl Nucleo {
             banco: banco.to_path_buf(),
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
             semelhantes: Semelhantes(None),
+            plano: None,
         })
     }
 
@@ -242,6 +244,44 @@ impl Nucleo {
     ) -> Self {
         self.semelhantes = Semelhantes(Some((busca, nivel)));
         self
+    }
+
+    /// Liga as ferramentas do controle mensal. `fabrica` abre uma instância do serviço de
+    /// planejamento por chamada. Chame depois de `com_busca`, para herdar o nível do cliente.
+    #[must_use]
+    pub fn com_planejamento(mut self, fabrica: Arc<crate::plano::Fabrica>) -> Self {
+        self.plano = Some(crate::plano::Plano {
+            fabrica,
+            banco: self.banco.clone(),
+            nivel: self.nivel(),
+            hoje: None,
+        });
+        self
+    }
+
+    /// Fixa o "hoje" do planejamento (para testes).
+    #[must_use]
+    pub fn com_hoje(mut self, hoje: sbf_planejamento::Data) -> Self {
+        if let Some(p) = &mut self.plano {
+            p.hoje = Some(hoje);
+        }
+        self
+    }
+
+    /// Há planejamento ligado?
+    #[must_use]
+    pub fn tem_planejamento(&self) -> bool {
+        self.plano.is_some()
+    }
+
+    /// As ferramentas do controle mensal.
+    ///
+    /// # Errors
+    /// Planejamento não ligado.
+    pub fn plano(&self) -> Result<&crate::plano::Plano, String> {
+        self.plano.as_ref().ok_or_else(|| {
+            "o planejamento não está ligado (falta <cofre>/planejamento.sqlite)".to_owned()
+        })
     }
 
     // ---------------------------------------------------------------- buscar_semelhantes

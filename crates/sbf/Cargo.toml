@@ -33,6 +33,7 @@ sbf-ia = { path = "../sbf-ia" }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 sbf-processo = { path = "../sbf-processo" }
 sbf-mcp = { path = "../sbf-mcp" }
+sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-coleta = { path = "../sbf-coleta" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
