@@ -82,10 +82,11 @@ fn valores_da_linha(linha: &str) -> Vec<Centavos> {
         .collect()
 }
 
+/// Código, nome, competência, prazo e valor.
+type LinhaDeRubrica = (String, String, Option<Competencia>, Option<u32>, Centavos);
+
 /// `CÓDIGO NOME... [MM/AAAA] [PRAZO] R$ VALOR`; `None` quando a linha não é uma rubrica.
-fn rubrica_da_linha(
-    linha: &str,
-) -> Option<(String, String, Option<Competencia>, Option<u32>, Centavos)> {
+fn rubrica_da_linha(linha: &str) -> Option<LinhaDeRubrica> {
     let palavras: Vec<&str> = linha.split_whitespace().collect();
     let codigo = *palavras.first()?;
     if !(4..=5).contains(&codigo.len()) || !codigo.chars().all(|c| c.is_ascii_digit()) {
