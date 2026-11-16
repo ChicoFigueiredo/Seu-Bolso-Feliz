@@ -6,7 +6,8 @@
 //!                "parcelas_que_faltam": 12, "fornecedor": "IMOBILIARIA X", "dia": 5 } ] }
 //! ```
 //!
-//! `natureza`: `entrada`, `saida`, `desconto_em_folha`, `passagem_entrada`, `passagem_saida`.
+//! `natureza`: `entrada`, `saida`, `desconto_em_folha`, `dentro_da_fatura`, `passagem_entrada`,
+//! `passagem_saida`.
 
 use std::path::Path;
 
@@ -146,6 +147,7 @@ pub fn natureza_de_texto(t: &str) -> Option<Natureza> {
         "entrada" => Natureza::Entrada,
         "saida" => Natureza::Saida,
         "desconto_em_folha" => Natureza::DescontoEmFolha,
+        "dentro_da_fatura" => Natureza::DentroDaFatura,
         "passagem_entrada" => Natureza::Passagem {
             sentido: Sentido::Entrada,
         },

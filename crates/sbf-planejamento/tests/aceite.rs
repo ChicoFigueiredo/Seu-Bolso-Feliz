@@ -1934,3 +1934,52 @@ fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
         Some(dia(2026, 10, 1))
     );
 }
+
+/// AC-28 (parte): compra no cartão aparece, mas não soma nas saídas de caixa (a fatura soma).
+#[test]
+fn ac28_compra_no_cartao_nao_conta_duas_vezes_no_caixa() {
+    use sbf_planejamento::*;
+    let mut p = PlanejamentoSqlite::novo(Banco::em_memoria().expect("banco"), Box::new(SemSaldos));
+    let nov = Competencia::nova(2026, 11).expect("nov");
+    let versao = |valor: i64, dia: u8| Versao {
+        id: String::new(),
+        desde: nov,
+        valor: Some(Centavos(valor)),
+        certeza: Certeza::Estimado,
+        fonte: Fonte::Pluggy,
+        frequencia: Frequencia::Mensal { dia },
+        conta: None,
+        centro: None,
+        fornecedor: None,
+        categoria: None,
+        nota: None,
+    };
+    for (nome, natureza, valor) in [
+        ("Fatura Exemplo", Natureza::Saida, 100_000),
+        ("Assinatura no Cartao", Natureza::DentroDaFatura, 3_500),
+    ] {
+        p.aplicar(
+            Alteracao::CriarRecorrente {
+                recorrente: NovoRecorrente {
+                    nome: nome.into(),
+                    grupo: "G".into(),
+                    subgrupo: None,
+                    posicao: 1,
+                    natureza,
+                    prazo: Prazo::SemFim,
+                    primeira_versao: versao(valor, 25),
+                },
+                origem: None,
+            },
+            Autor::Usuario,
+        )
+        .expect("criar");
+    }
+    let hoje = Data::nova(2026, 11, 21).expect("hoje");
+    let c = p
+        .controle(&Periodo::MesCivil(nov), Filtro::Todos, None, hoje)
+        .expect("controle");
+    assert_eq!(c.linhas.len(), 2, "as duas aparecem");
+    assert_eq!(c.resumo.saidas_de_caixa_previstas, Centavos(100_000));
+    assert_eq!(c.resumo.compras_no_cartao, Centavos(3_500));
+}
