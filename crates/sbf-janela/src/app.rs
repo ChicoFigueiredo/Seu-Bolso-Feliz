@@ -407,6 +407,26 @@ impl AppCasca for AppSbf {
             drop(j);
             v.push(a);
         }
+        // As Ações do Controle mensal (só com o planejamento ligado).
+        if self.janela.borrow().planejamento.is_some() {
+            for d in &crate::controle::ACOES_DO_CONTROLE {
+                let disp = self.janela.borrow().controle_disponibilidade(d.id);
+                let mut a = AcaoCasca::nova(d.codigo, d.rotulo)
+                    .icone(d.icone)
+                    .dica(d.dica)
+                    .keytip(d.keytip)
+                    .atalho(AtalhoCasca {
+                        ctrl: d.atalho.ctrl,
+                        alt: d.atalho.alt,
+                        shift: d.atalho.shift,
+                        tecla: d.atalho.tecla,
+                    });
+                if let Err(m) = disp {
+                    a = a.desabilitada(m);
+                }
+                v.push(a);
+            }
+        }
         // As Ações geradas dos dados: uma por conexão (filtro) e uma por tema.
         let fonte_atual = self.janela.borrow().fonte.clone();
         v.push(
@@ -485,6 +505,22 @@ impl AppCasca for AppSbf {
                 a = a.grupo(Grupo::novo(id_grupo, *g, ids_do_grupo));
             }
             abas.push(a);
+        }
+        if self.janela.borrow().planejamento.is_some() {
+            let mut a = AbaCasca::nova("controle", "Controle", "M");
+            let mut grupos: Vec<(&str, Vec<&str>)> = Vec::new();
+            for d in &crate::controle::ACOES_DO_CONTROLE {
+                match grupos.iter_mut().find(|(g, _)| *g == d.grupo) {
+                    Some((_, ids)) => ids.push(d.codigo),
+                    None => grupos.push((d.grupo, vec![d.codigo])),
+                }
+            }
+            for (g, ids_do_grupo) in &grupos {
+                let id_grupo = format!("controle.{}", g.to_lowercase().replace(' ', "-"));
+                a = a.grupo(Grupo::novo(id_grupo, *g, ids_do_grupo));
+            }
+            // A aba do Controle vai primeiro: é a primeira tela.
+            abas.insert(0, a);
         }
         abas
     }
@@ -574,7 +610,7 @@ impl AppCasca for AppSbf {
                 item
             })
             .collect();
-        vec![
+        let mut grupos = vec![
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", futuras(&["caixa"])),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
@@ -595,7 +631,18 @@ impl AppCasca for AppSbf {
                 v.extend(futuras(&["destinatarios"]));
                 v
             }),
-        ]
+        ];
+        // O Controle mensal é o primeiro grupo quando o planejamento está ligado.
+        if self.janela.borrow().planejamento.is_some() {
+            grupos.insert(
+                0,
+                GrupoNavegacao::novo(
+                    "Controle",
+                    vec![ItemNavegacao::novo("controle", "Controle mensal", "calendar_month")],
+                ),
+            );
+        }
+        grupos
     }
 
     fn destinos(&self) -> Vec<DestinoPaleta> {
@@ -636,6 +683,9 @@ impl AppCasca for AppSbf {
     }
 
     fn rota_inicial(&self) -> Rota {
+        if self.janela.borrow().planejamento.is_some() {
+            return Rota::nova(Destino::AreaFutura("controle").rota());
+        }
         Rota::nova(Destino::Area(Area::VisaoGeral).rota())
     }
 
@@ -969,6 +1019,15 @@ impl AppCasca for AppSbf {
             bancada_casca::pedir(ctx, bancada_casca::Pedido::Tema(t.to_owned()));
             return;
         }
+        if let Some(a) = crate::controle::acao_do_codigo(id) {
+            self.janela
+                .get_mut()
+                .pedir(crate::navegacao::Pedido::Controle(
+                    crate::controle_ui::PedidoDoControle::Acao(a),
+                ));
+            self.processar(ctx);
+            return;
+        }
         let Some(acao) = acao_do_codigo(id) else {
             return;
         };
@@ -1025,6 +1084,7 @@ impl AppCasca for AppSbf {
                     Some("triagem")
                 }
                 Destino::Item(r) if r.tipo == Tipo::Lote => Some("lotes"),
+                Destino::AreaFutura("controle") => Some("controle"),
                 _ => None,
             };
             if let Some(aba) = aba {
