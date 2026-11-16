@@ -1,0 +1,32 @@
+                                           Mês / Ano de Pagamento               CA/SR                                         Código de Lotação
+
+                                           OUTUBRO / 2026                       XX-YY EXEMPLO                                 000 0000-0
+
+DEMONSTRATIVO DE PAGAMENTO
+
+Nome                                                                                                  Data                   Matrícula
+PESSOA FICTICIA DE EXEMPLO                                                                            01/01/2000              c000000-0
+Unidade de Lotação                                                                                                           Sigla
+UNIDADE FICTICIA                                                                                                              UNFIC
+Cargo                                                                                    Ref.          Agênci      Operaçã   Conta de Depósito
+CARGO FICTICIO                                                                           100           000         1           00000-0
+Função de Confiança/Cargo em Comissão/Função Gratificada                                               Dep. PAI    SF-INSS    SF-CEF        Dep. IR
+FUNCAO FICTICIA                                                                                        0           0           0             1
+
+     Tipo                         Discriminação da Rubrica                              Competência               Prazo                Valor
+
+    2002        SALARIO PADRAO                                                              10/2026                                      R$ 5.000,00
+    2005        COMPL TEMP VARIAVEL AJUSTE MERCADO                                          10/2026                                      R$ 3.000,00
+    2275        FUNCAO GRATIFICADA EFETIVA                                                  10/2026                                      R$ 2.000,00
+    4313        INSS CONTRIBUICAO                                                           10/2026                001                    R$ 900,00
+    4325        IMPOSTO DE RENDA                                                            10/2026                999                  R$ 1.800,00
+   43345        CAIXA CONSIGNACOES SINCR                                                    10/2024                096                    R$ 300,00
+   43345        CAIXA CONSIGNACOES SINCR                                                    05/2025                120                    R$ 450,50
+    4342        FUNCEF - CONTRIBUICAO REB2002                                               10/2026                999                    R$ 600,00
+    4460        SAUDE CAIXA - MENSALIDADE                                                   10/2026                001                    R$ 250,00
+
+
+
+
+Salário Bruto                             Valor Descontos                       Salário Liquido                    Excesso de Débito
+R$ 10.000,00                              R$ 4.300,50                           R$ 5.699,50                        R$ 0,00

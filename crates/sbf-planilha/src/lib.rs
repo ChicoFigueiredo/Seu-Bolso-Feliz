@@ -10,6 +10,7 @@
 //! ou descrição vai a log (só contagens).
 
 pub mod conciliacao;
+pub mod contracheque;
 pub mod importacao;
 pub mod leitura;
 pub mod mapa;
@@ -35,6 +36,8 @@ pub enum ErroPlanilha {
     Mapa(String),
     #[error("inventário: {0}")]
     Inventario(String),
+    #[error("contracheque: {0}")]
+    Contracheque(String),
     #[error("saldos: {0}")]
     Saldos(String),
     #[error(transparent)]
