@@ -15,8 +15,8 @@ use egui::{
 use egui_extras::{Column, TableBuilder};
 use sbf_planejamento::{
     Alteracao, Autor, Competencia, Controle, Data, EntradaDoHistorico, ErroDoPlanejamento,
-    EstadoDaProposta, Excecao, Filtro, IdOcorrencia, Ocorrencia, Planejamento, Prazo, Proposta,
-    Recorrente, Simulacao,
+    EstadoDaProposta, Excecao, Filtro, IdOcorrencia, Natureza, Ocorrencia, Planejamento, Prazo,
+    Proposta, Recorrente, Simulacao,
 };
 
 use crate::componentes;
@@ -126,6 +126,7 @@ struct DadosDoDetalhe {
     recorrente: Option<Recorrente>,
     proximas: Vec<Ocorrencia>,
     historico: Vec<EntradaDoHistorico>,
+    excecoes: Vec<sbf_planejamento::ExcecaoGravada>,
 }
 
 /// O que a área guarda entre quadros.
@@ -422,10 +423,12 @@ fn carregar_detalhe(
         .proximas(id, desde, meses, hoje)
         .map_err(|e| e.to_string())?;
     let historico = plan.historico(Some(id), 60).map_err(|e| e.to_string())?;
+    let excecoes = plan.excecoes_do_recorrente(id).map_err(|e| e.to_string())?;
     Ok(DadosDoDetalhe {
         recorrente,
         proximas,
         historico,
+        excecoes,
     })
 }
 
@@ -1485,6 +1488,10 @@ fn linha(
             nome.push_str(&format!(" ({n}/{t})"));
         }
         ui.add(egui::Label::new(RichText::new(nome).color(cor_do_texto)).truncate());
+        if matches!(o.natureza, Natureza::DentroDaFatura) {
+            componentes::selo(ui, "no cartão", p.info_sutil, p.info)
+                .on_hover_text("Compra no cartão: o caixa sai pela fatura, que já está no plano. Não soma nas saídas.");
+        }
         if o.sugestao_de_conciliacao {
             componentes::selo(ui, "conciliar?", p.aviso_sutil, p.aviso).on_hover_text(
                 "Há um lançamento do banco que parece pagar esta linha. Confirme a conciliação.",
@@ -1884,7 +1891,7 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
             }
             AbaDoDetalhe::Versoes => aba_versoes(ui, dados.recorrente.as_ref()),
             AbaDoDetalhe::Pausas => aba_pausas(ui, dados.recorrente.as_ref()),
-            AbaDoDetalhe::Excecoes => aba_excecoes(ui, &dados.historico),
+            AbaDoDetalhe::Excecoes => aba_excecoes(ui, &dados.excecoes),
             AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
         });
     if mais {
@@ -2066,32 +2073,16 @@ fn aba_pausas(ui: &mut Ui, r: Option<&Recorrente>) {
     }
 }
 
-/// As exceções, lidas do histórico (a costura não as lista).
-fn aba_excecoes(ui: &mut Ui, h: &[EntradaDoHistorico]) {
-    let v: Vec<(&EntradaDoHistorico, Alteracao)> = h
-        .iter()
-        .filter_map(|e| {
-            serde_json::from_str::<Alteracao>(&e.alteracao)
-                .ok()
-                .map(|a| (e, a))
-        })
-        .filter(|(_, a)| matches!(a, Alteracao::Excecao { .. }))
-        .collect();
+/// As exceções do compromisso (`excecoes_do_recorrente`), com as desfeitas marcadas.
+fn aba_excecoes(ui: &mut Ui, v: &[sbf_planejamento::ExcecaoGravada]) {
     if v.is_empty() {
         texto_pequeno(
             ui,
             "Nenhuma exceção: adiamentos, dispensas, valores só de um mês e pagamentos informados aparecem aqui.",
         );
     }
-    for (e, a) in v {
-        let Alteracao::Excecao {
-            ocorrencia,
-            excecao,
-        } = a
-        else {
-            continue;
-        };
-        let tipo = match excecao {
+    for e in v {
+        let tipo = match &e.excecao {
             Excecao::Adiar { .. } => "Adiada",
             Excecao::Dispensar { .. } => "Dispensada",
             Excecao::ValorSoDesteMes { .. } => "Valor só deste mês",
@@ -2100,8 +2091,9 @@ fn aba_excecoes(ui: &mut Ui, h: &[EntradaDoHistorico]) {
         componentes::cartao(ui, |ui| {
             ui.label(
                 RichText::new(format!(
-                    "{tipo} · {}",
-                    competencia_texto(ocorrencia.competencia)
+                    "{tipo} · {}{}",
+                    competencia_texto(e.ocorrencia.competencia),
+                    if e.desfeita { " · desfeita" } else { "" }
                 ))
                 .strong(),
             );

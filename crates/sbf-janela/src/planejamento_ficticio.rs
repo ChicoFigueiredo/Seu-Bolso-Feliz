@@ -72,6 +72,7 @@ impl PlanejamentoFicticio {
             "Lazer",
             "Folha",
             "Passagem",
+            "Achados na Pluggy",
         ]
         .iter()
         .enumerate()
@@ -468,6 +469,40 @@ impl PlanejamentoFicticio {
                     inicio,
                     cx,
                     "Bolão",
+                ),
+            ),
+            (
+                "rec_padaria_cartao",
+                "Padaria (cartão)",
+                "Achados na Pluggy",
+                Some("No cartão"),
+                Natureza::DentroDaFatura,
+                Prazo::SemFim,
+                versao(
+                    Some(Centavos(18_000)),
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(12),
+                    inicio,
+                    nu,
+                    "Casa",
+                ),
+            ),
+            (
+                "rec_assinatura_debito",
+                "Assinatura de música (débito)",
+                "Achados na Pluggy",
+                Some("Débito em conta"),
+                Natureza::Saida,
+                Prazo::SemFim,
+                versao(
+                    Some(Centavos(2_190)),
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(11),
+                    inicio,
+                    cx,
+                    "Pessoal",
                 ),
             ),
         ];
@@ -916,6 +951,7 @@ impl PlanejamentoFicticio {
                 Natureza::Passagem {
                     sentido: Sentido::Saida,
                 } => p_sai += prev,
+                Natureza::DentroDaFatura => r.compras_no_cartao += prev,
             }
         }
         for o in atrasadas {
@@ -1075,7 +1111,7 @@ impl Planejamento for PlanejamentoFicticio {
                     Natureza::Entrada => t.entradas += prev,
                     Natureza::Saida => t.saidas_de_caixa += prev,
                     Natureza::DescontoEmFolha => t.descontos_em_folha += prev,
-                    Natureza::Passagem { .. } => {}
+                    Natureza::Passagem { .. } | Natureza::DentroDaFatura => {}
                 }
                 if o.previsto.is_none() {
                     t.sem_valor += 1;
@@ -1241,6 +1277,15 @@ impl Planejamento for PlanejamentoFicticio {
 
     fn origem_importada(&self, _origem: &OrigemImportada) -> Resultado<Option<String>> {
         Ok(None)
+    }
+
+    fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
+        Ok(self
+            .excecoes
+            .iter()
+            .filter(|e| e.ocorrencia.recorrente == recorrente)
+            .cloned()
+            .collect())
     }
 
     fn sugestao_de_conciliacao(&self, ocorrencia: &IdOcorrencia) -> Resultado<Option<Conciliacao>> {

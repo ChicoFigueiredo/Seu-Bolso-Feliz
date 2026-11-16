@@ -386,6 +386,8 @@ pub struct Subtotais {
     pub descontos_em_folha: Centavos,
     /// Dinheiro de passagem (fora de receita e despesa).
     pub passagem: Centavos,
+    /// Compras no cartão: já estão dentro das faturas, então ficam à parte das saídas.
+    pub no_cartao: Centavos,
     pub pago_informado: Centavos,
     pub conciliado: Centavos,
     pub falta: Centavos,
@@ -405,6 +407,7 @@ impl Subtotais {
                 Natureza::Saida => self.saidas += p,
                 Natureza::DescontoEmFolha => self.descontos_em_folha += p,
                 Natureza::Passagem { .. } => self.passagem += p,
+                Natureza::DentroDaFatura => self.no_cartao += p,
             },
         }
         self.pago_informado += o.pago_informado.unwrap_or_default();
@@ -418,6 +421,7 @@ impl Subtotais {
         self.saidas += outro.saidas;
         self.descontos_em_folha += outro.descontos_em_folha;
         self.passagem += outro.passagem;
+        self.no_cartao += outro.no_cartao;
         self.pago_informado += outro.pago_informado;
         self.conciliado += outro.conciliado;
         self.falta += outro.falta;
@@ -438,6 +442,9 @@ impl Subtotais {
         }
         if !self.passagem.e_zero() {
             v.push(("Passagem", self.passagem));
+        }
+        if !self.no_cartao.e_zero() {
+            v.push(("No cartão", self.no_cartao));
         }
         v
     }
@@ -663,6 +670,19 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         notas: Vec::new(),
         selo: None,
         dica: Some("Sem desconto em folha e sem dinheiro de passagem.".into()),
+        tom: Tom::Neutro,
+    });
+
+    v.push(Cartao {
+        id: "cartao",
+        titulo: "Compras no cartão",
+        valor: reais(r.compras_no_cartao),
+        notas: vec!["Já dentro das faturas.".into()],
+        selo: None,
+        dica: Some(
+            "Compras no cartão de crédito. O caixa sai pela fatura, que já está nas saídas; por isso não somam de novo."
+                .into(),
+        ),
         tom: Tom::Neutro,
     });
 
@@ -1602,6 +1622,7 @@ pub fn natureza_texto(n: Natureza) -> &'static str {
         Natureza::Passagem {
             sentido: Sentido::Saida,
         } => "Passagem (saída)",
+        Natureza::DentroDaFatura => "Compra no cartão (dentro da fatura)",
     }
 }
 
@@ -1869,6 +1890,7 @@ mod testes {
                 "disponivel",
                 "entradas",
                 "saidas",
+                "cartao",
                 "folha",
                 "atraso",
                 "conferir",
@@ -2247,5 +2269,33 @@ mod testes {
             let t = descrever(&p.alteracao, &nome);
             assert!(t.ends_with('.') && !t.contains("rec_"), "{t}");
         }
+    }
+
+    #[test]
+    fn compra_no_cartao_fica_fora_das_saidas_e_vai_a_parte() {
+        let n = Navegador::novo(hoje());
+        let c = controle_do(&n);
+        let g = montar_grade(&c);
+        assert!(c.resumo.compras_no_cartao > Centavos::ZERO);
+        assert_eq!(g.total.no_cartao, c.resumo.compras_no_cartao);
+        assert_eq!(g.total.saidas, c.resumo.saidas_de_caixa_previstas);
+        let pluggy = g
+            .grupos
+            .iter()
+            .find(|x| x.nome == "Achados na Pluggy")
+            .expect("grupo");
+        let subs: Vec<_> = pluggy
+            .subgrupos
+            .iter()
+            .filter_map(|s| s.nome.as_deref())
+            .collect();
+        assert!(subs.contains(&"No cartão") && subs.contains(&"Débito em conta"));
+        assert!(
+            pluggy
+                .total
+                .partes_do_previsto()
+                .iter()
+                .any(|(n, _)| *n == "No cartão")
+        );
     }
 }
