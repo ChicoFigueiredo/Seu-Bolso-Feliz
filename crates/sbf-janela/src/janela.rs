@@ -1820,7 +1820,7 @@ impl Janela {
                 }
             }
             P::Aplicar(alteracao) => {
-                let r = plan.aplicar(alteracao, Autor::Usuario);
+                let r = plan.aplicar(*alteracao, Autor::Usuario);
                 let ok = terminar(controle, r, "Aplicado.");
                 // Com erro, o diálogo fecha também: a base ficou velha, o certo é reabrir
                 // depois de recarregar.

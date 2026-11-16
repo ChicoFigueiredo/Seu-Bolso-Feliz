@@ -54,7 +54,11 @@ fn dia_mes(d: Data) -> String {
 
 /// `novembro de 2026`.
 pub fn mes_por_extenso(c: Competencia) -> String {
-    format!("{} de {}", MESES[usize::from(c.mes.clamp(1, 12)) - 1], c.ano)
+    format!(
+        "{} de {}",
+        MESES[usize::from(c.mes.clamp(1, 12)) - 1],
+        c.ano
+    )
 }
 
 // ---------------------------------------------------------------------------------------
@@ -126,7 +130,10 @@ impl Navegador {
     /// O primeiro e o último mês que a navegação alcança.
     pub fn limites(&self) -> (Competencia, Competencia) {
         let b = Self::base(self.modo, self.hoje);
-        (b.somar_meses(-MESES_PARA_TRAS), b.somar_meses(MESES_PARA_FRENTE))
+        (
+            b.somar_meses(-MESES_PARA_TRAS),
+            b.somar_meses(MESES_PARA_FRENTE),
+        )
     }
 
     pub fn periodo(&self) -> Periodo {
@@ -475,7 +482,10 @@ impl Grade {
             let v: Vec<&Ocorrencia> = g.linhas().collect();
             if let Some(i) = v.iter().position(|o| &o.id == id) {
                 // Mesmo recorrente em duas ocorrências (adiamento): ignora as do próprio.
-                let antes = v[..i].iter().rev().find(|o| o.id.recorrente != id.recorrente);
+                let antes = v[..i]
+                    .iter()
+                    .rev()
+                    .find(|o| o.id.recorrente != id.recorrente);
                 let depois = v[i + 1..].iter().find(|o| o.id.recorrente != id.recorrente);
                 return (antes.copied(), depois.copied());
             }
@@ -531,7 +541,8 @@ pub fn montar_grade(c: &Controle) -> Grade {
             }
         }
         // O subgrupo vale pela sua linha mais prioritária.
-        g.subgrupos.sort_by_key(|s| s.linhas.first().map(|o| o.posicao));
+        g.subgrupos
+            .sort_by_key(|s| s.linhas.first().map(|o| o.posicao));
         let mut t = Subtotais::default();
         for s in &g.subgrupos {
             t.somar(&s.total);
@@ -577,7 +588,10 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
 
     // Disponível agora: por conta, com a data da coleta.
     let soma: Centavos = r.disponivel_agora.iter().map(|s| s.valor).sum();
-    let desatualizado = r.disponivel_agora.iter().any(|s| saldo_desatualizado(s, hoje));
+    let desatualizado = r
+        .disponivel_agora
+        .iter()
+        .any(|s| saldo_desatualizado(s, hoje));
     v.push(Cartao {
         id: "disponivel",
         titulo: "Disponível agora",
@@ -604,15 +618,24 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
             })
             .collect(),
         selo: desatualizado.then_some("desatualizado"),
-        dica: Some("O último saldo coletado da Pluggy, por conta. Passou de 1 dia, aparece desatualizado.".into()),
-        tom: if desatualizado { Tom::Aviso } else { Tom::Neutro },
+        dica: Some(
+            "O último saldo coletado da Pluggy, por conta. Passou de 1 dia, aparece desatualizado."
+                .into(),
+        ),
+        tom: if desatualizado {
+            Tom::Aviso
+        } else {
+            Tom::Neutro
+        },
     });
 
     // Entradas previstas: com as duas datas do salário quando são diferentes.
     let notas: Vec<String> = c
         .linhas
         .iter()
-        .filter(|o| matches!(o.natureza, Natureza::Entrada) && o.vencimento != o.vencimento_original)
+        .filter(|o| {
+            matches!(o.natureza, Natureza::Entrada) && o.vencimento != o.vencimento_original
+        })
         .map(|o| {
             let v = vencimento(o);
             format!(
@@ -637,9 +660,9 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         id: "saidas",
         titulo: "Saídas de caixa",
         valor: reais(r.saidas_de_caixa_previstas),
-        notas: vec!["Sem desconto em folha e sem dinheiro de passagem.".into()],
+        notas: Vec::new(),
         selo: None,
-        dica: None,
+        dica: Some("Sem desconto em folha e sem dinheiro de passagem.".into()),
         tom: Tom::Neutro,
     });
 
@@ -647,7 +670,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         id: "folha",
         titulo: "Desconto em folha",
         valor: reais(r.descontos_em_folha),
-        notas: vec!["À parte: já retido no contracheque, não sai do caixa de novo.".into()],
+        notas: vec!["À parte: não sai do caixa de novo.".into()],
         selo: None,
         dica: Some("O salário entra pelo líquido. Estas consignações aparecem, mas não entram nas saídas de caixa.".into()),
         tom: Tom::Neutro,
@@ -665,20 +688,28 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         },
         selo: None,
         dica: None,
-        tom: if r.em_atraso > Centavos::ZERO { Tom::Perigo } else { Tom::Neutro },
+        tom: if r.em_atraso > Centavos::ZERO {
+            Tom::Perigo
+        } else {
+            Tom::Neutro
+        },
     });
 
     v.push(Cartao {
         id: "conferir",
         titulo: "A conferir",
         valor: formato::inteiro(i64::from(r.a_conferir)),
-        notas: vec!["Sem valor, ou só com pago informado.".into()],
+        notas: Vec::new(),
         selo: None,
-        dica: None,
-        tom: if r.a_conferir > 0 { Tom::Aviso } else { Tom::Neutro },
+        dica: Some("Ocorrências sem valor, ou só com pago informado e sem conciliação.".into()),
+        tom: if r.a_conferir > 0 {
+            Tom::Aviso
+        } else {
+            Tom::Neutro
+        },
     });
 
-    let mut notas = vec!["Disponível + entradas − saídas ainda não pagas − em atraso.".to_owned()];
+    let mut notas = Vec::new();
     if r.passagem_pendente > Centavos::ZERO {
         notas.push(format!(
             "Já tirado: {} de dinheiro de passagem a repassar.",
@@ -691,11 +722,14 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         valor: reais(r.livre_apos_compromissos),
         notas,
         selo: r.livre_e_estimativa.then_some("estimativa"),
-        dica: if r.lacunas.is_empty() {
-            None
+        dica: Some(if r.lacunas.is_empty() {
+            "Disponível + entradas − saídas ainda não pagas − em atraso.".to_owned()
         } else {
-            Some(format!("O que falta para este número ficar certo:\n• {}", r.lacunas.join("\n• ")))
-        },
+            format!(
+                "Disponível + entradas − saídas ainda não pagas − em atraso.\n\nO que falta para este número ficar certo:\n• {}",
+                r.lacunas.join("\n• ")
+            )
+        }),
         tom: if r.livre_e_estimativa { Tom::Aviso } else { Tom::Neutro },
     });
     v
@@ -972,7 +1006,8 @@ pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(),
             }
         }
         AcaoDoControle::Cancelar => {
-            if rec.is_some_and(|r| r.cancelamento.is_some()) || o.estado == E::SuprimidaPorCancelamento
+            if rec.is_some_and(|r| r.cancelamento.is_some())
+                || o.estado == E::SuprimidaPorCancelamento
             {
                 Err("O compromisso já está cancelado.".into())
             } else {
@@ -1158,7 +1193,8 @@ pub fn montar_alteracao(
                     // "Só este mês" muda só o valor (vira uma exceção).
                     if conta.trim() != atual.conta || centro.trim() != atual.centro {
                         return Err(
-                            "Conta e centro só mudam \"daqui em diante\". Escolha esse escopo.".into(),
+                            "Conta e centro só mudam \"daqui em diante\". Escolha esse escopo."
+                                .into(),
                         );
                     }
                     if m.valor.is_none() {
@@ -1176,7 +1212,11 @@ pub fn montar_alteracao(
                     if centro.trim() != atual.centro {
                         m.centro = Some(opcional(centro));
                     }
-                    let certeza = if *estimado { Certeza::Estimado } else { Certeza::Confirmado };
+                    let certeza = if *estimado {
+                        Certeza::Estimado
+                    } else {
+                        Certeza::Confirmado
+                    };
                     if certeza != atual.certeza {
                         m.certeza = Some(certeza);
                     }
@@ -1337,10 +1377,7 @@ impl AtualDaVersao {
 }
 
 /// A troca de duas prioridades (subir ou descer): as duas [`Alteracao::Mover`], na ordem.
-pub fn trocar_prioridade(
-    a: &Recorrente,
-    b: &Recorrente,
-) -> [Alteracao; 2] {
+pub fn trocar_prioridade(a: &Recorrente, b: &Recorrente) -> [Alteracao; 2] {
     // Se as posições empatam, separa-as: a linha que sobe fica uma posição antes da outra.
     let (pa, pb) = if a.posicao == b.posicao {
         (a.posicao - 1, b.posicao)
@@ -1373,7 +1410,7 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
     use sbf_planejamento::{Escopo, Frequencia};
     let escopo = |e: &Escopo| match e {
         Escopo::SoEsteMes(c) => format!("só em {}", competencia_texto(*c)),
-        Escopo::DaquiEmDiante(c) => format!("de {} em diante", competencia_texto(*c)),
+        Escopo::DaquiEmDiante(c) => format!("a partir de {}", competencia_texto(*c)),
     };
     match alteracao {
         Alteracao::CriarRecorrente { recorrente, .. } => {
@@ -1393,10 +1430,16 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
                 });
             }
             if let Some(c) = &mudanca.conta {
-                partes.push(format!("a conta para {}", c.as_deref().unwrap_or("nenhuma")));
+                partes.push(format!(
+                    "a conta para {}",
+                    c.as_deref().unwrap_or("nenhuma")
+                ));
             }
             if let Some(c) = &mudanca.centro {
-                partes.push(format!("o centro para {}", c.as_deref().unwrap_or("nenhum")));
+                partes.push(format!(
+                    "o centro para {}",
+                    c.as_deref().unwrap_or("nenhum")
+                ));
             }
             if mudanca.certeza.is_some() {
                 partes.push("a certeza do valor".into());
@@ -1412,7 +1455,11 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             } else {
                 partes.join(", ")
             };
-            format!("Mudar {o_que} de \u{201c}{}\u{201d}, {}.", nome(recorrente), escopo(e))
+            format!(
+                "Mudar {o_que} de \u{201c}{}\u{201d}, {}.",
+                nome(recorrente),
+                escopo(e)
+            )
         }
         Alteracao::Pausar {
             recorrente,
@@ -1424,10 +1471,19 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             "Pausar \u{201c}{}\u{201d} de {} {} ({motivo}).",
             nome(recorrente),
             competencia_texto(*desde),
-            ate.map_or("até retomar".to_owned(), |a| format!("até {} (exclusivo)", competencia_texto(a))),
+            ate.map_or("até retomar".to_owned(), |a| format!(
+                "até {} (exclusivo)",
+                competencia_texto(a)
+            )),
         ),
-        Alteracao::Retomar { recorrente, desde, .. } => {
-            format!("Retomar \u{201c}{}\u{201d} em {}.", nome(recorrente), competencia_texto(*desde))
+        Alteracao::Retomar {
+            recorrente, desde, ..
+        } => {
+            format!(
+                "Retomar \u{201c}{}\u{201d} em {}.",
+                nome(recorrente),
+                competencia_texto(*desde)
+            )
         }
         Alteracao::Cancelar {
             recorrente,
@@ -1439,51 +1495,87 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             "Cancelar \u{201c}{}\u{201d} a partir de {} ({motivo}; {}).",
             nome(recorrente),
             competencia_texto(*desde),
-            if *comprovado { "com comprovante" } else { "sem comprovante do fornecedor" }
+            if *comprovado {
+                "com comprovante"
+            } else {
+                "sem comprovante do fornecedor"
+            }
         ),
-        Alteracao::Excecao { ocorrencia, excecao } => {
+        Alteracao::Excecao {
+            ocorrencia,
+            excecao,
+        } => {
             let n = nome(&ocorrencia.recorrente);
             let mes = competencia_texto(ocorrencia.competencia);
             match excecao {
                 Excecao::Adiar { nova_data } => match nova_data {
-                    Some(d) => format!("Adiar \u{201c}{n}\u{201d} de {mes} para {}.", data_texto(*d)),
-                    None => format!("Adiar \u{201c}{n}\u{201d} de {mes} sem data (continua devido)."),
+                    Some(d) => format!(
+                        "Adiar \u{201c}{n}\u{201d} de {mes} para {}.",
+                        data_texto(*d)
+                    ),
+                    None => {
+                        format!("Adiar \u{201c}{n}\u{201d} de {mes} sem data (continua devido).")
+                    }
                 },
                 Excecao::Dispensar { motivo } => {
                     format!("Dispensar \u{201c}{n}\u{201d} em {mes} ({motivo}).")
                 }
                 Excecao::ValorSoDesteMes { valor } => {
-                    format!("Mudar o valor de \u{201c}{n}\u{201d} só em {mes} para {}.", reais(*valor))
+                    format!(
+                        "Mudar o valor de \u{201c}{n}\u{201d} só em {mes} para {}.",
+                        reais(*valor)
+                    )
                 }
                 Excecao::PagoInformado { valor, .. } => {
-                    format!("Informar {} pagos em \u{201c}{n}\u{201d} ({mes}).", reais(*valor))
+                    format!(
+                        "Informar {} pagos em \u{201c}{n}\u{201d} ({mes}).",
+                        reais(*valor)
+                    )
                 }
             }
         }
         Alteracao::DesfazerExcecao { .. } => "Desfazer uma exceção.".into(),
         Alteracao::Conciliar { conciliacao } => format!(
             "{} a conciliação de \u{201c}{}\u{201d} ({}) com {}.",
-            if conciliacao.confirmada { "Confirmar" } else { "Sugerir" },
+            if conciliacao.confirmada {
+                "Confirmar"
+            } else {
+                "Sugerir"
+            },
             nome(&conciliacao.ocorrencia.recorrente),
             competencia_texto(conciliacao.ocorrencia.competencia),
             reais(conciliacao.valor),
         ),
-        Alteracao::Excluir { recorrente, motivo, .. } => {
-            format!("Excluir \u{201c}{}\u{201d} ({motivo}). Dá para restaurar.", nome(recorrente))
+        Alteracao::Excluir {
+            recorrente, motivo, ..
+        } => {
+            format!(
+                "Excluir \u{201c}{}\u{201d} ({motivo}). Dá para restaurar.",
+                nome(recorrente)
+            )
         }
-        Alteracao::Restaurar { recorrente, .. } => format!("Restaurar \u{201c}{}\u{201d}.", nome(recorrente)),
+        Alteracao::Restaurar { recorrente, .. } => {
+            format!("Restaurar \u{201c}{}\u{201d}.", nome(recorrente))
+        }
         Alteracao::Arquivar {
             recorrente,
             arquivado,
             ..
         } => format!(
             "{} \u{201c}{}\u{201d}.",
-            if *arquivado { "Arquivar" } else { "Tirar do arquivo" },
+            if *arquivado {
+                "Arquivar"
+            } else {
+                "Tirar do arquivo"
+            },
             nome(recorrente)
         ),
         Alteracao::Mover {
             recorrente, grupo, ..
-        } => format!("Mover \u{201c}{}\u{201d} para o grupo {grupo}.", nome(recorrente)),
+        } => format!(
+            "Mover \u{201c}{}\u{201d} para o grupo {grupo}.",
+            nome(recorrente)
+        ),
         Alteracao::CriarGrupo { nome, .. } => format!("Criar o grupo {nome}."),
     }
 }
@@ -1613,7 +1705,11 @@ mod testes {
         assert_eq!(rotulos.len(), todos.len(), "rótulos distintos");
         for e in todos {
             let s = estilo_do_estado(e);
-            assert!(crate::icones::caractere(s.icone).is_some(), "ícone {}", s.icone);
+            assert!(
+                crate::icones::caractere(s.icone).is_some(),
+                "ícone {}",
+                s.icone
+            );
             assert!(!s.rotulo.is_empty());
         }
         assert_eq!(estilo_do_estado(E::EmAtraso).rotulo, "Em atraso");
@@ -1636,7 +1732,11 @@ mod testes {
         assert_eq!(nomes[0], "Entradas");
         // Nível 2: o grupo Lar tem os subgrupos da planilha.
         let lar = g.grupos.iter().find(|x| x.nome == "Lar").expect("Lar");
-        let subs: Vec<_> = lar.subgrupos.iter().filter_map(|s| s.nome.as_deref()).collect();
+        let subs: Vec<_> = lar
+            .subgrupos
+            .iter()
+            .filter_map(|s| s.nome.as_deref())
+            .collect();
         assert!(subs.contains(&"Moradia") && subs.contains(&"Contas"));
         // Nível 3: dentro do subgrupo, por posição.
         for gr in &g.grupos {
@@ -1682,7 +1782,11 @@ mod testes {
         let c = controle_do(&n);
         let g = montar_grade(&c);
         assert!(g.total.sem_valor >= 1, "a energia está sem valor");
-        let energia = c.linhas.iter().find(|o| o.id.recorrente == "rec_energia").expect("energia");
+        let energia = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_energia")
+            .expect("energia");
         assert_eq!(dinheiro_ou_sem_valor(energia.previsto), "sem valor");
         assert_eq!(falta(energia), None);
     }
@@ -1691,11 +1795,27 @@ mod testes {
     fn vencimento_mostra_as_duas_datas_do_salario() {
         let n = Navegador::novo(hoje());
         let c = controle_do(&n);
-        let sal = c.linhas.iter().find(|o| o.id.recorrente == "rec_salario").expect("salário");
+        let sal = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_salario")
+            .expect("salário");
         let v = vencimento(sal);
-        assert!(v.secundario.as_deref().is_some_and(|s| s.starts_with("crédito ")));
-        assert!(v.dica.as_deref().is_some_and(|s| s.contains("Disponível em")));
-        let aluguel = c.linhas.iter().find(|o| o.id.recorrente == "rec_aluguel").expect("aluguel");
+        assert!(
+            v.secundario
+                .as_deref()
+                .is_some_and(|s| s.starts_with("crédito "))
+        );
+        assert!(
+            v.dica
+                .as_deref()
+                .is_some_and(|s| s.contains("Disponível em"))
+        );
+        let aluguel = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_aluguel")
+            .expect("aluguel");
         assert_eq!(vencimento(aluguel).secundario, None);
     }
 
@@ -1704,7 +1824,12 @@ mod testes {
         let mut s = PlanejamentoFicticio::novo(hoje());
         let n = Navegador::novo(hoje());
         let c = controle_do(&n);
-        let o = c.linhas.iter().find(|o| o.id.recorrente == "rec_agua").expect("água").clone();
+        let o = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_agua")
+            .expect("água")
+            .clone();
         s.aplicar(
             Alteracao::Excecao {
                 ocorrencia: o.id.clone(),
@@ -1715,11 +1840,21 @@ mod testes {
             sbf_planejamento::Autor::Usuario,
         )
         .expect("adia");
-        let c = s.controle(&n.periodo(), Filtro::Todos, None, hoje()).unwrap();
-        let o = c.linhas.iter().find(|o| o.id.recorrente == "rec_agua").unwrap();
+        let c = s
+            .controle(&n.periodo(), Filtro::Todos, None, hoje())
+            .unwrap();
+        let o = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_agua")
+            .unwrap();
         assert_eq!(o.estado, EstadoDaOcorrencia::Adiada);
         let v = vencimento(o);
-        assert!(v.secundario.as_deref().is_some_and(|s| s.starts_with("era ")));
+        assert!(
+            v.secundario
+                .as_deref()
+                .is_some_and(|s| s.starts_with("era "))
+        );
     }
 
     #[test]
@@ -1730,7 +1865,15 @@ mod testes {
         let ids: Vec<_> = v.iter().map(|x| x.id).collect();
         assert_eq!(
             ids,
-            ["disponivel", "entradas", "saidas", "folha", "atraso", "conferir", "livre"]
+            [
+                "disponivel",
+                "entradas",
+                "saidas",
+                "folha",
+                "atraso",
+                "conferir",
+                "livre"
+            ]
         );
         let livre = v.iter().find(|x| x.id == "livre").unwrap();
         assert_eq!(livre.selo, Some("estimativa"));
@@ -1740,7 +1883,11 @@ mod testes {
         assert_eq!(disp.notas.len(), 2, "uma nota por conta");
         assert!(disp.notas.iter().any(|n| n.contains("coleta 16/11/2026")));
         let ent = v.iter().find(|x| x.id == "entradas").unwrap();
-        assert!(ent.notas.iter().any(|n| n.contains("disponível") && n.contains("crédito")));
+        assert!(
+            ent.notas
+                .iter()
+                .any(|n| n.contains("disponível") && n.contains("crédito"))
+        );
         let folha = v.iter().find(|x| x.id == "folha").unwrap();
         assert!(folha.notas[0].contains("não sai do caixa de novo"));
     }
@@ -1772,10 +1919,16 @@ mod testes {
             resumo: Resumo::default(),
         };
         c.resumo.livre_e_estimativa = false;
-        let l = cartoes(&c, hoje()).into_iter().find(|k| k.id == "livre").unwrap();
+        let l = cartoes(&c, hoje())
+            .into_iter()
+            .find(|k| k.id == "livre")
+            .unwrap();
         assert_eq!(l.selo, None);
         c.resumo.livre_e_estimativa = true;
-        let l = cartoes(&c, hoje()).into_iter().find(|k| k.id == "livre").unwrap();
+        let l = cartoes(&c, hoje())
+            .into_iter()
+            .find(|k| k.id == "livre")
+            .unwrap();
         assert_eq!(l.selo, Some("estimativa"));
     }
 
@@ -1809,7 +1962,11 @@ mod testes {
     fn disponibilidade_das_acoes() {
         let n = Navegador::novo(hoje());
         let c = controle_do(&n);
-        let atraso = c.linhas.iter().find(|o| o.estado == EstadoDaOcorrencia::EmAtraso && !o.sugestao_de_conciliacao).expect("em atraso");
+        let atraso = c
+            .linhas
+            .iter()
+            .find(|o| o.estado == EstadoDaOcorrencia::EmAtraso && !o.sugestao_de_conciliacao)
+            .expect("em atraso");
         let sem = ContextoDaLinha::default();
         assert!(disponibilidade(AcaoDoControle::Editar, &sem).is_err());
         let ctx = ContextoDaLinha {
@@ -1820,7 +1977,11 @@ mod testes {
         assert!(disponibilidade(AcaoDoControle::Pausar, &ctx).is_ok());
         assert!(disponibilidade(AcaoDoControle::Retomar, &ctx).is_err());
         assert!(disponibilidade(AcaoDoControle::ConfirmarConciliacao, &ctx).is_err());
-        let sug = c.linhas.iter().find(|o| o.sugestao_de_conciliacao).expect("sugestão");
+        let sug = c
+            .linhas
+            .iter()
+            .find(|o| o.sugestao_de_conciliacao)
+            .expect("sugestão");
         let ctx = ContextoDaLinha {
             linha: Some(sug),
             ..Default::default()
@@ -1847,7 +2008,14 @@ mod testes {
         assert_eq!(codigos.len(), ACOES_DO_CONTROLE.len());
         let mut atalhos: Vec<_> = ACOES_DO_CONTROLE
             .iter()
-            .map(|d| (d.atalho.ctrl, d.atalho.shift, d.atalho.alt, format!("{:?}", d.atalho.tecla)))
+            .map(|d| {
+                (
+                    d.atalho.ctrl,
+                    d.atalho.shift,
+                    d.atalho.alt,
+                    format!("{:?}", d.atalho.tecla),
+                )
+            })
             .collect();
         atalhos.sort();
         atalhos.dedup();
@@ -1894,14 +2062,31 @@ mod testes {
             centro: "Casa".into(),
             estimado: false,
         };
-        let a = montar_alteracao(&alvo(), comp, &f(EscopoEscolhido::SoEsteMes, "130,00", "Nubank"), &atual()).unwrap();
+        let a = montar_alteracao(
+            &alvo(),
+            comp,
+            &f(EscopoEscolhido::SoEsteMes, "130,00", "Nubank"),
+            &atual(),
+        )
+        .unwrap();
         assert!(matches!(
             a,
             Alteracao::Editar { escopo: sbf_planejamento::Escopo::SoEsteMes(c), .. } if c == comp
         ));
-        let a = montar_alteracao(&alvo(), comp, &f(EscopoEscolhido::DaquiEmDiante, "130,00", "CX-0630"), &atual()).unwrap();
+        let a = montar_alteracao(
+            &alvo(),
+            comp,
+            &f(EscopoEscolhido::DaquiEmDiante, "130,00", "CX-0630"),
+            &atual(),
+        )
+        .unwrap();
         match a {
-            Alteracao::Editar { escopo, mudanca, versao_base, .. } => {
+            Alteracao::Editar {
+                escopo,
+                mudanca,
+                versao_base,
+                ..
+            } => {
                 assert_eq!(escopo, sbf_planejamento::Escopo::DaquiEmDiante(comp));
                 assert_eq!(mudanca.valor, Some(Some(Centavos(13_000))));
                 assert_eq!(mudanca.conta, Some(Some("CX-0630".into())));
@@ -1910,13 +2095,35 @@ mod testes {
             outra => panic!("{outra:?}"),
         }
         // Só este mês com conta nova: recusa.
-        assert!(montar_alteracao(&alvo(), comp, &f(EscopoEscolhido::SoEsteMes, "130,00", "CX-0630"), &atual()).is_err());
+        assert!(
+            montar_alteracao(
+                &alvo(),
+                comp,
+                &f(EscopoEscolhido::SoEsteMes, "130,00", "CX-0630"),
+                &atual()
+            )
+            .is_err()
+        );
         // Nada mudou.
         assert_eq!(
-            montar_alteracao(&alvo(), comp, &f(EscopoEscolhido::DaquiEmDiante, "119,90", "Nubank"), &atual()).unwrap_err(),
+            montar_alteracao(
+                &alvo(),
+                comp,
+                &f(EscopoEscolhido::DaquiEmDiante, "119,90", "Nubank"),
+                &atual()
+            )
+            .unwrap_err(),
             "Nada mudou."
         );
-        assert!(montar_alteracao(&alvo(), comp, &f(EscopoEscolhido::DaquiEmDiante, "abc", "Nubank"), &atual()).is_err());
+        assert!(
+            montar_alteracao(
+                &alvo(),
+                comp,
+                &f(EscopoEscolhido::DaquiEmDiante, "abc", "Nubank"),
+                &atual()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1943,7 +2150,9 @@ mod testes {
             motivo: "viagem".into(),
         };
         let a = montar_alteracao(&alvo(), comp, &f("12/2026", "03/2027"), &atual()).unwrap();
-        assert!(matches!(a, Alteracao::Pausar { ate: Some(c), .. } if c == Competencia { ano: 2027, mes: 3 }));
+        assert!(
+            matches!(a, Alteracao::Pausar { ate: Some(c), .. } if c == Competencia { ano: 2027, mes: 3 })
+        );
         assert!(montar_alteracao(&alvo(), comp, &f("12/2026", "12/2026"), &atual()).is_err());
         assert!(montar_alteracao(&alvo(), comp, &f("2026-12", ""), &atual()).is_ok());
         assert!(montar_alteracao(&alvo(), comp, &f("13/2026", ""), &atual()).is_err());
@@ -1965,13 +2174,40 @@ mod testes {
         assert!(matches!(
             a,
             Alteracao::Excecao {
-                excecao: Excecao::PagoInformado { valor: Centavos(11_990), data: Some(_) },
+                excecao: Excecao::PagoInformado {
+                    valor: Centavos(11_990),
+                    data: Some(_)
+                },
                 ..
             }
         ));
-        let a = montar_alteracao(&alvo(), comp, &Formulario::Adiar { nova_data: String::new() }, &atual()).unwrap();
-        assert!(matches!(a, Alteracao::Excecao { excecao: Excecao::Adiar { nova_data: None }, .. }));
-        assert!(montar_alteracao(&alvo(), comp, &Formulario::Adiar { nova_data: "31/02/2026x".into() }, &atual()).is_err());
+        let a = montar_alteracao(
+            &alvo(),
+            comp,
+            &Formulario::Adiar {
+                nova_data: String::new(),
+            },
+            &atual(),
+        )
+        .unwrap();
+        assert!(matches!(
+            a,
+            Alteracao::Excecao {
+                excecao: Excecao::Adiar { nova_data: None },
+                ..
+            }
+        ));
+        assert!(
+            montar_alteracao(
+                &alvo(),
+                comp,
+                &Formulario::Adiar {
+                    nova_data: "31/02/2026x".into()
+                },
+                &atual()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1981,10 +2217,7 @@ mod testes {
         let b = s.recorrente("rec_condominio").unwrap().unwrap();
         let [x, y] = trocar_prioridade(&a, &b);
         match (x, y) {
-            (
-                Alteracao::Mover { posicao: pa, .. },
-                Alteracao::Mover { posicao: pb, .. },
-            ) => {
+            (Alteracao::Mover { posicao: pa, .. }, Alteracao::Mover { posicao: pb, .. }) => {
                 assert_eq!(pa, b.posicao);
                 assert_eq!(pb, a.posicao);
             }

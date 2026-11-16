@@ -14,16 +14,16 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 use sbf_planejamento::{
-    Alteracao, Autor, Competencia, Controle, Data, EntradaDoHistorico, EstadoDaProposta, Excecao,
-    Filtro, IdOcorrencia, Ocorrencia, Planejamento, Prazo, Proposta, Recorrente,
-    ErroDoPlanejamento, Simulacao,
+    Alteracao, Autor, Competencia, Controle, Data, EntradaDoHistorico, ErroDoPlanejamento,
+    EstadoDaProposta, Excecao, Filtro, IdOcorrencia, Ocorrencia, Planejamento, Prazo, Proposta,
+    Recorrente, Simulacao,
 };
 
 use crate::componentes;
 use crate::controle::{
-    self, AcaoDoControle, AlvoDoDialogo, AtualDaVersao, Cartao, ContextoDaLinha,
-    EscopoEscolhido, Formulario, Grade, GrupoVm, ModoDoPeriodo, Navegador, PROXIMAS_DE_INICIO,
-    SubgrupoVm, Subtotais, Tom, competencia_texto, data_texto, reais,
+    self, AcaoDoControle, AlvoDoDialogo, AtualDaVersao, Cartao, ContextoDaLinha, EscopoEscolhido,
+    Formulario, Grade, GrupoVm, ModoDoPeriodo, Navegador, PROXIMAS_DE_INICIO, SubgrupoVm,
+    Subtotais, Tom, competencia_texto, data_texto, reais,
 };
 use crate::formato;
 use crate::icones;
@@ -45,7 +45,7 @@ pub enum PedidoDoControle {
     /// Uma Ação do Ribbon, do menu da linha ou de um atalho.
     Acao(AcaoDoControle),
     /// Aplicar a alteração de um diálogo (já com a prévia vista).
-    Aplicar(Alteracao),
+    Aplicar(Box<Alteracao>),
     FecharDialogo,
     ConfirmarProposta(String),
     RecusarProposta(String, String),
@@ -149,6 +149,7 @@ pub struct EstadoDoControle {
     ir_para_mes: u8,
     ir_para_erro: Option<String>,
     atrasadas_abertas: bool,
+    pub resumo_aberto: bool,
     motivos_de_recusa: std::collections::HashMap<String, String>,
     recusando: Option<String>,
     cache: Option<CacheDoControle>,
@@ -189,6 +190,7 @@ impl EstadoDoControle {
             ir_para_mes: a.mes,
             ir_para_erro: None,
             atrasadas_abertas: true,
+            resumo_aberto: true,
             motivos_de_recusa: std::collections::HashMap::new(),
             recusando: None,
             cache: None,
@@ -231,17 +233,13 @@ impl EstadoDoControle {
     pub fn recorrente_selecionado(&self) -> Option<&Recorrente> {
         let (id, g, r) = self.selecao.as_ref()?;
         (Some(id) == self.selecionada.as_ref() && *g == self.geracao)
-            .then(|| r.as_ref())
+            .then_some(r.as_ref())
             .flatten()
     }
 
     fn restauravel_completo(&self) -> Option<&Recorrente> {
         let id = self.restauravel.as_ref()?;
-        self.arquivados
-            .as_ref()?
-            .1
-            .iter()
-            .find(|r| &r.id == id)
+        self.arquivados.as_ref()?.1.iter().find(|r| &r.id == id)
     }
 
     /// A linha de cima (`para_cima`) ou de baixo do mesmo grupo, de outro compromisso.
@@ -329,12 +327,20 @@ impl EstadoDoControle {
     fn garantir_lateral(&mut self, plan: &dyn Planejamento, hoje: Data) {
         match self.lateral {
             Some(AbaLateral::Propostas) => {
-                if self.propostas.as_ref().is_none_or(|(g, _)| *g != self.geracao) {
+                if self
+                    .propostas
+                    .as_ref()
+                    .is_none_or(|(g, _)| *g != self.geracao)
+                {
                     self.propostas = Some((self.geracao, carregar_propostas(plan, hoje)));
                 }
             }
             Some(AbaLateral::Arquivados) => {
-                if self.arquivados.as_ref().is_none_or(|(g, _)| *g != self.geracao) {
+                if self
+                    .arquivados
+                    .as_ref()
+                    .is_none_or(|(g, _)| *g != self.geracao)
+                {
                     let v = plan
                         .recorrentes(true)
                         .unwrap_or_default()
@@ -349,7 +355,9 @@ impl EstadoDoControle {
                     return;
                 };
                 let desatualizado = self.detalhe.as_ref().is_none_or(|d| {
-                    d.recorrente != id || d.geracao != self.geracao || d.meses != self.proximas_meses
+                    d.recorrente != id
+                        || d.geracao != self.geracao
+                        || d.meses != self.proximas_meses
                 });
                 if desatualizado {
                     let desde = Competencia::de_data(self.navegador.periodo().inicio());
@@ -364,7 +372,11 @@ impl EstadoDoControle {
             None => {}
         }
         // As propostas pendentes alimentam o botão do cabeçalho, mesmo com o painel fechado.
-        if self.propostas.as_ref().is_none_or(|(g, _)| *g != self.geracao) {
+        if self
+            .propostas
+            .as_ref()
+            .is_none_or(|(g, _)| *g != self.geracao)
+        {
             self.propostas = Some((self.geracao, carregar_propostas(plan, hoje)));
         }
     }
@@ -406,7 +418,9 @@ fn carregar_detalhe(
     hoje: Data,
 ) -> Result<DadosDoDetalhe, String> {
     let recorrente = plan.recorrente(id).map_err(|e| e.to_string())?;
-    let proximas = plan.proximas(id, desde, meses, hoje).map_err(|e| e.to_string())?;
+    let proximas = plan
+        .proximas(id, desde, meses, hoje)
+        .map_err(|e| e.to_string())?;
     let historico = plan.historico(Some(id), 60).map_err(|e| e.to_string())?;
     Ok(DadosDoDetalhe {
         recorrente,
@@ -461,7 +475,10 @@ pub fn itens_da_grade<'a>(grade: &'a Grade, recolhidos: &HashSet<String>) -> Vec
     let mut v = Vec::new();
     for g in &grade.grupos {
         let recolhido = recolhidos.contains(&chave_do_grupo(g));
-        v.push(ItemDaGrade::Grupo { grupo: g, recolhido });
+        v.push(ItemDaGrade::Grupo {
+            grupo: g,
+            recolhido,
+        });
         if recolhido {
             continue;
         }
@@ -649,7 +666,12 @@ pub fn abrir_dialogo(
         AcaoDoControle::Mover => Formulario::Mover {
             grupo: rec.grupo.clone(),
         },
-        outra => return Err(format!("{} não abre diálogo.", controle::definicao(outra).rotulo)),
+        outra => {
+            return Err(format!(
+                "{} não abre diálogo.",
+                controle::definicao(outra).rotulo
+            ));
+        }
     };
     let mut atual = AtualDaVersao::de(&o);
     atual.certeza = o.certeza;
@@ -695,7 +717,9 @@ fn selo_do_estado(ui: &mut Ui, e: sbf_planejamento::EstadoDaOcorrencia) {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
             ui.label(icones::icone_cor(s.icone, 13.0, cor));
-            ui.add(egui::Label::new(RichText::new(s.rotulo).size(12.0).color(cor).strong()).extend());
+            ui.add(
+                egui::Label::new(RichText::new(s.rotulo).size(12.0).color(cor).strong()).extend(),
+            );
         })
         .response;
     r.on_hover_text(s.rotulo);
@@ -728,11 +752,17 @@ pub fn area(
             .resizable(true)
             .default_size(400.0)
             .min_size(320.0)
-            .frame(Frame::new().fill(p.superficie_1).inner_margin(Margin::same(10)))
+            .frame(
+                Frame::new()
+                    .fill(p.superficie_1)
+                    .inner_margin(Margin::same(10)),
+            )
             .show(ui, |ui| lateral(ui, plan, estado, hoje, pedidos));
     }
 
     teclado(ui, estado);
+    let altura_total = ui.available_height();
+    let y0 = ui.cursor().top();
     ScrollArea::vertical()
         .id_salt("controle-pagina")
         .auto_shrink([false, false])
@@ -747,10 +777,15 @@ pub fn area(
                         componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
                     }
                     Ok(controle) => {
-                        cartoes(ui, &c.cartoes);
-                        ui.add_space(8.0);
+                        if estado.resumo_aberto {
+                            cartoes(ui, &c.cartoes);
+                            ui.add_space(6.0);
+                        }
                         faixa_de_atrasadas(ui, estado, controle, pedidos);
-                        grade(ui, estado, c, pedidos);
+                        // A grade ocupa o que sobra da janela (e nunca menos que o mínimo).
+                        let usado = ui.cursor().top() - y0;
+                        let altura = (altura_total - usado - 12.0).max(280.0);
+                        grade(ui, estado, c, altura, pedidos);
                     }
                 }
             }
@@ -796,12 +831,11 @@ fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
     ui.horizontal_wrapped(|ui| {
         componentes::titulo(ui, "Controle mensal", 20.0);
         if estado.navegador.e_projecao() {
-            componentes::selo(ui, "projeção", p.info_sutil, p.info)
-                .on_hover_text("Este período ainda não começou: o que se vê nasce das regras, não de fatos.");
+            componentes::selo(ui, "projeção", p.info_sutil, p.info).on_hover_text(
+                "Este período ainda não começou: o que se vê nasce das regras, não de fatos.",
+            );
         }
-    });
-    ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
+        ui.separator();
         let modo = estado.navegador.modo;
         for m in [ModoDoPeriodo::Ciclo, ModoDoPeriodo::MesCivil] {
             if ui.selectable_label(modo == m, m.rotulo()).clicked() {
@@ -915,7 +949,10 @@ fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
             estado.lateral = toggle(estado.lateral, AbaLateral::Propostas);
         }
         if ui
-            .selectable_label(estado.lateral == Some(AbaLateral::Detalhe), "Detalhe da linha")
+            .selectable_label(
+                estado.lateral == Some(AbaLateral::Detalhe),
+                "Detalhe da linha",
+            )
             .clicked()
         {
             estado.lateral = toggle(estado.lateral, AbaLateral::Detalhe);
@@ -926,11 +963,17 @@ fn cabecalho(ui: &mut Ui, estado: &mut EstadoDoControle) {
         {
             estado.lateral = toggle(estado.lateral, AbaLateral::Arquivados);
         }
+        ui.separator();
+        ui.checkbox(&mut estado.resumo_aberto, "Cartões do resumo");
     });
 }
 
 fn toggle(atual: Option<AbaLateral>, alvo: AbaLateral) -> Option<AbaLateral> {
-    if atual == Some(alvo) { None } else { Some(alvo) }
+    if atual == Some(alvo) {
+        None
+    } else {
+        Some(alvo)
+    }
 }
 
 fn mensagem(ui: &mut Ui, estado: &mut EstadoDoControle) {
@@ -943,7 +986,14 @@ fn mensagem(ui: &mut Ui, estado: &mut EstadoDoControle) {
         if erro {
             componentes::aviso(ui, "error", &texto, p.perigo_sutil, p.borda, p.perigo);
         } else {
-            componentes::aviso(ui, "check_circle", &texto, p.sucesso_sutil, p.borda, p.sucesso);
+            componentes::aviso(
+                ui,
+                "check_circle",
+                &texto,
+                p.sucesso_sutil,
+                p.borda,
+                p.sucesso,
+            );
         }
         if erro && texto.contains("recarregue") && ui.button("Recarregar").clicked() {
             estado.recarregar();
@@ -955,46 +1005,68 @@ fn mensagem(ui: &mut Ui, estado: &mut EstadoDoControle) {
     });
 }
 
+/// Quantos cartões vão por linha: todos, se cabem com folga; senão quatro (ou menos).
+pub fn cartoes_por_linha(largura: f32) -> usize {
+    (((largura + 8.0) / (LARGURA_MINIMA + 8.0)) as usize).clamp(1, 7)
+}
+
+const LARGURA_MINIMA: f32 = 128.0;
+
 fn cartoes(ui: &mut Ui, v: &[Cartao]) {
     let p = tema::paleta(ui.ctx());
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-        for k in v {
-            let (fundo, cor) = cores_do_tom(&p, k.tom);
-            let quadro = Frame::new()
-                .fill(p.superficie_1)
-                .stroke(Stroke::new(1.0, if k.tom == Tom::Neutro { p.borda } else { cor }))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(Margin::same(9))
-                .show(ui, |ui| {
-                    ui.set_width(210.0);
-                    ui.set_min_height(92.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(k.titulo)
-                                .size(12.0)
-                                .color(p.tinta_suave)
-                                .strong(),
-                        );
-                        if let Some(s) = k.selo {
-                            componentes::selo(ui, s, fundo, cor);
-                        }
-                    });
-                    ui.label(
-                        RichText::new(&k.valor)
-                            .font(FontId::new(20.0, crate::tema::familia_forte()))
-                            .color(p.tinta),
-                    );
-                    for n in &k.notas {
-                        ui.add(egui::Label::new(RichText::new(n).size(11.0).color(p.tinta_suave)));
-                    }
-                })
-                .response;
-            if let Some(d) = &k.dica {
-                quadro.on_hover_text(d);
+    let por_linha = cartoes_por_linha(ui.available_width());
+    let largura = ((ui.available_width() - 8.0 * (por_linha as f32 - 1.0)) / por_linha as f32)
+        .clamp(LARGURA_MINIMA, 300.0);
+    egui::Grid::new("controle-cartoes")
+        .spacing([8.0, 8.0])
+        .min_col_width(largura)
+        .show(ui, |ui| {
+            for (i, k) in v.iter().enumerate() {
+                let (fundo, cor) = cores_do_tom(&p, k.tom);
+                let quadro = Frame::new()
+                    .fill(p.superficie_1)
+                    .stroke(Stroke::new(
+                        1.0,
+                        if k.tom == Tom::Neutro { p.borda } else { cor },
+                    ))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::same(9))
+                    .show(ui, |ui| {
+                        ui.set_width(largura - 20.0);
+                        ui.set_min_height(70.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(k.titulo)
+                                    .size(12.0)
+                                    .color(p.tinta_suave)
+                                    .strong(),
+                            );
+                            if let Some(s) = k.selo {
+                                ui.horizontal(|ui| {
+                                    componentes::selo(ui, s, fundo, cor);
+                                });
+                            }
+                            ui.label(
+                                RichText::new(&k.valor)
+                                    .font(FontId::new(18.0, crate::tema::familia_forte()))
+                                    .color(p.tinta),
+                            );
+                            for n in &k.notas {
+                                ui.add(egui::Label::new(
+                                    RichText::new(n).size(11.0).color(p.tinta_suave),
+                                ));
+                            }
+                        });
+                    })
+                    .response;
+                if let Some(d) = &k.dica {
+                    quadro.on_hover_text(d);
+                }
+                if (i + 1) % por_linha == 0 {
+                    ui.end_row();
+                }
             }
-        }
-    });
+        });
 }
 
 fn faixa_de_atrasadas(
@@ -1029,14 +1101,18 @@ fn faixa_de_atrasadas(
                     .strong()
                     .color(p.perigo),
                 );
-                let rot = if estado.atrasadas_abertas { "Recolher" } else { "Mostrar" };
+                let rot = if estado.atrasadas_abertas {
+                    "Recolher"
+                } else {
+                    "Mostrar"
+                };
                 if ui.small_button(rot).clicked() {
                     estado.atrasadas_abertas = !estado.atrasadas_abertas;
                 }
                 texto_pequeno(ui, "Continuam devidas; vêm de períodos anteriores.");
             });
             if estado.atrasadas_abertas {
-                for o in &c.atrasadas_de_antes {
+                for o in c.atrasadas_de_antes.iter().take(3) {
                     let sel = estado.selecionada.as_ref() == Some(&o.id);
                     ui.horizontal(|ui| {
                         ui.add_space(22.0);
@@ -1049,6 +1125,18 @@ fn faixa_de_atrasadas(
                         if ui.selectable_label(sel, t).clicked() {
                             estado.selecionada = Some(o.id.clone());
                         }
+                    });
+                }
+                if c.atrasadas_de_antes.len() > 3 {
+                    ui.horizontal(|ui| {
+                        ui.add_space(22.0);
+                        texto_pequeno(
+                            ui,
+                            format!(
+                                "… e mais {}. Use o filtro Em atraso para ver todas.",
+                                c.atrasadas_de_antes.len() - 3
+                            ),
+                        );
                     });
                 }
             }
@@ -1143,7 +1231,13 @@ fn subtotais_em_colunas(
     }
 }
 
-fn grade(ui: &mut Ui, estado: &mut EstadoDoControle, c: &CacheDoControle, pedidos: &mut Vec<Pedido>) {
+fn grade(
+    ui: &mut Ui,
+    estado: &mut EstadoDoControle,
+    c: &CacheDoControle,
+    altura: f32,
+    pedidos: &mut Vec<Pedido>,
+) {
     let p = tema::paleta(ui.ctx());
     let projecao = estado.navegador.e_projecao();
     if c.grade.grupos.is_empty() {
@@ -1151,15 +1245,13 @@ fn grade(ui: &mut Ui, estado: &mut EstadoDoControle, c: &CacheDoControle, pedido
         ui.vertical_centered(|ui| {
             ui.label(icones::icone_cor("calendar_month", 36.0, p.tinta_suave));
             ui.label(
-                RichText::new("Nenhuma linha neste período com esse filtro.")
-                    .color(p.tinta_suave),
+                RichText::new("Nenhuma linha neste período com esse filtro.").color(p.tinta_suave),
             );
         });
         return;
     }
     let itens = itens_da_grade(&c.grade, &estado.recolhidos);
     let alturas: Vec<f32> = itens.iter().map(altura_do_item).collect();
-    let altura = ui.available_height().max(360.0);
     let mut alternar: Option<String> = None;
     let mut escolhida: Option<IdOcorrencia> = None;
     let mut pedir: Vec<AcaoDoControle> = Vec::new();
@@ -1172,106 +1264,138 @@ fn grade(ui: &mut Ui, estado: &mut EstadoDoControle, c: &CacheDoControle, pedido
             .collect()
     };
     let _ = &contexto_base;
-    let larguras = [88.0, 250.0, 108.0, 112.0, 108.0, 108.0, 100.0, 124.0, 86.0];
-    let mut construtor = TableBuilder::new(ui)
-        .id_salt("controle-grade")
-        .striped(false)
-        .resizable(true)
-        .sense(Sense::click())
-        .cell_layout(Layout::left_to_right(Align::Center))
-        .auto_shrink([false, false])
-        .max_scroll_height(altura);
-    for (i, l) in larguras.iter().enumerate() {
-        let col = if matches!(i, 3..=6) {
-            Column::initial(*l).at_least(60.0).clip(true)
-        } else {
-            Column::initial(*l).at_least(48.0).clip(true)
-        };
-        construtor = construtor.column(col);
-    }
-    construtor = construtor.column(Column::remainder().at_least(60.0).clip(true));
-    construtor
-        .header(26.0, |mut cab| {
-            for (i, rotulo) in COLUNAS.iter().enumerate() {
-                cab.col(|ui| {
-                    let r = RichText::new(*rotulo).strong().size(12.5).color(p.tinta_suave);
-                    if matches!(i, 3..=6) {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(r);
-                        });
-                    } else {
-                        ui.label(r);
-                    }
-                });
+    let larguras = [82.0, 210.0, 98.0, 132.0, 98.0, 98.0, 90.0, 122.0, 80.0];
+    let ancho = ui.available_width();
+    ui.allocate_ui_with_layout(
+        egui::vec2(ancho, altura + 30.0),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
+            let mut construtor = TableBuilder::new(ui)
+                .id_salt("controle-grade")
+                .striped(false)
+                .resizable(true)
+                .sense(Sense::click())
+                .cell_layout(Layout::left_to_right(Align::Center))
+                .auto_shrink([false, false])
+                .max_scroll_height(altura);
+            for (i, l) in larguras.iter().enumerate() {
+                let col = if matches!(i, 3..=6) {
+                    Column::initial(*l).at_least(60.0).clip(true)
+                } else {
+                    Column::initial(*l).at_least(48.0).clip(true)
+                };
+                construtor = construtor.column(col);
             }
-        })
-        .body(|corpo| {
-            corpo.heterogeneous_rows(alturas.iter().copied(), |mut row| {
-                let item = &itens[row.index()];
-                match item {
-                    ItemDaGrade::Grupo { grupo, recolhido } => {
-                        row.col(|ui| {
-                            let ic = if *recolhido { "chevron_right" } else { "expand_more" };
-                            ui.label(icones::icone_cor(ic, 18.0, p.tinta_suave));
-                        });
-                        row.col(|ui| {
-                            ui.label(RichText::new(&grupo.nome).strong().size(14.0));
-                            ui.label(
-                                RichText::new(format!("{} linhas", grupo.total.linhas))
-                                    .size(11.5)
-                                    .color(p.tinta_suave),
-                            );
-                        });
-                        for _ in 2..COLUNAS.len() {
-                            row.col(|_| {});
-                        }
-                        let r = row.response();
-                        if r.clicked() {
-                            alternar = Some(chave_do_grupo(grupo));
-                        }
-                    }
-                    ItemDaGrade::Subgrupo { grupo, sub, recolhido } => {
-                        row.col(|ui| {
-                            ui.add_space(10.0);
-                            let ic = if *recolhido { "chevron_right" } else { "expand_more" };
-                            ui.label(icones::icone_cor(ic, 16.0, p.tinta_suave));
-                        });
-                        row.col(|ui| {
-                            ui.label(
-                                RichText::new(sub.nome.as_deref().unwrap_or_default())
-                                    .strong()
-                                    .color(p.tinta_suave),
-                            );
-                            texto_pequeno(ui, format!("{} linhas", sub.total.linhas));
-                        });
-                        for _ in 2..COLUNAS.len() {
-                            row.col(|_| {});
-                        }
-                        if row.response().clicked() {
-                            alternar = Some(chave_do_subgrupo(grupo, sub));
-                        }
-                    }
-                    ItemDaGrade::Linha { ocorrencia: o, nivel } => {
-                        let sel = estado.selecionada.as_ref() == Some(&o.id);
-                        row.set_selected(sel);
-                        linha(&mut row, o, *nivel, projecao, &p);
-                        let r = row.response();
-                        if r.clicked() || r.secondary_clicked() {
-                            escolhida = Some(o.id.clone());
-                        }
-                        r.context_menu(|ui| {
-                            menu_da_linha(ui, &selecionada_ctx, &mut pedir);
+            construtor = construtor.column(Column::remainder().at_least(60.0).clip(true));
+            construtor
+                .header(26.0, |mut cab| {
+                    for (i, rotulo) in COLUNAS.iter().enumerate() {
+                        cab.col(|ui| {
+                            let r = RichText::new(*rotulo)
+                                .strong()
+                                .size(12.5)
+                                .color(p.tinta_suave);
+                            if matches!(i, 3..=6) {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(r);
+                                });
+                            } else {
+                                ui.label(r);
+                            }
                         });
                     }
-                    ItemDaGrade::Subtotal(g) => {
-                        subtotais_em_colunas(&mut row, &g.total, &format!("Subtotal · {}", g.nome), false, &p);
-                    }
-                    ItemDaGrade::Total(t) => {
-                        subtotais_em_colunas(&mut row, t, "Total do período", true, &p);
-                    }
-                }
-            });
-        });
+                })
+                .body(|corpo| {
+                    corpo.heterogeneous_rows(alturas.iter().copied(), |mut row| {
+                        let item = &itens[row.index()];
+                        match item {
+                            ItemDaGrade::Grupo { grupo, recolhido } => {
+                                row.col(|ui| {
+                                    let ic = if *recolhido {
+                                        "chevron_right"
+                                    } else {
+                                        "expand_more"
+                                    };
+                                    ui.label(icones::icone_cor(ic, 18.0, p.tinta_suave));
+                                });
+                                row.col(|ui| {
+                                    ui.label(RichText::new(&grupo.nome).strong().size(14.0));
+                                    ui.label(
+                                        RichText::new(format!("{} linhas", grupo.total.linhas))
+                                            .size(11.5)
+                                            .color(p.tinta_suave),
+                                    );
+                                });
+                                for _ in 2..COLUNAS.len() {
+                                    row.col(|_| {});
+                                }
+                                let r = row.response();
+                                if r.clicked() {
+                                    alternar = Some(chave_do_grupo(grupo));
+                                }
+                            }
+                            ItemDaGrade::Subgrupo {
+                                grupo,
+                                sub,
+                                recolhido,
+                            } => {
+                                row.col(|ui| {
+                                    ui.add_space(10.0);
+                                    let ic = if *recolhido {
+                                        "chevron_right"
+                                    } else {
+                                        "expand_more"
+                                    };
+                                    ui.label(icones::icone_cor(ic, 16.0, p.tinta_suave));
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        RichText::new(sub.nome.as_deref().unwrap_or_default())
+                                            .strong()
+                                            .color(p.tinta_suave),
+                                    );
+                                    texto_pequeno(ui, format!("{} linhas", sub.total.linhas));
+                                });
+                                for _ in 2..COLUNAS.len() {
+                                    row.col(|_| {});
+                                }
+                                if row.response().clicked() {
+                                    alternar = Some(chave_do_subgrupo(grupo, sub));
+                                }
+                            }
+                            ItemDaGrade::Linha {
+                                ocorrencia: o,
+                                nivel,
+                            } => {
+                                let sel = estado.selecionada.as_ref() == Some(&o.id);
+                                row.set_selected(sel);
+                                linha(&mut row, o, *nivel, projecao, &p);
+                                let r = row.response();
+                                if r.clicked() || r.secondary_clicked() {
+                                    escolhida = Some(o.id.clone());
+                                }
+                                r.context_menu(|ui| {
+                                    menu_da_linha(ui, &selecionada_ctx, &mut pedir);
+                                });
+                            }
+                            ItemDaGrade::Subtotal(g) => {
+                                subtotais_em_colunas(
+                                    &mut row,
+                                    &g.total,
+                                    &format!("Subtotal · {}", g.nome),
+                                    false,
+                                    &p,
+                                );
+                            }
+                            ItemDaGrade::Total(t) => {
+                                subtotais_em_colunas(&mut row, t, "Total do período", true, &p);
+                            }
+                        }
+                    });
+                });
+        },
+    );
     if let Some(k) = alternar
         && !estado.recolhidos.remove(&k)
     {
@@ -1336,8 +1460,13 @@ fn linha(
     p: &Paleta,
 ) {
     let p = *p;
-    let suprimida = controle::suprimida(o.estado) || o.estado == sbf_planejamento::EstadoDaOcorrencia::Dispensada;
-    let cor_do_texto = if suprimida { p.tinta_desabilitada } else { p.tinta };
+    let suprimida = controle::suprimida(o.estado)
+        || o.estado == sbf_planejamento::EstadoDaOcorrencia::Dispensada;
+    let cor_do_texto = if suprimida {
+        p.tinta_desabilitada
+    } else {
+        p.tinta
+    };
     row.col(|ui| {
         let (rotulo, icone) = controle::origem(o, projecao);
         let r = ui
@@ -1357,8 +1486,9 @@ fn linha(
         }
         ui.add(egui::Label::new(RichText::new(nome).color(cor_do_texto)).truncate());
         if o.sugestao_de_conciliacao {
-            componentes::selo(ui, "conciliar?", p.aviso_sutil, p.aviso)
-                .on_hover_text("Há um lançamento do banco que parece pagar esta linha. Confirme a conciliação.");
+            componentes::selo(ui, "conciliar?", p.aviso_sutil, p.aviso).on_hover_text(
+                "Há um lançamento do banco que parece pagar esta linha. Confirme a conciliação.",
+            );
         }
         if o.prazo_desconhecido {
             ui.label(icones::icone_cor("help", 14.0, p.aviso))
@@ -1413,10 +1543,16 @@ fn linha(
     });
     row.col(|ui| selo_do_estado(ui, o.estado));
     row.col(|ui| {
-        ui.add(egui::Label::new(RichText::new(o.conta.as_deref().unwrap_or("—")).size(12.0)).truncate());
+        ui.add(
+            egui::Label::new(RichText::new(o.conta.as_deref().unwrap_or("—")).size(12.0))
+                .truncate(),
+        );
     });
     row.col(|ui| {
-        ui.add(egui::Label::new(RichText::new(o.centro.as_deref().unwrap_or("—")).size(12.0)).truncate());
+        ui.add(
+            egui::Label::new(RichText::new(o.centro.as_deref().unwrap_or("—")).size(12.0))
+                .truncate(),
+        );
     });
 }
 
@@ -1438,7 +1574,10 @@ fn lateral(
             (AbaLateral::Propostas, "Propostas"),
             (AbaLateral::Arquivados, "Arquivados"),
         ] {
-            if ui.selectable_label(estado.lateral == Some(a), rot).clicked() {
+            if ui
+                .selectable_label(estado.lateral == Some(a), rot)
+                .clicked()
+            {
                 estado.lateral = Some(a);
             }
         }
@@ -1481,86 +1620,103 @@ fn propostas_ui(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<Pe
         ui.add_space(12.0);
         ui.label(RichText::new("Nenhuma proposta pendente.").color(p.tinta_suave));
     }
-    ScrollArea::vertical().id_salt("controle-propostas").show(ui, |ui| {
-        for v in &lista {
-            let id = v.proposta.id.clone();
-            Frame::new()
-                .fill(p.superficie_0)
-                .stroke(Stroke::new(1.0, p.borda))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(Margin::same(10))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(icones::icone_cor("smart_toy", 16.0, p.destaque_tinta));
-                        ui.label(
-                            RichText::new(controle::origem_da_proposta(&v.proposta))
-                                .strong()
-                                .size(12.5),
-                        );
-                        texto_pequeno(ui, format!("em {}", formato::data(&v.proposta.criada_em)));
-                    });
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(&v.texto).size(13.5));
-                    ui.add_space(4.0);
-                    match &v.simulacao {
-                        Ok(s) => resumo_da_simulacao(ui, s),
-                        Err(e) => {
-                            componentes::aviso(ui, "warning", e, p.aviso_sutil, p.aviso_borda, p.aviso);
+    ScrollArea::vertical()
+        .id_salt("controle-propostas")
+        .show(ui, |ui| {
+            for v in &lista {
+                let id = v.proposta.id.clone();
+                Frame::new()
+                    .fill(p.superficie_0)
+                    .stroke(Stroke::new(1.0, p.borda))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(icones::icone_cor("smart_toy", 16.0, p.destaque_tinta));
+                            ui.label(
+                                RichText::new(controle::origem_da_proposta(&v.proposta))
+                                    .strong()
+                                    .size(12.5),
+                            );
+                            texto_pequeno(
+                                ui,
+                                format!("em {}", formato::data(&v.proposta.criada_em)),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&v.texto).size(13.5));
+                        ui.add_space(4.0);
+                        match &v.simulacao {
+                            Ok(s) => resumo_da_simulacao(ui, s),
+                            Err(e) => {
+                                componentes::aviso(
+                                    ui,
+                                    "warning",
+                                    e,
+                                    p.aviso_sutil,
+                                    p.aviso_borda,
+                                    p.aviso,
+                                );
+                            }
                         }
-                    }
-                    texto_pequeno(
-                        ui,
-                        format!("Vence em {}", formato::data(&v.proposta.expira_em)),
-                    );
-                    ui.add_space(6.0);
-                    if estado.recusando.as_deref() == Some(id.as_str()) {
-                        let motivo = estado.motivos_de_recusa.entry(id.clone()).or_default();
-                        ui.add(
-                            egui::TextEdit::singleline(motivo)
-                                .hint_text("Motivo da recusa")
-                                .desired_width(f32::INFINITY),
+                        texto_pequeno(
+                            ui,
+                            format!("Vence em {}", formato::data(&v.proposta.expira_em)),
                         );
-                        let vazio = motivo.trim().is_empty();
-                        let texto = motivo.trim().to_owned();
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled(!vazio, egui::Button::new("Recusar com este motivo"))
-                                .on_disabled_hover_text("Diga o motivo.")
-                                .clicked()
-                            {
-                                pedidos.push(Pedido::Controle(PedidoDoControle::RecusarProposta(
-                                    id.clone(),
-                                    texto.clone(),
-                                )));
-                                estado.recusando = None;
-                            }
-                            if ui.button("Voltar").clicked() {
-                                estado.recusando = None;
-                            }
-                        });
-                    } else {
-                        ui.horizontal(|ui| {
-                            let ok = v.simulacao.is_ok();
-                            if ui
-                                .add_enabled(ok, egui::Button::new("Confirmar"))
-                                .on_hover_text("Aplica agora, como você")
-                                .on_disabled_hover_text("A linha mudou, recarregue.")
-                                .clicked()
-                            {
-                                pedidos.push(Pedido::Controle(PedidoDoControle::ConfirmarProposta(
-                                    id.clone(),
-                                )));
-                            }
-                            if ui.button("Recusar…").clicked() {
-                                estado.recusando = Some(id.clone());
-                            }
-                        });
-                    }
-                });
-            ui.add_space(8.0);
-        }
-    });
+                        ui.add_space(6.0);
+                        if estado.recusando.as_deref() == Some(id.as_str()) {
+                            let motivo = estado.motivos_de_recusa.entry(id.clone()).or_default();
+                            ui.add(
+                                egui::TextEdit::singleline(motivo)
+                                    .hint_text("Motivo da recusa")
+                                    .desired_width(f32::INFINITY),
+                            );
+                            let vazio = motivo.trim().is_empty();
+                            let texto = motivo.trim().to_owned();
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_enabled(
+                                        !vazio,
+                                        egui::Button::new("Recusar com este motivo"),
+                                    )
+                                    .on_disabled_hover_text("Diga o motivo.")
+                                    .clicked()
+                                {
+                                    pedidos.push(Pedido::Controle(
+                                        PedidoDoControle::RecusarProposta(
+                                            id.clone(),
+                                            texto.clone(),
+                                        ),
+                                    ));
+                                    estado.recusando = None;
+                                }
+                                if ui.button("Voltar").clicked() {
+                                    estado.recusando = None;
+                                }
+                            });
+                        } else {
+                            ui.horizontal(|ui| {
+                                let ok = v.simulacao.is_ok();
+                                if ui
+                                    .add_enabled(ok, egui::Button::new("Confirmar"))
+                                    .on_hover_text("Aplica agora, como você")
+                                    .on_disabled_hover_text("A linha mudou, recarregue.")
+                                    .clicked()
+                                {
+                                    pedidos.push(Pedido::Controle(
+                                        PedidoDoControle::ConfirmarProposta(id.clone()),
+                                    ));
+                                }
+                                if ui.button("Recusar…").clicked() {
+                                    estado.recusando = Some(id.clone());
+                                }
+                            });
+                        }
+                    });
+                ui.add_space(8.0);
+            }
+        });
     estado.propostas = Some((estado.geracao, lista));
 }
 
@@ -1570,8 +1726,18 @@ fn resumo_da_simulacao(ui: &mut Ui, s: &Simulacao) {
     if s.meses_afetados.is_empty() {
         texto_pequeno(ui, "Não muda nenhum valor mensal.");
     } else {
-        let a = s.meses_afetados.first().copied().map(competencia_texto).unwrap_or_default();
-        let b = s.meses_afetados.last().copied().map(competencia_texto).unwrap_or_default();
+        let a = s
+            .meses_afetados
+            .first()
+            .copied()
+            .map(competencia_texto)
+            .unwrap_or_default();
+        let b = s
+            .meses_afetados
+            .last()
+            .copied()
+            .map(competencia_texto)
+            .unwrap_or_default();
         ui.label(
             RichText::new(format!(
                 "Meses afetados: {} ({a} a {b})",
@@ -1580,21 +1746,25 @@ fn resumo_da_simulacao(ui: &mut Ui, s: &Simulacao) {
             .size(12.5)
             .strong(),
         );
-        egui::Grid::new(ui.next_auto_id()).num_columns(3).spacing([14.0, 2.0]).show(ui, |ui| {
-            for (comp, antes, depois) in s.mudancas.iter().take(6) {
-                ui.label(RichText::new(competencia_texto(*comp)).size(12.0));
-                ui.label(
-                    RichText::new(format!("antes {}", antes.map_or("—".to_owned(), reais)))
-                        .size(12.0)
-                        .color(p.tinta_suave),
-                );
-                ui.label(
-                    RichText::new(format!("depois {}", depois.map_or("—".to_owned(), reais)))
-                        .size(12.0),
-                );
-                ui.end_row();
-            }
-        });
+        egui::Grid::new(ui.next_auto_id())
+            .num_columns(3)
+            .spacing([14.0, 2.0])
+            .min_row_height(16.0)
+            .show(ui, |ui| {
+                for (comp, antes, depois) in s.mudancas.iter().take(6) {
+                    ui.label(RichText::new(competencia_texto(*comp)).size(12.0));
+                    ui.label(
+                        RichText::new(format!("antes {}", antes.map_or("—".to_owned(), reais)))
+                            .size(12.0)
+                            .color(p.tinta_suave),
+                    );
+                    ui.label(
+                        RichText::new(format!("depois {}", depois.map_or("—".to_owned(), reais)))
+                            .size(12.0),
+                    );
+                    ui.end_row();
+                }
+            });
         if s.mudancas.len() > 6 {
             texto_pequeno(ui, format!("… e mais {} meses.", s.mudancas.len() - 6));
         }
@@ -1610,7 +1780,10 @@ fn resumo_da_simulacao(ui: &mut Ui, s: &Simulacao) {
 fn arquivados_ui(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<Pedido>) {
     let p = tema::paleta(ui.ctx());
     componentes::titulo(ui, "Arquivados e excluídos", 16.0);
-    texto_pequeno(ui, "Nada é apagado: dá para restaurar. Escolha um e use Restaurar.");
+    texto_pequeno(
+        ui,
+        "Nada é apagado: dá para restaurar. Escolha um e use Restaurar.",
+    );
     ui.add_space(6.0);
     let lista: Vec<Recorrente> = estado
         .arquivados
@@ -1627,7 +1800,11 @@ fn arquivados_ui(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<P
             None => ("Arquivado".to_owned(), "folder_special"),
         };
         let resp = Frame::new()
-            .fill(if sel { p.destaque_sutil } else { p.superficie_0 })
+            .fill(if sel {
+                p.destaque_sutil
+            } else {
+                p.superficie_0
+            })
             .stroke(Stroke::new(1.0, p.borda))
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::same(8))
@@ -1639,7 +1816,9 @@ fn arquivados_ui(ui: &mut Ui, estado: &mut EstadoDoControle, pedidos: &mut Vec<P
                 });
                 texto_pequeno(ui, format!("{} · {}", r.grupo, rotulo));
                 if ui.small_button("Restaurar…").clicked() {
-                    pedidos.push(Pedido::Controle(PedidoDoControle::Acao(AcaoDoControle::Restaurar)));
+                    pedidos.push(Pedido::Controle(PedidoDoControle::Acao(
+                        AcaoDoControle::Restaurar,
+                    )));
                 }
             })
             .response;
@@ -1654,7 +1833,9 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
     let p = tema::paleta(ui.ctx());
     let Some(sel) = estado.linha_selecionada().cloned() else {
         ui.add_space(20.0);
-        ui.label(RichText::new("Escolha uma linha da grade para ver o detalhe.").color(p.tinta_suave));
+        ui.label(
+            RichText::new("Escolha uma linha da grade para ver o detalhe.").color(p.tinta_suave),
+        );
         return;
     };
     ui.horizontal(|ui| {
@@ -1673,7 +1854,10 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         for a in AbaDoDetalhe::TODAS {
-            if ui.selectable_label(estado.aba_do_detalhe == a, a.rotulo()).clicked() {
+            if ui
+                .selectable_label(estado.aba_do_detalhe == a, a.rotulo())
+                .clicked()
+            {
                 estado.aba_do_detalhe = a;
             }
         }
@@ -1691,18 +1875,21 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data) {
         }
     };
     let mut mais = false;
-    ScrollArea::vertical().id_salt("controle-detalhe").show(ui, |ui| match aba {
-        AbaDoDetalhe::Resumo => aba_resumo(ui, &sel, dados.recorrente.as_ref()),
-        AbaDoDetalhe::Proximas => {
-            mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
-        }
-        AbaDoDetalhe::Versoes => aba_versoes(ui, dados.recorrente.as_ref()),
-        AbaDoDetalhe::Pausas => aba_pausas(ui, dados.recorrente.as_ref()),
-        AbaDoDetalhe::Excecoes => aba_excecoes(ui, &dados.historico),
-        AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
-    });
+    ScrollArea::vertical()
+        .id_salt("controle-detalhe")
+        .show(ui, |ui| match aba {
+            AbaDoDetalhe::Resumo => aba_resumo(ui, &sel, dados.recorrente.as_ref()),
+            AbaDoDetalhe::Proximas => {
+                mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
+            }
+            AbaDoDetalhe::Versoes => aba_versoes(ui, dados.recorrente.as_ref()),
+            AbaDoDetalhe::Pausas => aba_pausas(ui, dados.recorrente.as_ref()),
+            AbaDoDetalhe::Excecoes => aba_excecoes(ui, &dados.historico),
+            AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
+        });
     if mais {
-        estado.proximas_meses = (estado.proximas_meses + PROXIMAS_DE_INICIO).min(sbf_planejamento::HORIZONTE_MESES);
+        estado.proximas_meses =
+            (estado.proximas_meses + PROXIMAS_DE_INICIO).min(sbf_planejamento::HORIZONTE_MESES);
     }
 }
 
@@ -1718,61 +1905,79 @@ fn prazo_texto(p: &Prazo) -> String {
         Prazo::SemFim => "Sem fim".into(),
         Prazo::AteCompetencia(c) => format!("Até {} (exclusivo)", competencia_texto(*c)),
         Prazo::Parcelas { total, primeira } => {
-            format!("{total} parcelas, a primeira em {}", competencia_texto(*primeira))
+            format!(
+                "{total} parcelas, a primeira em {}",
+                competencia_texto(*primeira)
+            )
         }
         Prazo::Desconhecido => "Desconhecido (projeção como estimativa)".into(),
     }
 }
 
 fn aba_resumo(ui: &mut Ui, o: &Ocorrencia, r: Option<&Recorrente>) {
-    egui::Grid::new("controle-resumo").num_columns(2).spacing([14.0, 6.0]).show(ui, |ui| {
-        campo(ui, "Vencimento", {
-            let v = controle::vencimento(o);
-            match v.secundario {
-                Some(s) => format!("{} · {s}", v.principal),
-                None => v.principal,
-            }
-        });
-        campo(ui, "Previsto", controle::dinheiro_ou_sem_valor(o.previsto));
-        campo(ui, "Pago informado", o.pago_informado.map_or("—".to_owned(), reais));
-        campo(ui, "Conciliado", o.conciliado.map_or("—".to_owned(), reais));
-        campo(ui, "Falta", controle::falta(o).map_or("—".to_owned(), reais));
-        campo(ui, "Origem do valor", controle::origem_dica(o, false));
-        campo(ui, "Conta", o.conta.clone().unwrap_or_else(|| "—".into()));
-        campo(ui, "Centro", o.centro.clone().unwrap_or_else(|| "—".into()));
-        if let Some(r) = r {
-            campo(ui, "Prazo", prazo_texto(&r.prazo));
+    egui::Grid::new("controle-resumo")
+        .num_columns(2)
+        .spacing([14.0, 6.0])
+        .show(ui, |ui| {
+            campo(ui, "Vencimento", {
+                let v = controle::vencimento(o);
+                match v.secundario {
+                    Some(s) => format!("{} · {s}", v.principal),
+                    None => v.principal,
+                }
+            });
+            campo(ui, "Previsto", controle::dinheiro_ou_sem_valor(o.previsto));
             campo(
                 ui,
-                "Situação",
-                match (&r.excluido, r.arquivado, &r.cancelamento) {
-                    (Some(_), _, _) => "Excluído",
-                    (_, true, _) => "Arquivado",
-                    (_, _, Some(_)) => "Cancelado",
-                    _ => "Ativo",
-                },
+                "Pago informado",
+                o.pago_informado.map_or("—".to_owned(), reais),
             );
-            campo(ui, "Versão do registro", r.versao_do_registro.to_string());
-        }
-    });
+            campo(ui, "Conciliado", o.conciliado.map_or("—".to_owned(), reais));
+            campo(
+                ui,
+                "Falta",
+                controle::falta(o).map_or("—".to_owned(), reais),
+            );
+            campo(ui, "Origem do valor", controle::origem_dica(o, false));
+            campo(ui, "Conta", o.conta.clone().unwrap_or_else(|| "—".into()));
+            campo(ui, "Centro", o.centro.clone().unwrap_or_else(|| "—".into()));
+            if let Some(r) = r {
+                campo(ui, "Prazo", prazo_texto(&r.prazo));
+                campo(
+                    ui,
+                    "Situação",
+                    match (&r.excluido, r.arquivado, &r.cancelamento) {
+                        (Some(_), _, _) => "Excluído",
+                        (_, true, _) => "Arquivado",
+                        (_, _, Some(_)) => "Cancelado",
+                        _ => "Ativo",
+                    },
+                );
+                campo(ui, "Versão do registro", r.versao_do_registro.to_string());
+            }
+        });
 }
 
 fn aba_proximas(ui: &mut Ui, v: &[Ocorrencia], meses: u16, _hoje: Data) -> bool {
     let p = tema::paleta(ui.ctx());
     texto_pequeno(ui, format!("Próximos {meses} meses a partir do período."));
-    egui::Grid::new("controle-proximas").num_columns(4).spacing([12.0, 3.0]).striped(true).show(ui, |ui| {
-        for t in ["Mês", "Vencimento", "Previsto", "Estado"] {
-            ui.label(RichText::new(t).strong().size(12.0).color(p.tinta_suave));
-        }
-        ui.end_row();
-        for o in v {
-            ui.label(competencia_texto(o.id.competencia));
-            ui.label(data_texto(o.vencimento));
-            ui.label(controle::dinheiro_ou_sem_valor(o.previsto));
-            ui.label(controle::estilo_do_estado(o.estado).rotulo);
+    egui::Grid::new("controle-proximas")
+        .num_columns(4)
+        .spacing([12.0, 3.0])
+        .striped(true)
+        .show(ui, |ui| {
+            for t in ["Mês", "Vencimento", "Previsto", "Estado"] {
+                ui.label(RichText::new(t).strong().size(12.0).color(p.tinta_suave));
+            }
             ui.end_row();
-        }
-    });
+            for o in v {
+                ui.label(competencia_texto(o.id.competencia));
+                ui.label(data_texto(o.vencimento));
+                ui.label(controle::dinheiro_ou_sem_valor(o.previsto));
+                ui.label(controle::estilo_do_estado(o.estado).rotulo);
+                ui.end_row();
+            }
+        });
     if v.is_empty() {
         texto_pequeno(ui, "Sem ocorrências neste intervalo.");
     }
@@ -1829,7 +2034,10 @@ fn aba_pausas(ui: &mut Ui, r: Option<&Recorrente>) {
                 RichText::new(format!(
                     "Pausa de {} {}",
                     competencia_texto(p.desde),
-                    p.ate.map_or("até retomar".to_owned(), |a| format!("até {} (exclusivo)", competencia_texto(a)))
+                    p.ate.map_or("até retomar".to_owned(), |a| format!(
+                        "até {} (exclusivo)",
+                        competencia_texto(a)
+                    ))
                 ))
                 .strong(),
             );
@@ -1839,7 +2047,9 @@ fn aba_pausas(ui: &mut Ui, r: Option<&Recorrente>) {
     }
     if let Some(c) = &r.cancelamento {
         componentes::cartao(ui, |ui| {
-            ui.label(RichText::new(format!("Cancelado desde {}", competencia_texto(c.desde))).strong());
+            ui.label(
+                RichText::new(format!("Cancelado desde {}", competencia_texto(c.desde))).strong(),
+            );
             texto_pequeno(
                 ui,
                 format!(
@@ -1860,14 +2070,25 @@ fn aba_pausas(ui: &mut Ui, r: Option<&Recorrente>) {
 fn aba_excecoes(ui: &mut Ui, h: &[EntradaDoHistorico]) {
     let v: Vec<(&EntradaDoHistorico, Alteracao)> = h
         .iter()
-        .filter_map(|e| serde_json::from_str::<Alteracao>(&e.alteracao).ok().map(|a| (e, a)))
+        .filter_map(|e| {
+            serde_json::from_str::<Alteracao>(&e.alteracao)
+                .ok()
+                .map(|a| (e, a))
+        })
         .filter(|(_, a)| matches!(a, Alteracao::Excecao { .. }))
         .collect();
     if v.is_empty() {
-        texto_pequeno(ui, "Nenhuma exceção: adiamentos, dispensas, valores só de um mês e pagamentos informados aparecem aqui.");
+        texto_pequeno(
+            ui,
+            "Nenhuma exceção: adiamentos, dispensas, valores só de um mês e pagamentos informados aparecem aqui.",
+        );
     }
     for (e, a) in v {
-        let Alteracao::Excecao { ocorrencia, excecao } = a else {
+        let Alteracao::Excecao {
+            ocorrencia,
+            excecao,
+        } = a
+        else {
             continue;
         };
         let tipo = match excecao {
@@ -1877,8 +2098,21 @@ fn aba_excecoes(ui: &mut Ui, h: &[EntradaDoHistorico]) {
             Excecao::PagoInformado { .. } => "Pago informado",
         };
         componentes::cartao(ui, |ui| {
-            ui.label(RichText::new(format!("{tipo} · {}", competencia_texto(ocorrencia.competencia))).strong());
-            texto_pequeno(ui, format!("{} · por {}", formato::data(&e.quando), autor_texto(&e.autor)));
+            ui.label(
+                RichText::new(format!(
+                    "{tipo} · {}",
+                    competencia_texto(ocorrencia.competencia)
+                ))
+                .strong(),
+            );
+            texto_pequeno(
+                ui,
+                format!(
+                    "{} · por {}",
+                    formato::data(&e.quando),
+                    autor_texto(&e.autor)
+                ),
+            );
         });
         ui.add_space(4.0);
     }
@@ -1891,7 +2125,14 @@ fn aba_historico(ui: &mut Ui, h: &[EntradaDoHistorico]) {
     for e in h {
         componentes::cartao(ui, |ui| {
             ui.label(&e.resumo);
-            texto_pequeno(ui, format!("{} · por {}", formato::data(&e.quando), autor_texto(&e.autor)));
+            texto_pequeno(
+                ui,
+                format!(
+                    "{} · por {}",
+                    formato::data(&e.quando),
+                    autor_texto(&e.autor)
+                ),
+            );
         });
         ui.add_space(4.0);
     }
@@ -1954,7 +2195,7 @@ pub fn desenhar_dialogo(
         fechar = true;
     }
     if aplicar && let Ok(alt) = d.alteracao() {
-        pedidos.push(Pedido::Controle(PedidoDoControle::Aplicar(alt)));
+        pedidos.push(Pedido::Controle(PedidoDoControle::Aplicar(Box::new(alt))));
     }
     if !fechar {
         estado.dialogo = Some(d);
@@ -1976,97 +2217,147 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                 ui.radio_value(escopo, EscopoEscolhido::SoEsteMes, "Só este mês");
                 ui.radio_value(escopo, EscopoEscolhido::DaquiEmDiante, "Daqui em diante");
             });
-            egui::Grid::new("controle-form-editar").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Valor (R$)");
-                ui.add(egui::TextEdit::singleline(valor).hint_text("312,44"));
-                ui.end_row();
-                let daqui = *escopo == EscopoEscolhido::DaquiEmDiante;
-                ui.label("Conta");
-                ui.add_enabled(daqui, egui::TextEdit::singleline(conta));
-                ui.end_row();
-                ui.label("Centro");
-                ui.add_enabled(daqui, egui::TextEdit::singleline(centro));
-                ui.end_row();
-                ui.label("");
-                ui.add_enabled(daqui, egui::Checkbox::new(estimado, "Valor estimado"));
-                ui.end_row();
-            });
+            egui::Grid::new("controle-form-editar")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Valor (R$)");
+                    ui.add(egui::TextEdit::singleline(valor).hint_text("312,44"));
+                    ui.end_row();
+                    let daqui = *escopo == EscopoEscolhido::DaquiEmDiante;
+                    ui.label("Conta");
+                    ui.add_enabled(daqui, egui::TextEdit::singleline(conta));
+                    ui.end_row();
+                    ui.label("Centro");
+                    ui.add_enabled(daqui, egui::TextEdit::singleline(centro));
+                    ui.end_row();
+                    ui.label("");
+                    ui.add_enabled(daqui, egui::Checkbox::new(estimado, "Valor estimado"));
+                    ui.end_row();
+                });
             if *escopo == EscopoEscolhido::SoEsteMes {
-                texto_pequeno(ui, "Só este mês muda apenas o valor, como uma exceção deste mês.");
+                texto_pequeno(
+                    ui,
+                    "Só este mês muda apenas o valor, como uma exceção deste mês.",
+                );
             }
         }
         Formulario::Pausar { desde, ate, motivo } => {
-            egui::Grid::new("controle-form-pausar").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Pausar a partir de");
-                ui.add(egui::TextEdit::singleline(desde).hint_text("12/2026"));
-                ui.end_row();
-                ui.label("Até (não entra)");
-                ui.add(egui::TextEdit::singleline(ate).hint_text("vazio = até retomar"));
-                ui.end_row();
-                ui.label("Motivo");
-                ui.add(egui::TextEdit::singleline(motivo).desired_width(280.0));
-                ui.end_row();
-            });
+            egui::Grid::new("controle-form-pausar")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Pausar a partir de");
+                    ui.add(egui::TextEdit::singleline(desde).hint_text("12/2026"));
+                    ui.end_row();
+                    ui.label("Até (não entra)");
+                    ui.add(egui::TextEdit::singleline(ate).hint_text("vazio = até retomar"));
+                    ui.end_row();
+                    ui.label("Motivo");
+                    ui.add(egui::TextEdit::singleline(motivo).desired_width(280.0));
+                    ui.end_row();
+                });
         }
         Formulario::Retomar { desde } => {
-            egui::Grid::new("controle-form-retomar").num_columns(2).show(ui, |ui| {
-                ui.label("Voltar em");
-                ui.add(egui::TextEdit::singleline(desde).hint_text("03/2027"));
-                ui.end_row();
-            });
-            texto_pequeno(ui, "Os meses anteriores seguem pausados; este mês e os seguintes voltam.");
+            egui::Grid::new("controle-form-retomar")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Voltar em");
+                    ui.add(egui::TextEdit::singleline(desde).hint_text("03/2027"));
+                    ui.end_row();
+                });
+            texto_pequeno(
+                ui,
+                "Os meses anteriores seguem pausados; este mês e os seguintes voltam.",
+            );
         }
-        Formulario::Cancelar { desde, motivo, comprovado } => {
-            egui::Grid::new("controle-form-cancelar").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Cancelar a partir de");
-                ui.add(egui::TextEdit::singleline(desde).hint_text("02/2027"));
-                ui.end_row();
-                ui.label("Motivo");
-                ui.add(egui::TextEdit::singleline(motivo).desired_width(280.0));
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(comprovado, "Tenho o comprovante do fornecedor");
-                ui.end_row();
-            });
-            texto_pequeno(ui, "Nada antes muda e o que já era devido continua. Sem comprovante, o app não afirma o cancelamento.");
+        Formulario::Cancelar {
+            desde,
+            motivo,
+            comprovado,
+        } => {
+            egui::Grid::new("controle-form-cancelar")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Cancelar a partir de");
+                    ui.add(egui::TextEdit::singleline(desde).hint_text("02/2027"));
+                    ui.end_row();
+                    ui.label("Motivo");
+                    ui.add(egui::TextEdit::singleline(motivo).desired_width(280.0));
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(comprovado, "Tenho o comprovante do fornecedor");
+                    ui.end_row();
+                });
+            texto_pequeno(
+                ui,
+                "Nada antes muda e o que já era devido continua. Sem comprovante, o app não afirma o cancelamento.",
+            );
         }
         Formulario::Adiar { nova_data } => {
-            egui::Grid::new("controle-form-adiar").num_columns(2).show(ui, |ui| {
-                ui.label("Nova data");
-                ui.add(egui::TextEdit::singleline(nova_data).hint_text("dd/mm/aaaa; vazio = sem data"));
-                ui.end_row();
-            });
-            texto_pequeno(ui, "Adiar não paga: continua devido. Sem data, passa a contar em atraso depois do vencimento original.");
+            egui::Grid::new("controle-form-adiar")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Nova data");
+                    ui.add(
+                        egui::TextEdit::singleline(nova_data)
+                            .hint_text("dd/mm/aaaa; vazio = sem data"),
+                    );
+                    ui.end_row();
+                });
+            texto_pequeno(
+                ui,
+                "Adiar não paga: continua devido. Sem data, passa a contar em atraso depois do vencimento original.",
+            );
         }
         Formulario::Dispensar { motivo } => {
-            egui::Grid::new("controle-form-dispensar").num_columns(2).show(ui, |ui| {
-                ui.label("Motivo");
-                ui.add(egui::TextEdit::singleline(motivo).desired_width(300.0));
-                ui.end_row();
-            });
-            texto_pequeno(ui, "Dispensar tira só este mês do que é devido. Não é pagar.");
+            egui::Grid::new("controle-form-dispensar")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Motivo");
+                    ui.add(egui::TextEdit::singleline(motivo).desired_width(300.0));
+                    ui.end_row();
+                });
+            texto_pequeno(
+                ui,
+                "Dispensar tira só este mês do que é devido. Não é pagar.",
+            );
         }
         Formulario::InformarPago { valor, data } => {
-            egui::Grid::new("controle-form-pago").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Valor pago (R$)");
-                ui.add(egui::TextEdit::singleline(valor));
-                ui.end_row();
-                ui.label("Data");
-                ui.add(egui::TextEdit::singleline(data).hint_text("dd/mm/aaaa"));
-                ui.end_row();
-            });
-            texto_pequeno(ui, "É o que você informa. A conciliação com o banco é outro passo.");
+            egui::Grid::new("controle-form-pago")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Valor pago (R$)");
+                    ui.add(egui::TextEdit::singleline(valor));
+                    ui.end_row();
+                    ui.label("Data");
+                    ui.add(egui::TextEdit::singleline(data).hint_text("dd/mm/aaaa"));
+                    ui.end_row();
+                });
+            texto_pequeno(
+                ui,
+                "É o que você informa. A conciliação com o banco é outro passo.",
+            );
         }
         Formulario::Excluir { motivo, confirmou } => {
-            egui::Grid::new("controle-form-excluir").num_columns(2).show(ui, |ui| {
-                ui.label("Motivo");
-                ui.add(egui::TextEdit::singleline(motivo).desired_width(300.0));
-                ui.end_row();
-            });
-            ui.checkbox(confirmou, "Sei que o compromisso some do controle (dá para restaurar)");
+            egui::Grid::new("controle-form-excluir")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Motivo");
+                    ui.add(egui::TextEdit::singleline(motivo).desired_width(300.0));
+                    ui.end_row();
+                });
+            ui.checkbox(
+                confirmou,
+                "Sei que o compromisso some do controle (dá para restaurar)",
+            );
         }
         Formulario::Arquivar => {
-            ui.label("O compromisso sai da grade, sem apagar nada. Dá para tirar do arquivo depois.");
+            ui.label(
+                "O compromisso sai da grade, sem apagar nada. Dá para tirar do arquivo depois.",
+            );
         }
         Formulario::Restaurar { excluido } => {
             ui.label(if *excluido {
@@ -2083,7 +2374,10 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                         ui.selectable_value(grupo, g.clone(), g);
                     }
                 });
-            texto_pequeno(ui, "Vai para o fim do grupo escolhido. Os valores dos meses não mudam.");
+            texto_pequeno(
+                ui,
+                "Vai para o fim do grupo escolhido. Os valores dos meses não mudam.",
+            );
         }
     }
 }
@@ -2130,7 +2424,10 @@ mod testes {
         let (e, _) = estado_e_servico();
         let g = &e.cache.as_ref().unwrap().grade;
         let todos = itens_da_grade(g, &HashSet::new());
-        let linhas = todos.iter().filter(|i| matches!(i, ItemDaGrade::Linha { .. })).count();
+        let linhas = todos
+            .iter()
+            .filter(|i| matches!(i, ItemDaGrade::Linha { .. }))
+            .count();
         assert_eq!(linhas, g.linhas().count());
         assert!(matches!(todos.last(), Some(ItemDaGrade::Total(_))));
         // Recolher o primeiro grupo some com as linhas dele, mas deixa o cabeçalho.
@@ -2138,11 +2435,23 @@ mod testes {
         let mut rec = HashSet::new();
         rec.insert(chave_do_grupo(primeiro));
         let menos = itens_da_grade(g, &rec);
-        let linhas_menos = menos.iter().filter(|i| matches!(i, ItemDaGrade::Linha { .. })).count();
+        let linhas_menos = menos
+            .iter()
+            .filter(|i| matches!(i, ItemDaGrade::Linha { .. }))
+            .count();
         assert_eq!(linhas - linhas_menos, primeiro.linhas().count());
-        assert!(matches!(menos[0], ItemDaGrade::Grupo { recolhido: true, .. }));
+        assert!(matches!(
+            menos[0],
+            ItemDaGrade::Grupo {
+                recolhido: true,
+                ..
+            }
+        ));
         // Cada grupo termina no subtotal, e o total fecha tudo.
-        let subtotais = todos.iter().filter(|i| matches!(i, ItemDaGrade::Subtotal(_))).count();
+        let subtotais = todos
+            .iter()
+            .filter(|i| matches!(i, ItemDaGrade::Subtotal(_)))
+            .count();
         assert_eq!(subtotais, g.grupos.len());
     }
 
@@ -2174,7 +2483,9 @@ mod testes {
         }
         d.atualizar_previa(&s, hoje());
         assert!(d.pode_aplicar());
-        let Some(Ok(sim)) = d.previa() else { panic!("sem prévia") };
+        let Some(Ok(sim)) = d.previa() else {
+            panic!("sem prévia")
+        };
         assert!(!sim.meses_afetados.is_empty());
         // Mudar o texto invalida a prévia até simular de novo.
         if let Formulario::Editar { valor, .. } = &mut d.formulario {
@@ -2215,7 +2526,12 @@ mod testes {
     #[test]
     fn contexto_da_linha_para_subir_e_descer() {
         let (mut e, _) = estado_e_servico();
-        let primeiro = e.cache.as_ref().unwrap().grade.grupos[0].linhas().next().unwrap().id.clone();
+        let primeiro = e.cache.as_ref().unwrap().grade.grupos[0]
+            .linhas()
+            .next()
+            .unwrap()
+            .id
+            .clone();
         e.selecionada = Some(primeiro);
         assert!(e.contexto().primeira_do_grupo);
         assert!(controle::disponibilidade(AcaoDoControle::Subir, &e.contexto()).is_err());

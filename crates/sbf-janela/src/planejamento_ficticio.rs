@@ -8,11 +8,11 @@
 
 use sbf_planejamento::{
     Alteracao, Autor, Cancelamento, Centavos, Certeza, Ciclo, Competencia, Conciliacao, Controle,
-    Data, DiaDeCorte, EntradaDoHistorico, EstadoDaOcorrencia, EstadoDaProposta, Excecao,
-    ExcecaoGravada, Exclusao, Filtro, Fonte, Frequencia, Grupo, HORIZONTE_MESES, IdOcorrencia,
-    Natureza, Ocorrencia, OrigemImportada, Pausa, Periodo, Planejamento, Prazo,
-    Proposta, Recibo, Recorrente, ErroDoPlanejamento, Resultado, Resumo, Saldo, Sentido,
-    Simulacao, TotaisDoMes, Versao,
+    Data, DiaDeCorte, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta,
+    Excecao, ExcecaoGravada, Exclusao, Filtro, Fonte, Frequencia, Grupo, HORIZONTE_MESES,
+    IdOcorrencia, Natureza, Ocorrencia, OrigemImportada, Pausa, Periodo, Planejamento, Prazo,
+    Proposta, Recibo, Recorrente, Resultado, Resumo, Saldo, Sentido, Simulacao, TotaisDoMes,
+    Versao,
 };
 
 /// Depois deste ponto, a data de "hoje" da demonstração. A janela passa `hoje` em toda
@@ -105,7 +105,15 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::Entrada,
                 Prazo::SemFim,
-                versao(Some(Centavos(845_000)), Certeza::Confirmado, Fonte::Planilha, mensal(5), inicio, cx, "Pessoal"),
+                versao(
+                    Some(Centavos(845_000)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(5),
+                    inicio,
+                    cx,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_casa",
@@ -114,7 +122,15 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::Entrada,
                 Prazo::SemFim,
-                versao(Some(Centavos(120_000)), Certeza::Estimado, Fonte::Planilha, mensal(10), inicio, cx, "Casa"),
+                versao(
+                    Some(Centavos(120_000)),
+                    Certeza::Estimado,
+                    Fonte::Planilha,
+                    mensal(10),
+                    inicio,
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_aluguel",
@@ -123,7 +139,15 @@ impl PlanejamentoFicticio {
                 Some("Moradia"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(230_000)), Certeza::Confirmado, Fonte::Contrato, mensal(10), inicio, cx, "Casa"),
+                versao(
+                    Some(Centavos(230_000)),
+                    Certeza::Confirmado,
+                    Fonte::Contrato,
+                    mensal(10),
+                    inicio,
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_condominio",
@@ -132,7 +156,15 @@ impl PlanejamentoFicticio {
                 Some("Moradia"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(48_000)), Certeza::Confirmado, Fonte::Planilha, mensal(12), inicio, cx, "Casa"),
+                versao(
+                    Some(Centavos(48_000)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(12),
+                    inicio,
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_energia",
@@ -141,7 +173,15 @@ impl PlanejamentoFicticio {
                 Some("Contas"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(None, Certeza::Estimado, Fonte::Pluggy, mensal(18), inicio, cx, "Casa"),
+                versao(
+                    None,
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(18),
+                    inicio,
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_agua",
@@ -150,7 +190,15 @@ impl PlanejamentoFicticio {
                 Some("Contas"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(9_640)), Certeza::Estimado, Fonte::Pluggy, mensal(20), inicio, cx, "Casa"),
+                versao(
+                    Some(Centavos(9_640)),
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(20),
+                    inicio,
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_internet",
@@ -159,7 +207,15 @@ impl PlanejamentoFicticio {
                 Some("Contas"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(11_990)), Certeza::Confirmado, Fonte::Contrato, mensal(15), inicio, nu, "Casa"),
+                versao(
+                    Some(Centavos(11_990)),
+                    Certeza::Confirmado,
+                    Fonte::Contrato,
+                    mensal(15),
+                    inicio,
+                    nu,
+                    "Casa",
+                ),
             ),
             (
                 "rec_iptu",
@@ -167,8 +223,19 @@ impl PlanejamentoFicticio {
                 "Lar",
                 Some("Impostos"),
                 Natureza::Saida,
-                Prazo::Parcelas { total: 10, primeira: h.somar_meses(-2) },
-                versao(Some(Centavos(21_500)), Certeza::Confirmado, Fonte::Planilha, mensal(10), h.somar_meses(-2), cx, "Casa"),
+                Prazo::Parcelas {
+                    total: 10,
+                    primeira: h.somar_meses(-2),
+                },
+                versao(
+                    Some(Centavos(21_500)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(10),
+                    h.somar_meses(-2),
+                    cx,
+                    "Casa",
+                ),
             ),
             (
                 "rec_mercado",
@@ -177,7 +244,15 @@ impl PlanejamentoFicticio {
                 Some("Alimentação"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(150_000)), Certeza::Estimado, Fonte::Pluggy, mensal(8), inicio, nu, "Casa"),
+                versao(
+                    Some(Centavos(150_000)),
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(8),
+                    inicio,
+                    nu,
+                    "Casa",
+                ),
             ),
             (
                 "rec_saude",
@@ -186,7 +261,15 @@ impl PlanejamentoFicticio {
                 Some("Saúde"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(64_000)), Certeza::Confirmado, Fonte::Contrato, mensal(7), inicio, cx, "Pessoal"),
+                versao(
+                    Some(Centavos(64_000)),
+                    Certeza::Confirmado,
+                    Fonte::Contrato,
+                    mensal(7),
+                    inicio,
+                    cx,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_farmacia",
@@ -195,7 +278,15 @@ impl PlanejamentoFicticio {
                 Some("Saúde"),
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(22_000)), Certeza::Estimado, Fonte::Pluggy, mensal(25), inicio, nu, "Pessoal"),
+                versao(
+                    Some(Centavos(22_000)),
+                    Certeza::Estimado,
+                    Fonte::Pluggy,
+                    mensal(25),
+                    inicio,
+                    nu,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_seguro",
@@ -208,7 +299,10 @@ impl PlanejamentoFicticio {
                     Some(Centavos(290_000)),
                     Certeza::Confirmado,
                     Fonte::Planilha,
-                    Frequencia::Anual { mes: h.somar_meses(2).mes, dia: 20 },
+                    Frequencia::Anual {
+                        mes: h.somar_meses(2).mes,
+                        dia: 20,
+                    },
                     inicio,
                     cx,
                     "Pessoal",
@@ -220,8 +314,19 @@ impl PlanejamentoFicticio {
                 "Dívidas",
                 None,
                 Natureza::Saida,
-                Prazo::Parcelas { total: 48, primeira: h.somar_meses(-10) },
-                versao(Some(Centavos(115_000)), Certeza::Confirmado, Fonte::Contrato, mensal(14), h.somar_meses(-10), cx, "Pessoal"),
+                Prazo::Parcelas {
+                    total: 48,
+                    primeira: h.somar_meses(-10),
+                },
+                versao(
+                    Some(Centavos(115_000)),
+                    Certeza::Confirmado,
+                    Fonte::Contrato,
+                    mensal(14),
+                    h.somar_meses(-10),
+                    cx,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_emprestimo",
@@ -230,7 +335,15 @@ impl PlanejamentoFicticio {
                 Some("Empréstimos"),
                 Natureza::Saida,
                 Prazo::AteCompetencia(h.somar_meses(7)),
-                versao(Some(Centavos(78_000)), Certeza::Confirmado, Fonte::Planilha, mensal(9), inicio, cx, "Pessoal"),
+                versao(
+                    Some(Centavos(78_000)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(9),
+                    inicio,
+                    cx,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_streaming",
@@ -239,7 +352,15 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(3_990)), Certeza::Confirmado, Fonte::Planilha, mensal(21), inicio, nu, "Pessoal"),
+                versao(
+                    Some(Centavos(3_990)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(21),
+                    inicio,
+                    nu,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_revista",
@@ -248,7 +369,15 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::Saida,
                 Prazo::SemFim,
-                versao(Some(Centavos(2_990)), Certeza::Confirmado, Fonte::Planilha, mensal(22), inicio, nu, "Pessoal"),
+                versao(
+                    Some(Centavos(2_990)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(22),
+                    inicio,
+                    nu,
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_presente",
@@ -261,7 +390,9 @@ impl PlanejamentoFicticio {
                     Some(Centavos(35_000)),
                     Certeza::Estimado,
                     Fonte::Usuario,
-                    Frequencia::Unica { data: h.somar_meses(3).dia(15) },
+                    Frequencia::Unica {
+                        data: h.somar_meses(3).dia(15),
+                    },
                     h.somar_meses(3),
                     nu,
                     "Pessoal",
@@ -274,7 +405,15 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::DescontoEmFolha,
                 Prazo::SemFim,
-                versao(Some(Centavos(62_000)), Certeza::Confirmado, Fonte::Contrato, mensal(5), inicio, "Salário", "Pessoal"),
+                versao(
+                    Some(Centavos(62_000)),
+                    Certeza::Confirmado,
+                    Fonte::Contrato,
+                    mensal(5),
+                    inicio,
+                    "Salário",
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_previdencia",
@@ -283,25 +422,53 @@ impl PlanejamentoFicticio {
                 None,
                 Natureza::DescontoEmFolha,
                 Prazo::SemFim,
-                versao(Some(Centavos(54_000)), Certeza::Confirmado, Fonte::Planilha, mensal(5), inicio, "Salário", "Pessoal"),
+                versao(
+                    Some(Centavos(54_000)),
+                    Certeza::Confirmado,
+                    Fonte::Planilha,
+                    mensal(5),
+                    inicio,
+                    "Salário",
+                    "Pessoal",
+                ),
             ),
             (
                 "rec_bolao_entrada",
                 "Bolão: cotas recebidas",
                 "Passagem",
                 None,
-                Natureza::Passagem { sentido: Sentido::Entrada },
+                Natureza::Passagem {
+                    sentido: Sentido::Entrada,
+                },
                 Prazo::SemFim,
-                versao(Some(Centavos(40_000)), Certeza::Estimado, Fonte::Usuario, mensal(3), inicio, cx, "Bolão"),
+                versao(
+                    Some(Centavos(40_000)),
+                    Certeza::Estimado,
+                    Fonte::Usuario,
+                    mensal(3),
+                    inicio,
+                    cx,
+                    "Bolão",
+                ),
             ),
             (
                 "rec_bolao_saida",
                 "Bolão: repasse",
                 "Passagem",
                 None,
-                Natureza::Passagem { sentido: Sentido::Saida },
+                Natureza::Passagem {
+                    sentido: Sentido::Saida,
+                },
                 Prazo::SemFim,
-                versao(Some(Centavos(30_000)), Certeza::Estimado, Fonte::Usuario, mensal(4), inicio, cx, "Bolão"),
+                versao(
+                    Some(Centavos(30_000)),
+                    Certeza::Estimado,
+                    Fonte::Usuario,
+                    mensal(4),
+                    inicio,
+                    cx,
+                    "Bolão",
+                ),
             ),
         ];
         for (i, (id, nome, grupo, sub, natureza, prazo, v)) in base.into_iter().enumerate() {
@@ -362,9 +529,6 @@ impl PlanejamentoFicticio {
         let mut n = 0;
         let ids: Vec<String> = self.recorrentes.iter().map(|r| r.id.clone()).collect();
         for id in ids {
-            if sem_pagar.contains(&id.as_str()) {
-                continue;
-            }
             for comp in (-3..=0).map(|d| h.somar_meses(d)) {
                 let Some(oc) = self.ocorrencia_de(&id, comp, hoje) else {
                     continue;
@@ -372,9 +536,17 @@ impl PlanejamentoFicticio {
                 if oc.vencimento >= hoje || oc.vencimento < hoje.somar_dias(-70) {
                     continue;
                 }
-                let Some(valor) = oc.previsto else { continue };
+                // Os atrasados de propósito são os dos últimos 45 dias.
+                if sem_pagar.contains(&id.as_str()) && oc.vencimento >= hoje.somar_dias(-45) {
+                    continue;
+                }
+                // A energia não tem previsto (sem valor), mas o que foi pago tem valor.
+                let Some(valor) = oc.previsto.or(Some(Centavos(31_250))) else {
+                    continue;
+                };
                 n += 1;
-                let sugestao = oc.id.recorrente == "rec_mercado";
+                let sugestao =
+                    oc.id.recorrente == "rec_mercado" && oc.vencimento >= hoje.somar_dias(-20);
                 if (n % 3 == 0 || sugestao) && !matches!(oc.natureza, Natureza::DescontoEmFolha) {
                     self.conciliacoes.push(Conciliacao {
                         ocorrencia: oc.id.clone(),
@@ -402,8 +574,12 @@ impl PlanejamentoFicticio {
 
     fn semear_propostas(&mut self) {
         let h = Competencia::de_data(self.hoje);
-        let internet = self.recorrente_interno("rec_internet").map(|r| r.versao_do_registro);
-        let streaming = self.recorrente_interno("rec_streaming").map(|r| r.versao_do_registro);
+        let internet = self
+            .recorrente_interno("rec_internet")
+            .map(|r| r.versao_do_registro);
+        let streaming = self
+            .recorrente_interno("rec_streaming")
+            .map(|r| r.versao_do_registro);
         if let Some(base) = internet {
             let _ = self.propor(
                 Alteracao::Editar {
@@ -449,8 +625,12 @@ impl PlanejamentoFicticio {
 
     // ------------------------------------------------------------------ projeção
 
-    fn versao_vigente<'a>(r: &'a Recorrente, comp: Competencia) -> Option<&'a Versao> {
-        r.versoes.iter().rev().find(|v| v.desde <= comp).or_else(|| r.versoes.first())
+    fn versao_vigente(r: &Recorrente, comp: Competencia) -> Option<&Versao> {
+        r.versoes
+            .iter()
+            .rev()
+            .find(|v| v.desde <= comp)
+            .or_else(|| r.versoes.first())
     }
 
     /// A regra gera ocorrência nesta competência? E com que parcela e dia?
@@ -501,7 +681,9 @@ impl PlanejamentoFicticio {
     }
 
     fn excecoes_de(&self, id: &IdOcorrencia) -> impl Iterator<Item = &ExcecaoGravada> {
-        self.excecoes.iter().filter(move |e| !e.desfeita && &e.ocorrencia == id)
+        self.excecoes
+            .iter()
+            .filter(move |e| !e.desfeita && &e.ocorrencia == id)
     }
 
     /// A ocorrência de um recorrente numa competência, com tudo aplicado.
@@ -546,7 +728,10 @@ impl PlanejamentoFicticio {
         let conciliado = conc.filter(|x| x.confirmada).map(|x| x.valor);
         let sugestao = conc.is_some_and(|x| !x.confirmada);
         let paga_algo = pago_informado.is_some() || conciliado.is_some();
-        let pausa = r.pausas.iter().any(|p| p.desde <= comp && p.ate.is_none_or(|a| comp < a));
+        let pausa = r
+            .pausas
+            .iter()
+            .any(|p| p.desde <= comp && p.ate.is_none_or(|a| comp < a));
         let cancelada = r.cancelamento.as_ref().is_some_and(|x| comp >= x.desde);
         let estado = if dispensada {
             EstadoDaOcorrencia::Dispensada
@@ -663,10 +848,16 @@ impl PlanejamentoFicticio {
             None => true,
             Some(b) => {
                 let b = b.to_lowercase();
-                [Some(&o.nome), o.conta.as_ref(), o.centro.as_ref(), o.fornecedor.as_ref(), Some(&o.grupo)]
-                    .into_iter()
-                    .flatten()
-                    .any(|t| t.to_lowercase().contains(&b))
+                [
+                    Some(&o.nome),
+                    o.conta.as_ref(),
+                    o.centro.as_ref(),
+                    o.fornecedor.as_ref(),
+                    Some(&o.grupo),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|t| t.to_lowercase().contains(&b))
             }
         };
         ok && busca_ok
@@ -719,8 +910,12 @@ impl PlanejamentoFicticio {
                     }
                 }
                 Natureza::DescontoEmFolha => r.descontos_em_folha += prev,
-                Natureza::Passagem { sentido: Sentido::Entrada } => p_entra += prev,
-                Natureza::Passagem { sentido: Sentido::Saida } => p_sai += prev,
+                Natureza::Passagem {
+                    sentido: Sentido::Entrada,
+                } => p_entra += prev,
+                Natureza::Passagem {
+                    sentido: Sentido::Saida,
+                } => p_sai += prev,
             }
         }
         for o in atrasadas {
@@ -731,27 +926,31 @@ impl PlanejamentoFicticio {
         }
         r.passagem_pendente = (p_entra - p_sai).ou_zero();
         let disponivel: Centavos = self.saldos.iter().map(|s| s.valor).sum();
-        r.livre_apos_compromissos = disponivel + entradas_a_receber
-            - saidas_a_pagar
-            - r.em_atraso
-            - r.passagem_pendente;
+        r.livre_apos_compromissos =
+            disponivel + entradas_a_receber - saidas_a_pagar - r.em_atraso - r.passagem_pendente;
         if self.saldos.is_empty() {
-            r.lacunas.push("Sem saldo coletado: o disponível agora é desconhecido.".into());
+            r.lacunas
+                .push("Sem saldo coletado: o disponível agora é desconhecido.".into());
             estimado = true;
         }
         for s in &self.saldos {
             let coleta = s.quando.get(..10).and_then(Data::de_iso);
             if coleta.is_none_or(|d| d.somar_dias(1) < hoje) {
-                r.lacunas.push(format!("O saldo de {} está desatualizado.", s.conta));
+                r.lacunas
+                    .push(format!("O saldo de {} está desatualizado.", s.conta));
                 estimado = true;
             }
         }
         if sem_valor > 0 {
-            r.lacunas.push(format!("{sem_valor} ocorrência(s) sem valor entram como zero na conta."));
+            r.lacunas.push(format!(
+                "{sem_valor} ocorrência(s) sem valor entram como zero na conta."
+            ));
             estimado = true;
         }
         if estimados > 0 {
-            r.lacunas.push(format!("{estimados} valor(es) são estimados, não confirmados."));
+            r.lacunas.push(format!(
+                "{estimados} valor(es) são estimados, não confirmados."
+            ));
             estimado = true;
         }
         r.livre_e_estimativa = estimado;
@@ -785,8 +984,8 @@ impl Planejamento for PlanejamentoFicticio {
         self.ordenar(&mut linhas);
         // Em atraso de antes: o que venceu antes do período (e antes de hoje), segue devido.
         let corte_atraso = inicio.min(hoje);
-        let mut atrasadas: Vec<Ocorrencia> = if inicio > hoje.somar_dias(-400) {
-            self.no_intervalo(hoje.somar_dias(-120), corte_atraso.somar_dias(-1), hoje)
+        let mut atrasadas: Vec<Ocorrencia> = if inicio <= hoje {
+            self.no_intervalo(hoje.somar_dias(-70), corte_atraso.somar_dias(-1), hoje)
                 .into_iter()
                 .filter(|o| o.estado == EstadoDaOcorrencia::EmAtraso && o.vencimento < inicio)
                 .collect()
@@ -908,7 +1107,15 @@ impl Planejamento for PlanejamentoFicticio {
             let a = self.ocorrencia_de(&rec, comp, hoje);
             let b = depois.ocorrencia_de(&rec, comp, hoje);
             let chave = |o: &Option<Ocorrencia>| {
-                o.as_ref().map(|o| (o.previsto, o.estado, o.vencimento, o.conta.clone(), o.grupo.clone()))
+                o.as_ref().map(|o| {
+                    (
+                        o.previsto,
+                        o.estado,
+                        o.vencimento,
+                        o.conta.clone(),
+                        o.grupo.clone(),
+                    )
+                })
             };
             if chave(&a) != chave(&b) {
                 meses_afetados.push(comp);
@@ -927,11 +1134,17 @@ impl Planejamento for PlanejamentoFicticio {
             };
             if o.pago_informado.is_some() || o.conciliado.is_some() {
                 conflitos.push(format!(
-                    "{comp}: há pagamento informado ou conciliado; ele continua valendo e visível."
+                    "{:02}/{:04}: há pagamento informado ou conciliado; ele continua valendo e visível.",
+                    comp.mes, comp.ano
                 ));
             }
-            if self.excecoes_de(&o.id).next().is_some() && matches!(alteracao, Alteracao::Editar { .. }) {
-                conflitos.push(format!("{comp}: já existe uma exceção neste mês; ela prevalece."));
+            if self.excecoes_de(&o.id).next().is_some()
+                && matches!(alteracao, Alteracao::Editar { .. })
+            {
+                conflitos.push(format!(
+                    "{:02}/{:04}: já existe uma exceção neste mês; ela prevalece.",
+                    comp.mes, comp.ano
+                ));
             }
         }
         Ok(Simulacao {
@@ -980,7 +1193,9 @@ impl Planejamento for PlanejamentoFicticio {
             .position(|p| p.id == id)
             .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(id.into()))?;
         if self.propostas[i].estado != EstadoDaProposta::Pendente {
-            return Err(ErroDoPlanejamento::Invalida("a proposta não está pendente".into()));
+            return Err(ErroDoPlanejamento::Invalida(
+                "a proposta não está pendente".into(),
+            ));
         }
         let alteracao = self.propostas[i].alteracao.clone();
         match self.aplicar_interno(alteracao, Autor::Usuario) {
@@ -1004,7 +1219,9 @@ impl Planejamento for PlanejamentoFicticio {
             .find(|p| p.id == id)
             .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(id.into()))?;
         if p.estado != EstadoDaProposta::Pendente {
-            return Err(ErroDoPlanejamento::Invalida("a proposta não está pendente".into()));
+            return Err(ErroDoPlanejamento::Invalida(
+                "a proposta não está pendente".into(),
+            ));
         }
         p.estado = EstadoDaProposta::Recusada;
         p.motivo = Some(motivo.into());
@@ -1056,7 +1273,9 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
 fn comp_da(a: &Alteracao) -> Option<Competencia> {
     match a {
         Alteracao::Editar { escopo, .. } => Some(match escopo {
-            sbf_planejamento::Escopo::SoEsteMes(c) | sbf_planejamento::Escopo::DaquiEmDiante(c) => *c,
+            sbf_planejamento::Escopo::SoEsteMes(c) | sbf_planejamento::Escopo::DaquiEmDiante(c) => {
+                *c
+            }
         }),
         Alteracao::Pausar { desde, .. }
         | Alteracao::Retomar { desde, .. }
@@ -1092,7 +1311,9 @@ impl PlanejamentoFicticio {
             resumo,
             alteracao: serde_json::to_string(alt).unwrap_or_default(),
         });
-        let versao_nova = self.recorrente_interno(alvo).map_or(0, |r| r.versao_do_registro);
+        let versao_nova = self
+            .recorrente_interno(alvo)
+            .map_or(0, |r| r.versao_do_registro);
         Recibo {
             alteracao_id: id,
             alvo: alvo.into(),
@@ -1126,7 +1347,12 @@ impl PlanejamentoFicticio {
                 });
                 Ok(self.registrar(autor, &id, "Criou um compromisso.".into(), &alt))
             }
-            Alteracao::Editar { recorrente, escopo, mudanca, versao_base } => {
+            Alteracao::Editar {
+                recorrente,
+                escopo,
+                mudanca,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 match escopo {
                     sbf_planejamento::Escopo::SoEsteMes(comp) => {
@@ -1143,16 +1369,29 @@ impl PlanejamentoFicticio {
                                 "só este mês permite mudar apenas o valor".into(),
                             ));
                         };
-                        let (parcela, _) = Self::gera(&self.recorrentes[i], comp).ok_or_else(|| {
-                            ErroDoPlanejamento::Invalida("o compromisso não ocorre neste mês".into())
-                        })?;
-                        let ocorrencia = IdOcorrencia { recorrente: recorrente.clone(), competencia: comp, parcela };
-                        self.substituir_excecao(ocorrencia, Excecao::ValorSoDesteMes { valor }, autor.clone());
+                        let (parcela, _) =
+                            Self::gera(&self.recorrentes[i], comp).ok_or_else(|| {
+                                ErroDoPlanejamento::Invalida(
+                                    "o compromisso não ocorre neste mês".into(),
+                                )
+                            })?;
+                        let ocorrencia = IdOcorrencia {
+                            recorrente: recorrente.clone(),
+                            competencia: comp,
+                            parcela,
+                        };
+                        self.substituir_excecao(
+                            ocorrencia,
+                            Excecao::ValorSoDesteMes { valor },
+                            autor.clone(),
+                        );
                     }
                     sbf_planejamento::Escopo::DaquiEmDiante(comp) => {
                         let mut nova = Self::versao_vigente(&self.recorrentes[i], comp)
                             .cloned()
-                            .ok_or_else(|| ErroDoPlanejamento::Invalida("sem versão vigente".into()))?;
+                            .ok_or_else(|| {
+                                ErroDoPlanejamento::Invalida("sem versão vigente".into())
+                            })?;
                         nova.desde = comp;
                         if let Some(v) = mudanca.valor {
                             nova.valor = v;
@@ -1192,15 +1431,35 @@ impl PlanejamentoFicticio {
                 self.recorrentes[i].versao_do_registro += 1;
                 Ok(self.registrar(autor, &recorrente, "Editou o compromisso.".into(), &alt))
             }
-            Alteracao::Pausar { recorrente, desde, ate, motivo, versao_base } => {
+            Alteracao::Pausar {
+                recorrente,
+                desde,
+                ate,
+                motivo,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let id = self.proximo_id("pausa");
                 let r = &mut self.recorrentes[i];
-                r.pausas.push(Pausa { id, desde, ate, motivo });
+                r.pausas.push(Pausa {
+                    id,
+                    desde,
+                    ate,
+                    motivo,
+                });
                 r.versao_do_registro += 1;
-                Ok(self.registrar(autor, &recorrente, format!("Pausou a partir de {desde}."), &alt))
+                Ok(self.registrar(
+                    autor,
+                    &recorrente,
+                    format!("Pausou a partir de {desde}."),
+                    &alt,
+                ))
             }
-            Alteracao::Retomar { recorrente, desde, versao_base } => {
+            Alteracao::Retomar {
+                recorrente,
+                desde,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
                 let Some(p) = r
@@ -1208,7 +1467,9 @@ impl PlanejamentoFicticio {
                     .iter_mut()
                     .find(|p| p.desde <= desde && p.ate.is_none_or(|a| a > desde))
                 else {
-                    return Err(ErroDoPlanejamento::Invalida("não há pausa aberta nesse mês".into()));
+                    return Err(ErroDoPlanejamento::Invalida(
+                        "não há pausa aberta nesse mês".into(),
+                    ));
                 };
                 p.ate = Some(desde);
                 // Uma pausa que acaba onde começou nunca suprimiu nada: sai da lista.
@@ -1216,17 +1477,35 @@ impl PlanejamentoFicticio {
                 r.versao_do_registro += 1;
                 Ok(self.registrar(autor, &recorrente, format!("Retomou em {desde}."), &alt))
             }
-            Alteracao::Cancelar { recorrente, desde, motivo, comprovado, versao_base } => {
+            Alteracao::Cancelar {
+                recorrente,
+                desde,
+                motivo,
+                comprovado,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
                 if r.cancelamento.is_some() {
                     return Err(ErroDoPlanejamento::Invalida("já está cancelado".into()));
                 }
-                r.cancelamento = Some(Cancelamento { desde, motivo, comprovado });
+                r.cancelamento = Some(Cancelamento {
+                    desde,
+                    motivo,
+                    comprovado,
+                });
                 r.versao_do_registro += 1;
-                Ok(self.registrar(autor, &recorrente, format!("Cancelou a partir de {desde}."), &alt))
+                Ok(self.registrar(
+                    autor,
+                    &recorrente,
+                    format!("Cancelou a partir de {desde}."),
+                    &alt,
+                ))
             }
-            Alteracao::Excecao { ocorrencia, excecao } => {
+            Alteracao::Excecao {
+                ocorrencia,
+                excecao,
+            } => {
                 let rec = ocorrencia.recorrente.clone();
                 let i = self
                     .recorrentes
@@ -1241,7 +1520,12 @@ impl PlanejamentoFicticio {
                     Excecao::ValorSoDesteMes { .. } => "Mudou o valor só deste mês de",
                     Excecao::PagoInformado { .. } => "Informou pagamento de",
                 };
-                Ok(self.registrar(autor, &rec, format!("{texto} {}.", ocorrencia.competencia), &alt))
+                Ok(self.registrar(
+                    autor,
+                    &rec,
+                    format!("{texto} {}.", ocorrencia.competencia),
+                    &alt,
+                ))
             }
             Alteracao::DesfazerExcecao { id } => {
                 let e = self
@@ -1255,20 +1539,41 @@ impl PlanejamentoFicticio {
             }
             Alteracao::Conciliar { conciliacao } => {
                 let rec = conciliacao.ocorrencia.recorrente.clone();
-                self.conciliacoes.retain(|c| c.ocorrencia != conciliacao.ocorrencia);
+                self.conciliacoes
+                    .retain(|c| c.ocorrencia != conciliacao.ocorrencia);
                 let confirmada = conciliacao.confirmada;
                 self.conciliacoes.push(conciliacao);
-                let texto = if confirmada { "Confirmou a conciliação." } else { "Sugeriu uma conciliação." };
+                let texto = if confirmada {
+                    "Confirmou a conciliação."
+                } else {
+                    "Sugeriu uma conciliação."
+                };
                 Ok(self.registrar(autor, &rec, texto.into(), &alt))
             }
-            Alteracao::Excluir { recorrente, motivo, versao_base } => {
+            Alteracao::Excluir {
+                recorrente,
+                motivo,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
-                r.excluido = Some(Exclusao { quando: quando.clone(), autor: autor.clone(), motivo });
+                r.excluido = Some(Exclusao {
+                    quando: quando.clone(),
+                    autor: autor.clone(),
+                    motivo,
+                });
                 r.versao_do_registro += 1;
-                Ok(self.registrar(autor, &recorrente, "Excluiu (de forma lógica).".into(), &alt))
+                Ok(self.registrar(
+                    autor,
+                    &recorrente,
+                    "Excluiu (de forma lógica).".into(),
+                    &alt,
+                ))
             }
-            Alteracao::Restaurar { recorrente, versao_base } => {
+            Alteracao::Restaurar {
+                recorrente,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
                 if r.excluido.is_none() {
@@ -1278,15 +1583,28 @@ impl PlanejamentoFicticio {
                 r.versao_do_registro += 1;
                 Ok(self.registrar(autor, &recorrente, "Restaurou.".into(), &alt))
             }
-            Alteracao::Arquivar { recorrente, arquivado, versao_base } => {
+            Alteracao::Arquivar {
+                recorrente,
+                arquivado,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
                 r.arquivado = arquivado;
                 r.versao_do_registro += 1;
-                let t = if arquivado { "Arquivou." } else { "Tirou do arquivo." };
+                let t = if arquivado {
+                    "Arquivou."
+                } else {
+                    "Tirou do arquivo."
+                };
                 Ok(self.registrar(autor, &recorrente, t.into(), &alt))
             }
-            Alteracao::Mover { recorrente, grupo, posicao, versao_base } => {
+            Alteracao::Mover {
+                recorrente,
+                grupo,
+                posicao,
+                versao_base,
+            } => {
                 let i = self.conferir_base(&recorrente, versao_base)?;
                 let r = &mut self.recorrentes[i];
                 r.grupo = grupo;
@@ -1298,14 +1616,18 @@ impl PlanejamentoFicticio {
                 if self.grupos.iter().any(|g| g.nome == nome) {
                     return Err(ErroDoPlanejamento::Invalida("o grupo já existe".into()));
                 }
-                self.grupos.push(Grupo { nome: nome.clone(), posicao });
+                self.grupos.push(Grupo {
+                    nome: nome.clone(),
+                    posicao,
+                });
                 Ok(self.registrar(autor, &nome, "Criou um grupo.".into(), &alt))
             }
         }
     }
 
     fn substituir_excecao(&mut self, ocorrencia: IdOcorrencia, excecao: Excecao, autor: Autor) {
-        let mesma = |a: &Excecao, b: &Excecao| std::mem::discriminant(a) == std::mem::discriminant(b);
+        let mesma =
+            |a: &Excecao, b: &Excecao| std::mem::discriminant(a) == std::mem::discriminant(b);
         for e in self.excecoes.iter_mut() {
             if e.ocorrencia == ocorrencia && !e.desfeita && mesma(&e.excecao, &excecao) {
                 e.desfeita = true;
@@ -1325,7 +1647,11 @@ impl PlanejamentoFicticio {
 
     /// As exceções gravadas de uma ocorrência (aba "Exceções" do detalhe).
     pub fn excecoes_da_ocorrencia(&self, id: &IdOcorrencia) -> Vec<ExcecaoGravada> {
-        self.excecoes.iter().filter(|e| &e.ocorrencia == id).cloned().collect()
+        self.excecoes
+            .iter()
+            .filter(|e| &e.ocorrencia == id)
+            .cloned()
+            .collect()
     }
 }
 
@@ -1359,7 +1685,9 @@ mod testes {
     #[test]
     fn o_ciclo_atual_tem_linhas_e_resumo() {
         let s = servico();
-        let c = s.controle(&periodo_atual(), Filtro::Todos, None, hoje()).expect("controle");
+        let c = s
+            .controle(&periodo_atual(), Filtro::Todos, None, hoje())
+            .expect("controle");
         assert!(c.linhas.len() > 10);
         assert!(c.resumo.livre_e_estimativa, "há valor sem valor e estimado");
         assert!(!c.resumo.lacunas.is_empty());
@@ -1377,8 +1705,14 @@ mod testes {
     #[test]
     fn salario_tem_duas_datas_diferentes() {
         let s = servico();
-        let c = s.controle(&periodo_atual(), Filtro::Todos, None, hoje()).expect("controle");
-        let sal = c.linhas.iter().find(|o| o.id.recorrente == "rec_salario").expect("salário");
+        let c = s
+            .controle(&periodo_atual(), Filtro::Todos, None, hoje())
+            .expect("controle");
+        let sal = c
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_salario")
+            .expect("salário");
         assert_ne!(sal.vencimento, sal.vencimento_original);
         assert!(sal.vencimento < sal.vencimento_original);
     }
@@ -1386,8 +1720,14 @@ mod testes {
     #[test]
     fn atrasadas_de_antes_trazem_o_iptu() {
         let s = servico();
-        let c = s.controle(&periodo_atual(), Filtro::Todos, None, hoje()).expect("controle");
-        assert!(c.atrasadas_de_antes.iter().any(|o| o.id.recorrente == "rec_iptu"));
+        let c = s
+            .controle(&periodo_atual(), Filtro::Todos, None, hoje())
+            .expect("controle");
+        assert!(
+            c.atrasadas_de_antes
+                .iter()
+                .any(|o| o.id.recorrente == "rec_iptu")
+        );
         assert!(c.resumo.em_atraso > Centavos::ZERO);
     }
 
@@ -1395,12 +1735,26 @@ mod testes {
     fn janeiro_de_2050_nasce_da_regra_sem_herdar_pago() {
         let s = servico();
         let p = Periodo::MesCivil(Competencia { ano: 2050, mes: 1 });
-        let c = s.controle(&p, Filtro::Todos, None, hoje()).expect("controle");
+        let c = s
+            .controle(&p, Filtro::Todos, None, hoje())
+            .expect("controle");
         assert!(!c.linhas.is_empty());
-        assert!(c.linhas.iter().all(|o| o.pago_informado.is_none() && o.conciliado.is_none()));
-        assert!(c.linhas.iter().all(|o| o.estado != EstadoDaOcorrencia::EmAtraso));
+        assert!(
+            c.linhas
+                .iter()
+                .all(|o| o.pago_informado.is_none() && o.conciliado.is_none())
+        );
+        assert!(
+            c.linhas
+                .iter()
+                .all(|o| o.estado != EstadoDaOcorrencia::EmAtraso)
+        );
         // O financiamento tem 48 parcelas e já acabou em 2050.
-        assert!(!c.linhas.iter().any(|o| o.id.recorrente == "rec_financiamento"));
+        assert!(
+            !c.linhas
+                .iter()
+                .any(|o| o.id.recorrente == "rec_financiamento")
+        );
     }
 
     #[test]
@@ -1408,10 +1762,23 @@ mod testes {
         let s = servico();
         let h = Competencia::de_data(hoje());
         let futuro = Periodo::MesCivil(h.seguinte());
-        let todos = s.controle(&futuro, Filtro::Todos, None, hoje()).expect("controle");
-        assert!(!todos.linhas.iter().any(|o| o.id.recorrente == "rec_streaming"));
-        let pausados = s.controle(&futuro, Filtro::PausadosECancelados, None, hoje()).expect("controle");
-        let o = pausados.linhas.iter().find(|o| o.id.recorrente == "rec_streaming").expect("pausada");
+        let todos = s
+            .controle(&futuro, Filtro::Todos, None, hoje())
+            .expect("controle");
+        assert!(
+            !todos
+                .linhas
+                .iter()
+                .any(|o| o.id.recorrente == "rec_streaming")
+        );
+        let pausados = s
+            .controle(&futuro, Filtro::PausadosECancelados, None, hoje())
+            .expect("controle");
+        let o = pausados
+            .linhas
+            .iter()
+            .find(|o| o.id.recorrente == "rec_streaming")
+            .expect("pausada");
         assert_eq!(o.estado, EstadoDaOcorrencia::SuprimidaPorPausa);
     }
 
@@ -1419,36 +1786,67 @@ mod testes {
     fn editar_so_este_mes_e_daqui_em_diante() {
         let mut s = servico();
         let h = Competencia::de_data(hoje());
-        let base = s.recorrente("rec_internet").unwrap().unwrap().versao_do_registro;
+        let base = s
+            .recorrente("rec_internet")
+            .unwrap()
+            .unwrap()
+            .versao_do_registro;
         let alt = Alteracao::Editar {
             recorrente: "rec_internet".into(),
             escopo: Escopo::DaquiEmDiante(h.somar_meses(2)),
-            mudanca: sbf_planejamento::MudancaDeVersao { valor: Some(Some(Centavos(15_000))), ..Default::default() },
+            mudanca: sbf_planejamento::MudancaDeVersao {
+                valor: Some(Some(Centavos(15_000))),
+                ..Default::default()
+            },
             versao_base: base,
         };
         let sim = s.simular(&alt, hoje()).expect("simula");
         assert!(sim.meses_afetados.contains(&h.somar_meses(2)));
         assert!(!sim.meses_afetados.contains(&h.seguinte()));
         s.aplicar(alt, Autor::Usuario).expect("aplica");
-        let antes = s.ocorrencia_de("rec_internet", h.seguinte(), hoje()).unwrap();
-        let depois = s.ocorrencia_de("rec_internet", h.somar_meses(2), hoje()).unwrap();
+        let antes = s
+            .ocorrencia_de("rec_internet", h.seguinte(), hoje())
+            .unwrap();
+        let depois = s
+            .ocorrencia_de("rec_internet", h.somar_meses(2), hoje())
+            .unwrap();
         assert_eq!(antes.previsto, Some(Centavos(11_990)));
         assert_eq!(depois.previsto, Some(Centavos(15_000)));
         // Só este mês: não cria versão.
-        let base = s.recorrente("rec_internet").unwrap().unwrap().versao_do_registro;
+        let base = s
+            .recorrente("rec_internet")
+            .unwrap()
+            .unwrap()
+            .versao_do_registro;
         s.aplicar(
             Alteracao::Editar {
                 recorrente: "rec_internet".into(),
                 escopo: Escopo::SoEsteMes(h.somar_meses(5)),
-                mudanca: sbf_planejamento::MudancaDeVersao { valor: Some(Some(Centavos(1))), ..Default::default() },
+                mudanca: sbf_planejamento::MudancaDeVersao {
+                    valor: Some(Some(Centavos(1))),
+                    ..Default::default()
+                },
                 versao_base: base,
             },
             Autor::Usuario,
         )
         .expect("aplica");
-        assert_eq!(s.recorrente("rec_internet").unwrap().unwrap().versoes.len(), 2);
-        assert_eq!(s.ocorrencia_de("rec_internet", h.somar_meses(5), hoje()).unwrap().previsto, Some(Centavos(1)));
-        assert_eq!(s.ocorrencia_de("rec_internet", h.somar_meses(6), hoje()).unwrap().previsto, Some(Centavos(15_000)));
+        assert_eq!(
+            s.recorrente("rec_internet").unwrap().unwrap().versoes.len(),
+            2
+        );
+        assert_eq!(
+            s.ocorrencia_de("rec_internet", h.somar_meses(5), hoje())
+                .unwrap()
+                .previsto,
+            Some(Centavos(1))
+        );
+        assert_eq!(
+            s.ocorrencia_de("rec_internet", h.somar_meses(6), hoje())
+                .unwrap()
+                .previsto,
+            Some(Centavos(15_000))
+        );
     }
 
     #[test]
@@ -1466,24 +1864,59 @@ mod testes {
             Autor::Usuario,
         );
         assert!(matches!(r, Err(ErroDoPlanejamento::VersaoVelha { .. })));
-        assert!(s.recorrente("rec_internet").unwrap().unwrap().pausas.is_empty());
+        assert!(
+            s.recorrente("rec_internet")
+                .unwrap()
+                .unwrap()
+                .pausas
+                .is_empty()
+        );
     }
 
     #[test]
     fn exclusao_e_logica_e_restaura() {
         let mut s = servico();
-        let base = s.recorrente("rec_farmacia").unwrap().unwrap().versao_do_registro;
+        let base = s
+            .recorrente("rec_farmacia")
+            .unwrap()
+            .unwrap()
+            .versao_do_registro;
         s.aplicar(
-            Alteracao::Excluir { recorrente: "rec_farmacia".into(), motivo: "duplicado".into(), versao_base: base },
+            Alteracao::Excluir {
+                recorrente: "rec_farmacia".into(),
+                motivo: "duplicado".into(),
+                versao_base: base,
+            },
             Autor::Usuario,
         )
         .expect("exclui");
-        assert!(s.recorrentes(false).unwrap().iter().all(|r| r.id != "rec_farmacia"));
-        let r = s.recorrentes(true).unwrap().into_iter().find(|r| r.id == "rec_farmacia").unwrap();
+        assert!(
+            s.recorrentes(false)
+                .unwrap()
+                .iter()
+                .all(|r| r.id != "rec_farmacia")
+        );
+        let r = s
+            .recorrentes(true)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == "rec_farmacia")
+            .unwrap();
         assert!(r.excluido.is_some());
-        s.aplicar(Alteracao::Restaurar { recorrente: "rec_farmacia".into(), versao_base: r.versao_do_registro }, Autor::Usuario)
-            .expect("restaura");
-        assert!(s.recorrentes(false).unwrap().iter().any(|r| r.id == "rec_farmacia"));
+        s.aplicar(
+            Alteracao::Restaurar {
+                recorrente: "rec_farmacia".into(),
+                versao_base: r.versao_do_registro,
+            },
+            Autor::Usuario,
+        )
+        .expect("restaura");
+        assert!(
+            s.recorrentes(false)
+                .unwrap()
+                .iter()
+                .any(|r| r.id == "rec_farmacia")
+        );
         assert_eq!(s.historico(Some("rec_farmacia"), 10).unwrap().len(), 2);
     }
 
@@ -1509,7 +1942,9 @@ mod testes {
     fn calendario_tem_360_meses_sem_faltar() {
         let s = servico();
         let h = Competencia::de_data(hoje());
-        let v = s.calendario(h, HORIZONTE_MESES, hoje()).expect("calendário");
+        let v = s
+            .calendario(h, HORIZONTE_MESES, hoje())
+            .expect("calendário");
         assert_eq!(v.len(), 360);
         for (i, t) in v.iter().enumerate() {
             assert_eq!(t.competencia, h.somar_meses(i as i32));
@@ -1520,16 +1955,26 @@ mod testes {
     #[test]
     fn saldo_antigo_deixa_o_livre_como_estimativa_com_lacuna() {
         let s = servico();
-        let c = s.controle(&periodo_atual(), Filtro::Todos, None, hoje()).expect("controle");
+        let c = s
+            .controle(&periodo_atual(), Filtro::Todos, None, hoje())
+            .expect("controle");
         assert!(c.resumo.lacunas.iter().any(|l| l.contains("desatualizado")));
     }
 
     #[test]
     fn busca_e_filtros() {
         let s = servico();
-        let c = s.controle(&periodo_atual(), Filtro::Todos, Some("energia"), hoje()).unwrap();
-        assert!(c.linhas.iter().all(|o| o.nome.to_lowercase().contains("energia")));
-        let sv = s.controle(&periodo_atual(), Filtro::SemValor, None, hoje()).unwrap();
+        let c = s
+            .controle(&periodo_atual(), Filtro::Todos, Some("energia"), hoje())
+            .unwrap();
+        assert!(
+            c.linhas
+                .iter()
+                .all(|o| o.nome.to_lowercase().contains("energia"))
+        );
+        let sv = s
+            .controle(&periodo_atual(), Filtro::SemValor, None, hoje())
+            .unwrap();
         assert!(sv.linhas.iter().all(|o| o.previsto.is_none()) && !sv.linhas.is_empty());
     }
 }
