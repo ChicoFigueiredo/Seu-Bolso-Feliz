@@ -56,8 +56,56 @@ impl Planejamento for Falso {
         Ok(self.grupos.clone())
     }
 
-    fn proximas(&self, _: &str, _: Competencia, _: u16, _: Data) -> Resultado<Vec<Ocorrencia>> {
-        nao_suportado()
+    /// Só a ocorrência de `desde`, com o estado `Adiada` se há exceção `Adiar` nela.
+    fn proximas(
+        &self,
+        recorrente: &str,
+        desde: Competencia,
+        _: u16,
+        _: Data,
+    ) -> Resultado<Vec<Ocorrencia>> {
+        let r = self
+            .recorrentes
+            .iter()
+            .find(|r| r.id == recorrente)
+            .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(recorrente.to_owned()))?;
+        let id = IdOcorrencia {
+            recorrente: r.id.clone(),
+            competencia: desde,
+            parcela: None,
+        };
+        let adiada = self
+            .excecoes
+            .iter()
+            .any(|(o, e)| *o == id && matches!(e, Excecao::Adiar { .. }));
+        let v = &r.versoes[0];
+        Ok(vec![Ocorrencia {
+            id,
+            nome: r.nome.clone(),
+            grupo: r.grupo.clone(),
+            subgrupo: None,
+            posicao: r.posicao,
+            natureza: r.natureza,
+            vencimento: desde.dia(1),
+            vencimento_original: desde.dia(1),
+            previsto: v.valor,
+            certeza: v.certeza,
+            fonte: v.fonte,
+            pago_informado: None,
+            conciliado: None,
+            estado: if adiada {
+                EstadoDaOcorrencia::Adiada
+            } else {
+                EstadoDaOcorrencia::Prevista
+            },
+            parcela: None,
+            conta: None,
+            centro: None,
+            fornecedor: None,
+            versao: v.id.clone(),
+            prazo_desconhecido: false,
+            sugestao_de_conciliacao: false,
+        }])
     }
 
     fn calendario(&self, _: Competencia, _: u16, _: Data) -> Resultado<Vec<TotaisDoMes>> {
