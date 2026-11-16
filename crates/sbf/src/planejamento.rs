@@ -301,6 +301,45 @@ fn conciliar(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<(), 
     ))
 }
 
+/// `sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM`: define o início do
+/// acompanhamento. Antes dele, ocorrência sem pagamento informado não vira "em atraso" (a
+/// planilha importada é histórico); só o que o usuário adiou continua devido.
+fn acompanhar(args: &[String]) -> ExitCode {
+    let opcoes = match ler_opcoes(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("sbf: {e}\n{USO}");
+            return ExitCode::from(2);
+        }
+    };
+    let feito = (|| -> Result<sbf_planejamento::Data, String> {
+        let cofre = exige(&opcoes.inventario, "--inventario")?;
+        let texto = exige(&opcoes.ciclo, "--ciclo")?;
+        let competencia =
+            Competencia::de_texto(texto).ok_or_else(|| format!("competência inválida: {texto}"))?;
+        let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
+            .map_err(|e| e.to_string())?;
+        let mut plan =
+            sbf_planejamento::PlanejamentoSqlite::novo(banco, Box::new(sbf_planejamento::SemSaldos));
+        // O acompanhamento começa no primeiro dia do ciclo (corte no dia 20).
+        let corte = sbf_planejamento::DiaDeCorte::novo(20).expect("20 é um dia de corte válido");
+        let inicio = sbf_planejamento::Ciclo::do_mes(competencia.ano, competencia.mes, corte).inicio;
+        plan.definir_inicio_do_acompanhamento(inicio)
+            .map_err(|e| e.to_string())?;
+        Ok(inicio)
+    })();
+    match feito {
+        Ok(d) => {
+            println!("acompanhamento a partir de {d} (ciclo)");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("sbf: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -390,41 +429,5 @@ mod testes {
                 .expect("utf8")
                 .contains("STREAMING FICTICIO")
         );
-    }
-}
-
-/// `sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM`: define o início do
-/// acompanhamento. Antes dele, ocorrência sem pagamento informado não vira "em atraso" (a
-/// planilha importada é histórico); só o que o usuário adiou continua devido.
-fn acompanhar(args: &[String]) -> ExitCode {
-    let opcoes = match ler_opcoes(args) {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("sbf: {e}\n{USO}");
-            return ExitCode::from(2);
-        }
-    };
-    let feito = (|| -> Result<Competencia, String> {
-        let cofre = exige(&opcoes.inventario, "--inventario")?;
-        let texto = exige(&opcoes.ciclo, "--ciclo")?;
-        let competencia =
-            Competencia::de_texto(texto).ok_or_else(|| format!("competência inválida: {texto}"))?;
-        let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
-            .map_err(|e| e.to_string())?;
-        let mut plan =
-            sbf_planejamento::PlanejamentoSqlite::novo(banco, Box::new(sbf_planejamento::SemSaldos));
-        plan.definir_inicio_do_acompanhamento(competencia)
-            .map_err(|e| e.to_string())?;
-        Ok(competencia)
-    })();
-    match feito {
-        Ok(c) => {
-            println!("acompanhamento a partir de {c}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("sbf: {e}");
-            ExitCode::from(1)
-        }
     }
 }
