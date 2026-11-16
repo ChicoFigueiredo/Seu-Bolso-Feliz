@@ -17,8 +17,9 @@ pub mod ocultos;
 pub mod saldos;
 pub mod texto;
 
-#[cfg(test)]
-mod falso;
+/// Implementação em memória do trait, só para testes (deste crate e do CLI).
+#[doc(hidden)]
+pub mod falso;
 #[cfg(test)]
 mod fixtura;
 

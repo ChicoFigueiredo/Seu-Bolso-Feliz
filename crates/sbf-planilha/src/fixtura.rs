@@ -44,15 +44,71 @@ pub fn planilha_ficticia(caminho: &Path) {
         Option<f64>,
     );
     let linhas: [Linha; 9] = [
-        ("Essencial", "Aluguel Fictício", Some((2026, 11, 5)), "CX-0630", Some(1500.0), Some(1500.0)),
-        ("", "Internet Exemplo", Some((2026, 11, 10)), "Nubank", None, None), // fórmula #NAME?
-        ("Essencial Total", "", None, "", Some(1500.0), None),                // subtotal
-        ("Lar", "Luz Exemplo", Some((2026, 11, 12)), "CX-0630", Some(180.5), None),
-        ("", "Plano de Saúde Exemplo", Some((2026, 11, 15)), "Salário", Some(250.0), None),
-        ("", "Empréstimo Consignado", Some((2026, 11, 15)), "Salário", Some(400.0), None),
-        ("Parcial", "Fatura Velha", Some((2026, 3, 10)), "Nubank", Some(90.0), None), // resto antigo
-        ("", "Taxa Soma", Some((2026, 11, 20)), "Nubank", Some(0.1 + 0.2), None),
-        ("", "Sem Previsto", Some((2026, 11, 25)), "Nubank", None, None),
+        (
+            "Essencial",
+            "Aluguel Fictício",
+            Some((2026, 11, 5)),
+            "CX-0630",
+            Some(1500.0),
+            Some(1500.0),
+        ),
+        (
+            "",
+            "Internet Exemplo",
+            Some((2026, 11, 10)),
+            "Nubank",
+            None,
+            None,
+        ), // fórmula #NAME?
+        ("Essencial Total", "", None, "", Some(1500.0), None), // subtotal
+        (
+            "Lar",
+            "Luz Exemplo",
+            Some((2026, 11, 12)),
+            "CX-0630",
+            Some(180.5),
+            None,
+        ),
+        (
+            "",
+            "Plano de Saúde Exemplo",
+            Some((2026, 11, 15)),
+            "Salário",
+            Some(250.0),
+            None,
+        ),
+        (
+            "",
+            "Empréstimo Consignado",
+            Some((2026, 11, 15)),
+            "Salário",
+            Some(400.0),
+            None,
+        ),
+        (
+            "Parcial",
+            "Fatura Velha",
+            Some((2026, 3, 10)),
+            "Nubank",
+            Some(90.0),
+            None,
+        ), // resto antigo
+        (
+            "",
+            "Taxa Soma",
+            Some((2026, 11, 20)),
+            "Nubank",
+            Some(0.1 + 0.2),
+            None,
+        ),
+        (
+            "",
+            "Sem Previsto",
+            Some((2026, 11, 25)),
+            "Nubank",
+            None,
+            None,
+        ),
     ];
     for (i, (g, d, v, m, p, pago)) in linhas.iter().enumerate() {
         let r = 6 + i as u32;
@@ -64,7 +120,8 @@ pub fn planilha_ficticia(caminho: &Path) {
         }
         if let Some((a, me, di)) = v {
             let dt = ExcelDateTime::from_ymd(*a, *me, *di).expect("data");
-            ws.write_datetime_with_format(r, 6, &dt, &data).expect("celula");
+            ws.write_datetime_with_format(r, 6, &dt, &data)
+                .expect("celula");
         }
         if !m.is_empty() {
             ws.write_string(r, 7, *m).expect("celula");
@@ -77,8 +134,12 @@ pub fn planilha_ficticia(caminho: &Path) {
         }
     }
     // Fórmula com erro em cache na linha 8 (Internet Exemplo), coluna I.
-    ws.write_formula(7, 8, Formula::new("=NOMEINEXISTENTE()").set_result("#NAME?"))
-        .expect("celula");
+    ws.write_formula(
+        7,
+        8,
+        Formula::new("=NOMEINEXISTENTE()").set_result("#NAME?"),
+    )
+    .expect("celula");
     ws.write_string(7, 11, "obs da internet").expect("celula");
 
     // Painel lateral.
@@ -87,20 +148,28 @@ pub fn planilha_ficticia(caminho: &Path) {
     ws.write_string(2, 17, "Salário").expect("celula");
     ws.write_number(2, 19, 5000.0).expect("celula");
     ws.write_number(2, 20, 5000.0).expect("celula");
-    for (i, h) in ["Consig", "Saude", "INSS", "Prev", "Sal", "IR"].iter().enumerate() {
+    for (i, h) in ["Consig", "Saude", "INSS", "Prev", "Sal", "IR"]
+        .iter()
+        .enumerate()
+    {
         ws.write_string(2, 32 + i as u16, *h).expect("celula");
     }
-    ws.write_string(3, 24, "001 SALARIO BASE 2026/11 5.000,00").expect("celula");
+    ws.write_string(3, 24, "001 SALARIO BASE 2026/11 5.000,00")
+        .expect("celula");
     ws.write_string(3, 27, "Salario base").expect("celula");
     ws.write_number(3, 28, 5000.0).expect("celula");
     ws.write_number(3, 32, 0.0).expect("celula");
     ws.write_number(3, 36, 1.0).expect("celula");
-    ws.write_string(4, 24, "210 INSS 2026/11 400,00").expect("celula");
+    ws.write_string(4, 24, "210 INSS 2026/11 400,00")
+        .expect("celula");
     ws.write_number(4, 34, 1.0).expect("celula");
-    ws.write_string(15, 24, "== NÃO DEBITADO ==").expect("celula");
-    ws.write_string(16, 24, "301 PLANO SAUDE 2026/11 250,00").expect("celula");
+    ws.write_string(15, 24, "== NÃO DEBITADO ==")
+        .expect("celula");
+    ws.write_string(16, 24, "301 PLANO SAUDE 2026/11 250,00")
+        .expect("celula");
     ws.write_number(16, 32, 1.0).expect("celula");
-    ws.write_string(17, 24, "302 EMPRESTIMO CONSIGNADO 2026/11 400,00").expect("celula");
+    ws.write_string(17, 24, "302 EMPRESTIMO CONSIGNADO 2026/11 400,00")
+        .expect("celula");
     ws.write_number(17, 32, 1.0).expect("celula");
 
     // Legenda dos meios.
@@ -133,14 +202,25 @@ pub fn inventario_ficticio() -> rusqlite::Connection {
 }
 
 /// Insere uma transação. `ciclo` é derivado da data (corte no dia 20).
-pub fn registro(c: &rusqlite::Connection, ref_: &str, tipo: &str, data: &str, valor: i64, forn: &str) {
+pub fn registro(
+    c: &rusqlite::Connection,
+    ref_: &str,
+    tipo: &str,
+    data: &str,
+    valor: i64,
+    forn: &str,
+) {
     let (a, m, d): (i32, i32, i32) = (
         data[..4].parse().expect("ano"),
         data[5..7].parse().expect("mes"),
         data[8..10].parse().expect("dia"),
     );
     let total = a * 12 + m - 1 - i32::from(d < 20);
-    let ciclo = format!("{:04}-{:02}", total.div_euclid(12), total.rem_euclid(12) + 1);
+    let ciclo = format!(
+        "{:04}-{:02}",
+        total.div_euclid(12),
+        total.rem_euclid(12) + 1
+    );
     c.execute(
         "INSERT INTO registro (external_ref, tipo, data, ciclo_id, valor_centavos, fornecedor_normalizado)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

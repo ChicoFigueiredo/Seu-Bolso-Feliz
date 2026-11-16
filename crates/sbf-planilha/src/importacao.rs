@@ -164,23 +164,42 @@ pub fn previa_com_mapa(
         candidatos.push(c);
     }
     for (i, l) in aba.linhas.iter().enumerate() {
-        candidatos.push(candidato_da_linha(aba, l, i as i64 + 1, mapa, competencia, &mut faltantes));
+        candidatos.push(candidato_da_linha(
+            aba,
+            l,
+            i as i64 + 1,
+            mapa,
+            competencia,
+            &mut faltantes,
+        ));
     }
     let ignorados = aba
         .subtotais
         .iter()
-        .map(|s| Ignorado { linha: s.linha, motivo: "subtotal ou cabeçalho de grupo".to_owned() })
+        .map(|s| Ignorado {
+            linha: s.linha,
+            motivo: "subtotal ou cabeçalho de grupo".to_owned(),
+        })
         .collect();
 
     // Grupos novos, na ordem da planilha.
     let grupos_existentes = plan.grupos()?;
-    let mut base = grupos_existentes.iter().map(|g| g.posicao + 1).max().unwrap_or(0);
-    let mut vistos: HashSet<String> =
-        grupos_existentes.iter().map(|g| normalizar(&g.nome)).collect();
+    let mut base = grupos_existentes
+        .iter()
+        .map(|g| g.posicao + 1)
+        .max()
+        .unwrap_or(0);
+    let mut vistos: HashSet<String> = grupos_existentes
+        .iter()
+        .map(|g| normalizar(&g.nome))
+        .collect();
     let mut grupos_novos = Vec::new();
     for c in &candidatos {
         if vistos.insert(normalizar(&c.grupo)) {
-            grupos_novos.push(Grupo { nome: c.grupo.clone(), posicao: base });
+            grupos_novos.push(Grupo {
+                nome: c.grupo.clone(),
+                posicao: base,
+            });
             base += 1;
         }
     }
@@ -272,7 +291,11 @@ pub fn previa_com_mapa(
 }
 
 fn versao_vigente(r: &Recorrente, c: Competencia) -> Option<&Versao> {
-    r.versoes.iter().rev().find(|v| v.desde <= c).or_else(|| r.versoes.first())
+    r.versoes
+        .iter()
+        .rev()
+        .find(|v| v.desde <= c)
+        .or_else(|| r.versoes.first())
 }
 
 /// Casa pelo nome normalizado: primeiro com o mesmo grupo, depois só pelo nome. Cada
@@ -361,7 +384,10 @@ fn candidato_da_linha(
         .and_then(|i| i.natureza.as_deref())
         .and_then(natureza_de_texto)
         .unwrap_or_else(|| {
-            if l.meio.as_deref().is_some_and(|m| aba.meio_e_desconto_em_folha(m)) {
+            if l.meio
+                .as_deref()
+                .is_some_and(|m| aba.meio_e_desconto_em_folha(m))
+            {
                 Natureza::DescontoEmFolha
             } else {
                 Natureza::Saida
@@ -400,7 +426,10 @@ fn candidato_da_linha(
         (venc, _) => {
             let dia = venc.map_or(1, |d| d.dia);
             let prazo = match item.and_then(|i| i.parcelas_que_faltam) {
-                Some(total) if total > 0 => Prazo::Parcelas { total, primeira: ocorrencia },
+                Some(total) if total > 0 => Prazo::Parcelas {
+                    total,
+                    primeira: ocorrencia,
+                },
                 _ => Prazo::Desconhecido,
             };
             (Frequencia::Mensal { dia }, prazo)
@@ -411,7 +440,10 @@ fn candidato_da_linha(
     } else {
         Certeza::Estimado
     };
-    let pago = l.pago.filter(|p| p.0 > 0).map(|valor| PagoDoMes { competencia: ocorrencia, valor });
+    let pago = l.pago.filter(|p| p.0 > 0).map(|valor| PagoDoMes {
+        competencia: ocorrencia,
+        valor,
+    });
     Candidato {
         linha: l.linha,
         nome: l.descricao.clone(),
@@ -440,11 +472,7 @@ fn candidato_da_linha(
     }
 }
 
-fn excecao_de_pago(
-    recorrente: &str,
-    prazo: &Prazo,
-    pago: &PagoDoMes,
-) -> Alteracao {
+fn excecao_de_pago(recorrente: &str, prazo: &Prazo, pago: &PagoDoMes) -> Alteracao {
     let parcela = match prazo {
         Prazo::Parcelas { primeira, .. } if *primeira == pago.competencia => Some(1),
         _ => None,
@@ -455,7 +483,10 @@ fn excecao_de_pago(
             competencia: pago.competencia,
             parcela,
         },
-        excecao: Excecao::PagoInformado { valor: pago.valor, data: None::<Data> },
+        excecao: Excecao::PagoInformado {
+            valor: pago.valor,
+            data: None::<Data>,
+        },
     }
 }
 
@@ -464,7 +495,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
     let mut c = Confirmacao::default();
     for g in &previa.grupos_novos {
         plan.aplicar(
-            Alteracao::CriarGrupo { nome: g.nome.clone(), posicao: g.posicao },
+            Alteracao::CriarGrupo {
+                nome: g.nome.clone(),
+                posicao: g.posicao,
+            },
             Autor::Importacao,
         )?;
         c.grupos += 1;
@@ -479,13 +513,19 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
         )?;
         c.criados += 1;
         if let Some(p) = &n.pago {
-            plan.aplicar(excecao_de_pago(&recibo.alvo, &n.recorrente.prazo, p), Autor::Importacao)?;
+            plan.aplicar(
+                excecao_de_pago(&recibo.alvo, &n.recorrente.prazo, p),
+                Autor::Importacao,
+            )?;
             c.pagos_informados += 1;
         }
     }
     for e in &previa.existentes {
         if let (CasadoPor::Nome, Some(p)) = (e.por, &e.pago) {
-            plan.aplicar(excecao_de_pago(&e.recorrente, &Prazo::Desconhecido, p), Autor::Importacao)?;
+            plan.aplicar(
+                excecao_de_pago(&e.recorrente, &Prazo::Desconhecido, p),
+                Autor::Importacao,
+            )?;
             c.pagos_informados += 1;
         }
     }
@@ -505,7 +545,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
         )?;
         c.atualizados += 1;
         if let Some(p) = &a.pago {
-            plan.aplicar(excecao_de_pago(&a.recorrente, &Prazo::Desconhecido, p), Autor::Importacao)?;
+            plan.aplicar(
+                excecao_de_pago(&a.recorrente, &Prazo::Desconhecido, p),
+                Autor::Importacao,
+            )?;
             c.pagos_informados += 1;
         }
     }
@@ -530,7 +573,10 @@ mod testes {
     }
 
     fn por_nome<'a>(p: &'a Previa, nome: &str) -> &'a ItemNovo {
-        p.novos.iter().find(|n| n.recorrente.nome == nome).expect(nome)
+        p.novos
+            .iter()
+            .find(|n| n.recorrente.nome == nome)
+            .expect(nome)
     }
 
     // AC-03
@@ -550,12 +596,19 @@ mod testes {
         let net = por_nome(&p, "Internet Exemplo");
         assert_eq!(net.recorrente.primeira_versao.valor, None);
         assert_eq!(net.recorrente.primeira_versao.certeza, Certeza::Estimado);
-        assert!(p.faltantes.iter().any(|f| f.nome == "Internet Exemplo" && f.o_que.contains("erro de fórmula")));
+        assert!(
+            p.faltantes
+                .iter()
+                .any(|f| f.nome == "Internet Exemplo" && f.o_que.contains("erro de fórmula"))
+        );
         assert!(p.faltantes.iter().any(|f| f.nome == "Sem Previsto"));
         // Nada foi gravado.
         assert!(plan.aplicadas.is_empty());
         // Ordem da planilha vira posição.
-        assert!(por_nome(&p, "Aluguel Fictício").recorrente.posicao < por_nome(&p, "Luz Exemplo").recorrente.posicao);
+        assert!(
+            por_nome(&p, "Aluguel Fictício").recorrente.posicao
+                < por_nome(&p, "Luz Exemplo").recorrente.posicao
+        );
     }
 
     #[test]
@@ -565,22 +618,52 @@ mod testes {
         let aluguel = por_nome(&p, "Aluguel Fictício");
         assert_eq!(aluguel.recorrente.natureza, Natureza::Saida);
         assert_eq!(aluguel.recorrente.prazo, Prazo::Desconhecido);
-        assert_eq!(aluguel.recorrente.primeira_versao.frequencia, Frequencia::Mensal { dia: 5 });
-        assert_eq!(aluguel.recorrente.primeira_versao.conta.as_deref(), Some("CX-0630"));
-        assert_eq!(aluguel.recorrente.primeira_versao.certeza, Certeza::Confirmado);
+        assert_eq!(
+            aluguel.recorrente.primeira_versao.frequencia,
+            Frequencia::Mensal { dia: 5 }
+        );
+        assert_eq!(
+            aluguel.recorrente.primeira_versao.conta.as_deref(),
+            Some("CX-0630")
+        );
+        assert_eq!(
+            aluguel.recorrente.primeira_versao.certeza,
+            Certeza::Confirmado
+        );
         assert_eq!(aluguel.recorrente.primeira_versao.fonte, Fonte::Planilha);
-        assert_eq!(aluguel.pago, Some(PagoDoMes { competencia: COMP, valor: Centavos(150_000) }));
-        assert_eq!(aluguel.origem, OrigemImportada { arquivo_sha256: SHA.into(), aba: ABA.into(), linha: 7 });
+        assert_eq!(
+            aluguel.pago,
+            Some(PagoDoMes {
+                competencia: COMP,
+                valor: Centavos(150_000)
+            })
+        );
+        assert_eq!(
+            aluguel.origem,
+            OrigemImportada {
+                arquivo_sha256: SHA.into(),
+                aba: ABA.into(),
+                linha: 7
+            }
+        );
         // Resto antigo: evento único, sem recorrência.
         let velha = por_nome(&p, "Fatura Velha");
         assert_eq!(
             velha.recorrente.primeira_versao.frequencia,
-            Frequencia::Unica { data: Data::nova(2026, 3, 10).expect("data") }
+            Frequencia::Unica {
+                data: Data::nova(2026, 3, 10).expect("data")
+            }
         );
         assert_eq!(velha.recorrente.prazo, Prazo::SemFim);
-        assert!(!matches!(velha.recorrente.primeira_versao.frequencia, Frequencia::Mensal { .. }));
+        assert!(!matches!(
+            velha.recorrente.primeira_versao.frequencia,
+            Frequencia::Mensal { .. }
+        ));
         // 0,1 + 0,2 vira 30 centavos.
-        assert_eq!(por_nome(&p, "Taxa Soma").recorrente.primeira_versao.valor, Some(Centavos(30)));
+        assert_eq!(
+            por_nome(&p, "Taxa Soma").recorrente.primeira_versao.valor,
+            Some(Centavos(30))
+        );
     }
 
     // AC-06 e D3
@@ -588,12 +671,21 @@ mod testes {
     fn consignacao_e_desconto_em_folha_e_salario_entra_liquido() {
         let plan = Falso::default();
         let p = previa(&aba(), SHA, &plan, COMP).expect("previa");
-        assert_eq!(por_nome(&p, "Plano de Saúde Exemplo").recorrente.natureza, Natureza::DescontoEmFolha);
-        assert_eq!(por_nome(&p, "Empréstimo Consignado").recorrente.natureza, Natureza::DescontoEmFolha);
+        assert_eq!(
+            por_nome(&p, "Plano de Saúde Exemplo").recorrente.natureza,
+            Natureza::DescontoEmFolha
+        );
+        assert_eq!(
+            por_nome(&p, "Empréstimo Consignado").recorrente.natureza,
+            Natureza::DescontoEmFolha
+        );
         let sal = por_nome(&p, "Salário");
         assert_eq!(sal.recorrente.natureza, Natureza::Entrada);
         // 5.000,00 menos 250,00 e 400,00.
-        assert_eq!(sal.recorrente.primeira_versao.valor, Some(Centavos(435_000)));
+        assert_eq!(
+            sal.recorrente.primeira_versao.valor,
+            Some(Centavos(435_000))
+        );
         assert_eq!(sal.recorrente.primeira_versao.certeza, Certeza::Estimado);
         assert_eq!(sal.origem.linha, 3);
         // A soma das saídas de caixa não conta os descontos em folha.
@@ -619,10 +711,22 @@ mod testes {
         assert_eq!(plan.recorrentes.len(), 9);
         assert!(plan.aplicadas.iter().all(|(_, a)| *a == Autor::Importacao));
         // Os grupos foram criados antes dos recorrentes, na ordem da planilha.
-        assert_eq!(plan.grupos.iter().map(|g| g.nome.as_str()).collect::<Vec<_>>(), ["Salário", "Essencial", "Lar", "Parcial"]);
+        assert_eq!(
+            plan.grupos
+                .iter()
+                .map(|g| g.nome.as_str())
+                .collect::<Vec<_>>(),
+            ["Salário", "Essencial", "Lar", "Parcial"]
+        );
         assert!(matches!(plan.aplicadas[0].0, Alteracao::CriarGrupo { .. }));
         assert_eq!(plan.excecoes.len(), 1);
-        assert!(matches!(plan.excecoes[0].1, Excecao::PagoInformado { valor: Centavos(150_000), .. }));
+        assert!(matches!(
+            plan.excecoes[0].1,
+            Excecao::PagoInformado {
+                valor: Centavos(150_000),
+                ..
+            }
+        ));
 
         let antes = plan.aplicadas.len();
         let p2 = previa(&a, SHA, &plan, COMP).expect("previa 2");
@@ -641,9 +745,21 @@ mod testes {
         confirmar(&previa(&a, SHA, &plan, COMP).expect("p"), &mut plan).expect("c");
         // Outro arquivo (outro sha): a Luz mudou e o Aluguel foi decidido pelo usuário.
         let mut b = a.clone();
-        b.linhas.iter_mut().find(|l| l.descricao == "Luz Exemplo").expect("luz").previsto = Some(Centavos(20_000));
-        b.linhas.iter_mut().find(|l| l.descricao.starts_with("Aluguel")).expect("al").previsto = Some(Centavos(160_000));
-        let aluguel = plan.recorrentes.iter_mut().find(|r| r.nome.starts_with("Aluguel")).expect("al");
+        b.linhas
+            .iter_mut()
+            .find(|l| l.descricao == "Luz Exemplo")
+            .expect("luz")
+            .previsto = Some(Centavos(20_000));
+        b.linhas
+            .iter_mut()
+            .find(|l| l.descricao.starts_with("Aluguel"))
+            .expect("al")
+            .previsto = Some(Centavos(160_000));
+        let aluguel = plan
+            .recorrentes
+            .iter_mut()
+            .find(|r| r.nome.starts_with("Aluguel"))
+            .expect("al");
         aluguel.versoes[0].fonte = Fonte::Usuario;
 
         let p = previa(&b, "bbbb", &plan, COMP).expect("previa");
@@ -654,10 +770,18 @@ mod testes {
         assert_eq!(p.conflitos.len(), 1);
         assert_eq!(p.existentes.len(), 7);
         confirmar(&p, &mut plan).expect("c2");
-        let luz = plan.recorrentes.iter().find(|r| r.nome == "Luz Exemplo").expect("luz");
+        let luz = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome == "Luz Exemplo")
+            .expect("luz");
         assert_eq!(luz.versoes.len(), 2);
         assert_eq!(luz.versoes[1].valor, Some(Centavos(20_000)));
-        let al = plan.recorrentes.iter().find(|r| r.nome.starts_with("Aluguel")).expect("al");
+        let al = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome.starts_with("Aluguel"))
+            .expect("al");
         assert_eq!(al.versoes.len(), 1);
     }
 
@@ -672,11 +796,36 @@ mod testes {
         .expect("mapa");
         let p = previa_com_mapa(&aba(), SHA, &Falso::default(), COMP, &mapa).expect("previa");
         let luz = por_nome(&p, "Luz Exemplo");
-        assert_eq!(luz.recorrente.prazo, Prazo::Parcelas { total: 12, primeira: COMP });
-        assert_eq!(luz.recorrente.primeira_versao.centro.as_deref(), Some("Casa"));
-        assert_eq!(luz.recorrente.primeira_versao.fornecedor.as_deref(), Some("ENERGIA SA"));
-        assert!(matches!(por_nome(&p, "Taxa Soma").recorrente.natureza, Natureza::Passagem { .. }));
-        assert_eq!(por_nome(&p, "Salário").recorrente.primeira_versao.frequencia, Frequencia::Mensal { dia: 5 });
-        assert!(!p.faltantes.iter().any(|f| f.o_que.contains("dia do salário")));
+        assert_eq!(
+            luz.recorrente.prazo,
+            Prazo::Parcelas {
+                total: 12,
+                primeira: COMP
+            }
+        );
+        assert_eq!(
+            luz.recorrente.primeira_versao.centro.as_deref(),
+            Some("Casa")
+        );
+        assert_eq!(
+            luz.recorrente.primeira_versao.fornecedor.as_deref(),
+            Some("ENERGIA SA")
+        );
+        assert!(matches!(
+            por_nome(&p, "Taxa Soma").recorrente.natureza,
+            Natureza::Passagem { .. }
+        ));
+        assert_eq!(
+            por_nome(&p, "Salário")
+                .recorrente
+                .primeira_versao
+                .frequencia,
+            Frequencia::Mensal { dia: 5 }
+        );
+        assert!(
+            !p.faltantes
+                .iter()
+                .any(|f| f.o_que.contains("dia do salário"))
+        );
     }
 }

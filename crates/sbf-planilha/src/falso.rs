@@ -1,4 +1,4 @@
-//! Implementação falsa e mínima do trait `Planejamento`, só para os testes deste crate.
+//! Implementação falsa e mínima do trait `Planejamento`, só para testes. Não use fora deles.
 
 use std::collections::HashMap;
 
@@ -17,11 +17,19 @@ pub struct Falso {
 }
 
 fn nao_suportado<T>() -> Resultado<T> {
-    Err(ErroDoPlanejamento::Invalida("o falso não faz isso".to_owned()))
+    Err(ErroDoPlanejamento::Invalida(
+        "o falso não faz isso".to_owned(),
+    ))
 }
 
 impl Planejamento for Falso {
-    fn controle(&self, periodo: &Periodo, _: Filtro, _: Option<&str>, _: Data) -> Resultado<Controle> {
+    fn controle(
+        &self,
+        periodo: &Periodo,
+        _: Filtro,
+        _: Option<&str>,
+        _: Data,
+    ) -> Resultado<Controle> {
         Ok(Controle {
             periodo: *periodo,
             grupos: self.grupos.clone(),
@@ -65,7 +73,10 @@ impl Planejamento for Falso {
         let mut alvo = format!("alvo{n}");
         let mut versao_nova = 1;
         match &alteracao {
-            Alteracao::CriarRecorrente { recorrente: r, origem } => {
+            Alteracao::CriarRecorrente {
+                recorrente: r,
+                origem,
+            } => {
                 if let Some(o) = origem
                     && self.origens.contains_key(o)
                 {
@@ -95,22 +106,35 @@ impl Planejamento for Falso {
                 alvo = id;
             }
             Alteracao::CriarGrupo { nome, posicao } => {
-                self.grupos.push(Grupo { nome: nome.clone(), posicao: *posicao });
+                self.grupos.push(Grupo {
+                    nome: nome.clone(),
+                    posicao: *posicao,
+                });
             }
-            Alteracao::Excecao { ocorrencia, excecao } => {
+            Alteracao::Excecao {
+                ocorrencia,
+                excecao,
+            } => {
                 self.excecoes.push((ocorrencia.clone(), excecao.clone()));
             }
             Alteracao::Conciliar { conciliacao } => {
                 self.conciliacoes.push(conciliacao.clone());
             }
-            Alteracao::Editar { recorrente, escopo: Escopo::DaquiEmDiante(c), mudanca, versao_base } => {
+            Alteracao::Editar {
+                recorrente,
+                escopo: Escopo::DaquiEmDiante(c),
+                mudanca,
+                versao_base,
+            } => {
                 let r = self
                     .recorrentes
                     .iter_mut()
                     .find(|r| &r.id == recorrente)
                     .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(recorrente.clone()))?;
                 if r.versao_do_registro != *versao_base {
-                    return Err(ErroDoPlanejamento::VersaoVelha { atual: r.versao_do_registro });
+                    return Err(ErroDoPlanejamento::VersaoVelha {
+                        atual: r.versao_do_registro,
+                    });
                 }
                 let mut v = r.versoes.last().cloned().expect("versao");
                 v.id = format!("v{n}");

@@ -42,7 +42,9 @@ impl SaldosDaPluggy {
             let texto = std::fs::read_to_string(&arquivo)
                 .map_err(|e| ErroPlanilha::Saldos(format!("não deu para ler as contas ({e})")))?;
             for linha in texto.lines().filter(|l| !l.trim().is_empty()) {
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(linha) else { continue };
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(linha) else {
+                    continue;
+                };
                 if v["type"].as_str() == Some("CREDIT") {
                     continue;
                 }
@@ -86,27 +88,46 @@ mod testes {
     #[test]
     fn ultimo_saldo_de_cada_conta_com_a_data_da_coleta() {
         let cofre = tempfile::tempdir().expect("cofre");
-        coleta(cofre.path(), "2026-11-01", &[
-            r#"{"id":"a","name":"Conta A","type":"BANK","balance":100.10}"#,
-            r#"{"id":"b","name":"Conta B","type":"BANK","balance":50}"#,
-        ]);
-        coleta(cofre.path(), "2026-11-15", &[
-            r#"{"id":"a","name":"Conta A","type":"BANK","balance":200.2}"#,
-            r#"{"id":"c","name":"Cartão","type":"CREDIT","balance":900}"#,
-            "isto nao e json",
-            r#"{"id":"d","name":"Sem saldo","type":"BANK"}"#,
-        ]);
+        coleta(
+            cofre.path(),
+            "2026-11-01",
+            &[
+                r#"{"id":"a","name":"Conta A","type":"BANK","balance":100.10}"#,
+                r#"{"id":"b","name":"Conta B","type":"BANK","balance":50}"#,
+            ],
+        );
+        coleta(
+            cofre.path(),
+            "2026-11-15",
+            &[
+                r#"{"id":"a","name":"Conta A","type":"BANK","balance":200.2}"#,
+                r#"{"id":"c","name":"Cartão","type":"CREDIT","balance":900}"#,
+                "isto nao e json",
+                r#"{"id":"d","name":"Sem saldo","type":"BANK"}"#,
+            ],
+        );
         let s = SaldosDaPluggy::ler(cofre.path()).expect("ler").saldos();
         assert_eq!(s.len(), 2);
         let a = s.iter().find(|x| x.conta == "Conta A").expect("a");
-        assert_eq!((a.valor, a.quando.as_str()), (Centavos(20_020), "2026-11-15T00:00:00Z"));
+        assert_eq!(
+            (a.valor, a.quando.as_str()),
+            (Centavos(20_020), "2026-11-15T00:00:00Z")
+        );
         let b = s.iter().find(|x| x.conta == "Conta B").expect("b");
-        assert_eq!((b.valor, b.quando.as_str()), (Centavos(5_000), "2026-11-01T00:00:00Z"));
+        assert_eq!(
+            (b.valor, b.quando.as_str()),
+            (Centavos(5_000), "2026-11-01T00:00:00Z")
+        );
     }
 
     #[test]
     fn sem_coleta_e_vazio() {
         let cofre = tempfile::tempdir().expect("cofre");
-        assert!(SaldosDaPluggy::ler(cofre.path()).expect("ler").saldos().is_empty());
+        assert!(
+            SaldosDaPluggy::ler(cofre.path())
+                .expect("ler")
+                .saldos()
+                .is_empty()
+        );
     }
 }

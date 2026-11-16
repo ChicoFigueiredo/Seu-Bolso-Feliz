@@ -43,9 +43,18 @@ impl Default for ConfigOcultos {
             ciclos: 8,
             minimo_de_ciclos: 5,
             tipos: vec!["compra".to_owned(), "debito".to_owned()],
-            genericas: ["transferencia", "transf", "pix", "ted", "doc", "saque", "deposito", "pagamento"]
-                .map(str::to_owned)
-                .to_vec(),
+            genericas: [
+                "transferencia",
+                "transf",
+                "pix",
+                "ted",
+                "doc",
+                "saque",
+                "deposito",
+                "pagamento",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
             divergencia_pct: 10,
             ate_ciclo: None,
         }
@@ -82,7 +91,11 @@ pub struct PreviaDeOcultos {
 
 impl PreviaDeOcultos {
     pub fn contagens(&self) -> String {
-        format!("novos={} divergentes={}", self.novos.len(), self.divergentes.len())
+        format!(
+            "novos={} divergentes={}",
+            self.novos.len(),
+            self.divergentes.len()
+        )
     }
 }
 
@@ -110,7 +123,10 @@ fn mediana(mut v: Vec<i64>) -> i64 {
 
 fn e_generica(fornecedor: &str, cfg: &ConfigOcultos) -> bool {
     let f = normalizar(fornecedor);
-    cfg.genericas.iter().map(|g| normalizar(g)).any(|g| f == g || f.starts_with(&format!("{g} ")))
+    cfg.genericas
+        .iter()
+        .map(|g| normalizar(g))
+        .any(|g| f == g || f.starts_with(&format!("{g} ")))
 }
 
 /// Os fornecedores recorrentes do inventário, sem olhar o planejamento.
@@ -123,15 +139,22 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
                  ORDER BY ciclo_id DESC LIMIT ?2",
             )
             .map_err(erro)?;
-        st.query_map(rusqlite::params![cfg.ate_ciclo, cfg.ciclos as i64], |r| r.get(0))
-            .map_err(erro)?
-            .collect::<Result<_, _>>()
-            .map_err(erro)?
+        st.query_map(rusqlite::params![cfg.ate_ciclo, cfg.ciclos as i64], |r| {
+            r.get(0)
+        })
+        .map_err(erro)?
+        .collect::<Result<_, _>>()
+        .map_err(erro)?
     };
     if ciclos.is_empty() || cfg.tipos.is_empty() {
         return Ok(Vec::new());
     }
-    let marcas = |n: usize, de: usize| (0..n).map(|i| format!("?{}", de + i + 1)).collect::<Vec<_>>().join(",");
+    let marcas = |n: usize, de: usize| {
+        (0..n)
+            .map(|i| format!("?{}", de + i + 1))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
     let sql = format!(
         "SELECT fornecedor_normalizado, ciclo_id, valor_centavos, data FROM registro
          WHERE valor_centavos < 0 AND fornecedor_normalizado IS NOT NULL
@@ -143,7 +166,12 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
     let parametros = cfg.tipos.iter().chain(ciclos.iter());
     let linhas = st
         .query_map(params_from_iter(parametros), |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })
         .map_err(erro)?;
 
@@ -155,7 +183,11 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
         if e_generica(&f, cfg) {
             continue;
         }
-        *totais.entry(f.clone()).or_default().entry(ciclo).or_default() += -valor;
+        *totais
+            .entry(f.clone())
+            .or_default()
+            .entry(ciclo)
+            .or_default() += -valor;
         if let Some(d) = data.get(8..10).and_then(|d| d.parse::<i64>().ok()) {
             dias.entry(f).or_default().push(d);
         }
@@ -164,7 +196,7 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
         .into_iter()
         .filter(|(_, por_ciclo)| por_ciclo.len() >= cfg.minimo_de_ciclos)
         .map(|(f, por_ciclo)| {
-            let dia = dias.remove(&f).map_or(1, |d| mediana(d)).clamp(1, 31) as u8;
+            let dia = dias.remove(&f).map_or(1, mediana).clamp(1, 31) as u8;
             Achado {
                 ciclos_presentes: por_ciclo.len(),
                 mediana: Centavos(mediana(por_ciclo.into_values().collect())),
@@ -195,14 +227,20 @@ fn casados<'a>(f: &str, existentes: &'a [Recorrente], mapa: &Mapa) -> Vec<&'a Re
         .iter()
         .filter(|r| {
             parecidos(&r.nome, f)
-                || r.versoes.iter().any(|v| v.fornecedor.as_deref().is_some_and(|x| parecidos(x, f)))
+                || r.versoes
+                    .iter()
+                    .any(|v| v.fornecedor.as_deref().is_some_and(|x| parecidos(x, f)))
                 || do_mapa.contains(&normalizar(&r.nome))
         })
         .collect()
 }
 
 fn vigente(r: &Recorrente, c: Competencia) -> Option<&Versao> {
-    r.versoes.iter().rev().find(|v| v.desde <= c).or_else(|| r.versoes.first())
+    r.versoes
+        .iter()
+        .rev()
+        .find(|v| v.desde <= c)
+        .or_else(|| r.versoes.first())
 }
 
 /// Detecta e compara com o planejamento, sem gravar.
@@ -221,7 +259,9 @@ pub fn previa_de_ocultos(
         match m.as_slice() {
             [] => novos.push(a),
             [r] if r.natureza == Natureza::Saida => {
-                let Some(v) = vigente(r, competencia.seguinte()) else { continue };
+                let Some(v) = vigente(r, competencia.seguinte()) else {
+                    continue;
+                };
                 let Some(atual) = v.valor else { continue };
                 let diferenca = (a.mediana.0 - atual.0).abs();
                 if v.fonte != sbf_planejamento::Fonte::Usuario
@@ -244,13 +284,20 @@ pub fn previa_de_ocultos(
         None
     } else {
         let grupos = plan.grupos()?;
-        let existe = grupos.iter().any(|g| normalizar(&g.nome) == normalizar(GRUPO_DOS_ACHADOS));
+        let existe = grupos
+            .iter()
+            .any(|g| normalizar(&g.nome) == normalizar(GRUPO_DOS_ACHADOS));
         (!existe).then(|| Grupo {
             nome: GRUPO_DOS_ACHADOS.to_owned(),
             posicao: grupos.iter().map(|g| g.posicao + 1).max().unwrap_or(0),
         })
     };
-    Ok(PreviaDeOcultos { competencia, grupo_novo, novos, divergentes })
+    Ok(PreviaDeOcultos {
+        competencia,
+        grupo_novo,
+        novos,
+        divergentes,
+    })
 }
 
 pub fn confirmar_ocultos(
@@ -260,7 +307,10 @@ pub fn confirmar_ocultos(
     let mut c = ConfirmacaoDeOcultos::default();
     if let Some(g) = &previa.grupo_novo {
         plan.aplicar(
-            Alteracao::CriarGrupo { nome: g.nome.clone(), posicao: g.posicao },
+            Alteracao::CriarGrupo {
+                nome: g.nome.clone(),
+                posicao: g.posicao,
+            },
             Autor::Importacao,
         )?;
     }
@@ -329,7 +379,14 @@ mod testes {
         for mes in 2..=9 {
             let mut r = |tipo: &str, dia: u8, valor: i64, forn: &str| {
                 n += 1;
-                registro(&c, &format!("pluggy:txn_{n}"), tipo, &format!("2026-{mes:02}-{dia:02}"), valor, forn);
+                registro(
+                    &c,
+                    &format!("pluggy:txn_{n}"),
+                    tipo,
+                    &format!("2026-{mes:02}-{dia:02}"),
+                    valor,
+                    forn,
+                );
             };
             r("compra", 25, -3990, "STREAMING X");
             r("compra", 22, -1000, "ACADEMIA Y");
@@ -374,9 +431,26 @@ mod testes {
 
     fn plano() -> Falso {
         let mut p = Falso::default();
-        p.aplicar(Alteracao::CriarGrupo { nome: "Essencial".into(), posicao: 0 }, Autor::Importacao).expect("g");
-        for r in [rec("Aluguel Imob", 120_000, None), rec("Luz Exemplo", 18_050, None)] {
-            p.aplicar(Alteracao::CriarRecorrente { recorrente: r, origem: None }, Autor::Importacao).expect("r");
+        p.aplicar(
+            Alteracao::CriarGrupo {
+                nome: "Essencial".into(),
+                posicao: 0,
+            },
+            Autor::Importacao,
+        )
+        .expect("g");
+        for r in [
+            rec("Aluguel Imob", 120_000, None),
+            rec("Luz Exemplo", 18_050, None),
+        ] {
+            p.aplicar(
+                Alteracao::CriarRecorrente {
+                    recorrente: r,
+                    origem: None,
+                },
+                Autor::Importacao,
+            )
+            .expect("r");
         }
         p
     }
@@ -385,7 +459,16 @@ mod testes {
     fn detecta_so_o_que_e_recorrente_e_nao_e_transferencia() {
         let a = detectar(&inventario(), &ConfigOcultos::default()).expect("detectar");
         let nomes: Vec<&str> = a.iter().map(|a| a.fornecedor.as_str()).collect();
-        assert_eq!(nomes, ["ACADEMIA Y", "ALUGUEL IMOB", "CAFE W", "LUZ ENERGIA", "STREAMING X"]);
+        assert_eq!(
+            nomes,
+            [
+                "ACADEMIA Y",
+                "ALUGUEL IMOB",
+                "CAFE W",
+                "LUZ ENERGIA",
+                "STREAMING X"
+            ]
+        );
         let cafe = a.iter().find(|a| a.fornecedor == "CAFE W").expect("cafe");
         assert_eq!(cafe.mediana, Centavos(1000));
         assert_eq!(cafe.ciclos_presentes, 8);
@@ -401,13 +484,22 @@ mod testes {
 
     #[test]
     fn cria_achados_no_fim_e_edita_divergente_a_partir_do_ciclo_seguinte() {
-        let mapa = Mapa::de_json(r#"{"itens":[{"descricao":"Luz Exemplo","fornecedor":"LUZ ENERGIA"}]}"#).expect("mapa");
+        let mapa =
+            Mapa::de_json(r#"{"itens":[{"descricao":"Luz Exemplo","fornecedor":"LUZ ENERGIA"}]}"#)
+                .expect("mapa");
         let mut plan = plano();
-        let p = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP).expect("previa");
+        let p = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP)
+            .expect("previa");
         // Streaming, academia e café são novos; o aluguel casa pelo nome e a luz pelo mapa.
         let novos: Vec<&str> = p.novos.iter().map(|a| a.fornecedor.as_str()).collect();
         assert_eq!(novos, ["ACADEMIA Y", "CAFE W", "STREAMING X"]);
-        assert_eq!(p.grupo_novo, Some(Grupo { nome: GRUPO_DOS_ACHADOS.to_owned(), posicao: 1 }));
+        assert_eq!(
+            p.grupo_novo,
+            Some(Grupo {
+                nome: GRUPO_DOS_ACHADOS.to_owned(),
+                posicao: 1
+            })
+        );
         // Aluguel: 1.200,00 contra 1.400,00 na Pluggy (16%): versão nova. Luz: 2,4%: nada.
         assert_eq!(p.divergentes.len(), 1);
         assert_eq!(p.divergentes[0].nome, "Aluguel Imob");
@@ -417,19 +509,31 @@ mod testes {
 
         let c = confirmar_ocultos(&p, &mut plan).expect("confirmar");
         assert_eq!((c.criados, c.editados), (3, 1));
-        let stream = plan.recorrentes.iter().find(|r| r.nome == "STREAMING X").expect("stream");
+        let stream = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome == "STREAMING X")
+            .expect("stream");
         let v = &stream.versoes[0];
-        assert_eq!((v.fonte, v.certeza, v.valor), (Fonte::Pluggy, Certeza::Estimado, Some(Centavos(3990))));
+        assert_eq!(
+            (v.fonte, v.certeza, v.valor),
+            (Fonte::Pluggy, Certeza::Estimado, Some(Centavos(3990)))
+        );
         assert_eq!(v.frequencia, Frequencia::Mensal { dia: 25 });
         assert_eq!(stream.grupo, GRUPO_DOS_ACHADOS);
         assert_eq!(stream.prazo, Prazo::Desconhecido);
-        let al = plan.recorrentes.iter().find(|r| r.nome == "Aluguel Imob").expect("al");
+        let al = plan
+            .recorrentes
+            .iter()
+            .find(|r| r.nome == "Aluguel Imob")
+            .expect("al");
         assert_eq!(al.versoes.len(), 2);
         assert_eq!(al.versoes[1].desde, Competencia { ano: 2026, mes: 12 });
         assert_eq!(al.versoes[1].certeza, Certeza::Estimado);
 
         // Rodar de novo não cria nem edita nada.
-        let p2 = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP).expect("previa 2");
+        let p2 = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP)
+            .expect("previa 2");
         assert!(p2.novos.is_empty() && p2.divergentes.is_empty() && p2.grupo_novo.is_none());
     }
 
@@ -437,7 +541,14 @@ mod testes {
     fn nao_mexe_no_que_o_usuario_decidiu() {
         let mut plan = plano();
         plan.recorrentes[0].versoes[0].fonte = Fonte::Usuario;
-        let p = previa_de_ocultos(&inventario(), &plan, &Mapa::vazio(), &ConfigOcultos::default(), COMP).expect("previa");
+        let p = previa_de_ocultos(
+            &inventario(),
+            &plan,
+            &Mapa::vazio(),
+            &ConfigOcultos::default(),
+            COMP,
+        )
+        .expect("previa");
         assert!(p.divergentes.is_empty());
     }
 }

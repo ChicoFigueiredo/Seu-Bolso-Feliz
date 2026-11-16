@@ -48,11 +48,14 @@ pub fn centavos_de_texto(texto: &str) -> Option<Centavos> {
     if inteiro.is_empty() && fracao.is_empty() {
         return None;
     }
-    if !inteiro.chars().all(|c| c.is_ascii_digit()) || !fracao.chars().all(|c| c.is_ascii_digit())
-    {
+    if !inteiro.chars().all(|c| c.is_ascii_digit()) || !fracao.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    let inteiro: i64 = if inteiro.is_empty() { 0 } else { inteiro.parse().ok()? };
+    let inteiro: i64 = if inteiro.is_empty() {
+        0
+    } else {
+        inteiro.parse().ok()?
+    };
     let mut digitos = fracao.chars().map(|c| i64::from(c as u8 - b'0'));
     let d1 = digitos.next().unwrap_or(0);
     let d2 = digitos.next().unwrap_or(0);
@@ -99,6 +102,9 @@ mod testes {
 
     #[test]
     fn normaliza_acento_e_espaco() {
-        assert_eq!(normalizar("  Plano  de SAÚDE – Unimed "), "plano de saude unimed");
+        assert_eq!(
+            normalizar("  Plano  de SAÚDE – Unimed "),
+            "plano de saude unimed"
+        );
     }
 }

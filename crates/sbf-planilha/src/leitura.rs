@@ -123,6 +123,33 @@ impl AbaLida {
     }
 }
 
+/// O SHA-256 do arquivo, em hexadecimal minúsculo: a identidade da importação.
+pub fn sha256_do_arquivo(arquivo: &Path) -> Resultado<String> {
+    use sha2::{Digest, Sha256};
+    let mut f = std::fs::File::open(arquivo).map_err(|e| ErroPlanilha::Abrir(e.to_string()))?;
+    let mut h = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| ErroPlanilha::Abrir(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// `AAAA.MM` (o nome da aba mensal) para a competência.
+pub fn competencia_da_aba(aba: &str) -> Option<sbf_planejamento::Competencia> {
+    let (a, m) = aba.trim().split_once('.')?;
+    if a.len() != 4 || m.len() != 2 {
+        return None;
+    }
+    sbf_planejamento::Competencia::nova(a.parse().ok()?, m.parse().ok()?)
+}
+
 /// Os nomes das abas, na ordem do arquivo.
 pub fn nomes_das_abas(arquivo: &Path) -> Resultado<Vec<String>> {
     let wb = open_workbook_auto(arquivo).map_err(|e| ErroPlanilha::Abrir(e.to_string()))?;
@@ -170,8 +197,7 @@ fn celula(faixa: &Range<Cel>, linha: u32, coluna: u32) -> Valor {
             let t = s.trim();
             if t.is_empty() {
                 Valor::Vazio
-            } else if t.starts_with('#') && (t.ends_with('!') || t.ends_with('?') || t == "#N/A")
-            {
+            } else if t.starts_with('#') && (t.ends_with('!') || t.ends_with('?') || t == "#N/A") {
                 Valor::Erro(t.to_owned())
             } else {
                 Valor::Texto(t.to_owned())
@@ -213,17 +239,15 @@ impl Leitor<'_> {
         }
     }
 
-    fn dinheiro(
-        &self,
-        linha: u32,
-        coluna: u32,
-        erros: &mut Vec<ErroDeCelula>,
-    ) -> Option<Centavos> {
+    fn dinheiro(&self, linha: u32, coluna: u32, erros: &mut Vec<ErroDeCelula>) -> Option<Centavos> {
         match self.v(linha, coluna) {
             Valor::Numero(n) => centavos_de_f64(n),
             Valor::Texto(t) => centavos_de_texto(&t),
             Valor::Erro(e) => {
-                erros.push(ErroDeCelula { coluna: letra(coluna), erro: e });
+                erros.push(ErroDeCelula {
+                    coluna: letra(coluna),
+                    erro: e,
+                });
                 None
             }
             Valor::Vazio | Valor::DataSerie(_) => None,
@@ -237,7 +261,10 @@ impl Leitor<'_> {
             Valor::Numero(n) if (20_000.0..80_000.0).contains(&n) => data_de_serie(n),
             Valor::Texto(t) => data_de_texto(&t),
             Valor::Erro(e) => {
-                erros.push(ErroDeCelula { coluna: letra(coluna), erro: e });
+                erros.push(ErroDeCelula {
+                    coluna: letra(coluna),
+                    erro: e,
+                });
                 None
             }
             _ => None,
@@ -311,13 +338,19 @@ fn ler_faixa(aba: &str, faixa: &Range<Cel>) -> AbaLida {
         });
     }
 
-    let salario = (l.texto(3, COL_LEGENDA_CODIGO).map(|t| crate::texto::normalizar(&t))
+    let salario = (l
+        .texto(3, COL_LEGENDA_CODIGO)
+        .map(|t| crate::texto::normalizar(&t))
         == Some("salario".to_owned()))
     .then(|| {
         let mut erros = Vec::new();
         let previsto = l.dinheiro(3, COL_PREVISTO_SALARIO, &mut erros);
         let pago = l.dinheiro(3, COL_PAGO_SALARIO, &mut erros);
-        Salario { previsto, pago, erros }
+        Salario {
+            previsto,
+            pago,
+            erros,
+        }
     });
 
     let cabecalhos: Vec<String> = COLS_FLAGS
@@ -346,7 +379,12 @@ fn ler_faixa(aba: &str, faixa: &Range<Cel>) -> AbaLida {
     }
 
     let legenda = (9..=13)
-        .filter_map(|n| Some((l.texto(n, COL_LEGENDA_CODIGO)?, l.texto(n, COL_LEGENDA_TEXTO)?)))
+        .filter_map(|n| {
+            Some((
+                l.texto(n, COL_LEGENDA_CODIGO)?,
+                l.texto(n, COL_LEGENDA_TEXTO)?,
+            ))
+        })
         .collect();
 
     AbaLida {
@@ -421,9 +459,17 @@ mod testes {
         let internet = &a.linhas[1];
         assert_eq!(internet.grupo, "Essencial");
         assert_eq!(internet.linha, 8);
-        let luz = a.linhas.iter().find(|l| l.descricao == "Luz Exemplo").expect("luz");
+        let luz = a
+            .linhas
+            .iter()
+            .find(|l| l.descricao == "Luz Exemplo")
+            .expect("luz");
         assert_eq!(luz.grupo, "Lar");
-        let plano = a.linhas.iter().find(|l| l.descricao.starts_with("Plano")).expect("plano");
+        let plano = a
+            .linhas
+            .iter()
+            .find(|l| l.descricao.starts_with("Plano"))
+            .expect("plano");
         assert_eq!(plano.grupo, "Lar");
         assert_eq!(plano.meio.as_deref(), Some("Salário"));
     }
@@ -438,7 +484,11 @@ mod testes {
         assert_eq!(internet.erros[0].erro, "#NAME?");
         assert_eq!(internet.obs.as_deref(), Some("obs da internet"));
         // Vazio sem erro também é ausente, mas sem marca.
-        let sem = a.linhas.iter().find(|l| l.descricao == "Sem Previsto").expect("linha");
+        let sem = a
+            .linhas
+            .iter()
+            .find(|l| l.descricao == "Sem Previsto")
+            .expect("linha");
         assert_eq!(sem.previsto, None);
         assert!(sem.erros.is_empty());
     }
@@ -450,9 +500,17 @@ mod testes {
         assert_eq!(aluguel.previsto, Some(Centavos(150_000)));
         assert_eq!(aluguel.pago, Some(Centavos(150_000)));
         assert_eq!(aluguel.vencimento, Data::nova(2026, 11, 5));
-        let soma = a.linhas.iter().find(|l| l.descricao == "Taxa Soma").expect("linha");
+        let soma = a
+            .linhas
+            .iter()
+            .find(|l| l.descricao == "Taxa Soma")
+            .expect("linha");
         assert_eq!(soma.previsto, Some(Centavos(30)));
-        let luz = a.linhas.iter().find(|l| l.descricao == "Luz Exemplo").expect("luz");
+        let luz = a
+            .linhas
+            .iter()
+            .find(|l| l.descricao == "Luz Exemplo")
+            .expect("luz");
         assert_eq!(luz.previsto, Some(Centavos(18_050)));
         assert_eq!(luz.pago, None);
     }
@@ -478,7 +536,27 @@ mod testes {
         assert_eq!(a.legenda.len(), 3);
         assert!(a.meio_e_desconto_em_folha("Salário"));
         assert!(!a.meio_e_desconto_em_folha("Nubank"));
-        assert_eq!(a.descricao_do_meio("salario"), Some("Desconto Contracheque"));
+        assert_eq!(
+            a.descricao_do_meio("salario"),
+            Some("Desconto Contracheque")
+        );
+    }
+
+    #[test]
+    fn sha256_e_competencia_da_aba() {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let arq = pasta.path().join("a.txt");
+        std::fs::write(&arq, b"abc").expect("escrever");
+        assert_eq!(
+            sha256_do_arquivo(&arq).expect("sha"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            competencia_da_aba("2026.11"),
+            sbf_planejamento::Competencia::nova(2026, 11)
+        );
+        assert_eq!(competencia_da_aba("Resumo"), None);
+        assert_eq!(competencia_da_aba("2026.13"), None);
     }
 
     #[test]
@@ -486,7 +564,10 @@ mod testes {
         let pasta = tempfile::tempdir().expect("pasta");
         let arq = pasta.path().join("p.xlsx");
         planilha_ficticia(&arq);
-        assert!(matches!(ler_aba(&arq, "2099.01"), Err(ErroPlanilha::AbaInexistente(_))));
+        assert!(matches!(
+            ler_aba(&arq, "2099.01"),
+            Err(ErroPlanilha::AbaInexistente(_))
+        ));
         let ruim = pasta.path().join("x.xlsx");
         std::fs::write(&ruim, b"nao e planilha").expect("escrever");
         assert!(matches!(ler_aba(&ruim, ABA), Err(ErroPlanilha::Abrir(_))));

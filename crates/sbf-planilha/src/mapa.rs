@@ -83,8 +83,12 @@ pub fn natureza_de_texto(t: &str) -> Option<Natureza> {
         "entrada" => Natureza::Entrada,
         "saida" => Natureza::Saida,
         "desconto_em_folha" => Natureza::DescontoEmFolha,
-        "passagem_entrada" => Natureza::Passagem { sentido: Sentido::Entrada },
-        "passagem_saida" => Natureza::Passagem { sentido: Sentido::Saida },
+        "passagem_entrada" => Natureza::Passagem {
+            sentido: Sentido::Entrada,
+        },
+        "passagem_saida" => Natureza::Passagem {
+            sentido: Sentido::Saida,
+        },
         _ => return None,
     })
 }
@@ -101,7 +105,10 @@ mod testes {
         .expect("mapa");
         let i = m.item("plano  de saude").expect("item");
         assert_eq!(i.parcelas_que_faltam, Some(3));
-        assert_eq!(natureza_de_texto(i.natureza.as_deref().unwrap_or("")), Some(Natureza::DescontoEmFolha));
+        assert_eq!(
+            natureza_de_texto(i.natureza.as_deref().unwrap_or("")),
+            Some(Natureza::DescontoEmFolha)
+        );
         assert!(m.item("outro").is_none());
     }
 

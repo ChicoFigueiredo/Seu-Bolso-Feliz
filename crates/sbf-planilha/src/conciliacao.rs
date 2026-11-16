@@ -32,9 +32,14 @@ impl Default for ConfigConciliacao {
             janela_dias: 5,
             tolerancia_pct: 1,
             tolerancia_minima: Centavos(100),
-            tipos_excluidos: ["transferencia_interna", "pagamento_fatura", "investimento", "estorno"]
-                .map(str::to_owned)
-                .to_vec(),
+            tipos_excluidos: [
+                "transferencia_interna",
+                "pagamento_fatura",
+                "investimento",
+                "estorno",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
         }
     }
 }
@@ -67,7 +72,13 @@ fn conta_para_conciliar(o: &Ocorrencia) -> bool {
 }
 
 fn entra(o: &Ocorrencia) -> bool {
-    matches!(o.natureza, Natureza::Entrada | Natureza::Passagem { sentido: Sentido::Entrada })
+    matches!(
+        o.natureza,
+        Natureza::Entrada
+            | Natureza::Passagem {
+                sentido: Sentido::Entrada
+            }
+    )
 }
 
 /// Calcula as sugestões, sem gravar.
@@ -84,7 +95,9 @@ pub fn sugerir(
         .linhas
         .iter()
         .chain(controle.atrasadas_de_antes.iter())
-        .filter(|o| conta_para_conciliar(o) && o.previsto.or(o.pago_informado).is_some_and(|v| v.0 > 0))
+        .filter(|o| {
+            conta_para_conciliar(o) && o.previsto.or(o.pago_informado).is_some_and(|v| v.0 > 0)
+        })
         .collect();
     let (Some(menor), Some(maior)) = (
         ocorrencias.iter().map(|o| o.vencimento).min(),
@@ -207,8 +220,16 @@ fn transacoes_entre(
         if cfg.tipos_excluidos.contains(&tipo) {
             continue;
         }
-        let Some(data) = Data::de_iso(&data) else { continue };
-        saida.push(Transacao { id, referencia, data, valor, fornecedor });
+        let Some(data) = Data::de_iso(&data) else {
+            continue;
+        };
+        saida.push(Transacao {
+            id,
+            referencia,
+            data,
+            valor,
+            fornecedor,
+        });
     }
     Ok(saida)
 }
@@ -254,34 +275,90 @@ mod testes {
         Periodo::MesCivil(Competencia { ano: 2026, mes: 11 })
     }
 
-    const HOJE: Data = Data { ano: 2026, mes: 11, dia: 16 };
+    const HOJE: Data = Data {
+        ano: 2026,
+        mes: 11,
+        dia: 16,
+    };
 
     fn cenario() -> (Connection, Falso) {
         let c = inventario_ficticio();
         // Aluguel: valor igual, 2 dias depois. Luz: 0,5% acima, na janela.
-        registro(&c, "pluggy:txn_a", "debito", "2026-11-07", -150_000, "IMOBILIARIA");
-        registro(&c, "pluggy:txn_l", "debito", "2026-11-10", -18_140, "ENERGIA");
+        registro(
+            &c,
+            "pluggy:txn_a",
+            "debito",
+            "2026-11-07",
+            -150_000,
+            "IMOBILIARIA",
+        );
+        registro(
+            &c,
+            "pluggy:txn_l",
+            "debito",
+            "2026-11-10",
+            -18_140,
+            "ENERGIA",
+        );
         // Fora da janela (6 dias), valor errado e transferência interna do mesmo valor.
-        registro(&c, "pluggy:txn_longe", "debito", "2026-11-18", -9_000, "NET");
-        registro(&c, "pluggy:txn_errado", "debito", "2026-11-15", -9_500, "NET");
-        registro(&c, "pluggy:txn_interna", "transferencia_interna", "2026-11-15", -9_000, "NET");
+        registro(
+            &c,
+            "pluggy:txn_longe",
+            "debito",
+            "2026-11-18",
+            -9_000,
+            "NET",
+        );
+        registro(
+            &c,
+            "pluggy:txn_errado",
+            "debito",
+            "2026-11-15",
+            -9_500,
+            "NET",
+        );
+        registro(
+            &c,
+            "pluggy:txn_interna",
+            "transferencia_interna",
+            "2026-11-15",
+            -9_000,
+            "NET",
+        );
         // Duas ocorrências iguais disputam uma transação só.
-        registro(&c, "pluggy:txn_s1", "compra", "2026-11-20", -3_990, "STREAMING");
-        let mut p = Falso::default();
-        p.ocorrencias = vec![
-            ocorrencia("r1", "Aluguel", 5, 150_000),
-            ocorrencia("r2", "Luz", 12, 18_050),
-            ocorrencia("r3", "Internet", 12, 9_000),
-            ocorrencia("r4", "Streaming A", 20, 3_990),
-            ocorrencia("r5", "Streaming B", 20, 3_990),
-        ];
+        registro(
+            &c,
+            "pluggy:txn_s1",
+            "compra",
+            "2026-11-20",
+            -3_990,
+            "STREAMING",
+        );
+        let p = Falso {
+            ocorrencias: vec![
+                ocorrencia("r1", "Aluguel", 5, 150_000),
+                ocorrencia("r2", "Luz", 12, 18_050),
+                ocorrencia("r3", "Internet", 12, 9_000),
+                ocorrencia("r4", "Streaming A", 20, 3_990),
+                ocorrencia("r5", "Streaming B", 20, 3_990),
+            ],
+            ..Falso::default()
+        };
         (c, p)
     }
 
     #[test]
     fn casa_por_valor_e_janela_uma_transacao_por_ocorrencia() {
         let (c, p) = cenario();
-        let s = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &ConfigConciliacao::default(), HOJE).expect("sugerir");
+        let s = sugerir(
+            &c,
+            &p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("sugerir");
         let por_rec = |r: &str| s.iter().find(|x| x.ocorrencia.recorrente == r);
         assert_eq!(por_rec("r1").expect("aluguel").movimento, "pluggy:txn_a");
         assert_eq!(por_rec("r1").expect("aluguel").valor, Centavos(150_000));
@@ -289,7 +366,10 @@ mod testes {
         // Internet: nenhuma serve (longe, errada, interna).
         assert!(por_rec("r3").is_none());
         // Duas ocorrências iguais disputam a mesma transação: ambígua, nenhuma leva.
-        assert_eq!(s.iter().filter(|x| x.movimento == "pluggy:txn_s1").count(), 0);
+        assert_eq!(
+            s.iter().filter(|x| x.movimento == "pluggy:txn_s1").count(),
+            0
+        );
         assert_eq!(s.len(), 2);
         assert!(s.iter().all(|x| !x.confirmada));
     }
@@ -298,7 +378,15 @@ mod testes {
     fn mapa_exige_o_fornecedor() {
         let (c, p) = cenario();
         let mapa = Mapa::de_json(r#"{"itens":[{"descricao":"Aluguel","fornecedor":"OUTRA IMOBILIARIA"},{"descricao":"Luz","fornecedor":"energia"}]}"#).expect("mapa");
-        let s = sugerir(&c, &p, &periodo(), &mapa, &ConfigConciliacao::default(), HOJE).expect("sugerir");
+        let s = sugerir(
+            &c,
+            &p,
+            &periodo(),
+            &mapa,
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("sugerir");
         assert!(s.iter().all(|x| x.ocorrencia.recorrente != "r1"));
         assert!(s.iter().any(|x| x.ocorrencia.recorrente == "r2"));
     }
@@ -306,7 +394,15 @@ mod testes {
     #[test]
     fn grava_como_sugestao_e_nao_repete_o_que_ja_tem_sugestao() {
         let (c, mut p) = cenario();
-        let n = conciliar(&c, &mut p, &periodo(), &Mapa::vazio(), &ConfigConciliacao::default(), HOJE).expect("conciliar");
+        let n = conciliar(
+            &c,
+            &mut p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("conciliar");
         assert_eq!(n, 2);
         assert_eq!(p.conciliacoes.len(), 2);
         assert!(p.conciliacoes.iter().all(|x| !x.confirmada));
@@ -317,7 +413,15 @@ mod testes {
                 o.sugestao_de_conciliacao = true;
             }
         }
-        let de_novo = conciliar(&c, &mut p, &periodo(), &Mapa::vazio(), &ConfigConciliacao::default(), HOJE).expect("de novo");
+        let de_novo = conciliar(
+            &c,
+            &mut p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("de novo");
         assert_eq!(de_novo, 0);
     }
 
@@ -325,11 +429,40 @@ mod testes {
     fn desconto_em_folha_e_entrada_com_sinal_certo() {
         let (c, mut p) = cenario();
         p.ocorrencias[0].natureza = Natureza::DescontoEmFolha;
-        registro(&c, "pluggy:txn_entrada", "credito", "2026-11-05", 150_000, "EMPRESA");
-        let s = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &ConfigConciliacao::default(), HOJE).expect("sugerir");
+        registro(
+            &c,
+            "pluggy:txn_entrada",
+            "credito",
+            "2026-11-05",
+            150_000,
+            "EMPRESA",
+        );
+        let s = sugerir(
+            &c,
+            &p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("sugerir");
         assert!(s.iter().all(|x| x.ocorrencia.recorrente != "r1"));
         p.ocorrencias[0].natureza = Natureza::Entrada;
-        let s = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &ConfigConciliacao::default(), HOJE).expect("sugerir");
-        assert_eq!(s.iter().find(|x| x.ocorrencia.recorrente == "r1").expect("entrada").movimento, "pluggy:txn_entrada");
+        let s = sugerir(
+            &c,
+            &p,
+            &periodo(),
+            &Mapa::vazio(),
+            &ConfigConciliacao::default(),
+            HOJE,
+        )
+        .expect("sugerir");
+        assert_eq!(
+            s.iter()
+                .find(|x| x.ocorrencia.recorrente == "r1")
+                .expect("entrada")
+                .movimento,
+            "pluggy:txn_entrada"
+        );
     }
 }
