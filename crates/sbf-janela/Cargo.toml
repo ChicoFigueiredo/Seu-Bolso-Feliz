@@ -18,6 +18,7 @@ sbf-processo = { path = "../sbf-processo" }
 sbf-previa = { path = "../sbf-previa" }
 sbf-triagem = { path = "../sbf-triagem" }
 sbf-indice = { path = "../sbf-indice" }
+sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-pontos = { path = "../sbf-pontos" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-worker = { path = "../sbf-worker" }

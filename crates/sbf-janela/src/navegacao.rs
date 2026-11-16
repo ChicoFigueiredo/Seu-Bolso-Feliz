@@ -116,6 +116,8 @@ pub enum Pedido {
     Caixa(crate::caixa_ui::PedidoDaCaixa),
     /// Triagem por IA (spec 09): rodada, aceitar e recusar sugestões, opções.
     Triagem(crate::triagem::AcaoDaTriagem),
+    /// Controle mensal (spec 11): Ações, aplicar com prévia e propostas do Claude.
+    Controle(crate::controle_ui::PedidoDoControle),
 }
 
 impl Pedido {

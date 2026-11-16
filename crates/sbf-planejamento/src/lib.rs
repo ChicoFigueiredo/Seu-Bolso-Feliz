@@ -746,6 +746,15 @@ pub trait Planejamento {
     /// O recorrente que já nasceu desta origem, se houver.
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>>;
 
+    /// A conciliação sugerida (não confirmada) de uma ocorrência, com o movimento, o valor
+    /// e a data. A janela precisa dela para o botão "Confirmar conciliação": o
+    /// [`Ocorrencia::sugestao_de_conciliacao`] só diz que ela existe. Quem não guarda
+    /// sugestões devolve `None` (o padrão).
+    fn sugestao_de_conciliacao(&self, ocorrencia: &IdOcorrencia) -> Resultado<Option<Conciliacao>> {
+        let _ = ocorrencia;
+        Ok(None)
+    }
+
     /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
     /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {

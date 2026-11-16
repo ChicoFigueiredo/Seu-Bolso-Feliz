@@ -33,6 +33,13 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         motivo: "Os rascunhos do pipeline para corrigir, aprovar ou recusar (fatia 3)",
     },
     AreaFutura {
+        id: "controle",
+        rotulo: "Controle mensal",
+        icone: "calendar_month",
+        fatia: 4,
+        motivo: "O planejamento ainda não está ligado a esta janela (spec 11).",
+    },
+    AreaFutura {
         id: "conexoes",
         rotulo: "Conexões",
         icone: "hub",
@@ -326,6 +333,7 @@ fn grupo_do_destino(destino: &Destino) -> &'static str {
         Destino::Area(a) if a.e_do_livro_caixa() => "Dinheiro",
         Destino::Area(_) => "Inventário",
         Destino::AreaFutura(id) => match *id {
+            "controle" => "Controle",
             "caixa" => "Documentos",
             "conexoes" | "alertas" | "roteiros" => "Fontes",
             "sincronizacao" => "Estação",
