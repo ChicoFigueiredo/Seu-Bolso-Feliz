@@ -13,7 +13,7 @@ use crate::banco::{
     novo_id, rfc3339,
 };
 use crate::escrita::aplicar_na;
-use crate::projecao::{projetar, projetar_competencias};
+use crate::projecao::{projetar_competencias_desde, projetar_desde};
 use crate::resumo;
 use crate::{
     Alteracao, Autor, Centavos, Competencia, Conciliacao, Controle, Data, EntradaDoHistorico,
@@ -196,13 +196,14 @@ fn fotografar(
     let ocorrencias = if rec.excluido.is_some() || rec.arquivado {
         Vec::new()
     } else {
-        projetar(
+        projetar_desde(
             &rec,
             &excecoes,
             &conciliacoes,
             de,
             de.somar_meses(i32::from(meses) - 1),
             hoje,
+            banco::ler_inicio(c)?,
         )
     };
     Ok(Foto {
@@ -411,13 +412,20 @@ impl Planejamento for PlanejamentoSqlite {
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let no_periodo = candidatas(c_inicio, c_fim, excecoes);
             linhas.extend(
-                projetar_competencias(rec, excecoes, conciliacoes, no_periodo, hoje)
-                    .into_iter()
-                    .filter(|o| inicio <= o.vencimento && o.vencimento <= fim),
+                projetar_competencias_desde(
+                    rec,
+                    excecoes,
+                    conciliacoes,
+                    no_periodo,
+                    hoje,
+                    dados.inicio,
+                )
+                .into_iter()
+                .filter(|o| inicio <= o.vencimento && o.vencimento <= fim),
             );
             let antes = candidatas(c_antes, c_inicio, excecoes);
             atrasadas.extend(
-                projetar_competencias(rec, excecoes, conciliacoes, antes, hoje)
+                projetar_competencias_desde(rec, excecoes, conciliacoes, antes, hoje, dados.inicio)
                     .into_iter()
                     .filter(|o| {
                         o.vencimento < inicio
@@ -524,7 +532,9 @@ impl Planejamento for PlanejamentoSqlite {
             let excecoes = dados.excecoes_de(&rec.id);
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let comps = candidatas(inicio, ultimo, excecoes);
-            for o in projetar_competencias(rec, excecoes, conciliacoes, comps, hoje) {
+            for o in
+                projetar_competencias_desde(rec, excecoes, conciliacoes, comps, hoje, dados.inicio)
+            {
                 if o.suprimida() || o.estado == EstadoDaOcorrencia::Dispensada {
                     continue;
                 }
@@ -783,6 +793,46 @@ impl Planejamento for PlanejamentoSqlite {
 
 /// Atalho para quem lê conciliações de um recorrente (a importação e os testes).
 impl PlanejamentoSqlite {
+    /// O início do acompanhamento: antes dele, o que não tem pagamento informado não é
+    /// "em atraso" (pago vazio é "não informado"). `None` = não definido.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn inicio_do_acompanhamento(&self) -> Resultado<Option<Competencia>> {
+        banco::ler_inicio(self.banco.conexao())
+    }
+
+    /// Define o início do acompanhamento e deixa a linha no histórico (autor `Usuario`).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn definir_inicio_do_acompanhamento(&mut self, competencia: Competencia) -> Resultado<()> {
+        let agora = rfc3339(self.agora());
+        let tx = self.banco.conexao_mut().transaction()?;
+        tx.execute(
+            "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
+             ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor",
+            params![banco::CHAVE_INICIO, competencia.to_string()],
+        )?;
+        let id = novo_id(&tx, "hist")?;
+        tx.execute(
+            "INSERT INTO historico (id, quando, autor, alvo, recorrente_id, resumo, alteracao)
+             VALUES (?1, ?2, ?3, 'configuracao', NULL, ?4, ?5)",
+            params![
+                id,
+                agora,
+                json(&Autor::Usuario)?,
+                format!("Definiu o início do acompanhamento em {competencia}."),
+                json(&serde_json::json!({
+                    "tipo": "definir_inicio_do_acompanhamento",
+                    "competencia": competencia.to_string(),
+                }))?
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// As conciliações gravadas de um recorrente (confirmadas e sugestões).
     ///
     /// # Errors

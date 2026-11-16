@@ -1718,7 +1718,7 @@ fn abrir_cria_o_arquivo_com_permissao_0600_e_os_dados_sobrevivem() {
         & 0o777;
     assert_eq!(modo, 0o600);
     let banco = Banco::abrir(&caminho).expect("reabrir");
-    assert_eq!(banco.versao_do_esquema().expect("versão"), 1);
+    assert_eq!(banco.versao_do_esquema().expect("versão"), 2);
     let s = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
     assert!(s.recorrente(&id).expect("ler").is_some());
 }
@@ -1741,4 +1741,118 @@ fn rusqlite_user_version(caminho: &std::path::Path, versao: u32) {
         .conexao()
         .pragma_update(None, "user_version", i64::from(versao))
         .expect("versão");
+}
+
+// ---------------------------------------------------------------------------------------
+// Início do acompanhamento (AC-05: pago vazio é "não informado", não "não pago")
+// ---------------------------------------------------------------------------------------
+
+fn resto_antigo() -> NovoRecorrente {
+    let mut n = novo(
+        "Resto Antigo Exemplo",
+        "Essencial",
+        9,
+        Natureza::Saida,
+        Prazo::SemFim,
+        Some(8000),
+        Certeza::Confirmado,
+        Frequencia::Unica {
+            data: dia(2024, 3, 10),
+        },
+    );
+    n.primeira_versao.desde = comp(2024, 3);
+    n
+}
+
+#[test]
+fn inicio_do_acompanhamento_e_gravado_com_historico_do_usuario() {
+    let mut s = servico();
+    assert_eq!(s.inicio_do_acompanhamento().expect("início"), None);
+    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+        .expect("definir");
+    assert_eq!(
+        s.inicio_do_acompanhamento().expect("início"),
+        Some(comp(2026, 11))
+    );
+    s.definir_inicio_do_acompanhamento(comp(2026, 10))
+        .expect("redefinir");
+    assert_eq!(
+        s.inicio_do_acompanhamento().expect("início"),
+        Some(comp(2026, 10))
+    );
+    let h = s.historico(Some("configuracao"), 10).expect("histórico");
+    assert_eq!(h.len(), 2);
+    assert_eq!(h[0].autor, Autor::Usuario);
+    assert!(h[0].alteracao.contains("2026-10"));
+}
+
+#[test]
+fn antes_do_inicio_do_acompanhamento_nada_esta_em_atraso_sem_adiar() {
+    let mut s = servico_com_saldo(vec![saldo(100_000, "2026-11-16T09:00:00Z")]);
+    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+        .expect("início");
+    // Streaming com primeira versão em 2026-10 (outubro vencido, sem pago informado).
+    let id = criar(&mut s, streaming());
+    let antigo = criar(&mut s, resto_antigo());
+
+    // Outubro sem pago: não atrasa e fica Prevista.
+    let out = ocorrencia(&s, &id, 2026, 10, Filtro::Todos).expect("outubro");
+    assert_eq!(out.estado, EstadoDaOcorrencia::Prevista);
+    // O resto de 2024 também não.
+    let velho = ocorrencia(&s, &antigo, 2024, 3, Filtro::Todos).expect("2024");
+    assert_eq!(velho.estado, EstadoDaOcorrencia::Prevista);
+
+    // Novembro vencido sem pago: atrasa normalmente, e só ele entra no resumo.
+    let nov = s
+        .controle(&mes(2026, 11), Filtro::Todos, None, HOJE)
+        .expect("novembro");
+    let nov_streaming = nov
+        .linhas
+        .iter()
+        .find(|o| o.id.recorrente == id)
+        .expect("novembro");
+    assert_eq!(nov_streaming.estado, EstadoDaOcorrencia::EmAtraso);
+    assert!(nov.atrasadas_de_antes.is_empty(), "nada de antes do início");
+    assert_eq!(nov.resumo.em_atraso, Centavos(3500));
+    assert_eq!(nov.resumo.livre_apos_compromissos, Centavos(100_000 - 3500));
+
+    // Sem início definido, o comportamento antigo continua (outubro atrasa).
+    let mut s2 = servico();
+    let id2 = criar(&mut s2, streaming());
+    assert_eq!(
+        ocorrencia(&s2, &id2, 2026, 10, Filtro::Todos)
+            .expect("outubro")
+            .estado,
+        EstadoDaOcorrencia::EmAtraso
+    );
+}
+
+#[test]
+fn antes_do_inicio_o_adiar_sem_data_continua_devida_e_aparece_no_ciclo() {
+    let mut s = servico();
+    s.definir_inicio_do_acompanhamento(comp(2026, 11))
+        .expect("início");
+    let id = criar(&mut s, streaming());
+    s.aplicar(
+        Alteracao::Excecao {
+            ocorrencia: IdOcorrencia {
+                recorrente: id.clone(),
+                competencia: comp(2026, 10),
+                parcela: None,
+            },
+            excecao: Excecao::Adiar { nova_data: None },
+        },
+        Autor::Usuario,
+    )
+    .expect("adiar");
+    let out = ocorrencia(&s, &id, 2026, 10, Filtro::Todos).expect("outubro");
+    assert_eq!(out.estado, EstadoDaOcorrencia::EmAtraso);
+    let ciclo = Ciclo::do_mes(2026, 11, DiaDeCorte::PADRAO);
+    let c = s
+        .controle(&Periodo::Ciclo(ciclo), Filtro::Todos, None, HOJE)
+        .expect("ciclo");
+    // O ciclo começa em 20/11: outubro (adiado) e novembro (dia 5, vencido) são "de antes".
+    let comps: Vec<_> = c.atrasadas_de_antes.iter().map(|o| o.id.competencia).collect();
+    assert_eq!(comps, [comp(2026, 10), comp(2026, 11)]);
+    assert_eq!(c.resumo.em_atraso, Centavos(3500 * 2));
 }

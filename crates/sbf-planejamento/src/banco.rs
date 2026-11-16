@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 1;
+pub const VERSAO_DO_ESQUEMA: u32 = 2;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -149,6 +149,13 @@ const MIGRACOES: &[&str] = &[
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     CREATE TRIGGER excecoes_sem_delete BEFORE DELETE ON excecoes
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    ",
+    // 2: configuração (início do acompanhamento).
+    "
+    CREATE TABLE configuracao (
+        chave TEXT PRIMARY KEY,
+        valor TEXT NOT NULL
+    );
     ",
 ];
 
@@ -291,6 +298,8 @@ pub(crate) struct Dados {
     pub excecoes: HashMap<String, Vec<ExcecaoGravada>>,
     pub conciliacoes: HashMap<String, Vec<Conciliacao>>,
     pub grupos: Vec<Grupo>,
+    /// O início do acompanhamento, se definido.
+    pub inicio: Option<Competencia>,
 }
 
 impl Dados {
@@ -605,7 +614,24 @@ pub(crate) fn carregar_dados(conexao: &Connection) -> Resultado<Dados> {
         excecoes: ler_excecoes(conexao, None)?,
         conciliacoes: ler_conciliacoes(conexao, None)?,
         grupos: ler_grupos(conexao)?,
+        inicio: ler_inicio(conexao)?,
     })
+}
+
+pub(crate) const CHAVE_INICIO: &str = "inicio_do_acompanhamento";
+
+/// O início do acompanhamento gravado na configuração.
+pub(crate) fn ler_inicio(conexao: &Connection) -> Resultado<Option<Competencia>> {
+    conexao
+        .query_row(
+            "SELECT valor FROM configuracao WHERE chave = ?1",
+            params![CHAVE_INICIO],
+            |l| l.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ler_competencia)
+        .transpose()
 }
 
 /// Um recorrente com as exceções e as conciliações dele.
