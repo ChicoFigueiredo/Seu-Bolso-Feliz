@@ -15,13 +15,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    AlvoDoDocumento, Autor, Cancelamento, Centavos, Competencia, Composicao, Conciliacao, Data,
-    DocumentoVinculado, ErroDoPlanejamento, ExcecaoGravada, Exclusao, Grupo, IdOcorrencia, Pausa,
-    Recorrente, Resultado, Versao,
+    AlvoDoDocumento, Assinatura, Autor, Cancelamento, Centavos, Competencia, Composicao,
+    Conciliacao, Data, DocumentoVinculado, ErroDoPlanejamento, ExcecaoGravada, Exclusao, Grupo,
+    IdOcorrencia, Pausa, Recorrente, Resultado, Versao,
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 4;
+pub const VERSAO_DO_ESQUEMA: u32 = 5;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -196,6 +196,30 @@ const MIGRACOES: &[&str] = &[
     CREATE TRIGGER composicoes_sem_delete BEFORE DELETE ON composicoes
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     CREATE TRIGGER documentos_vinculados_sem_delete BEFORE DELETE ON documentos_vinculados
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    ",
+    // 5: contas (apelido do planejamento -> conta do extrato) e assinaturas dos recorrentes.
+    // Sem DELETE: desfazer um par ou tirar uma assinatura deixa a linha com o campo vazio, e o
+    // que mudou fica no histórico.
+    "
+    CREATE TABLE contas_do_planejamento (
+        apelido          TEXT PRIMARY KEY,
+        conta_do_extrato TEXT,
+        quando           TEXT NOT NULL,
+        autor            TEXT NOT NULL
+    );
+
+    CREATE TABLE assinaturas (
+        recorrente_id TEXT PRIMARY KEY REFERENCES recorrentes(id),
+        texto         TEXT,
+        janela_dias   INTEGER,
+        quando        TEXT NOT NULL,
+        autor         TEXT NOT NULL
+    );
+
+    CREATE TRIGGER contas_do_planejamento_sem_delete BEFORE DELETE ON contas_do_planejamento
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    CREATE TRIGGER assinaturas_sem_delete BEFORE DELETE ON assinaturas
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     ",
 ];
@@ -837,6 +861,51 @@ pub(crate) fn ler_documentos(
             },
         )
         .collect()
+}
+
+// ---------------------------------------------------------------------------------------
+// Contas e assinaturas
+// ---------------------------------------------------------------------------------------
+
+/// Os pares confirmados: apelido -> conta do extrato (só os que têm conta).
+pub(crate) fn ler_pares_de_conta(c: &Connection) -> Resultado<HashMap<String, String>> {
+    let mut stmt = c.prepare(
+        "SELECT apelido, conta_do_extrato FROM contas_do_planejamento
+         WHERE conta_do_extrato IS NOT NULL",
+    )?;
+    let pares = stmt
+        .query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(pares)
+}
+
+/// As assinaturas ativas: recorrente -> assinatura.
+pub(crate) fn ler_assinaturas(c: &Connection) -> Resultado<HashMap<String, Assinatura>> {
+    let mut stmt = c.prepare(
+        "SELECT recorrente_id, texto, janela_dias FROM assinaturas
+         WHERE texto IS NOT NULL AND janela_dias IS NOT NULL",
+    )?;
+    let linhas = stmt
+        .query_map([], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                l.get::<_, String>(1)?,
+                l.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(linhas
+        .into_iter()
+        .map(|(rec, texto, janela)| {
+            (
+                rec,
+                Assinatura {
+                    texto,
+                    janela_dias: u8::try_from(janela).unwrap_or(u8::MAX),
+                },
+            )
+        })
+        .collect())
 }
 
 #[cfg(test)]

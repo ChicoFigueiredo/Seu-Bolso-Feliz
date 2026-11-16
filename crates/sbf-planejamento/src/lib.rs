@@ -25,6 +25,7 @@
 use std::fmt;
 
 mod banco;
+pub mod conciliacao;
 mod escrita;
 mod projecao;
 mod resumo;
