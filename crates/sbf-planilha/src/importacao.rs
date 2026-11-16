@@ -15,7 +15,7 @@ use sbf_planejamento::{
 
 use crate::Resultado;
 use crate::leitura::{AbaLida, LinhaDaPlanilha};
-use crate::mapa::{ItemDoMapa, Mapa, natureza_de_texto};
+use crate::mapa::{Extra, ItemDoMapa, Mapa, natureza_de_texto};
 use crate::texto::normalizar;
 
 /// Vencimento mais antigo que isto, em meses antes da competência, é resto antigo (D14).
@@ -38,6 +38,8 @@ pub struct ItemNovo {
     pub recorrente: NovoRecorrente,
     pub origem: OrigemImportada,
     pub pago: Option<PagoDoMes>,
+    /// A competência da ocorrência a adiar sem data (previsto zero com unitário e obs).
+    pub adiar: Option<Competencia>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,7 @@ pub struct ItemExistente {
     pub por: CasadoPor,
     /// Só nos casados por nome: o pago do arquivo novo.
     pub pago: Option<PagoDoMes>,
+    pub adiar: Option<Competencia>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +71,7 @@ pub struct ItemAtualizavel {
     pub valor_novo: Centavos,
     pub desde: Competencia,
     pub pago: Option<PagoDoMes>,
+    pub adiar: Option<Competencia>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +132,7 @@ pub struct Confirmacao {
     pub criados: u32,
     pub atualizados: u32,
     pub pagos_informados: u32,
+    pub adiadas: u32,
 }
 
 /// O que se sabe de uma linha (ou do salário) antes de decidir criar, casar ou atualizar.
@@ -140,6 +145,9 @@ struct Candidato {
     prazo: Prazo,
     versao: Versao,
     pago: Option<PagoDoMes>,
+    adiar: Option<Competencia>,
+    /// Origem própria (os extras do mapa); as linhas usam `(sha256, aba, linha)`.
+    origem: Option<OrigemImportada>,
 }
 
 pub fn previa(
@@ -169,6 +177,17 @@ pub fn previa_com_mapa(
             l,
             i as i64 + 1,
             mapa,
+            competencia,
+            &mut faltantes,
+        ));
+    }
+    let mut posicao = aba.linhas.len() as i64;
+    for (i, e) in mapa.extras.iter().enumerate() {
+        posicao += 1;
+        candidatos.push(candidato_do_extra(
+            i,
+            e,
+            posicao,
             competencia,
             &mut faltantes,
         ));
@@ -220,11 +239,11 @@ pub fn previa_com_mapa(
     };
 
     for c in candidatos {
-        let origem = OrigemImportada {
+        let origem = c.origem.clone().unwrap_or_else(|| OrigemImportada {
             arquivo_sha256: sha256.to_owned(),
             aba: aba.nome.clone(),
             linha: c.linha,
-        };
+        });
         if let Some(id) = plan.origem_importada(&origem)? {
             usados.insert(id.clone());
             p.existentes.push(ItemExistente {
@@ -233,6 +252,7 @@ pub fn previa_com_mapa(
                 recorrente: id,
                 por: CasadoPor::Origem,
                 pago: None,
+                adiar: None,
             });
             continue;
         }
@@ -250,6 +270,7 @@ pub fn previa_com_mapa(
                 },
                 origem,
                 pago: c.pago,
+                adiar: c.adiar,
             });
             continue;
         };
@@ -275,6 +296,7 @@ pub fn previa_com_mapa(
                         valor_novo: novo,
                         desde: competencia,
                         pago: c.pago,
+                        adiar: c.adiar,
                     });
                 }
             }
@@ -284,6 +306,7 @@ pub fn previa_com_mapa(
                 recorrente: r.id.clone(),
                 por: CasadoPor::Nome,
                 pago: c.pago,
+                adiar: c.adiar,
             }),
         }
     }
@@ -368,7 +391,58 @@ fn candidato_do_salario(
             nota: Some("líquido: salário menos as consignações".to_owned()),
         },
         pago: None,
+        adiar: None,
+        origem: None,
     })
+}
+
+fn candidato_do_extra(
+    indice: usize,
+    e: &Extra,
+    posicao: i64,
+    competencia: Competencia,
+    faltantes: &mut Vec<Faltante>,
+) -> Candidato {
+    let valor = e.valor_centavos.map(Centavos);
+    if valor.is_none() {
+        faltantes.push(Faltante {
+            linha: indice as u32,
+            nome: e.nome.clone(),
+            o_que: "extra sem valor".to_owned(),
+        });
+    }
+    Candidato {
+        linha: indice as u32,
+        nome: e.nome.clone(),
+        grupo: e.grupo.clone(),
+        posicao,
+        natureza: natureza_de_texto(&e.natureza).unwrap_or(Natureza::Saida),
+        prazo: Prazo::SemFim,
+        versao: Versao {
+            id: String::new(),
+            desde: competencia,
+            valor,
+            certeza: if e.certeza == "confirmado" {
+                Certeza::Confirmado
+            } else {
+                Certeza::Estimado
+            },
+            fonte: Fonte::Usuario,
+            frequencia: Frequencia::Mensal { dia: e.dia },
+            conta: None,
+            centro: e.centro.clone(),
+            fornecedor: e.fornecedor.clone(),
+            categoria: None,
+            nota: Some("extra do mapa".to_owned()),
+        },
+        pago: None,
+        adiar: None,
+        origem: Some(OrigemImportada {
+            arquivo_sha256: e.sha256(),
+            aba: "mapa".to_owned(),
+            linha: indice as u32,
+        }),
+    }
 }
 
 fn candidato_da_linha(
@@ -435,7 +509,23 @@ fn candidato_da_linha(
             (Frequencia::Mensal { dia }, prazo)
         }
     };
-    let certeza = if l.previsto.is_some() && l.erros.is_empty() {
+    // Previsto zero nunca vira regra de valor 0: com unitário e observação o valor é o
+    // unitário e a ocorrência fica adiada (em atraso); sem unitário, fica sem valor.
+    let (valor, adiar) = match l.previsto {
+        Some(Centavos(0)) => match (l.unitario, &l.obs) {
+            (Some(u), Some(_)) if u.0 > 0 => (Some(u), Some(ocorrencia)),
+            _ => {
+                faltantes.push(Faltante {
+                    linha: l.linha,
+                    nome: l.descricao.clone(),
+                    o_que: "previsto zero".to_owned(),
+                });
+                (None, None)
+            }
+        },
+        outro => (outro, None),
+    };
+    let certeza = if valor.is_some() && l.previsto != Some(Centavos(0)) && l.erros.is_empty() {
         Certeza::Confirmado
     } else {
         Certeza::Estimado
@@ -454,7 +544,7 @@ fn candidato_da_linha(
         versao: Versao {
             id: String::new(),
             desde: ocorrencia,
-            valor: l.previsto,
+            valor,
             certeza,
             fonte: Fonte::Planilha,
             frequencia,
@@ -469,6 +559,8 @@ fn candidato_da_linha(
             },
         },
         pago,
+        adiar,
+        origem: None,
     }
 }
 
@@ -488,6 +580,30 @@ fn excecao_de_pago(recorrente: &str, prazo: &Prazo, pago: &PagoDoMes) -> Alterac
             data: None::<Data>,
         },
     }
+}
+
+fn adiar_sem_data(
+    plan: &mut dyn Planejamento,
+    recorrente: &str,
+    prazo: &Prazo,
+    competencia: Competencia,
+) -> Resultado<()> {
+    let parcela = match prazo {
+        Prazo::Parcelas { primeira, .. } if *primeira == competencia => Some(1),
+        _ => None,
+    };
+    plan.aplicar(
+        Alteracao::Excecao {
+            ocorrencia: IdOcorrencia {
+                recorrente: recorrente.to_owned(),
+                competencia,
+                parcela,
+            },
+            excecao: Excecao::Adiar { nova_data: None },
+        },
+        Autor::Importacao,
+    )?;
+    Ok(())
 }
 
 /// Aplica a prévia: grupos, recorrentes novos, atualizações e pagos informados.
@@ -519,6 +635,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
             )?;
             c.pagos_informados += 1;
         }
+        if let Some(comp) = n.adiar {
+            adiar_sem_data(plan, &recibo.alvo, &n.recorrente.prazo, comp)?;
+            c.adiadas += 1;
+        }
     }
     for e in &previa.existentes {
         if let (CasadoPor::Nome, Some(p)) = (e.por, &e.pago) {
@@ -527,6 +647,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
                 Autor::Importacao,
             )?;
             c.pagos_informados += 1;
+        }
+        if let (CasadoPor::Nome, Some(comp)) = (e.por, e.adiar) {
+            adiar_sem_data(plan, &e.recorrente, &Prazo::Desconhecido, comp)?;
+            c.adiadas += 1;
         }
     }
     for a in &previa.atualizaveis {
@@ -544,6 +668,10 @@ pub fn confirmar(previa: &Previa, plan: &mut dyn Planejamento) -> Resultado<Conf
             Autor::Importacao,
         )?;
         c.atualizados += 1;
+        if let Some(comp) = a.adiar {
+            adiar_sem_data(plan, &a.recorrente, &Prazo::Desconhecido, comp)?;
+            c.adiadas += 1;
+        }
         if let Some(p) = &a.pago {
             plan.aplicar(
                 excecao_de_pago(&a.recorrente, &Prazo::Desconhecido, p),
@@ -824,6 +952,139 @@ mod testes {
         );
         assert!(
             !p.faltantes
+                .iter()
+                .any(|f| f.o_que.contains("dia do salário"))
+        );
+    }
+
+    fn aba_de_casos() -> AbaLida {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let arq = pasta.path().join("c.xlsx");
+        crate::fixtura::planilha_de_casos(&arq);
+        ler_aba(&arq, ABA).expect("aba")
+    }
+
+    #[test]
+    fn grupos_da_previa_ignoram_totais_em_b() {
+        let p = previa(&aba_de_casos(), SHA, &Falso::default(), COMP).expect("previa");
+        let nomes: Vec<&str> = p.grupos_novos.iter().map(|g| g.nome.as_str()).collect();
+        assert_eq!(nomes, ["Essencial", "Lar"]);
+    }
+
+    #[test]
+    fn previsto_zero_com_unitario_e_obs_vira_unitario_e_adiada() {
+        let mut plan = Falso::default();
+        let p = previa(&aba_de_casos(), SHA, &plan, COMP).expect("previa");
+        let a = por_nome(&p, "Zero Com Obs");
+        assert_eq!(a.recorrente.primeira_versao.valor, Some(Centavos(8_000)));
+        assert_eq!(a.adiar, Some(COMP));
+        // Sem unitário, e com unitário mas sem obs: sem valor, faltante, nunca zero.
+        for nome in ["Zero Sem Unitario", "Zero Sem Obs"] {
+            let n = por_nome(&p, nome);
+            assert_eq!(n.recorrente.primeira_versao.valor, None, "{nome}");
+            assert_eq!(n.adiar, None);
+            assert!(
+                p.faltantes
+                    .iter()
+                    .any(|f| f.nome == nome && f.o_que == "previsto zero")
+            );
+        }
+        assert!(
+            p.novos
+                .iter()
+                .all(|n| n.recorrente.primeira_versao.valor != Some(Centavos(0)))
+        );
+        let c = confirmar(&p, &mut plan).expect("confirmar");
+        assert_eq!(c.adiadas, 1);
+        let adiadas: Vec<_> = plan
+            .excecoes
+            .iter()
+            .filter(|(_, e)| matches!(e, Excecao::Adiar { nova_data: None }))
+            .collect();
+        assert_eq!(adiadas.len(), 1);
+        assert_eq!(adiadas[0].0.competencia, COMP);
+    }
+
+    #[test]
+    fn extras_do_mapa_viram_recorrentes_idempotentes_no_fim() {
+        let mapa = Mapa::de_json(
+            r#"{"extras":[
+              {"nome":"Bolão","grupo":"Passagem","natureza":"passagem_entrada","valor_centavos":5000,"dia":10,"certeza":"estimado"},
+              {"nome":"Renda Extra","grupo":"Entradas","natureza":"entrada","dia":3,"centro":"Casa","fornecedor":"CLIENTE","certeza":"confirmado"}]}"#,
+        )
+        .expect("mapa");
+        let mut plan = Falso::default();
+        let a = aba();
+        let p = previa_com_mapa(&a, SHA, &plan, COMP, &mapa).expect("previa");
+        let nomes: Vec<&str> = p.grupos_novos.iter().map(|g| g.nome.as_str()).collect();
+        assert_eq!(
+            nomes,
+            [
+                "Salário",
+                "Essencial",
+                "Lar",
+                "Parcial",
+                "Passagem",
+                "Entradas"
+            ]
+        );
+        let bolao = por_nome(&p, "Bolão");
+        assert!(matches!(
+            bolao.recorrente.natureza,
+            Natureza::Passagem { .. }
+        ));
+        assert_eq!(bolao.recorrente.prazo, Prazo::SemFim);
+        let v = &bolao.recorrente.primeira_versao;
+        assert_eq!(
+            (v.fonte, v.certeza, v.valor),
+            (Fonte::Usuario, Certeza::Estimado, Some(Centavos(5000)))
+        );
+        assert_eq!(v.frequencia, Frequencia::Mensal { dia: 10 });
+        assert_eq!(bolao.origem.aba, "mapa");
+        assert_eq!(bolao.origem.linha, 0);
+        assert_eq!(bolao.origem.arquivo_sha256, mapa.extras[0].sha256());
+        let renda = por_nome(&p, "Renda Extra");
+        assert_eq!(renda.recorrente.primeira_versao.valor, None);
+        assert!(p.faltantes.iter().any(|f| f.nome == "Renda Extra"));
+        confirmar(&p, &mut plan).expect("confirmar");
+        assert_eq!(plan.recorrentes.len(), 11);
+
+        // Outro arquivo (outro sha), mesmo mapa: extras não duplicam.
+        let p2 = previa_com_mapa(&a, "outro", &plan, COMP, &mapa).expect("previa 2");
+        assert!(p2.novos.is_empty(), "{}", p2.contagens());
+        assert!(
+            p2.existentes
+                .iter()
+                .any(|e| e.nome == "Bolão" && e.por == CasadoPor::Origem)
+        );
+    }
+
+    #[test]
+    fn dia_do_salario_vem_do_mapa_e_sem_mapa_e_dia_1_com_faltante() {
+        let sem = previa(&aba(), SHA, &Falso::default(), COMP).expect("previa");
+        assert_eq!(
+            por_nome(&sem, "Salário")
+                .recorrente
+                .primeira_versao
+                .frequencia,
+            Frequencia::Mensal { dia: 1 }
+        );
+        assert!(
+            sem.faltantes
+                .iter()
+                .any(|f| f.nome == "Salário" && f.o_que.contains("dia do salário"))
+        );
+        let mapa = Mapa::de_json(r#"{"itens":[{"descricao":"Salário","dia":7}]}"#).expect("mapa");
+        let com = previa_com_mapa(&aba(), SHA, &Falso::default(), COMP, &mapa).expect("previa");
+        assert_eq!(
+            por_nome(&com, "Salário")
+                .recorrente
+                .primeira_versao
+                .frequencia,
+            Frequencia::Mensal { dia: 7 }
+        );
+        assert!(
+            !com.faltantes
                 .iter()
                 .any(|f| f.o_que.contains("dia do salário"))
         );
