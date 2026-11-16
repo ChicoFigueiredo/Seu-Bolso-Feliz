@@ -658,7 +658,7 @@ impl PlanejamentoFicticio {
             AlvoDoDocumento::Ocorrencia {
                 id: IdOcorrencia {
                     recorrente: "rec_energia".into(),
-                    competencia: h,
+                    competencia: h.seguinte(),
                     parcela: None,
                 },
             },

@@ -456,11 +456,11 @@ mod testes {
 
     #[test]
     fn tabela_soma_proventos_descontos_e_liquido() {
-        let c = composicao(1_000_00, 250_00);
-        let t = tabela_de_rubricas(&c, Some(Centavos(750_00)));
-        assert_eq!(t.total_proventos, Centavos(1_000_00));
-        assert_eq!(t.total_descontos, Centavos(250_00));
-        assert_eq!(t.liquido, Centavos(750_00));
+        let c = composicao(100_000, 25_000);
+        let t = tabela_de_rubricas(&c, Some(Centavos(75_000)));
+        assert_eq!(t.total_proventos, Centavos(100_000));
+        assert_eq!(t.total_descontos, Centavos(25_000));
+        assert_eq!(t.liquido, Centavos(75_000));
         assert_eq!(t.aviso, None);
         assert_eq!(t.proventos.len(), 1);
         assert_eq!(t.descontos[0].nome, "INSS");
@@ -469,10 +469,10 @@ mod testes {
 
     #[test]
     fn divergencia_vira_aviso_com_os_dois_valores() {
-        let c = composicao(1_000_00, 250_00);
-        let a = aviso_de_divergencia(&c, Some(Centavos(700_00))).expect("aviso");
+        let c = composicao(100_000, 25_000);
+        let a = aviso_de_divergencia(&c, Some(Centavos(70_000))).expect("aviso");
         assert_eq!(a, "as rubricas somam R$ 750,00, o digitado é R$ 700,00");
-        assert_eq!(aviso_de_divergencia(&c, Some(Centavos(750_00))), None);
+        assert_eq!(aviso_de_divergencia(&c, Some(Centavos(75_000))), None);
         assert_eq!(aviso_de_divergencia(&c, None), None);
     }
 

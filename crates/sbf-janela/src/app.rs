@@ -155,10 +155,7 @@ impl AppSbf {
             .map(|p| {
                 (
                     id_do_painel(p).to_owned(),
-                    matches!(
-                        p,
-                        PainelDoDock::Detalhe | PainelDoDock::Previa | PainelDoDock::Historico
-                    ),
+                    matches!(p, PainelDoDock::Detalhe | PainelDoDock::Previa),
                 )
             })
             .collect();
@@ -824,7 +821,12 @@ impl AppCasca for AppSbf {
                     _ => 0,
                 };
                 let mut d = PainelDock::novo(id_do_painel(p), p.titulo(), pilha).icone(p.icone());
-                if matches!(p, PainelDoDock::Origens | PainelDoDock::Texto) {
+                // O Histórico de decisões abre fechado: o Detalhe do Controle mensal (tabelas
+                // de rubricas, documentos) precisa da altura, e `Ver decisões` o abre.
+                if matches!(
+                    p,
+                    PainelDoDock::Origens | PainelDoDock::Texto | PainelDoDock::Historico
+                ) {
                     d = d.escondido();
                 }
                 d

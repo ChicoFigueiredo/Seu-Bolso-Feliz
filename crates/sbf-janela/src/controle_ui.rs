@@ -458,32 +458,19 @@ impl EstadoDoControle {
     }
 
     fn garantir_lateral(&mut self, plan: &dyn Planejamento, hoje: Data) {
-        match self.lateral {
-            Some(AbaLateral::Propostas) => {
-                if self
-                    .propostas
-                    .as_ref()
-                    .is_none_or(|(g, _)| *g != self.geracao)
-                {
-                    self.propostas = Some((self.geracao, carregar_propostas(plan, hoje)));
-                }
-            }
-            Some(AbaLateral::Arquivados) => {
-                if self
-                    .arquivados
-                    .as_ref()
-                    .is_none_or(|(g, _)| *g != self.geracao)
-                {
-                    let v = plan
-                        .recorrentes(true)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|r| r.arquivado || r.excluido.is_some())
-                        .collect();
-                    self.arquivados = Some((self.geracao, v));
-                }
-            }
-            None => {}
+        if self.lateral == Some(AbaLateral::Arquivados)
+            && self
+                .arquivados
+                .as_ref()
+                .is_none_or(|(g, _)| *g != self.geracao)
+        {
+            let v = plan
+                .recorrentes(true)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.arquivado || r.excluido.is_some())
+                .collect();
+            self.arquivados = Some((self.geracao, v));
         }
         // As propostas pendentes alimentam o botão do cabeçalho, mesmo com o painel fechado.
         if self
@@ -2090,27 +2077,33 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
         aba = AbaDoDetalhe::Resumo;
     }
     let n_docs = dados.docs_da_ocorrencia.len() + dados.docs_do_compromisso.len();
-    ui.horizontal_wrapped(|ui| {
-        for a in AbaDoDetalhe::TODAS {
-            if a == AbaDoDetalhe::Rubricas && !tem_rubricas {
-                continue;
-            }
-            let rot = match a {
-                AbaDoDetalhe::Documentos if n_docs > 0 => format!("{} ({n_docs})", a.rotulo()),
-                _ => a.rotulo().to_owned(),
-            };
-            if ui.selectable_label(aba == a, rot).clicked() {
-                aba = a;
-            }
-        }
+    // Uma linha só: o painel do dock é baixo, e sete abas lado a lado quebram em quatro linhas.
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Ver").size(12.0).color(p.tinta_suave));
+        let rotulo_de = |a: AbaDoDetalhe| match a {
+            AbaDoDetalhe::Documentos if n_docs > 0 => format!("{} ({n_docs})", a.rotulo()),
+            _ => a.rotulo().to_owned(),
+        };
+        egui::ComboBox::from_id_salt("controle-aba-do-detalhe")
+            .selected_text(rotulo_de(aba))
+            .width((ui.available_width() - 6.0).max(120.0))
+            .show_ui(ui, |ui| {
+                for a in AbaDoDetalhe::TODAS {
+                    if a == AbaDoDetalhe::Rubricas && !tem_rubricas {
+                        continue;
+                    }
+                    ui.selectable_value(&mut aba, a, rotulo_de(a));
+                }
+            });
     });
     estado.aba_do_detalhe = aba;
     ui.separator();
     let mut mais = false;
     let mut efeitos: Vec<EfeitoDoDetalhe> = Vec::new();
-    ScrollArea::vertical()
+    // O painel do dock já rola na vertical; aqui só as tabelas largas rolam de lado.
+    ScrollArea::horizontal()
         .id_salt("controle-detalhe")
-        .auto_shrink([false, false])
+        .auto_shrink([false, true])
         .show(ui, |ui| match aba {
             AbaDoDetalhe::Resumo => aba_resumo(ui, &sel, dados.recorrente.as_ref()),
             AbaDoDetalhe::Rubricas => {
@@ -2198,7 +2191,8 @@ fn aba_rubricas(ui: &mut Ui, t: &TabelaDeRubricas, efeitos: &mut Vec<EfeitoDoDet
             .spacing([12.0, 4.0])
             .striped(true)
             .show(ui, |ui| {
-                for c in ["Código", "Nome", "Competência", "Prazo", "Valor"] {
+                // O valor logo depois do nome: o painel do dock é estreito.
+                for c in ["Código", "Nome", "Valor", "Competência", "Prazo"] {
                     ui.label(RichText::new(c).size(11.5).color(p.tinta_suave));
                 }
                 ui.end_row();
@@ -2218,15 +2212,13 @@ fn aba_rubricas(ui: &mut Ui, t: &TabelaDeRubricas, efeitos: &mut Vec<EfeitoDoDet
                             ui.label(&l.nome);
                         }
                     }
+                    celula_de_valor(ui, l.valor, false);
                     ui.label(RichText::new(&l.competencia).size(12.0));
                     ui.label(RichText::new(&l.prazo).size(12.0));
-                    celula_de_valor(ui, l.valor, false);
                     ui.end_row();
                 }
                 ui.label("");
                 ui.label(RichText::new(format!("Total de {}", titulo.to_lowercase())).strong());
-                ui.label("");
-                ui.label("");
                 celula_de_valor(ui, total, true);
                 ui.end_row();
             });
@@ -3461,7 +3453,13 @@ mod testes {
         assert!(texto.starts_with("as rubricas somam R$ 8.226,00, o digitado é"));
         assert_eq!(id.recorrente, "rec_salario");
         let entradas = c.cartoes.iter().find(|k| k.id == "entradas").unwrap();
-        assert!(entradas.aviso.as_deref().unwrap().contains("as rubricas somam"));
+        assert!(
+            entradas
+                .aviso
+                .as_deref()
+                .unwrap()
+                .contains("as rubricas somam")
+        );
         // Os outros cartões não ganham triângulo.
         assert!(c.cartoes.iter().filter(|k| k.aviso.is_some()).count() == 1);
     }
@@ -3475,7 +3473,9 @@ mod testes {
             .unwrap()
             .unwrap();
         // Ajusta o desconto até o líquido bater com os R$ 8.450,00 digitados.
-        let dif = c.divergencia(Some(sbf_planejamento::Centavos(845_000))).unwrap();
+        let dif = c
+            .divergencia(Some(sbf_planejamento::Centavos(845_000)))
+            .unwrap();
         c.rubricas[2].valor = sbf_planejamento::Centavos(c.rubricas[2].valor.0 + dif.0);
         c.desde = Competencia::de_data(hoje());
         c.origem = "contracheque 11/2026 (revisado)".into();
@@ -3532,7 +3532,10 @@ mod testes {
         assert_eq!(lista.len(), 1);
         assert_eq!(lista[0].tipo, sbf_planejamento::TipoDeDocumento::Boleto);
         // O mesmo documento não vincula duas vezes ao mesmo alvo.
-        assert!(s.aplicar(seletor.alteracao().unwrap(), Autor::Usuario).is_err());
+        assert!(
+            s.aplicar(seletor.alteracao().unwrap(), Autor::Usuario)
+                .is_err()
+        );
         // Não aparece no compromisso inteiro.
         let inteiro = AlvoDoDocumento::Recorrente {
             id: "rec_internet".into(),
@@ -3568,7 +3571,9 @@ mod testes {
         let visiveis = sel.visiveis();
         let n_visiveis = visiveis.len();
         assert!(
-            visiveis.iter().any(|c| c.nome == "contracheque-2026-11.pdf"),
+            visiveis
+                .iter()
+                .any(|c| c.nome == "contracheque-2026-11.pdf"),
             "{:?}",
             sel.candidatos.iter().map(|c| &c.nome).collect::<Vec<_>>()
         );
@@ -3611,7 +3616,12 @@ mod testes {
             )
         );
         // Nada foi gravado antes de criar.
-        assert!(s.recorrentes(false).unwrap().iter().all(|r| r.nome != "Presente da Ana"));
+        assert!(
+            s.recorrentes(false)
+                .unwrap()
+                .iter()
+                .all(|r| r.nome != "Presente da Ana")
+        );
         for a in d.alteracoes().unwrap() {
             s.aplicar(a, Autor::Usuario).expect("cria");
         }
