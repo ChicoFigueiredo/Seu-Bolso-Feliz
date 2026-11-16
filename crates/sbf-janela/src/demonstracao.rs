@@ -289,6 +289,12 @@ pub fn e_movimento_entre_contas(tipo: &str) -> bool {
     )
 }
 
+/// O hash fictício que a demonstração dá ao achado de nome `nome` (para ligar outros dados
+/// fictícios, como os documentos do planejamento, a achados que existem aqui).
+pub fn hash_do_nome(nome: &str) -> String {
+    hash_de(nome)
+}
+
 fn hash_de(semente: &str) -> String {
     // FNV-1a de 64 bits, duas vezes, para um "hash" fictício estável de 32 dígitos.
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -1053,6 +1059,25 @@ impl Estado {
                 )),
             });
             e.nova_origem(&h, "gmail:pessoal", &format!("Recebidos/{nome}"), 3);
+            let nome = "contracheque-2026-11.pdf";
+            let h = hash_de(nome);
+            e.achados.push(Achado {
+                hash: h.clone(),
+                nome: nome.into(),
+                estado: "documento".into(),
+                decidido_por: Some("regras@2".into()),
+                tipo_de_documento: "contracheque".into(),
+                fornecedor: Some("Órgão Exemplo".into()),
+                data: Some("2026-11-05".into()),
+                valor: Some(822_600),
+                texto: Some(
+                    "ÓRGÃO EXEMPLO\nContracheque · competência 11/2026\nLíquido R$ 8.226,00".into(),
+                ),
+                protegido: false,
+                duplicidades: BTreeSet::new(),
+                email: None,
+            });
+            e.nova_origem(&h, "drive:principal", &format!("Meu Drive/Folha/{nome}"), 2);
             let nome = "extrato-alfa-2026-10.csv";
             let h = hash_de(nome);
             e.achados.push(Achado {

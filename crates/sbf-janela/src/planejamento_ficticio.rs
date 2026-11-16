@@ -7,11 +7,12 @@
 //! motor do serviço real: não use fora da demonstração.
 
 use sbf_planejamento::{
-    Alteracao, Autor, Cancelamento, Centavos, Certeza, Ciclo, Competencia, Conciliacao, Controle,
-    Data, DiaDeCorte, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta,
-    Excecao, ExcecaoGravada, Exclusao, Filtro, Fonte, Frequencia, Grupo, HORIZONTE_MESES,
-    IdOcorrencia, Natureza, Ocorrencia, OrigemImportada, Pausa, Periodo, Planejamento, Prazo,
-    Proposta, Recibo, Recorrente, Resultado, Resumo, Saldo, Sentido, Simulacao, TotaisDoMes,
+    Alteracao, AlvoDoDocumento, Autor, Cancelamento, Centavos, Certeza, Ciclo, Competencia,
+    Composicao, Conciliacao, Controle, Data, DiaDeCorte, DocumentoVinculado, EntradaDoHistorico,
+    ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta, Excecao, ExcecaoGravada, Exclusao,
+    Filtro, Fonte, Frequencia, Grupo, HORIZONTE_MESES, IdOcorrencia, Natureza, Ocorrencia,
+    OrigemImportada, Pausa, Periodo, Planejamento, Prazo, Proposta, Recibo, Recorrente, Resultado,
+    Resumo, Rubrica, Saldo, Sentido, Simulacao, TipoDeDocumento, TipoDeRubrica, TotaisDoMes,
     Versao,
 };
 
@@ -27,6 +28,8 @@ pub struct PlanejamentoFicticio {
     conciliacoes: Vec<Conciliacao>,
     propostas: Vec<Proposta>,
     historico: Vec<EntradaDoHistorico>,
+    composicoes: Vec<Composicao>,
+    documentos: Vec<DocumentoVinculado>,
     saldos: Vec<Saldo>,
     /// Recorrentes cujo valor "disponível" antecede o crédito (feriado bancário), em dias.
     antecipa_dias: Vec<(String, i64)>,
@@ -88,6 +91,8 @@ impl PlanejamentoFicticio {
             conciliacoes: Vec::new(),
             propostas: Vec::new(),
             historico: Vec::new(),
+            composicoes: Vec::new(),
+            documentos: Vec::new(),
             saldos: Vec::new(),
             antecipa_dias: vec![("rec_salario".into(), 2)],
             contador: 0,
@@ -554,7 +559,113 @@ impl PlanejamentoFicticio {
         ];
         s.semear_pagos(hoje);
         s.semear_propostas();
+        s.semear_composicao_e_documentos(inicio, h);
         s
+    }
+
+    /// As rubricas do salário fictício (que somam diferente do digitado, para mostrar o aviso)
+    /// e alguns documentos vinculados.
+    fn semear_composicao_e_documentos(&mut self, inicio: Competencia, h: Competencia) {
+        let r = |codigo: &str,
+                 nome: &str,
+                 tipo: TipoDeRubrica,
+                 valor: i64,
+                 competencia: Option<Competencia>,
+                 prazo: Option<u32>,
+                 recorrente: Option<&str>| Rubrica {
+            codigo: Some(codigo.into()),
+            nome: nome.into(),
+            tipo,
+            valor: Centavos(valor),
+            competencia,
+            prazo,
+            recorrente: recorrente.map(Into::into),
+        };
+        use TipoDeRubrica::{Desconto, Provento};
+        self.composicoes.push(Composicao {
+            recorrente: "rec_salario".into(),
+            desde: inicio,
+            rubricas: vec![
+                r("1001", "Vencimento", Provento, 1_020_000, None, None, None),
+                r(
+                    "1005",
+                    "Adicional por tempo de serviço",
+                    Provento,
+                    115_000,
+                    None,
+                    None,
+                    None,
+                ),
+                r("2001", "INSS", Desconto, 95_162, None, None, None),
+                r(
+                    "2002",
+                    "Imposto de renda",
+                    Desconto,
+                    101_238,
+                    None,
+                    None,
+                    None,
+                ),
+                r(
+                    "2040",
+                    "Consignado do banco",
+                    Desconto,
+                    62_000,
+                    Competencia::nova(h.ano - 1, 3),
+                    Some(84),
+                    Some("rec_consignado"),
+                ),
+                r(
+                    "2050",
+                    "Previdência",
+                    Desconto,
+                    54_000,
+                    None,
+                    None,
+                    Some("rec_previdencia"),
+                ),
+            ],
+            documento: Some(crate::demonstracao::hash_do_nome(
+                "contracheque-2026-11.pdf",
+            )),
+            origem: format!("contracheque {:02}/{}", h.mes, h.ano),
+        });
+        let agora = self.agora();
+        let mut vincular =
+            |alvo: AlvoDoDocumento, nome: &str, tipo: TipoDeDocumento, data: &str| {
+                self.contador += 1;
+                self.documentos.push(DocumentoVinculado {
+                    id: format!("doc_{}", self.contador),
+                    alvo,
+                    sha256: crate::demonstracao::hash_do_nome(nome),
+                    tipo,
+                    nome: nome.into(),
+                    data: Data::de_iso(data),
+                    quando: agora.clone(),
+                    autor: Autor::Usuario,
+                    desvinculado: false,
+                });
+            };
+        vincular(
+            AlvoDoDocumento::Recorrente {
+                id: "rec_salario".into(),
+            },
+            "contracheque-2026-11.pdf",
+            TipoDeDocumento::Contracheque,
+            "2026-11-05",
+        );
+        vincular(
+            AlvoDoDocumento::Ocorrencia {
+                id: IdOcorrencia {
+                    recorrente: "rec_energia".into(),
+                    competencia: h,
+                    parcela: None,
+                },
+            },
+            "fatura-2026-11-recebida.pdf",
+            TipoDeDocumento::Fatura,
+            "2026-11-10",
+        );
     }
 
     /// O que já passou (até 70 dias) está pago, menos poucos casos que ficam em atraso.
@@ -1127,6 +1238,14 @@ impl Planejamento for PlanejamentoFicticio {
         let alvo = alvo_da(alteracao);
         let comp_inicial = comp_da(alteracao).unwrap_or(Competencia::de_data(hoje));
         depois.aplicar_interno(alteracao.clone(), Autor::Usuario)?;
+        // Um compromisso novo ainda não tem id: o da cópia é o último criado.
+        let (alvo, comp_inicial) = match alteracao {
+            Alteracao::CriarRecorrente { recorrente, .. } => (
+                depois.recorrentes.last().map(|r| r.id.clone()),
+                recorrente.primeira_versao.desde,
+            ),
+            _ => (alvo, comp_inicial),
+        };
         let Some(rec) = alvo else {
             return Ok(Simulacao {
                 meses_afetados: Vec::new(),
@@ -1284,6 +1403,28 @@ impl Planejamento for PlanejamentoFicticio {
             .excecoes
             .iter()
             .filter(|e| e.ocorrencia.recorrente == recorrente)
+            .cloned()
+            .collect())
+    }
+
+    fn composicao(
+        &self,
+        recorrente: &str,
+        competencia: Competencia,
+    ) -> Resultado<Option<Composicao>> {
+        Ok(self
+            .composicoes
+            .iter()
+            .filter(|c| c.recorrente == recorrente && c.desde <= competencia)
+            .max_by_key(|c| c.desde)
+            .cloned())
+    }
+
+    fn documentos(&self, alvo: &AlvoDoDocumento) -> Resultado<Vec<DocumentoVinculado>> {
+        Ok(self
+            .documentos
+            .iter()
+            .filter(|d| !d.desvinculado && d.alvo == *alvo)
             .cloned()
             .collect())
     }
@@ -1670,12 +1811,71 @@ impl PlanejamentoFicticio {
                 });
                 Ok(self.registrar(autor, &nome, "Criou um grupo.".into(), &alt))
             }
-            // O agente da janela implementa no fictício (rubricas e documentos).
-            Alteracao::DefinirComposicao { .. }
-            | Alteracao::VincularDocumento { .. }
-            | Alteracao::DesvincularDocumento { .. } => Err(ErroDoPlanejamento::Invalida(
-                "ainda não implementado no fictício".into(),
-            )),
+            Alteracao::DefinirComposicao {
+                composicao,
+                versao_base,
+            } => {
+                let i = self.conferir_base(&composicao.recorrente, versao_base)?;
+                let id = self.recorrentes[i].id.clone();
+                self.recorrentes[i].versao_do_registro += 1;
+                self.composicoes
+                    .retain(|c| !(c.recorrente == id && c.desde == composicao.desde));
+                self.composicoes.push(composicao);
+                Ok(self.registrar(autor, &id, "Definiu as rubricas.".into(), &alt))
+            }
+            Alteracao::VincularDocumento {
+                alvo,
+                sha256,
+                tipo_documento,
+                nome,
+                data,
+            } => {
+                let recorrente = match &alvo {
+                    AlvoDoDocumento::Recorrente { id } => id.clone(),
+                    AlvoDoDocumento::Ocorrencia { id } => id.recorrente.clone(),
+                };
+                if self.recorrente_interno(&recorrente).is_none() {
+                    return Err(ErroDoPlanejamento::NaoEncontrado(recorrente));
+                }
+                if sha256.trim().is_empty() {
+                    return Err(ErroDoPlanejamento::Invalida("documento sem sha256".into()));
+                }
+                if self
+                    .documentos
+                    .iter()
+                    .any(|d| !d.desvinculado && d.alvo == alvo && d.sha256 == sha256)
+                {
+                    return Err(ErroDoPlanejamento::Invalida(
+                        "este documento já está vinculado aqui".into(),
+                    ));
+                }
+                let id = self.proximo_id("doc");
+                self.documentos.push(DocumentoVinculado {
+                    id,
+                    alvo,
+                    sha256,
+                    tipo: tipo_documento,
+                    nome,
+                    data,
+                    quando,
+                    autor: autor.clone(),
+                    desvinculado: false,
+                });
+                Ok(self.registrar(autor, &recorrente, "Vinculou um documento.".into(), &alt))
+            }
+            Alteracao::DesvincularDocumento { id } => {
+                let d = self
+                    .documentos
+                    .iter_mut()
+                    .find(|d| d.id == id && !d.desvinculado)
+                    .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(id.clone()))?;
+                d.desvinculado = true;
+                let recorrente = match &d.alvo {
+                    AlvoDoDocumento::Recorrente { id } => id.clone(),
+                    AlvoDoDocumento::Ocorrencia { id } => id.recorrente.clone(),
+                };
+                Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
+            }
         }
     }
 
