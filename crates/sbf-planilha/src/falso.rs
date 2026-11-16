@@ -16,6 +16,10 @@ pub struct Falso {
     pub ocorrencias: Vec<Ocorrencia>,
     pub composicoes: Vec<Composicao>,
     pub documentos: Vec<DocumentoVinculado>,
+    /// As contas com o par (o que `contas` devolve).
+    pub contas: Vec<ContaDoPlanejamento>,
+    /// A assinatura por recorrente.
+    pub assinaturas: HashMap<String, Assinatura>,
 }
 
 fn nao_suportado<T>() -> Resultado<T> {
@@ -280,6 +284,14 @@ impl Planejamento for Falso {
             .filter(|d| &d.alvo == alvo && !d.desvinculado)
             .cloned()
             .collect())
+    }
+
+    fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
+        Ok(self.contas.clone())
+    }
+
+    fn assinatura(&self, recorrente: &str) -> Resultado<Option<Assinatura>> {
+        Ok(self.assinaturas.get(recorrente).cloned())
     }
 
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>> {

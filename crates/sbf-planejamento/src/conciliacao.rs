@@ -230,7 +230,7 @@ fn avaliar(
 type Par = (bool, i64, i64, usize, usize);
 
 /// Um corte a mais: a ocorrência e o movimento servem um ao outro?
-pub type FiltroExtra = dyn Fn(&Ocorrencia, &MovimentoDoExtrato) -> bool;
+pub type FiltroExtra<'a> = dyn Fn(&Ocorrencia, &MovimentoDoExtrato) -> bool + 'a;
 
 /// As sugestões do período, sem gravar. `usados` são os movimentos que outras ocorrências já
 /// têm (confirmados ou sugeridos). `filtro` é um corte a mais por ocorrência e movimento (o
@@ -241,7 +241,7 @@ pub fn sugerir(
     movimentos: &[MovimentoDoExtrato],
     usados: &HashSet<String>,
     cfg: &Config,
-    filtro: Option<&FiltroExtra>,
+    filtro: Option<&FiltroExtra<'_>>,
 ) -> Vec<Conciliacao> {
     let mut pares: Vec<Par> = Vec::new();
     for (i, alvo) in alvos.iter().enumerate().filter(|(_, a)| tem_como_casar(a)) {

@@ -195,7 +195,8 @@ pub fn inventario_ficticio() -> rusqlite::Connection {
         "CREATE TABLE registro (
            id INTEGER PRIMARY KEY, external_ref TEXT UNIQUE, tipo TEXT NOT NULL,
            data TEXT NOT NULL, ciclo_id TEXT, valor_centavos INTEGER NOT NULL,
-           descricao_original TEXT, supplier_name_raw TEXT, fornecedor_normalizado TEXT);",
+           descricao_original TEXT, supplier_name_raw TEXT, fornecedor_normalizado TEXT,
+           conta_provavel TEXT);",
     )
     .expect("esquema");
     c
@@ -225,6 +226,25 @@ pub fn registro(
         "INSERT INTO registro (external_ref, tipo, data, ciclo_id, valor_centavos, fornecedor_normalizado)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![ref_, tipo, data, ciclo, valor, forn],
+    )
+    .expect("insert");
+}
+
+/// Insere um movimento do extrato com conta e descrição (o fornecedor fica igual à descrição).
+pub fn registro_completo(
+    c: &rusqlite::Connection,
+    ref_: &str,
+    tipo: &str,
+    data: &str,
+    valor: i64,
+    conta: Option<&str>,
+    descricao: &str,
+) {
+    c.execute(
+        "INSERT INTO registro (external_ref, tipo, data, valor_centavos, conta_provavel,
+                               descricao_original, fornecedor_normalizado)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        rusqlite::params![ref_, tipo, data, valor, conta, descricao],
     )
     .expect("insert");
 }

@@ -4,6 +4,7 @@
 //! - [`importacao`]: prévia (sem gravar) e confirmação, tudo por `Planejamento::aplicar`.
 //! - [`ocultos`]: recorrentes achados no inventário (Pluggy) que a planilha não traz.
 //! - [`conciliacao`]: sugestões de conciliação com as transações do inventário.
+//! - [`movimentos`]: o extrato da Pluggy (`registro` do inventário) como fonte de movimentos.
 //! - [`saldos`]: o último saldo de cada conta, do bruto da Pluggy guardado no cofre.
 //!
 //! Regras: dinheiro só em centavos; erro de fórmula nunca vira zero; nenhum valor, nome
@@ -14,6 +15,7 @@ pub mod contracheque;
 pub mod importacao;
 pub mod leitura;
 pub mod mapa;
+pub mod movimentos;
 pub mod ocultos;
 pub mod saldos;
 pub mod texto;
