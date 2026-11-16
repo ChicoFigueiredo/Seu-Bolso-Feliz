@@ -777,6 +777,10 @@ impl Planejamento for PlanejamentoSqlite {
             .collect()
     }
 
+    fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
+        PlanejamentoSqlite::excecoes(self, recorrente)
+    }
+
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>> {
         Ok(self
             .banco

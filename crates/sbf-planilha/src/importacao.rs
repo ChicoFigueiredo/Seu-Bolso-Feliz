@@ -596,10 +596,18 @@ fn pendente_de_adiar(
     hoje: Data,
 ) -> Resultado<Option<Competencia>> {
     let Some(comp) = comp else { return Ok(None) };
-    let ja = plan
-        .proximas(recorrente, comp, 1, hoje)?
-        .iter()
-        .any(|o| o.id.competencia == comp && o.estado == EstadoDaOcorrencia::Adiada);
+    // Uma exceção Adiar ativa naquela competência já basta (um adiamento sem data vencido
+    // aparece como EmAtraso, não Adiada, então o estado sozinho não serve).
+    let ja_gravado = plan.excecoes_do_recorrente(recorrente)?.iter().any(|e| {
+        !e.desfeita
+            && e.ocorrencia.competencia == comp
+            && matches!(e.excecao, sbf_planejamento::Excecao::Adiar { .. })
+    });
+    let ja = ja_gravado
+        || plan
+            .proximas(recorrente, comp, 1, hoje)?
+            .iter()
+            .any(|o| o.id.competencia == comp && o.estado == EstadoDaOcorrencia::Adiada);
     Ok((!ja).then_some(comp))
 }
 

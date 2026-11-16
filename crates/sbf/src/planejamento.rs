@@ -21,7 +21,7 @@ use sbf_planilha::leitura;
 use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
 
-const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar]";
+const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
 
 type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 
@@ -39,6 +39,9 @@ fn abrir_planejamento(cofre: &Path) -> Result<Box<dyn Planejamento>, String> {
 }
 
 pub fn rodar(args: &[String]) -> ExitCode {
+    if args.first().map(String::as_str) == Some("acompanhar") {
+        return acompanhar(&args[1..]);
+    }
     let mut saida = std::io::stdout();
     rodar_com(args, &abrir_planejamento, &mut saida)
 }
@@ -387,5 +390,41 @@ mod testes {
                 .expect("utf8")
                 .contains("STREAMING FICTICIO")
         );
+    }
+}
+
+/// `sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM`: define o início do
+/// acompanhamento. Antes dele, ocorrência sem pagamento informado não vira "em atraso" (a
+/// planilha importada é histórico); só o que o usuário adiou continua devido.
+fn acompanhar(args: &[String]) -> ExitCode {
+    let opcoes = match ler_opcoes(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("sbf: {e}\n{USO}");
+            return ExitCode::from(2);
+        }
+    };
+    let feito = (|| -> Result<Competencia, String> {
+        let cofre = exige(&opcoes.inventario, "--inventario")?;
+        let texto = exige(&opcoes.ciclo, "--ciclo")?;
+        let competencia =
+            Competencia::de_texto(texto).ok_or_else(|| format!("competência inválida: {texto}"))?;
+        let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
+            .map_err(|e| e.to_string())?;
+        let mut plan =
+            sbf_planejamento::PlanejamentoSqlite::novo(banco, Box::new(sbf_planejamento::SemSaldos));
+        plan.definir_inicio_do_acompanhamento(competencia)
+            .map_err(|e| e.to_string())?;
+        Ok(competencia)
+    })();
+    match feito {
+        Ok(c) => {
+            println!("acompanhamento a partir de {c}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("sbf: {e}");
+            ExitCode::from(1)
+        }
     }
 }

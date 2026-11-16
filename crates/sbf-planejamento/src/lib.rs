@@ -740,6 +740,13 @@ pub trait Planejamento {
 
     /// O recorrente que já nasceu desta origem, se houver.
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>>;
+
+    /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
+    /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
+    fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
+        let _ = recorrente;
+        Ok(Vec::new())
+    }
 }
 
 /// Os saldos das contas, vindos de fora (a Pluggy no inventário).
