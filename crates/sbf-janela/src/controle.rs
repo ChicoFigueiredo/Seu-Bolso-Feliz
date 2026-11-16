@@ -841,6 +841,8 @@ pub enum AcaoDoControle {
     Excluir,
     Restaurar,
     Propostas,
+    /// Procura no extrato as conciliações sugeridas do período aberto.
+    BuscarNoExtrato,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -875,7 +877,7 @@ const fn at(ctrl: bool, shift: bool, alt: bool, tecla: egui::Key) -> AtalhoDoCon
 use egui::Key;
 
 /// A lista das Ações do controle mensal (Ribbon, menu da linha e Paleta leem daqui).
-pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 17] = [
+pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 18] = [
     DefinicaoDoControle {
         id: AcaoDoControle::AdicionarCompromisso,
         codigo: "controle.adicionar",
@@ -1046,6 +1048,16 @@ pub const ACOES_DO_CONTROLE: [DefinicaoDoControle; 17] = [
         atalho: at(true, true, false, Key::L),
         keytip: "O",
     },
+    DefinicaoDoControle {
+        id: AcaoDoControle::BuscarNoExtrato,
+        codigo: "controle.buscar-no-extrato",
+        rotulo: "Buscar no extrato",
+        icone: "search",
+        dica: "Procura no extrato do banco o que casa com as ocorrências do período e deixa como sugestão",
+        grupo: "Extrato",
+        atalho: at(true, true, false, Key::Y),
+        keytip: "S",
+    },
 ];
 
 pub fn definicao(a: AcaoDoControle) -> &'static DefinicaoDoControle {
@@ -1078,7 +1090,9 @@ pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(),
     use EstadoDaOcorrencia as E;
     if matches!(
         a,
-        AcaoDoControle::Propostas | AcaoDoControle::AdicionarCompromisso
+        AcaoDoControle::Propostas
+            | AcaoDoControle::AdicionarCompromisso
+            | AcaoDoControle::BuscarNoExtrato
     ) {
         return Ok(());
     }
@@ -1176,6 +1190,7 @@ pub fn disponibilidade(a: AcaoDoControle, c: &ContextoDaLinha<'_>) -> Result<(),
         }
         AcaoDoControle::Restaurar
         | AcaoDoControle::Propostas
+        | AcaoDoControle::BuscarNoExtrato
         | AcaoDoControle::AdicionarCompromisso => Ok(()),
     }
 }

@@ -15,9 +15,10 @@ use egui::{
 use egui_extras::{Column, TableBuilder};
 use sbf_inventario::consulta::Consulta;
 use sbf_planejamento::{
-    Alteracao, AlvoDoDocumento, Autor, Competencia, Composicao, Controle, Data, DocumentoVinculado,
-    EntradaDoHistorico, ErroDoPlanejamento, EstadoDaProposta, Excecao, Filtro, Grupo, IdOcorrencia,
-    Natureza, Ocorrencia, Planejamento, Prazo, Proposta, Recorrente, Simulacao,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Competencia, Composicao, Conciliacao, Controle,
+    Data, DocumentoVinculado, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaProposta, Excecao,
+    Filtro, Grupo, IdOcorrencia, MovimentoCandidato, Natureza, Ocorrencia, Planejamento, Prazo,
+    Proposta, Recorrente, Simulacao,
 };
 
 use crate::componentes;
@@ -31,6 +32,7 @@ use crate::controle::{
 };
 use crate::formato;
 use crate::icones;
+use crate::movimentos::{self, OfertaDeAssinatura};
 use crate::navegacao::Pedido;
 use crate::preferencias_da_janela::PreferenciasDoControle;
 use crate::rubricas::{self, SeletorDeDocumento, TabelaDeRubricas};
@@ -59,6 +61,19 @@ pub enum PedidoDoControle {
     PreviaDoDocumento(String),
     /// Abre a prévia do documento numa janela própria.
     DestacarDocumento(String),
+    /// Concilia à mão com um movimento escolhido na lista. `descricao` é a do banco, para
+    /// oferecer a assinatura depois.
+    ConciliarManual {
+        conciliacao: Conciliacao,
+        descricao: String,
+    },
+    /// Define (ou tira) a assinatura de um recorrente, lendo a versão na hora.
+    DefinirAssinatura {
+        recorrente: String,
+        assinatura: Option<Assinatura>,
+    },
+    /// Põe a cópia do acervo do contracheque (`content_hash`) na fila do Reconhecimento.
+    RevisarContracheque(String),
     FecharDialogo,
     ConfirmarProposta(String),
     RecusarProposta(String, String),
@@ -159,6 +174,10 @@ struct DadosDoDetalhe {
     docs_da_ocorrencia: Vec<DocumentoVinculado>,
     /// Os ligados ao compromisso inteiro.
     docs_do_compromisso: Vec<DocumentoVinculado>,
+    /// A conciliação à espera de confirmação, se houver.
+    sugestao: Option<Conciliacao>,
+    /// Os movimentos do extrato que podem pagar esta ocorrência, do melhor ao pior.
+    candidatos: Vec<MovimentoCandidato>,
 }
 
 /// O diálogo "Adicionar compromisso": o formulário e a prévia da última criação válida.
@@ -232,6 +251,12 @@ pub struct EstadoDoControle {
     pub anexar: Option<SeletorDeDocumento>,
     /// O documento (`content_hash`) mostrado no painel Prévia do dock.
     pub documento_em_previa: Option<String>,
+    /// A lista de "Conciliar com outro…" está aberta para esta ocorrência.
+    pub conciliar_aberto: Option<IdOcorrencia>,
+    /// O que se oferece depois de uma conciliação manual (a assinatura).
+    pub oferta_de_assinatura: Option<OfertaDeAssinatura>,
+    /// A tela "Contas do planejamento".
+    pub contas: crate::contas_ui::EstadoDasContas,
     selecao_da_previa: Option<IdOcorrencia>,
     motivos_de_recusa: std::collections::HashMap<String, String>,
     recusando: Option<String>,
@@ -277,6 +302,9 @@ impl EstadoDoControle {
             novo: None,
             anexar: None,
             documento_em_previa: None,
+            conciliar_aberto: None,
+            oferta_de_assinatura: None,
+            contas: crate::contas_ui::EstadoDasContas::default(),
             selecao_da_previa: None,
             motivos_de_recusa: std::collections::HashMap::new(),
             recusando: None,
@@ -568,7 +596,14 @@ fn carregar_detalhe(
         .map_err(|e| e.to_string())?;
     let historico = plan.historico(Some(id), 60).map_err(|e| e.to_string())?;
     let excecoes = plan.excecoes_do_recorrente(id).map_err(|e| e.to_string())?;
+    // O extrato é um extra: se falhar, o resto do detalhe continua valendo.
+    let sugestao = plan.sugestao_de_conciliacao(ocorrencia).ok().flatten();
+    let candidatos = plan
+        .candidatos_de_conciliacao(ocorrencia)
+        .unwrap_or_default();
     Ok(DadosDoDetalhe {
+        sugestao,
+        candidatos,
         recorrente,
         proximas,
         historico,
@@ -670,6 +705,53 @@ pub fn itens_da_grade<'a>(grade: &'a Grade, recolhidos: &HashSet<String>) -> Vec
 // Diálogo
 // ---------------------------------------------------------------------------------------
 
+/// Os campos da assinatura no diálogo de Editar: o texto da descrição do banco e a janela em
+/// dias. Texto vazio tira a assinatura.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampoDeAssinatura {
+    pub texto: String,
+    pub janela: String,
+    pub original: Option<Assinatura>,
+}
+
+impl CampoDeAssinatura {
+    pub fn novo(original: Option<Assinatura>) -> Self {
+        Self {
+            texto: original
+                .as_ref()
+                .map(|a| a.texto.clone())
+                .unwrap_or_default(),
+            janela: original
+                .as_ref()
+                .map_or(movimentos::JANELA_OFERECIDA, |a| a.janela_dias)
+                .to_string(),
+            original,
+        }
+    }
+
+    /// O que os campos dizem: `None` = sem assinatura. Erro quando a janela não é um número
+    /// de 1 a 60.
+    pub fn valor(&self) -> Result<Option<Assinatura>, String> {
+        let texto = self.texto.trim();
+        if texto.is_empty() {
+            return Ok(None);
+        }
+        match self.janela.trim().parse::<u8>() {
+            Ok(j) if (1..=60).contains(&j) => Ok(Some(Assinatura {
+                texto: texto.to_owned(),
+                janela_dias: j,
+            })),
+            _ => Err("A janela da assinatura vai de 1 a 60 dias.".to_owned()),
+        }
+    }
+
+    /// A assinatura a gravar, se ela mudou (`Some(None)` = tirar).
+    pub fn a_gravar(&self) -> Option<Option<Assinatura>> {
+        let v = self.valor().ok()?;
+        (v != self.original).then_some(v)
+    }
+}
+
 /// Um diálogo de edição aberto, com a prévia da última alteração válida.
 #[derive(Debug, Clone)]
 pub struct DialogoDoControle {
@@ -680,6 +762,10 @@ pub struct DialogoDoControle {
     pub atual: AtualDaVersao,
     pub grupos: Vec<String>,
     pub erro: Option<String>,
+    /// Só no Editar: como reconhecer o compromisso no extrato.
+    pub assinatura: Option<CampoDeAssinatura>,
+    /// O formulário como abriu: sem mexer nele, só a assinatura é gravada.
+    pub inicial: Formulario,
     simulada: Option<(Alteracao, Result<Simulacao, String>)>,
 }
 
@@ -717,7 +803,36 @@ impl DialogoDoControle {
 
     /// Pode aplicar: o formulário é válido e a prévia não falhou.
     pub fn pode_aplicar(&self) -> bool {
-        matches!(self.previa(), Some(Ok(_)))
+        let assinatura_boa = self.assinatura.as_ref().is_none_or(|a| a.valor().is_ok());
+        // Mexer só na assinatura não tem prévia de valores: a edição em si não muda nada.
+        let so_assinatura = self.formulario == self.inicial
+            && self
+                .assinatura
+                .as_ref()
+                .and_then(CampoDeAssinatura::a_gravar)
+                .is_some();
+        assinatura_boa && (so_assinatura || matches!(self.previa(), Some(Ok(_))))
+    }
+
+    /// Os pedidos que o Aplicar faz, na ordem: a edição (a menos que só a assinatura mudou)
+    /// e a assinatura. A versão desta é lida na hora, depois da edição.
+    pub fn pedidos_de_aplicar(&self) -> Vec<Pedido> {
+        let nova = self
+            .assinatura
+            .as_ref()
+            .and_then(CampoDeAssinatura::a_gravar);
+        let so_assinatura = nova.is_some() && self.formulario == self.inicial;
+        let mut v = Vec::new();
+        if !so_assinatura && let Ok(alt) = self.alteracao() {
+            v.push(Pedido::Controle(PedidoDoControle::Aplicar(Box::new(alt))));
+        }
+        if let Some(assinatura) = nova {
+            v.push(Pedido::Controle(PedidoDoControle::DefinirAssinatura {
+                recorrente: self.alvo.recorrente.clone(),
+                assinatura,
+            }));
+        }
+        v
     }
 }
 
@@ -747,6 +862,10 @@ pub fn abrir_dialogo(
                 ocorrencia: None,
             },
             competencia: Competencia::de_data(hoje),
+            inicial: Formulario::Restaurar {
+                excluido: r.excluido.is_some(),
+            },
+            assinatura: None,
             formulario: Formulario::Restaurar {
                 excluido: r.excluido.is_some(),
             },
@@ -825,7 +944,11 @@ pub fn abrir_dialogo(
     };
     let mut atual = AtualDaVersao::de(&o);
     atual.certeza = o.certeza;
+    let assinatura = (acao == AcaoDoControle::Editar)
+        .then(|| CampoDeAssinatura::novo(plan.assinatura(&rec.id).ok().flatten()));
     Ok(DialogoDoControle {
+        inicial: formulario.clone(),
+        assinatura,
         acao,
         alvo: AlvoDoDialogo {
             recorrente: rec.id.clone(),
@@ -882,7 +1005,7 @@ fn triangulo_de_aviso(ui: &mut Ui, texto: &str) -> egui::Response {
         .on_hover_text(format!("Atenção: {texto}."))
 }
 
-fn texto_pequeno(ui: &mut Ui, t: impl Into<String>) {
+pub(crate) fn texto_pequeno(ui: &mut Ui, t: impl Into<String>) {
     let p = tema::paleta(ui.ctx());
     ui.label(RichText::new(t.into()).size(11.5).color(p.tinta_suave));
 }
@@ -1134,7 +1257,7 @@ fn toggle(atual: Option<AbaLateral>, alvo: AbaLateral) -> Option<AbaLateral> {
     }
 }
 
-fn mensagem(ui: &mut Ui, estado: &mut EstadoDoControle) {
+pub(crate) fn mensagem(ui: &mut Ui, estado: &mut EstadoDoControle) {
     let Some((texto, erro)) = estado.mensagem.clone() else {
         return;
     };
@@ -2023,6 +2146,33 @@ pub fn detalhe_no_dock(
     detalhe_ui(ui, estado, hoje, pedidos);
 }
 
+/// Os contracheques ligados à ocorrência ou ao compromisso inteiro.
+fn contracheques_de(dados: &DadosDoDetalhe) -> Vec<&DocumentoVinculado> {
+    dados
+        .docs_da_ocorrencia
+        .iter()
+        .chain(dados.docs_do_compromisso.iter())
+        .filter(|d| d.tipo == sbf_planejamento::TipoDeDocumento::Contracheque && !d.desvinculado)
+        .collect()
+}
+
+/// A seção Movimentos da ocorrência; desconto em folha não passa pelo extrato.
+fn movimentos_do_detalhe(
+    sel: &Ocorrencia,
+    dados: &DadosDoDetalhe,
+) -> Option<movimentos::VmDeMovimentos> {
+    (sel.natureza != Natureza::DescontoEmFolha).then(|| {
+        movimentos::montar(&movimentos::EntradaDosMovimentos {
+            conciliado: sel.conciliado,
+            sugestao: dados.sugestao.as_ref(),
+            candidatos: &dados.candidatos,
+            composicao: dados.composicao.as_ref(),
+            contracheques: &contracheques_de(dados),
+            previsto: sel.previsto,
+        })
+    })
+}
+
 /// O que um clique no detalhe pede; aplicado depois do desenho.
 enum EfeitoDoDetalhe {
     IrParaLinha(String),
@@ -2030,6 +2180,7 @@ enum EfeitoDoDetalhe {
     Destacar(String),
     Desvincular(String),
     Anexar,
+    RevisarContracheque(String),
 }
 
 fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &mut Vec<Pedido>) {
@@ -2087,6 +2238,19 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
     }
     let aba = estado.aba_do_detalhe.efetiva(tem_rubricas);
     ui.separator();
+    let contracheques = contracheques_de(dados);
+    let vm_movimentos = movimentos_do_detalhe(&sel, dados);
+    let faixa = movimentos::faixa_do_contracheque(
+        dados.composicao.as_ref(),
+        &contracheques,
+        sel.id.competencia,
+    );
+    let mut conciliar_aberto = estado.conciliar_aberto.as_ref() == Some(&sel.id);
+    let mut dispensou_oferta = false;
+    let oferta = estado
+        .oferta_de_assinatura
+        .as_ref()
+        .filter(|o| o.recorrente == sel.id.recorrente);
     let mut mais = false;
     let mut efeitos: Vec<EfeitoDoDetalhe> = Vec::new();
     // O painel do dock já rola na vertical; aqui só as tabelas largas rolam de lado.
@@ -2095,12 +2259,21 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
         .auto_shrink([false, true])
         .show(ui, |ui| match aba {
             AbaDoDetalhe::Resumo => {
+                // Os movimentos primeiro: é o que se decide ali (confirmar, escolher outro).
+                if let Some(vm) = &vm_movimentos {
+                    dispensou_oferta =
+                        movimentos::secao(ui, vm, &sel.id, &mut conciliar_aberto, oferta, pedidos);
+                    ui.add_space(8.0);
+                }
                 aba_resumo(ui, &sel, dados.recorrente.as_ref());
                 ui.add_space(8.0);
                 secao_do_detalhe(ui, &p, "Próximas ocorrências");
                 mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
             }
             AbaDoDetalhe::Rubricas => {
+                if let Some(f) = &faixa {
+                    faixa_do_contracheque_ui(ui, f, &mut efeitos);
+                }
                 if let Some(t) = &tabela {
                     aba_rubricas(ui, t, &mut efeitos);
                 }
@@ -2125,6 +2298,10 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
             }
             AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
         });
+    estado.conciliar_aberto = conciliar_aberto.then(|| sel.id.clone());
+    if dispensou_oferta {
+        estado.oferta_de_assinatura = None;
+    }
     if mais {
         estado.proximas_meses =
             (estado.proximas_meses + PROXIMAS_DE_INICIO).min(sbf_planejamento::HORIZONTE_MESES);
@@ -2142,6 +2319,9 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
                 pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
                     Alteracao::DesvincularDocumento { id },
                 ])));
+            }
+            EfeitoDoDetalhe::RevisarContracheque(sha) => {
+                pedidos.push(Pedido::Controle(PedidoDoControle::RevisarContracheque(sha)));
             }
             EfeitoDoDetalhe::Anexar => {
                 pedidos.push(Pedido::Controle(PedidoDoControle::Acao(
@@ -2223,6 +2403,42 @@ fn faixa_de_abas(
     ui.painter()
         .hline(largura, r.bottom(), egui::Stroke::new(1.0, p.borda));
     nova
+}
+
+/// A faixa da aba Rubricas: o contracheque vinculado tem rubricas que a composição vigente
+/// não usa. "Revisar e usar" leva a cópia do acervo ao Reconhecimento.
+fn faixa_do_contracheque_ui(
+    ui: &mut Ui,
+    f: &movimentos::FaixaDoContracheque,
+    efeitos: &mut Vec<EfeitoDoDetalhe>,
+) {
+    let p = tema::paleta(ui.ctx());
+    Frame::new()
+        .fill(p.aviso_sutil)
+        .stroke(Stroke::new(1.0, p.borda))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(icones::icone_cor("warning", 16.0, p.aviso));
+                ui.label(
+                    RichText::new(format!(
+                        "O contracheque {} vinculado traz rubricas diferentes.",
+                        f.mes_ano
+                    ))
+                    .color(p.aviso),
+                );
+                if ui
+                    .button("Revisar e usar")
+                    .on_hover_text("Abre o contracheque no painel Reconhecimento para você conferir as rubricas")
+                    .clicked()
+                {
+                    efeitos.push(EfeitoDoDetalhe::RevisarContracheque(f.sha256.clone()));
+                }
+            });
+        });
+    ui.add_space(6.0);
 }
 
 /// A aba "Valores e rubricas": proventos, descontos, totais e o líquido contra o digitado.
@@ -2699,8 +2915,8 @@ pub fn desenhar_dialogo(
     if resposta.should_close() {
         fechar = true;
     }
-    if aplicar && let Ok(alt) = d.alteracao() {
-        pedidos.push(Pedido::Controle(PedidoDoControle::Aplicar(Box::new(alt))));
+    if aplicar {
+        pedidos.extend(d.pedidos_de_aplicar());
     }
     if !fechar {
         estado.dialogo = Some(d);
@@ -3131,7 +3347,10 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                     ui.end_row();
                     let daqui = *escopo == EscopoEscolhido::DaquiEmDiante;
                     ui.label("Conta");
-                    ui.add_enabled(daqui, egui::TextEdit::singleline(conta));
+                    ui.add_enabled(
+                        daqui,
+                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0630"),
+                    );
                     ui.end_row();
                     ui.label("Centro");
                     ui.add_enabled(daqui, egui::TextEdit::singleline(centro));
@@ -3283,6 +3502,34 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                 ui,
                 "Vai para o fim do grupo escolhido. Os valores dos meses não mudam.",
             );
+        }
+    }
+    if let Some(a) = &mut d.assinatura {
+        ui.add_space(6.0);
+        ui.label(RichText::new("Assinatura no extrato").strong());
+        egui::Grid::new("controle-form-assinatura")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Texto do banco");
+                ui.add(
+                    egui::TextEdit::singleline(&mut a.texto)
+                        .hint_text("SALARIO EMPRESA")
+                        .desired_width(240.0),
+                );
+                ui.end_row();
+                ui.label("Janela (dias)");
+                ui.add(egui::TextEdit::singleline(&mut a.janela).desired_width(60.0));
+                ui.end_row();
+            });
+        match a.valor() {
+            Err(e) => {
+                ui.label(RichText::new(e).color(tema::paleta(ui.ctx()).aviso));
+            }
+            Ok(_) => texto_pequeno(
+                ui,
+                "O que o banco descreve com esse texto, perto do vencimento, vira candidato com qualquer valor. Vazio = sem assinatura.",
+            ),
         }
     }
 }
@@ -3830,6 +4077,364 @@ mod testes {
         assert_eq!(
             controle::acao_do_codigo("controle.adicionar"),
             Some(AcaoDoControle::AdicionarCompromisso)
+        );
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Conciliação com o extrato (contas, movimentos, assinatura, faixa do contracheque)
+    // -----------------------------------------------------------------------------------
+
+    fn janela_ligada() -> crate::janela::Janela {
+        let mut j = crate::janela::Janela::nova();
+        j.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
+        j.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje())));
+        j
+    }
+
+    /// Escolhe o salário do mês do ciclo aberto e lê o detalhe.
+    fn selecionar_salario(j: &mut crate::janela::Janela) -> Ocorrencia {
+        let pl = j.planejamento.as_ref().expect("planejamento").0.as_ref();
+        // A tela abre no ciclo seguinte (últimos dias do ciclo); o de hoje tem o de novembro.
+        j.controle.navegador.ir_para_hoje();
+        j.controle.garantir_cache(pl, hoje());
+        // O salário de novembro (já caiu no banco; o de dezembro ainda vem): está em atraso de
+        // antes, à espera da confirmação.
+        j.controle.selecionada = Some(IdOcorrencia {
+            recorrente: "rec_salario".into(),
+            competencia: Competencia::de_data(hoje()),
+            parcela: None,
+        });
+        j.controle.garantir_selecao(pl);
+        j.controle.garantir_detalhe(pl, hoje());
+        j.controle.linha_selecionada().cloned().expect("linha")
+    }
+
+    fn vm_do_salario(j: &mut crate::janela::Janela) -> (Ocorrencia, movimentos::VmDeMovimentos) {
+        let sel = selecionar_salario(j);
+        let dados = j
+            .controle
+            .detalhe
+            .as_ref()
+            .and_then(|d| d.dados.as_ref().ok())
+            .expect("dados");
+        let vm = movimentos_do_detalhe(&sel, dados).expect("movimentos");
+        (sel, vm)
+    }
+
+    fn mapear_salario(j: &mut crate::janela::Janela) {
+        j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
+            Alteracao::MapearConta {
+                apelido: "CX-0630".into(),
+                conta_do_extrato: Some(crate::planejamento_ficticio::CONTA_DO_SALARIO.into()),
+            },
+        ]));
+        assert_eq!(j.controle.mensagem.as_ref().map(|m| m.1), Some(false));
+    }
+
+    #[test]
+    fn contas_mostram_o_par_confirmado_e_a_sugestao_para_o_resto() {
+        let j = janela_ligada();
+        let pl = j.planejamento.as_ref().unwrap().0.as_ref();
+        let d = crate::contas_ui::carregar(pl).expect("contas");
+        let cx = d.contas.iter().find(|c| c.apelido == "CX-0630").unwrap();
+        assert!(cx.conta_do_extrato.is_none());
+        let s = d.sugestao_de("CX-0630").expect("sugestão");
+        assert_eq!(
+            s.conta_do_extrato,
+            crate::planejamento_ficticio::CONTA_DO_SALARIO
+        );
+        assert!(!s.motivo.is_empty());
+        assert!(d.sugestao_de("Nubank").is_none());
+        assert!(d.do_extrato.len() >= 2);
+    }
+
+    #[test]
+    fn confirmar_o_par_pelo_pedido_grava_e_diz_em_portugues() {
+        let mut j = janela_ligada();
+        let Pedido::Controle(p) = crate::contas_ui::pedido_de_par(
+            "CX-0630",
+            Some(crate::planejamento_ficticio::CONTA_DO_SALARIO),
+        ) else {
+            panic!("pedido do controle");
+        };
+        j.controle_pedido(p);
+        assert_eq!(
+            j.controle.mensagem,
+            Some(("Par de conta confirmado.".to_owned(), false))
+        );
+        let pl = j.planejamento.as_ref().unwrap().0.as_ref();
+        let d = crate::contas_ui::carregar(pl).unwrap();
+        assert_eq!(
+            d.contas
+                .iter()
+                .find(|c| c.apelido == "CX-0630")
+                .unwrap()
+                .conta_do_extrato
+                .as_deref(),
+            Some(crate::planejamento_ficticio::CONTA_DO_SALARIO)
+        );
+        // Desligar.
+        let Pedido::Controle(p) = crate::contas_ui::pedido_de_par("CX-0630", None) else {
+            panic!("pedido do controle");
+        };
+        j.controle_pedido(p);
+        assert_eq!(
+            j.controle.mensagem,
+            Some(("Par de conta desligado.".to_owned(), false))
+        );
+    }
+
+    #[test]
+    fn o_detalhe_do_salario_traz_a_sugestao_e_os_candidatos_ordenados() {
+        let mut j = janela_ligada();
+        let (sel, vm) = vm_do_salario(&mut j);
+        assert!(sel.sugestao_de_conciliacao, "{sel:?}");
+        let sug = vm.sugestao.as_ref().expect("sugestão");
+        // Sem o par confirmado, a conta ainda não prova nada.
+        assert!(!sug.tres_provas);
+        assert!(vm.candidatos.len() >= 2);
+        assert!(vm.candidatos[0].bate_assinatura);
+        let mut dias: Vec<i64> = Vec::new();
+        for c in vm.candidatos.iter().filter(|c| !c.bate_assinatura) {
+            dias.push(sel.vencimento.dias_ate(c.movimento.data).abs());
+        }
+        assert!(dias.windows(2).all(|w| w[0] <= w[1]), "{dias:?}");
+    }
+
+    #[test]
+    fn com_o_par_confirmado_a_sugestao_do_salario_ganha_tres_provas() {
+        let mut j = janela_ligada();
+        mapear_salario(&mut j);
+        let (_, vm) = vm_do_salario(&mut j);
+        let sug = vm.sugestao.expect("sugestão");
+        assert!(sug.tres_provas, "{sug:?}");
+        assert_eq!(sug.diferenca, None);
+        assert_eq!(sug.valor, crate::planejamento_ficticio::LIQUIDO_DO_SALARIO);
+    }
+
+    #[test]
+    fn confirmar_a_sugestao_vira_conciliacao_confirmada() {
+        let mut j = janela_ligada();
+        mapear_salario(&mut j);
+        selecionar_salario(&mut j);
+        j.controle_pedido(PedidoDoControle::Acao(AcaoDoControle::ConfirmarConciliacao));
+        let (sel, vm) = vm_do_salario(&mut j);
+        assert!(!sel.sugestao_de_conciliacao);
+        assert_eq!(
+            sel.conciliado,
+            Some(crate::planejamento_ficticio::LIQUIDO_DO_SALARIO)
+        );
+        let m = vm.confirmadas.first().expect("confirmada");
+        assert!(m.tres_provas);
+        assert!(
+            m.descricao
+                .as_deref()
+                .is_some_and(|d| d.contains("SALARIO"))
+        );
+    }
+
+    #[test]
+    fn conciliar_com_outro_grava_confirmada_e_oferece_a_assinatura_so_sem_ela() {
+        let mut j = janela_ligada();
+        let (sel, vm) = vm_do_salario(&mut j);
+        let outro = vm
+            .candidatos
+            .iter()
+            .find(|c| !c.bate_assinatura)
+            .expect("outro")
+            .movimento
+            .clone();
+        let pedido = |descricao: &str| PedidoDoControle::ConciliarManual {
+            conciliacao: Conciliacao {
+                ocorrencia: sel.id.clone(),
+                movimento: outro.movimento.clone(),
+                valor: outro.valor,
+                data: outro.data,
+                confirmada: true,
+            },
+            descricao: descricao.to_owned(),
+        };
+        // O salário já tem assinatura: nada a oferecer.
+        j.controle_pedido(pedido(&outro.descricao));
+        let (sel2, _) = vm_do_salario(&mut j);
+        assert_eq!(sel2.conciliado, Some(outro.valor));
+        assert!(!sel2.sugestao_de_conciliacao);
+        assert_eq!(j.controle.oferta_de_assinatura, None);
+        // Sem assinatura, a oferta aparece com o texto do banco.
+        let base = {
+            let pl = j.planejamento.as_ref().unwrap().0.as_ref();
+            pl.recorrente("rec_salario")
+                .unwrap()
+                .unwrap()
+                .versao_do_registro
+        };
+        j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
+            Alteracao::DefinirAssinatura {
+                recorrente: "rec_salario".into(),
+                assinatura: None,
+                versao_base: base,
+            },
+        ]));
+        j.controle_pedido(pedido(&outro.descricao));
+        let oferta = j.controle.oferta_de_assinatura.clone().expect("oferta");
+        assert_eq!(oferta.recorrente, "rec_salario");
+        assert_eq!(oferta.texto, outro.descricao);
+        // Aceitar lê a versão na hora (a conciliação não a mexe, mas a edição de antes sim) e
+        // grava com janela de 5 dias.
+        j.controle_pedido(PedidoDoControle::DefinirAssinatura {
+            recorrente: oferta.recorrente.clone(),
+            assinatura: Some(oferta.assinatura()),
+        });
+        assert_eq!(j.controle.oferta_de_assinatura, None);
+        let pl = j.planejamento.as_ref().unwrap().0.as_ref();
+        assert_eq!(
+            pl.assinatura("rec_salario").unwrap(),
+            Some(Assinatura {
+                texto: outro.descricao,
+                janela_dias: 5
+            })
+        );
+    }
+
+    #[test]
+    fn buscar_no_extrato_diz_quantas_sugestoes_novas() {
+        let mut j = janela_ligada();
+        // O salário do mês já nasce sugerido; a busca não repete.
+        j.controle_pedido(PedidoDoControle::Acao(AcaoDoControle::BuscarNoExtrato));
+        let (texto, erro) = j.controle.mensagem.clone().expect("mensagem");
+        assert!(!erro);
+        assert!(
+            texto == "Nenhuma sugestão nova."
+                || texto.ends_with("sugestões novas.")
+                || texto == "1 sugestão nova.",
+            "{texto}"
+        );
+        assert!(
+            j.controle_disponibilidade(AcaoDoControle::BuscarNoExtrato)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn buscar_no_extrato_acha_a_sugestao_que_foi_tirada() {
+        let mut j = janela_ligada();
+        let (sel, _) = vm_do_salario(&mut j);
+        // Dispensar a sugestão semeada não é uma Alteração; refaz o fictício sem ela.
+        let s = PlanejamentoFicticio::novo(hoje());
+        let _ = s.sugestao_de_conciliacao(&sel.id);
+        j.ligar_planejamento(Box::new(s));
+        j.controle_pedido(PedidoDoControle::Acao(AcaoDoControle::BuscarNoExtrato));
+        assert!(!j.controle.mensagem.as_ref().unwrap().1);
+    }
+
+    #[test]
+    fn editar_o_salario_tem_a_conta_e_a_assinatura() {
+        let mut j = janela_ligada();
+        selecionar_salario(&mut j);
+        let pl = j.planejamento.as_ref().unwrap().0.as_ref();
+        let mut d =
+            abrir_dialogo(AcaoDoControle::Editar, &j.controle, pl, hoje()).expect("diálogo");
+        let Formulario::Editar { conta, .. } = &d.formulario else {
+            panic!("formulário de editar");
+        };
+        assert_eq!(conta, "CX-0630");
+        let campo = d.assinatura.clone().expect("campo da assinatura");
+        assert_eq!(campo.texto, crate::planejamento_ficticio::TEXTO_DO_SALARIO);
+        assert_eq!(campo.janela, "5");
+        // Sem mexer em nada, não há o que aplicar.
+        assert!(d.pedidos_de_aplicar().is_empty());
+        assert!(!d.pode_aplicar());
+        // Só a assinatura mudou: só ela é gravada.
+        let a = d.assinatura.as_mut().unwrap();
+        a.texto = "SALARIO OUTRO".into();
+        a.janela = "7".into();
+        assert!(d.pode_aplicar());
+        let v = d.pedidos_de_aplicar();
+        assert_eq!(
+            v,
+            vec![Pedido::Controle(PedidoDoControle::DefinirAssinatura {
+                recorrente: "rec_salario".into(),
+                assinatura: Some(Assinatura {
+                    texto: "SALARIO OUTRO".into(),
+                    janela_dias: 7
+                }),
+            })]
+        );
+        // Janela inválida bloqueia o Aplicar.
+        d.assinatura.as_mut().unwrap().janela = "0".into();
+        d.atualizar_previa(pl, hoje());
+        assert!(!d.pode_aplicar());
+        // Texto vazio tira a assinatura.
+        let a = d.assinatura.as_mut().unwrap();
+        a.texto = "  ".into();
+        assert_eq!(a.a_gravar(), Some(None));
+    }
+
+    #[test]
+    fn faixa_das_rubricas_aparece_quando_a_composicao_nao_veio_do_contracheque() {
+        let mut j = janela_ligada();
+        // A composição semeada vem do contracheque vinculado: sem faixa.
+        selecionar_salario(&mut j);
+        let dados = j.controle.detalhe.as_ref().unwrap().dados.as_ref().unwrap();
+        let docs = contracheques_de(dados);
+        assert_eq!(docs.len(), 1);
+        let comp = j.controle.selecionada.as_ref().unwrap().competencia;
+        assert_eq!(
+            movimentos::faixa_do_contracheque(dados.composicao.as_ref(), &docs, comp),
+            None
+        );
+        // Um contracheque novo vinculado, de outro mês, traz rubricas que a composição não usa.
+        j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
+            Alteracao::VincularDocumento {
+                alvo: AlvoDoDocumento::Recorrente {
+                    id: "rec_salario".into(),
+                },
+                sha256: "sha-do-contracheque-novo".into(),
+                tipo_documento: sbf_planejamento::TipoDeDocumento::Contracheque,
+                nome: "contracheque-2026-12.pdf".into(),
+                data: Data::de_iso("2026-12-05"),
+            },
+        ]));
+        selecionar_salario(&mut j);
+        let dados = j.controle.detalhe.as_ref().unwrap().dados.as_ref().unwrap();
+        let docs = contracheques_de(dados);
+        let f = movimentos::faixa_do_contracheque(dados.composicao.as_ref(), &docs, comp)
+            .expect("faixa");
+        assert_eq!(f.sha256, "sha-do-contracheque-novo");
+        assert_eq!(f.mes_ano, "12/2026");
+    }
+
+    #[test]
+    fn revisar_contracheque_enfileira_no_reconhecimento_e_pede_o_painel() {
+        let mut j = janela_ligada();
+        // Sem reconhecedor, avisa em vez de calar.
+        j.revisar_contracheque("/acervo/contracheque.pdf".into());
+        assert_eq!(j.controle.mensagem.as_ref().map(|m| m.1), Some(true));
+        assert!(j.reconhecimento.cartoes.is_empty());
+        j.ligar_reconhecedor(std::sync::Arc::new(
+            crate::reconhecimento_ficticio::reconhecedor_do_contracheque(),
+        ));
+        j.revisar_contracheque("/acervo/contracheque.pdf".into());
+        assert_eq!(j.reconhecimento.cartoes.len(), 1);
+        assert!(j.reconhecimento.painel_pedido);
+        assert_eq!(j.controle.mensagem.as_ref().map(|m| m.1), Some(false));
+        // Pelo pedido, sem inventário ligado, é um aviso (não há cópia do acervo).
+        j.controle_pedido(PedidoDoControle::RevisarContracheque("sha".into()));
+        assert_eq!(j.controle.mensagem.as_ref().map(|m| m.1), Some(true));
+        assert_eq!(j.reconhecimento.cartoes.len(), 1);
+    }
+
+    #[test]
+    fn a_tela_de_contas_e_o_buscar_estao_na_navegacao_e_na_lista_de_acoes() {
+        use crate::controle::acao_do_codigo;
+        assert_eq!(
+            acao_do_codigo("controle.buscar-no-extrato"),
+            Some(AcaoDoControle::BuscarNoExtrato)
+        );
+        let a = crate::areas::area_futura(crate::contas_ui::ROTA).expect("área");
+        assert_eq!(
+            crate::areas::grupo_de(&crate::navegacao::Destino::AreaFutura(a.id)),
+            "Controle"
         );
     }
 }

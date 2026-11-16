@@ -773,11 +773,14 @@ impl AppCasca for AppSbf {
                 0,
                 GrupoNavegacao::novo(
                     "Controle",
-                    vec![ItemNavegacao::novo(
-                        "controle",
-                        "Controle mensal",
-                        "calendar_month",
-                    )],
+                    vec![
+                        ItemNavegacao::novo("controle", "Controle mensal", "calendar_month"),
+                        ItemNavegacao::novo(
+                            crate::contas_ui::ROTA,
+                            "Contas do planejamento",
+                            "account_balance",
+                        ),
+                    ],
                 ),
             );
         }
@@ -1235,7 +1238,7 @@ impl AppCasca for AppSbf {
                     Some("triagem")
                 }
                 Destino::Item(r) if r.tipo == Tipo::Lote => Some("lotes"),
-                Destino::AreaFutura("controle") => Some("controle"),
+                Destino::AreaFutura("controle" | crate::contas_ui::ROTA) => Some("controle"),
                 _ => None,
             };
             if let Some(aba) = aba {

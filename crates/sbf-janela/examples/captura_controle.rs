@@ -1,6 +1,6 @@
 //! Capturas de tela do Controle mensal, só com dados fictícios.
 //!
-//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo|arrastar SBF_CAPTURA=/caminho/cena.png \
+//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo|arrastar|conciliar|contas|faixa SBF_CAPTURA=/caminho/cena.png \
 //!  xvfb-run -a cargo run -p sbf-janela --example captura_controle`
 //!
 //! Abre a janela da casca com o planejamento fictício ligado, arruma a cena, tira a foto da
@@ -199,6 +199,57 @@ impl App {
             (11, "arrastar-fim") => {
                 // O fim do cartão: só deste mês, fora do total, líquidos e a divergência.
                 janela.reconhecimento.rolar_para = Some(RECONHECIMENTO_ROLAGEM_FIM);
+            }
+            // O Detalhe do Salário de novembro (no ciclo de hoje): a sugestão do extrato, o selo
+            // das três provas (com o par de conta confirmado) e a lista "Conciliar com outro…".
+            (1, "conciliar") => {
+                c.navegador.ir_para_hoje();
+                c.resumo_aberto = false;
+                c.selecionada = Some(id("rec_salario", h));
+                c.aba_do_detalhe = AbaDoDetalhe::Resumo;
+                c.conciliar_aberto = Some(id("rec_salario", h));
+            }
+            (2, "conciliar" | "faixa") => {
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "conciliar") => {
+                janela.pedir(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
+                    sbf_planejamento::Alteracao::MapearConta {
+                        apelido: "CX-0630".into(),
+                        conta_do_extrato: Some(
+                            sbf_janela::planejamento_ficticio::CONTA_DO_SALARIO.into(),
+                        ),
+                    },
+                ])));
+            }
+            (1, "contas") => {
+                let mut v = Vec::new();
+                sbf_janela::navegacao::pedir_abrir(
+                    ctx,
+                    &mut v,
+                    sbf_janela::Destino::AreaFutura(sbf_janela::contas_ui::ROTA),
+                    false,
+                );
+            }
+            // O contracheque de dezembro, vinculado, tem rubricas que a composição não usa.
+            (1, "faixa") => {
+                c.navegador.ir_para_hoje();
+                c.resumo_aberto = false;
+                c.selecionada = Some(id("rec_salario", h));
+                c.aba_do_detalhe = AbaDoDetalhe::Rubricas;
+            }
+            (3, "faixa") => {
+                janela.pedir(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
+                    sbf_planejamento::Alteracao::VincularDocumento {
+                        alvo: sbf_planejamento::AlvoDoDocumento::Recorrente {
+                            id: "rec_salario".into(),
+                        },
+                        sha256: "sha-do-contracheque-2026-12".into(),
+                        tipo_documento: sbf_planejamento::TipoDeDocumento::Contracheque,
+                        nome: "contracheque-2026-12.pdf".into(),
+                        data: Data::de_iso("2026-12-05"),
+                    },
+                ])));
             }
             (1, "propostas") => {
                 c.resumo_aberto = false;

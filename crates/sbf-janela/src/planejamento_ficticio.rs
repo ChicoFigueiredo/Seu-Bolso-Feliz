@@ -6,14 +6,21 @@
 //! motor pequeno, só o bastante para a janela mostrar e editar o controle mensal. Não é o
 //! motor do serviço real: não use fora da demonstração.
 
+mod extrato;
+
+pub use extrato::{
+    CONTA_DO_NUBANK, CONTA_DO_SALARIO, CONTA_SEM_PAR, LIQUIDO_DO_SALARIO, TEXTO_DO_SALARIO,
+};
+
 use sbf_planejamento::{
-    Alteracao, AlvoDoDocumento, Autor, Cancelamento, Centavos, Certeza, Ciclo, Competencia,
-    Composicao, Conciliacao, Controle, Data, DiaDeCorte, DocumentoVinculado, EntradaDoHistorico,
-    ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta, Excecao, ExcecaoGravada, Exclusao,
-    Filtro, Fonte, Frequencia, Grupo, HORIZONTE_MESES, IdOcorrencia, Natureza, Ocorrencia,
-    OrigemImportada, Pausa, Periodo, Planejamento, Prazo, Proposta, Recibo, Recorrente, Resultado,
-    Resumo, Rubrica, Saldo, Sentido, Simulacao, TipoDeDocumento, TipoDeRubrica, TotaisDoMes,
-    Versao,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Cancelamento, Centavos, Certeza, Ciclo,
+    Competencia, Composicao, Conciliacao, ContaDoPlanejamento, Controle, Data, DiaDeCorte,
+    DocumentoVinculado, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaOcorrencia,
+    EstadoDaProposta, Excecao, ExcecaoGravada, Exclusao, Filtro, Fonte, Frequencia, Grupo,
+    HORIZONTE_MESES, IdOcorrencia, MovimentoCandidato, MovimentoDoExtrato, Natureza, Ocorrencia,
+    OrigemImportada, ParDeConta, Pausa, Periodo, Planejamento, Prazo, Proposta, Recibo, Recorrente,
+    Resultado, Resumo, Rubrica, Saldo, Sentido, Simulacao, TipoDeDocumento, TipoDeRubrica,
+    TotaisDoMes, Versao,
 };
 
 /// Depois deste ponto, a data de "hoje" da demonstração. A janela passa `hoje` em toda
@@ -31,6 +38,11 @@ pub struct PlanejamentoFicticio {
     composicoes: Vec<Composicao>,
     documentos: Vec<DocumentoVinculado>,
     saldos: Vec<Saldo>,
+    /// O extrato fictício (a Pluggy da demonstração).
+    extrato: Vec<MovimentoDoExtrato>,
+    /// Apelido do planejamento -> conta do extrato, os pares confirmados.
+    mapa_contas: Vec<(String, String)>,
+    assinaturas: Vec<(String, Assinatura)>,
     /// Recorrentes cujo valor "disponível" antecede o crédito (feriado bancário), em dias.
     antecipa_dias: Vec<(String, i64)>,
     contador: u64,
@@ -94,6 +106,9 @@ impl PlanejamentoFicticio {
             composicoes: Vec::new(),
             documentos: Vec::new(),
             saldos: Vec::new(),
+            extrato: Vec::new(),
+            mapa_contas: Vec::new(),
+            assinaturas: Vec::new(),
             antecipa_dias: vec![("rec_salario".into(), 2)],
             contador: 0,
             hoje,
@@ -560,6 +575,7 @@ impl PlanejamentoFicticio {
         s.semear_pagos(hoje);
         s.semear_propostas();
         s.semear_composicao_e_documentos(inicio, h);
+        s.semear_extrato(hoje);
         s
     }
 
@@ -1436,6 +1452,33 @@ impl Planejamento for PlanejamentoFicticio {
             .find(|c| &c.ocorrencia == ocorrencia && !c.confirmada)
             .cloned())
     }
+
+    fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
+        Ok(self.contas_impl())
+    }
+
+    fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
+        Ok(self.pares_sugeridos_impl())
+    }
+
+    fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
+        Ok(self.contas_do_extrato_impl())
+    }
+
+    fn assinatura(&self, recorrente: &str) -> Resultado<Option<Assinatura>> {
+        Ok(self.assinatura_impl(recorrente))
+    }
+
+    fn candidatos_de_conciliacao(
+        &self,
+        ocorrencia: &IdOcorrencia,
+    ) -> Resultado<Vec<MovimentoCandidato>> {
+        Ok(self.candidatos_impl(ocorrencia))
+    }
+
+    fn buscar_conciliacoes(&mut self, periodo: &Periodo, hoje: Data) -> Resultado<usize> {
+        self.buscar_impl(periodo, hoje)
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {
@@ -1878,10 +1921,15 @@ impl PlanejamentoFicticio {
                 };
                 Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
             }
-            // Costura de 2026-11-16: o agente da janela implementa no fictício.
-            Alteracao::MapearConta { .. } | Alteracao::DefinirAssinatura { .. } => Err(
-                ErroDoPlanejamento::Invalida("ainda não implementado no fictício".to_owned()),
-            ),
+            Alteracao::MapearConta {
+                apelido,
+                conta_do_extrato,
+            } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
+            Alteracao::DefinirAssinatura {
+                recorrente,
+                assinatura,
+                versao_base,
+            } => self.definir_assinatura(recorrente, assinatura, versao_base, autor, &alt),
         }
     }
 
