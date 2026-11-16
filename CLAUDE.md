@@ -182,7 +182,7 @@ cargo test --workspace            # all Rust tests (fixtures only, never real da
 cargo clippy --workspace --all-targets -- -D warnings
 cargo deny check
 scripts/desktop/conferir.sh       # fmt, clippy, tests, Bun tests and release build
-WAYLAND_DISPLAY= cargo run -p sbf -- --demonstracao   # XWayland; native Wayland is unverified
+cargo run -p sbf -- --demonstracao   # X11/XWayland by default when DISPLAY exists (file drop and window position need it); SBF_WAYLAND=1 forces native Wayland, unverified
 cargo run --release -p sbf-inventario --example medir -- <copy.sqlite>  # timings on a COPY
 ```
 

@@ -7,6 +7,7 @@
 //! padrão e não reclama.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use sbf_planejamento::Filtro;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,100 @@ impl Default for PreferenciasDoControle {
     }
 }
 
+/// Menor e maior tamanho (em pontos) que se aceita de um arquivo guardado.
+pub const TAMANHO_MINIMO: [f32; 2] = [960.0, 600.0];
+pub const TAMANHO_MAXIMO: [f32; 2] = [16_000.0, 16_000.0];
+/// Posição externa (em pontos) fora desta faixa em cada eixo não vale (monitor que sumiu).
+pub const POSICAO_LIMITE: f32 = 16_000.0;
+
+/// O que a janela do sistema mostra num quadro (lido de `ViewportInfo`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Observacao {
+    pub maximizada: bool,
+    pub tela_cheia: bool,
+    pub minimizada: bool,
+    /// Tamanho interno, em pontos.
+    pub tamanho: Option<[f32; 2]>,
+    /// Posição externa, em pontos (só o X11 e os sistemas que a informam entregam).
+    pub posicao: Option<[f32; 2]>,
+}
+
+/// Como a janela do sistema foi deixada: maximizada ou não, o tamanho "normal" e a posição.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct EstadoDaJanela {
+    #[serde(default)]
+    pub maximizada: bool,
+    /// Tamanho interno quando não maximizada.
+    #[serde(default)]
+    pub tamanho: Option<[f32; 2]>,
+    /// Posição externa quando não maximizada (só vale onde o sistema deixa pôr a posição).
+    #[serde(default)]
+    pub posicao: Option<[f32; 2]>,
+}
+
+impl EstadoDaJanela {
+    /// O tamanho guardado, limitado a uma faixa sã; não finito não vale.
+    pub fn tamanho_valido(&self) -> Option<[f32; 2]> {
+        let [l, a] = self.tamanho?;
+        (l.is_finite() && a.is_finite()).then(|| {
+            [
+                l.clamp(TAMANHO_MINIMO[0], TAMANHO_MAXIMO[0]),
+                a.clamp(TAMANHO_MINIMO[1], TAMANHO_MAXIMO[1]),
+            ]
+        })
+    }
+
+    /// A posição guardada, se couber na faixa sã.
+    pub fn posicao_valida(&self) -> Option<[f32; 2]> {
+        let [x, y] = self.posicao?;
+        let ok = |v: f32| v.is_finite() && v.abs() <= POSICAO_LIMITE;
+        (ok(x) && ok(y)).then_some([x, y])
+    }
+
+    /// O estado depois de ver a janela neste quadro: tela cheia e minimizada não contam, e
+    /// maximizada não sobrescreve o tamanho "normal".
+    pub fn depois_de(&self, obs: &Observacao) -> Self {
+        if obs.tela_cheia || obs.minimizada {
+            return *self;
+        }
+        let mut novo = *self;
+        novo.maximizada = obs.maximizada;
+        if !obs.maximizada {
+            let visto = Self {
+                tamanho: obs.tamanho,
+                posicao: obs.posicao,
+                ..Default::default()
+            };
+            if let Some(t) = visto.tamanho_valido() {
+                novo.tamanho = Some(t);
+            }
+            if let Some(p) = visto.posicao_valida() {
+                novo.posicao = Some(p);
+            }
+        }
+        novo
+    }
+
+    /// Aplica o estado guardado ao `ViewportBuilder` da abertura. A posição só entra quando
+    /// `com_posicao` (no Wayland o sistema não deixa o app escolher).
+    pub fn aplicar(
+        &self,
+        mut vb: egui::ViewportBuilder,
+        com_posicao: bool,
+    ) -> egui::ViewportBuilder {
+        if let Some([l, a]) = self.tamanho_valido() {
+            vb = vb.with_inner_size([l, a]);
+        }
+        if com_posicao && let Some([x, y]) = self.posicao_valida() {
+            vb = vb.with_position([x, y]);
+        }
+        if self.maximizada {
+            vb = vb.with_maximized(true);
+        }
+        vb
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PreferenciasDaJanela {
     /// O `zoom_factor` do egui; `None` enquanto nada foi guardado.
@@ -72,7 +167,24 @@ pub struct PreferenciasDaJanela {
     /// A largura da lateral (dock) em pontos.
     #[serde(default)]
     pub largura_da_lateral: Option<f32>,
+    /// A janela do sistema: maximizada, tamanho e posição.
+    #[serde(default)]
+    pub janela: EstadoDaJanela,
 }
+
+/// Onde moram as preferências da janela: na pasta de dados do app, nunca dentro do cofre.
+/// `None` sem pasta de dados ou com ela dentro do cofre.
+pub fn arquivo_das_preferencias_do(cofre: Option<&Path>) -> Option<PathBuf> {
+    let pasta = sbf_chaveiro::pasta_de_dados_do_app().ok()?;
+    if let Some(c) = cofre {
+        sbf_chaveiro::garantir_fora_do_cofre(&pasta, c).ok()?;
+    }
+    Some(pasta.join(NOME_DO_ARQUIVO))
+}
+
+/// A espera do Guardador: o que muda a cada quadro (arrastar divisão, mover janela) só vai
+/// para o disco quando para de mudar por este tempo.
+pub const ESPERA_DE_GRAVACAO: Duration = Duration::from_millis(800);
 
 /// Largura que a casca aceita para a lateral (`size_range` do dock).
 pub const LARGURA_MINIMA: f32 = 220.0;
@@ -132,6 +244,9 @@ pub struct Guardador {
     arquivo: Option<PathBuf>,
     ultimo: Option<PreferenciasDaJanela>,
     resolvido: bool,
+    /// O que está esperando para ser gravado e desde quando não muda.
+    pendente: Option<(PreferenciasDaJanela, Instant)>,
+    botao_antes: bool,
 }
 
 impl Guardador {
@@ -155,6 +270,43 @@ impl Guardador {
         self.ultimo = Some(lidas.clone());
         self.arquivo = arquivo;
         lidas
+    }
+
+    /// Há algo mudado esperando a hora de gravar (o app pede um quadro para depois).
+    pub fn tem_pendente(&self) -> bool {
+        self.pendente.is_some()
+    }
+
+    /// Um quadro com espera: grava `atual` quando ele para de mudar por `ESPERA_DE_GRAVACAO`
+    /// ou quando o botão do mouse acaba de soltar (fim de um arrasto). `Ok(true)` quando
+    /// gravou.
+    pub fn quadro_com_espera(
+        &mut self,
+        atual: &PreferenciasDaJanela,
+        agora: Instant,
+        botao_apertado: bool,
+    ) -> Result<bool, String> {
+        let soltou = self.botao_antes && !botao_apertado;
+        self.botao_antes = botao_apertado;
+        if self.arquivo.is_none() || self.ultimo.as_ref() == Some(atual) {
+            self.pendente = None;
+            return Ok(false);
+        }
+        let desde = match &self.pendente {
+            Some((p, desde)) if p == atual => *desde,
+            _ => {
+                self.pendente = Some((atual.clone(), agora));
+                agora
+            }
+        };
+        if botao_apertado {
+            return Ok(false);
+        }
+        if soltou || agora.saturating_duration_since(desde) >= ESPERA_DE_GRAVACAO {
+            self.pendente = None;
+            return self.quadro(atual);
+        }
+        Ok(false)
     }
 
     /// Um quadro: grava se `atual` difere do último gravado. `Ok(true)` quando gravou.
@@ -200,8 +352,14 @@ mod testes {
                 paineis_visiveis: [("previa".to_owned(), false)].into_iter().collect(),
                 tela_cheia: false,
                 modo_foco: true,
+                dock: None,
             }),
             largura_da_lateral: Some(410.0),
+            janela: EstadoDaJanela {
+                maximizada: true,
+                tamanho: Some([1400.0, 900.0]),
+                posicao: Some([120.0, 40.0]),
+            },
         }
     }
 
@@ -332,5 +490,159 @@ mod testes {
             ..Default::default()
         };
         assert_eq!(p.largura_valida(), None);
+    }
+
+    fn obs(maximizada: bool, t: [f32; 2], p: [f32; 2]) -> Observacao {
+        Observacao {
+            maximizada,
+            tamanho: Some(t),
+            posicao: Some(p),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn arquivo_sem_o_campo_da_janela_abre_nao_maximizado() {
+        let (_t, a) = caminho();
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::write(&a, r#"{"zoom": 1.5, "largura_da_lateral": 400.0}"#).unwrap();
+        let p = PreferenciasDaJanela::carregar(&a);
+        assert_eq!(p.janela, EstadoDaJanela::default());
+        assert!(!p.janela.maximizada);
+    }
+
+    #[test]
+    fn tamanho_e_posicao_ficam_em_limites_sanos() {
+        let e = EstadoDaJanela {
+            tamanho: Some([100.0, 99_999.0]),
+            posicao: Some([30.0, 20.0]),
+            ..Default::default()
+        };
+        assert_eq!(e.tamanho_valido(), Some([960.0, 16_000.0]));
+        assert_eq!(e.posicao_valida(), Some([30.0, 20.0]));
+        for ruim in [
+            [f32::NAN, 1.0],
+            [1.0, f32::INFINITY],
+            [-90_000.0, 0.0],
+            [0.0, 70_000.0],
+        ] {
+            let e = EstadoDaJanela {
+                tamanho: Some(ruim),
+                posicao: Some(ruim),
+                ..Default::default()
+            };
+            assert_eq!(e.posicao_valida(), None, "{ruim:?}");
+            if !ruim[0].is_finite() || !ruim[1].is_finite() {
+                assert_eq!(e.tamanho_valido(), None, "{ruim:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn maximizada_nao_sobrescreve_o_tamanho_normal() {
+        let normal =
+            EstadoDaJanela::default().depois_de(&obs(false, [1300.0, 800.0], [10.0, 20.0]));
+        assert_eq!(normal.tamanho, Some([1300.0, 800.0]));
+        assert_eq!(normal.posicao, Some([10.0, 20.0]));
+        let max = normal.depois_de(&obs(true, [1920.0, 1000.0], [0.0, 0.0]));
+        assert!(max.maximizada);
+        assert_eq!(max.tamanho, Some([1300.0, 800.0]));
+        assert_eq!(max.posicao, Some([10.0, 20.0]));
+        // Desmaximizar volta a seguir a janela.
+        let de_volta = max.depois_de(&obs(false, [1200.0, 700.0 + 0.0], [5.0, 5.0]));
+        assert!(!de_volta.maximizada);
+        assert_eq!(de_volta.tamanho, Some([1200.0, 700.0]));
+    }
+
+    #[test]
+    fn tela_cheia_e_minimizada_sao_ignoradas() {
+        let antes = EstadoDaJanela::default().depois_de(&obs(false, [1300.0, 800.0], [10.0, 20.0]));
+        for (tela_cheia, minimizada) in [(true, false), (false, true)] {
+            let o = Observacao {
+                tela_cheia,
+                minimizada,
+                maximizada: true,
+                tamanho: Some([1920.0, 1080.0]),
+                posicao: Some([0.0, 0.0]),
+            };
+            assert_eq!(antes.depois_de(&o), antes);
+        }
+    }
+
+    #[test]
+    fn sem_posicao_informada_a_guardada_fica() {
+        let antes = EstadoDaJanela::default().depois_de(&obs(false, [1300.0, 800.0], [10.0, 20.0]));
+        let wayland = Observacao {
+            tamanho: Some([1310.0, 810.0]),
+            posicao: None,
+            ..Default::default()
+        };
+        let depois = antes.depois_de(&wayland);
+        assert_eq!(depois.tamanho, Some([1310.0, 810.0]));
+        assert_eq!(depois.posicao, Some([10.0, 20.0]));
+    }
+
+    #[test]
+    fn aplicar_no_viewport_respeita_a_posicao_confiavel() {
+        let e = alteradas().janela;
+        let x11 = e.aplicar(egui::ViewportBuilder::default(), true);
+        assert_eq!(x11.maximized, Some(true));
+        assert_eq!(x11.inner_size, Some(egui::vec2(1400.0, 900.0)));
+        assert_eq!(x11.position, Some(egui::pos2(120.0, 40.0)));
+        let wayland = e.aplicar(egui::ViewportBuilder::default(), false);
+        assert_eq!(wayland.position, None);
+        let nada = EstadoDaJanela::default().aplicar(egui::ViewportBuilder::default(), true);
+        assert_eq!(nada.maximized, None);
+        assert_eq!(nada.inner_size, None);
+    }
+
+    fn com_arquivo() -> (tempfile::TempDir, Guardador) {
+        let (t, a) = caminho();
+        let mut g = Guardador::default();
+        g.ligar(Some(a));
+        (t, g)
+    }
+
+    #[test]
+    fn guardador_espera_o_arrasto_parar() {
+        let (_t, mut g) = com_arquivo();
+        let t0 = Instant::now();
+        let mut p = PreferenciasDaJanela::default();
+        // Muda a cada quadro por meio segundo: nada vai ao disco.
+        for ms in 0..5u64 {
+            p.largura_da_lateral = Some(300.0 + ms as f32);
+            let r = g.quadro_com_espera(&p, t0 + Duration::from_millis(ms * 100), false);
+            assert_eq!(r, Ok(false));
+        }
+        assert!(g.tem_pendente());
+        assert!(!g.arquivo().unwrap().exists());
+        // Parou de mudar por mais que a espera: grava.
+        let r = g.quadro_com_espera(&p, t0 + Duration::from_millis(400 + 900), false);
+        assert_eq!(r, Ok(true));
+        assert!(!g.tem_pendente());
+        assert_eq!(PreferenciasDaJanela::carregar(g.arquivo().unwrap()), p);
+    }
+
+    #[test]
+    fn guardador_grava_ao_soltar_o_botao_e_nao_com_ele_apertado() {
+        let (_t, mut g) = com_arquivo();
+        let t0 = Instant::now();
+        let p = PreferenciasDaJanela {
+            largura_da_lateral: Some(350.0),
+            ..Default::default()
+        };
+        assert_eq!(g.quadro_com_espera(&p, t0, true), Ok(false));
+        // Muito tempo depois, ainda com o botão apertado: espera.
+        let tarde = t0 + Duration::from_secs(5);
+        assert_eq!(g.quadro_com_espera(&p, tarde, true), Ok(false));
+        assert_eq!(g.quadro_com_espera(&p, tarde, false), Ok(true));
+    }
+
+    #[test]
+    fn guardador_sem_mudanca_nao_fica_pendente() {
+        let (_t, mut g) = com_arquivo();
+        let p = PreferenciasDaJanela::default();
+        assert_eq!(g.quadro_com_espera(&p, Instant::now(), false), Ok(false));
+        assert!(!g.tem_pendente());
     }
 }

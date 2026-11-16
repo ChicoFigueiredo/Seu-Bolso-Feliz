@@ -183,6 +183,8 @@ pub struct Janela {
     /// A cópia mais recente das preferências da casca (tema, densidade, painéis...). Começa
     /// com o que o arquivo tinha, para nunca gravar `None` por cima do guardado.
     pub casca_guardada: Option<bancada_casca::Preferencias>,
+    /// Como a janela do sistema foi deixada (maximizada, tamanho, posição).
+    pub estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela,
     /// A largura da lateral no último quadro (ou a guardada, antes de restaurar).
     pub largura_da_lateral: Option<f32>,
 }
@@ -297,6 +299,7 @@ impl Janela {
             ),
             guardador: crate::preferencias_da_janela::Guardador::default(),
             casca_guardada: None,
+            estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela::default(),
             largura_da_lateral: None,
         }
     }
@@ -311,6 +314,7 @@ impl Janela {
             controle: self.controle.preferencias(),
             casca: self.casca_guardada.clone(),
             largura_da_lateral: self.largura_da_lateral,
+            janela: self.estado_da_janela,
         }
     }
 
@@ -339,6 +343,7 @@ impl Janela {
         self.controle.aplicar_preferencias(&lidas.controle);
         self.casca_guardada = lidas.casca.clone();
         self.largura_da_lateral = lidas.largura_valida();
+        self.estado_da_janela = lidas.janela;
         lidas
     }
 
