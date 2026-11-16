@@ -5067,6 +5067,7 @@ dependencies = [
  "sbf-livro",
  "sbf-mcp",
  "sbf-mensageiros",
+ "sbf-pdf",
  "sbf-planejamento",
  "sbf-planilha",
  "sbf-pontos",
