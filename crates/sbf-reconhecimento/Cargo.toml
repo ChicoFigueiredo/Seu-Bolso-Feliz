@@ -15,12 +15,13 @@ sbf-pdf = { path = "../sbf-pdf" }
 sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
 rusqlite = { workspace = true }
+serde_json = { workspace = true }
 thiserror.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
-serde_json = { workspace = true }
 # O PDF fictício dos testes (a mesma versão do sbf-pdf).
+zeroize = { workspace = true }
 lopdf = { version = "=0.47.0", default-features = false }
 
 [lints]
