@@ -24,6 +24,11 @@
 //! (módulos novos neste crate); o agente da janela escreve contra [`Reconhecedor`] e
 //! [`ReconhecedorFicticio`]. Mudar um tipo público exige avisar o integrador.
 
+pub mod cofre;
+pub mod salario;
+
+pub use cofre::{MotorDeIa, ReconhecedorDoCofre, Segredos};
+
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;

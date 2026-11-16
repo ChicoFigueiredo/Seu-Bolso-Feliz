@@ -25,6 +25,7 @@ use sbf_planilha::importacao;
 use sbf_planilha::leitura;
 use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
+use sbf_reconhecimento::salario;
 
 const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
 
@@ -381,38 +382,10 @@ fn contracheque_com(
     saida: &mut dyn Write,
 ) -> Result<(), String> {
     let c = contracheque::ler(texto).map_err(|e| e.to_string())?;
-    let recorrente = match &o.recorrente {
-        Some(id) => plan
-            .recorrente(id)
-            .map_err(|e| e.to_string())?
-            .ok_or("o recorrente não existe")?,
-        None => {
-            let mut candidatos: Vec<_> = plan
-                .recorrentes(false)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .filter(|r| {
-                    r.natureza == sbf_planejamento::Natureza::Entrada
-                        && sbf_planilha::texto::normalizar(&r.nome).contains("salario")
-                })
-                .collect();
-            match candidatos.len() {
-                1 => candidatos.remove(0),
-                0 => return Err("não achei o recorrente do salário (use --recorrente)".to_owned()),
-                _ => {
-                    return Err("há mais de um recorrente de salário (use --recorrente)".to_owned());
-                }
-            }
-        }
-    };
+    let recorrente = salario::recorrente_do_salario(&*plan, o.recorrente.as_deref())
+        .map_err(|e| e.to_string())?;
     let composicao = c.composicao(&recorrente.id, sha);
-    let digitado = recorrente
-        .versoes
-        .iter()
-        .rev()
-        .find(|v| v.desde <= c.pagamento)
-        .or_else(|| recorrente.versoes.first())
-        .and_then(|v| v.valor);
+    let digitado = salario::valor_digitado(&recorrente, c.pagamento);
 
     es(writeln!(
         saida,
@@ -462,10 +435,7 @@ fn contracheque_com(
     if !o.confirmar {
         return es(writeln!(saida, "nada foi gravado (use --confirmar)"));
     }
-    let igual = plan
-        .composicao(&recorrente.id, c.pagamento)
-        .map_err(|e| e.to_string())?
-        .is_some_and(|a| a.desde == composicao.desde && a.rubricas == composicao.rubricas);
+    let igual = salario::composicao_ja_vigente(&*plan, &composicao).map_err(|e| e.to_string())?;
     if !igual {
         plan.aplicar(
             Alteracao::DefinirComposicao {
@@ -479,11 +449,7 @@ fn contracheque_com(
     let alvo = AlvoDoDocumento::Recorrente {
         id: recorrente.id.clone(),
     };
-    let ja_vinculado = plan
-        .documentos(&alvo)
-        .map_err(|e| e.to_string())?
-        .iter()
-        .any(|d| d.sha256 == sha);
+    let ja_vinculado = salario::ja_vinculado(&*plan, &alvo, sha).map_err(|e| e.to_string())?;
     if !ja_vinculado {
         plan.aplicar(
             Alteracao::VincularDocumento {

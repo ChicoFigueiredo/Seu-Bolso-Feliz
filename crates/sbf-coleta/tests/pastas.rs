@@ -5,7 +5,7 @@
 use rusqlite::Connection;
 use sbf_coleta::pastas::{
     Contadores, Destino, Opcoes, Varredor, Vigia, abrir_varredura_do_vigia, indexar_arquivo,
-    iso_de, mtime_ms,
+    iso_de, mtime_ms, registrar_arrastado, sha256_do_arquivo,
 };
 use serde::Deserialize;
 use std::fs;
@@ -322,4 +322,97 @@ fn origem_gravada_pelo_bun_com_mtime_divergente_nao_ganha_segunda_origem() {
         assert_eq!((r2.novos, r2.repetidos), (0, 1), "{segundos}: {r2:?}");
         assert_eq!(contar(&c, "SELECT COUNT(*) FROM origem"), 1, "{segundos}");
     }
+}
+
+#[test]
+fn arrastado_registra_copia_ao_acervo_e_deixa_o_original_intacto() {
+    let c = cenario();
+    // Extensão que a varredura ignora: soltar é decisão explícita, vale mesmo assim.
+    escrever(&c.raiz, "nota.mp3", "conteudo ficticio arrastado");
+    let original = c.raiz.join("nota.mp3");
+    let hash = sha256_do_arquivo(&original).expect("hash");
+
+    let r = registrar_arrastado(&c.conn, &c.cofre, &original, &hash).expect("registrar");
+
+    assert!(r.achado_novo && r.copiado_agora, "{r:?}");
+    let acervo = r.caminho_acervo.expect("caminho");
+    assert_eq!(
+        fs::read_to_string(c.cofre.join(&acervo)).expect("copia"),
+        "conteudo ficticio arrastado"
+    );
+    assert_eq!(
+        fs::read_to_string(&original).expect("original"),
+        "conteudo ficticio arrastado"
+    );
+    assert_eq!(
+        contar(
+            &c,
+            "SELECT COUNT(*) FROM origem WHERE fonte_id = 'arrastado' AND filename = 'nota.mp3'"
+        ),
+        1
+    );
+    assert_eq!(
+        contar(&c, "SELECT COUNT(*) FROM achado WHERE camada = 'A'"),
+        1
+    );
+}
+
+#[test]
+fn arrastado_repetido_nao_duplica_e_copia_o_que_faltava() {
+    let c = cenario();
+    escrever(&c.raiz, "fatura.pdf", "conteudo ficticio repetido");
+    let original = c.raiz.join("fatura.pdf");
+    let hash = sha256_do_arquivo(&original).expect("hash");
+    // O achado já existe (varredura B: só hash, sem cópia).
+    c.conn
+        .execute(
+            "INSERT INTO achado (content_hash, file_size_bytes, camada) VALUES (?1, 26, 'B')",
+            [&hash],
+        )
+        .expect("achado");
+
+    let primeira = registrar_arrastado(&c.conn, &c.cofre, &original, &hash).expect("1");
+    assert!(
+        !primeira.achado_novo && primeira.copiado_agora,
+        "{primeira:?}"
+    );
+    let segunda = registrar_arrastado(&c.conn, &c.cofre, &original, &hash).expect("2");
+    assert!(
+        !segunda.achado_novo && !segunda.copiado_agora,
+        "{segunda:?}"
+    );
+    assert_eq!(segunda.caminho_acervo, primeira.caminho_acervo);
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM achado"), 1);
+    assert_eq!(contar(&c, "SELECT COUNT(*) FROM origem"), 1);
+    assert_eq!(
+        contar(&c, "SELECT COUNT(*) FROM achado WHERE camada = 'A'"),
+        1,
+        "soltar promove a camada B para A"
+    );
+}
+
+#[test]
+fn arrastado_que_mudou_depois_do_hash_nao_deixa_copia_sob_o_hash_errado() {
+    let c = cenario();
+    escrever(&c.raiz, "a.txt", "conteudo ficticio original");
+    let original = c.raiz.join("a.txt");
+    let hash = sha256_do_arquivo(&original).expect("hash");
+    // Mesmo tamanho, outro conteúdo.
+    escrever(&c.raiz, "a.txt", "conteudo ficticio trocado!");
+
+    let r = registrar_arrastado(&c.conn, &c.cofre, &original, &hash).expect("registrar");
+
+    assert!(!r.copiado_agora && r.caminho_acervo.is_none(), "{r:?}");
+    assert!(
+        !c.cofre
+            .join(format!("acervo/{}/{hash}.txt", &hash[..2]))
+            .exists()
+    );
+    assert_eq!(
+        contar(
+            &c,
+            "SELECT COUNT(*) FROM achado WHERE caminho_acervo IS NOT NULL"
+        ),
+        0
+    );
 }
