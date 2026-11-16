@@ -16,3 +16,5 @@ docs/design/desktop/temas.json
 docs/design/desktop/tokens.json
 # Modelo do cargo-about (Handlebars), não é HTML.
 scripts/desktop/about.hbs
+# Skills de agentes vendorizadas (conferidas pelo skills-lock.json): não reformatar.
+.agents
