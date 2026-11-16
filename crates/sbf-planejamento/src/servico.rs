@@ -777,6 +777,15 @@ impl Planejamento for PlanejamentoSqlite {
             .collect()
     }
 
+    fn sugestao_de_conciliacao(
+        &self,
+        ocorrencia: &crate::IdOcorrencia,
+    ) -> Resultado<Option<Conciliacao>> {
+        Ok(PlanejamentoSqlite::conciliacoes(self, &ocorrencia.recorrente)?
+            .into_iter()
+            .find(|c| !c.confirmada && &c.ocorrencia == ocorrencia))
+    }
+
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
         PlanejamentoSqlite::excecoes(self, recorrente)
     }

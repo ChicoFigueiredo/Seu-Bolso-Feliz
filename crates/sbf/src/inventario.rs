@@ -104,6 +104,19 @@ impl AppDoInventario {
                 };
                 let mut janela = Janela::nova();
                 janela.ligacoes.cofre = true;
+                // O controle mensal (spec 11): o planejamento do cofre, quando já existe.
+                let arquivo_do_plano = self.pasta.join("planejamento.sqlite");
+                if arquivo_do_plano.exists() {
+                    match sbf_planejamento::Banco::abrir(&arquivo_do_plano) {
+                        Ok(banco) => janela.ligar_planejamento(Box::new(
+                            sbf_planejamento::PlanejamentoSqlite::novo(
+                                banco,
+                                crate::mcp::saldos_do_cofre(&self.pasta),
+                            ),
+                        )),
+                        Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
+                    }
+                }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());
                 // Só lê o estado: não pede senha. Se o keyring travar, a barra mostra "—".
