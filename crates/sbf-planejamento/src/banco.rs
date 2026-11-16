@@ -15,12 +15,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    Autor, Cancelamento, Centavos, Competencia, Conciliacao, Data, ErroDoPlanejamento,
-    ExcecaoGravada, Exclusao, Grupo, IdOcorrencia, Pausa, Recorrente, Resultado, Versao,
+    AlvoDoDocumento, Autor, Cancelamento, Centavos, Competencia, Composicao, Conciliacao, Data,
+    DocumentoVinculado, ErroDoPlanejamento, ExcecaoGravada, Exclusao, Grupo, IdOcorrencia, Pausa,
+    Recorrente, Resultado, Versao,
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 3;
+pub const VERSAO_DO_ESQUEMA: u32 = 4;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -162,6 +163,40 @@ const MIGRACOES: &[&str] = &[
     "
     UPDATE configuracao SET valor = valor || '-01'
     WHERE chave = 'inicio_do_acompanhamento' AND length(valor) = 7;
+    ",
+    // 4: composição do salário (rubricas) e documentos vinculados. Sem DELETE: a composição
+    // de mesmo `desde` é substituída no lugar e o documento é desvinculado por marca.
+    "
+    CREATE TABLE composicoes (
+        id            TEXT PRIMARY KEY,
+        recorrente_id TEXT NOT NULL REFERENCES recorrentes(id),
+        desde         TEXT NOT NULL,
+        rubricas      TEXT NOT NULL,
+        documento     TEXT,
+        origem        TEXT NOT NULL,
+        quando        TEXT NOT NULL,
+        autor         TEXT NOT NULL,
+        UNIQUE (recorrente_id, desde)
+    );
+
+    CREATE TABLE documentos_vinculados (
+        id            TEXT PRIMARY KEY,
+        recorrente_id TEXT NOT NULL REFERENCES recorrentes(id),
+        ocorrencia    TEXT,
+        sha256        TEXT NOT NULL,
+        tipo          TEXT NOT NULL,
+        nome          TEXT NOT NULL,
+        data          TEXT,
+        quando        TEXT NOT NULL,
+        autor         TEXT NOT NULL,
+        desvinculado  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX documentos_por_recorrente ON documentos_vinculados (recorrente_id);
+
+    CREATE TRIGGER composicoes_sem_delete BEFORE DELETE ON composicoes
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    CREATE TRIGGER documentos_vinculados_sem_delete BEFORE DELETE ON documentos_vinculados
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     ",
 ];
 
@@ -708,6 +743,100 @@ pub(crate) fn de_rfc3339(texto: &str) -> Option<i64> {
     let m: i64 = hora.get(3..5)?.parse().ok()?;
     let s: i64 = hora.get(6..8)?.parse().ok()?;
     Some(data.dias_desde_1970() * 86_400 + h * 3600 + m * 60 + s)
+}
+
+// ---------------------------------------------------------------------------------------
+// Composições e documentos vinculados
+// ---------------------------------------------------------------------------------------
+
+/// A composição de maior `desde <= competencia` do recorrente.
+pub(crate) fn ler_composicao(
+    c: &Connection,
+    recorrente: &str,
+    competencia: Competencia,
+) -> Resultado<Option<Composicao>> {
+    let linhas: Vec<(String, String, Option<String>, String)> = {
+        let mut stmt = c.prepare(
+            "SELECT desde, rubricas, documento, origem FROM composicoes
+             WHERE recorrente_id = ?1",
+        )?;
+        stmt.query_map(params![recorrente], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })?
+        .collect::<Result<_, _>>()?
+    };
+    let mut melhor: Option<Composicao> = None;
+    for (desde, rubricas, documento, origem) in linhas {
+        let desde = ler_competencia(&desde)?;
+        if desde > competencia || melhor.as_ref().is_some_and(|m| m.desde >= desde) {
+            continue;
+        }
+        melhor = Some(Composicao {
+            recorrente: recorrente.to_owned(),
+            desde,
+            rubricas: de_json(&rubricas)?,
+            documento,
+            origem,
+        });
+    }
+    Ok(melhor)
+}
+
+/// Os documentos ativos de um recorrente: só os da regra, ou só os de uma ocorrência.
+pub(crate) fn ler_documentos(
+    c: &Connection,
+    recorrente: &str,
+    ocorrencia: Option<&str>,
+) -> Resultado<Vec<DocumentoVinculado>> {
+    let mut stmt = c.prepare(
+        "SELECT id, recorrente_id, ocorrencia, sha256, tipo, nome, data, quando, autor, desvinculado
+         FROM documentos_vinculados
+         WHERE recorrente_id = ?1 AND desvinculado = 0
+           AND (ocorrencia IS NULL OR ocorrencia = ?2)
+         ORDER BY quando DESC, rowid DESC",
+    )?;
+    let linhas = stmt
+        .query_map(params![recorrente, ocorrencia], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                l.get::<_, String>(1)?,
+                l.get::<_, Option<String>>(2)?,
+                l.get::<_, String>(3)?,
+                l.get::<_, String>(4)?,
+                l.get::<_, String>(5)?,
+                l.get::<_, Option<String>>(6)?,
+                l.get::<_, String>(7)?,
+                l.get::<_, String>(8)?,
+                l.get::<_, bool>(9)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    linhas
+        .into_iter()
+        .map(
+            |(id, rec, oc, sha256, tipo, nome, data, quando, autor, desvinculado)| {
+                let alvo = match oc {
+                    Some(t) => AlvoDoDocumento::Ocorrencia {
+                        id: IdOcorrencia::de_texto(&t).ok_or_else(|| {
+                            ErroDoPlanejamento::Banco("ocorrência inválida no banco".into())
+                        })?,
+                    },
+                    None => AlvoDoDocumento::Recorrente { id: rec },
+                };
+                Ok(DocumentoVinculado {
+                    id,
+                    alvo,
+                    sha256,
+                    tipo: de_json(&tipo)?,
+                    nome,
+                    data: data.as_deref().map(ler_data).transpose()?,
+                    quando,
+                    autor: de_json(&autor)?,
+                    desvinculado,
+                })
+            },
+        )
+        .collect()
 }
 
 #[cfg(test)]

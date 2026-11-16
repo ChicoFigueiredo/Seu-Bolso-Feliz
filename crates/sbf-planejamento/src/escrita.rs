@@ -8,9 +8,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::banco::{self, carregar_um, json, novo_id};
 use crate::projecao::{projetar_competencias, versao_vigente};
 use crate::{
-    Alteracao, Autor, Competencia, Conciliacao, Data, ErroDoPlanejamento, Escopo, Excecao,
-    Exclusao, Frequencia, IdOcorrencia, MudancaDeVersao, NovoRecorrente, OrigemImportada, Prazo,
-    Recibo, Recorrente, Resultado, Versao,
+    Alteracao, AlvoDoDocumento, Autor, Competencia, Composicao, Conciliacao, Data,
+    ErroDoPlanejamento, Escopo, Excecao, Exclusao, Frequencia, IdOcorrencia, MudancaDeVersao,
+    NovoRecorrente, OrigemImportada, Prazo, Recibo, Recorrente, Resultado, TipoDeDocumento, Versao,
 };
 
 /// O que uma variante fez, para o histórico e o recibo.
@@ -90,14 +90,18 @@ pub(crate) fn aplicar_na(
             versao_base,
         } => mover(c, recorrente, grupo, *posicao, *versao_base)?,
         Alteracao::CriarGrupo { nome, posicao } => criar_grupo(c, nome, *posicao)?,
-        // Costura de 2026-11-16: o agente do motor implementa.
-        Alteracao::DefinirComposicao { .. }
-        | Alteracao::VincularDocumento { .. }
-        | Alteracao::DesvincularDocumento { .. } => {
-            return Err(crate::ErroDoPlanejamento::Invalida(
-                "ainda não implementado nesta versão".to_owned(),
-            ));
-        }
+        Alteracao::DefinirComposicao {
+            composicao,
+            versao_base,
+        } => definir_composicao(c, composicao, *versao_base, autor, agora)?,
+        Alteracao::VincularDocumento {
+            alvo,
+            sha256,
+            tipo_documento,
+            nome,
+            data,
+        } => vincular_documento(c, alvo, sha256, *tipo_documento, nome, *data, autor, agora)?,
+        Alteracao::DesvincularDocumento { id } => desvincular_documento(c, id)?,
     };
 
     let alteracao_id = if feito.grava_historico {
@@ -786,6 +790,164 @@ fn criar_grupo(c: &Connection, nome: &str, posicao: i64) -> Resultado<Feito> {
         recorrente: None,
         resumo: "Criou ou reordenou um grupo.".into(),
         versao_nova: 0,
+        grava_historico: true,
+    })
+}
+
+// ---------------------------------------------------------------------------------------
+// Composição do salário e documentos
+// ---------------------------------------------------------------------------------------
+
+/// Grava as rubricas a partir de `desde`; a de mesmo `desde` é substituída no lugar. Não
+/// muda a versão do registro nem o valor digitado.
+fn definir_composicao(
+    c: &Connection,
+    composicao: &Composicao,
+    base: i64,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let rec = carregar_com_base(c, &composicao.recorrente, base)?;
+    nao_vazio(&composicao.origem, "a origem")?;
+    if composicao.rubricas.iter().any(|r| r.nome.trim().is_empty()) {
+        return invalida("toda rubrica precisa de nome");
+    }
+    let desde = composicao.desde.to_string();
+    let rubricas = json(&composicao.rubricas)?;
+    let atualizadas = c.execute(
+        "UPDATE composicoes SET rubricas = ?3, documento = ?4, origem = ?5, quando = ?6,
+                autor = ?7
+         WHERE recorrente_id = ?1 AND desde = ?2",
+        params![
+            rec.id,
+            desde,
+            rubricas,
+            composicao.documento,
+            composicao.origem,
+            agora,
+            json(autor)?
+        ],
+    )?;
+    if atualizadas == 0 {
+        c.execute(
+            "INSERT INTO composicoes (id, recorrente_id, desde, rubricas, documento, origem,
+                                      quando, autor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                novo_id(c, "comp")?,
+                rec.id,
+                desde,
+                rubricas,
+                composicao.documento,
+                composicao.origem,
+                agora,
+                json(autor)?
+            ],
+        )?;
+    }
+    Ok(Feito {
+        alvo: rec.id.clone(),
+        recorrente: Some(rec.id),
+        resumo: format!(
+            "Definiu a composição do salário desde {} ({} rubricas).",
+            composicao.desde,
+            composicao.rubricas.len()
+        ),
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vincular_documento(
+    c: &Connection,
+    alvo: &AlvoDoDocumento,
+    sha256: &str,
+    tipo: TipoDeDocumento,
+    nome: &str,
+    data: Option<Data>,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    nao_vazio(sha256, "o sha256")?;
+    let (recorrente, ocorrencia) = match alvo {
+        AlvoDoDocumento::Recorrente { id } => (id.clone(), None),
+        AlvoDoDocumento::Ocorrencia { id } => (id.recorrente.clone(), Some(id.to_string())),
+    };
+    let rec = carregar(c, &recorrente)?;
+    let existente: Option<String> = c
+        .query_row(
+            "SELECT id FROM documentos_vinculados
+             WHERE recorrente_id = ?1 AND ocorrencia IS ?2 AND sha256 = ?3 AND desvinculado = 0",
+            params![recorrente, ocorrencia, sha256],
+            |l| l.get(0),
+        )
+        .optional()?;
+    if let Some(id) = existente {
+        return Ok(Feito {
+            alvo: id,
+            recorrente: None,
+            resumo: String::new(),
+            versao_nova: rec.versao_do_registro,
+            grava_historico: false,
+        });
+    }
+    nao_vazio(nome, "o nome do documento")?;
+    let id = novo_id(c, "doc")?;
+    c.execute(
+        "INSERT INTO documentos_vinculados
+             (id, recorrente_id, ocorrencia, sha256, tipo, nome, data, quando, autor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            id,
+            recorrente,
+            ocorrencia,
+            sha256,
+            json(&tipo)?,
+            nome,
+            data.map(|d| d.to_string()),
+            agora,
+            json(autor)?
+        ],
+    )?;
+    Ok(Feito {
+        alvo: id,
+        recorrente: Some(recorrente),
+        resumo: "Vinculou um documento.".into(),
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+/// Marca o documento como desvinculado; desvincular de novo não faz nada.
+fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
+    let (recorrente, desvinculado): (String, bool) = c
+        .query_row(
+            "SELECT recorrente_id, desvinculado FROM documentos_vinculados WHERE id = ?1",
+            params![id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(format!("documento {id}")))?;
+    let rec = carregar(c, &recorrente)?;
+    if desvinculado {
+        return Ok(Feito {
+            alvo: id.to_owned(),
+            recorrente: None,
+            resumo: String::new(),
+            versao_nova: rec.versao_do_registro,
+            grava_historico: false,
+        });
+    }
+    c.execute(
+        "UPDATE documentos_vinculados SET desvinculado = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(recorrente),
+        resumo: "Desvinculou um documento.".into(),
+        versao_nova: rec.versao_do_registro,
         grava_historico: true,
     })
 }

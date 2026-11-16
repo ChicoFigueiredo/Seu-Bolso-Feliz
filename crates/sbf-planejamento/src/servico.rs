@@ -16,10 +16,11 @@ use crate::escrita::aplicar_na;
 use crate::projecao::{projetar_competencias_desde, projetar_desde};
 use crate::resumo;
 use crate::{
-    Alteracao, Autor, Centavos, Competencia, Conciliacao, Controle, Data, EntradaDoHistorico,
-    ErroDoPlanejamento, EstadoDaOcorrencia, EstadoDaProposta, Excecao, ExcecaoGravada, Filtro,
-    FonteDeSaldos, Grupo, HORIZONTE_MESES, Natureza, Ocorrencia, OrigemImportada, Periodo,
-    Planejamento, Proposta, Recibo, Recorrente, Resultado, Simulacao, TotaisDoMes,
+    Alteracao, AlvoDoDocumento, Autor, Centavos, Competencia, Composicao, Conciliacao, Controle,
+    Data, DocumentoVinculado, EntradaDoHistorico, ErroDoPlanejamento, EstadoDaOcorrencia,
+    EstadoDaProposta, Excecao, ExcecaoGravada, Filtro, FonteDeSaldos, Grupo, HORIZONTE_MESES,
+    Natureza, Ocorrencia, OrigemImportada, Periodo, Planejamento, Proposta, Recibo, Recorrente,
+    Resultado, Simulacao, TotaisDoMes,
 };
 
 /// Quantos meses para trás o controle procura o que está em atraso.
@@ -298,6 +299,11 @@ fn conflitos_da(alteracao: &Alteracao, inicio: Competencia, depois: &Foto) -> Ve
                     o.id.competencia
                 ));
             }
+        }
+        Alteracao::DefinirComposicao { .. }
+        | Alteracao::VincularDocumento { .. }
+        | Alteracao::DesvincularDocumento { .. } => {
+            conflitos.push("Não muda a projeção: só o detalhe e os documentos.".to_owned());
         }
         _ => {}
     }
@@ -788,9 +794,11 @@ impl Planejamento for PlanejamentoSqlite {
         &self,
         ocorrencia: &crate::IdOcorrencia,
     ) -> Resultado<Option<Conciliacao>> {
-        Ok(PlanejamentoSqlite::conciliacoes(self, &ocorrencia.recorrente)?
-            .into_iter()
-            .find(|c| !c.confirmada && &c.ocorrencia == ocorrencia))
+        Ok(
+            PlanejamentoSqlite::conciliacoes(self, &ocorrencia.recorrente)?
+                .into_iter()
+                .find(|c| !c.confirmada && &c.ocorrencia == ocorrencia),
+        )
     }
 
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
@@ -808,6 +816,27 @@ impl Planejamento for PlanejamentoSqlite {
                 |l| l.get(0),
             )
             .optional()?)
+    }
+
+    fn composicao(
+        &self,
+        recorrente: &str,
+        competencia: Competencia,
+    ) -> Resultado<Option<Composicao>> {
+        banco::ler_composicao(self.banco.conexao(), recorrente, competencia)
+    }
+
+    /// Para uma ocorrência, devolve também os documentos da regra (o recorrente): um
+    /// contrato ligado ao recorrente vale para todos os meses. Para o recorrente, só os da
+    /// regra. Os mais recentes primeiro.
+    fn documentos(&self, alvo: &AlvoDoDocumento) -> Resultado<Vec<DocumentoVinculado>> {
+        let c = self.banco.conexao();
+        match alvo {
+            AlvoDoDocumento::Recorrente { id } => banco::ler_documentos(c, id, None),
+            AlvoDoDocumento::Ocorrencia { id } => {
+                banco::ler_documentos(c, &id.recorrente, Some(&id.to_string()))
+            }
+        }
     }
 }
 
