@@ -27,10 +27,19 @@ fn livro_da_estacao() -> Option<PathBuf> {
 /// é aqui que ele entra.
 fn abrir_planejamento(arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
     let banco = sbf_planejamento::Banco::abrir(arquivo).map_err(|e| e.to_string())?;
+    let cofre = arquivo.parent().unwrap_or(Path::new("."));
     Ok(Box::new(sbf_planejamento::PlanejamentoSqlite::novo(
         banco,
-        Box::new(sbf_planejamento::SemSaldos),
+        saldos_do_cofre(cofre),
     )))
+}
+
+/// Os saldos da Pluggy guardados no cofre; sem eles, nenhum saldo (o resumo marca a lacuna).
+pub fn saldos_do_cofre(cofre: &Path) -> Box<dyn sbf_planejamento::FonteDeSaldos> {
+    match sbf_planilha::saldos::SaldosDaPluggy::ler(cofre) {
+        Ok(s) => Box::new(s),
+        Err(_) => Box::new(sbf_planejamento::SemSaldos),
+    }
 }
 
 pub fn rodar(args: &[String]) -> ExitCode {
