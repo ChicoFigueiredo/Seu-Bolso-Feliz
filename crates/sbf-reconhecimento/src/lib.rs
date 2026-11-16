@@ -34,7 +34,8 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use sbf_planejamento::{
-    Alteracao, AlvoDoDocumento, Centavos, Composicao, Data, IdOcorrencia, TipoDeDocumento,
+    Alteracao, AlvoDoDocumento, Centavos, Competencia, Composicao, Data, Excecao, IdOcorrencia,
+    TipoDeDocumento,
 };
 use sbf_planilha::contracheque::{ConsignacaoComPrazo, Contracheque};
 
@@ -135,50 +136,193 @@ pub enum Sugestao {
         tipo: TipoDeDocumento,
         data: Option<Data>,
     },
-    /// Passar a usar as rubricas do contracheque a partir de `composicao.desde`.
+    /// Passar a usar as rubricas do contracheque: com eventuais, duas composições (a do mês e
+    /// a das fixas); sem, uma só. A pessoa troca a marcação de cada rubrica no cartão antes
+    /// de confirmar, e a janela aplica o que [`UsoDeRubricas::composicoes`] devolve para a
+    /// marcação do momento.
     UsarRubricas {
-        /// "Usar estas 21 rubricas no Salário desde 10/2026".
+        /// "Usar estas 21 rubricas no Salário desde 10/2026" (para a marcação inicial).
         rotulo: String,
-        composicao: Composicao,
-        /// Quanto o líquido das rubricas difere do valor digitado no compromisso (`None`:
-        /// confere ou não há valor digitado).
-        divergencia: Option<Centavos>,
+        uso: Box<UsoDeRubricas>,
     },
+    /// Informar que o Salário do mês foi recebido, pelo líquido do contracheque, na data do
+    /// crédito. Só quando a ocorrência ainda não tem pago informado nem conciliação.
+    InformarRecebido {
+        /// "Informar recebido em 13/10 pelo líquido".
+        rotulo: String,
+        ocorrencia: IdOcorrencia,
+        valor: Centavos,
+        data: Data,
+    },
+}
+
+/// O que a sugestão "usar estas rubricas" precisa para montar as composições na hora de
+/// confirmar, com a marcação de fixas e eventuais que a pessoa deixou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsoDeRubricas {
+    /// O recorrente do salário.
+    pub recorrente: String,
+    /// O nome do recorrente ("Salário"), para os rótulos.
+    pub nome: String,
+    /// O sha256 do contracheque (vira o `documento` das composições).
+    pub documento: String,
+    /// O contracheque lido: rubricas, marcação inicial, informativas e competência.
+    pub contracheque: Contracheque,
+    /// O valor digitado do recorrente no mês do pagamento.
+    pub digitado_no_mes: Option<Centavos>,
+    /// O valor digitado do recorrente no mês seguinte (o que vale daqui para frente).
+    pub digitado_depois: Option<Centavos>,
+}
+
+impl UsoDeRubricas {
+    /// A marcação inicial: `true` = a rubrica é eventual (só deste mês).
+    #[must_use]
+    pub fn eventuais_iniciais(&self) -> Vec<bool> {
+        self.contracheque.eventuais.clone()
+    }
+
+    /// As composições para a marcação dada, na ordem em que se aplicam (a do mês primeiro).
+    #[must_use]
+    pub fn composicoes(&self, eventuais: &[bool]) -> Vec<Composicao> {
+        self.contracheque
+            .composicoes(&self.recorrente, &self.documento, eventuais)
+    }
+
+    /// O líquido do mês (sem as rubricas informativas).
+    #[must_use]
+    pub fn liquido_do_mes(&self) -> Centavos {
+        self.contracheque.liquido_do_mes()
+    }
+
+    /// O líquido das fixas.
+    #[must_use]
+    pub fn liquido_das_fixas(&self, eventuais: &[bool]) -> Centavos {
+        self.contracheque.liquido_das_fixas(eventuais)
+    }
+
+    /// Desde quando as fixas valem.
+    #[must_use]
+    pub fn fixas_desde(&self, eventuais: &[bool]) -> Competencia {
+        self.contracheque.fixas_desde(eventuais)
+    }
+
+    /// Há rubrica eventual na marcação (então são duas composições).
+    #[must_use]
+    pub fn tem_eventuais(&self, eventuais: &[bool]) -> bool {
+        self.contracheque.tem_eventuais(eventuais)
+    }
+
+    /// O valor digitado com que o líquido das fixas se compara: o do mês seguinte quando as
+    /// fixas começam lá, senão o do mês do pagamento.
+    #[must_use]
+    pub fn digitado_das_fixas(&self, eventuais: &[bool]) -> Option<Centavos> {
+        if self.tem_eventuais(eventuais) {
+            self.digitado_depois
+        } else {
+            self.digitado_no_mes
+        }
+    }
+
+    /// Quanto o líquido das fixas difere do valor digitado (o que vale daqui para frente);
+    /// `None` quando bate ou não há valor digitado.
+    #[must_use]
+    pub fn divergencia(&self, eventuais: &[bool]) -> Option<Centavos> {
+        let d = self.digitado_das_fixas(eventuais)?;
+        let dif = Centavos(self.liquido_das_fixas(eventuais).0 - d.0);
+        (dif != Centavos(0)).then_some(dif)
+    }
+
+    /// O rótulo para a marcação dada.
+    #[must_use]
+    pub fn rotulo(&self, eventuais: &[bool]) -> String {
+        let c = &self.contracheque;
+        let mes = format!("{:02}/{}", c.pagamento.mes, c.pagamento.ano);
+        let comps = self.composicoes(eventuais);
+        match comps.as_slice() {
+            [so] => format!(
+                "Usar estas {} rubricas no {} desde {mes}",
+                so.rubricas.len(),
+                self.nome
+            ),
+            [do_mes, fixas] => {
+                let de = fixas.desde;
+                format!(
+                    "Usar as {} rubricas do mês no {} e as {} fixas desde {:02}/{}",
+                    do_mes.rubricas.len(),
+                    self.nome,
+                    fixas.rubricas.len(),
+                    de.mes,
+                    de.ano
+                )
+            }
+            _ => format!("Usar as rubricas no {} desde {mes}", self.nome),
+        }
+    }
 }
 
 impl Sugestao {
     pub fn rotulo(&self) -> &str {
         match self {
-            Sugestao::Vincular { rotulo, .. } | Sugestao::UsarRubricas { rotulo, .. } => rotulo,
+            Sugestao::Vincular { rotulo, .. }
+            | Sugestao::UsarRubricas { rotulo, .. }
+            | Sugestao::InformarRecebido { rotulo, .. } => rotulo,
         }
     }
 
     /// O recorrente cuja `versao_do_registro` a janela lê na hora de confirmar (só
-    /// [`Sugestao::UsarRubricas`] precisa).
+    /// [`Sugestao::UsarRubricas`] precisa; para as duas composições a janela lê de novo a
+    /// cada uma).
     pub fn recorrente_para_versao(&self) -> Option<&str> {
         match self {
-            Sugestao::UsarRubricas { composicao, .. } => Some(&composicao.recorrente),
-            Sugestao::Vincular { .. } => None,
+            Sugestao::UsarRubricas { uso, .. } => Some(&uso.recorrente),
+            Sugestao::Vincular { .. } | Sugestao::InformarRecebido { .. } => None,
         }
     }
 
-    /// A alteração que a janela aplica quando o usuário confirma. `versao_base` é a do
-    /// recorrente lida na hora (ignorada por [`Sugestao::Vincular`]).
-    pub fn alteracao(&self, sha256: &str, nome: &str, versao_base: i64) -> Alteracao {
+    /// As alterações que a janela aplica, em ordem, quando o usuário confirma.
+    /// `versao_base` é a do recorrente lida na hora (ignorada fora de
+    /// [`Sugestao::UsarRubricas`], onde a janela troca a base de cada composição pela
+    /// versão lida logo antes de aplicá-la). `eventuais` é a marcação do cartão (`None`: a
+    /// inicial); só importa para [`Sugestao::UsarRubricas`].
+    pub fn alteracoes(
+        &self,
+        sha256: &str,
+        nome: &str,
+        versao_base: i64,
+        eventuais: Option<&[bool]>,
+    ) -> Vec<Alteracao> {
         match self {
             Sugestao::Vincular {
                 alvo, tipo, data, ..
-            } => Alteracao::VincularDocumento {
+            } => vec![Alteracao::VincularDocumento {
                 alvo: alvo.clone(),
                 sha256: sha256.to_owned(),
                 tipo_documento: *tipo,
                 nome: nome.to_owned(),
                 data: *data,
-            },
-            Sugestao::UsarRubricas { composicao, .. } => Alteracao::DefinirComposicao {
-                composicao: composicao.clone(),
-                versao_base,
-            },
+            }],
+            Sugestao::UsarRubricas { uso, .. } => {
+                let marcacao = eventuais.map_or_else(|| uso.eventuais_iniciais(), <[bool]>::to_vec);
+                uso.composicoes(&marcacao)
+                    .into_iter()
+                    .map(|composicao| Alteracao::DefinirComposicao {
+                        composicao,
+                        versao_base,
+                    })
+                    .collect()
+            }
+            Sugestao::InformarRecebido {
+                ocorrencia,
+                valor,
+                data,
+                ..
+            } => vec![Alteracao::Excecao {
+                ocorrencia: ocorrencia.clone(),
+                excecao: Excecao::PagoInformado {
+                    valor: *valor,
+                    data: Some(*data),
+                },
+            }],
         }
     }
 }
@@ -335,7 +479,9 @@ mod testes {
     fn vincular_vira_alteracao_com_o_sha_e_o_nome() {
         let s = &resultado().sugestoes[0];
         assert_eq!(s.recorrente_para_versao(), None);
-        match s.alteracao("ff", "c.pdf", 7) {
+        let alteracoes = s.alteracoes("ff", "c.pdf", 7, None);
+        assert_eq!(alteracoes.len(), 1);
+        match &alteracoes[0] {
             Alteracao::VincularDocumento {
                 sha256,
                 nome,
@@ -344,7 +490,7 @@ mod testes {
             } => {
                 assert_eq!(sha256, "ff");
                 assert_eq!(nome, "c.pdf");
-                assert_eq!(tipo_documento, TipoDeDocumento::Contracheque);
+                assert_eq!(*tipo_documento, TipoDeDocumento::Contracheque);
             }
             outra => panic!("alteração inesperada: {outra:?}"),
         }

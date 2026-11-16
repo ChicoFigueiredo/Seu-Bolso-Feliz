@@ -22,6 +22,8 @@ use sbf_reconhecimento::{
 use zeroize::Zeroizing;
 
 const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
+const CONTRACHEQUE_2026: &str =
+    include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
 const CPF: &str = "52998224725";
 
 struct Segredos;
@@ -474,14 +476,13 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
         outra => panic!("{outra:?}"),
     }
     match &r.sugestoes[1] {
-        Sugestao::UsarRubricas {
-            rotulo,
-            composicao,
-            divergencia,
-        } => {
+        Sugestao::UsarRubricas { rotulo, uso } => {
             assert_eq!(rotulo, "Usar estas 9 rubricas no Salário desde 10/2026");
-            assert_eq!(composicao.desde, Competencia { ano: 2026, mes: 10 });
-            assert_eq!(*divergencia, Some(Centavos(19_950)));
+            let marcacao = uso.eventuais_iniciais();
+            let composicoes = uso.composicoes(&marcacao);
+            assert_eq!(composicoes.len(), 1);
+            assert_eq!(composicoes[0].desde, Competencia { ano: 2026, mes: 10 });
+            assert_eq!(uso.divergencia(&marcacao), Some(Centavos(19_950)));
         }
         outra => panic!("{outra:?}"),
     }
@@ -511,11 +512,9 @@ fn contracheque_ja_vinculado_e_com_a_mesma_composicao_nao_sugere_nada() {
         .expect("existe")
         .versao_do_registro;
     for s in &primeira.sugestoes {
-        plan.aplicar(
-            s.alteracao(&primeira.sha256, &primeira.nome, versao),
-            Autor::Usuario,
-        )
-        .expect("aplicar");
+        for a in s.alteracoes(&primeira.sha256, &primeira.nome, versao, None) {
+            plan.aplicar(a, Autor::Usuario).expect("aplicar");
+        }
     }
     drop(plan);
 
@@ -811,4 +810,120 @@ fn pdf_protegido_com_regra_do_chaveiro_abre_e_grava_o_texto() {
         )
         .expect("tentativas");
     assert_eq!(tudo, 0);
+}
+
+fn recebido(r: &Resultado) -> Option<&Sugestao> {
+    r.sugestoes
+        .iter()
+        .find(|s| matches!(s, Sugestao::InformarRecebido { .. }))
+}
+
+#[test]
+fn contracheque_de_2026_sugere_vincular_duas_composicoes_e_informar_recebido() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
+    assert!(matches!(r.sugestoes[0], Sugestao::Vincular { .. }));
+    match &r.sugestoes[1] {
+        Sugestao::UsarRubricas { rotulo, uso } => {
+            assert_eq!(
+                rotulo,
+                "Usar as 32 rubricas do mês no Salário e as 19 fixas desde 11/2026"
+            );
+            let marcacao = uso.eventuais_iniciais();
+            let comps = uso.composicoes(&marcacao);
+            assert_eq!(comps.len(), 2);
+            assert_eq!(comps[0].desde, Competencia { ano: 2026, mes: 10 });
+            assert_eq!(comps[1].desde, Competencia { ano: 2026, mes: 11 });
+            assert_eq!(uso.liquido_do_mes(), Centavos(2_460_522));
+            // A divergência compara as fixas com o digitado (R$ 20.000,00).
+            let fixas = uso.liquido_das_fixas(&marcacao);
+            assert_eq!(
+                uso.divergencia(&marcacao),
+                Some(Centavos(fixas.0 - 2_000_000))
+            );
+        }
+        outra => panic!("{outra:?}"),
+    }
+    match &r.sugestoes[2] {
+        Sugestao::InformarRecebido {
+            rotulo,
+            ocorrencia,
+            valor,
+            data,
+        } => {
+            assert_eq!(rotulo, "Informar recebido em 13/10 pelo líquido");
+            assert_eq!(ocorrencia.recorrente, id);
+            assert_eq!(ocorrencia.competencia, Competencia { ano: 2026, mes: 10 });
+            assert_eq!(*valor, Centavos(2_460_522));
+            assert_eq!(data.to_string(), "2026-10-13");
+        }
+        outra => panic!("{outra:?}"),
+    }
+    assert!(
+        r.avisos.iter().any(|a| a.contains("não entra no total")),
+        "{:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn informar_recebido_so_aparece_quando_a_ocorrencia_ainda_nao_tem_pago_informado() {
+    let c = cenario();
+    c.planejamento_com_salario(2_000_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+    let r = c.reconhecedor(None);
+
+    let primeira = ok(c.rodar(&r, &arquivo).0);
+    let s = recebido(&primeira).expect("sugere o recebido");
+    let mut plan = c.plan();
+    for a in s.alteracoes(&primeira.sha256, &primeira.nome, 0, None) {
+        plan.aplicar(a, Autor::Usuario).expect("aplicar");
+    }
+    drop(plan);
+
+    let segunda = ok(c.rodar(&r, &arquivo).0);
+    assert!(recebido(&segunda).is_none(), "{:?}", segunda.sugestoes);
+}
+
+#[test]
+fn contracheque_sem_data_de_credito_nao_sugere_informar_recebido() {
+    let c = cenario();
+    c.planejamento_com_salario(550_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(recebido(&r).is_none());
+}
+
+#[test]
+fn composicoes_de_2026_confirmadas_nao_sao_sugeridas_de_novo() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+    let r = c.reconhecedor(None);
+    let primeira = ok(c.rodar(&r, &arquivo).0);
+    let mut plan = c.plan();
+    for s in &primeira.sugestoes {
+        for mut a in s.alteracoes(&primeira.sha256, &primeira.nome, 0, None) {
+            if let Alteracao::DefinirComposicao { versao_base, .. } = &mut a {
+                *versao_base = plan
+                    .recorrente(&id)
+                    .expect("r")
+                    .expect("existe")
+                    .versao_do_registro;
+            }
+            plan.aplicar(a, Autor::Usuario).expect("aplicar");
+        }
+    }
+    drop(plan);
+
+    let segunda = ok(c.rodar(&r, &arquivo).0);
+
+    assert!(segunda.sugestoes.is_empty(), "{:?}", segunda.sugestoes);
 }
