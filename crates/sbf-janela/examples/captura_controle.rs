@@ -113,7 +113,7 @@ impl App {
                 c.resumo_aberto = false;
                 c.filtro = Filtro::PausadosECancelados;
                 c.selecionada = Some(id("rec_streaming", h.seguinte()));
-                c.aba_do_detalhe = AbaDoDetalhe::Pausas;
+                c.aba_do_detalhe = AbaDoDetalhe::Vigencia;
             }
             (1, "editar") => {
                 c.selecionada = Some(id("rec_internet", h));
@@ -131,6 +131,11 @@ impl App {
                     *valor = "139,90".into();
                     *escopo = sbf_janela::controle::EscopoEscolhido::DaquiEmDiante;
                 }
+            }
+            (1, "abas") => c.resumo_aberto = false,
+            (3, "abas") => {
+                c.selecionar_recorrente("rec_salario");
+                c.aba_do_detalhe = AbaDoDetalhe::Resumo;
             }
             (1, "rubricas") => c.resumo_aberto = true,
             // Só o Detalhe no dock: a tabela de rubricas pede altura.

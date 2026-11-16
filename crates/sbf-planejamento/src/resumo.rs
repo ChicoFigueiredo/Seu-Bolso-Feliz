@@ -83,7 +83,12 @@ pub(crate) fn calcular(
             },
         }
         // O desconto em folha não entra no livre; as demais entram até serem pagas.
-        if !paga && !matches!(o.natureza, Natureza::DescontoEmFolha | Natureza::DentroDaFatura) {
+        if !paga
+            && !matches!(
+                o.natureza,
+                Natureza::DescontoEmFolha | Natureza::DentroDaFatura
+            )
+        {
             if o.previsto.is_none() {
                 sem_valor += 1;
             } else if o.e_incerta() {

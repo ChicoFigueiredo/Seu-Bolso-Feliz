@@ -388,7 +388,12 @@ fn ac30_so_propor_cria_proposta_e_nada_mais_muda() {
         "proposta pendente: confirme na janela do SBF"
     );
     assert_eq!(r["proposta"]["estado"], "pendente");
-    assert!(!r["simulacao"]["meses_afetados"].as_array().unwrap().is_empty());
+    assert!(
+        !r["simulacao"]["meses_afetados"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let e = c.falso.0.lock().unwrap();
     assert_eq!(e.propostas.len(), 1);

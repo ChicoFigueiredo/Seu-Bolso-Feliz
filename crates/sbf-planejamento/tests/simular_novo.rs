@@ -37,5 +37,8 @@ fn simular_compromisso_novo_mostra_os_meses_e_nao_grava() {
     let s = p.simular(&novo, hoje).expect("simular");
     assert_eq!(s.meses_afetados, vec![nov], "evento único: um mês só");
     assert_eq!(s.mudancas, vec![(nov, None, Some(Centavos(20_000)))]);
-    assert!(p.recorrentes(true).expect("recorrentes").is_empty(), "simular não grava");
+    assert!(
+        p.recorrentes(true).expect("recorrentes").is_empty(),
+        "simular não grava"
+    );
 }

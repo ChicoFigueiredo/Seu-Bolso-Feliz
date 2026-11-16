@@ -178,6 +178,11 @@ pub struct Janela {
     pub controle: crate::controle_ui::EstadoDoControle,
     /// O que a janela lembra entre aberturas (zoom e o jeito do Controle mensal).
     pub guardador: crate::preferencias_da_janela::Guardador,
+    /// A cópia mais recente das preferências da casca (tema, densidade, painéis...). Começa
+    /// com o que o arquivo tinha, para nunca gravar `None` por cima do guardado.
+    pub casca_guardada: Option<bancada_casca::Preferencias>,
+    /// A largura da lateral no último quadro (ou a guardada, antes de restaurar).
+    pub largura_da_lateral: Option<f32>,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -288,6 +293,8 @@ impl Janela {
                 sbf_planejamento::Data::hoje_em_sao_paulo(),
             ),
             guardador: crate::preferencias_da_janela::Guardador::default(),
+            casca_guardada: None,
+            largura_da_lateral: None,
         }
     }
 
@@ -299,6 +306,8 @@ impl Janela {
         crate::preferencias_da_janela::PreferenciasDaJanela {
             zoom: Some(zoom),
             controle: self.controle.preferencias(),
+            casca: self.casca_guardada.clone(),
+            largura_da_lateral: self.largura_da_lateral,
         }
     }
 
@@ -314,9 +323,20 @@ impl Janela {
     /// Lê o que foi guardado, restaura o Controle e devolve o zoom guardado (se valer).
     /// Chame uma vez, quando o arquivo já puder ser decidido.
     pub fn restaurar_preferencias(&mut self, arquivo: Option<std::path::PathBuf>) -> Option<f32> {
+        self.restaurar(arquivo).zoom_valido()
+    }
+
+    /// Como `restaurar_preferencias`, mas devolve tudo o que foi lido (a casca e a largura
+    /// da lateral também ficam guardadas aqui, para não serem sobrescritas por `None`).
+    pub fn restaurar(
+        &mut self,
+        arquivo: Option<std::path::PathBuf>,
+    ) -> crate::preferencias_da_janela::PreferenciasDaJanela {
         let lidas = self.guardador.ligar(arquivo);
         self.controle.aplicar_preferencias(&lidas.controle);
-        lidas.zoom_valido()
+        self.casca_guardada = lidas.casca.clone();
+        self.largura_da_lateral = lidas.largura_valida();
+        lidas
     }
 
     /// Liga o planejamento (o serviço real, ou o fictício da demonstração). O Controle

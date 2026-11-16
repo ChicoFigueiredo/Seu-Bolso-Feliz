@@ -71,40 +71,46 @@ pub enum AbaLateral {
     Arquivados,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// As abas do Detalhe. Guardada entre aberturas; valor desconhecido vale Resumo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AbaDoDetalhe {
-    Resumo,
     Rubricas,
     Documentos,
-    Proximas,
-    Versoes,
-    Pausas,
-    Excecoes,
+    /// Versões, pausas e exceções.
+    Vigencia,
     Historico,
+    /// Também o que vale para um nome desconhecido (`serde(other)` pede a última variante).
+    #[default]
+    #[serde(other)]
+    Resumo,
 }
 
 impl AbaDoDetalhe {
-    const TODAS: [AbaDoDetalhe; 8] = [
+    const TODAS: [AbaDoDetalhe; 5] = [
         AbaDoDetalhe::Resumo,
         AbaDoDetalhe::Rubricas,
         AbaDoDetalhe::Documentos,
-        AbaDoDetalhe::Proximas,
-        AbaDoDetalhe::Versoes,
-        AbaDoDetalhe::Pausas,
-        AbaDoDetalhe::Excecoes,
+        AbaDoDetalhe::Vigencia,
         AbaDoDetalhe::Historico,
     ];
 
     fn rotulo(self) -> &'static str {
         match self {
             AbaDoDetalhe::Resumo => "Resumo",
-            AbaDoDetalhe::Rubricas => "Valores e rubricas",
+            AbaDoDetalhe::Rubricas => "Rubricas",
             AbaDoDetalhe::Documentos => "Documentos",
-            AbaDoDetalhe::Proximas => "Próximas ocorrências",
-            AbaDoDetalhe::Versoes => "Versões",
-            AbaDoDetalhe::Pausas => "Pausas e cancelamento",
-            AbaDoDetalhe::Excecoes => "Exceções",
+            AbaDoDetalhe::Vigencia => "Vigência",
             AbaDoDetalhe::Historico => "Histórico",
+        }
+    }
+
+    /// A aba que de fato se mostra: a guardada, ou Resumo quando ela não existe para a linha
+    /// (Rubricas sem composição). Nunca altera a preferência.
+    pub fn efetiva(self, tem_rubricas: bool) -> AbaDoDetalhe {
+        if self == AbaDoDetalhe::Rubricas && !tem_rubricas {
+            AbaDoDetalhe::Resumo
+        } else {
+            self
         }
     }
 }
@@ -301,6 +307,7 @@ impl EstadoDoControle {
             modo: self.navegador.modo,
             filtro: self.filtro,
             recolhidos,
+            aba_do_detalhe: self.aba_do_detalhe,
         }
     }
 
@@ -314,6 +321,7 @@ impl EstadoDoControle {
         }
         self.filtro = p.filtro;
         self.recolhidos = p.recolhidos.iter().cloned().collect();
+        self.aba_do_detalhe = p.aba_do_detalhe;
     }
 
     /// Abre ou fecha o painel lateral.
@@ -2072,31 +2080,12 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
     }
     ui.add_space(4.0);
     let tem_rubricas = tabela.is_some();
-    let mut aba = estado.aba_do_detalhe;
-    if aba == AbaDoDetalhe::Rubricas && !tem_rubricas {
-        aba = AbaDoDetalhe::Resumo;
-    }
+    let aba = estado.aba_do_detalhe.efetiva(tem_rubricas);
     let n_docs = dados.docs_da_ocorrencia.len() + dados.docs_do_compromisso.len();
-    // Uma linha só: o painel do dock é baixo, e sete abas lado a lado quebram em quatro linhas.
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Ver").size(12.0).color(p.tinta_suave));
-        let rotulo_de = |a: AbaDoDetalhe| match a {
-            AbaDoDetalhe::Documentos if n_docs > 0 => format!("{} ({n_docs})", a.rotulo()),
-            _ => a.rotulo().to_owned(),
-        };
-        egui::ComboBox::from_id_salt("controle-aba-do-detalhe")
-            .selected_text(rotulo_de(aba))
-            .width((ui.available_width() - 6.0).max(120.0))
-            .show_ui(ui, |ui| {
-                for a in AbaDoDetalhe::TODAS {
-                    if a == AbaDoDetalhe::Rubricas && !tem_rubricas {
-                        continue;
-                    }
-                    ui.selectable_value(&mut aba, a, rotulo_de(a));
-                }
-            });
-    });
-    estado.aba_do_detalhe = aba;
+    if let Some(nova) = faixa_de_abas(ui, &p, aba, tem_rubricas, n_docs) {
+        estado.aba_do_detalhe = nova;
+    }
+    let aba = estado.aba_do_detalhe.efetiva(tem_rubricas);
     ui.separator();
     let mut mais = false;
     let mut efeitos: Vec<EfeitoDoDetalhe> = Vec::new();
@@ -2105,7 +2094,12 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
         .id_salt("controle-detalhe")
         .auto_shrink([false, true])
         .show(ui, |ui| match aba {
-            AbaDoDetalhe::Resumo => aba_resumo(ui, &sel, dados.recorrente.as_ref()),
+            AbaDoDetalhe::Resumo => {
+                aba_resumo(ui, &sel, dados.recorrente.as_ref());
+                ui.add_space(8.0);
+                secao_do_detalhe(ui, &p, "Próximas ocorrências");
+                mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
+            }
             AbaDoDetalhe::Rubricas => {
                 if let Some(t) = &tabela {
                     aba_rubricas(ui, t, &mut efeitos);
@@ -2119,12 +2113,16 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
                 estado.documento_em_previa.as_deref(),
                 &mut efeitos,
             ),
-            AbaDoDetalhe::Proximas => {
-                mais = aba_proximas(ui, &dados.proximas, d.meses, hoje);
+            AbaDoDetalhe::Vigencia => {
+                secao_do_detalhe(ui, &p, "Versões");
+                aba_versoes(ui, dados.recorrente.as_ref());
+                ui.add_space(8.0);
+                secao_do_detalhe(ui, &p, "Pausas e cancelamento");
+                aba_pausas(ui, dados.recorrente.as_ref());
+                ui.add_space(8.0);
+                secao_do_detalhe(ui, &p, "Exceções");
+                aba_excecoes(ui, &dados.excecoes);
             }
-            AbaDoDetalhe::Versoes => aba_versoes(ui, dados.recorrente.as_ref()),
-            AbaDoDetalhe::Pausas => aba_pausas(ui, dados.recorrente.as_ref()),
-            AbaDoDetalhe::Excecoes => aba_excecoes(ui, &dados.excecoes),
             AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
         });
     if mais {
@@ -2159,6 +2157,72 @@ fn celula_de_valor(ui: &mut Ui, v: sbf_planejamento::Centavos, forte: bool) {
         let t = RichText::new(reais(v));
         ui.label(if forte { t.strong() } else { t });
     });
+}
+
+/// Título de seção dentro de uma aba do Detalhe.
+fn secao_do_detalhe(ui: &mut Ui, p: &Paleta, titulo: &str) {
+    ui.label(RichText::new(titulo).strong().size(13.0).color(p.tinta));
+    ui.add_space(2.0);
+}
+
+/// A faixa de abas do Detalhe: quebra de linha (cabe num dock estreito), sublinhado na ativa
+/// e fundo no hover, como as abas de página da casca. Devolve a aba clicada, se houve.
+fn faixa_de_abas(
+    ui: &mut Ui,
+    p: &Paleta,
+    ativa: AbaDoDetalhe,
+    tem_rubricas: bool,
+    n_docs: usize,
+) -> Option<AbaDoDetalhe> {
+    let mut nova = None;
+    let largura = ui.available_rect_before_wrap().x_range();
+    let faixa = ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+        for a in AbaDoDetalhe::TODAS {
+            if a == AbaDoDetalhe::Rubricas && !tem_rubricas {
+                continue;
+            }
+            let texto = match a {
+                AbaDoDetalhe::Documentos if n_docs > 0 => format!("{}  {n_docs}", a.rotulo()),
+                _ => a.rotulo().to_owned(),
+            };
+            let eh_ativa = a == ativa;
+            let cor = if eh_ativa { p.destaque_tinta } else { p.tinta };
+            let g = ui
+                .painter()
+                .layout_no_wrap(texto, egui::FontId::proportional(13.5), cor);
+            let (rect, resp) =
+                ui.allocate_exact_size(g.size() + egui::vec2(16.0, 10.0), egui::Sense::click());
+            if resp.hovered() && !eh_ativa {
+                ui.painter().rect_filled(
+                    rect,
+                    egui::CornerRadius::same(4),
+                    ui.visuals().widgets.hovered.weak_bg_fill,
+                );
+            }
+            ui.painter().galley(rect.center() - g.size() / 2.0, g, cor);
+            if eh_ativa {
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left() + 5.0, rect.bottom() - 2.0),
+                        egui::pos2(rect.right() - 5.0, rect.bottom()),
+                    ),
+                    egui::CornerRadius::same(1),
+                    p.destaque,
+                );
+            }
+            if resp
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                nova = Some(a);
+            }
+        }
+    });
+    let r = faixa.response.rect;
+    ui.painter()
+        .hline(largura, r.bottom(), egui::Stroke::new(1.0, p.borda));
+    nova
 }
 
 /// A aba "Valores e rubricas": proventos, descontos, totais e o líquido contra o digitado.
@@ -3675,6 +3739,21 @@ mod testes {
     // ----------------------------------------------------------------- preferências
 
     #[test]
+    fn aba_sem_composicao_mostra_resumo_sem_mudar_a_preferencia() {
+        let (mut e, _) = estado_e_servico();
+        e.aba_do_detalhe = AbaDoDetalhe::Rubricas;
+        assert_eq!(e.aba_do_detalhe.efetiva(false), AbaDoDetalhe::Resumo);
+        assert_eq!(e.aba_do_detalhe.efetiva(true), AbaDoDetalhe::Rubricas);
+        // A preferência continua a guardada.
+        assert_eq!(e.aba_do_detalhe, AbaDoDetalhe::Rubricas);
+        assert_eq!(e.preferencias().aba_do_detalhe, AbaDoDetalhe::Rubricas);
+        assert_eq!(
+            AbaDoDetalhe::Vigencia.efetiva(false),
+            AbaDoDetalhe::Vigencia
+        );
+    }
+
+    #[test]
     fn preferencias_do_controle_vao_e_voltam() {
         let (mut e, _) = estado_e_servico();
         e.resumo_aberto = false;
@@ -3690,6 +3769,7 @@ mod testes {
         crate::preferencias_da_janela::PreferenciasDaJanela {
             zoom: Some(1.2),
             controle: p.clone(),
+            ..Default::default()
         }
         .salvar(&arquivo)
         .unwrap();

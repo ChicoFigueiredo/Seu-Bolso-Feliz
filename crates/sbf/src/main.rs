@@ -22,8 +22,8 @@ mod estacao;
 mod inventario;
 mod mcp;
 mod planejamento;
-mod roteiros;
 mod rag;
+mod roteiros;
 mod servidor;
 mod triagem;
 mod worker;
@@ -105,6 +105,9 @@ impl eframe::App for App {
                 .request_repaint_after(std::time::Duration::from_secs(3));
         }
         self.casca.desenhar(ui);
+        if let Some(p) = self.casca.app.tomar_preferencias_da_casca() {
+            self.casca.aplicar_preferencias(&p);
+        }
         if std::env::var_os("SBF_DEPURAR").is_some() {
             eprintln!("quadro em {:?}", inicio.elapsed());
         }

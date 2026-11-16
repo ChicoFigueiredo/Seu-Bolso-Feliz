@@ -282,8 +282,12 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
         Ok(w) => {
             let mut w = w
                 .com_mensageiros(mensageiros)
-                .com_roteiros(Box::new(crate::roteiros::RoteirosReais::novo(dados_dos_roteiros)))
-                .com_indice(Box::new(crate::rag::IndexadorReal::novo(dados_do_rag.clone())))
+                .com_roteiros(Box::new(crate::roteiros::RoteirosReais::novo(
+                    dados_dos_roteiros,
+                )))
+                .com_indice(Box::new(crate::rag::IndexadorReal::novo(
+                    dados_do_rag.clone(),
+                )))
                 .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)));
             w.rodar(&parar);
             ExitCode::SUCCESS

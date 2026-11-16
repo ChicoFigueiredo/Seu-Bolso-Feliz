@@ -82,6 +82,8 @@ pub struct AppSbf {
     zoom_visto: f32,
     /// Um zoom guardado que a casca ainda não aplicou: enquanto isso, nada é gravado.
     zoom_restaurando: Option<f32>,
+    /// As preferências da casca lidas do arquivo, à espera de o integrador aplicá-las.
+    casca_a_aplicar: Option<Preferencias>,
 }
 
 impl std::fmt::Debug for AppSbf {
@@ -96,6 +98,9 @@ impl std::fmt::Debug for AppSbf {
 const PREFIXO_FONTE: &str = "inicio.fonte.";
 const PREFIXO_FONTE_TODAS: &str = "inicio.fonte-todas";
 const PREFIXO_TEMA: &str = "exibir.tema.";
+
+/// O id (egui) do painel lateral que a casca desenha.
+const ID_DA_LATERAL: &str = "casca.dock";
 
 /// O id do painel do dock na casca.
 pub fn id_do_painel(p: PainelDoDock) -> &'static str {
@@ -170,6 +175,7 @@ impl AppSbf {
             textos: Textos::pt_br(),
             zoom_visto: 1.0,
             zoom_restaurando: None,
+            casca_a_aplicar: None,
         }
     }
 
@@ -184,7 +190,33 @@ impl AppSbf {
                 return;
             }
             let arquivo = j.arquivo_das_preferencias();
-            let guardado = j.restaurar_preferencias(arquivo);
+            let lidas = j.restaurar(arquivo);
+            let guardado = lidas.zoom_valido();
+            self.casca_a_aplicar = lidas.casca_para_aplicar();
+            if let Some(l) = lidas.largura_valida() {
+                // A casca lê este estado ao desenhar a lateral no próximo quadro.
+                ctx.data_mut(|d| {
+                    d.insert_persisted(
+                        egui::Id::new(ID_DA_LATERAL),
+                        egui::containers::panel::PanelState {
+                            outer_rect: egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(l, 0.0),
+                            ),
+                        },
+                    );
+                });
+                ctx.request_repaint();
+                // Neste quadro o estado ainda pode ser o de fábrica: só lê a partir do próximo.
+                self.zoom_visto = zoom;
+                if let Some(z) = guardado
+                    && (z - zoom).abs() > 1e-3
+                {
+                    self.zoom_restaurando = Some(z);
+                    bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(z));
+                }
+                return;
+            }
             self.zoom_visto = zoom;
             if let Some(z) = guardado
                 && (z - zoom).abs() > 1e-3
@@ -209,6 +241,13 @@ impl AppSbf {
             bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(zoom));
             self.zoom_visto = zoom;
         }
+        if let Some(estado) =
+            egui::containers::panel::PanelState::load(ctx, egui::Id::new(ID_DA_LATERAL))
+            && let Some(l) =
+                crate::preferencias_da_janela::limitar_largura(estado.outer_rect.width())
+        {
+            j.largura_da_lateral = Some(l);
+        }
         let atual = j.preferencias_atuais(zoom);
         if j.guardador.quadro(&atual).is_err() {
             j.mensagem = Some(Mensagem {
@@ -216,6 +255,12 @@ impl AppSbf {
                 erro: true,
             });
         }
+    }
+
+    /// As preferências da casca lidas do arquivo, uma vez: o integrador as passa a
+    /// `Casca::aplicar_preferencias` depois de desenhar.
+    pub fn tomar_preferencias_da_casca(&mut self) -> Option<Preferencias> {
+        self.casca_a_aplicar.take()
     }
 
     /// A janela (estado da interface), para testes e para o integrador.
@@ -1155,6 +1200,10 @@ impl AppCasca for AppSbf {
     }
 
     fn ao_mudar_preferencias(&mut self, preferencias: &Preferencias) {
+        // Enquanto as lidas esperam para ser aplicadas, o que chega é o de fábrica.
+        if self.casca_a_aplicar.is_none() {
+            self.janela.get_mut().casca_guardada = Some(preferencias.clone());
+        }
         self.paineis_visiveis = preferencias.paineis_visiveis.clone();
         self.tema_atual = preferencias.tema.clone();
     }

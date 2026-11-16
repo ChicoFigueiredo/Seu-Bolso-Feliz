@@ -193,7 +193,10 @@ pub enum Prazo {
     /// A última ocorrência é a da competência anterior a esta (exclusivo).
     AteCompetencia(Competencia),
     /// N parcelas, a primeira na competência `primeira`. Gera exatamente N.
-    Parcelas { total: u32, primeira: Competencia },
+    Parcelas {
+        total: u32,
+        primeira: Competencia,
+    },
     /// Sem prova do fim: projeta até o horizonte, com `prazo_desconhecido = true`.
     Desconhecido,
 }
@@ -341,11 +344,20 @@ impl IdOcorrencia {
 #[serde(tag = "tipo", rename_all = "snake_case")]
 pub enum Excecao {
     /// `None` = adiada sem data: continua devida.
-    Adiar { nova_data: Option<Data> },
+    Adiar {
+        nova_data: Option<Data>,
+    },
     /// Tira do exigível com motivo. Não é pagar.
-    Dispensar { motivo: String },
-    ValorSoDesteMes { valor: Centavos },
-    PagoInformado { valor: Centavos, data: Option<Data> },
+    Dispensar {
+        motivo: String,
+    },
+    ValorSoDesteMes {
+        valor: Centavos,
+    },
+    PagoInformado {
+        valor: Centavos,
+        data: Option<Data>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -847,8 +859,7 @@ pub trait Planejamento {
     fn aplicar(&mut self, alteracao: Alteracao, autor: Autor) -> Resultado<Recibo>;
 
     /// Guarda uma proposta pendente. A mesma `chave` devolve a mesma proposta.
-    fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str)
-    -> Resultado<Proposta>;
+    fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str) -> Resultado<Proposta>;
 
     fn propostas(&self, so_pendentes: bool) -> Resultado<Vec<Proposta>>;
 
@@ -872,7 +883,11 @@ pub trait Planejamento {
     }
 
     /// A composição (rubricas) vigente de um recorrente na competência. O padrão é nenhuma.
-    fn composicao(&self, recorrente: &str, competencia: Competencia) -> Resultado<Option<Composicao>> {
+    fn composicao(
+        &self,
+        recorrente: &str,
+        competencia: Competencia,
+    ) -> Resultado<Option<Composicao>> {
         let _ = (recorrente, competencia);
         Ok(None)
     }
@@ -940,7 +955,10 @@ mod testes {
         let c = Composicao {
             recorrente: "sal".into(),
             desde: Competencia { ano: 2026, mes: 11 },
-            rubricas: vec![r(TipoDeRubrica::Provento, 100000), r(TipoDeRubrica::Desconto, 25000)],
+            rubricas: vec![
+                r(TipoDeRubrica::Provento, 100000),
+                r(TipoDeRubrica::Desconto, 25000),
+            ],
             documento: None,
             origem: "teste".into(),
         };
@@ -952,7 +970,11 @@ mod testes {
 
     #[test]
     fn id_da_ocorrencia_vai_e_volta() {
-        for t in ["rec_1:2027-01", "rec_1:2027-01:p3", "rec:com:dois-pontos:2027-01"] {
+        for t in [
+            "rec_1:2027-01",
+            "rec_1:2027-01:p3",
+            "rec:com:dois-pontos:2027-01",
+        ] {
             let id = IdOcorrencia::de_texto(t).expect(t);
             assert_eq!(id.to_string(), t);
         }
