@@ -249,8 +249,29 @@ impl AppSbf {
         {
             j.largura_da_lateral = Some(l);
         }
+        let (obs, botao) = ctx.input(|i| {
+            let v = i.viewport();
+            (
+                crate::preferencias_da_janela::Observacao {
+                    maximizada: v.maximized.unwrap_or(false),
+                    tela_cheia: v.fullscreen.unwrap_or(false),
+                    minimizada: v.minimized.unwrap_or(false),
+                    tamanho: v.inner_rect.map(|r| [r.width(), r.height()]),
+                    posicao: v.outer_rect.map(|r| [r.min.x, r.min.y]),
+                },
+                i.pointer.any_down(),
+            )
+        });
+        j.estado_da_janela = j.estado_da_janela.depois_de(&obs);
         let atual = j.preferencias_atuais(zoom);
-        if j.guardador.quadro(&atual).is_err() {
+        let gravou = j
+            .guardador
+            .quadro_com_espera(&atual, std::time::Instant::now(), botao);
+        if j.guardador.tem_pendente() {
+            // Sem entrada nenhuma não vem outro quadro: peça o da hora de gravar.
+            ctx.request_repaint_after(crate::preferencias_da_janela::ESPERA_DE_GRAVACAO);
+        }
+        if gravou.is_err() {
             j.mensagem = Some(Mensagem {
                 texto: "Não deu para guardar as preferências da janela.".to_owned(),
                 erro: true,
@@ -265,12 +286,10 @@ impl AppSbf {
         j.arrastar_ui(ctx);
         if std::mem::take(&mut j.reconhecimento.painel_pedido) {
             let id = id_do_painel(PainelDoDock::Reconhecimento);
-            if !self.paineis_visiveis.get(id).copied().unwrap_or(false) {
-                // A casca atende no fim do quadro; o espelho só muda no próximo, então
-                // marca já para não pedir duas vezes.
-                self.paineis_visiveis.insert(id.to_owned(), true);
-                bancada_casca::executar(ctx, ids::painel(id));
-            }
+            self.paineis_visiveis.insert(id.to_owned(), true);
+            // Mostra o painel E o deixa como a aba ativa da pilha (antes ele só aparecia,
+            // atrás da aba aberta). O pedido é idempotente.
+            bancada_casca::mostrar_painel(ctx, id);
         }
     }
 

@@ -235,16 +235,58 @@ fn focar_para_captura(casca: &mut Casca<AppSbf>, ctx: &egui::Context) {
     }
 }
 
-fn abrir_janela_de(app: Box<dyn eframe::App>) -> ExitCode {
+/// No Linux com `DISPLAY`, a janela roda no X11 (XWayland no KDE/Wayland): o winit 0.30 no
+/// Wayland não entrega arquivos soltos nem deixa ler ou pôr a posição da janela.
+/// `SBF_WAYLAND=1` mantém o Wayland nativo.
+fn usar_x11(display: Option<&std::ffi::OsStr>, sbf_wayland: Option<&std::ffi::OsStr>) -> bool {
+    display.is_some_and(|d| !d.is_empty()) && sbf_wayland != Some(std::ffi::OsStr::new("1"))
+}
+
+fn forcar_x11() -> bool {
+    cfg!(target_os = "linux")
+        && usar_x11(
+            std::env::var_os("DISPLAY").as_deref(),
+            std::env::var_os("SBF_WAYLAND").as_deref(),
+        )
+}
+
+/// A posição da janela só vale onde o sistema deixa o app lê-la e pô-la: o X11 e os demais
+/// sistemas, não o Wayland.
+fn posicao_confiavel() -> bool {
+    !cfg!(target_os = "linux") || forcar_x11()
+}
+
+/// Como a janela foi deixada da última vez (`--inventario`: o arquivo das preferências na
+/// pasta de dados do app, nunca no cofre). Demonstração e capturas não leem nada.
+fn estado_guardado_da_janela(
+    cofre: Option<&std::path::Path>,
+) -> Option<sbf_janela::preferencias_da_janela::EstadoDaJanela> {
+    let arquivo = sbf_janela::preferencias_da_janela::arquivo_das_preferencias_do(cofre)?;
+    Some(sbf_janela::preferencias_da_janela::PreferenciasDaJanela::carregar(&arquivo).janela)
+}
+
+fn abrir_janela_de(app: Box<dyn eframe::App>, cofre: Option<&std::path::Path>) -> ExitCode {
     // As sobras da conversão do Office de uma sessão interrompida (pasta 0700 em tmpfs).
     sbf_janela::previa::faxinar_sobras_em_segundo_plano();
-    let opcoes = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Seu Bolso Feliz")
-            .with_inner_size([1480.0, 920.0])
-            .with_min_inner_size([960.0, 600.0]),
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Seu Bolso Feliz")
+        .with_inner_size([1480.0, 920.0])
+        .with_min_inner_size([960.0, 600.0]);
+    if let Some(estado) = estado_guardado_da_janela(cofre) {
+        viewport = estado.aplicar(viewport, posicao_confiavel());
+    }
+    #[allow(unused_mut)]
+    let mut opcoes = eframe::NativeOptions {
+        viewport,
         ..Default::default()
     };
+    #[cfg(target_os = "linux")]
+    if forcar_x11() {
+        opcoes.event_loop_builder = Some(Box::new(|construtor| {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            construtor.with_x11();
+        }));
+    }
     let criar = Box::new(|cc: &eframe::CreationContext<'_>| {
         // As fontes valem do quadro seguinte em diante: instale antes do primeiro.
         sbf_janela::tema::instalar_fontes(&cc.egui_ctx);
@@ -469,13 +511,18 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("--demonstracao") => match app_de_demonstracao() {
-            Ok(app) => abrir_janela_de(Box::new(app)),
+            Ok(app) => abrir_janela_de(Box::new(app), None),
             Err(e) => {
                 eprintln!("sbf: {e}");
                 ExitCode::FAILURE
             }
         },
-        None => abrir_janela_de(Box::new(entrada::Entrada::nova())),
+        None => abrir_janela_de(
+            Box::new(entrada::Entrada::nova()),
+            std::env::var_os("FINANCAS_DIR")
+                .map(std::path::PathBuf::from)
+                .as_deref(),
+        ),
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("worker") => worker::rodar(&args[1..]),
@@ -508,7 +555,7 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             };
             match inventario::abrir(std::path::Path::new(pasta)) {
-                Ok(app) => abrir_janela_de(Box::new(app)),
+                Ok(app) => abrir_janela_de(Box::new(app), Some(std::path::Path::new(pasta))),
                 Err(e) => {
                     eprintln!("sbf: não deu para abrir o inventário: {e}");
                     ExitCode::from(3)
@@ -519,5 +566,20 @@ fn main() -> ExitCode {
             eprintln!("{AJUDA}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod testes_do_backend {
+    use super::usar_x11;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn x11_quando_ha_display_e_o_wayland_nao_foi_pedido() {
+        assert!(usar_x11(Some(OsStr::new(":0")), None));
+        assert!(usar_x11(Some(OsStr::new(":0")), Some(OsStr::new("0"))));
+        assert!(!usar_x11(Some(OsStr::new(":0")), Some(OsStr::new("1"))));
+        assert!(!usar_x11(None, None));
+        assert!(!usar_x11(Some(OsStr::new("")), None));
     }
 }

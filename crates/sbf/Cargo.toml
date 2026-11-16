@@ -48,6 +48,10 @@ ctrlc = { version = "3", features = ["termination"] }
 zeroize = { workspace = true }
 rusqlite = { workspace = true }
 
+# Só para o `with_x11()` do event loop: o eframe não reexporta a extensão de plataforma.
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["x11"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 
