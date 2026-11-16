@@ -243,7 +243,12 @@ pub fn planilha_de_casos(caminho: &Path) {
     ws.write_string(7, 2, "B").expect("c");
     ws.write_number(7, 8, 50.0).expect("c");
     ws.write_string(8, 1, "300").expect("c"); // total como texto, sem linha
-    ws.write_formula(9, 1, Formula::new("=NOMEINEXISTENTE()").set_result("#NAME?")).expect("c");
+    ws.write_formula(
+        9,
+        1,
+        Formula::new("=NOMEINEXISTENTE()").set_result("#NAME?"),
+    )
+    .expect("c");
     ws.write_string(9, 2, "C").expect("c");
     ws.write_number(9, 8, 10.0).expect("c");
     ws.write_string(10, 1, "Lar").expect("c");

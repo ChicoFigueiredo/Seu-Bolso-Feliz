@@ -27,7 +27,10 @@ pub fn normalizar(texto: &str) -> String {
 /// O SHA-256 de bytes, em hexadecimal minúsculo.
 pub fn sha256_de_bytes(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Um decimal em texto para centavos, em aritmética inteira, arredondando meio para longe

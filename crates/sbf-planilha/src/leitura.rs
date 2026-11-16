@@ -578,8 +578,11 @@ mod testes {
         let arq = pasta.path().join("c.xlsx");
         crate::fixtura::planilha_de_casos(&arq);
         let a = ler_aba(&arq, ABA).expect("aba");
-        let grupos: Vec<(&str, &str)> =
-            a.linhas.iter().map(|l| (l.descricao.as_str(), l.grupo.as_str())).collect();
+        let grupos: Vec<(&str, &str)> = a
+            .linhas
+            .iter()
+            .map(|l| (l.descricao.as_str(), l.grupo.as_str()))
+            .collect();
         assert_eq!(grupos[0], ("A", "Essencial"));
         assert_eq!(grupos[1], ("B", "Essencial"));
         assert_eq!(grupos[2], ("C", "Essencial")); // erro em B não abre grupo

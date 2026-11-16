@@ -94,10 +94,16 @@ impl Mapa {
         }
         for e in &mapa.extras {
             if natureza_de_texto(&e.natureza).is_none() {
-                return Err(ErroPlanilha::Mapa(format!("natureza desconhecida: {}", e.natureza)));
+                return Err(ErroPlanilha::Mapa(format!(
+                    "natureza desconhecida: {}",
+                    e.natureza
+                )));
             }
             if !matches!(e.certeza.as_str(), "estimado" | "confirmado") {
-                return Err(ErroPlanilha::Mapa(format!("certeza desconhecida: {}", e.certeza)));
+                return Err(ErroPlanilha::Mapa(format!(
+                    "certeza desconhecida: {}",
+                    e.certeza
+                )));
             }
             if !(1..=31).contains(&e.dia) {
                 return Err(ErroPlanilha::Mapa("dia do extra fora de 1 a 31".to_owned()));
@@ -175,7 +181,10 @@ mod testes {
         .expect("mapa");
         assert!(m.ignora("padaria ze"));
         assert!(!m.ignora("outra"));
-        assert_eq!(m.fornecedores().collect::<Vec<_>>(), [("Bolão", "LOTERICA")]);
+        assert_eq!(
+            m.fornecedores().collect::<Vec<_>>(),
+            [("Bolão", "LOTERICA")]
+        );
         assert_eq!(m.extras[0].sha256(), m.extras[0].clone().sha256());
         assert!(
             Mapa::de_json(r#"{"extras":[{"nome":"x","grupo":"g","natureza":"saida","dia":1,"certeza":"talvez"}]}"#)

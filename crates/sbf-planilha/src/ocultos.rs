@@ -261,7 +261,9 @@ pub fn previa_de_ocultos(
         let m = casados(&a.fornecedor, &existentes, mapa);
         match m.as_slice() {
             // Citado no mapa (item ou extra): já coberto, mesmo sem recorrente criado ainda.
-            [] if mapa.fornecedores().any(|(_, f)| parecidos(f, &a.fornecedor)) => {}
+            [] if mapa
+                .fornecedores()
+                .any(|(_, f)| parecidos(f, &a.fornecedor)) => {}
             [] => novos.push(a),
             [r] if r.natureza == Natureza::Saida => {
                 let Some(v) = vigente(r, competencia.seguinte()) else {
@@ -551,7 +553,8 @@ mod testes {
         )
         .expect("mapa");
         let plan = plano();
-        let p = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP).expect("previa");
+        let p = previa_de_ocultos(&inventario(), &plan, &mapa, &ConfigOcultos::default(), COMP)
+            .expect("previa");
         assert!(p.novos.is_empty(), "{:?}", p.novos);
         assert!(p.grupo_novo.is_none());
     }
