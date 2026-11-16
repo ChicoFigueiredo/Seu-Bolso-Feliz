@@ -221,13 +221,28 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
         Reconhecido::Contracheque {
             contracheque,
             consignacoes,
-        } => es(writeln!(
-            saida,
-            "reconhecido: contracheque competencia={} rubricas={} consignacoes={}",
-            contracheque.pagamento,
-            contracheque.rubricas.len(),
-            consignacoes.len()
-        ))?,
+        } => {
+            let c = contracheque;
+            let eventuais = c
+                .eventuais
+                .iter()
+                .zip(&c.informativas)
+                .filter(|(e, i)| **e && !**i)
+                .count();
+            es(writeln!(
+                saida,
+                "reconhecido: contracheque competencia={} rubricas={} eventuais={eventuais} informativas={} consignacoes={} parcelas={}{}",
+                c.pagamento,
+                c.rubricas.len(),
+                c.informativas.iter().filter(|i| **i).count(),
+                consignacoes.len(),
+                c.parcelas_atuais.iter().flatten().count(),
+                c.credito.map_or_else(String::new, |d| format!(
+                    " credito={:02}/{:02}/{:04}",
+                    d.dia, d.mes, d.ano
+                ))
+            ))?;
+        }
         Reconhecido::PelaIa { resumo, .. } if o.detalhar => {
             es(writeln!(saida, "reconhecido: pela IA, {resumo}"))?;
         }
@@ -246,16 +261,40 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
     if o.detalhar {
         for s in &r.sugestoes {
             es(writeln!(saida, "sugestao: {}", s.rotulo()))?;
-            if let Sugestao::UsarRubricas {
-                divergencia: Some(d),
-                ..
-            } = s
-            {
-                es(writeln!(
-                    saida,
-                    "  o liquido das rubricas diverge do digitado em {} centavos",
-                    d.0
-                ))?;
+            match s {
+                Sugestao::UsarRubricas { uso, .. } => {
+                    let m = uso.eventuais_iniciais();
+                    let c = &uso.contracheque;
+                    let eventuais = c
+                        .eventuais
+                        .iter()
+                        .zip(&c.informativas)
+                        .filter(|(e, i)| **e && !**i)
+                        .count();
+                    let informativas = c.informativas.iter().filter(|i| **i).count();
+                    es(writeln!(
+                        saida,
+                        "  composicoes={} eventuais={eventuais} informativas={informativas} fixas desde {:02}/{}",
+                        uso.composicoes(&m).len(),
+                        uso.fixas_desde(&m).mes,
+                        uso.fixas_desde(&m).ano
+                    ))?;
+                    if let Some(d) = uso.divergencia(&m) {
+                        es(writeln!(
+                            saida,
+                            "  o liquido das fixas diverge do digitado em {} centavos",
+                            d.0
+                        ))?;
+                    }
+                }
+                Sugestao::InformarRecebido { data, .. } => {
+                    es(writeln!(
+                        saida,
+                        "  credito em {:02}/{:02}/{:04}",
+                        data.dia, data.mes, data.ano
+                    ))?;
+                }
+                Sugestao::Vincular { .. } => {}
             }
         }
         for a in &r.avisos {
