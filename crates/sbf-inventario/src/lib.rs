@@ -41,6 +41,9 @@ pub mod sugestao;
 // PDF protegido: alvos, regras, tentativas e pendência por falha.
 pub mod protegidos;
 
+// O texto extraído de um achado e o `canonical_fingerprint`.
+pub mod texto;
+
 // Manutenção pela linha de comando.
 pub mod manutencao;
 

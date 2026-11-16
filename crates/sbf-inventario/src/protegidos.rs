@@ -27,6 +27,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use std::time::Duration;
 
 use crate::pendencia::ETAPA_DA_JANELA;
+use crate::texto;
 
 /// A prioridade de uma regra de senha nova quando a decisão não diz outra (o padrão da coluna
 /// `regra_senha.prioridade` no esquema do Bun). Menor tenta primeiro.
@@ -348,21 +349,11 @@ pub fn registrar(
             conteudo,
             impressao,
         } => {
-            tx.execute(
-                "INSERT OR IGNORE INTO texto (content_hash, metodo, conteudo) VALUES (?1, ?2, ?3)",
-                params![hash, METODO_PDFTOTEXT, conteudo],
-            )?;
-            tx.execute(
-                "UPDATE achado SET canonical_fingerprint = ?2 WHERE content_hash = ?1",
-                params![hash, impressao],
-            )?;
+            texto::gravar_texto(&tx, hash, METODO_PDFTOTEXT, conteudo, Some(impressao))?;
             true
         }
         Conclusao::SemTexto => {
-            tx.execute(
-                "INSERT OR IGNORE INTO texto (content_hash, metodo, conteudo) VALUES (?1, ?2, '')",
-                params![hash, METODO_SEM_TEXTO],
-            )?;
+            texto::gravar_texto(&tx, hash, METODO_SEM_TEXTO, "", None)?;
             true
         }
         Conclusao::SemRegra { pergunta } => {
