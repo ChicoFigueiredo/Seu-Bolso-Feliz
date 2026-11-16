@@ -311,5 +311,10 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
         }
     }
     let ja_pareados: HashSet<String> = pares.keys().cloned().collect();
-    Ok(conciliacao::pares_sugeridos(&evidencias, &ja_pareados))
+    let contas_ja_usadas: HashSet<String> = pares.values().cloned().collect();
+    Ok(conciliacao::pares_sugeridos(
+        &evidencias,
+        &ja_pareados,
+        &contas_ja_usadas,
+    ))
 }

@@ -411,10 +411,18 @@ fn motivo_do(p: &Placar) -> String {
 /// Os pares propostos: para cada apelido, a conta do extrato com mais peso (confirmadas pesam
 /// mais). Empate no topo não propõe nada. Quem já tem par confirmado fica de fora.
 #[must_use]
-pub fn pares_sugeridos(evidencias: &[Evidencia], ja_pareados: &HashSet<String>) -> Vec<ParDeConta> {
+///
+/// Uma conta do extrato é de um apelido só: a que já está confirmada para outro apelido não é
+/// proposta; a que dois apelidos disputam fica com o de mais peso, e no empate os dois
+/// aparecem com "disputada com …" no motivo (o usuário escolhe).
+pub fn pares_sugeridos(
+    evidencias: &[Evidencia],
+    ja_pareados: &HashSet<String>,
+    contas_ja_usadas: &HashSet<String>,
+) -> Vec<ParDeConta> {
     let mut por_apelido: HashMap<&str, HashMap<&str, Placar>> = HashMap::new();
     for e in evidencias {
-        if ja_pareados.contains(&e.apelido) {
+        if ja_pareados.contains(&e.apelido) || contas_ja_usadas.contains(&e.conta_do_extrato) {
             continue;
         }
         let p = por_apelido
@@ -437,7 +445,7 @@ pub fn pares_sugeridos(evidencias: &[Evidencia], ja_pareados: &HashSet<String>) 
             }
         }
     }
-    let mut pares: Vec<ParDeConta> = por_apelido
+    let vencedores: Vec<(ParDeConta, u32)> = por_apelido
         .into_iter()
         .filter_map(|(apelido, contas)| {
             let maior = contas.values().map(|p| p.peso).max()?;
@@ -446,12 +454,43 @@ pub fn pares_sugeridos(evidencias: &[Evidencia], ja_pareados: &HashSet<String>) 
             if do_topo.next().is_some() {
                 return None;
             }
-            Some(ParDeConta {
-                apelido: apelido.to_owned(),
-                conta_do_extrato: (*conta).to_owned(),
-                evidencias: placar.confirmadas + placar.sugeridas + placar.assinaturas,
-                motivo: motivo_do(placar),
+            Some((
+                ParDeConta {
+                    apelido: apelido.to_owned(),
+                    conta_do_extrato: (*conta).to_owned(),
+                    evidencias: placar.confirmadas + placar.sugeridas + placar.assinaturas,
+                    motivo: motivo_do(placar),
+                },
+                placar.peso,
+            ))
+        })
+        .collect();
+    // Dois apelidos querendo a mesma conta: fica o de mais peso; no empate, os dois, avisados.
+    let mut pares: Vec<ParDeConta> = vencedores
+        .iter()
+        .filter(|(par, peso)| {
+            !vencedores.iter().any(|(outro, peso_do_outro)| {
+                outro.apelido != par.apelido
+                    && outro.conta_do_extrato == par.conta_do_extrato
+                    && peso_do_outro > peso
             })
+        })
+        .map(|(par, peso)| {
+            let mut rivais: Vec<&str> = vencedores
+                .iter()
+                .filter(|(outro, peso_do_outro)| {
+                    outro.apelido != par.apelido
+                        && outro.conta_do_extrato == par.conta_do_extrato
+                        && peso_do_outro == peso
+                })
+                .map(|(outro, _)| outro.apelido.as_str())
+                .collect();
+            rivais.sort_unstable();
+            let mut par = par.clone();
+            if !rivais.is_empty() {
+                par.motivo = format!("{} · disputada com {}", par.motivo, rivais.join(", "));
+            }
+            par
         })
         .collect();
     pares.sort_by(|a, b| a.apelido.cmp(&b.apelido));
@@ -783,7 +822,7 @@ mod testes {
             evidencia("PAREADO", "B9", confirmada()),
         ];
         let ja: HashSet<String> = ["PAREADO".to_owned()].into();
-        let p = pares_sugeridos(&evs, &ja);
+        let p = pares_sugeridos(&evs, &ja, &HashSet::new());
         assert_eq!(p.len(), 2);
         assert_eq!(p[0].apelido, "CX-1");
         assert_eq!(p[0].conta_do_extrato, "B1");
@@ -797,10 +836,36 @@ mod testes {
     }
 
     #[test]
+    fn conta_disputada_fica_com_o_de_mais_peso_e_empate_avisa() {
+        let sugerida = || Indicio::Conciliacao { confirmada: false };
+        // Dois apelidos com o mesmo peso querendo a mesma conta: os dois, avisados.
+        let empate = [
+            evidencia("CX-1", "B1", sugerida()),
+            evidencia("CARTAO", "B1", sugerida()),
+        ];
+        let p = pares_sugeridos(&empate, &HashSet::new(), &HashSet::new());
+        assert_eq!(p.len(), 2);
+        assert!(p[0].motivo.ends_with("disputada com CX-1"));
+        assert!(p[1].motivo.ends_with("disputada com CARTAO"));
+        // Com mais peso, um leva.
+        let peso = [
+            evidencia("CX-1", "B1", sugerida()),
+            evidencia("CX-1", "B1", Indicio::Assinatura),
+            evidencia("CARTAO", "B1", sugerida()),
+        ];
+        let p = pares_sugeridos(&peso, &HashSet::new(), &HashSet::new());
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].apelido, "CX-1");
+        // Conta já confirmada para outro apelido não é proposta.
+        let usadas: HashSet<String> = ["B1".to_owned()].into();
+        assert!(pares_sugeridos(&peso, &HashSet::new(), &usadas).is_empty());
+    }
+
+    #[test]
     fn pares_empatados_nao_propoem_nada() {
         let s = || Indicio::Conciliacao { confirmada: false };
         let evs = [evidencia("CX", "B1", s()), evidencia("CX", "B2", s())];
-        assert!(pares_sugeridos(&evs, &HashSet::new()).is_empty());
+        assert!(pares_sugeridos(&evs, &HashSet::new(), &HashSet::new()).is_empty());
     }
 
     #[test]
