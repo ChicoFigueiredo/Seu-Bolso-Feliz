@@ -76,13 +76,14 @@ pub(crate) fn calcular(
                 }
             }
             Natureza::DescontoEmFolha => r.descontos_em_folha += previsto,
+            Natureza::DentroDaFatura => r.compras_no_cartao += previsto,
             Natureza::Passagem { sentido } => match sentido {
                 Sentido::Entrada => passagem_entrada += previsto,
                 Sentido::Saida => passagem_saida += previsto,
             },
         }
         // O desconto em folha não entra no livre; as demais entram até serem pagas.
-        if !paga && !matches!(o.natureza, Natureza::DescontoEmFolha) {
+        if !paga && !matches!(o.natureza, Natureza::DescontoEmFolha | Natureza::DentroDaFatura) {
             if o.previsto.is_none() {
                 sem_valor += 1;
             } else if o.e_incerta() {

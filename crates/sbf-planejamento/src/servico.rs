@@ -551,7 +551,7 @@ impl Planejamento for PlanejamentoSqlite {
                     Natureza::Entrada => mes.entradas += previsto,
                     Natureza::Saida => mes.saidas_de_caixa += previsto,
                     Natureza::DescontoEmFolha => mes.descontos_em_folha += previsto,
-                    Natureza::Passagem { .. } => {}
+                    Natureza::Passagem { .. } | Natureza::DentroDaFatura => {}
                 }
                 if o.previsto.is_none() {
                     mes.sem_valor += 1;

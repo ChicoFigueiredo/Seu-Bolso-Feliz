@@ -358,6 +358,7 @@ fn natureza(t: &str) -> Result<Natureza, String> {
         "entrada" => Natureza::Entrada,
         "saida" => Natureza::Saida,
         "desconto_em_folha" => Natureza::DescontoEmFolha,
+        "dentro_da_fatura" => Natureza::DentroDaFatura,
         "passagem_entrada" => Natureza::Passagem {
             sentido: Sentido::Entrada,
         },

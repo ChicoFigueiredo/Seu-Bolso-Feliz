@@ -162,6 +162,9 @@ pub enum Natureza {
     DescontoEmFolha,
     /// Dinheiro de passagem (bolão): fica fora de receita e de despesa.
     Passagem { sentido: Sentido },
+    /// Compra no cartão de crédito: aparece e é rastreada, mas o caixa sai pela fatura, que já
+    /// está no plano. Fica fora das saídas de caixa para não contar duas vezes.
+    DentroDaFatura,
 }
 
 /// Quando a regra gera ocorrência.
@@ -435,6 +438,8 @@ pub struct Resumo {
     /// Saídas de caixa: sem desconto em folha e sem dinheiro de passagem.
     pub saidas_de_caixa_previstas: Centavos,
     pub descontos_em_folha: Centavos,
+    /// Compras no cartão do período: já estão dentro das faturas, fora das saídas de caixa.
+    pub compras_no_cartao: Centavos,
     pub em_atraso: Centavos,
     /// Ocorrências sem valor ou só com pago informado.
     pub a_conferir: u32,

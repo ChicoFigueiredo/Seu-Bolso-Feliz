@@ -69,6 +69,8 @@ pub struct Achado {
     pub mediana: Centavos,
     /// Dia do mês mais comum (mediana dos dias).
     pub dia: u8,
+    /// A maioria das cobranças é compra no cartão (tipo `compra`): o caixa sai pela fatura.
+    pub no_cartao: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +158,7 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
             .join(",")
     };
     let sql = format!(
-        "SELECT fornecedor_normalizado, ciclo_id, valor_centavos, data FROM registro
+        "SELECT fornecedor_normalizado, ciclo_id, valor_centavos, data, tipo FROM registro
          WHERE valor_centavos < 0 AND fornecedor_normalizado IS NOT NULL
            AND fornecedor_normalizado <> '' AND tipo IN ({}) AND ciclo_id IN ({})",
         marcas(cfg.tipos.len(), 0),
@@ -171,6 +173,7 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
             ))
         })
         .map_err(erro)?;
@@ -178,10 +181,17 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
     // fornecedor -> ciclo -> total; fornecedor -> dias
     let mut totais: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     let mut dias: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+    // fornecedor -> (compras no cartão, cobranças)
+    let mut cartao: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     for l in linhas {
-        let (f, ciclo, valor, data) = l.map_err(erro)?;
+        let (f, ciclo, valor, data, tipo) = l.map_err(erro)?;
         if e_generica(&f, cfg) {
             continue;
+        }
+        let c = cartao.entry(f.clone()).or_default();
+        c.1 += 1;
+        if tipo == "compra" {
+            c.0 += 1;
         }
         *totais
             .entry(f.clone())
@@ -197,7 +207,9 @@ pub fn detectar(conn: &Connection, cfg: &ConfigOcultos) -> Resultado<Vec<Achado>
         .filter(|(_, por_ciclo)| por_ciclo.len() >= cfg.minimo_de_ciclos)
         .map(|(f, por_ciclo)| {
             let dia = dias.remove(&f).map_or(1, mediana).clamp(1, 31) as u8;
+            let (compras, total) = cartao.get(&f).copied().unwrap_or((0, 0));
             Achado {
+                no_cartao: compras * 2 > total,
                 ciclos_presentes: por_ciclo.len(),
                 mediana: Centavos(mediana(por_ciclo.into_values().collect())),
                 dia,
@@ -327,9 +339,9 @@ pub fn confirmar_ocultos(
                 recorrente: NovoRecorrente {
                     nome: a.fornecedor.clone(),
                     grupo: GRUPO_DOS_ACHADOS.to_owned(),
-                    subgrupo: None,
+                    subgrupo: Some(if a.no_cartao { "No cartão" } else { "Débito em conta" }.to_owned()),
                     posicao: i as i64 + 1,
-                    natureza: Natureza::Saida,
+                    natureza: if a.no_cartao { Natureza::DentroDaFatura } else { Natureza::Saida },
                     prazo: Prazo::Desconhecido,
                     primeira_versao: Versao {
                         id: String::new(),
