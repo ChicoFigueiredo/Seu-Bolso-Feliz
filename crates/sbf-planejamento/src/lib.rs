@@ -24,6 +24,16 @@
 
 use std::fmt;
 
+mod banco;
+mod escrita;
+mod projecao;
+mod resumo;
+mod servico;
+
+pub use banco::Banco;
+pub use projecao::{projetar, projetar_competencias, versao_vigente};
+pub use servico::PlanejamentoSqlite;
+
 use serde::{Deserialize, Serialize};
 
 pub use sbf_livro::{Centavos, Ciclo, Data, DiaDeCorte};

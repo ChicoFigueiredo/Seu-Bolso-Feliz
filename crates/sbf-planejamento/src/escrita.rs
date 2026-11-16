@@ -1,0 +1,783 @@
+//! A escrita: toda alteração aceita passa por [`aplicar_na`], que roda dentro da transação
+//! de quem chama (o serviço, a confirmação de proposta ou a simulação) e grava uma linha
+//! no histórico. Nada aqui apaga de fato: pausa, cancelamento, exceção e exclusão são
+//! linhas, e `desfeita` é uma marca.
+
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::banco::{self, carregar_um, json, novo_id};
+use crate::projecao::{projetar_competencias, versao_vigente};
+use crate::{
+    Alteracao, Autor, Competencia, Conciliacao, Data, ErroDoPlanejamento, Escopo, Excecao,
+    Exclusao, Frequencia, IdOcorrencia, MudancaDeVersao, NovoRecorrente, OrigemImportada, Prazo,
+    Recibo, Recorrente, Resultado, Versao,
+};
+
+/// O que uma variante fez, para o histórico e o recibo.
+struct Feito {
+    alvo: String,
+    recorrente: Option<String>,
+    resumo: String,
+    versao_nova: i64,
+    /// `false` quando nada mudou (a mesma origem importada duas vezes).
+    grava_historico: bool,
+}
+
+fn invalida<T>(motivo: &str) -> Resultado<T> {
+    Err(ErroDoPlanejamento::Invalida(motivo.to_owned()))
+}
+
+/// Aplica uma alteração dentro da transação de `c` e deixa a linha no histórico.
+pub(crate) fn aplicar_na(
+    c: &Connection,
+    alteracao: &Alteracao,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Recibo> {
+    let feito = match alteracao {
+        Alteracao::CriarRecorrente { recorrente, origem } => {
+            criar_recorrente(c, recorrente, origem.as_ref(), agora)?
+        }
+        Alteracao::Editar {
+            recorrente,
+            escopo,
+            mudanca,
+            versao_base,
+        } => editar(c, recorrente, *escopo, mudanca, *versao_base, autor, agora)?,
+        Alteracao::Pausar {
+            recorrente,
+            desde,
+            ate,
+            motivo,
+            versao_base,
+        } => pausar(c, recorrente, *desde, *ate, motivo, *versao_base)?,
+        Alteracao::Retomar {
+            recorrente,
+            desde,
+            versao_base,
+        } => retomar(c, recorrente, *desde, *versao_base)?,
+        Alteracao::Cancelar {
+            recorrente,
+            desde,
+            motivo,
+            comprovado,
+            versao_base,
+        } => cancelar(c, recorrente, *desde, motivo, *comprovado, *versao_base)?,
+        Alteracao::Excecao {
+            ocorrencia,
+            excecao,
+        } => excecao_avulsa(c, ocorrencia, excecao, autor, agora)?,
+        Alteracao::DesfazerExcecao { id } => desfazer_excecao(c, id)?,
+        Alteracao::Conciliar { conciliacao } => conciliar(c, conciliacao)?,
+        Alteracao::Excluir {
+            recorrente,
+            motivo,
+            versao_base,
+        } => excluir(c, recorrente, motivo, *versao_base, autor, agora)?,
+        Alteracao::Restaurar {
+            recorrente,
+            versao_base,
+        } => restaurar(c, recorrente, *versao_base)?,
+        Alteracao::Arquivar {
+            recorrente,
+            arquivado,
+            versao_base,
+        } => arquivar(c, recorrente, *arquivado, *versao_base)?,
+        Alteracao::Mover {
+            recorrente,
+            grupo,
+            posicao,
+            versao_base,
+        } => mover(c, recorrente, grupo, *posicao, *versao_base)?,
+        Alteracao::CriarGrupo { nome, posicao } => criar_grupo(c, nome, *posicao)?,
+    };
+
+    let alteracao_id = if feito.grava_historico {
+        let id = novo_id(c, "hist")?;
+        c.execute(
+            "INSERT INTO historico (id, quando, autor, alvo, recorrente_id, resumo, alteracao)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                agora,
+                json(autor)?,
+                feito.alvo,
+                feito.recorrente,
+                feito.resumo,
+                json(alteracao)?
+            ],
+        )?;
+        id
+    } else {
+        String::new()
+    };
+    Ok(Recibo {
+        alteracao_id,
+        alvo: feito.alvo,
+        versao_nova: feito.versao_nova,
+        quando: agora.to_owned(),
+    })
+}
+
+// ---------------------------------------------------------------------------------------
+// Validações
+// ---------------------------------------------------------------------------------------
+
+fn validar_frequencia(f: &Frequencia) -> Resultado<()> {
+    let dia_ok = |d: u8| (1..=31).contains(&d);
+    let valida = match *f {
+        Frequencia::Mensal { dia } => dia_ok(dia),
+        Frequencia::CadaNMeses { n, dia, .. } => n >= 1 && dia_ok(dia),
+        Frequencia::Anual { mes, dia } => (1..=12).contains(&mes) && dia_ok(dia),
+        Frequencia::Unica { .. } => true,
+    };
+    if valida {
+        Ok(())
+    } else {
+        invalida("frequência inválida")
+    }
+}
+
+fn validar_prazo(p: &Prazo) -> Resultado<()> {
+    match *p {
+        Prazo::Parcelas { total: 0, .. } => {
+            invalida("parcelas: o total precisa ser maior que zero")
+        }
+        _ => Ok(()),
+    }
+}
+
+fn nao_vazio(texto: &str, campo: &str) -> Resultado<()> {
+    if texto.trim().is_empty() {
+        invalida(&format!("{campo} não pode ficar vazio"))
+    } else {
+        Ok(())
+    }
+}
+
+fn carregar(c: &Connection, id: &str) -> Resultado<Recorrente> {
+    banco::ler_recorrentes(c, Some(id), true)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(format!("recorrente {id}")))
+}
+
+/// O recorrente existe, não está excluído e a versão de base confere.
+fn carregar_com_base(c: &Connection, id: &str, base: i64) -> Resultado<Recorrente> {
+    let rec = carregar(c, id)?;
+    conferir_base(&rec, base)?;
+    if rec.excluido.is_some() {
+        return invalida("o recorrente está excluído; restaure antes");
+    }
+    Ok(rec)
+}
+
+fn conferir_base(rec: &Recorrente, base: i64) -> Resultado<()> {
+    if rec.versao_do_registro == base {
+        Ok(())
+    } else {
+        Err(ErroDoPlanejamento::VersaoVelha {
+            atual: rec.versao_do_registro,
+        })
+    }
+}
+
+/// Sobe a versão do registro e devolve a nova.
+fn subir_versao(c: &Connection, id: &str) -> Resultado<i64> {
+    Ok(c.query_row(
+        "UPDATE recorrentes SET versao_do_registro = versao_do_registro + 1
+         WHERE id = ?1 RETURNING versao_do_registro",
+        params![id],
+        |l| l.get(0),
+    )?)
+}
+
+fn garantir_grupo(c: &Connection, nome: &str) -> Resultado<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO grupos (nome, posicao)
+         VALUES (?1, COALESCE((SELECT MAX(posicao) FROM grupos), 0) + 1)",
+        params![nome],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------
+// Variantes
+// ---------------------------------------------------------------------------------------
+
+fn gravar_versao(c: &Connection, recorrente: &str, v: &Versao, nova: bool) -> Resultado<()> {
+    let valores = params![
+        v.id,
+        recorrente,
+        v.desde.to_string(),
+        v.valor.map(|x| x.0),
+        json(&v.certeza)?,
+        json(&v.fonte)?,
+        json(&v.frequencia)?,
+        v.conta,
+        v.centro,
+        v.fornecedor,
+        v.categoria,
+        v.nota
+    ];
+    if nova {
+        c.execute(
+            "INSERT INTO versoes (id, recorrente_id, desde, valor, certeza, fonte, frequencia,
+                                  conta, centro, fornecedor, categoria, nota)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            valores,
+        )?;
+    } else {
+        c.execute(
+            "UPDATE versoes SET valor = ?4, certeza = ?5, fonte = ?6, frequencia = ?7,
+                    conta = ?8, centro = ?9, fornecedor = ?10, categoria = ?11, nota = ?12
+             WHERE id = ?1 AND recorrente_id = ?2 AND desde = ?3",
+            valores,
+        )?;
+    }
+    Ok(())
+}
+
+fn criar_recorrente(
+    c: &Connection,
+    novo: &NovoRecorrente,
+    origem: Option<&OrigemImportada>,
+    agora: &str,
+) -> Resultado<Feito> {
+    if let Some(o) = origem {
+        let existente: Option<String> = c
+            .query_row(
+                "SELECT recorrente_id FROM origens_importadas
+                 WHERE sha256 = ?1 AND aba = ?2 AND linha = ?3",
+                params![o.arquivo_sha256, o.aba, o.linha],
+                |l| l.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existente {
+            let rec = carregar(c, &id)?;
+            return Ok(Feito {
+                alvo: id,
+                recorrente: None,
+                resumo: String::new(),
+                versao_nova: rec.versao_do_registro,
+                grava_historico: false,
+            });
+        }
+    }
+    nao_vazio(&novo.nome, "o nome")?;
+    nao_vazio(&novo.grupo, "o grupo")?;
+    validar_prazo(&novo.prazo)?;
+    validar_frequencia(&novo.primeira_versao.frequencia)?;
+
+    let id = novo_id(c, "rec")?;
+    garantir_grupo(c, &novo.grupo)?;
+    c.execute(
+        "INSERT INTO recorrentes (id, nome, grupo, subgrupo, posicao, natureza, prazo,
+                                  versao_do_registro, criado_em)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
+        params![
+            id,
+            novo.nome,
+            novo.grupo,
+            novo.subgrupo,
+            novo.posicao,
+            json(&novo.natureza)?,
+            json(&novo.prazo)?,
+            agora
+        ],
+    )?;
+    let versao = Versao {
+        id: novo_id(c, "ver")?,
+        ..novo.primeira_versao.clone()
+    };
+    gravar_versao(c, &id, &versao, true)?;
+    if let Some(o) = origem {
+        c.execute(
+            "INSERT INTO origens_importadas (sha256, aba, linha, recorrente_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![o.arquivo_sha256, o.aba, o.linha, id],
+        )?;
+    }
+    Ok(Feito {
+        alvo: id.clone(),
+        recorrente: Some(id),
+        resumo: "Criou o recorrente.".into(),
+        versao_nova: 1,
+        grava_historico: true,
+    })
+}
+
+fn aplicar_mudanca(v: &mut Versao, m: &MudancaDeVersao) {
+    if let Some(valor) = m.valor {
+        v.valor = valor;
+    }
+    if let Some(certeza) = m.certeza {
+        v.certeza = certeza;
+    }
+    if let Some(fonte) = m.fonte {
+        v.fonte = fonte;
+    }
+    if let Some(frequencia) = m.frequencia {
+        v.frequencia = frequencia;
+    }
+    if let Some(x) = &m.conta {
+        v.conta.clone_from(x);
+    }
+    if let Some(x) = &m.centro {
+        v.centro.clone_from(x);
+    }
+    if let Some(x) = &m.fornecedor {
+        v.fornecedor.clone_from(x);
+    }
+    if let Some(x) = &m.categoria {
+        v.categoria.clone_from(x);
+    }
+    if let Some(x) = &m.nota {
+        v.nota.clone_from(x);
+    }
+}
+
+fn campos_mudados(m: &MudancaDeVersao) -> Vec<&'static str> {
+    let mut campos = Vec::new();
+    let mut marca = |tem: bool, nome: &'static str| {
+        if tem {
+            campos.push(nome);
+        }
+    };
+    marca(m.valor.is_some(), "valor");
+    marca(m.certeza.is_some(), "certeza");
+    marca(m.fonte.is_some(), "fonte");
+    marca(m.frequencia.is_some(), "frequência");
+    marca(m.conta.is_some(), "conta");
+    marca(m.centro.is_some(), "centro");
+    marca(m.fornecedor.is_some(), "fornecedor");
+    marca(m.categoria.is_some(), "categoria");
+    marca(m.nota.is_some(), "nota");
+    campos
+}
+
+fn editar(
+    c: &Connection,
+    id: &str,
+    escopo: Escopo,
+    mudanca: &MudancaDeVersao,
+    base: i64,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let rec = carregar_com_base(c, id, base)?;
+    let campos = campos_mudados(mudanca);
+    if campos.is_empty() {
+        return invalida("nenhuma mudança");
+    }
+    let resumo = match escopo {
+        Escopo::SoEsteMes(competencia) => {
+            let so_valor = campos == ["valor"];
+            let Some(Some(valor)) = mudanca.valor.filter(|_| so_valor) else {
+                return invalida("só o valor muda só neste mês, e ele precisa ter valor");
+            };
+            let ocorrencia = id_da_ocorrencia(c, id, competencia)?;
+            registrar_excecao(
+                c,
+                &ocorrencia,
+                &Excecao::ValorSoDesteMes { valor },
+                autor,
+                agora,
+            )?;
+            format!("Mudou o valor só de {competencia}.")
+        }
+        Escopo::DaquiEmDiante(competencia) => {
+            if let Some(f) = &mudanca.frequencia {
+                validar_frequencia(f)?;
+            }
+            let base_da_versao = versao_vigente(&rec, competencia)
+                .or_else(|| rec.versoes.first())
+                .ok_or_else(|| ErroDoPlanejamento::Banco("recorrente sem versão".into()))?;
+            let mesma_data = base_da_versao.desde == competencia;
+            let mut nova = base_da_versao.clone();
+            aplicar_mudanca(&mut nova, mudanca);
+            nova.desde = competencia;
+            if !mesma_data {
+                nova.id = novo_id(c, "ver")?;
+            }
+            gravar_versao(c, id, &nova, !mesma_data)?;
+            format!(
+                "Nova versão a partir de {competencia} ({}).",
+                campos.join(", ")
+            )
+        }
+    };
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo,
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+/// O id (com a parcela) da ocorrência do recorrente naquela competência.
+fn id_da_ocorrencia(
+    c: &Connection,
+    recorrente: &str,
+    competencia: Competencia,
+) -> Resultado<IdOcorrencia> {
+    let (rec, excecoes, conciliacoes) = carregar_um(c, recorrente)?
+        .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(format!("recorrente {recorrente}")))?;
+    // O `hoje` só decide o estado; o id não depende dele.
+    let qualquer_dia = Data {
+        ano: 2000,
+        mes: 1,
+        dia: 1,
+    };
+    projetar_competencias(&rec, &excecoes, &conciliacoes, [competencia], qualquer_dia)
+        .into_iter()
+        .next()
+        .map(|o| o.id)
+        .ok_or_else(|| ErroDoPlanejamento::Invalida(format!("não há ocorrência em {competencia}")))
+}
+
+fn tipo_da_excecao(e: &Excecao) -> &'static str {
+    match e {
+        Excecao::Adiar { .. } => "adiar",
+        Excecao::Dispensar { .. } => "dispensar",
+        Excecao::ValorSoDesteMes { .. } => "valor_so_deste_mes",
+        Excecao::PagoInformado { .. } => "pago_informado",
+    }
+}
+
+/// Grava a exceção; a anterior do mesmo tipo na mesma ocorrência fica `desfeita`
+/// (a última decisão vale, e desfazer não ressuscita a antiga).
+fn registrar_excecao(
+    c: &Connection,
+    ocorrencia: &IdOcorrencia,
+    excecao: &Excecao,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<String> {
+    let texto = ocorrencia.to_string();
+    let tipo = tipo_da_excecao(excecao);
+    c.execute(
+        "UPDATE excecoes SET desfeita = 1 WHERE ocorrencia = ?1 AND tipo = ?2 AND desfeita = 0",
+        params![texto, tipo],
+    )?;
+    let id = novo_id(c, "exc")?;
+    c.execute(
+        "INSERT INTO excecoes (id, recorrente_id, ocorrencia, competencia, parcela, tipo,
+                               excecao, quando, autor, desfeita)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+        params![
+            id,
+            ocorrencia.recorrente,
+            texto,
+            ocorrencia.competencia.to_string(),
+            ocorrencia.parcela,
+            tipo,
+            json(excecao)?,
+            agora,
+            json(autor)?
+        ],
+    )?;
+    Ok(id)
+}
+
+fn pausar(
+    c: &Connection,
+    id: &str,
+    desde: Competencia,
+    ate: Option<Competencia>,
+    motivo: &str,
+    base: i64,
+) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    nao_vazio(motivo, "o motivo")?;
+    if ate.is_some_and(|a| a <= desde) {
+        return invalida("a pausa precisa terminar depois de começar");
+    }
+    if banco::existe(
+        c,
+        "SELECT 1 FROM pausas WHERE recorrente_id = ?1 AND ate IS NULL",
+        params![id],
+    )? {
+        return invalida("já há uma pausa aberta; retome antes");
+    }
+    c.execute(
+        "INSERT INTO pausas (id, recorrente_id, desde, ate, motivo) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            novo_id(c, "pau")?,
+            id,
+            desde.to_string(),
+            ate.map(|a| a.to_string()),
+            motivo
+        ],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: format!("Pausou a partir de {desde}."),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn retomar(c: &Connection, id: &str, desde: Competencia, base: i64) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    let pausa: Option<String> = c
+        .query_row(
+            "SELECT id FROM pausas
+             WHERE recorrente_id = ?1 AND desde < ?2 AND (ate IS NULL OR ate > ?2)
+             ORDER BY desde DESC LIMIT 1",
+            params![id, desde.to_string()],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let Some(pausa) = pausa else {
+        return invalida("não há pausa para retomar nesta competência");
+    };
+    c.execute(
+        "UPDATE pausas SET ate = ?2 WHERE id = ?1",
+        params![pausa, desde.to_string()],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: format!("Retomou em {desde}."),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn cancelar(
+    c: &Connection,
+    id: &str,
+    desde: Competencia,
+    motivo: &str,
+    comprovado: bool,
+    base: i64,
+) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    nao_vazio(motivo, "o motivo")?;
+    c.execute(
+        "INSERT INTO cancelamentos (recorrente_id, desde, motivo, comprovado)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (recorrente_id) DO UPDATE
+         SET desde = excluded.desde, motivo = excluded.motivo, comprovado = excluded.comprovado",
+        params![id, desde.to_string(), motivo, comprovado],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: format!(
+            "Cancelou a partir de {desde}{}.",
+            if comprovado { " (comprovado)" } else { "" }
+        ),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+/// O recorrente da ocorrência existe e não está excluído.
+fn recorrente_da_ocorrencia(c: &Connection, ocorrencia: &IdOcorrencia) -> Resultado<Recorrente> {
+    let rec = carregar(c, &ocorrencia.recorrente)?;
+    if rec.excluido.is_some() {
+        return invalida("o recorrente está excluído; restaure antes");
+    }
+    Ok(rec)
+}
+
+fn excecao_avulsa(
+    c: &Connection,
+    ocorrencia: &IdOcorrencia,
+    excecao: &Excecao,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let rec = recorrente_da_ocorrencia(c, ocorrencia)?;
+    if let Excecao::Dispensar { motivo } = excecao {
+        nao_vazio(motivo, "o motivo")?;
+    }
+    registrar_excecao(c, ocorrencia, excecao, autor, agora)?;
+    let resumo = match excecao {
+        Excecao::Adiar { nova_data: Some(d) } => format!("Adiou {ocorrencia} para {d}."),
+        Excecao::Adiar { nova_data: None } => format!("Adiou {ocorrencia} sem nova data."),
+        Excecao::Dispensar { .. } => format!("Dispensou {ocorrencia}."),
+        Excecao::ValorSoDesteMes { .. } => {
+            format!("Mudou o valor só de {}.", ocorrencia.competencia)
+        }
+        Excecao::PagoInformado { .. } => format!("Informou pago em {ocorrencia}."),
+    };
+    Ok(Feito {
+        alvo: ocorrencia.to_string(),
+        recorrente: Some(rec.id),
+        resumo,
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+fn desfazer_excecao(c: &Connection, id: &str) -> Resultado<Feito> {
+    let linha: Option<(String, String)> = c
+        .query_row(
+            "SELECT ocorrencia, recorrente_id FROM excecoes WHERE id = ?1",
+            params![id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    let Some((ocorrencia, recorrente)) = linha else {
+        return Err(ErroDoPlanejamento::NaoEncontrado(format!("exceção {id}")));
+    };
+    c.execute(
+        "UPDATE excecoes SET desfeita = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    let rec = carregar(c, &recorrente)?;
+    Ok(Feito {
+        alvo: ocorrencia.clone(),
+        recorrente: Some(recorrente),
+        resumo: format!("Desfez uma exceção de {ocorrencia}."),
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+fn conciliar(c: &Connection, x: &Conciliacao) -> Resultado<Feito> {
+    let rec = recorrente_da_ocorrencia(c, &x.ocorrencia)?;
+    nao_vazio(&x.movimento, "o movimento")?;
+    // Uma sugestão nunca rebaixa uma conciliação já confirmada.
+    c.execute(
+        "INSERT INTO conciliacoes (ocorrencia, recorrente_id, competencia, parcela, movimento,
+                                   valor, data, confirmada)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (ocorrencia, movimento) DO UPDATE
+         SET valor = excluded.valor, data = excluded.data, confirmada = excluded.confirmada
+         WHERE conciliacoes.confirmada = 0 OR excluded.confirmada = 1",
+        params![
+            x.ocorrencia.to_string(),
+            x.ocorrencia.recorrente,
+            x.ocorrencia.competencia.to_string(),
+            x.ocorrencia.parcela,
+            x.movimento,
+            x.valor.0,
+            x.data.to_string(),
+            x.confirmada
+        ],
+    )?;
+    Ok(Feito {
+        alvo: x.ocorrencia.to_string(),
+        recorrente: Some(rec.id),
+        resumo: if x.confirmada {
+            format!("Confirmou a conciliação de {}.", x.ocorrencia)
+        } else {
+            format!("Sugeriu a conciliação de {}.", x.ocorrencia)
+        },
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+fn excluir(
+    c: &Connection,
+    id: &str,
+    motivo: &str,
+    base: i64,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    nao_vazio(motivo, "o motivo")?;
+    let exclusao = Exclusao {
+        quando: agora.to_owned(),
+        autor: autor.clone(),
+        motivo: motivo.to_owned(),
+    };
+    c.execute(
+        "UPDATE recorrentes SET excluido = ?2 WHERE id = ?1",
+        params![id, json(&exclusao)?],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: "Excluiu (exclusão lógica).".into(),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn restaurar(c: &Connection, id: &str, base: i64) -> Resultado<Feito> {
+    let rec = carregar(c, id)?;
+    conferir_base(&rec, base)?;
+    if rec.excluido.is_none() {
+        return invalida("o recorrente não está excluído");
+    }
+    c.execute(
+        "UPDATE recorrentes SET excluido = NULL WHERE id = ?1",
+        params![id],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: "Restaurou o recorrente.".into(),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn arquivar(c: &Connection, id: &str, arquivado: bool, base: i64) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    c.execute(
+        "UPDATE recorrentes SET arquivado = ?2 WHERE id = ?1",
+        params![id, arquivado],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: if arquivado {
+            "Arquivou o recorrente.".into()
+        } else {
+            "Tirou o recorrente do arquivo.".into()
+        },
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn mover(c: &Connection, id: &str, grupo: &str, posicao: i64, base: i64) -> Resultado<Feito> {
+    carregar_com_base(c, id, base)?;
+    nao_vazio(grupo, "o grupo")?;
+    garantir_grupo(c, grupo)?;
+    c.execute(
+        "UPDATE recorrentes SET grupo = ?2, posicao = ?3 WHERE id = ?1",
+        params![id, grupo, posicao],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: "Mudou o grupo ou a prioridade.".into(),
+        versao_nova,
+        grava_historico: true,
+    })
+}
+
+fn criar_grupo(c: &Connection, nome: &str, posicao: i64) -> Resultado<Feito> {
+    nao_vazio(nome, "o nome do grupo")?;
+    c.execute(
+        "INSERT INTO grupos (nome, posicao) VALUES (?1, ?2)
+         ON CONFLICT (nome) DO UPDATE SET posicao = excluded.posicao",
+        params![nome, posicao],
+    )?;
+    Ok(Feito {
+        alvo: nome.to_owned(),
+        recorrente: None,
+        resumo: "Criou ou reordenou um grupo.".into(),
+        versao_nova: 0,
+        grava_historico: true,
+    })
+}
