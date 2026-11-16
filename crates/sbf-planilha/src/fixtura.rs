@@ -118,3 +118,33 @@ pub fn planilha_ficticia(caminho: &Path) {
 
     wb.save(caminho).expect("salvar");
 }
+
+/// Inventário fictício em memória: só as colunas de `registro` que este crate lê.
+pub fn inventario_ficticio() -> rusqlite::Connection {
+    let c = rusqlite::Connection::open_in_memory().expect("memoria");
+    c.execute_batch(
+        "CREATE TABLE registro (
+           id INTEGER PRIMARY KEY, external_ref TEXT UNIQUE, tipo TEXT NOT NULL,
+           data TEXT NOT NULL, ciclo_id TEXT, valor_centavos INTEGER NOT NULL,
+           descricao_original TEXT, supplier_name_raw TEXT, fornecedor_normalizado TEXT);",
+    )
+    .expect("esquema");
+    c
+}
+
+/// Insere uma transação. `ciclo` é derivado da data (corte no dia 20).
+pub fn registro(c: &rusqlite::Connection, ref_: &str, tipo: &str, data: &str, valor: i64, forn: &str) {
+    let (a, m, d): (i32, i32, i32) = (
+        data[..4].parse().expect("ano"),
+        data[5..7].parse().expect("mes"),
+        data[8..10].parse().expect("dia"),
+    );
+    let total = a * 12 + m - 1 - i32::from(d < 20);
+    let ciclo = format!("{:04}-{:02}", total.div_euclid(12), total.rem_euclid(12) + 1);
+    c.execute(
+        "INSERT INTO registro (external_ref, tipo, data, ciclo_id, valor_centavos, fornecedor_normalizado)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![ref_, tipo, data, ciclo, valor, forn],
+    )
+    .expect("insert");
+}
