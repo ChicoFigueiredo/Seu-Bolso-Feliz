@@ -985,6 +985,11 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
+    /// As contas que aparecem no extrato (para escolher o par de um apelido), em ordem.
+    fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     /// A assinatura de um recorrente, se houver.
     fn assinatura(&self, recorrente: &str) -> Resultado<Option<Assinatura>> {
         let _ = recorrente;
