@@ -44,6 +44,8 @@ fn passo_em_meses(frequencia: &Frequencia) -> i32 {
 
 /// As exceções e conciliações de um recorrente, indexadas por ocorrência.
 struct Contexto<'a> {
+    /// O início do acompanhamento: antes dele, sem pago informado, nada está em atraso.
+    inicio: Option<Competencia>,
     excecoes: HashMap<&'a IdOcorrencia, Vec<&'a ExcecaoGravada>>,
     conciliacoes: HashMap<&'a IdOcorrencia, Vec<&'a Conciliacao>>,
 }
@@ -53,6 +55,7 @@ impl<'a> Contexto<'a> {
         recorrente: &Recorrente,
         excecoes: &'a [ExcecaoGravada],
         conciliacoes: &'a [Conciliacao],
+        inicio: Option<Competencia>,
     ) -> Contexto<'a> {
         let mut por_excecao: HashMap<&IdOcorrencia, Vec<&ExcecaoGravada>> = HashMap::new();
         for e in excecoes
@@ -69,6 +72,7 @@ impl<'a> Contexto<'a> {
             por_conciliacao.entry(&c.ocorrencia).or_default().push(c);
         }
         Contexto {
+            inicio,
             excecoes: por_excecao,
             conciliacoes: por_conciliacao,
         }
@@ -99,6 +103,7 @@ fn decisoes(excecoes: &[&ExcecaoGravada]) -> Decisoes {
 
 /// Projeta as ocorrências de `de` a `ate` (inclusive), com as suprimidas marcadas pelos
 /// estados `SuprimidaPor*`. Quem monta o controle filtra o que não deve aparecer.
+/// Sem início do acompanhamento: veja [`projetar_desde`].
 pub fn projetar(
     recorrente: &Recorrente,
     excecoes: &[ExcecaoGravada],
@@ -107,13 +112,29 @@ pub fn projetar(
     ate: Competencia,
     hoje: Data,
 ) -> Vec<Ocorrencia> {
+    projetar_desde(recorrente, excecoes, conciliacoes, de, ate, hoje, None)
+}
+
+/// Como [`projetar`], com o início do acompanhamento: uma ocorrência de competência
+/// anterior a ele, sem pagamento informado, nunca fica `EmAtraso` (pago vazio é "não
+/// informado", não "não pago"), salvo se tiver `Excecao::Adiar`, que diz que ainda é devida.
+pub fn projetar_desde(
+    recorrente: &Recorrente,
+    excecoes: &[ExcecaoGravada],
+    conciliacoes: &[Conciliacao],
+    de: Competencia,
+    ate: Competencia,
+    hoje: Data,
+    inicio: Option<Competencia>,
+) -> Vec<Ocorrencia> {
     let total = de.meses_ate(ate);
-    projetar_competencias(
+    projetar_competencias_desde(
         recorrente,
         excecoes,
         conciliacoes,
         (0..=total).map(|i| de.somar_meses(i)),
         hoje,
+        inicio,
     )
 }
 
@@ -125,7 +146,19 @@ pub fn projetar_competencias(
     competencias: impl IntoIterator<Item = Competencia>,
     hoje: Data,
 ) -> Vec<Ocorrencia> {
-    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes);
+    projetar_competencias_desde(recorrente, excecoes, conciliacoes, competencias, hoje, None)
+}
+
+/// [`projetar_competencias`] com o início do acompanhamento.
+pub fn projetar_competencias_desde(
+    recorrente: &Recorrente,
+    excecoes: &[ExcecaoGravada],
+    conciliacoes: &[Conciliacao],
+    competencias: impl IntoIterator<Item = Competencia>,
+    hoje: Data,
+    inicio: Option<Competencia>,
+) -> Vec<Ocorrencia> {
+    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio);
     competencias
         .into_iter()
         .filter_map(|c| ocorrencia_em(recorrente, &contexto, c, hoje))
@@ -199,7 +232,17 @@ fn ocorrencia_em(
     let estado = if let (Some(s), false) = (motivo_da_supressao, tem_pago) {
         s
     } else {
-        estado_da(&decisoes, previsto, conciliado, vencimento, hoje)
+        let antes_do_inicio = contexto.inicio.is_some_and(|i| c < i);
+        // Antes do início, só o adiar diz que ainda é devida.
+        let pode_atrasar = !antes_do_inicio || decisoes.adiar.is_some();
+        estado_da(
+            &decisoes,
+            previsto,
+            conciliado,
+            vencimento,
+            hoje,
+            pode_atrasar,
+        )
     };
 
     Some(Ocorrencia {
@@ -244,6 +287,7 @@ fn estado_da(
     conciliado: Option<crate::Centavos>,
     vencimento: Data,
     hoje: Data,
+    pode_atrasar: bool,
 ) -> EstadoDaOcorrencia {
     let menor_que_o_previsto = |pago: crate::Centavos| previsto.is_some_and(|p| pago < p);
     if let Some(c) = conciliado {
@@ -263,7 +307,7 @@ fn estado_da(
     if d.dispensada {
         return EstadoDaOcorrencia::Dispensada;
     }
-    if vencimento < hoje {
+    if pode_atrasar && vencimento < hoje {
         return EstadoDaOcorrencia::EmAtraso;
     }
     if d.adiar.is_some() {
@@ -746,5 +790,36 @@ mod testes {
         let b = proj(&r, &[], comp(2026, 11), comp(2056, 10));
         assert_eq!(a, b);
         assert_eq!(a.len(), 360);
+    }
+
+    #[test]
+    fn antes_do_inicio_do_acompanhamento_nada_atrasa_salvo_adiar() {
+        let r = mensal(5);
+        let e = [excecao(comp(2026, 9), Excecao::Adiar { nova_data: None })];
+        let o = projetar_desde(
+            &r,
+            &e,
+            &[],
+            comp(2026, 9),
+            comp(2026, 12),
+            HOJE,
+            Some(comp(2026, 11)),
+        );
+        use EstadoDaOcorrencia::*;
+        let estados: Vec<_> = o.iter().map(|x| x.estado).collect();
+        // setembro (adiada sem data) segue as regras de sempre; outubro não atrasa.
+        assert_eq!(estados, [EmAtraso, Prevista, EmAtraso, Prevista]);
+        // Pago informado antes do início continua valendo.
+        let e = [pago(comp(2026, 10), 3500)];
+        let o = projetar_desde(
+            &r,
+            &e,
+            &[],
+            comp(2026, 10),
+            comp(2026, 10),
+            HOJE,
+            Some(comp(2026, 11)),
+        );
+        assert_eq!(o[0].estado, PagoInformado);
     }
 }

@@ -31,7 +31,9 @@ mod resumo;
 mod servico;
 
 pub use banco::Banco;
-pub use projecao::{projetar, projetar_competencias, versao_vigente};
+pub use projecao::{
+    projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
+};
 pub use servico::PlanejamentoSqlite;
 
 use serde::{Deserialize, Serialize};
