@@ -90,6 +90,14 @@ pub(crate) fn aplicar_na(
             versao_base,
         } => mover(c, recorrente, grupo, *posicao, *versao_base)?,
         Alteracao::CriarGrupo { nome, posicao } => criar_grupo(c, nome, *posicao)?,
+        // Costura de 2026-11-16: o agente do motor implementa.
+        Alteracao::DefinirComposicao { .. }
+        | Alteracao::VincularDocumento { .. }
+        | Alteracao::DesvincularDocumento { .. } => {
+            return Err(crate::ErroDoPlanejamento::Invalida(
+                "ainda não implementado nesta versão".to_owned(),
+            ));
+        }
     };
 
     let alteracao_id = if feito.grava_historico {

@@ -488,6 +488,106 @@ pub struct TotaisDoMes {
 }
 
 // ---------------------------------------------------------------------------------------
+// Composição do salário e documentos
+// ---------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeRubrica {
+    Provento,
+    Desconto,
+}
+
+/// Uma rubrica do contracheque. O salário continua digitado (decisão do CEO): as rubricas
+/// são o detalhe que explica o líquido e servem para conferir a soma.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rubrica {
+    /// O código do contracheque (`2002`), quando houver.
+    pub codigo: Option<String>,
+    pub nome: String,
+    pub tipo: TipoDeRubrica,
+    pub valor: Centavos,
+    /// A competência que a rubrica traz (numa consignação, o início do contrato).
+    pub competencia: Option<Competencia>,
+    /// O prazo em meses que o contracheque informa (numa consignação, o total de parcelas).
+    pub prazo: Option<u32>,
+    /// O recorrente de desconto em folha que esta rubrica representa, quando houver.
+    pub recorrente: Option<String>,
+}
+
+/// As rubricas de um recorrente de entrada (o salário) a partir de uma competência.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Composicao {
+    pub recorrente: String,
+    /// Vale desta competência em diante, como uma versão.
+    pub desde: Competencia,
+    pub rubricas: Vec<Rubrica>,
+    /// O sha256 do documento de onde as rubricas vieram (o contracheque), quando houver.
+    pub documento: Option<String>,
+    /// De onde vieram, em português ("planilha 2026.10", "contracheque 11/2026").
+    pub origem: String,
+}
+
+impl Composicao {
+    /// Proventos menos descontos.
+    pub fn liquido(&self) -> Centavos {
+        self.rubricas
+            .iter()
+            .map(|r| match r.tipo {
+                TipoDeRubrica::Provento => r.valor,
+                TipoDeRubrica::Desconto => Centavos(-r.valor.0),
+            })
+            .sum()
+    }
+
+    /// A diferença entre o líquido das rubricas e o valor digitado; `None` quando batem ou
+    /// quando não há valor digitado para comparar.
+    pub fn divergencia(&self, digitado: Option<Centavos>) -> Option<Centavos> {
+        let d = digitado?;
+        let dif = Centavos(self.liquido().0 - d.0);
+        (dif != Centavos(0)).then_some(dif)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeDocumento {
+    Contracheque,
+    /// Cobrança: fatura, conta. Não prova pagamento.
+    Fatura,
+    Boleto,
+    /// Prova de pagamento.
+    Comprovante,
+    Contrato,
+    NotaFiscal,
+    Outro,
+}
+
+/// A que o documento se liga: à regra inteira (um contrato) ou a um mês (uma fatura).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "tipo", rename_all = "snake_case")]
+pub enum AlvoDoDocumento {
+    Recorrente { id: String },
+    Ocorrencia { id: IdOcorrencia },
+}
+
+/// Um documento do cofre (pelo sha256 do achado) ligado a um recorrente ou ocorrência.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentoVinculado {
+    pub id: String,
+    pub alvo: AlvoDoDocumento,
+    /// O `content_hash` do achado no inventário.
+    pub sha256: String,
+    pub tipo: TipoDeDocumento,
+    /// Nome para mostrar (o nome do arquivo); nunca vai a log.
+    pub nome: String,
+    pub data: Option<Data>,
+    pub quando: String,
+    pub autor: Autor,
+    pub desvinculado: bool,
+}
+
+// ---------------------------------------------------------------------------------------
 // Escrita
 // ---------------------------------------------------------------------------------------
 
@@ -613,6 +713,22 @@ pub enum Alteracao {
     CriarGrupo {
         nome: String,
         posicao: i64,
+    },
+    /// Grava as rubricas de um recorrente a partir de `composicao.desde` (substitui a de
+    /// mesmo `desde`). Não muda o valor digitado.
+    DefinirComposicao {
+        composicao: Composicao,
+        versao_base: i64,
+    },
+    VincularDocumento {
+        alvo: AlvoDoDocumento,
+        sha256: String,
+        tipo_documento: TipoDeDocumento,
+        nome: String,
+        data: Option<Data>,
+    },
+    DesvincularDocumento {
+        id: String,
     },
 }
 
@@ -755,6 +871,18 @@ pub trait Planejamento {
         Ok(None)
     }
 
+    /// A composição (rubricas) vigente de um recorrente na competência. O padrão é nenhuma.
+    fn composicao(&self, recorrente: &str, competencia: Competencia) -> Resultado<Option<Composicao>> {
+        let _ = (recorrente, competencia);
+        Ok(None)
+    }
+
+    /// Os documentos ligados a um alvo (sem os desvinculados). O padrão é nenhum.
+    fn documentos(&self, alvo: &AlvoDoDocumento) -> Resultado<Vec<DocumentoVinculado>> {
+        let _ = alvo;
+        Ok(Vec::new())
+    }
+
     /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
     /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
@@ -796,6 +924,30 @@ mod testes {
         assert_eq!(Competencia { ano: 2027, mes: 2 }.dia(31).dia, 28);
         assert_eq!(Competencia { ano: 2028, mes: 2 }.dia(31).dia, 29);
         assert_eq!(Competencia { ano: 2026, mes: 4 }.dia(31).dia, 30);
+    }
+
+    #[test]
+    fn composicao_soma_e_acusa_divergencia() {
+        let r = |tipo, v| Rubrica {
+            codigo: None,
+            nome: "x".into(),
+            tipo,
+            valor: Centavos(v),
+            competencia: None,
+            prazo: None,
+            recorrente: None,
+        };
+        let c = Composicao {
+            recorrente: "sal".into(),
+            desde: Competencia { ano: 2026, mes: 11 },
+            rubricas: vec![r(TipoDeRubrica::Provento, 1_000_00), r(TipoDeRubrica::Desconto, 250_00)],
+            documento: None,
+            origem: "teste".into(),
+        };
+        assert_eq!(c.liquido(), Centavos(750_00));
+        assert_eq!(c.divergencia(Some(Centavos(750_00))), None);
+        assert_eq!(c.divergencia(Some(Centavos(700_00))), Some(Centavos(50_00)));
+        assert_eq!(c.divergencia(None), None);
     }
 
     #[test]

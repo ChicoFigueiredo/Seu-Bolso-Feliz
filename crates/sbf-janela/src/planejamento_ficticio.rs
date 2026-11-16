@@ -1311,7 +1311,10 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
         Alteracao::CriarRecorrente { .. }
         | Alteracao::DesfazerExcecao { .. }
-        | Alteracao::CriarGrupo { .. } => None,
+        | Alteracao::CriarGrupo { .. }
+        | Alteracao::DefinirComposicao { .. }
+        | Alteracao::VincularDocumento { .. }
+        | Alteracao::DesvincularDocumento { .. } => None,
     }
 }
 
@@ -1667,6 +1670,12 @@ impl PlanejamentoFicticio {
                 });
                 Ok(self.registrar(autor, &nome, "Criou um grupo.".into(), &alt))
             }
+            // O agente da janela implementa no fictício (rubricas e documentos).
+            Alteracao::DefinirComposicao { .. }
+            | Alteracao::VincularDocumento { .. }
+            | Alteracao::DesvincularDocumento { .. } => Err(ErroDoPlanejamento::Invalida(
+                "ainda não implementado no fictício".into(),
+            )),
         }
     }
 

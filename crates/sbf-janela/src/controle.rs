@@ -1630,6 +1630,14 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             nome(recorrente)
         ),
         Alteracao::CriarGrupo { nome, .. } => format!("Criar o grupo {nome}."),
+        Alteracao::DefinirComposicao { composicao, .. } => format!(
+            "Definir {} rubricas de {} a partir de {}.",
+            composicao.rubricas.len(),
+            nome(&composicao.recorrente),
+            competencia_texto(composicao.desde)
+        ),
+        Alteracao::VincularDocumento { nome: doc, .. } => format!("Vincular o documento {doc}."),
+        Alteracao::DesvincularDocumento { .. } => "Desvincular um documento.".to_owned(),
     }
 }
 

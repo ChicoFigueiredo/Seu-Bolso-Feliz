@@ -231,7 +231,14 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
                 |l| l.get(0),
             )
             .optional()?,
-        Alteracao::CriarRecorrente { .. } | Alteracao::CriarGrupo { .. } => None,
+        Alteracao::DefinirComposicao { composicao, .. } => Some(composicao.recorrente.clone()),
+        Alteracao::VincularDocumento { alvo, .. } => Some(match alvo {
+            crate::AlvoDoDocumento::Recorrente { id } => id.clone(),
+            crate::AlvoDoDocumento::Ocorrencia { id } => id.recorrente.clone(),
+        }),
+        Alteracao::CriarRecorrente { .. }
+        | Alteracao::CriarGrupo { .. }
+        | Alteracao::DesvincularDocumento { .. } => None,
     })
 }
 
