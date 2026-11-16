@@ -309,6 +309,14 @@ impl Guardador {
         Ok(false)
     }
 
+    /// Grava agora o que estava esperando (o app vai fechar). `Ok(true)` quando gravou.
+    pub fn descarregar(&mut self) -> Result<bool, String> {
+        match self.pendente.take() {
+            Some((p, _)) => self.quadro(&p),
+            None => Ok(false),
+        }
+    }
+
     /// Um quadro: grava se `atual` difere do último gravado. `Ok(true)` quando gravou.
     pub fn quadro(&mut self, atual: &PreferenciasDaJanela) -> Result<bool, String> {
         let Some(arquivo) = self.arquivo.as_deref() else {
@@ -326,6 +334,24 @@ impl Guardador {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn descarregar_grava_o_pendente_antes_da_espera() {
+        let (_d, arquivo) = caminho();
+        let mut g = Guardador::default();
+        g.ligar(Some(arquivo.clone()));
+        let p = PreferenciasDaJanela {
+            zoom: Some(1.25),
+            ..Default::default()
+        };
+        let agora = Instant::now();
+        assert_eq!(g.quadro_com_espera(&p, agora, false), Ok(false));
+        assert!(g.tem_pendente());
+        assert_eq!(g.descarregar(), Ok(true));
+        assert!(!g.tem_pendente());
+        assert_eq!(PreferenciasDaJanela::carregar(&arquivo).zoom, Some(1.25));
+        assert_eq!(g.descarregar(), Ok(false));
+    }
 
     fn caminho() -> (tempfile::TempDir, PathBuf) {
         let t = tempfile::tempdir().expect("pasta");

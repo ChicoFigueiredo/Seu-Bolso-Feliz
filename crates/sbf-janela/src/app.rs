@@ -299,6 +299,12 @@ impl AppSbf {
         self.casca_a_aplicar.take()
     }
 
+    /// O app vai fechar: grava as preferências que ainda esperavam a hora (mexer e fechar em
+    /// menos de um segundo não perde a mudança).
+    pub fn ao_fechar(&mut self) {
+        let _ = self.janela.get_mut().guardador.descarregar();
+    }
+
     /// A janela (estado da interface), para testes e para o integrador.
     pub fn janela(&self) -> std::cell::RefMut<'_, Janela> {
         self.janela.borrow_mut()

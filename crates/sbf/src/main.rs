@@ -80,6 +80,10 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.casca.app.ao_fechar();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let inicio = std::time::Instant::now();
         if let Some(estacao) = self.estacao.as_mut() {
