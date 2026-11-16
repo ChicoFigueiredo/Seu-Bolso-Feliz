@@ -5267,6 +5267,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-planejamento"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "sbf-livro",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sbf-pontos"
 version = "0.1.0"
 dependencies = [

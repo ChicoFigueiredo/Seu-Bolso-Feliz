@@ -13,6 +13,13 @@ da outra, nem na UI nem no código.
 A soma dos saldos das contas bancárias, neste instante. Não desconta nada.
 _Avoid_: saldo, saldo total, dinheiro
 
+**Dinheiro de passagem**:
+Dinheiro de terceiros que entra numa conta do usuário só para sair de novo, como as cotas
+de um bolão repassadas à lotérica. Fica num centro próprio, com entradas e saídas, e não
+é receita nem despesa. Está no disponível agora, mas o livre após compromissos desconta o
+que ainda não foi repassado.
+_Avoid_: receita, renda extra, reembolso
+
 **Livre após compromissos**:
 O disponível agora menos os compromissos já conhecidos e ainda não pagos. É uma
 estimativa e deve ser sinalizada como tal sempre que houver compromisso sem valor
@@ -94,6 +101,83 @@ _Avoid_: conta a pagar, obrigação, pendência
 Algo que se repete em intervalo previsível: assinatura, conta de consumo, parcelamento,
 receita fixa.
 _Avoid_: template recorrente, recurring template, série
+
+**Ocorrência**:
+Um recorrente num mês específico: a assinatura de janeiro/2027. Existe porque a regra diz
+que existe, sem ninguém precisar criá-la, e tem sempre a mesma identidade naquele mês.
+Enquanto não é paga, é um compromisso; sozinha, nunca é uma movimentação.
+_Avoid_: instância, lançamento futuro, parcela (parcela é de dívida)
+
+**Versão**:
+Os dados de um recorrente (valor, vencimento, conta, centro, prioridade) que valem a
+partir de uma data. Mudar algo "daqui para a frente" cria uma versão nova; as ocorrências
+anteriores continuam explicadas pela versão delas.
+_Avoid_: edição, revisão
+
+**Exceção**:
+Uma decisão sobre uma única ocorrência: adiar para outra data, dispensar, ou usar outro
+valor só naquele mês. Não muda a regra nem os outros meses. Dispensar não é pagar, e uma
+ocorrência adiada continua devida.
+_Avoid_: ajuste, override, correção pontual
+
+**Pausa**:
+Um intervalo em que o recorrente não gera ocorrências. A regra e o contrato com o
+fornecedor continuam, e uma cobrança já emitida no intervalo continua devida. Retomar
+encerra a pausa numa data.
+_Avoid_: suspensão, cancelamento, desativar
+
+**Cancelamento**:
+O fim de um recorrente a partir de uma data: nenhuma ocorrência depois dela. Não prova
+que o fornecedor aceitou cancelar nem extingue uma dívida real; isso só um documento
+comprova.
+_Avoid_: exclusão, pausa, encerrar
+
+**Pago informado**:
+O valor que o usuário diz ter pago numa ocorrência, sem prova bancária — a coluna "Valor
+Pago" da planilha. Fica a conferir até a ocorrência ser conciliada. Vazio quer dizer "não
+informado", nunca "não pago".
+_Avoid_: pago declarado, quitado, baixado
+
+**Em atraso**:
+A ocorrência cujo vencimento passou sem pagamento conhecido, e que continua devida. Não
+some do mês seguinte nem vira dispensada: aparece junto do mês corrente até ser paga,
+renegociada ou conciliada.
+_Avoid_: inadimplente, vencida e esquecida, perdida
+
+**Conciliada** (ocorrência):
+A ocorrência ligada à movimentação real que a pagou. É o único "pago" que entra como fato
+nos totais; pago informado sozinho, não.
+_Avoid_: pago confirmado, liquidada
+
+**Desconto em folha**:
+O que o empregador retém do salário antes de depositar: consignação, previdência, plano
+de saúde. O **salário líquido** é o que de fato cai na conta, já sem esses descontos;
+contá-los de novo como saída da conta é dupla contagem.
+_Avoid_: débito em conta, parcela do salário
+
+**Data de disponibilidade** e **data do crédito**:
+Duas datas da mesma entrada. A de disponibilidade é quando o dinheiro já pode ser usado; a
+do crédito é quando o banco registra o lançamento. Com feriado, um salário pode estar
+disponível num dia e ter o crédito registrado no dia útil seguinte.
+_Avoid_: data do salário, dia do pagamento
+
+**Grupo**:
+Como o usuário arruma o controle mensal no primeiro nível, do jeito da planilha: Essencial,
+Lar, Empréstimos, Parcial, Assinaturas. É só arrumação: não é categoria, nem centro, nem
+prioridade, e trocar uma linha de grupo não muda nada no livro-caixa.
+_Avoid_: categoria, seção, tipo
+
+**Prioridade**:
+A ordem em que as coisas são pagas, igual à ordem da planilha: o grupo de cima vem antes
+do de baixo, e dentro do grupo a linha de cima vem antes. Mudar a prioridade é mudar a
+posição, não escolher um rótulo.
+_Avoid_: essencialidade, importância, urgência, nível
+
+**Controle mensal**:
+A visão de um mês, civil ou ciclo, com todos os compromissos: o que se previu, o que se
+informou pago, o que está conciliado e o que falta conferir. Qualquer um dos próximos 360
+meses pode ser aberto, e o futuro só mostra o que as regras projetam.
+_Avoid_: planilha, orçamento, dashboard
 
 ## Documentos
 
