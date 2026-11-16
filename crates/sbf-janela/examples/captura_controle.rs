@@ -177,20 +177,28 @@ impl App {
                     f.centro = "Pessoal".into();
                 }
             }
-            (1, "arrastar") => {
+            (1, "arrastar" | "arrastar-fim") => {
                 c.resumo_aberto = false;
                 // Só o painel Reconhecimento no dock: o cartão pede altura.
                 bancada_casca::executar(ctx, bancada_casca::ids::painel("detalhe"));
                 bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
             }
-            (3, "arrastar") => {
+            (3, "arrastar" | "arrastar-fim") => {
                 let arquivo = std::env::temp_dir().join("contracheque-2026-10.pdf");
                 let _ = std::fs::write(&arquivo, b"arquivo ficticio");
                 janela.soltar_arquivos(vec![arquivo], Some(ctx));
             }
-            (9, "arrastar") => {
+            (9, "arrastar" | "arrastar-fim") => {
                 // O usuário confirma a primeira sugestão (vincular); a segunda fica à espera.
                 janela.confirmar_sugestao(0, 0);
+            }
+            (11, "arrastar") => {
+                // Rola até os grupos de rubricas da sugestão "usar estas rubricas".
+                janela.reconhecimento.rolar_para = Some(RECONHECIMENTO_ROLAGEM);
+            }
+            (11, "arrastar-fim") => {
+                // O fim do cartão: só deste mês, fora do total, líquidos e a divergência.
+                janela.reconhecimento.rolar_para = Some(RECONHECIMENTO_ROLAGEM_FIM);
             }
             (1, "propostas") => {
                 c.resumo_aberto = false;
@@ -230,6 +238,12 @@ impl eframe::App for App {
         }
     }
 }
+
+/// Quanto rolar o painel do reconhecimento para mostrar as rubricas.
+const RECONHECIMENTO_ROLAGEM: f32 = 640.0;
+
+/// Idem, até o fim do cartão (a rolagem passa do fim sem problema: o egui limita).
+const RECONHECIMENTO_ROLAGEM_FIM: f32 = 5000.0;
 
 fn main() -> std::process::ExitCode {
     let cena = std::env::var("SBF_CENA").unwrap_or_else(|_| "ciclo".into());

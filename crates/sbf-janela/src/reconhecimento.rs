@@ -146,6 +146,9 @@ pub struct Reconhecimento {
     pub pairando: bool,
     /// O painel deve aparecer (ao soltar); o app consome isto uma vez.
     pub painel_pedido: bool,
+    /// Rola a lista de cartões até este ponto no próximo quadro (as capturas usam, para
+    /// mostrar as rubricas); a interface consome uma vez.
+    pub rolar_para: Option<f32>,
 }
 
 impl Reconhecimento {
@@ -652,11 +655,10 @@ mod testes {
             .expect("prêmio");
         assert!(inicial[premio]);
         j.alternar_eventual(0, i, premio);
-        assert_eq!(
-            j.reconhecimento.cartoes[0]
+        assert!(
+            !j.reconhecimento.cartoes[0]
                 .eventuais_da(i)
-                .expect("marcação")[premio],
-            false
+                .expect("marcação")[premio]
         );
         j.confirmar_sugestao(0, i);
         assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);

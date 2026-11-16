@@ -101,15 +101,18 @@ impl Janela {
                 pedidos.push(Pedido::Limpar);
             }
         });
-        ScrollArea::vertical()
+        let mut area = ScrollArea::vertical()
             .id_salt("dock-reconhecimento")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (i, c) in cartoes.iter().enumerate() {
-                    cartao(ui, &p, i, c, &mut pedidos);
-                    ui.add_space(6.0);
-                }
-            });
+            .auto_shrink([false, false]);
+        if let Some(y) = self.reconhecimento.rolar_para.take() {
+            area = area.vertical_scroll_offset(y);
+        }
+        area.show(ui, |ui| {
+            for (i, c) in cartoes.iter().enumerate() {
+                cartao(ui, &p, i, c, &mut pedidos);
+                ui.add_space(6.0);
+            }
+        });
         self.aplicar(ui.ctx(), pedidos);
     }
 
@@ -500,43 +503,67 @@ fn rubricas_em_grupos(
             pequeno(ui, "nenhuma", p.tinta_desabilitada);
             return;
         }
-        egui::Grid::new(("rubricas", cartao, sugestao, indices[0], indices.len()))
-            .num_columns(3)
-            .spacing([8.0, 1.0])
-            .show(ui, |ui| {
-                for &i in indices {
-                    let r = &c.rubricas[i];
-                    let mut fixa = !eventual(i);
-                    if ui
-                        .add_enabled(editavel, egui::Checkbox::without_text(&mut fixa))
-                        .on_hover_text(if fixa {
-                            "Fixa: vale daqui para frente. Desmarque para valer só deste mês."
-                        } else {
-                            "Só deste mês. Marque para valer daqui para frente."
-                        })
-                        .changed()
-                    {
-                        pedidos.push(Pedido::AlternarEventual(cartao, sugestao, i));
-                    }
-                    let mut nome = r.nome.clone();
-                    if let Some(parcela) = c.parcelas_atuais.get(i).copied().flatten() {
-                        nome = format!("{nome} · parcela {parcela}");
-                    }
-                    if let Some(k) = r.competencia
-                        && k != c.pagamento
-                        && c.prazo_e_parcela_atual
-                    {
-                        nome = format!("{nome} · de {}", competencia_texto(k));
-                    }
-                    ui.label(RichText::new(nome).size(12.0).color(p.tinta));
-                    let valor = match r.tipo {
-                        TipoDeRubrica::Provento => reais(r.valor),
-                        TipoDeRubrica::Desconto => format!("− {}", reais(r.valor)),
-                    };
-                    ui.label(RichText::new(valor).size(12.0).color(p.tinta_suave));
-                    ui.end_row();
+        ui.spacing_mut().item_spacing.y = 1.0;
+        for &i in indices {
+            let r = &c.rubricas[i];
+            let mut fixa = !eventual(i);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(editavel, egui::Checkbox::without_text(&mut fixa))
+                    .on_hover_text(if fixa {
+                        "Fixa: vale daqui para frente. Desmarque para valer só deste mês."
+                    } else {
+                        "Só deste mês. Marque para valer daqui para frente."
+                    })
+                    .changed()
+                {
+                    pedidos.push(Pedido::AlternarEventual(cartao, sugestao, i));
                 }
+                let valor = match r.tipo {
+                    TipoDeRubrica::Provento => reais(r.valor),
+                    TipoDeRubrica::Desconto => format!("− {}", reais(r.valor)),
+                };
+                let mut detalhe = Vec::new();
+                if let Some(parcela) = c.parcelas_atuais.get(i).copied().flatten() {
+                    detalhe.push(format!("parcela {parcela}"));
+                }
+                if let Some(k) = r.competencia
+                    && k != c.pagamento
+                    && c.prazo_e_parcela_atual
+                {
+                    detalhe.push(format!("de {}", competencia_texto(k)));
+                }
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.horizontal(|ui| {
+                        let largura = (ui.available_width() - 84.0).max(40.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(largura, 16.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&r.nome).size(12.0).color(p.tinta),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(&r.nome);
+                            },
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(valor).size(12.0).color(p.tinta));
+                        });
+                    });
+                    if !detalhe.is_empty() {
+                        ui.label(
+                            RichText::new(detalhe.join(" · "))
+                                .size(11.0)
+                                .color(p.tinta_suave),
+                        );
+                    }
+                });
             });
+        }
     };
     grupo(
         ui,
@@ -559,11 +586,6 @@ fn rubricas_em_grupos(
                 RichText::new(format!("{} · {}", r.nome, reais(r.valor)))
                     .size(12.0)
                     .color(p.tinta_desabilitada),
-            );
-            aviso_com_triangulo(
-                ui,
-                p,
-                &format!("{} não entra no total de descontos do contracheque", r.nome),
             );
         }
     }
