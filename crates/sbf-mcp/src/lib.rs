@@ -10,7 +10,9 @@
 //! confirma é o usuário, em Inventário › Triagem por IA. O livro-caixa é só leitura.
 
 pub mod ferramentas;
+pub mod plano;
 pub mod servidor;
 
 pub use ferramentas::Nucleo;
+pub use plano::Fabrica;
 pub use servidor::servir_stdio;

@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use sbf_mcp::Nucleo;
 
-const USO: &str = "uso: sbf mcp --inventario <pasta-do-cofre> [--livro <livro-caixa.sqlite>]";
+const USO: &str = "uso: sbf mcp --inventario <pasta-do-cofre> [--livro <livro-caixa.sqlite>] [--planejamento <planejamento.sqlite>]";
 
 /// O cache do livro mais recente em `<pasta de dados>/livro-caixa/*/livro-caixa.sqlite`.
 fn livro_da_estacao() -> Option<PathBuf> {
@@ -22,14 +22,23 @@ fn livro_da_estacao() -> Option<PathBuf> {
         .map(|(_, p)| p)
 }
 
+/// Abre o serviço de planejamento (spec 11) no arquivo dado. Ponto único de ligação: o
+/// MCP só conhece o trait `Planejamento`; quando o serviço real for integrado ao binário,
+/// é aqui que ele entra.
+fn abrir_planejamento(_arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
+    Err("o serviço de planejamento ainda não foi integrado a este binário".to_owned())
+}
+
 pub fn rodar(args: &[String]) -> ExitCode {
     let mut pasta: Option<&String> = None;
     let mut livro: Option<PathBuf> = None;
+    let mut planejamento: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
         match (args[i].as_str(), args.get(i + 1)) {
             ("--inventario", Some(v)) => pasta = Some(v),
             ("--livro", Some(v)) => livro = Some(PathBuf::from(v)),
+            ("--planejamento", Some(v)) => planejamento = Some(PathBuf::from(v)),
             _ => {
                 eprintln!("sbf mcp: argumento inesperado.\n{USO}");
                 return ExitCode::from(2);
@@ -59,6 +68,23 @@ pub fn rodar(args: &[String]) -> ExitCode {
         .and_then(|p| crate::rag::busca_local(&p))
     {
         Some(b) => nucleo.com_busca(std::sync::Arc::new(b), sbf_ia::NivelDeConfianca::Mascarado),
+        None => nucleo,
+    };
+    // As ferramentas do controle mensal só ligam se há planejamento (`--planejamento` ou
+    // `<cofre>/planejamento.sqlite`).
+    let planejamento = planejamento
+        .or_else(|| Some(Path::new(pasta).join("planejamento.sqlite")).filter(|p| p.is_file()));
+    let nucleo = match planejamento {
+        Some(arquivo) if arquivo.is_file() => {
+            nucleo.com_planejamento(std::sync::Arc::new(move || abrir_planejamento(&arquivo)))
+        }
+        Some(arquivo) => {
+            eprintln!(
+                "sbf mcp: não achei {} (controle mensal desligado)",
+                arquivo.display()
+            );
+            nucleo
+        }
         None => nucleo,
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
