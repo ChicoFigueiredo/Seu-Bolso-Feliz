@@ -9,11 +9,11 @@ use egui::{
     Align2, Color32, Context, CornerRadius, FontId, Id, LayerId, Order, RichText, ScrollArea,
     Stroke, StrokeKind, Ui,
 };
-use sbf_planejamento::{AlvoDoDocumento, Centavos, IdOcorrencia};
-use sbf_reconhecimento::{EstadoDoTexto, Reconhecido, Situacao, Sugestao};
+use sbf_planejamento::{AlvoDoDocumento, Centavos, IdOcorrencia, TipoDeRubrica};
+use sbf_reconhecimento::{EstadoDoTexto, Reconhecido, Situacao, Sugestao, UsoDeRubricas};
 
 use crate::componentes;
-use crate::controle::{competencia_texto, reais};
+use crate::controle::{competencia_texto, data_texto, reais};
 use crate::formato;
 use crate::icones;
 use crate::janela::Janela;
@@ -27,6 +27,8 @@ use sbf_inventario::consulta::Area;
 enum Pedido {
     Confirmar(usize, usize),
     Ignorar(usize, usize),
+    /// (cartão, sugestão, rubrica): troca a rubrica entre fixa e só deste mês.
+    AlternarEventual(usize, usize, usize),
     Cancelar(usize),
     Limpar,
     AbrirNoControle(IdOcorrencia),
@@ -116,6 +118,7 @@ impl Janela {
             match pedido {
                 Pedido::Confirmar(c, s) => self.confirmar_sugestao(c, s),
                 Pedido::Ignorar(c, s) => self.ignorar_sugestao(c, s),
+                Pedido::AlternarEventual(c, s, r) => self.alternar_eventual(c, s, r),
                 Pedido::Cancelar(c) => self.cancelar_reconhecimento(c),
                 Pedido::Limpar => self.limpar_reconhecimento(),
                 Pedido::AbrirNoControle(id) => {
@@ -345,6 +348,11 @@ fn reconhecido(ui: &mut Ui, p: &Paleta, r: &Reconhecido, pedidos: &mut Vec<Pedid
                     par(ui, p, "Bruto", c.bruto.map(|v| Centavos(v.0)));
                     par(ui, p, "Descontos", c.descontos.map(|v| Centavos(v.0)));
                     par(ui, p, "Líquido", c.liquido.map(|v| Centavos(v.0)));
+                    if let Some(d) = c.credito {
+                        ui.label(RichText::new("Crédito").size(12.0).color(p.tinta_suave));
+                        ui.label(data_texto(d));
+                        ui.end_row();
+                    }
                 });
             if !c.conferido {
                 aviso_com_triangulo(
@@ -395,30 +403,33 @@ fn sugestao(
 ) {
     let feita = c.confirmadas.contains(&s);
     let ignorada = c.ignoradas.contains(&s);
+    let marcacao = c.eventuais_da(s);
+    let rotulo = match (sug, &marcacao) {
+        (Sugestao::UsarRubricas { uso, .. }, Some(m)) => uso.rotulo(m),
+        _ => sug.rotulo().to_owned(),
+    };
     ui.horizontal_wrapped(|ui| {
         if feita {
             ui.label(icones::icone_cor("check_circle", 15.0, p.sucesso));
         }
-        ui.label(RichText::new(sug.rotulo()).color(if ignorada {
+        ui.label(RichText::new(rotulo).color(if ignorada {
             p.tinta_desabilitada
         } else {
             p.tinta
         }));
     });
-    if let Sugestao::UsarRubricas {
-        divergencia: Some(d),
-        ..
-    } = sug
-    {
-        let sinal = if d.0 > 0 { "acima" } else { "abaixo" };
-        aviso_com_triangulo(
-            ui,
-            p,
-            &format!(
-                "O líquido das rubricas fica {} {sinal} do valor digitado no compromisso.",
-                reais(Centavos(d.0.abs()))
-            ),
-        );
+    match (sug, &marcacao) {
+        (Sugestao::UsarRubricas { uso, .. }, Some(m)) => {
+            rubricas_em_grupos(ui, p, cartao, s, uso, m, !(feita || ignorada), pedidos);
+        }
+        (Sugestao::InformarRecebido { valor, .. }, _) => {
+            pequeno(
+                ui,
+                format!("O Salário do mês fica pago em {}.", reais(*valor)),
+                p.tinta_suave,
+            );
+        }
+        _ => {}
     }
     if let Some((k, erro)) = &c.erro_de_sugestao
         && *k == s
@@ -448,4 +459,158 @@ fn sugestao(
         }
     });
     ui.add_space(3.0);
+}
+
+/// As rubricas do contracheque em dois grupos, com uma caixa por rubrica para trocar de
+/// grupo (caixa marcada = "fixa": vale daqui para frente), mais os líquidos.
+#[allow(clippy::too_many_arguments)]
+fn rubricas_em_grupos(
+    ui: &mut Ui,
+    p: &Paleta,
+    cartao: usize,
+    sugestao: usize,
+    uso: &UsoDeRubricas,
+    marcacao: &[bool],
+    editavel: bool,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let c = &uso.contracheque;
+    let eventual = |i: usize| marcacao.get(i).copied().unwrap_or(false);
+    let informativa = |i: usize| c.informativas.get(i).copied().unwrap_or(false);
+    let fixas_desde = uso.fixas_desde(marcacao);
+    let fixas = (0..c.rubricas.len())
+        .filter(|i| !informativa(*i) && !eventual(*i))
+        .collect::<Vec<_>>();
+    let do_mes = (0..c.rubricas.len())
+        .filter(|i| !informativa(*i) && eventual(*i))
+        .collect::<Vec<_>>();
+    let fora = (0..c.rubricas.len())
+        .filter(|i| informativa(*i))
+        .collect::<Vec<_>>();
+    ui.add_space(3.0);
+    pequeno(
+        ui,
+        "Caixa marcada: a rubrica se repete todo mês (fixa).",
+        p.tinta_suave,
+    );
+    let grupo = |ui: &mut Ui, titulo: String, indices: &[usize], pedidos: &mut Vec<Pedido>| {
+        ui.add_space(3.0);
+        ui.label(RichText::new(titulo).strong().size(12.5).color(p.tinta));
+        if indices.is_empty() {
+            pequeno(ui, "nenhuma", p.tinta_desabilitada);
+            return;
+        }
+        egui::Grid::new(("rubricas", cartao, sugestao, indices[0], indices.len()))
+            .num_columns(3)
+            .spacing([8.0, 1.0])
+            .show(ui, |ui| {
+                for &i in indices {
+                    let r = &c.rubricas[i];
+                    let mut fixa = !eventual(i);
+                    if ui
+                        .add_enabled(editavel, egui::Checkbox::without_text(&mut fixa))
+                        .on_hover_text(if fixa {
+                            "Fixa: vale daqui para frente. Desmarque para valer só deste mês."
+                        } else {
+                            "Só deste mês. Marque para valer daqui para frente."
+                        })
+                        .changed()
+                    {
+                        pedidos.push(Pedido::AlternarEventual(cartao, sugestao, i));
+                    }
+                    let mut nome = r.nome.clone();
+                    if let Some(parcela) = c.parcelas_atuais.get(i).copied().flatten() {
+                        nome = format!("{nome} · parcela {parcela}");
+                    }
+                    if let Some(k) = r.competencia
+                        && k != c.pagamento
+                        && c.prazo_e_parcela_atual
+                    {
+                        nome = format!("{nome} · de {}", competencia_texto(k));
+                    }
+                    ui.label(RichText::new(nome).size(12.0).color(p.tinta));
+                    let valor = match r.tipo {
+                        TipoDeRubrica::Provento => reais(r.valor),
+                        TipoDeRubrica::Desconto => format!("− {}", reais(r.valor)),
+                    };
+                    ui.label(RichText::new(valor).size(12.0).color(p.tinta_suave));
+                    ui.end_row();
+                }
+            });
+    };
+    grupo(
+        ui,
+        format!("Fixas (valem desde {})", competencia_texto(fixas_desde)),
+        &fixas,
+        pedidos,
+    );
+    grupo(ui, "Só deste mês".to_owned(), &do_mes, pedidos);
+    if !fora.is_empty() {
+        ui.add_space(3.0);
+        ui.label(
+            RichText::new("Fora do total (informativa)")
+                .strong()
+                .size(12.5)
+                .color(p.tinta_desabilitada),
+        );
+        for i in fora {
+            let r = &c.rubricas[i];
+            ui.label(
+                RichText::new(format!("{} · {}", r.nome, reais(r.valor)))
+                    .size(12.0)
+                    .color(p.tinta_desabilitada),
+            );
+            aviso_com_triangulo(
+                ui,
+                p,
+                &format!("{} não entra no total de descontos do contracheque", r.nome),
+            );
+        }
+    }
+    ui.add_space(4.0);
+    let tem_eventuais = uso.tem_eventuais(marcacao);
+    egui::Grid::new(("liquidos", cartao, sugestao))
+        .num_columns(2)
+        .spacing([14.0, 2.0])
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("Líquido do mês")
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
+            ui.label(reais(uso.liquido_do_mes()));
+            ui.end_row();
+            if tem_eventuais {
+                ui.label(
+                    RichText::new("Líquido das fixas")
+                        .size(12.0)
+                        .color(p.tinta_suave),
+                );
+                ui.horizontal(|ui| {
+                    ui.label(reais(uso.liquido_das_fixas(marcacao)));
+                    if uso.divergencia(marcacao).is_some() {
+                        ui.label(icones::icone_cor("warning", 15.0, p.aviso));
+                    }
+                });
+                ui.end_row();
+            } else if uso.divergencia(marcacao).is_some() {
+                ui.label("");
+                ui.label(icones::icone_cor("warning", 15.0, p.aviso));
+                ui.end_row();
+            }
+        });
+    if let (Some(d), Some(digitado)) = (uso.divergencia(marcacao), uso.digitado_das_fixas(marcacao))
+    {
+        let sinal = if d.0 > 0 { "acima" } else { "abaixo" };
+        aviso_com_triangulo(
+            ui,
+            p,
+            &format!(
+                "O líquido das {} fica {} {sinal} do valor digitado no compromisso ({}).",
+                if tem_eventuais { "fixas" } else { "rubricas" },
+                reais(Centavos(d.0.abs())),
+                reais(digitado)
+            ),
+        );
+    }
 }

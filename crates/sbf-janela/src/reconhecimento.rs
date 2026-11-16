@@ -11,16 +11,16 @@
 //! - **nada muda no planejamento sem o clique**: [`Janela::confirmar_sugestao`] é o único
 //!   caminho que escreve, com `Autor::Usuario`.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::JoinHandle;
 
-use sbf_planejamento::Autor;
+use sbf_planejamento::{Alteracao, Autor};
 use sbf_reconhecimento::{
-    Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Resultado, Situacao,
+    Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Resultado, Situacao, Sugestao,
 };
 
 use crate::controle_ui::mensagem_de_erro;
@@ -53,6 +53,9 @@ pub struct Cartao {
     pub ignoradas: Vec<usize>,
     /// O erro da última tentativa de confirmar (índice da sugestão, motivo).
     pub erro_de_sugestao: Option<(usize, String)>,
+    /// A marcação de eventuais que a pessoa deixou em cada sugestão de rubricas (índice da
+    /// sugestão): `true` = só deste mês. Quem não mexeu não aparece: vale a inicial.
+    pub marcacoes: BTreeMap<usize, Vec<bool>>,
 }
 
 impl Cartao {
@@ -69,7 +72,21 @@ impl Cartao {
             confirmadas: Vec::new(),
             ignoradas: Vec::new(),
             erro_de_sugestao: None,
+            marcacoes: BTreeMap::new(),
         }
+    }
+
+    /// A marcação de eventuais da sugestão de rubricas `sugestao`: a da pessoa, ou a inicial.
+    pub fn eventuais_da(&self, sugestao: usize) -> Option<Vec<bool>> {
+        let Sugestao::UsarRubricas { uso, .. } = self.resultado()?.sugestoes.get(sugestao)? else {
+            return None;
+        };
+        Some(
+            self.marcacoes
+                .get(&sugestao)
+                .cloned()
+                .unwrap_or_else(|| uso.eventuais_iniciais()),
+        )
     }
 
     /// O cartão ainda ocupa a fila (espera ou roda).
@@ -339,8 +356,28 @@ impl Janela {
         }
     }
 
+    /// Troca a rubrica `rubrica` da sugestão de rubricas entre "fixa" e "só deste mês".
+    /// Só vale antes de confirmar; nada é gravado.
+    pub fn alternar_eventual(&mut self, cartao: usize, sugestao: usize, rubrica: usize) {
+        let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
+            return;
+        };
+        if c.confirmadas.contains(&sugestao) {
+            return;
+        }
+        let Some(mut marcacao) = c.eventuais_da(sugestao) else {
+            return;
+        };
+        let Some(m) = marcacao.get_mut(rubrica) else {
+            return;
+        };
+        *m = !*m;
+        c.marcacoes.insert(sugestao, marcacao);
+    }
+
     /// Confirmar uma sugestão: o único caminho que escreve no planejamento (`Autor::Usuario`).
-    /// Confirmar de novo a mesma sugestão não faz nada.
+    /// Confirmar de novo a mesma sugestão não faz nada. As rubricas aplicam uma composição
+    /// por vez, cada uma com a versão do recorrente lida logo antes.
     pub fn confirmar_sugestao(&mut self, cartao: usize, sugestao: usize) {
         let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
             return;
@@ -349,6 +386,7 @@ impl Janela {
             return;
         }
         c.erro_de_sugestao = None;
+        let marcacao = c.eventuais_da(sugestao);
         let Some(resultado) = c.resultado() else {
             return;
         };
@@ -364,27 +402,34 @@ impl Janela {
             return;
         };
         let plan = pl.0.as_mut();
-        // A versão do recorrente lida agora: se mudou desde o reconhecimento, o conflito
-        // aparece no cartão em vez de sobrescrever.
-        let versao = match s.recorrente_para_versao() {
-            Some(id) => match plan.recorrente(id) {
-                Ok(Some(r)) => r.versao_do_registro,
-                Ok(None) => 0,
-                Err(e) => {
-                    c.erro_de_sugestao = Some((sugestao, mensagem_de_erro(&e)));
-                    return;
+        let mut resultado_final = Ok(());
+        for mut alteracao in s.alteracoes(&sha, &nome, 0, marcacao.as_deref()) {
+            // A versão do recorrente lida agora: se mudou desde o reconhecimento, o conflito
+            // aparece no cartão em vez de sobrescrever.
+            if let (Alteracao::DefinirComposicao { versao_base, .. }, Some(id)) =
+                (&mut alteracao, s.recorrente_para_versao())
+            {
+                match plan.recorrente(id) {
+                    Ok(Some(r)) => *versao_base = r.versao_do_registro,
+                    Ok(None) => *versao_base = 0,
+                    Err(e) => {
+                        resultado_final = Err(mensagem_de_erro(&e));
+                        break;
+                    }
                 }
-            },
-            None => 0,
-        };
-        let r = plan.aplicar(s.alteracao(&sha, &nome, versao), Autor::Usuario);
+            }
+            if let Err(e) = plan.aplicar(alteracao, Autor::Usuario) {
+                resultado_final = Err(mensagem_de_erro(&e));
+                break;
+            }
+        }
         self.controle.recarregar();
-        match r {
-            Ok(_) => {
+        match resultado_final {
+            Ok(()) => {
                 c.confirmadas.push(sugestao);
                 self.controle.mensagem = Some((format!("Feito: {}.", s.rotulo()), false));
             }
-            Err(e) => c.erro_de_sugestao = Some((sugestao, mensagem_de_erro(&e))),
+            Err(e) => c.erro_de_sugestao = Some((sugestao, e)),
         }
     }
 }
@@ -469,7 +514,7 @@ mod testes {
         }
         let res = c.resultado().expect("resultado");
         assert!(matches!(res.reconhecido, Reconhecido::Contracheque { .. }));
-        assert_eq!(res.sugestoes.len(), 2);
+        assert_eq!(res.sugestoes.len(), 3);
         assert_eq!(r.recebidos.lock().expect("trava").as_slice(), &[a]);
     }
 
@@ -535,38 +580,134 @@ mod testes {
         assert!(j.reconhecimento.cartoes[0].erro_de_sugestao.is_none());
     }
 
-    #[test]
-    fn confirmar_usar_rubricas_define_a_composicao() {
-        let (mut j, _) = janela_com_tudo();
-        let dir = tempfile::tempdir().expect("dir");
-        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
-        esperar(&mut j);
-        let (i, composicao) = j.reconhecimento.cartoes[0]
+    fn indice_de_rubricas(j: &Janela) -> usize {
+        j.reconhecimento.cartoes[0]
             .resultado()
             .expect("resultado")
             .sugestoes
             .iter()
-            .enumerate()
-            .find_map(|(i, s)| match s {
-                Sugestao::UsarRubricas { composicao, .. } => Some((i, composicao.clone())),
-                Sugestao::Vincular { .. } => None,
-            })
-            .expect("usar rubricas");
+            .position(|s| matches!(s, Sugestao::UsarRubricas { .. }))
+            .expect("usar rubricas")
+    }
+
+    fn uso_do_cartao(j: &Janela) -> sbf_reconhecimento::UsoDeRubricas {
+        match &j.reconhecimento.cartoes[0]
+            .resultado()
+            .expect("r")
+            .sugestoes[indice_de_rubricas(j)]
+        {
+            Sugestao::UsarRubricas { uso, .. } => (**uso).clone(),
+            _ => unreachable!(),
+        }
+    }
+
+    fn composicao_em(j: &Janela, desde: Competencia) -> Option<sbf_planejamento::Composicao> {
+        j.planejamento
+            .as_ref()
+            .expect("planejamento")
+            .0
+            .composicao(ID_DO_SALARIO, desde)
+            .expect("composição")
+    }
+
+    #[test]
+    fn confirmar_usar_rubricas_define_as_duas_composicoes() {
+        let (mut j, _) = janela_com_tudo();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let uso = uso_do_cartao(&j);
+        let esperadas = uso.composicoes(&uso.eventuais_iniciais());
+        assert_eq!(esperadas.len(), 2);
+        let i = indice_de_rubricas(&j);
         j.confirmar_sugestao(0, i);
         assert_eq!(
             j.reconhecimento.cartoes[0].erro_de_sugestao, None,
             "a confirmação falhou"
         );
-        let gravada = j
+        for e in &esperadas {
+            let gravada = composicao_em(&j, e.desde).expect("existe");
+            assert_eq!(gravada.desde, e.desde);
+            assert_eq!(gravada.rubricas, e.rubricas);
+            assert_eq!(gravada.documento, e.documento);
+        }
+    }
+
+    #[test]
+    fn trocar_a_marcacao_antes_de_confirmar_muda_o_que_e_gravado() {
+        let (mut j, _) = janela_com_tudo();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let uso = uso_do_cartao(&j);
+        let i = indice_de_rubricas(&j);
+        let inicial = uso.eventuais_iniciais();
+        let fixas_antes = uso.composicoes(&inicial)[1].rubricas.len();
+        // O prêmio (eventual) passa a fixo.
+        let premio = uso
+            .contracheque
+            .rubricas
+            .iter()
+            .position(|r| r.nome == "PREMIO CAIXA")
+            .expect("prêmio");
+        assert!(inicial[premio]);
+        j.alternar_eventual(0, i, premio);
+        assert_eq!(
+            j.reconhecimento.cartoes[0]
+                .eventuais_da(i)
+                .expect("marcação")[premio],
+            false
+        );
+        j.confirmar_sugestao(0, i);
+        assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
+        let fixas = composicao_em(&j, Competencia { ano: 2026, mes: 11 }).expect("fixas");
+        assert_eq!(fixas.rubricas.len(), fixas_antes + 1);
+        assert!(fixas.rubricas.iter().any(|r| r.nome == "PREMIO CAIXA"));
+    }
+
+    #[test]
+    fn alternar_nao_grava_nada_e_nao_vale_depois_de_confirmar() {
+        let (mut j, _) = janela_com_tudo();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let i = indice_de_rubricas(&j);
+        let antes = composicao_em(&j, Competencia { ano: 2026, mes: 10 });
+        j.alternar_eventual(0, i, 0);
+        assert_eq!(composicao_em(&j, Competencia { ano: 2026, mes: 10 }), antes);
+        j.confirmar_sugestao(0, i);
+        let marcacoes = j.reconhecimento.cartoes[0].marcacoes.clone();
+        j.alternar_eventual(0, i, 1);
+        assert_eq!(j.reconhecimento.cartoes[0].marcacoes, marcacoes);
+    }
+
+    #[test]
+    fn confirmar_informar_recebido_grava_o_pago_informado_do_mes() {
+        let (mut j, _) = janela_com_tudo();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let i = j.reconhecimento.cartoes[0]
+            .resultado()
+            .expect("resultado")
+            .sugestoes
+            .iter()
+            .position(|s| matches!(s, Sugestao::InformarRecebido { .. }))
+            .expect("informar recebido");
+        j.confirmar_sugestao(0, i);
+        assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
+        assert!(j.reconhecimento.cartoes[0].confirmadas.contains(&i));
+        let o = j
             .planejamento
             .as_ref()
             .expect("planejamento")
             .0
-            .composicao(ID_DO_SALARIO, composicao.desde)
-            .expect("composição")
-            .expect("existe");
-        assert_eq!(gravada.rubricas, composicao.rubricas);
-        assert_eq!(gravada.documento, composicao.documento);
+            .proximas(ID_DO_SALARIO, Competencia { ano: 2026, mes: 10 }, 1, hoje())
+            .expect("proximas");
+        assert_eq!(
+            o[0].pago_informado,
+            Some(sbf_planejamento::Centavos(2_460_522))
+        );
     }
 
     #[test]
@@ -578,18 +719,12 @@ mod testes {
         // A sugestão traz um recorrente que não existe: a escrita é recusada.
         if let SituacaoDoCartao::Pronto(r) = &mut j.reconhecimento.cartoes[0].situacao {
             for s in &mut r.sugestoes {
-                if let Sugestao::UsarRubricas { composicao, .. } = s {
-                    composicao.recorrente = "rec_que_nao_existe".to_owned();
+                if let Sugestao::UsarRubricas { uso, .. } = s {
+                    uso.recorrente = "rec_que_nao_existe".to_owned();
                 }
             }
         }
-        let i = j.reconhecimento.cartoes[0]
-            .resultado()
-            .expect("resultado")
-            .sugestoes
-            .iter()
-            .position(|s| matches!(s, Sugestao::UsarRubricas { .. }))
-            .expect("usar rubricas");
+        let i = indice_de_rubricas(&j);
         j.confirmar_sugestao(0, i);
         let c = &j.reconhecimento.cartoes[0];
         assert!(c.confirmadas.is_empty());

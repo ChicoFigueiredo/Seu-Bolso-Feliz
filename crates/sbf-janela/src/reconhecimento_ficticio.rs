@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
-use sbf_planejamento::{Centavos, TipoDeDocumento};
+use sbf_planejamento::{Centavos, IdOcorrencia, TipoDeDocumento};
 use sbf_planilha::contracheque;
 use sbf_reconhecimento::{
-    ErroDoReconhecimento, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao, ocorrencia_do_mes,
+    ErroDoReconhecimento, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao, UsoDeRubricas,
+    ocorrencia_do_mes,
 };
 
 use crate::controle::competencia_texto;
@@ -20,34 +21,40 @@ pub const ID_DO_SALARIO: &str = "rec_salario";
 const VALOR_DIGITADO_DO_SALARIO: i64 = 845_000;
 
 const TEXTO_DO_CONTRACHEQUE: &str =
-    include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
+    include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
 
 /// O nome do arquivo que o reconhecedor fictício "reconhece", seja qual for o que se solte.
 pub const NOME_DO_CONTRACHEQUE: &str = "contracheque-2026-10.pdf";
 
 /// Um [`ReconhecedorFicticio`] que sempre devolve o contracheque fictício de outubro de
-/// 2026, com duas sugestões: vincular à ocorrência do mês e usar as rubricas.
+/// 2026 (no layout de 2026), com três sugestões: vincular à ocorrência do mês, usar as
+/// rubricas (fixas e eventuais) e informar o recebido pelo líquido.
 pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
     let resposta = match contracheque::ler(TEXTO_DO_CONTRACHEQUE) {
         Ok(c) => {
             let sha = crate::demonstracao::hash_do_nome(NOME_DO_CONTRACHEQUE);
-            let composicao = c.composicao(ID_DO_SALARIO, &sha);
-            let liquido = composicao.liquido();
-            let divergencia = (liquido.0 != VALOR_DIGITADO_DO_SALARIO)
-                .then_some(Centavos(liquido.0 - VALOR_DIGITADO_DO_SALARIO));
             let mes = competencia_texto(c.pagamento);
             let mut avisos = Vec::new();
             if !c.conferido {
                 avisos
                     .push("A soma das rubricas não bate com o líquido do contracheque.".to_owned());
             }
+            avisos.extend(c.avisos.iter().cloned());
             if c.nao_classificadas > 0 {
                 avisos.push(format!(
                     "{} rubricas ficaram sem classificação.",
                     c.nao_classificadas
                 ));
             }
-            let sugestoes = vec![
+            let uso = UsoDeRubricas {
+                recorrente: ID_DO_SALARIO.to_owned(),
+                nome: "Salário".to_owned(),
+                documento: sha.clone(),
+                digitado_no_mes: Some(Centavos(VALOR_DIGITADO_DO_SALARIO)),
+                digitado_depois: Some(Centavos(VALOR_DIGITADO_DO_SALARIO)),
+                contracheque: c.clone(),
+            };
+            let mut sugestoes = vec![
                 Sugestao::Vincular {
                     alvo: ocorrencia_do_mes(ID_DO_SALARIO, c.pagamento),
                     rotulo: format!("Vincular ao Salário · {mes}"),
@@ -55,14 +62,25 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     data: None,
                 },
                 Sugestao::UsarRubricas {
-                    rotulo: format!(
-                        "Usar estas {} rubricas no Salário desde {mes}",
-                        composicao.rubricas.len()
-                    ),
-                    composicao,
-                    divergencia,
+                    rotulo: uso.rotulo(&uso.eventuais_iniciais()),
+                    uso: Box::new(uso),
                 },
             ];
+            if let (Some(credito), Some(liquido)) = (c.credito, c.liquido) {
+                sugestoes.push(Sugestao::InformarRecebido {
+                    rotulo: format!(
+                        "Informar recebido em {:02}/{:02} pelo líquido",
+                        credito.dia, credito.mes
+                    ),
+                    ocorrencia: IdOcorrencia {
+                        recorrente: ID_DO_SALARIO.to_owned(),
+                        competencia: c.pagamento,
+                        parcela: None,
+                    },
+                    valor: liquido,
+                    data: credito,
+                });
+            }
             Ok(Resultado {
                 sha256: sha,
                 nome: NOME_DO_CONTRACHEQUE.to_owned(),
