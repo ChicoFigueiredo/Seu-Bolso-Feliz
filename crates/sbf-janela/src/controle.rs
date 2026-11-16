@@ -96,6 +96,16 @@ impl Navegador {
         Self::no_modo(ModoDoPeriodo::Ciclo, hoje)
     }
 
+    /// Para abrir a tela: o ciclo de hoje, ou o seguinte nos últimos 5 dias dele (o do
+    /// próximo salário, decisão D9 da spec 11). "Hoje" continua levando ao ciclo de hoje.
+    pub fn abertura(hoje: Data) -> Self {
+        let mut n = Self::novo(hoje);
+        if hoje.dias_ate(Ciclo::da_data(hoje, DiaDeCorte::PADRAO).fim) < 5 {
+            n.ancora = n.ancora.seguinte();
+        }
+        n
+    }
+
     fn no_modo(modo: ModoDoPeriodo, hoje: Data) -> Self {
         Navegador {
             modo,
@@ -588,6 +598,45 @@ pub fn saldo_desatualizado(s: &Saldo, hoje: Data) -> bool {
         .is_none_or(|coleta| coleta.somar_dias(1) < hoje)
 }
 
+/// As notas do cartão "Disponível agora": uma linha por conta com saldo (somando as contas
+/// de mesmo nome), a data da coleta mais recente uma vez só e quantas contas estão zeradas.
+fn notas_dos_saldos(saldos: &[sbf_planejamento::Saldo], hoje: Data) -> Vec<String> {
+    let mut por_conta: Vec<(String, Centavos)> = Vec::new();
+    let mut zeradas = 0usize;
+    for s in saldos {
+        if s.valor == Centavos(0) {
+            zeradas += 1;
+            continue;
+        }
+        match por_conta.iter_mut().find(|(c, _)| *c == s.conta) {
+            Some((_, v)) => *v += s.valor,
+            None => por_conta.push((s.conta.clone(), s.valor)),
+        }
+    }
+    let mut notas: Vec<String> = por_conta
+        .into_iter()
+        .map(|(c, v)| format!("{c} {}", reais(v)))
+        .collect();
+    if let Some(recente) = saldos.iter().max_by(|a, b| a.quando.cmp(&b.quando)) {
+        notas.push(format!(
+            "coleta {}{}",
+            formato::data(&recente.quando),
+            if saldo_desatualizado(recente, hoje) {
+                " · desatualizado"
+            } else {
+                ""
+            }
+        ));
+    }
+    if zeradas > 0 {
+        notas.push(format!(
+            "+{zeradas} {} com saldo zero",
+            if zeradas == 1 { "conta" } else { "contas" }
+        ));
+    }
+    notas
+}
+
 /// Os sete cartões do topo, na ordem. Cada número vem do [`Resumo`], rastreável às linhas.
 pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
     let r: &Resumo = &c.resumo;
@@ -607,23 +656,7 @@ pub fn cartoes(c: &Controle, hoje: Data) -> Vec<Cartao> {
         } else {
             reais(soma)
         },
-        notas: r
-            .disponivel_agora
-            .iter()
-            .map(|s| {
-                format!(
-                    "{} {} · coleta {}{}",
-                    s.conta,
-                    reais(s.valor),
-                    formato::data(&s.quando),
-                    if saldo_desatualizado(s, hoje) {
-                        " · desatualizado"
-                    } else {
-                        ""
-                    }
-                )
-            })
-            .collect(),
+        notas: notas_dos_saldos(&r.disponivel_agora, hoje),
         selo: desatualizado.then_some("desatualizado"),
         dica: Some(
             "O último saldo coletado da Pluggy, por conta. Passou de 1 dia, aparece desatualizado."
@@ -1902,7 +1935,7 @@ mod testes {
         assert!(livre.dica.as_deref().unwrap().contains("desatualizado"));
         let disp = v.iter().find(|x| x.id == "disponivel").unwrap();
         assert_eq!(disp.selo, Some("desatualizado"));
-        assert_eq!(disp.notas.len(), 2, "uma nota por conta");
+        assert_eq!(disp.notas.len(), 3, "uma nota por conta com saldo e a da coleta");
         assert!(disp.notas.iter().any(|n| n.contains("coleta 16/11/2026")));
         let ent = v.iter().find(|x| x.id == "entradas").unwrap();
         assert!(

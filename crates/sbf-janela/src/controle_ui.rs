@@ -171,7 +171,7 @@ impl std::fmt::Debug for EstadoDoControle {
 
 impl EstadoDoControle {
     pub fn novo(hoje: Data) -> Self {
-        let navegador = Navegador::novo(hoje);
+        let navegador = Navegador::abertura(hoje);
         let a = navegador.ancora();
         Self {
             navegador,
