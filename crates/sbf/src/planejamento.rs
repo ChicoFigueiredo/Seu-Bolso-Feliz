@@ -25,7 +25,7 @@ use sbf_planilha::importacao;
 use sbf_planilha::leitura;
 use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
-use sbf_reconhecimento::salario;
+use sbf_reconhecimento::{UsoDeRubricas, salario};
 
 const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
 
@@ -384,8 +384,24 @@ fn contracheque_com(
     let c = contracheque::ler(texto).map_err(|e| e.to_string())?;
     let recorrente = salario::recorrente_do_salario(&*plan, o.recorrente.as_deref())
         .map_err(|e| e.to_string())?;
-    let composicao = c.composicao(&recorrente.id, sha);
-    let digitado = salario::valor_digitado(&recorrente, c.pagamento);
+    let uso = UsoDeRubricas {
+        recorrente: recorrente.id.clone(),
+        nome: recorrente.nome.clone(),
+        documento: sha.to_owned(),
+        digitado_no_mes: salario::valor_digitado(&recorrente, c.pagamento),
+        digitado_depois: salario::valor_digitado(&recorrente, c.pagamento.somar_meses(1)),
+        contracheque: c.clone(),
+    };
+    let marcacao = uso.eventuais_iniciais();
+    let composicoes = uso.composicoes(&marcacao);
+    let digitado = uso.digitado_das_fixas(&marcacao);
+    let eventuais = c
+        .eventuais
+        .iter()
+        .zip(&c.informativas)
+        .filter(|(e, i)| **e && !**i)
+        .count();
+    let informativas = c.informativas.iter().filter(|i| **i).count();
 
     es(writeln!(
         saida,
@@ -401,7 +417,28 @@ fn contracheque_com(
             "NAO CONFERIDO (a soma das rubricas nao bate com o liquido)"
         }
     ))?;
-    match composicao.divergencia(digitado) {
+    if let Some(d) = c.credito {
+        es(writeln!(
+            saida,
+            "credito em {:02}/{:02}/{:04}",
+            d.dia, d.mes, d.ano
+        ))?;
+    }
+    if eventuais > 0 || informativas > 0 {
+        es(writeln!(
+            saida,
+            "eventuais={eventuais} informativas={informativas} fixas={} liquido do mes={} liquido das fixas={}",
+            c.rubricas.len() - eventuais - informativas,
+            reais(Some(uso.liquido_do_mes())),
+            reais(Some(uso.liquido_das_fixas(&marcacao)))
+        ))?;
+    }
+    if o.detalhar {
+        for a in &c.avisos {
+            es(writeln!(saida, "aviso: {a}"))?;
+        }
+    }
+    match uso.divergencia(&marcacao) {
         Some(dif) => es(writeln!(
             saida,
             "salario digitado={} diverge das rubricas em {}",
@@ -420,11 +457,27 @@ fn contracheque_com(
             k.nome, k.inicio.mes, k.inicio.ano, k.prazo, k.termina.mes, k.termina.ano
         ))?;
     }
-    if o.detalhar {
-        for r in &c.rubricas {
+    for (r, parcela) in c.rubricas.iter().zip(&c.parcelas_atuais) {
+        if let Some(n) = parcela {
             es(writeln!(
                 saida,
-                "rubrica {} | {} | {:?} | {}",
+                "consignacao {}: parcela {n} (fim desconhecido)",
+                r.nome
+            ))?;
+        }
+    }
+    if o.detalhar {
+        for (i, r) in c.rubricas.iter().enumerate() {
+            let grupo = if c.informativas[i] {
+                "informativa"
+            } else if c.eventuais[i] {
+                "eventual"
+            } else {
+                "fixa"
+            };
+            es(writeln!(
+                saida,
+                "rubrica {} | {} | {:?} | {} | {grupo}",
                 r.codigo.as_deref().unwrap_or("-"),
                 r.nome,
                 r.tipo,
@@ -435,12 +488,21 @@ fn contracheque_com(
     if !o.confirmar {
         return es(writeln!(saida, "nada foi gravado (use --confirmar)"));
     }
-    let igual = salario::composicao_ja_vigente(&*plan, &composicao).map_err(|e| e.to_string())?;
-    if !igual {
+    let mut igual = true;
+    for composicao in composicoes {
+        if salario::composicao_ja_vigente(&*plan, &composicao).map_err(|e| e.to_string())? {
+            continue;
+        }
+        igual = false;
+        // A versão lida logo antes de cada composição.
+        let versao_base = plan
+            .recorrente(&recorrente.id)
+            .map_err(|e| e.to_string())?
+            .map_or(recorrente.versao_do_registro, |r| r.versao_do_registro);
         plan.aplicar(
             Alteracao::DefinirComposicao {
                 composicao,
-                versao_base: recorrente.versao_do_registro,
+                versao_base,
             },
             Autor::Importacao,
         )
@@ -610,6 +672,9 @@ mod testes {
 
     const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
 
+    const CONTRACHEQUE_2026: &str =
+        include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
+
     fn falso_com_salario(valor: i64) -> Falso {
         use sbf_planejamento::*;
         let mut f = Falso::default();
@@ -714,6 +779,70 @@ mod testes {
             "{t}"
         );
         assert_eq!(plan.aplicadas.len(), antes);
+    }
+
+    fn rodar_contracheque_2026(plan: &mut Falso, confirmar: bool, detalhar: bool) -> String {
+        let mut saida = Vec::new();
+        let o = Opcoes {
+            detalhar,
+            ..opcoes_do_contracheque(confirmar)
+        };
+        contracheque_com(&o, CONTRACHEQUE_2026, "abc123", "c.pdf", plan, &mut saida)
+            .expect("contracheque");
+        String::from_utf8(saida).expect("utf8")
+    }
+
+    #[test]
+    fn contracheque_de_2026_mostra_eventuais_informativa_parcela_e_credito() {
+        let mut plan = falso_com_salario(954_885);
+        let t = rodar_contracheque_2026(&mut plan, false, false);
+        assert!(t.contains("rubricas=33"), "{t}");
+        assert!(t.contains("credito em 13/10/2026"), "{t}");
+        assert!(
+            t.contains("eventuais=13 informativas=1 fixas=19 liquido do mes=R$ 24.605,22"),
+            "{t}"
+        );
+        assert!(t.contains("salario digitado confere"), "{t}");
+        assert!(
+            t.contains("consignacao EMPRESTIMO E-CONSIGNADO: parcela 13 (fim desconhecido)"),
+            "{t}"
+        );
+        assert!(!t.contains("termina"), "{t}");
+        assert!(!t.contains("FULANO") && !t.contains("c000000"), "{t}");
+        assert!(plan.composicoes.is_empty());
+        let d = rodar_contracheque_2026(&mut plan, false, true);
+        assert!(
+            d.contains("ADIANTAMENTO DE SALARIO") && d.contains("| informativa"),
+            "{d}"
+        );
+        assert!(d.contains("| eventual") && d.contains("| fixa"), "{d}");
+    }
+
+    #[test]
+    fn contracheque_de_2026_confirmar_grava_a_do_mes_e_a_das_fixas() {
+        let mut plan = falso_com_salario(954_885);
+        rodar_contracheque_2026(&mut plan, true, false);
+        assert_eq!(plan.composicoes.len(), 2);
+        let desdes: Vec<_> = plan.composicoes.iter().map(|c| c.desde).collect();
+        assert!(desdes.contains(&Competencia { ano: 2026, mes: 10 }));
+        assert!(desdes.contains(&Competencia { ano: 2026, mes: 11 }));
+        let do_mes = plan
+            .composicoes
+            .iter()
+            .find(|c| c.desde.mes == 10)
+            .expect("do mês");
+        assert_eq!(do_mes.liquido(), Centavos(2_460_522));
+        assert_eq!(do_mes.rubricas.len(), 32);
+        let fixas = plan
+            .composicoes
+            .iter()
+            .find(|c| c.desde.mes == 11)
+            .expect("fixas");
+        assert_eq!(fixas.rubricas.len(), 19);
+        assert_eq!(fixas.liquido(), Centavos(954_885));
+        let t = rodar_contracheque_2026(&mut plan, true, false);
+        assert!(t.contains("composicao=ja existia"), "{t}");
+        assert_eq!(plan.composicoes.len(), 2);
     }
 
     #[test]

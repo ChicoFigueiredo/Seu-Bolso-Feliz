@@ -20,7 +20,7 @@ use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
 use sbf_pdf::texto::{LIMITE_DO_TEXTO, cortar_como_o_js, impressao_canonica};
 use sbf_pdf::{Desfecho, Ferramentas, FonteDeSegredos, OpcoesDaRodada, PdfProtegido};
-use sbf_planejamento::{Banco, PlanejamentoSqlite, SemSaldos, TipoDeDocumento};
+use sbf_planejamento::{Banco, Planejamento as _, PlanejamentoSqlite, SemSaldos, TipoDeDocumento};
 use sbf_triagem::Alvo;
 use sbf_triagem::rodada::{
     ConfigDaRodada, Progresso, RastroDeFalhas, SituacaoDaRodada, configuracao_da_fila, rodar,
@@ -31,7 +31,7 @@ use crate::salario::{
 };
 use crate::{
     Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, Reconhecedor, Reconhecido, Resultado,
-    Situacao, Sugestao, ocorrencia_do_mes,
+    Situacao, Sugestao, UsoDeRubricas, ocorrencia_do_mes,
 };
 
 /// A fonte de segredos do reconhecedor (o chaveiro, na janela).
@@ -540,6 +540,7 @@ impl ReconhecedorDoCofre {
                         "a soma das rubricas não bate com o líquido do contracheque".to_owned(),
                     );
                 }
+                estado.avisos.extend(c.avisos.iter().cloned());
                 estado.reconhecido = Reconhecido::Contracheque {
                     consignacoes: c.consignacoes_com_prazo(),
                     contracheque: c,
@@ -671,14 +672,27 @@ impl ReconhecedorDoCofre {
             Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
         };
         let mes = format!("{:02}/{}", c.pagamento.mes, c.pagamento.ano);
-        let composicao = c.composicao(&recorrente.id, &estado.sha256);
         let alvo = ocorrencia_do_mes(&recorrente.id, c.pagamento);
-        let (vinculado, vigente) = match (
-            ja_vinculado(&plan, &alvo, &estado.sha256),
-            composicao_ja_vigente(&plan, &composicao),
-        ) {
-            (Ok(v), Ok(g)) => (v, g),
-            _ => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
+        let uso = UsoDeRubricas {
+            recorrente: recorrente.id.clone(),
+            nome: recorrente.nome.clone(),
+            documento: estado.sha256.clone(),
+            contracheque: c.clone(),
+            digitado_no_mes: valor_digitado(&recorrente, c.pagamento),
+            digitado_depois: valor_digitado(&recorrente, c.pagamento.somar_meses(1)),
+        };
+        let marcacao = uso.eventuais_iniciais();
+        let composicoes = uso.composicoes(&marcacao);
+        let vinculado = ja_vinculado(&plan, &alvo, &estado.sha256);
+        let vigentes: Vec<_> = composicoes
+            .iter()
+            .map(|k| composicao_ja_vigente(&plan, k))
+            .collect();
+        let (Ok(vinculado), Ok(vigentes)) = (
+            vinculado,
+            vigentes.into_iter().collect::<Result<Vec<bool>, _>>(),
+        ) else {
+            return Situacao::Falhou("não deu para ler o planejamento".to_owned());
         };
         let mut sugestoes = Vec::new();
         if !vinculado {
@@ -689,17 +703,34 @@ impl ReconhecedorDoCofre {
                 data: Some(c.pagamento.dia(1)),
             });
         }
-        if !vigente {
-            let digitado = valor_digitado(&recorrente, c.pagamento);
+        if !vigentes.iter().all(|v| *v) {
             sugestoes.push(Sugestao::UsarRubricas {
-                rotulo: format!(
-                    "Usar estas {} rubricas no {} desde {mes}",
-                    composicao.rubricas.len(),
-                    recorrente.nome
-                ),
-                divergencia: composicao.divergencia(digitado),
-                composicao,
+                rotulo: uso.rotulo(&marcacao),
+                uso: Box::new(uso),
             });
+        }
+        if let (Some(credito), Some(liquido)) = (c.credito, c.liquido) {
+            // O Salário do mês ainda sem pagamento informado nem conciliação.
+            match plan.proximas(&recorrente.id, c.pagamento, 1, credito) {
+                Ok(ocorrencias) => {
+                    if let Some(o) = ocorrencias.iter().find(|o| {
+                        o.id.competencia == c.pagamento
+                            && o.pago_informado.is_none()
+                            && o.conciliado.is_none()
+                    }) {
+                        sugestoes.push(Sugestao::InformarRecebido {
+                            rotulo: format!(
+                                "Informar recebido em {:02}/{:02} pelo líquido",
+                                credito.dia, credito.mes
+                            ),
+                            ocorrencia: o.id.clone(),
+                            valor: liquido,
+                            data: credito,
+                        });
+                    }
+                }
+                Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
+            }
         }
         estado.sugestoes = sugestoes;
         Situacao::Feita
