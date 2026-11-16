@@ -1025,6 +1025,14 @@ impl Planejamento for PlanejamentoFicticio {
     fn origem_importada(&self, _origem: &OrigemImportada) -> Resultado<Option<String>> {
         Ok(None)
     }
+
+    fn sugestao_de_conciliacao(&self, ocorrencia: &IdOcorrencia) -> Resultado<Option<Conciliacao>> {
+        Ok(self
+            .conciliacoes
+            .iter()
+            .find(|c| &c.ocorrencia == ocorrencia && !c.confirmada)
+            .cloned())
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {
@@ -1198,11 +1206,13 @@ impl PlanejamentoFicticio {
                 let Some(p) = r
                     .pausas
                     .iter_mut()
-                    .find(|p| p.desde < desde && p.ate.is_none_or(|a| a > desde))
+                    .find(|p| p.desde <= desde && p.ate.is_none_or(|a| a > desde))
                 else {
                     return Err(ErroDoPlanejamento::Invalida("não há pausa aberta nesse mês".into()));
                 };
                 p.ate = Some(desde);
+                // Uma pausa que acaba onde começou nunca suprimiu nada: sai da lista.
+                r.pausas.retain(|p| p.ate.is_none_or(|a| a > p.desde));
                 r.versao_do_registro += 1;
                 Ok(self.registrar(autor, &recorrente, format!("Retomou em {desde}."), &alt))
             }
