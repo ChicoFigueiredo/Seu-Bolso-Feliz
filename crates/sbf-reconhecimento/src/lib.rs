@@ -34,7 +34,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use sbf_planejamento::{
-    Alteracao, AlvoDoDocumento, Centavos, Competencia, Composicao, Data, Excecao, IdOcorrencia,
+    Alteracao, AlvoDoDocumento, Centavos, Competencia, Composicao, Conciliacao, Data, IdOcorrencia,
     TipoDeDocumento,
 };
 use sbf_planilha::contracheque::{ConsignacaoComPrazo, Contracheque};
@@ -145,16 +145,23 @@ pub enum Sugestao {
         rotulo: String,
         uso: Box<UsoDeRubricas>,
     },
-    /// Informar que o Salário do mês foi recebido, pelo líquido do contracheque, na data do
-    /// crédito. Só quando a ocorrência ainda não tem pago informado nem conciliação.
-    InformarRecebido {
-        /// "Informar recebido em 13/10 pelo líquido".
+    /// Conciliar o Salário do mês com o crédito que o extrato tem. Substitui o antigo "informar
+    /// recebido": a data impressa no contracheque não é a do crédito, então só se sugere
+    /// quando o extrato tem o crédito (e nada quando não tem).
+    Conciliar {
+        /// "Conciliar o Salário · 10/2026 com o crédito de 06/10 no extrato".
         rotulo: String,
-        ocorrencia: IdOcorrencia,
-        valor: Centavos,
-        data: Data,
+        /// O crédito do extrato. A janela aplica com `confirmada: true` (o clique do usuário
+        /// é a confirmação).
+        conciliacao: Conciliacao,
+        /// Quantas das três provas batem: o documento (o contracheque do mês), o valor exato
+        /// do líquido e a conta ou a assinatura. De 2 a [`PROVAS_POSSIVEIS`].
+        provas: u8,
     },
 }
+
+/// O total de provas que uma conciliação do contracheque pode ter.
+pub const PROVAS_POSSIVEIS: u8 = 3;
 
 /// O que a sugestão "usar estas rubricas" precisa para montar as composições na hora de
 /// confirmar, com a marcação de fixas e eventuais que a pessoa deixou.
@@ -265,7 +272,7 @@ impl Sugestao {
         match self {
             Sugestao::Vincular { rotulo, .. }
             | Sugestao::UsarRubricas { rotulo, .. }
-            | Sugestao::InformarRecebido { rotulo, .. } => rotulo,
+            | Sugestao::Conciliar { rotulo, .. } => rotulo,
         }
     }
 
@@ -275,7 +282,7 @@ impl Sugestao {
     pub fn recorrente_para_versao(&self) -> Option<&str> {
         match self {
             Sugestao::UsarRubricas { uso, .. } => Some(&uso.recorrente),
-            Sugestao::Vincular { .. } | Sugestao::InformarRecebido { .. } => None,
+            Sugestao::Vincular { .. } | Sugestao::Conciliar { .. } => None,
         }
     }
 
@@ -311,16 +318,10 @@ impl Sugestao {
                     })
                     .collect()
             }
-            Sugestao::InformarRecebido {
-                ocorrencia,
-                valor,
-                data,
-                ..
-            } => vec![Alteracao::Excecao {
-                ocorrencia: ocorrencia.clone(),
-                excecao: Excecao::PagoInformado {
-                    valor: *valor,
-                    data: Some(*data),
+            Sugestao::Conciliar { conciliacao, .. } => vec![Alteracao::Conciliar {
+                conciliacao: Conciliacao {
+                    confirmada: true,
+                    ..conciliacao.clone()
                 },
             }],
         }

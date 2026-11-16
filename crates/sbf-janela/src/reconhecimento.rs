@@ -684,7 +684,7 @@ mod testes {
     }
 
     #[test]
-    fn confirmar_informar_recebido_grava_o_pago_informado_do_mes() {
+    fn confirmar_conciliar_grava_a_conciliacao_confirmada_do_mes() {
         let (mut j, _) = janela_com_tudo();
         let dir = tempfile::tempdir().expect("dir");
         j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
@@ -694,8 +694,8 @@ mod testes {
             .expect("resultado")
             .sugestoes
             .iter()
-            .position(|s| matches!(s, Sugestao::InformarRecebido { .. }))
-            .expect("informar recebido");
+            .position(|s| matches!(s, Sugestao::Conciliar { .. }))
+            .expect("conciliar");
         j.confirmar_sugestao(0, i);
         assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
         assert!(j.reconhecimento.cartoes[0].confirmadas.contains(&i));
@@ -706,10 +706,15 @@ mod testes {
             .0
             .proximas(ID_DO_SALARIO, Competencia { ano: 2026, mes: 10 }, 1, hoje())
             .expect("proximas");
-        assert_eq!(
-            o[0].pago_informado,
-            Some(sbf_planejamento::Centavos(2_460_522))
-        );
+        assert_eq!(o[0].conciliado, Some(sbf_planejamento::Centavos(2_460_522)));
+        let c = j
+            .planejamento
+            .as_ref()
+            .expect("planejamento")
+            .0
+            .sugestao_de_conciliacao(&o[0].id)
+            .expect("sugestao");
+        assert!(c.is_none(), "a conciliação confirmada não é mais sugestão");
     }
 
     #[test]

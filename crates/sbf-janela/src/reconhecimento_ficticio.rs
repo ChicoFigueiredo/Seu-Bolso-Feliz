@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
-use sbf_planejamento::{Centavos, IdOcorrencia, TipoDeDocumento};
+use sbf_planejamento::{Centavos, Conciliacao, IdOcorrencia, TipoDeDocumento};
 use sbf_planilha::contracheque;
 use sbf_reconhecimento::{
-    ErroDoReconhecimento, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao, UsoDeRubricas,
-    ocorrencia_do_mes,
+    ErroDoReconhecimento, PROVAS_POSSIVEIS, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao,
+    UsoDeRubricas, ocorrencia_do_mes,
 };
 
 use crate::controle::competencia_texto;
@@ -16,6 +16,9 @@ use crate::janela::Janela;
 
 /// O recorrente do Salário no planejamento fictício.
 pub const ID_DO_SALARIO: &str = "rec_salario";
+
+/// O movimento fictício do crédito do Salário no extrato.
+pub const MOVIMENTO_DO_SALARIO: &str = "pluggy:txn_salario_ficticio";
 
 /// O valor digitado do Salário no planejamento fictício (para a divergência).
 const VALOR_DIGITADO_DO_SALARIO: i64 = 845_000;
@@ -28,7 +31,7 @@ pub const NOME_DO_CONTRACHEQUE: &str = "contracheque-2026-10.pdf";
 
 /// Um [`ReconhecedorFicticio`] que sempre devolve o contracheque fictício de outubro de
 /// 2026 (no layout de 2026), com três sugestões: vincular à ocorrência do mês, usar as
-/// rubricas (fixas e eventuais) e informar o recebido pelo líquido.
+/// rubricas (fixas e eventuais) e conciliar com o crédito do extrato.
 pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
     let resposta = match contracheque::ler(TEXTO_DO_CONTRACHEQUE) {
         Ok(c) => {
@@ -66,19 +69,27 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     uso: Box::new(uso),
                 },
             ];
-            if let (Some(credito), Some(liquido)) = (c.credito, c.liquido) {
-                sugestoes.push(Sugestao::InformarRecebido {
+            // O crédito do extrato fictício caiu três dias antes da data impressa no
+            // contracheque (a data impressa não é a do crédito).
+            if let (Some(impressa), Some(liquido)) = (c.credito, c.liquido) {
+                let credito = impressa.somar_dias(-3);
+                sugestoes.push(Sugestao::Conciliar {
                     rotulo: format!(
-                        "Informar recebido em {:02}/{:02} pelo líquido",
+                        "Conciliar o Salário · {mes} com o crédito de {:02}/{:02} no extrato",
                         credito.dia, credito.mes
                     ),
-                    ocorrencia: IdOcorrencia {
-                        recorrente: ID_DO_SALARIO.to_owned(),
-                        competencia: c.pagamento,
-                        parcela: None,
+                    conciliacao: Conciliacao {
+                        ocorrencia: IdOcorrencia {
+                            recorrente: ID_DO_SALARIO.to_owned(),
+                            competencia: c.pagamento,
+                            parcela: None,
+                        },
+                        movimento: MOVIMENTO_DO_SALARIO.to_owned(),
+                        valor: liquido,
+                        data: credito,
+                        confirmada: false,
                     },
-                    valor: liquido,
-                    data: credito,
+                    provas: PROVAS_POSSIVEIS,
                 });
             }
             Ok(Resultado {
