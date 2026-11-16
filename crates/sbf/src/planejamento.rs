@@ -219,7 +219,11 @@ fn achar_ocultos(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<
     let mapa = mapa_de(o)?;
     let conn = abrir_inventario(cofre)?;
     let mut plan = abrir(cofre)?;
-    let competencia = Competencia::de_data(Data::hoje_em_sao_paulo());
+    // A competência do início do ciclo atual (corte no dia 20): a divergência vale a partir
+    // da seguinte, que é a do ciclo do próximo salário.
+    let corte = sbf_planejamento::DiaDeCorte::novo(20).expect("20 é um dia de corte válido");
+    let ciclo = sbf_planejamento::Ciclo::da_data(Data::hoje_em_sao_paulo(), corte);
+    let competencia = Competencia::de_data(ciclo.inicio);
     let previa =
         ocultos::previa_de_ocultos(&conn, &*plan, &mapa, &ConfigOcultos::default(), competencia)
             .map_err(|e| e.to_string())?;
