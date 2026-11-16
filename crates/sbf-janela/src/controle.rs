@@ -1698,6 +1698,16 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
         ),
         Alteracao::VincularDocumento { nome: doc, .. } => format!("Vincular o documento {doc}."),
         Alteracao::DesvincularDocumento { .. } => "Desvincular um documento.".to_owned(),
+        Alteracao::MapearConta {
+            apelido,
+            conta_do_extrato: Some(c),
+        } => format!("Ligar a conta {apelido} a {c}."),
+        Alteracao::MapearConta { apelido, .. } => format!("Desligar a conta {apelido}."),
+        Alteracao::DefinirAssinatura {
+            assinatura: Some(a),
+            ..
+        } => format!("Reconhecer no extrato por \"{}\".", a.texto),
+        Alteracao::DefinirAssinatura { .. } => "Tirar a assinatura do extrato.".to_owned(),
     }
 }
 

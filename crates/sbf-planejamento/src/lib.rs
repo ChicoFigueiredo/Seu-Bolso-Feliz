@@ -382,6 +382,64 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
+/// Uma conta do planejamento (o apelido da planilha, como `CX-0630`) e a conta do extrato a
+/// que ela corresponde (o `conta_provavel` do inventário, como `CAIXA · 593889552-5`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContaDoPlanejamento {
+    pub apelido: String,
+    /// `None` enquanto o usuário não confirmou um par.
+    pub conta_do_extrato: Option<String>,
+}
+
+/// Um par apelido ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParDeConta {
+    pub apelido: String,
+    pub conta_do_extrato: String,
+    /// Quantas conciliações (confirmadas ou sugeridas) e assinaturas apontam para o par.
+    pub evidencias: u32,
+    /// Em português, para a tela ("3 conciliações e o crédito do Salário").
+    pub motivo: String,
+}
+
+/// Como achar no extrato o movimento de um recorrente de valor variável (o salário): o texto
+/// que a descrição do banco traz e a janela em dias em volta do vencimento. A conta vem da
+/// versão (o apelido) e do par confirmado.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Assinatura {
+    /// Comparado sem acento e sem caixa, como "contém" ("SALARIO CAIXA").
+    pub texto: String,
+    pub janela_dias: u8,
+}
+
+/// Um movimento do extrato (a Pluggy no inventário), visto pelo planejamento.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MovimentoDoExtrato {
+    /// `pluggy:txn_<id>` (o `external_ref`).
+    pub movimento: String,
+    pub data: Data,
+    /// Positivo entrou, negativo saiu.
+    pub valor: Centavos,
+    pub conta_do_extrato: String,
+    pub descricao: String,
+    /// O `tipo` do inventário (`credito`, `pagamento_fatura`, `transferencia_interna`…).
+    pub tipo: String,
+}
+
+/// Um movimento candidato a uma ocorrência, para a escolha manual ("Conciliar com outro…") e
+/// para a sugestão.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MovimentoCandidato {
+    pub movimento: MovimentoDoExtrato,
+    /// A descrição bate com a assinatura do recorrente.
+    pub bate_assinatura: bool,
+    /// A conta do movimento é a conta (par confirmado) da ocorrência.
+    pub mesma_conta: bool,
+    /// O valor esperado (líquido da composição do mês, se houver; senão o previsto) menos o
+    /// valor do movimento, em módulo. `None` sem valor esperado.
+    pub diferenca: Option<Centavos>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EstadoDaOcorrencia {
@@ -742,6 +800,17 @@ pub enum Alteracao {
     DesvincularDocumento {
         id: String,
     },
+    /// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato.
+    MapearConta {
+        apelido: String,
+        conta_do_extrato: Option<String>,
+    },
+    /// Define (ou tira, com `None`) a assinatura de um recorrente.
+    DefinirAssinatura {
+        recorrente: String,
+        assinatura: Option<Assinatura>,
+        versao_base: i64,
+    },
 }
 
 /// O que uma alteração aceita devolve.
@@ -904,11 +973,62 @@ pub trait Planejamento {
         let _ = recorrente;
         Ok(Vec::new())
     }
+
+    /// Os apelidos de conta em uso (nas versões) e o par confirmado de cada um.
+    fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
+        Ok(Vec::new())
+    }
+
+    /// Os pares apelido ↔ conta do extrato que o histórico sugere, para apelidos ainda sem par
+    /// confirmado. Não grava nada.
+    fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
+        Ok(Vec::new())
+    }
+
+    /// A assinatura de um recorrente, se houver.
+    fn assinatura(&self, recorrente: &str) -> Resultado<Option<Assinatura>> {
+        let _ = recorrente;
+        Ok(None)
+    }
+
+    /// Os movimentos do extrato candidatos a uma ocorrência, do melhor ao pior: mesma natureza
+    /// (entrada/saída), janela de ±10 dias (ou a da assinatura), primeiro os que batem a
+    /// assinatura e a conta. Não grava nada.
+    fn candidatos_de_conciliacao(
+        &self,
+        ocorrencia: &IdOcorrencia,
+    ) -> Resultado<Vec<MovimentoCandidato>> {
+        let _ = ocorrencia;
+        Ok(Vec::new())
+    }
+
+    /// Procura no extrato as sugestões de conciliação do período e grava as novas
+    /// (`confirmada: false`). Devolve quantas gravou.
+    fn buscar_conciliacoes(&mut self, periodo: &Periodo, hoje: Data) -> Resultado<usize> {
+        let _ = (periodo, hoje);
+        Ok(0)
+    }
 }
 
 /// Os saldos das contas, vindos de fora (a Pluggy no inventário).
 pub trait FonteDeSaldos {
     fn saldos(&self) -> Vec<Saldo>;
+}
+
+/// Os movimentos do extrato, vindos de fora (a Pluggy no inventário), entre duas datas
+/// inclusive.
+pub trait FonteDeMovimentos {
+    fn movimentos(&self, de: Data, ate: Data) -> Vec<MovimentoDoExtrato>;
+}
+
+/// Sem extrato.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SemMovimentos;
+
+impl FonteDeMovimentos for SemMovimentos {
+    fn movimentos(&self, _de: Data, _ate: Data) -> Vec<MovimentoDoExtrato> {
+        Vec::new()
+    }
 }
 
 /// Sem saldo conhecido.

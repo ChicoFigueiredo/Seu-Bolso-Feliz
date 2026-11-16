@@ -102,6 +102,12 @@ pub(crate) fn aplicar_na(
             data,
         } => vincular_documento(c, alvo, sha256, *tipo_documento, nome, *data, autor, agora)?,
         Alteracao::DesvincularDocumento { id } => desvincular_documento(c, id)?,
+        // Costura de 2026-11-16: o agente do motor implementa.
+        Alteracao::MapearConta { .. } | Alteracao::DefinirAssinatura { .. } => {
+            return Err(crate::ErroDoPlanejamento::Invalida(
+                "contas e assinaturas ainda não são gravadas".to_owned(),
+            ));
+        }
     };
 
     let alteracao_id = if feito.grava_historico {

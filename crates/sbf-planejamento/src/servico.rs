@@ -239,7 +239,9 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         }),
         Alteracao::CriarRecorrente { .. }
         | Alteracao::CriarGrupo { .. }
-        | Alteracao::DesvincularDocumento { .. } => None,
+        | Alteracao::DesvincularDocumento { .. }
+        | Alteracao::MapearConta { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
     })
 }
 

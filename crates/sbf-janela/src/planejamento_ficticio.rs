@@ -1455,7 +1455,9 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::CriarGrupo { .. }
         | Alteracao::DefinirComposicao { .. }
         | Alteracao::VincularDocumento { .. }
-        | Alteracao::DesvincularDocumento { .. } => None,
+        | Alteracao::DesvincularDocumento { .. }
+        | Alteracao::MapearConta { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
     }
 }
 
@@ -1876,6 +1878,10 @@ impl PlanejamentoFicticio {
                 };
                 Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
             }
+            // Costura de 2026-11-16: o agente da janela implementa no fictício.
+            Alteracao::MapearConta { .. } | Alteracao::DefinirAssinatura { .. } => Err(
+                ErroDoPlanejamento::Invalida("ainda não implementado no fictício".to_owned()),
+            ),
         }
     }
 
