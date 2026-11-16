@@ -1,9 +1,7 @@
 //! Os números do topo do controle mensal (spec 11, "Resumo"). Cada um sai das linhas.
 
 use crate::banco::de_rfc3339;
-use crate::{
-    Centavos, Data, EstadoDaOcorrencia, Natureza, Ocorrencia, Resumo, Saldo, Sentido,
-};
+use crate::{Centavos, Data, EstadoDaOcorrencia, Natureza, Ocorrencia, Resumo, Saldo, Sentido};
 
 /// Quantos dias um saldo pode ter, no máximo, para valer como atual (D10).
 const DIAS_DE_VALIDADE_DO_SALDO: i64 = 1;
@@ -93,7 +91,10 @@ pub(crate) fn calcular(
         }
     }
 
-    for o in atrasadas.iter().filter(|o| matches!(o.natureza, Natureza::Saida)) {
+    for o in atrasadas
+        .iter()
+        .filter(|o| matches!(o.natureza, Natureza::Saida))
+    {
         r.em_atraso += o.falta().unwrap_or(zero);
         if o.previsto.is_none() {
             sem_valor += 1;
@@ -107,14 +108,13 @@ pub(crate) fn calcular(
     r.passagem_pendente = if pendente < zero { zero } else { pendente };
 
     let saldo_total: Centavos = saldos.iter().map(|s| s.valor).sum();
-    r.livre_apos_compromissos = saldo_total + entradas_nao_recebidas
-        - saidas_nao_pagas
-        - r.em_atraso
-        - r.passagem_pendente;
+    r.livre_apos_compromissos =
+        saldo_total + entradas_nao_recebidas - saidas_nao_pagas - r.em_atraso - r.passagem_pendente;
 
     if saldos.is_empty() {
-        r.lacunas
-            .push("Saldo das contas não encontrado: o livre não conta o dinheiro disponível.".into());
+        r.lacunas.push(
+            "Saldo das contas não encontrado: o livre não conta o dinheiro disponível.".into(),
+        );
     } else if saldos.iter().any(|s| desatualizado(s, hoje)) {
         r.lacunas
             .push("Saldo desatualizado: coletado há mais de 1 dia.".into());

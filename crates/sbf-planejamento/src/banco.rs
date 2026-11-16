@@ -15,8 +15,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    Autor, Cancelamento, Centavos, Competencia, Conciliacao, Data, ErroDoPlanejamento, Exclusao,
-    ExcecaoGravada, Grupo, IdOcorrencia, Pausa, Recorrente, Resultado, Versao,
+    Autor, Cancelamento, Centavos, Competencia, Conciliacao, Data, ErroDoPlanejamento,
+    ExcecaoGravada, Exclusao, Grupo, IdOcorrencia, Pausa, Recorrente, Resultado, Versao,
 };
 
 /// A versão do esquema que este código cria e entende.
@@ -228,7 +228,11 @@ impl Banco {
         for (indice, sql) in MIGRACOES.iter().enumerate().skip(atual as usize) {
             let tx = self.conexao.transaction()?;
             tx.execute_batch(sql)?;
-            tx.pragma_update(None, "user_version", i64::try_from(indice + 1).unwrap_or(i64::MAX))?;
+            tx.pragma_update(
+                None,
+                "user_version",
+                i64::try_from(indice + 1).unwrap_or(i64::MAX),
+            )?;
             tx.commit()?;
         }
         Ok(())
@@ -365,7 +369,16 @@ fn ler_versoes(conexao: &Connection, so_o: Option<&str>) -> Resultado<Vec<LinhaD
     brutas
         .into_iter()
         .map(
-            |(recorrente_id, id, desde, valor, certeza, fonte, frequencia, [conta, centro, fornecedor, categoria, nota])| {
+            |(
+                recorrente_id,
+                id,
+                desde,
+                valor,
+                certeza,
+                fonte,
+                frequencia,
+                [conta, centro, fornecedor, categoria, nota],
+            )| {
                 Ok(LinhaDeVersao {
                     recorrente_id,
                     versao: Versao {
@@ -514,18 +527,20 @@ pub(crate) fn ler_excecoes(
         .collect::<Result<Vec<_>, _>>()?;
     let mut mapa: HashMap<String, Vec<ExcecaoGravada>> = HashMap::new();
     for (id, recorrente_id, competencia, parcela, excecao, quando, autor, desfeita) in brutas {
-        mapa.entry(recorrente_id.clone()).or_default().push(ExcecaoGravada {
-            id,
-            ocorrencia: IdOcorrencia {
-                recorrente: recorrente_id,
-                competencia: ler_competencia(&competencia)?,
-                parcela,
-            },
-            excecao: de_json(&excecao)?,
-            quando,
-            autor: de_json::<Autor>(&autor)?,
-            desfeita,
-        });
+        mapa.entry(recorrente_id.clone())
+            .or_default()
+            .push(ExcecaoGravada {
+                id,
+                ocorrencia: IdOcorrencia {
+                    recorrente: recorrente_id,
+                    competencia: ler_competencia(&competencia)?,
+                    parcela,
+                },
+                excecao: de_json(&excecao)?,
+                quando,
+                autor: de_json::<Autor>(&autor)?,
+                desfeita,
+            });
     }
     Ok(mapa)
 }
@@ -553,17 +568,19 @@ pub(crate) fn ler_conciliacoes(
         .collect::<Result<Vec<_>, _>>()?;
     let mut mapa: HashMap<String, Vec<Conciliacao>> = HashMap::new();
     for (recorrente_id, competencia, parcela, movimento, valor, data, confirmada) in brutas {
-        mapa.entry(recorrente_id.clone()).or_default().push(Conciliacao {
-            ocorrencia: IdOcorrencia {
-                recorrente: recorrente_id,
-                competencia: ler_competencia(&competencia)?,
-                parcela,
-            },
-            movimento,
-            valor: Centavos(valor),
-            data: ler_data(&data)?,
-            confirmada,
-        });
+        mapa.entry(recorrente_id.clone())
+            .or_default()
+            .push(Conciliacao {
+                ocorrencia: IdOcorrencia {
+                    recorrente: recorrente_id,
+                    competencia: ler_competencia(&competencia)?,
+                    parcela,
+                },
+                movimento,
+                valor: Centavos(valor),
+                data: ler_data(&data)?,
+                confirmada,
+            });
     }
     Ok(mapa)
 }
@@ -591,11 +608,11 @@ pub(crate) fn carregar_dados(conexao: &Connection) -> Resultado<Dados> {
     })
 }
 
+/// Um recorrente com as exceções e as conciliações dele.
+pub(crate) type UmRecorrente = (Recorrente, Vec<ExcecaoGravada>, Vec<Conciliacao>);
+
 /// Um recorrente só, com as exceções e conciliações dele.
-pub(crate) fn carregar_um(
-    conexao: &Connection,
-    id: &str,
-) -> Resultado<Option<(Recorrente, Vec<ExcecaoGravada>, Vec<Conciliacao>)>> {
+pub(crate) fn carregar_um(conexao: &Connection, id: &str) -> Resultado<Option<UmRecorrente>> {
     let Some(rec) = ler_recorrentes(conexao, Some(id), true)?.into_iter().next() else {
         return Ok(None);
     };
@@ -610,12 +627,15 @@ pub(crate) fn carregar_um(
 
 /// Um id novo, aleatório (do próprio SQLite), com prefixo legível.
 pub(crate) fn novo_id(conexao: &Connection, prefixo: &str) -> Resultado<String> {
-    let sufixo: String =
-        conexao.query_row("SELECT lower(hex(randomblob(8)))", [], |l| l.get(0))?;
+    let sufixo: String = conexao.query_row("SELECT lower(hex(randomblob(8)))", [], |l| l.get(0))?;
     Ok(format!("{prefixo}_{sufixo}"))
 }
 
-pub(crate) fn existe(conexao: &Connection, sql: &str, parametros: impl rusqlite::Params) -> Resultado<bool> {
+pub(crate) fn existe(
+    conexao: &Connection,
+    sql: &str,
+    parametros: impl rusqlite::Params,
+) -> Resultado<bool> {
     Ok(conexao
         .query_row(sql, parametros, |_| Ok(()))
         .optional()?
@@ -671,6 +691,9 @@ mod testes {
     #[test]
     fn migra_do_zero_e_nao_repete() {
         let banco = Banco::em_memoria().expect("banco");
-        assert_eq!(banco.versao_do_esquema().expect("versão"), VERSAO_DO_ESQUEMA);
+        assert_eq!(
+            banco.versao_do_esquema().expect("versão"),
+            VERSAO_DO_ESQUEMA
+        );
     }
 }

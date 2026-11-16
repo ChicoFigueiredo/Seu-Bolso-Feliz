@@ -140,7 +140,9 @@ fn validar_frequencia(f: &Frequencia) -> Resultado<()> {
 
 fn validar_prazo(p: &Prazo) -> Resultado<()> {
     match *p {
-        Prazo::Parcelas { total: 0, .. } => invalida("parcelas: o total precisa ser maior que zero"),
+        Prazo::Parcelas { total: 0, .. } => {
+            invalida("parcelas: o total precisa ser maior que zero")
+        }
         _ => Ok(()),
     }
 }
@@ -375,7 +377,13 @@ fn editar(
                 return invalida("só o valor muda só neste mês, e ele precisa ter valor");
             };
             let ocorrencia = id_da_ocorrencia(c, id, competencia)?;
-            registrar_excecao(c, &ocorrencia, &Excecao::ValorSoDesteMes { valor }, autor, agora)?;
+            registrar_excecao(
+                c,
+                &ocorrencia,
+                &Excecao::ValorSoDesteMes { valor },
+                autor,
+                agora,
+            )?;
             format!("Mudou o valor só de {competencia}.")
         }
         Escopo::DaquiEmDiante(competencia) => {
@@ -410,7 +418,11 @@ fn editar(
 }
 
 /// O id (com a parcela) da ocorrência do recorrente naquela competência.
-fn id_da_ocorrencia(c: &Connection, recorrente: &str, competencia: Competencia) -> Resultado<IdOcorrencia> {
+fn id_da_ocorrencia(
+    c: &Connection,
+    recorrente: &str,
+    competencia: Competencia,
+) -> Resultado<IdOcorrencia> {
     let (rec, excecoes, conciliacoes) = carregar_um(c, recorrente)?
         .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(format!("recorrente {recorrente}")))?;
     // O `hoje` só decide o estado; o id não depende dele.
@@ -423,9 +435,7 @@ fn id_da_ocorrencia(c: &Connection, recorrente: &str, competencia: Competencia) 
         .into_iter()
         .next()
         .map(|o| o.id)
-        .ok_or_else(|| {
-            ErroDoPlanejamento::Invalida(format!("não há ocorrência em {competencia}"))
-        })
+        .ok_or_else(|| ErroDoPlanejamento::Invalida(format!("não há ocorrência em {competencia}")))
 }
 
 fn tipo_da_excecao(e: &Excecao) -> &'static str {
@@ -595,7 +605,9 @@ fn excecao_avulsa(
         Excecao::Adiar { nova_data: Some(d) } => format!("Adiou {ocorrencia} para {d}."),
         Excecao::Adiar { nova_data: None } => format!("Adiou {ocorrencia} sem nova data."),
         Excecao::Dispensar { .. } => format!("Dispensou {ocorrencia}."),
-        Excecao::ValorSoDesteMes { .. } => format!("Mudou o valor só de {}.", ocorrencia.competencia),
+        Excecao::ValorSoDesteMes { .. } => {
+            format!("Mudou o valor só de {}.", ocorrencia.competencia)
+        }
         Excecao::PagoInformado { .. } => format!("Informou pago em {ocorrencia}."),
     };
     Ok(Feito {
@@ -618,7 +630,10 @@ fn desfazer_excecao(c: &Connection, id: &str) -> Resultado<Feito> {
     let Some((ocorrencia, recorrente)) = linha else {
         return Err(ErroDoPlanejamento::NaoEncontrado(format!("exceção {id}")));
     };
-    c.execute("UPDATE excecoes SET desfeita = 1 WHERE id = ?1", params![id])?;
+    c.execute(
+        "UPDATE excecoes SET desfeita = 1 WHERE id = ?1",
+        params![id],
+    )?;
     let rec = carregar(c, &recorrente)?;
     Ok(Feito {
         alvo: ocorrencia.clone(),
@@ -699,7 +714,10 @@ fn restaurar(c: &Connection, id: &str, base: i64) -> Resultado<Feito> {
     if rec.excluido.is_none() {
         return invalida("o recorrente não está excluído");
     }
-    c.execute("UPDATE recorrentes SET excluido = NULL WHERE id = ?1", params![id])?;
+    c.execute(
+        "UPDATE recorrentes SET excluido = NULL WHERE id = ?1",
+        params![id],
+    )?;
     let versao_nova = subir_versao(c, id)?;
     Ok(Feito {
         alvo: id.to_owned(),

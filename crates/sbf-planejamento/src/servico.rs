@@ -8,7 +8,10 @@ use std::fmt;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::banco::{self, Banco, Dados, agora_unix, carregar_dados, carregar_um, de_json, de_rfc3339, json, novo_id, rfc3339};
+use crate::banco::{
+    self, Banco, Dados, agora_unix, carregar_dados, carregar_um, de_json, de_rfc3339, json,
+    novo_id, rfc3339,
+};
 use crate::escrita::aplicar_na;
 use crate::projecao::{projetar, projetar_competencias};
 use crate::resumo;
@@ -114,9 +117,8 @@ fn candidatas(
     ate: Competencia,
     excecoes: &[ExcecaoGravada],
 ) -> BTreeSet<Competencia> {
-    let mut conjunto: BTreeSet<Competencia> = (0..=de.meses_ate(ate))
-        .map(|i| de.somar_meses(i))
-        .collect();
+    let mut conjunto: BTreeSet<Competencia> =
+        (0..=de.meses_ate(ate)).map(|i| de.somar_meses(i)).collect();
     conjunto.extend(
         excecoes
             .iter()
@@ -134,7 +136,10 @@ fn ativos(dados: &Dados) -> impl Iterator<Item = &Recorrente> {
 }
 
 fn posicoes_dos_grupos(grupos: &[Grupo]) -> HashMap<&str, i64> {
-    grupos.iter().map(|g| (g.nome.as_str(), g.posicao)).collect()
+    grupos
+        .iter()
+        .map(|g| (g.nome.as_str(), g.posicao))
+        .collect()
 }
 
 fn ordenar(linhas: &mut [Ocorrencia], grupos: &[Grupo]) {
@@ -310,13 +315,27 @@ fn estado_do_texto(t: &str) -> Resultado<EstadoDaProposta> {
         "confirmada" => EstadoDaProposta::Confirmada,
         "recusada" => EstadoDaProposta::Recusada,
         "expirada" => EstadoDaProposta::Expirada,
-        _ => return Err(ErroDoPlanejamento::Banco("estado de proposta desconhecido".into())),
+        _ => {
+            return Err(ErroDoPlanejamento::Banco(
+                "estado de proposta desconhecido".into(),
+            ));
+        }
     })
 }
 
-const COLUNAS_DE_PROPOSTA: &str = "id, alteracao, origem, chave, criada_em, expira_em, estado, motivo";
+const COLUNAS_DE_PROPOSTA: &str =
+    "id, alteracao, origem, chave, criada_em, expira_em, estado, motivo";
 
-type LinhaDeProposta = (String, String, String, String, String, String, String, Option<String>);
+type LinhaDeProposta = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+);
 
 fn ler_linha_de_proposta(l: &rusqlite::Row<'_>) -> rusqlite::Result<LinhaDeProposta> {
     Ok((
@@ -352,7 +371,12 @@ fn montar_proposta(linha: LinhaDeProposta, agora: i64) -> Resultado<Proposta> {
     })
 }
 
-fn proposta_por(c: &Connection, coluna: &str, valor: &str, agora: i64) -> Resultado<Option<Proposta>> {
+fn proposta_por(
+    c: &Connection,
+    coluna: &str,
+    valor: &str,
+    agora: i64,
+) -> Resultado<Option<Proposta>> {
     c.query_row(
         &format!("SELECT {COLUNAS_DE_PROPOSTA} FROM propostas WHERE {coluna} = ?1"),
         params![valor],
@@ -434,9 +458,11 @@ impl Planejamento for PlanejamentoSqlite {
     }
 
     fn recorrente(&self, id: &str) -> Resultado<Option<Recorrente>> {
-        Ok(banco::ler_recorrentes(self.banco.conexao(), Some(id), true)?
-            .into_iter()
-            .next())
+        Ok(
+            banco::ler_recorrentes(self.banco.conexao(), Some(id), true)?
+                .into_iter()
+                .next(),
+        )
     }
 
     fn grupos(&self) -> Resultado<Vec<Grupo>> {
@@ -502,7 +528,8 @@ impl Planejamento for PlanejamentoSqlite {
                 if o.suprimida() || o.estado == EstadoDaOcorrencia::Dispensada {
                     continue;
                 }
-                let Ok(indice) = usize::try_from(inicio.meses_ate(Competencia::de_data(o.vencimento)))
+                let Ok(indice) =
+                    usize::try_from(inicio.meses_ate(Competencia::de_data(o.vencimento)))
                 else {
                     continue;
                 };
@@ -537,7 +564,13 @@ impl Planejamento for PlanejamentoSqlite {
             Alteracao::CriarRecorrente { .. } => Some(recibo.alvo),
             _ => alvo,
         };
-        let depois = fotografar(&tx, alvo_depois.as_deref(), inicio, MESES_DA_SIMULACAO, hoje)?;
+        let depois = fotografar(
+            &tx,
+            alvo_depois.as_deref(),
+            inicio,
+            MESES_DA_SIMULACAO,
+            hoje,
+        )?;
         // Sempre desfaz: simular nunca grava.
         tx.rollback()?;
 
@@ -650,7 +683,12 @@ impl Planejamento for PlanejamentoSqlite {
         // A alteração roda num ponto de salvamento: se falhar, nada dela fica, e a proposta
         // continua pendente com o motivo da falha.
         let savepoint = tx.savepoint()?;
-        match aplicar_na(&savepoint, &proposta.alteracao, &Autor::Usuario, &texto_agora) {
+        match aplicar_na(
+            &savepoint,
+            &proposta.alteracao,
+            &Autor::Usuario,
+            &texto_agora,
+        ) {
             Ok(recibo) => {
                 savepoint.commit()?;
                 tx.execute(
@@ -750,9 +788,11 @@ impl PlanejamentoSqlite {
     /// # Errors
     /// Falha do SQLite.
     pub fn conciliacoes(&self, recorrente: &str) -> Resultado<Vec<Conciliacao>> {
-        Ok(banco::ler_conciliacoes(self.banco.conexao(), Some(recorrente))?
-            .remove(recorrente)
-            .unwrap_or_default())
+        Ok(
+            banco::ler_conciliacoes(self.banco.conexao(), Some(recorrente))?
+                .remove(recorrente)
+                .unwrap_or_default(),
+        )
     }
 
     /// As exceções gravadas de um recorrente, inclusive as desfeitas.

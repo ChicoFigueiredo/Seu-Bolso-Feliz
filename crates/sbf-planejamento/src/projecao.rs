@@ -179,7 +179,10 @@ fn ocorrencia_em(
 
     let excecoes = contexto.excecoes.get(&id).map_or(&[][..], Vec::as_slice);
     let decisoes = decisoes(excecoes);
-    let conciliacoes = contexto.conciliacoes.get(&id).map_or(&[][..], Vec::as_slice);
+    let conciliacoes = contexto
+        .conciliacoes
+        .get(&id)
+        .map_or(&[][..], Vec::as_slice);
 
     let sugestao_de_conciliacao = conciliacoes.iter().any(|x| !x.confirmada);
     let confirmadas: Vec<&&Conciliacao> = conciliacoes.iter().filter(|x| x.confirmada).collect();
@@ -403,7 +406,12 @@ mod testes {
         )
     }
 
-    fn proj(r: &Recorrente, e: &[ExcecaoGravada], de: Competencia, ate: Competencia) -> Vec<Ocorrencia> {
+    fn proj(
+        r: &Recorrente,
+        e: &[ExcecaoGravada],
+        de: Competencia,
+        ate: Competencia,
+    ) -> Vec<Ocorrencia> {
         projetar(r, e, &[], de, ate, HOJE)
     }
 
@@ -462,7 +470,13 @@ mod testes {
         let comps: Vec<_> = o.iter().map(|x| x.id.competencia).collect();
         assert_eq!(
             comps,
-            [comp(2026, 11), comp(2027, 2), comp(2027, 5), comp(2027, 8), comp(2027, 11)]
+            [
+                comp(2026, 11),
+                comp(2027, 2),
+                comp(2027, 5),
+                comp(2027, 8),
+                comp(2027, 11)
+            ]
         );
     }
 
@@ -478,7 +492,10 @@ mod testes {
         );
         let o = proj(&r, &[], comp(2026, 1), comp(2029, 12));
         let datas: Vec<_> = o.iter().map(|x| x.vencimento.to_string()).collect();
-        assert_eq!(datas, ["2026-02-28", "2027-02-28", "2028-02-29", "2029-02-28"]);
+        assert_eq!(
+            datas,
+            ["2026-02-28", "2027-02-28", "2028-02-29", "2029-02-28"]
+        );
     }
 
     #[test]
@@ -500,7 +517,11 @@ mod testes {
                 total: 48,
                 primeira: comp(2026, 11),
             },
-            vec![versao(comp(2026, 1), 120000, Frequencia::Mensal { dia: 10 })],
+            vec![versao(
+                comp(2026, 1),
+                120000,
+                Frequencia::Mensal { dia: 10 },
+            )],
         );
         let o = proj(&r, &[], comp(2026, 1), comp(2056, 12));
         assert_eq!(o.len(), 48);
@@ -552,7 +573,11 @@ mod testes {
         let o = proj(&r, &[], comp(2027, 1), comp(2027, 3));
         assert_eq!(
             o.iter().map(|x| x.estado).collect::<Vec<_>>(),
-            [SuprimidaPorPausa, SuprimidaPorCancelamento, SuprimidaPorCancelamento]
+            [
+                SuprimidaPorPausa,
+                SuprimidaPorCancelamento,
+                SuprimidaPorCancelamento
+            ]
         );
     }
 
@@ -597,7 +622,12 @@ mod testes {
     fn adiar_com_data_muda_o_vencimento_e_guarda_o_original() {
         let r = mensal(5);
         let nova = Data::nova(2027, 1, 20).expect("data");
-        let e = [excecao(comp(2027, 1), Excecao::Adiar { nova_data: Some(nova) })];
+        let e = [excecao(
+            comp(2027, 1),
+            Excecao::Adiar {
+                nova_data: Some(nova),
+            },
+        )];
         let o = proj(&r, &e, comp(2027, 1), comp(2027, 1));
         assert_eq!(o[0].vencimento, nova);
         assert_eq!(o[0].vencimento_original.dia, 5);
@@ -622,9 +652,7 @@ mod testes {
         let r = mensal(5);
         let mut desfeita = excecao(
             comp(2027, 3),
-            Excecao::ValorSoDesteMes {
-                valor: Centavos(1),
-            },
+            Excecao::ValorSoDesteMes { valor: Centavos(1) },
         );
         desfeita.desfeita = true;
         let e = [
@@ -655,7 +683,10 @@ mod testes {
         let o = proj(&r, &e, comp(2026, 8), comp(2026, 12));
         use EstadoDaOcorrencia::*;
         let estados: Vec<_> = o.iter().map(|x| x.estado).collect();
-        assert_eq!(estados, [EmAtraso, Parcial, PagoInformado, EmAtraso, Prevista]);
+        assert_eq!(
+            estados,
+            [EmAtraso, Parcial, PagoInformado, EmAtraso, Prevista]
+        );
         // pago em outubro não aparece em novembro nem no futuro
         assert_eq!(o[3].pago_informado, None);
         assert_eq!(o[4].pago_informado, None);
@@ -685,10 +716,24 @@ mod testes {
             data: Data::nova(2027, 1, 5).expect("data"),
             confirmada,
         };
-        let o = projetar(&r, &[], &[c(true, 1000)], comp(2027, 1), comp(2027, 1), HOJE);
+        let o = projetar(
+            &r,
+            &[],
+            &[c(true, 1000)],
+            comp(2027, 1),
+            comp(2027, 1),
+            HOJE,
+        );
         assert_eq!(o[0].estado, EstadoDaOcorrencia::Parcial);
         assert_eq!(o[0].conciliado, Some(Centavos(1000)));
-        let o = projetar(&r, &[], &[c(false, 3500)], comp(2027, 1), comp(2027, 1), HOJE);
+        let o = projetar(
+            &r,
+            &[],
+            &[c(false, 3500)],
+            comp(2027, 1),
+            comp(2027, 1),
+            HOJE,
+        );
         assert_eq!(o[0].estado, EstadoDaOcorrencia::Prevista);
         assert!(o[0].sugestao_de_conciliacao);
         assert_eq!(o[0].conciliado, None);
