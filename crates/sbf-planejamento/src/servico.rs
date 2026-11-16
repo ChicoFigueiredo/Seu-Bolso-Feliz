@@ -847,6 +847,13 @@ impl Planejamento for PlanejamentoSqlite {
         extrato::buscar(self, periodo, hoje)
     }
 
+    fn conciliacoes_da_ocorrencia(
+        &self,
+        ocorrencia: &crate::IdOcorrencia,
+    ) -> Resultado<Vec<crate::ConciliacaoComMovimento>> {
+        extrato::conciliacoes_da_ocorrencia(self, ocorrencia)
+    }
+
     /// Para uma ocorrência, devolve também os documentos da regra (o recorrente): um
     /// contrato ligado ao recorrente vale para todos os meses. Para o recorrente, só os da
     /// regra. Os mais recentes primeiro.

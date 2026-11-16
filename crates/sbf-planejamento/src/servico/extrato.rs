@@ -134,6 +134,51 @@ pub(super) fn candidatos(
     ))
 }
 
+/// As conciliações gravadas da ocorrência, cada uma com o movimento do extrato (procurado no
+/// dia da conciliação) e se a conta bate com o par confirmado do apelido.
+pub(super) fn conciliacoes_da_ocorrencia(
+    s: &PlanejamentoSqlite,
+    id: &IdOcorrencia,
+) -> Resultado<Vec<crate::ConciliacaoComMovimento>> {
+    let c = s.banco.conexao();
+    let gravadas: Vec<_> = banco::ler_conciliacoes(c, Some(&id.recorrente))?
+        .remove(&id.recorrente)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|x| x.ocorrencia == *id)
+        .collect();
+    if gravadas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let hoje = hoje_do_relogio(s);
+    let pares = banco::ler_pares_de_conta(c)?;
+    let conta_exigida = s
+        .proximas(&id.recorrente, id.competencia, 1, hoje)?
+        .into_iter()
+        .find(|o| o.id == *id)
+        .and_then(|o| o.conta)
+        .and_then(|a| pares.get(a.trim()).cloned());
+    Ok(gravadas
+        .into_iter()
+        .map(|conciliacao| {
+            let movimento = s
+                .movimentos
+                .movimentos(conciliacao.data, conciliacao.data)
+                .into_iter()
+                .find(|m| m.movimento == conciliacao.movimento);
+            let mesma_conta = movimento
+                .as_ref()
+                .zip(conta_exigida.as_ref())
+                .is_some_and(|(m, conta)| &m.conta_do_extrato == conta);
+            crate::ConciliacaoComMovimento {
+                conciliacao,
+                movimento,
+                mesma_conta,
+            }
+        })
+        .collect())
+}
+
 pub(super) fn buscar(
     s: &mut PlanejamentoSqlite,
     periodo: &Periodo,

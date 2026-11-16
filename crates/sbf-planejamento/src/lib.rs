@@ -427,6 +427,16 @@ pub struct MovimentoDoExtrato {
     pub tipo: String,
 }
 
+/// Uma conciliação gravada da ocorrência, com o movimento do extrato quando ele ainda aparece
+/// lá (para o Detalhe mostrar data, conta e descrição do que foi confirmado).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConciliacaoComMovimento {
+    pub conciliacao: Conciliacao,
+    pub movimento: Option<MovimentoDoExtrato>,
+    /// A conta do movimento é a conta (par confirmado) da ocorrência.
+    pub mesma_conta: bool,
+}
+
 /// Um movimento candidato a uma ocorrência, para a escolha manual ("Conciliar com outro…") e
 /// para a sugestão.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1004,6 +1014,15 @@ pub trait Planejamento {
         &self,
         ocorrencia: &IdOcorrencia,
     ) -> Resultado<Vec<MovimentoCandidato>> {
+        let _ = ocorrencia;
+        Ok(Vec::new())
+    }
+
+    /// As conciliações gravadas da ocorrência (confirmadas e sugestão), com o movimento.
+    fn conciliacoes_da_ocorrencia(
+        &self,
+        ocorrencia: &IdOcorrencia,
+    ) -> Resultado<Vec<ConciliacaoComMovimento>> {
         let _ = ocorrencia;
         Ok(Vec::new())
     }

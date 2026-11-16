@@ -178,6 +178,8 @@ struct DadosDoDetalhe {
     sugestao: Option<Conciliacao>,
     /// Os movimentos do extrato que podem pagar esta ocorrência, do melhor ao pior.
     candidatos: Vec<MovimentoCandidato>,
+    /// As conciliações gravadas desta ocorrência, com o movimento do extrato.
+    conciliacoes: Vec<sbf_planejamento::ConciliacaoComMovimento>,
 }
 
 /// O diálogo "Adicionar compromisso": o formulário e a prévia da última criação válida.
@@ -601,9 +603,13 @@ fn carregar_detalhe(
     let candidatos = plan
         .candidatos_de_conciliacao(ocorrencia)
         .unwrap_or_default();
+    let conciliacoes = plan
+        .conciliacoes_da_ocorrencia(ocorrencia)
+        .unwrap_or_default();
     Ok(DadosDoDetalhe {
         sugestao,
         candidatos,
+        conciliacoes,
         recorrente,
         proximas,
         historico,
@@ -2164,6 +2170,7 @@ fn movimentos_do_detalhe(
     (sel.natureza != Natureza::DescontoEmFolha).then(|| {
         movimentos::montar(&movimentos::EntradaDosMovimentos {
             conciliado: sel.conciliado,
+            gravadas: &dados.conciliacoes,
             sugestao: dados.sugestao.as_ref(),
             candidatos: &dados.candidatos,
             composicao: dados.composicao.as_ref(),

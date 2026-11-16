@@ -4,8 +4,8 @@
 
 use egui::{Frame, Margin, RichText, Stroke, Ui};
 use sbf_planejamento::{
-    Assinatura, Centavos, Competencia, Composicao, Conciliacao, Data, DocumentoVinculado,
-    IdOcorrencia, MovimentoCandidato, TipoDeDocumento,
+    Assinatura, Centavos, Competencia, Composicao, Conciliacao, ConciliacaoComMovimento, Data,
+    DocumentoVinculado, IdOcorrencia, MovimentoCandidato, TipoDeDocumento,
 };
 
 use crate::componentes;
@@ -41,8 +41,8 @@ pub struct MovimentoVm {
 /// O que a seção mostra.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct VmDeMovimentos {
-    /// As conciliações já confirmadas (a janela só enxerga o valor delas; os detalhes vêm do
-    /// candidato de mesmo valor, quando ele está na lista).
+    /// As conciliações já confirmadas, com data, conta e descrição do movimento quando o
+    /// extrato ainda o tem.
     pub confirmadas: Vec<MovimentoVm>,
     pub sugestao: Option<MovimentoVm>,
     pub candidatos: Vec<MovimentoCandidato>,
@@ -52,6 +52,8 @@ pub struct VmDeMovimentos {
 #[derive(Debug, Clone, Copy)]
 pub struct EntradaDosMovimentos<'a> {
     pub conciliado: Option<Centavos>,
+    /// As conciliações gravadas da ocorrência, com o movimento do extrato.
+    pub gravadas: &'a [ConciliacaoComMovimento],
     pub sugestao: Option<&'a Conciliacao>,
     pub candidatos: &'a [MovimentoCandidato],
     pub composicao: Option<&'a Composicao>,
@@ -101,7 +103,19 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
         candidatos: e.candidatos.to_vec(),
         ..Default::default()
     };
-    if let Some(v) = e.conciliado {
+    for g in e.gravadas.iter().filter(|g| g.conciliacao.confirmada) {
+        let valor = g.conciliacao.valor;
+        vm.confirmadas.push(MovimentoVm {
+            id: Some(g.conciliacao.movimento.clone()),
+            data: Some(g.conciliacao.data),
+            valor,
+            conta: g.movimento.as_ref().map(|m| m.conta_do_extrato.clone()),
+            descricao: g.movimento.as_ref().map(|m| m.descricao.clone()),
+            diferenca: so_se_difere(esperado(e).map(|x| Centavos((x.0 - valor.0).abs()))),
+            tres_provas: tres_provas(e, valor, g.mesma_conta),
+        });
+    }
+    if let Some(v) = e.conciliado.filter(|_| vm.confirmadas.is_empty()) {
         let achado = e
             .candidatos
             .iter()
@@ -448,6 +462,35 @@ mod testes {
     }
 
     #[test]
+    fn confirmada_mostra_o_movimento_gravado_mesmo_sem_candidato() {
+        let c = composicao(822_600, Some("sha-a"));
+        let doc = contracheque("sha-a", "2026-11-05");
+        let docs = [&doc];
+        let mut conc = sugestao("m9", 822_600);
+        conc.confirmada = true;
+        let m = candidato("m9", 822_600, true, 0).movimento;
+        let gravadas = [ConciliacaoComMovimento {
+            conciliacao: conc,
+            movimento: Some(m.clone()),
+            mesma_conta: true,
+        }];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: Some(Centavos(822_600)),
+            gravadas: &gravadas,
+            sugestao: None,
+            candidatos: &[],
+            composicao: Some(&c),
+            contracheques: &docs,
+            previsto: Some(Centavos(845_000)),
+        });
+        assert_eq!(vm.confirmadas.len(), 1);
+        let x = &vm.confirmadas[0];
+        assert_eq!(x.descricao.as_deref(), Some(m.descricao.as_str()));
+        assert_eq!(x.conta.as_deref(), Some(m.conta_do_extrato.as_str()));
+        assert!(x.tres_provas);
+    }
+
+    #[test]
     fn tres_provas_pedem_contracheque_valor_e_conta() {
         let c = composicao(822_600, Some("sha-a"));
         let doc = contracheque("sha-a", "2026-11-05");
@@ -456,6 +499,7 @@ mod testes {
         let cands = [candidato("m1", 822_600, true, 0)];
         let base = EntradaDosMovimentos {
             conciliado: None,
+            gravadas: &[],
             sugestao: Some(&s),
             candidatos: &cands,
             composicao: Some(&c),
@@ -502,6 +546,7 @@ mod testes {
     fn confirmada_pega_os_detalhes_do_candidato_de_mesmo_valor() {
         let cands = [candidato("m1", 822_600, true, 0)];
         let vm = montar(&EntradaDosMovimentos {
+            gravadas: &[],
             conciliado: Some(Centavos(822_600)),
             sugestao: None,
             candidatos: &cands,
@@ -514,6 +559,7 @@ mod testes {
         assert!(m.data.is_some());
         // Sem candidato correspondente, mostra só o valor, sem inventar o resto.
         let vm = montar(&EntradaDosMovimentos {
+            gravadas: &[],
             conciliado: Some(Centavos(1_000)),
             sugestao: None,
             candidatos: &cands,

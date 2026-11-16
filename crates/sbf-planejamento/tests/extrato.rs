@@ -690,3 +690,52 @@ fn sem_extrato_nada_e_sugerido() {
     assert!(s.pares_de_conta_sugeridos().expect("pares").is_empty());
     assert!(s.contas_do_extrato().expect("contas").is_empty());
 }
+
+#[test]
+fn conciliacoes_da_ocorrencia_trazem_o_movimento_e_a_conta() {
+    let extrato = Extrato::default();
+    extrato.por("pluggy:txn_s", 20, 822_600, "BANCO · 1", "SALARIO EMPRESA");
+    let mut s = servico(&extrato);
+    let id = criar(
+        &mut s,
+        "Salário",
+        Natureza::Entrada,
+        20,
+        Some(845_000),
+        Some("CX-0630"),
+    );
+    assert!(
+        s.conciliacoes_da_ocorrencia(&ocorrencia(&id))
+            .expect("vazio")
+            .is_empty()
+    );
+    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    s.aplicar(
+        Alteracao::Conciliar {
+            conciliacao: Conciliacao {
+                ocorrencia: ocorrencia(&id),
+                movimento: "pluggy:txn_s".into(),
+                valor: Centavos(822_600),
+                data: dia(20),
+                confirmada: true,
+            },
+        },
+        Autor::Usuario,
+    )
+    .expect("confirmar");
+    let v = s
+        .conciliacoes_da_ocorrencia(&ocorrencia(&id))
+        .expect("conciliações");
+    assert_eq!(v.len(), 1);
+    assert!(v[0].conciliacao.confirmada);
+    assert!(v[0].mesma_conta);
+    let m = v[0].movimento.as_ref().expect("movimento");
+    assert_eq!(m.descricao, "SALARIO EMPRESA");
+    // Sem par, a conta não bate (mas o movimento continua achado).
+    mapear(&mut s, "CX-0630", None);
+    let v = s
+        .conciliacoes_da_ocorrencia(&ocorrencia(&id))
+        .expect("conciliações");
+    assert!(!v[0].mesma_conta);
+    assert!(v[0].movimento.is_some());
+}

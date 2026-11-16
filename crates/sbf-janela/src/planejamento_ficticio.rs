@@ -1479,6 +1479,13 @@ impl Planejamento for PlanejamentoFicticio {
     fn buscar_conciliacoes(&mut self, periodo: &Periodo, hoje: Data) -> Resultado<usize> {
         self.buscar_impl(periodo, hoje)
     }
+
+    fn conciliacoes_da_ocorrencia(
+        &self,
+        ocorrencia: &IdOcorrencia,
+    ) -> Resultado<Vec<sbf_planejamento::ConciliacaoComMovimento>> {
+        Ok(self.conciliacoes_da_ocorrencia_impl(ocorrencia))
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {

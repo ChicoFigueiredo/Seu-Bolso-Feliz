@@ -291,6 +291,35 @@ impl PlanejamentoFicticio {
             .max_by_key(|c| c.desde)
     }
 
+    pub(super) fn conciliacoes_da_ocorrencia_impl(
+        &self,
+        id: &IdOcorrencia,
+    ) -> Vec<sbf_planejamento::ConciliacaoComMovimento> {
+        let conta_certa = self
+            .ocorrencia_de(&id.recorrente, id.competencia, self.hoje)
+            .and_then(|o| o.conta)
+            .and_then(|a| self.conta_do_apelido(&a).map(str::to_owned));
+        self.conciliacoes
+            .iter()
+            .filter(|c| c.ocorrencia == *id)
+            .map(|c| {
+                let movimento = self
+                    .extrato
+                    .iter()
+                    .find(|m| m.movimento == c.movimento)
+                    .cloned();
+                let mesma_conta = movimento
+                    .as_ref()
+                    .is_some_and(|m| conta_certa.as_deref() == Some(m.conta_do_extrato.as_str()));
+                sbf_planejamento::ConciliacaoComMovimento {
+                    conciliacao: c.clone(),
+                    movimento,
+                    mesma_conta,
+                }
+            })
+            .collect()
+    }
+
     pub(super) fn candidatos_impl(&self, id: &IdOcorrencia) -> Vec<MovimentoCandidato> {
         self.ocorrencia_de(&id.recorrente, id.competencia, self.hoje)
             .map(|o| self.candidatos_de(&o))
