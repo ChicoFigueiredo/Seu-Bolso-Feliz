@@ -40,6 +40,13 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         motivo: "O planejamento ainda não está ligado a esta janela (spec 11).",
     },
     AreaFutura {
+        id: crate::contas_ui::ROTA,
+        rotulo: "Contas do planejamento",
+        icone: "account_balance",
+        fatia: 4,
+        motivo: "O planejamento ainda não está ligado a esta janela (spec 11).",
+    },
+    AreaFutura {
         id: "conexoes",
         rotulo: "Conexões",
         icone: "hub",
@@ -333,7 +340,7 @@ fn grupo_do_destino(destino: &Destino) -> &'static str {
         Destino::Area(a) if a.e_do_livro_caixa() => "Dinheiro",
         Destino::Area(_) => "Inventário",
         Destino::AreaFutura(id) => match *id {
-            "controle" => "Controle",
+            "controle" | crate::contas_ui::ROTA => "Controle",
             "caixa" => "Documentos",
             "conexoes" | "alertas" | "roteiros" => "Fontes",
             "sincronizacao" => "Estação",

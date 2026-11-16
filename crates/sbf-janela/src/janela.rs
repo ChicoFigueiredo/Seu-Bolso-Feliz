@@ -1110,6 +1110,11 @@ impl Janela {
                     crate::controle_ui::area(ui, pl.0.as_ref(), &mut self.controle, hoje, pedidos);
                 }
             }
+            Destino::AreaFutura(crate::contas_ui::ROTA) if self.planejamento.is_some() => {
+                if let Some(pl) = self.planejamento.as_ref() {
+                    crate::contas_ui::area(ui, pl.0.as_ref(), &mut self.controle, pedidos);
+                }
+            }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
@@ -1839,6 +1844,19 @@ impl Janela {
                     .destacar(&crate::rubricas::ref_do_documento(sha));
                 return;
             }
+            P::RevisarContracheque(sha) => {
+                let caminho = match self.ferramentas.as_ref() {
+                    Some(f) => f.caminho_do_original(sha),
+                    None => Err(
+                        "Sem inventário ligado: não há cópia do acervo para revisar.".to_owned(),
+                    ),
+                };
+                match caminho {
+                    Ok(c) => self.revisar_contracheque(c),
+                    Err(e) => self.controle.mensagem = Some((e, true)),
+                }
+                return;
+            }
             _ => {}
         }
         let hoje = self.hoje_como_data();
@@ -1884,6 +1902,11 @@ impl Janela {
                     Some(Alteracao::CriarRecorrente { .. }) => "Compromisso criado.",
                     Some(Alteracao::VincularDocumento { .. }) => "Documento anexado.",
                     Some(Alteracao::DesvincularDocumento { .. }) => "Documento desvinculado.",
+                    Some(Alteracao::MapearConta {
+                        conta_do_extrato: Some(_),
+                        ..
+                    }) => "Par de conta confirmado.",
+                    Some(Alteracao::MapearConta { .. }) => "Par de conta desligado.",
                     _ => "Feito.",
                 };
                 let mut r = Ok(());
@@ -1903,7 +1926,63 @@ impl Janela {
                     (Ok(()), _) => (pronto.to_owned(), false),
                 });
             }
-            P::PreviaDoDocumento(_) | P::DestacarDocumento(_) => {}
+            P::PreviaDoDocumento(_) | P::DestacarDocumento(_) | P::RevisarContracheque(_) => {}
+            P::Acao(A::BuscarNoExtrato) => {
+                let periodo = controle.navegador.periodo();
+                controle.recarregar();
+                controle.mensagem = Some(match plan.buscar_conciliacoes(&periodo, hoje) {
+                    Ok(0) => ("Nenhuma sugestão nova.".to_owned(), false),
+                    Ok(1) => ("1 sugestão nova.".to_owned(), false),
+                    Ok(n) => (format!("{n} sugestões novas."), false),
+                    Err(e) => (mensagem_de_erro(&e), true),
+                });
+            }
+            P::ConciliarManual {
+                conciliacao,
+                descricao,
+            } => {
+                let recorrente = conciliacao.ocorrencia.recorrente.clone();
+                let r = plan.aplicar(Alteracao::Conciliar { conciliacao }, Autor::Usuario);
+                if terminar(controle, r, "Conciliação confirmada.") {
+                    // Sem assinatura, oferece reconhecer o compromisso pela descrição do banco.
+                    controle.oferta_de_assinatura =
+                        matches!(plan.assinatura(&recorrente), Ok(None)).then_some(
+                            crate::movimentos::OfertaDeAssinatura {
+                                recorrente,
+                                texto: descricao,
+                            },
+                        );
+                }
+            }
+            P::DefinirAssinatura {
+                recorrente,
+                assinatura,
+            } => {
+                // A versão é lida agora: a conciliação ou a edição de antes já a mudou.
+                let versao = plan.recorrente(&recorrente);
+                let r = match versao {
+                    Ok(Some(rec)) => plan.aplicar(
+                        Alteracao::DefinirAssinatura {
+                            recorrente,
+                            assinatura: assinatura.clone(),
+                            versao_base: rec.versao_do_registro,
+                        },
+                        Autor::Usuario,
+                    ),
+                    Ok(None) => Err(sbf_planejamento::ErroDoPlanejamento::NaoEncontrado(
+                        recorrente,
+                    )),
+                    Err(e) => Err(e),
+                };
+                let ok = if assinatura.is_some() {
+                    "Assinatura guardada."
+                } else {
+                    "Assinatura retirada."
+                };
+                if terminar(controle, r, ok) {
+                    controle.oferta_de_assinatura = None;
+                }
+            }
             P::Acao(A::ConfirmarConciliacao) => {
                 let Some(o) = controle.linha_selecionada().cloned() else {
                     return;
@@ -1975,6 +2054,21 @@ impl Janela {
                 });
             }
         }
+    }
+
+    /// Põe a cópia do acervo de um contracheque na fila do Reconhecimento (a mesma entrada do
+    /// arrastar); o app mostra o painel quando `painel_pedido` está ligado.
+    pub fn revisar_contracheque(&mut self, caminho: std::path::PathBuf) {
+        if !self.reconhecimento.ligado() {
+            self.controle.mensagem =
+                Some((format!("{}.", crate::reconhecimento::NAO_LIGADO), true));
+            return;
+        }
+        self.soltar_arquivos(vec![caminho], None);
+        self.controle.mensagem = Some((
+            "Contracheque no Reconhecimento: confira as rubricas e confirme.".to_owned(),
+            false,
+        ));
     }
 
     fn erro(&mut self, texto: String) {
