@@ -47,6 +47,8 @@ export default tseslint.config(
       // testes do cargo. `target/` é saída do cargo.
       "crates/",
       "target/",
+      // Skills de agentes vendorizadas, conferidas pelo skills-lock.json.
+      ".agents/",
     ],
   },
 );
