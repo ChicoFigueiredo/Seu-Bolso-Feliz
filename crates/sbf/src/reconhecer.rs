@@ -96,32 +96,45 @@ pub fn rodar(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
     let chaveiro = sbf_chaveiro::Chaveiro::abrir_na_pasta_padrao().ok();
+    let reconhecedor = match montar(cofre, chaveiro, o.com_ia) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("sbf: não deu para montar a IA: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    rodar_com(&o, &reconhecedor, &mut std::io::stdout())
+}
+
+type Segredos = sbf_reconhecimento::Segredos;
+
+/// O reconhecedor do cofre, com o chaveiro (PDF protegido) e, com `com_ia`, a IA montada como
+/// na área Triagem (`triagem::montar_motor`). Serve ao CLI e à janela.
+///
+/// # Errors
+/// A IA pedida não montou.
+pub fn montar(
+    cofre: &std::path::Path,
+    chaveiro: Option<sbf_chaveiro::Chaveiro>,
+    com_ia: bool,
+) -> Result<ReconhecedorDoCofre, String> {
     let segredos: Segredos = match &chaveiro {
         Some(c) => Arc::new(c.clone()),
         None => Arc::new(SemChaveiro),
     };
     let mut reconhecedor = ReconhecedorDoCofre::novo(cofre, segredos, None);
-    if o.com_ia {
+    if com_ia {
         let insumos = crate::triagem::Insumos::do_ambiente(chaveiro);
-        match crate::triagem::montar_motor(&cofre.join("inventario.sqlite"), &insumos, false) {
-            Ok(m) => {
-                reconhecedor = reconhecedor.com_motor_de_ia(sbf_reconhecimento::MotorDeIa {
-                    fila: m.fila,
-                    registro: m.registro,
-                    provedor: m.principal.nome(),
-                    rastro: Some(m.rastro),
-                });
-            }
-            Err(e) => {
-                eprintln!("sbf: não deu para montar a IA: {e}");
-                return ExitCode::from(1);
-            }
-        }
+        let m = crate::triagem::montar_motor(&cofre.join("inventario.sqlite"), &insumos, false)?;
+        reconhecedor = reconhecedor.com_motor_de_ia(sbf_reconhecimento::MotorDeIa {
+            fila: m.fila,
+            registro: m.registro,
+            provedor: m.principal.nome(),
+            rastro: Some(m.rastro),
+        });
     }
-    rodar_com(&o, &reconhecedor, &mut std::io::stdout())
+    Ok(reconhecedor)
 }
-
-type Segredos = sbf_reconhecimento::Segredos;
 
 fn rodar_com(o: &Opcoes, r: &dyn Reconhecedor, saida: &mut dyn Write) -> ExitCode {
     let Some(arquivo) = &o.arquivo else {

@@ -140,6 +140,13 @@ impl AppDoInventario {
                 let mut janela_chaveiro_para_perguntar = f.chaveiro.clone();
                 let chaves_da_ia = f.chaveiro.clone();
                 let chaveiro_dos_roteiros = f.chaveiro.clone();
+                // Arrastar documento (spec 11): o reconhecedor do cofre. A IA entra sozinha só
+                // quando os leitores locais não reconhecem; sem IA montada, segue sem ela.
+                let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
+                    .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
+                if let Ok(r) = reconhecedor {
+                    janela.ligar_reconhecedor(std::sync::Arc::new(r));
+                }
                 janela.ferramentas = Some(f);
                 // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
                 // usuário. Nada roda até você clicar em Executar ou em Gravar novo.
