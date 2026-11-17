@@ -258,6 +258,27 @@ duas importações da mesma coisa — descrevem o mesmo fato financeiro. Conteú
 não é conciliação: é o mesmo documento com mais de uma origem.
 _Avoid_: reconciliation, match, dedup
 
+## Reconhecimento
+
+**Regra de reconhecimento**:
+Instrução versionada que diz como reconhecer um tipo de documento ou registro, quais
+campos tirar dele e o que propor. Muda sem recompilar o sbf e só vale depois que o
+usuário ativa a versão. Uma versão nova recomeça como **ativa** (só propõe); depois de 5
+propostas aceitas seguidas, sem correção, o sbf sugere torná-la **consolidada**, e só o
+usuário aprova. Uma regra consolidada concilia sozinha, mas apenas com as três provas
+exatas e sempre com Desfazer; uma rejeição, um Desfazer ou uma versão nova a devolve a
+ativa. Nasce de três jeitos: escrita no editor, rascunho montado a partir de uma correção
+na caixa de entrada, ou proposta pela IA — e nenhum desses a ativa.
+_Avoid_: padrão, plugin, template, parser, alerta (alerta avisa; regra de reconhecimento
+reconhece)
+
+**Script**:
+Trecho curto em Lua anexado a uma regra de reconhecimento para calcular ou transformar
+campos — conferir o IRRF de um contracheque, montar a competência de uma rubrica. Só lê o
+que recebe e devolve uma proposta; nunca grava, paga, concilia nem acessa arquivo, rede ou
+banco.
+_Avoid_: plugin, extensão, roteiro (roteiro é o caminho de um site), macro
+
 ## Inventário
 
 **Inventário**:

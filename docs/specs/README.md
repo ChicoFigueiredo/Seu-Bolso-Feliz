@@ -21,7 +21,7 @@ Substituem a pilha de ~54 documentos antigos (agora em [`../_arquivo/`](../_arqu
 | [04-ia-e-chat](04-ia-e-chat.md)                                   | Interface inteligente             | ✅ integrado                   |
 | [05-dominio-financeiro](05-dominio-financeiro.md)                 | Núcleo determinístico             | ✅ testado                     |
 | [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md) | Desktop Rust: inventário          | ⬜ proposta                    |
-| [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | ⬜ proposta                     |
+| [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | 🟡 decidida, em implementação  |
 
 ## Regras de manutenção (spec-driven)
 

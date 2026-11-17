@@ -1,16 +1,41 @@
-# Seu Bolso Feliz — ADR-021 / Spec 13 (PROPOSTA)
+# Seu Bolso Feliz — Spec 13: regras de reconhecimento e scripts Luau
+
 ## Motor de reconhecimento, regras determinísticas e extensões Lua no Rust
 
 **Data:** 17/11/2026  
-**Estado:** proposta arquitetural para decisão e implementação incremental, não declaração de funcionalidade entregue.  
+**Estado:** decidida (grill com o CEO em 2026-11-17) · **ADR:** [ADR-021](../arquitetura/2026-11-17-adr-021-regras-de-reconhecimento.md)  
 **Escopo:** núcleo local Rust, inventário, planejamento, documentos, movimentos Pluggy, MCP e futuros adaptadores de Telegram/Gmail/web.  
 **Prioridade:** preservar a entrega do Controle Mensal; acrescentar extensibilidade sem reescrever o planejamento ou a conciliação.
+
+## Decisões do CEO (2026-11-17)
+
+Valem sobre o texto da proposta abaixo quando os dois divergem. Termos no glossário
+(`CONTEXT.md`): **Regra de reconhecimento**, **Script**; a fila de revisão humana é a
+**Caixa de entrada** (estado **Precisa revisar**) e a trilha de execução entra no **Rastro**.
+
+| #   | Decisão                                                                                                                                                                                                                                                                                |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | **Escopo deste PR:** P0–P2 e a conferência do IRRF. A entrada aceita Telegram e Gmail, provada com testes fictícios (AC-LUA-09); as conexões reais, que dependem de token e OAuth do CEO, vão num PR seguinte.                                                                         |
+| D2  | **Runtime:** Luau (`mlua`), num processo filho do `sbf` sem rede, arquivo nem segredo, com limite de memória, tempo e instruções, encerrado no timeout.                                                                                                                                |
+| D3  | **Catálogo:** `regras.sqlite` próprio no cofre, do crate `sbf-regras`; inventário e planejamento sem migração. Identificadores em português (ADR-018).                                                                                                                                 |
+| D4  | **Estados:** rascunho → ativa (só propõe) → consolidada. O sbf sugere consolidar depois de **5** propostas aceitas seguidas sem correção; o CEO aprova. Consolidada concilia sozinha só com as três provas exatas, com Desfazer; rejeição, Desfazer ou versão nova a devolvem a ativa. |
+| D5  | **Glossário:** "Regra de reconhecimento" e "Script" ("Alerta" e "Roteiro" seguem sendo outras coisas).                                                                                                                                                                                 |
+| D6  | **Web:** o formato do desktop é canônico; `document_patterns` fica mapeado em documento, sem sincronizar nem apagar o TypeScript.                                                                                                                                                      |
+| D7  | **Correção:** corrigir um documento na caixa de entrada monta, sem IA, uma regra-rascunho (âncoras do texto, expressões em volta dos valores corrigidos, o documento como exemplo). A IA, pelo MCP, só refina rascunhos.                                                               |
+| D8  | **IRRF:** tabela oficial de 2026 (faixas e redutor) como parâmetro versionado por competência, conferida na fonte. Só confere e mostra ⚠; nunca altera a rubrica.                                                                                                                      |
+| D9  | **CI:** job Rust que baixa a bancada com um token de leitura criado pelo CEO; sem o secret, avisa e pula.                                                                                                                                                                              |
+| D10 | **Fábrica:** o contracheque e o que já é reconhecido hoje viram regras ativas que chamam o leitor atual (comportamento idêntico); regras novas (comprovantes, IRRF) chegam em rascunho.                                                                                                |
+| D11 | **Cartão × fatura × débito:** invariantes em Rust provadas por teste e a proposta do elo fatura→débito; a conferência item a item segue com a spec 11.                                                                                                                                 |
+| D12 | **Janela:** área nova "Regras" (lista, página com editor, exemplos, diff da simulação, versões e rollback); no Reconhecimento, "Testar com este documento" e "Criar regra a partir daqui". Exemplo que falha **bloqueia** a ativação.                                                  |
+| D13 | **Pluggy:** as regras extraem campos (favorecido, tipo, autenticação) que alimentam os candidatos atuais; as assinaturas da spec 11 seguem casando.                                                                                                                                    |
+| D14 | **Ativação** só na janela ou num terminal interativo; o MCP e a IA nunca ativam, consolidam nem revertem.                                                                                                                                                                              |
 
 ## 1. Auditoria da base encontrada
 
 Consultado o GitHub `ChicoFigueiredo/Seu-Bolso-Feliz` na `main`, commit `fdfedd172ee76946eb3f985ecafb64262b675574` (PR #25, mesclado em 17/11/2026).
 
 **Implementado / com código inspecionado**:
+
 - `crates/sbf-reconhecimento`: sequência de conferência SHA, registro, extração do texto, leitor local, IA de fallback e sugestão; a detecção local de contracheque hoje usa a expressão normalizada `demonstrativo de pagamento` e chama `sbf_planilha::contracheque::ler`.
 - `crates/sbf-planilha`: leitura/importação XLSM e parser de contracheque (layouts distintos); regras específicas (por código, palavras e cabeçalhos) ficam no código Rust.
 - `crates/sbf-planejamento`: projeção determinística de 360 meses a partir de recorrências, versões, exceções e conciliações, com histórico e exclusão lógica. **Não reimplementar este motor.**
@@ -18,6 +43,7 @@ Consultado o GitHub `ChicoFigueiredo/Seu-Bolso-Feliz` na `main`, commit `fdfedd1
 - No lado TypeScript/Neon já há `document_patterns`, `pattern_feedback`, `workers/ingestion/src/parsers/pattern-matcher.ts` e `supplier-templates`; são uma base conceitual de padrões versionados, mas **não há executor unificado de scripts Lua no Rust**.
 
 **Evidência de entrega e limites**:
+
 - PR #25: 92 arquivos alterados; mais de 41 mil linhas adicionadas; CI do commit de merge verde.
 - A CI GitHub atual executa Bun, testes web/API, lint/typecheck e build web; **não executa `cargo test`, `cargo clippy` nem build da janela Rust**. O PR afirma 1.508 testes Rust verdes, mas essa informação não foi reexecutada nesta auditoria.
 - O relatório de aceite `docs/specs/11-desktop-controle-mensal-aceite.md` ainda marca como FAIL partes de cartão × fatura × banco, histórico navegável, alerta de feriado e drill-down completo; MCP real na máquina está UNVERIFIED.
@@ -82,13 +108,13 @@ flowchart TD
   "schema_version": 1,
   "input_id": "identificador-estavel-da-origem",
   "kind": "document|bank_transaction|email|message",
-  "source": {"channel": "telegram|gmail|drag_drop|folder|pluggy", "external_id": "..."},
+  "source": { "channel": "telegram|gmail|drag_drop|folder|pluggy", "external_id": "..." },
   "sha256": "hash-do-conteudo-quando-houver",
   "mime_detected": "application/pdf",
   "filename": "nome-seguro.pdf",
   "text": "texto-extraido-ja-normalizado",
-  "visual_features": {"layout_fingerprint": null, "logo_hint": null, "colors": []},
-  "hints": {"institution_id": null, "account_id": null, "amount_cents": null, "date": null},
+  "visual_features": { "layout_fingerprint": null, "logo_hint": null, "colors": [] },
+  "hints": { "institution_id": null, "account_id": null, "amount_cents": null, "date": null },
   "evidence_refs": ["id-do-arquivo-original"],
   "event_time": "2026-11-17T10:00:00-03:00"
 }
@@ -180,7 +206,7 @@ A base tributável e o cálculo de IRRF são mais complexos que subtrair descont
 
 ## 5. Três jornadas críticas
 
-**A. Contracheque CAIXA**: arquivo PDF → texto → detector CAIXA/contracheque → leitor já existente (sem substituição) → campos/rubricas → Lua *opcional* calcula conferências (como IRRF conforme tabelas versionadas) → sugere vínculo de cada rubrica com compromissos/consignados → concilia salário automaticamente somente pela política das três provas; divergências em revisão.
+**A. Contracheque CAIXA**: arquivo PDF → texto → detector CAIXA/contracheque → leitor já existente (sem substituição) → campos/rubricas → Lua _opcional_ calcula conferências (como IRRF conforme tabelas versionadas) → sugere vínculo de cada rubrica com compromissos/consignados → concilia salário automaticamente somente pela política das três provas; divergências em revisão.
 
 **B. Comprovante CAIXA recebido do Telegram**: bot/adaptador autorizado recebe mídia e identificadores da mensagem → arquivo preservado no cofre → detector tipado vê sinais do comprovante → regra por layout extrai valor, data, conta, destinatário, autenticação → encontra candidatos no inventário, Pluggy, faturas e Controle Mensal → propõe relações comprovante–movimento–obrigação, sem confundir comprovante com novo gasto → em conflito/ausência de prova, solicitar revisão e aprender com a correção. Telegram não deve executar scripts fornecidos na mensagem.
 
@@ -198,21 +224,25 @@ A base tributável e o cálculo de IRRF são mais complexos que subtrair descont
 ## 7. Fases de implementação — sem interromper o Controle Mensal
 
 ### P0 — Contrato + motor declarativo (bloqueio de arquitetura)
+
 - ADR aprovada; esquemas de entrada/saída e catálogo canônico mapeado ao `document_patterns` já existente.
 - Injetar `MotorDeRegras` no passo `LerLocalmente` do `sbf-reconhecimento`, sem mexer nas APIs financeiras.
 - Carregar regra de SQLite, rodar detecção e extração por dados, com trace, versionamento, precedência, simulação e fallback dos parsers existentes.
 - Demonstração obrigatória: cadastrar um tipo de comprovante fictício por configuração, reconhecer documento **sem recompilar Rust**.
 
 ### P1 — Executor Lua (feature isolada)
+
 - `mlua` com VM restrita, subprocesso para scripts não confiáveis, limites, API de valores imutáveis, sem IO, rede, SQL ou mutações.
 - Ativação e rollback; testes de segurança e precisão de centavos.
 - Demonstração: alterar Lua de uma regra e obter extração/cálculo diferente em um documento fictício **sem build**; documentação de como criar regra.
 
 ### P2 — Pré-conciliação + interfaces
+
 - Resultado dos scripts vira apenas `DecisionCandidate`; confronto com Pluggy, compromissos, contratos, faturas e comprovantes; política Rust valida e aplica via API/propõe na interface.
 - Janela: catálogo e editor seguro, teste, diff, simulação histórica e confirmação; MCP: listar/explicar/simular/propor padrão, **não ativar sozinho**.
 
 ### P3 — Novos adaptadores e cálculo específico
+
 - Telegram/Gmail como origens, mesma máquina de estados, dedup e segredo da integração no cofre.
 - Biblioteca de regras por comprovantes bancários/contracheques/faturas/invoices, com fixtures.
 - IRRF calculado por script contra tabela **versionada por competência**, inicialmente só conferência.
@@ -231,7 +261,7 @@ A base tributável e o cálculo de IRRF são mais complexos que subtrair descont
 - **AC-LUA-10**: nenhuma dupla contagem entre itens do cartão, total da fatura e débito; contracheque líquido e desconto em folha não reduzem caixa duas vezes.
 - **AC-LUA-11**: IRRF estimado indica tabela/competência/versão e alerta divergência, sem sobrescrever rubrica do contracheque.
 - **AC-LUA-12**: testes de unidade e integração executados para crates Rust; `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` e build da UI Linux documentados; adicionar essas verificações à CI em job Rust.
-- **AC-LUA-13**: Teste real contra *cópia* do cofre, com contagens e discrepâncias, sem expor dados na saída; auditor confirma evidências e a UI, não apenas relato do implementador.
+- **AC-LUA-13**: Teste real contra _cópia_ do cofre, com contagens e discrepâncias, sem expor dados na saída; auditor confirma evidências e a UI, não apenas relato do implementador.
 - **AC-LUA-14**: o controle mensal de 360 meses, pausas e reconciliações existentes continua igual com e sem a feature de regras Lua (testes de regressão).
 
 ## 9. Orientação aos agentes
