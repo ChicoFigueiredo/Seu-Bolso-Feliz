@@ -146,14 +146,34 @@ _Avoid_: inadimplente, vencida e esquecida, perdida
 
 **Conciliada** (ocorrência):
 A ocorrência ligada à movimentação real que a pagou. É o único "pago" que entra como fato
-nos totais; pago informado sozinho, não.
+nos totais; pago informado sozinho, não. Quando três provas batem exatamente — o documento
+(o contracheque), o crédito no banco e a conta —, a ocorrência é conciliada sozinha e pode
+ser desfeita; com qualquer diferença, a ligação é só sugerida.
 _Avoid_: pago confirmado, liquidada
 
 **Desconto em folha**:
 O que o empregador retém do salário antes de depositar: consignação, previdência, plano
 de saúde. O **salário líquido** é o que de fato cai na conta, já sem esses descontos;
-contá-los de novo como saída da conta é dupla contagem.
+contá-los de novo como saída da conta é dupla contagem. O contracheque do mês é a prova
+de que cada desconto foi feito. Cada desconto de consignação é a parcela de um contrato de
+empréstimo próprio.
 _Avoid_: débito em conta, parcela do salário
+
+**Empréstimo** (contrato):
+Uma dívida com contrato: número, valor contratado, taxa, sistema de amortização, prazo e a
+evolução. O consignado é pago por desconto em folha, uma parcela por contracheque; cada
+contrato é um empréstimo à parte, mesmo quando vários têm o mesmo nome no contracheque.
+_Avoid_: consignação (quando se fala do contrato), débito
+
+**Evolução** (de um empréstimo):
+A tabela parcela a parcela do contrato — amortização, juros e saldo devedor. O que o banco
+informou vale como fato; dali para frente, é calculada pela taxa e pelo sistema.
+_Avoid_: extrato do empréstimo, cronograma
+
+**Renovação**:
+Quando um contrato é quitado por um novo do mesmo credor, que leva o saldo devedor: o
+antigo fica quitado por renovação e o novo nasce ligado a ele.
+_Avoid_: refin, refinanciamento, novo empréstimo
 
 **Data de disponibilidade** e **data do crédito**:
 Duas datas da mesma entrada. A de disponibilidade é quando o dinheiro já pode ser usado; a
@@ -217,6 +237,20 @@ _Avoid_: lançamento, transação, linha, item
 Um detalhe que compõe um registro sem ser um fato à parte — a parcela 3/10 de uma
 compra, o IOF que veio junto, cada rubrica de um contracheque.
 _Avoid_: item, sub-item, linha
+
+**Contracheque**:
+O documento do empregador que, para um mês de pagamento, lista as rubricas e o salário
+líquido. Declara um registro do tipo salário — o líquido — cujas rubricas são
+sub-registros; o crédito do banco é outro registro do mesmo fato. A data de crédito impressa
+nele não prova quando o dinheiro entrou: quem prova é o banco.
+_Avoid_: holerite, demonstrativo, folha
+
+**Rubrica**:
+Uma linha do contracheque: um provento ou um desconto, com código, competência e, nos
+descontos de contrato, a parcela. É **fixa** quando se repete todo mês, **eventual** quando
+vale só naquele (PLR, prêmio, adiantamento, retroativo) e **informativa** quando aparece no
+contracheque mas fica fora dos totais dele.
+_Avoid_: verba, item, linha do holerite
 
 **Conciliação**:
 O ato de reconhecer que dois registros — uma transação importada e um documento, ou
