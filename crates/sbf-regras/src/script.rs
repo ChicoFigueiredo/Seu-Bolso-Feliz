@@ -123,3 +123,81 @@ pub trait ExecutorDeScript: Send + Sync + std::fmt::Debug {
     /// [`ErroDoScript::Sintaxe`] ou [`ErroDoScript::SemTransformar`].
     fn verificar(&self, fonte: &str) -> Result<(), ErroDoScript>;
 }
+
+// ---------------------------------------------------------------------------------------
+// Executor de mentira, para testes (deste crate e de quem integra)
+// ---------------------------------------------------------------------------------------
+
+type Funcao = Box<dyn Fn(&PedidoDeScript) -> Result<RespostaDoScript, ErroDoScript> + Send + Sync>;
+
+/// Um [`ExecutorDeScript`] que não executa Luau: mapeia o **fonte** para uma resposta fixa
+/// (ou para uma função do pedido) e guarda os pedidos recebidos. Só para testes.
+#[derive(Default)]
+pub struct ExecutorFicticio {
+    respostas: std::sync::Mutex<BTreeMap<String, Funcao>>,
+    pedidos: std::sync::Mutex<Vec<PedidoDeScript>>,
+}
+
+impl std::fmt::Debug for ExecutorFicticio {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutorFicticio").finish_non_exhaustive()
+    }
+}
+
+impl ExecutorFicticio {
+    pub fn novo() -> Self {
+        Self::default()
+    }
+
+    /// Para este fonte, devolve sempre esta resposta.
+    #[must_use]
+    pub fn com(self, fonte: &str, resposta: Result<RespostaDoScript, ErroDoScript>) -> Self {
+        self.com_funcao(fonte, move |_| resposta.clone())
+    }
+
+    /// Para este fonte, calcula a resposta a partir do pedido.
+    #[must_use]
+    pub fn com_funcao(
+        self,
+        fonte: &str,
+        f: impl Fn(&PedidoDeScript) -> Result<RespostaDoScript, ErroDoScript> + Send + Sync + 'static,
+    ) -> Self {
+        if let Ok(mut m) = self.respostas.lock() {
+            m.insert(fonte.to_owned(), Box::new(f));
+        }
+        self
+    }
+
+    /// Os pedidos recebidos até agora.
+    pub fn pedidos(&self) -> Vec<PedidoDeScript> {
+        self.pedidos.lock().map(|p| p.clone()).unwrap_or_default()
+    }
+}
+
+impl ExecutorDeScript for ExecutorFicticio {
+    fn executar(&self, pedido: &PedidoDeScript) -> Result<RespostaDoScript, ErroDoScript> {
+        if let Ok(mut p) = self.pedidos.lock() {
+            p.push(pedido.clone());
+        }
+        let respostas = self
+            .respostas
+            .lock()
+            .map_err(|_| ErroDoScript::Processo("executor de mentira travado".to_owned()))?;
+        match respostas.get(&pedido.fonte) {
+            Some(f) => f(pedido),
+            None => Err(ErroDoScript::SemTransformar),
+        }
+    }
+
+    fn verificar(&self, fonte: &str) -> Result<(), ErroDoScript> {
+        let respostas = self
+            .respostas
+            .lock()
+            .map_err(|_| ErroDoScript::Processo("executor de mentira travado".to_owned()))?;
+        if respostas.contains_key(fonte) {
+            Ok(())
+        } else {
+            Err(ErroDoScript::SemTransformar)
+        }
+    }
+}
