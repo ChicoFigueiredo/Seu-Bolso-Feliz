@@ -13,6 +13,8 @@
 //! - `sbf canais`: o bot do Telegram e os alertas, na VPS (ADR-014, ADR-017; ver `canais.rs`);
 //! - `sbf reconhecer --inventario <cofre> --arquivo <caminho>`: o reconhecimento de um arquivo
 //!   solto, sem janela (ver `reconhecer.rs`);
+//! - `sbf regras --inventario <cofre> <subcomando>`: as regras de reconhecimento (`regras.rs`);
+//! - `sbf script --servir`: o processo filho dos scripts Luau, interno (`script.rs`);
 //! - `sbf --versao`.
 
 mod caixa;
@@ -26,7 +28,9 @@ mod mcp;
 mod planejamento;
 mod rag;
 mod reconhecer;
+mod regras;
 mod roteiros;
+mod script;
 mod servidor;
 mod triagem;
 mod worker;
@@ -478,7 +482,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -534,6 +538,8 @@ fn main() -> ExitCode {
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("planejamento") => planejamento::rodar(&args[1..]),
         Some("reconhecer") => reconhecer::rodar(&args[1..]),
+        Some("regras") => regras::rodar(&args[1..]),
+        Some("script") => script::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {
             let (Some("--inventario"), Some(pasta)) =

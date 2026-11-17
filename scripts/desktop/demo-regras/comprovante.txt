@@ -1,0 +1,6 @@
+Banco Exemplo
+Comprovante PIX
+Favorecido: Fulano de Tal
+Valor: R$ 1.234,56
+Data: 06/10/2026
+Autenticacao: ABC123XYZ
