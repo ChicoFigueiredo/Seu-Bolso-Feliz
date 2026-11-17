@@ -83,11 +83,21 @@ function transformar(entrada, parametros, ajuda)
     }
   end
   local diferenca = retido - estimado
+  -- A folha pode truncar onde o script arredonda: até 1 centavo é arredondamento, não
+  -- divergência (visto no ensaio de 2026-11-17 com um contracheque real, numa cópia).
+  local TOLERANCIA_CENTAVOS = 1
+  local diverge = math.abs(diferenca) > TOLERANCIA_CENTAVOS
+  local motivos = {}
+  if diverge then
+    motivos = { "o IRRF retido difere do estimado pela tabela" }
+  elseif diferenca ~= 0 then
+    motivos = { "diferença de arredondamento de 1 centavo" }
+  end
   return {
     corresponde = true,
     campos = { irrf_estimado_centavos = estimado, irrf_diferenca_centavos = diferenca },
-    revisar = diferenca ~= 0,
-    motivos = diferenca ~= 0 and { "o IRRF retido difere do estimado pela tabela" } or {},
+    revisar = diverge,
+    motivos = motivos,
     evidencias = evidencias,
   }
 end

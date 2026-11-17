@@ -105,6 +105,26 @@ fn diferenca_e_revisao() {
 }
 
 #[test]
+fn um_centavo_e_arredondamento_nao_divergencia() {
+    // A folha trunca onde o script arredonda: ±1 centavo não pede revisão, mas fica no
+    // campo da diferença e nos motivos; 2 centavos já é divergência.
+    let com = |retido: i64| {
+        rodar(
+            json!({"base_irrf_centavos": 600_000, "irrf_retido_centavos": retido,
+                     "rendimento_tributavel_centavos": 600_000}),
+        )
+        .expect("roda")
+    };
+    for retido in [56_151, 56_153] {
+        let r = com(retido);
+        assert!(!r.revisar, "{retido}");
+        assert_eq!(r.motivos, ["diferença de arredondamento de 1 centavo"]);
+    }
+    assert_eq!(com(56_151).campos["irrf_diferenca_centavos"], json!(-1));
+    assert!(com(56_150).revisar);
+}
+
+#[test]
 fn dados_faltando_pedem_revisao_sem_inventar() {
     let r = rodar(json!({"irrf_retido_centavos": 100})).expect("roda");
     assert!(r.corresponde && r.revisar && r.campos.is_empty());
