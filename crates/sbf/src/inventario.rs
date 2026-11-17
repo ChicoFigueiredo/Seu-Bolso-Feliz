@@ -125,10 +125,12 @@ impl AppDoInventario {
                         if let Err(e) = c.semear_fabrica() {
                             eprintln!("sbf: as regras de fábrica não entraram ({e})");
                         }
-                        janela.regras.ligar(sbf_janela::regras::FonteDasRegras::nova(
-                            std::sync::Arc::new(std::sync::Mutex::new(c)),
-                            crate::script::executor_de_script().ok(),
-                        ));
+                        janela
+                            .regras
+                            .ligar(sbf_janela::regras::FonteDasRegras::nova(
+                                std::sync::Arc::new(std::sync::Mutex::new(c)),
+                                crate::script::executor_de_script().ok(),
+                            ));
                     }
                     Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
                 }

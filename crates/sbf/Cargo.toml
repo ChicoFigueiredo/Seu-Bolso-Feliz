@@ -46,8 +46,6 @@ sbf-reconhecimento = { path = "../sbf-reconhecimento" }
 sbf-regras = { workspace = true }
 sbf-script = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
-sbf-regras = { workspace = true }
-sbf-script = { workspace = true }
 sha2 = { workspace = true }
 serde = { workspace = true }
 ctrlc = { version = "3", features = ["termination"] }
