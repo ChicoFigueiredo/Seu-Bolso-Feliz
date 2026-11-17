@@ -747,7 +747,16 @@ impl AppCasca for AppSbf {
             .collect();
         let mut grupos = vec![
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
-            GrupoNavegacao::novo("Documentos", futuras(&["caixa"])),
+            GrupoNavegacao::novo("Documentos", {
+                // As Regras de reconhecimento (spec 13) já funcionam: sem selo de fatia.
+                let mut v = futuras(&["caixa"]);
+                v.push(ItemNavegacao::novo(
+                    crate::regras_ui::ROTA,
+                    "Regras de reconhecimento",
+                    "rule",
+                ));
+                v
+            }),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
             GrupoNavegacao::novo("Fontes", {
                 // Roteiros (spec 10, C1) já funcionam: o item não leva o selo de fatia.

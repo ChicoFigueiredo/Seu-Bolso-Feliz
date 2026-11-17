@@ -21,6 +21,7 @@ sbf-indice = { path = "../sbf-indice" }
 sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-planilha = { path = "../sbf-planilha" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
+sbf-regras = { workspace = true }
 sbf-pontos = { path = "../sbf-pontos" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-worker = { path = "../sbf-worker" }

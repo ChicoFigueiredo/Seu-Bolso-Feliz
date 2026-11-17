@@ -5380,6 +5380,7 @@ dependencies = [
  "sbf-previa",
  "sbf-processo",
  "sbf-reconhecimento",
+ "sbf-regras",
  "sbf-roteiros",
  "sbf-triagem",
  "sbf-worker",
