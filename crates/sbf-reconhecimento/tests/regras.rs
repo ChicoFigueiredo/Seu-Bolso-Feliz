@@ -1,0 +1,1013 @@
+//! O motor de regras ligado ao reconhecimento (spec 13, ADR-021): AC-LUA-06, 09, 10, 11 e 14.
+//! Cofre temporário, dados fictícios ("Banco Exemplo", "Fulano de Tal"), nenhuma IA.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use rusqlite::Connection;
+use sbf_inventario::banco::Inventario;
+use sbf_pdf::{ErroDeFonte, FonteDeSegredos};
+use sbf_planejamento::{
+    Alteracao, AlvoDoDocumento, Autor, Banco, Centavos, Certeza, Competencia, Filtro, Fonte,
+    Frequencia, Natureza, NovoRecorrente, Periodo, Planejamento, PlanejamentoSqlite, Prazo,
+    SemSaldos, Versao,
+};
+use sbf_reconhecimento::regras::{
+    self, ARQUIVO_DAS_REGRAS, entrada_do_documento, entrada_do_registro, ler_registro,
+    rotulo_do_candidato,
+};
+use sbf_reconhecimento::{Reconhecedor, ReconhecedorDoCofre, Reconhecido, Resultado, Sugestao};
+use sbf_regras::catalogo::{Catalogo, EstadoDaProposta, NovaVersao};
+use sbf_regras::definicao::{
+    Condicao, Definicao, Extracao, FonteDaExtracao, Formato, ModeloDeProposta,
+};
+use sbf_regras::motor::Motor;
+use sbf_regras::{Autor as AutorDaRegra, Canal, Decisao, Estado, Quem, Retorno, Valor};
+use sbf_script::ExecutorNoProcesso;
+use zeroize::Zeroizing;
+
+const CONTRACHEQUE_2026: &str =
+    include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
+const CONTA: &str = "Banco Exemplo 000000-1";
+const COMPROVANTE: &str = "Banco Exemplo\nComprovante PIX\nFavorecido: Fulano de Tal\n\
+Valor: R$ 187,50\nData: 12/11/2026\nConta de origem: Banco Exemplo 000000-1\n\
+Autenticação: ABC123XYZ\n";
+const BOLETO_DE_ENERGIA: &str = "BOLETO ENERGIA EXEMPLO S.A.\nVencimento 24/11/2026\nValor R$ 187,50\nConta de origem: Banco Exemplo 000000-1\n";
+const FATURA: &str = "Fatura Cartao Exemplo\nCartao: Cartao Exemplo\nTotal da fatura: R$ 900,00\n\
+Vencimento: 10/11/2026\n";
+
+struct Segredos;
+
+impl FonteDeSegredos for Segredos {
+    fn cpf(&self) -> Result<Zeroizing<String>, ErroDeFonte> {
+        Ok(Zeroizing::new("52998224725".to_owned()))
+    }
+    fn senha_propria(&self, _: &str) -> Result<Zeroizing<String>, ErroDeFonte> {
+        Err(ErroDeFonte::SemSenhaPropria)
+    }
+}
+
+struct Cenario {
+    _raiz: tempfile::TempDir,
+    cofre: PathBuf,
+    soltos: PathBuf,
+}
+
+fn cenario() -> Cenario {
+    let raiz = tempfile::tempdir().expect("raiz");
+    let cofre = raiz.path().join("cofre");
+    let soltos = raiz.path().join("soltos");
+    std::fs::create_dir_all(&cofre).expect("cofre");
+    std::fs::create_dir_all(&soltos).expect("soltos");
+    let mut inventario = Inventario::abrir(cofre.join("inventario.sqlite")).expect("abrir");
+    inventario
+        .migrar(raiz.path().join("copia.sqlite"))
+        .expect("migrar");
+    Cenario {
+        _raiz: raiz,
+        cofre,
+        soltos,
+    }
+}
+
+fn comp(ano: i32, mes: u8) -> Competencia {
+    Competencia { ano, mes }
+}
+
+impl Cenario {
+    fn conexao(&self) -> Connection {
+        Connection::open(self.cofre.join("inventario.sqlite")).expect("abrir")
+    }
+
+    fn contar(&self, sql: &str) -> i64 {
+        self.conexao()
+            .query_row(sql, [], |l| l.get(0))
+            .expect("contar")
+    }
+
+    fn solto(&self, nome: &str, conteudo: &str) -> PathBuf {
+        let c = self.soltos.join(nome);
+        std::fs::write(&c, conteudo).expect("escrever");
+        c
+    }
+
+    fn sem_regras(&self) -> ReconhecedorDoCofre {
+        ReconhecedorDoCofre::novo(&self.cofre, Arc::new(Segredos), None)
+    }
+
+    fn com_regras(&self) -> ReconhecedorDoCofre {
+        self.sem_regras().com_regras(None)
+    }
+
+    fn rodar(&self, r: &ReconhecedorDoCofre, caminho: &Path) -> Resultado {
+        r.reconhecer(caminho, &mut |_| {}, &AtomicBool::new(false))
+            .expect("reconhecer")
+    }
+
+    fn plan(&self) -> PlanejamentoSqlite {
+        let banco = Banco::abrir(self.cofre.join("planejamento.sqlite")).expect("banco");
+        PlanejamentoSqlite::novo(banco, Box::new(SemSaldos))
+    }
+
+    /// Um recorrente mensal fictício; devolve o id.
+    fn criar(
+        &self,
+        nome: &str,
+        natureza: Natureza,
+        valor: i64,
+        dia: u8,
+        conta: Option<&str>,
+    ) -> String {
+        let mut plan = self.plan();
+        plan.aplicar(
+            Alteracao::CriarRecorrente {
+                recorrente: NovoRecorrente {
+                    nome: nome.into(),
+                    grupo: "Casa".into(),
+                    subgrupo: None,
+                    posicao: 0,
+                    natureza,
+                    prazo: Prazo::SemFim,
+                    primeira_versao: Versao {
+                        id: String::new(),
+                        desde: comp(2026, 1),
+                        valor: Some(Centavos(valor)),
+                        certeza: Certeza::Confirmado,
+                        fonte: Fonte::Usuario,
+                        frequencia: Frequencia::Mensal { dia },
+                        conta: conta.map(str::to_owned),
+                        centro: None,
+                        fornecedor: None,
+                        categoria: None,
+                        nota: None,
+                    },
+                },
+                origem: None,
+            },
+            Autor::Usuario,
+        )
+        .expect("criar");
+        plan.recorrentes(false)
+            .expect("lista")
+            .into_iter()
+            .find(|r| r.nome == nome)
+            .expect("criado")
+            .id
+    }
+
+    fn mapear_conta(&self) {
+        self.plan()
+            .aplicar(
+                Alteracao::MapearConta {
+                    apelido: "CX-0001".into(),
+                    conta_do_extrato: Some(CONTA.into()),
+                },
+                Autor::Usuario,
+            )
+            .expect("mapear");
+    }
+
+    /// Um movimento no extrato do inventário (a Pluggy).
+    fn movimento(&self, id: &str, tipo: &str, data: &str, valor: i64, descricao: &str) {
+        let conn = self.conexao();
+        conn.execute(
+            "INSERT OR IGNORE INTO fonte (id, tipo, descricao)
+             VALUES ('conexao:pluggy', 'conexao', 'x')",
+            [],
+        )
+        .expect("fonte");
+        conn.execute(
+            "INSERT INTO registro (external_ref, fonte_id, tipo, data, data_tipo, valor_centavos,
+                                   descricao_original, conta_provavel, extraido_por)
+             VALUES (?1, 'conexao:pluggy', ?2, ?3, 'pagamento', ?4, ?5, ?6, 'pluggy@1')",
+            rusqlite::params![id, tipo, data, valor, descricao, CONTA],
+        )
+        .expect("registro");
+    }
+
+    fn catalogo(&self) -> Catalogo {
+        Catalogo::abrir(&self.cofre.join(ARQUIVO_DAS_REGRAS)).expect("catalogo")
+    }
+
+    /// Salva e ativa (pelo usuário) uma regra.
+    fn instalar(&self, nova: NovaVersao) {
+        let mut c = self.catalogo();
+        let v = c.salvar_rascunho(nova).expect("rascunho");
+        c.ativar(&v.regra, v.versao, &Quem::Usuario, None)
+            .expect("ativar");
+    }
+
+    /// 5 propostas aceitas seguidas e a consolidação pelo usuário (D4).
+    fn consolidar(&self, regra: &str, texto: &str) {
+        let mut c = self.catalogo();
+        let motor = Motor::das_vigentes(&c, None).expect("motor");
+        for i in 0..5 {
+            let id = format!("{:064x}", 1000 + i);
+            let e =
+                entrada_do_documento(&id, "x.txt", "text/plain", Some(texto), Canal::Pasta, None);
+            let Decisao::Reconhecido(rec) = motor.ler(&e).decisao else {
+                panic!("a regra devia reconhecer");
+            };
+            c.registrar_proposta(&rec, &id).expect("proposta");
+            c.registrar_retorno(&rec.chave, Retorno::Aceito, &Quem::Usuario, "")
+                .expect("retorno");
+        }
+        c.consolidar(regra, 1, &Quem::Usuario).expect("consolidar");
+        assert_eq!(c.versao(regra, 1).expect("v").estado, Estado::Consolidada);
+    }
+}
+
+fn extracao(regex: &str, formato: Formato) -> Extracao {
+    Extracao {
+        regex: regex.to_owned(),
+        grupo: 1,
+        formato,
+        fonte: FonteDaExtracao::Texto,
+    }
+}
+
+fn nova(regra: &str, definicao: Definicao) -> NovaVersao {
+    NovaVersao {
+        regra: regra.to_owned(),
+        nome: regra.to_owned(),
+        definicao,
+        script: None,
+        autor: AutorDaRegra::Usuario,
+        motivo: "teste".to_owned(),
+    }
+}
+
+fn regra_do_comprovante() -> NovaVersao {
+    let mut d = Definicao::simples("comprovante", "comprovante pix");
+    d.detectar
+        .todos
+        .push(Condicao::Contem("banco exemplo".into()));
+    d.extrair.insert(
+        "valor_centavos".into(),
+        extracao(r"Valor:\s*R\$\s*([\d.,]+)", Formato::Centavos),
+    );
+    d.extrair.insert(
+        "data".into(),
+        extracao(r"Data:\s*(\d{2}/\d{2}/\d{4})", Formato::Data),
+    );
+    d.extrair.insert(
+        "conta".into(),
+        extracao(r"Conta de origem:\s*(.+)", Formato::Texto),
+    );
+    d.obrigatorios = vec!["valor_centavos".into(), "data".into()];
+    d.propor = vec![ModeloDeProposta::ProvarRegistro { janela_dias: 2 }];
+    nova("comprovante-pix-banco-exemplo", d)
+}
+
+fn regra_do_boleto() -> NovaVersao {
+    let mut d = Definicao::simples("boleto", "boleto energia exemplo");
+    d.extrair.insert(
+        "valor_centavos".into(),
+        extracao(r"Valor R\$\s*([\d.,]+)", Formato::Centavos),
+    );
+    d.extrair.insert(
+        "data".into(),
+        extracao(r"Vencimento (\d{2}/\d{2}/\d{4})", Formato::Data),
+    );
+    d.propor = vec![ModeloDeProposta::ConciliarOcorrencia {
+        janela_dias: 10,
+        compromisso: Some("Energia".into()),
+    }];
+    nova("boleto-energia-exemplo", d)
+}
+
+fn regra_da_fatura() -> NovaVersao {
+    let mut d = Definicao::simples("fatura-de-cartao", "fatura cartao exemplo");
+    d.extrair.insert(
+        "valor_centavos".into(),
+        extracao(r"Total da fatura:\s*R\$\s*([\d.,]+)", Formato::Centavos),
+    );
+    d.extrair.insert(
+        "vencimento".into(),
+        extracao(r"Vencimento:\s*(\d{2}/\d{2}/\d{4})", Formato::Data),
+    );
+    d.extrair
+        .insert("cartao".into(), extracao(r"Cartao:\s*(.+)", Formato::Texto));
+    d.propor = vec![ModeloDeProposta::PagarFatura];
+    nova("fatura-cartao-exemplo", d)
+}
+
+fn de_regra(r: &Resultado) -> &Sugestao {
+    r.sugestoes
+        .iter()
+        .find(|s| s.da_regra().is_some())
+        .unwrap_or_else(|| panic!("nenhuma sugestão de regra: {:?}", r.sugestoes))
+}
+
+fn provas(s: &Sugestao) -> u8 {
+    match s {
+        Sugestao::ProvarRegistro { provas, .. }
+        | Sugestao::ConciliarOcorrencia { provas, .. }
+        | Sugestao::PagarFatura { provas, .. } => *provas,
+        outra => panic!("{outra:?}"),
+    }
+}
+
+/// O que o clique em Confirmar faz: aplica as alterações da sugestão.
+fn confirmar(plan: &mut PlanejamentoSqlite, r: &Resultado, s: &Sugestao) {
+    for a in s.alteracoes(&r.sha256, &r.nome, 0, None) {
+        plan.aplicar(a, Autor::Usuario).expect("aplicar");
+    }
+}
+
+fn novembro() -> Periodo {
+    Periodo::MesCivil(comp(2026, 11))
+}
+
+fn hoje() -> sbf_planejamento::Data {
+    sbf_planejamento::Data::hoje_em_sao_paulo()
+}
+
+// ---------------------------------------------------------------- AC-LUA-06
+
+#[test]
+fn ac_lua_06_regra_ativa_so_propoe_e_nada_grava_sozinho() {
+    let c = cenario();
+    c.criar("Energia", Natureza::Saida, 18_750, 24, Some("CX-0001"));
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-24",
+        -18_750,
+        "PAGTO ENERGIA",
+    );
+    c.instalar(regra_do_boleto());
+    let arquivo = c.solto("boleto.txt", BOLETO_DE_ENERGIA);
+
+    let r = c.rodar(&c.com_regras(), &arquivo);
+
+    let s = de_regra(&r);
+    assert!(matches!(s, Sugestao::ConciliarOcorrencia { .. }));
+    assert_eq!(provas(s), 3, "documento, valor exato e conta");
+    assert!(!s.e_automatica(), "regra ativa nunca é automática");
+    assert!(s.conciliacao_automatica().is_none());
+    // O reconhecimento não escreveu no planejamento: nenhuma conciliação, nenhum documento.
+    let plan = c.plan();
+    let ocorrencias = plan
+        .controle(&novembro(), Filtro::Todos, None, hoje())
+        .unwrap();
+    assert!(ocorrencias.linhas.iter().all(|o| o.conciliado.is_none()));
+    // A proposta ficou aberta no catálogo.
+    let abertas = c
+        .catalogo()
+        .propostas(Some(EstadoDaProposta::Aberta))
+        .unwrap();
+    assert_eq!(abertas.len(), 1);
+    // O retorno do usuário alimenta a consolidação.
+    let (_, chave) = s.da_regra().unwrap();
+    regras::registrar_retorno(&c.cofre, chave, Retorno::Aceito).unwrap();
+    assert_eq!(
+        c.catalogo()
+            .versao("boleto-energia-exemplo", 1)
+            .unwrap()
+            .aceitas_seguidas,
+        1
+    );
+}
+
+#[test]
+fn ac_lua_06_consolidada_com_duas_provas_nao_e_automatica_e_com_tres_e() {
+    let c = cenario();
+    c.criar("Energia", Natureza::Saida, 18_750, 24, Some("CX-0001"));
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-24",
+        -18_750,
+        "PAGTO ENERGIA",
+    );
+    c.instalar(regra_do_boleto());
+    c.consolidar("boleto-energia-exemplo", BOLETO_DE_ENERGIA);
+
+    // Sem o par de conta confirmado, só o documento e o valor batem: 2 provas.
+    let arquivo = c.solto("boleto.txt", BOLETO_DE_ENERGIA);
+    let r = c.rodar(&c.com_regras(), &arquivo);
+    let s = de_regra(&r);
+    assert_eq!(provas(s), 2);
+    assert!(
+        !s.e_automatica(),
+        "consolidada com 2 provas não concilia sozinha"
+    );
+
+    // Com o par de conta, são 3: automática, e o autor é "<regra>@<versão>".
+    c.mapear_conta();
+    let outro = c.solto("outro.txt", &format!("{BOLETO_DE_ENERGIA}\n"));
+    let r = c.rodar(&c.com_regras(), &outro);
+    let s = de_regra(&r);
+    assert_eq!(provas(s), 3);
+    assert!(s.e_automatica());
+    let (_, autor) = s.conciliacao_automatica().expect("automática");
+    assert_eq!(autor, "boleto-energia-exemplo@1");
+    // Mesmo automática, o reconhecimento só sugere: quem grava é a janela.
+    let plan = c.plan();
+    let o = plan
+        .controle(&novembro(), Filtro::Todos, None, hoje())
+        .unwrap();
+    assert!(o.linhas.iter().all(|l| l.conciliado.is_none()));
+}
+
+#[test]
+fn ac_lua_06_nao_ha_proposta_que_crie_gasto() {
+    // Não existe variante de `Proposta` nem de `Sugestao` que crie recorrente ou registro:
+    // aplicar qualquer sugestão de regra só concilia ou vincula.
+    let c = cenario();
+    c.criar("Energia", Natureza::Saida, 18_750, 24, Some("CX-0001"));
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-24",
+        -18_750,
+        "PAGTO ENERGIA",
+    );
+    c.instalar(regra_do_boleto());
+    let arquivo = c.solto("boleto.txt", BOLETO_DE_ENERGIA);
+    let r = c.rodar(&c.com_regras(), &arquivo);
+    for a in de_regra(&r).alteracoes(&r.sha256, &r.nome, 0, None) {
+        assert!(matches!(a, Alteracao::Conciliar { .. }), "{a:?}");
+    }
+}
+
+// ---------------------------------------------------------------- AC-LUA-09
+
+#[test]
+fn ac_lua_09_arrasto_e_depois_ja_no_cofre_e_uma_proposta_so() {
+    let c = cenario();
+    c.instalar(regra_do_comprovante());
+    let r = c.com_regras();
+    let arrastado = c.solto("comprovante.txt", COMPROVANTE);
+
+    let primeira = c.rodar(&r, &arrastado);
+    assert_eq!(
+        primeira.entrada.as_ref().unwrap().origem.canal,
+        Canal::Arrastado
+    );
+
+    // A cópia que o arrasto guardou no acervo do cofre.
+    let copia = achar_copia(&c.cofre, COMPROVANTE);
+    let segunda = c.rodar(&r, &copia);
+    let e = segunda.entrada.as_ref().unwrap();
+    assert_eq!(e.origem.canal, Canal::Cofre);
+    assert_eq!(
+        e.id,
+        primeira.entrada.as_ref().unwrap().id,
+        "o id é o sha256"
+    );
+
+    let propostas = c.catalogo().propostas(None).unwrap();
+    assert_eq!(propostas.len(), 1, "a mesma chave: uma proposta só");
+}
+
+fn achar_copia(raiz: &Path, conteudo: &str) -> PathBuf {
+    fn andar(pasta: &Path, conteudo: &[u8], achados: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(pasta).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                andar(&p, conteudo, achados);
+            } else if std::fs::read(&p).is_ok_and(|b| b == conteudo) {
+                achados.push(p);
+            }
+        }
+    }
+    let mut achados = Vec::new();
+    andar(raiz, conteudo.as_bytes(), &mut achados);
+    achados.pop().expect("a cópia no acervo")
+}
+
+#[test]
+fn ac_lua_09_mesmo_conteudo_em_dois_caminhos_acumula_origens_e_uma_proposta() {
+    let c = cenario();
+    c.instalar(regra_do_comprovante());
+    let r = c.com_regras();
+    c.rodar(&r, &c.solto("a.txt", COMPROVANTE));
+    c.rodar(&r, &c.solto("b.txt", COMPROVANTE));
+    assert_eq!(c.contar("SELECT COUNT(*) FROM achado"), 1);
+    assert_eq!(
+        c.contar("SELECT COUNT(*) FROM origem"),
+        2,
+        "o inventário acumula as origens"
+    );
+    assert_eq!(c.catalogo().propostas(None).unwrap().len(), 1);
+}
+
+#[test]
+fn ac_lua_09_telegram_e_pasta_com_o_mesmo_sha_dao_a_mesma_chave() {
+    let c = cenario();
+    c.instalar(regra_do_comprovante());
+    let mut cat = c.catalogo();
+    let motor = Motor::das_vigentes(&cat, None).unwrap();
+    let sha = "ab".repeat(32);
+    let ler = |canal, id: &str| {
+        let e = entrada_do_documento(
+            &sha,
+            "c.pdf",
+            "application/pdf",
+            Some(COMPROVANTE),
+            canal,
+            Some(id),
+        );
+        match motor.ler(&e).decisao {
+            Decisao::Reconhecido(rec) => *rec,
+            outra => panic!("{outra:?}"),
+        }
+    };
+    let telegram = ler(Canal::Telegram, "msg-77");
+    let pasta = ler(Canal::Pasta, "/pasta/c.pdf");
+    assert_eq!(telegram.chave, pasta.chave);
+    assert!(cat.registrar_proposta(&telegram, &sha).unwrap());
+    assert!(!cat.registrar_proposta(&pasta, &sha).unwrap(), "já existia");
+    assert_eq!(cat.propostas(None).unwrap().len(), 1);
+}
+
+#[test]
+fn ac_lua_09_o_mesmo_registro_da_pluggy_lido_duas_vezes_e_uma_proposta() {
+    let c = cenario();
+    let mut cat = c.catalogo();
+    cat.semear_fabrica().unwrap();
+    // A regra de fábrica do Pix chega em rascunho; ativar é decisão do usuário.
+    cat.ativar("pix-na-descricao", 1, &Quem::Usuario, None)
+        .unwrap();
+    let motor = Motor::das_vigentes(&cat, None).unwrap();
+    let m = movimento_pix();
+    let e = entrada_do_registro(&m);
+    assert_eq!(e.id, "pluggy:txn_pix");
+    let primeira = ler_registro(&motor, &e).expect("reconhece o Pix");
+    let segunda = ler_registro(&motor, &entrada_do_registro(&m)).expect("de novo");
+    assert_eq!(primeira.chave, segunda.chave);
+    assert!(cat.registrar_proposta(&primeira, &e.id).unwrap());
+    assert!(!cat.registrar_proposta(&segunda, &e.id).unwrap());
+    assert_eq!(cat.propostas(None).unwrap().len(), 1);
+}
+
+fn movimento_pix() -> sbf_planejamento::MovimentoDoExtrato {
+    sbf_planejamento::MovimentoDoExtrato {
+        movimento: "pluggy:txn_pix".into(),
+        data: sbf_planejamento::Data::nova(2026, 11, 12).unwrap(),
+        valor: Centavos(-18_750),
+        conta_do_extrato: CONTA.into(),
+        descricao: "PIX ENVIADO Fulano de Tal".into(),
+        tipo: "debito".into(),
+    }
+}
+
+#[test]
+fn d13_favorecido_e_tipo_so_enriquecem_o_rotulo_do_candidato() {
+    let c = cenario();
+    let mut cat = c.catalogo();
+    cat.semear_fabrica().unwrap();
+    cat.ativar("pix-na-descricao", 1, &Quem::Usuario, None)
+        .unwrap();
+    let motor = Motor::das_vigentes(&cat, None).unwrap();
+    let candidato = sbf_planejamento::MovimentoCandidato {
+        movimento: movimento_pix(),
+        bate_assinatura: false,
+        mesma_conta: true,
+        diferenca: None,
+    };
+    let rotulo = rotulo_do_candidato(&motor, &candidato);
+    assert!(rotulo.starts_with("PIX ENVIADO Fulano de Tal"), "{rotulo}");
+    assert!(rotulo.contains("favorecido Fulano de Tal"), "{rotulo}");
+    assert!(rotulo.ends_with("pix"), "{rotulo}");
+    // Sem a regra vigente, o rótulo é o de sempre.
+    let vazio = Motor::novo(Vec::new(), Vec::new(), None);
+    assert_eq!(
+        rotulo_do_candidato(&vazio, &candidato),
+        "PIX ENVIADO Fulano de Tal"
+    );
+}
+
+#[test]
+fn ambiguo_vai_para_precisa_revisar_e_nao_grava_proposta() {
+    let c = cenario();
+    let mut a = Definicao::simples("comprovante", "comprovante pix");
+    a.extrair.insert(
+        "valor_centavos".into(),
+        extracao(r"Valor:\s*R\$\s*([\d.,]+)", Formato::Centavos),
+    );
+    let mut b = Definicao::simples("comprovante", "favorecido");
+    b.extrair.insert(
+        "valor_centavos".into(),
+        extracao(r"Tarifa:\s*R\$\s*([\d.,]+)", Formato::Centavos),
+    );
+    c.instalar(nova("regra-a", a));
+    c.instalar(nova("regra-b", b));
+    let arquivo = c.solto("c.txt", &format!("{COMPROVANTE}Tarifa: R$ 2,00\n"));
+
+    let r = c.rodar(&c.com_regras(), &arquivo);
+
+    match &r.reconhecido {
+        Reconhecido::Ambiguo { candidatas, motivo } => {
+            assert_eq!(candidatas.len(), 2);
+            assert!(motivo.contains("valor_centavos"), "{motivo}");
+        }
+        outra => panic!("{outra:?}"),
+    }
+    assert!(r.sugestoes.is_empty());
+    assert!(c.catalogo().propostas(None).unwrap().is_empty());
+    assert!(matches!(
+        r.leitura.as_ref().unwrap().decisao,
+        Decisao::Ambiguo { .. }
+    ));
+}
+
+// ---------------------------------------------------------------- AC-LUA-10
+
+#[test]
+fn ac_lua_10_fatura_mais_debito_concilia_a_ocorrencia_sem_gasto_novo() {
+    let c = cenario();
+    c.criar(
+        "Cartão Exemplo",
+        Natureza::Saida,
+        90_000,
+        10,
+        Some("CX-0001"),
+    );
+    c.criar(
+        "Compras no Cartão Exemplo",
+        Natureza::DentroDaFatura,
+        30_000,
+        3,
+        None,
+    );
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_fat",
+        "pagamento_fatura",
+        "2026-11-09",
+        -90_000,
+        "PAGTO FATURA",
+    );
+    c.instalar(regra_da_fatura());
+    let antes_registros = c.contar("SELECT COUNT(*) FROM registro");
+    let antes = c
+        .plan()
+        .controle(&novembro(), Filtro::Todos, None, hoje())
+        .unwrap();
+    let arquivo = c.solto("fatura.txt", FATURA);
+
+    let r = c.rodar(&c.com_regras(), &arquivo);
+
+    let s = de_regra(&r);
+    let Sugestao::PagarFatura { conciliacao, .. } = s else {
+        panic!("{s:?}");
+    };
+    assert_eq!(conciliacao.movimento, "pluggy:txn_fat");
+    assert_eq!(conciliacao.valor, Centavos(90_000));
+    assert_eq!(provas(s), 3);
+    assert!(s.rotulo().contains("não é gasto novo"));
+
+    let mut plan = c.plan();
+    confirmar(&mut plan, &r, s);
+    let depois = plan
+        .controle(&novembro(), Filtro::Todos, None, hoje())
+        .unwrap();
+    let fatura_depois = depois
+        .linhas
+        .iter()
+        .find(|o| o.nome == "Cartão Exemplo")
+        .unwrap();
+    assert_eq!(
+        fatura_depois.conciliado,
+        Some(Centavos(90_000)),
+        "a fatura ficou conciliada"
+    );
+    // Nenhum gasto novo: os números do Controle mensal e o extrato são os mesmos.
+    assert_eq!(
+        depois.resumo.saidas_de_caixa_previstas,
+        antes.resumo.saidas_de_caixa_previstas
+    );
+    assert_eq!(
+        depois.resumo.compras_no_cartao,
+        antes.resumo.compras_no_cartao
+    );
+    assert_eq!(depois.linhas.len(), antes.linhas.len());
+    assert_eq!(c.contar("SELECT COUNT(*) FROM registro"), antes_registros);
+}
+
+#[test]
+fn ac_lua_10_comprovante_prova_o_debito_que_ja_existe_sem_registro_novo() {
+    let c = cenario();
+    let id = c.criar("Energia", Natureza::Saida, 18_750, 12, Some("CX-0001"));
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-12",
+        -18_750,
+        "PIX ENVIADO",
+    );
+    c.instalar(regra_do_comprovante());
+    // O débito já está conciliado à ocorrência: é nela que o comprovante se anexa.
+    let ocorrencia = sbf_planejamento::IdOcorrencia {
+        recorrente: id,
+        competencia: comp(2026, 11),
+        parcela: None,
+    };
+    c.plan()
+        .aplicar(
+            Alteracao::Conciliar {
+                conciliacao: sbf_planejamento::Conciliacao {
+                    ocorrencia: ocorrencia.clone(),
+                    movimento: "pluggy:txn_1".into(),
+                    valor: Centavos(18_750),
+                    data: sbf_planejamento::Data::nova(2026, 11, 12).unwrap(),
+                    confirmada: true,
+                },
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+    let registros = c.contar("SELECT COUNT(*) FROM registro");
+    let arquivo = c.solto("comprovante.txt", COMPROVANTE);
+
+    let r = c.rodar(&c.com_regras(), &arquivo);
+
+    let s = de_regra(&r);
+    let Sugestao::ProvarRegistro {
+        movimento, alvo, ..
+    } = s
+    else {
+        panic!("{s:?}");
+    };
+    assert_eq!(movimento.movimento, "pluggy:txn_1");
+    assert_eq!(
+        alvo,
+        &Some(AlvoDoDocumento::Ocorrencia {
+            id: ocorrencia.clone()
+        })
+    );
+    assert_eq!(provas(s), 3);
+    assert!(!s.e_automatica(), "regra ativa, não consolidada");
+
+    let mut plan = c.plan();
+    confirmar(&mut plan, &r, s);
+    let alvo = AlvoDoDocumento::Ocorrencia { id: ocorrencia };
+    assert_eq!(
+        plan.documentos(&alvo).unwrap().len(),
+        1,
+        "o comprovante ficou ligado"
+    );
+    assert_eq!(
+        c.contar("SELECT COUNT(*) FROM registro"),
+        registros,
+        "nenhum registro novo"
+    );
+    // Aplicar de novo não duplica: a sugestão já diz que está ligado.
+    let de_novo = c.rodar(&c.com_regras(), &c.solto("copia.txt", COMPROVANTE));
+    assert!(de_novo.sugestoes.iter().all(|s| s.da_regra().is_none()));
+    assert!(de_novo.avisos.iter().any(|a| a.contains("já está ligado")));
+}
+
+#[test]
+fn ac_lua_10_comprovante_sem_debito_unico_nao_inventa_um() {
+    let c = cenario();
+    c.movimento("pluggy:txn_1", "debito", "2026-11-12", -18_750, "A");
+    c.movimento("pluggy:txn_2", "debito", "2026-11-12", -18_750, "B");
+    c.instalar(regra_do_comprovante());
+    let r = c.rodar(&c.com_regras(), &c.solto("c.txt", COMPROVANTE));
+    // Dois débitos iguais na mesma conta: empate não se adivinha.
+    assert!(r.sugestoes.is_empty());
+    assert!(
+        r.avisos.iter().any(|a| a.contains("único débito")),
+        "{:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn ac_lua_10_contracheque_liquido_e_desconto_em_folha_nao_reduzem_o_caixa_duas_vezes() {
+    // O Controle mensal já prova: `sbf-planejamento/tests/aceite.rs` (desconto em folha fora
+    // das saídas de caixa) e `tests/salario.rs` (o previsto do desconto segue a rubrica).
+    // Aqui, de ponta a ponta com o reconhecimento por regras: o contracheque de 2026 cria os
+    // descontos em folha e as saídas de caixa seguem em zero.
+    let c = cenario();
+    let id = c.criar("Salário", Natureza::Entrada, 2_000_000, 5, Some("CX-0001"));
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026);
+    let r = c.rodar(&c.com_regras(), &arquivo);
+    assert!(matches!(r.reconhecido, Reconhecido::Contracheque { .. }));
+
+    let mut plan = c.plan();
+    for s in &r.sugestoes {
+        if let Sugestao::CriarDescontosEmFolha { uso, descontos, .. } = s {
+            sbf_reconhecimento::descontos::aplicar_descontos(
+                &mut plan,
+                uso,
+                descontos,
+                &uso.eventuais_iniciais(),
+            )
+            .unwrap();
+            continue;
+        }
+        for mut a in s.alteracoes(&r.sha256, &r.nome, 0, None) {
+            if let Alteracao::DefinirComposicao { versao_base, .. } = &mut a {
+                *versao_base = plan.recorrente(&id).unwrap().unwrap().versao_do_registro;
+            }
+            plan.aplicar(a, Autor::Usuario).unwrap();
+        }
+    }
+    let c11 = plan
+        .controle(&novembro(), Filtro::Todos, None, hoje())
+        .unwrap();
+    assert!(
+        c11.resumo.descontos_em_folha.0 > 0,
+        "os descontos em folha aparecem"
+    );
+    assert_eq!(
+        c11.resumo.saidas_de_caixa_previstas,
+        Centavos(0),
+        "e não saem do caixa de novo: o líquido já vem descontado"
+    );
+}
+
+// ---------------------------------------------------------------- AC-LUA-11
+
+fn ativar_a_versao_2_do_contracheque(c: &Cenario, executor: &ExecutorNoProcesso) {
+    let mut cat = c.catalogo();
+    cat.semear_fabrica().unwrap();
+    assert_eq!(
+        cat.versao("contracheque", 2).unwrap().estado,
+        Estado::Rascunho
+    );
+    cat.ativar("contracheque", 2, &Quem::Usuario, Some(executor))
+        .unwrap();
+}
+
+#[test]
+fn ac_lua_11_irrf_estimado_traz_a_tabela_e_alerta_sem_mexer_na_rubrica() {
+    let c = cenario();
+    let executor = ExecutorNoProcesso::novo();
+    ativar_a_versao_2_do_contracheque(&c, &executor);
+    let r = ReconhecedorDoCofre::novo(&c.cofre, Arc::new(Segredos), None)
+        .com_regras(Some(Arc::new(executor)));
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026);
+
+    let resultado = c.rodar(&r, &arquivo);
+
+    // A base de cálculo de R$ 18.000,00 dá R$ 4.041,27 pela tabela; o contracheque reteve
+    // R$ 6.123,40 (sem a do PLR).
+    let aviso = resultado
+        .avisos
+        .iter()
+        .find(|a| a.contains("IRRF"))
+        .unwrap_or_else(|| panic!("sem aviso do IRRF: {:?}", resultado.avisos));
+    assert_eq!(
+        aviso,
+        "⚠ IRRF estimado R$ 4.041,27 difere do retido R$ 6.123,40 (irrf-2026-01)"
+    );
+    // O Rastro traz o reconhecimento completo, com a tabela e a versão nas evidências.
+    let leitura = resultado.leitura.as_ref().unwrap();
+    let Decisao::Reconhecido(rec) = &leitura.decisao else {
+        panic!("{:?}", leitura.decisao);
+    };
+    assert_eq!((rec.regra.as_str(), rec.versao), ("contracheque", 2));
+    assert!(rec.revisar);
+    assert!(
+        rec.evidencias
+            .iter()
+            .any(|e| e == "tabela:irrf:irrf-2026-01")
+    );
+    assert!(rec.evidencias.iter().any(|e| e == "rubrica_irrf"));
+    assert_eq!(
+        rec.campos["irrf_estimado_centavos"].valor,
+        Valor::Centavos(404_127)
+    );
+    assert_eq!(
+        rec.campos["irrf_retido_centavos"].valor,
+        Valor::Centavos(612_340)
+    );
+    assert_eq!(
+        rec.campos["irrf_diferenca_centavos"].valor,
+        Valor::Centavos(208_213)
+    );
+    // Nada do contracheque mudou: as rubricas são as que o leitor nativo lê.
+    let Reconhecido::Contracheque { contracheque, .. } = &resultado.reconhecido else {
+        panic!("{:?}", resultado.reconhecido);
+    };
+    let nativo = sbf_planilha::contracheque::ler(CONTRACHEQUE_2026).unwrap();
+    assert_eq!(contracheque.rubricas, nativo.rubricas);
+    assert_eq!(contracheque.liquido, nativo.liquido);
+}
+
+#[test]
+fn ac_lua_11_com_a_v1_ativa_nao_ha_alerta_de_irrf() {
+    let c = cenario();
+    let r = c.rodar(&c.com_regras(), &c.solto("c.txt", CONTRACHEQUE_2026));
+    assert!(r.avisos.iter().all(|a| !a.contains("IRRF")));
+    let leitura = r.leitura.as_ref().unwrap();
+    let Decisao::Reconhecido(rec) = &leitura.decisao else {
+        panic!();
+    };
+    assert_eq!((rec.regra.as_str(), rec.versao), ("contracheque", 1));
+    assert_eq!(rec.estado, Estado::Ativa);
+    assert_eq!(
+        rec.campos["liquido_centavos"].valor,
+        Valor::Centavos(2_460_522)
+    );
+    assert_eq!(
+        rec.campos["competencia"].valor,
+        Valor::Competencia("2026-10".into())
+    );
+    assert_eq!(
+        rec.campos["base_irrf_centavos"].valor,
+        Valor::Centavos(1_800_000)
+    );
+    assert_eq!(
+        rec.campos["irrf_retido_centavos"].valor,
+        Valor::Centavos(612_340)
+    );
+}
+
+// ---------------------------------------------------------------- AC-LUA-14
+
+fn sem_o_rastro(mut r: Resultado) -> Resultado {
+    r.entrada = None;
+    r.leitura = None;
+    r
+}
+
+#[test]
+fn ac_lua_14_com_e_sem_regras_o_resultado_atual_e_o_mesmo() {
+    for (nome, texto) in [
+        ("contracheque.txt", CONTRACHEQUE_2026),
+        (
+            "boleto.txt",
+            "BOLETO DE COBRANCA ENERGIA EXEMPLO Valor R$ 187,50",
+        ),
+        ("anotacao.txt", "nada financeiro aqui"),
+    ] {
+        let sem = cenario();
+        let com = cenario();
+        for c in [&sem, &com] {
+            c.criar("Salário", Natureza::Entrada, 2_000_000, 5, Some("CX-0001"));
+        }
+        let r_sem = sem.rodar(&sem.sem_regras(), &sem.solto(nome, texto));
+        let r_com = com.rodar(&com.com_regras(), &com.solto(nome, texto));
+        assert!(r_com.entrada.is_some() && r_com.leitura.is_some(), "{nome}");
+        assert_eq!(r_sem.entrada, None);
+        // Os ids dos recorrentes são sorteados por cofre; o resto tem de ser idêntico.
+        let r_com = sem_o_rastro(r_com);
+        assert_eq!(r_com.reconhecido, r_sem.reconhecido, "{nome}");
+        assert_eq!(r_com.texto, r_sem.texto, "{nome}");
+        assert_eq!(r_com.avisos, r_sem.avisos, "{nome}");
+        assert_eq!(r_com.sha256, r_sem.sha256, "{nome}");
+        let rotulos = |r: &Resultado| {
+            r.sugestoes
+                .iter()
+                .map(|s| s.rotulo().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rotulos(&r_com), rotulos(&r_sem), "{nome}");
+    }
+}
+
+#[test]
+fn ac_lua_14_se_o_catalogo_nao_abre_o_caminho_atual_roda_como_hoje() {
+    let sem = cenario();
+    let com = cenario();
+    // `regras.sqlite` é uma pasta: o catálogo não abre.
+    std::fs::create_dir(com.cofre.join(ARQUIVO_DAS_REGRAS)).unwrap();
+    let r_sem = sem.rodar(&sem.sem_regras(), &sem.solto("c.txt", CONTRACHEQUE_2026));
+    let r_com = com.rodar(&com.com_regras(), &com.solto("c.txt", CONTRACHEQUE_2026));
+    assert_eq!(r_com.entrada, None);
+    assert_eq!(r_com, r_sem);
+}
+
+#[test]
+fn a_entrada_leva_o_mime_pela_assinatura_e_o_canal_do_cofre() {
+    assert_eq!(
+        regras::mime_pelo_conteudo(b"%PDF-1.7 ..."),
+        "application/pdf"
+    );
+    assert_eq!(
+        regras::mime_pelo_conteudo(&[0x89, b'P', b'N', b'G', 1]),
+        "image/png"
+    );
+    assert_eq!(
+        regras::mime_pelo_conteudo(&[0xFF, 0xD8, 0xFF, 0xE0]),
+        "image/jpeg"
+    );
+    assert_eq!(
+        regras::mime_pelo_conteudo("olá, mundo".as_bytes()),
+        "text/plain"
+    );
+    assert_eq!(
+        regras::mime_pelo_conteudo(&[0, 1, 2, 3]),
+        "application/octet-stream"
+    );
+    let c = cenario();
+    let dentro = c.cofre.join("anotacao.txt");
+    std::fs::write(&dentro, "x").unwrap();
+    let r = c.rodar(&c.com_regras(), &dentro);
+    let e = r.entrada.expect("entrada");
+    assert_eq!(e.origem.canal, Canal::Cofre);
+    assert_eq!(e.mime.as_deref(), Some("text/plain"));
+    assert_eq!(e.nome.as_deref(), Some("anotacao.txt"));
+}

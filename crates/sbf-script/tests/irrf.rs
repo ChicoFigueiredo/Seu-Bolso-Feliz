@@ -8,8 +8,8 @@ use sbf_regras::script::{ErroDoScript, ExecutorDeScript, Limites, RespostaDoScri
 use sbf_script::ExecutorNoProcesso;
 use serde_json::{Value, json};
 
-const SCRIPT: &str = include_str!("../fabrica/irrf.luau");
-const TABELA: &str = include_str!("../fabrica/irrf-2026-01.json");
+const SCRIPT: &str = include_str!("../../sbf-regras/fabrica/irrf.luau");
+const TABELA: &str = include_str!("../../sbf-regras/fabrica/irrf-2026-01.json");
 
 fn rodar(campos: Value) -> Result<RespostaDoScript, ErroDoScript> {
     let tabela: Value = serde_json::from_str(TABELA).expect("tabela");

@@ -5538,6 +5538,8 @@ dependencies = [
  "sbf-pdf",
  "sbf-planejamento",
  "sbf-planilha",
+ "sbf-regras",
+ "sbf-script",
  "sbf-triagem",
  "serde_json",
  "tempfile",

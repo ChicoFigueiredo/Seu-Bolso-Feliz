@@ -38,6 +38,8 @@ pub struct Contracheque {
     /// Observações da leitura, em português e sem valores ("X não entra no total de
     /// descontos do contracheque").
     pub avisos: Vec<String>,
+    /// "Base Cálculo Imposto Renda" do rodapé, quando o layout a traz (o de 2026 traz).
+    pub base_irrf: Option<Centavos>,
 }
 
 /// Uma consignação com prazo: o contrato começou em `inicio` e dura `prazo` parcelas.
@@ -150,6 +152,31 @@ fn credito_da_linha(linha: &str) -> Option<Data> {
         return None;
     }
     Data::de_iso(&format!("{a}-{m}-{d}"))
+}
+
+/// O valor de um rótulo do rodapé: os rótulos ficam numa linha (separados por 2 espaços ou
+/// mais) e os `R$ valor`, na primeira linha com valores logo abaixo, na mesma ordem. `None`
+/// quando o rótulo não existe, a contagem não bate ou o valor não lê.
+fn valor_do_rodape(linhas: &[&str], rotulo: &str) -> Option<Centavos> {
+    for (i, l) in linhas.iter().enumerate() {
+        let rotulos: Vec<&str> = l
+            .split("  ")
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        let Some(pos) = rotulos.iter().position(|r| normalizar(r) == rotulo) else {
+            continue;
+        };
+        let valores = linhas[i + 1..]
+            .iter()
+            .take(2)
+            .map(|x| valores_da_linha(x))
+            .find(|v| !v.is_empty())?;
+        return (valores.len() == rotulos.len())
+            .then(|| valores.get(pos).copied())
+            .flatten();
+    }
+    None
 }
 
 /// Rubrica eventual: não se repete todo mês. Duas regras, só estas:
@@ -346,6 +373,7 @@ pub fn ler(texto: &str) -> Resultado<Contracheque> {
         parcelas_atuais,
         prazo_e_parcela_atual,
         avisos,
+        base_irrf: valor_do_rodape(&linhas, "base calculo imposto renda"),
     })
 }
 
@@ -577,6 +605,17 @@ mod testes {
             c.rubricas[indice(&c, "4313", 87_344)].tipo,
             TipoDeRubrica::Desconto
         );
+    }
+
+    #[test]
+    fn le_a_base_de_calculo_do_imposto_de_renda_do_rodape() {
+        let c = ler(TEXTO_2026).expect("ler");
+        assert_eq!(c.base_irrf, Some(Centavos(1_800_000)));
+        // Sem o rótulo, ou com os valores em número diferente dos rótulos, não adivinha.
+        let sem = TEXTO_2026.replace("Base Cálculo Imposto Renda", "Outra Coisa Qualquer");
+        assert_eq!(ler(&sem).expect("ler").base_irrf, None);
+        let quebrado = TEXTO_2026.replace("R$ 18.000,00", "");
+        assert_eq!(ler(&quebrado).expect("ler").base_irrf, None);
     }
 
     #[test]

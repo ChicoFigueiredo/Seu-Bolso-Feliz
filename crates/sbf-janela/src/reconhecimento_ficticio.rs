@@ -114,6 +114,8 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                 },
                 sugestoes,
                 avisos,
+                entrada: None,
+                leitura: None,
             })
         }
         Err(_) => Err(ErroDoReconhecimento::Arquivo(

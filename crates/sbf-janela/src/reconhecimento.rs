@@ -445,15 +445,15 @@ impl Janela {
             return;
         };
         let sha = resultado.sha256.clone();
-        let automaticas: Vec<(usize, Conciliacao)> = resultado
+        // `conciliacao_automatica` cobre o salário (`tres-provas`) e as regras consolidadas
+        // (`<id>@<versão>`), cada uma com o nome do autor.
+        let automaticas: Vec<(usize, Conciliacao, String)> = resultado
             .sugestoes
             .iter()
             .enumerate()
-            .filter_map(|(i, s)| match s {
-                Sugestao::Conciliar { conciliacao, .. } if s.e_automatica() => {
-                    Some((i, conciliacao.clone()))
-                }
-                _ => None,
+            .filter_map(|(i, s)| {
+                s.conciliacao_automatica()
+                    .map(|(c, regra)| (i, c.clone(), regra))
             })
             .collect();
         if automaticas.is_empty() {
@@ -465,7 +465,7 @@ impl Janela {
         let plan = pl.0.as_mut();
         let mut aviso = None;
         let mut feitas = 0usize;
-        for (i, conciliacao) in automaticas {
+        for (i, conciliacao, regra) in automaticas {
             // O usuário já disse "não" a este par: a regra não o refaz.
             if plan
                 .conciliacao_desfeita(&conciliacao.ocorrencia, &conciliacao.movimento)
@@ -490,9 +490,7 @@ impl Janela {
                     Alteracao::Conciliar {
                         conciliacao: confirmada.clone(),
                     },
-                    Autor::Regra {
-                        regra: "tres-provas".to_owned(),
-                    },
+                    Autor::Regra { regra },
                 );
                 if let Err(e) = r {
                     c.erro_de_sugestao = Some((i, mensagem_de_erro(&e)));

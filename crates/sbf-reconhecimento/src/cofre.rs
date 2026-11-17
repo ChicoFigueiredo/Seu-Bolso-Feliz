@@ -31,6 +31,7 @@ use sbf_triagem::rodada::{
 };
 
 use crate::descontos::{propor_descontos, sugestao_de_baixa};
+use crate::regras::{self, Ligadas};
 use crate::salario::{
     ErroDoSalario, composicao_ja_vigente, ja_vinculado, recorrente_do_salario, valor_digitado,
 };
@@ -78,10 +79,12 @@ enum Ia {
 
 /// O reconhecedor sobre uma pasta de cofre.
 pub struct ReconhecedorDoCofre {
-    cofre: PathBuf,
+    pub(crate) cofre: PathBuf,
     segredos: Segredos,
     ia: Ia,
     ferramentas: Ferramentas,
+    /// As regras de reconhecimento (spec 13); `None` é o caminho de sempre.
+    pub(crate) regras: Option<Ligadas>,
 }
 
 impl std::fmt::Debug for ReconhecedorDoCofre {
@@ -89,6 +92,7 @@ impl std::fmt::Debug for ReconhecedorDoCofre {
         f.debug_struct("ReconhecedorDoCofre")
             .field("cofre", &self.cofre)
             .field("ia", &!matches!(self.ia, Ia::Nenhuma))
+            .field("regras", &self.regras.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -109,7 +113,24 @@ impl ReconhecedorDoCofre {
             segredos,
             ia: provedor.map_or(Ia::Nenhuma, Ia::Provedor),
             ferramentas: Ferramentas::default(),
+            regras: None,
         }
+    }
+
+    /// Liga o motor de regras de reconhecimento (spec 13, ADR-021) ao passo de leitura local:
+    /// abre `<cofre>/regras.sqlite` (criando e semeando as regras de fábrica) e consulta as
+    /// versões ativas e consolidadas antes dos leitores nativos. `executor` roda os scripts
+    /// (`sbf_script::ExecutorNoProcesso`); sem ele, regras com script falham sem derrubar nada.
+    ///
+    /// Sem esta chamada, ou se o catálogo não abrir, o caminho atual roda exatamente como
+    /// antes (AC-LUA-14).
+    #[must_use]
+    pub fn com_regras(
+        mut self,
+        executor: Option<Arc<dyn sbf_regras::script::ExecutorDeScript>>,
+    ) -> Self {
+        self.regras = Some(Ligadas { executor });
+        self
     }
 
     /// Usa o motor da triagem (a mesma fila, reserva e registro da área Triagem) em vez de
@@ -148,18 +169,22 @@ fn da_coleta(e: sbf_coleta::Erro) -> ErroDoReconhecimento {
 }
 
 /// O que o arquivo já disse até agora, entre as etapas.
-struct Estado {
-    sha256: String,
-    ja_existia: bool,
-    dentro_do_cofre: bool,
+pub(crate) struct Estado {
+    pub(crate) sha256: String,
+    pub(crate) ja_existia: bool,
+    pub(crate) dentro_do_cofre: bool,
     /// O achado não está no inventário (arquivo de dentro do cofre que ele não conhece).
-    sem_achado: bool,
-    texto: EstadoDoTexto,
+    pub(crate) sem_achado: bool,
+    pub(crate) texto: EstadoDoTexto,
     /// O texto para os leitores e a IA; `None` quando não há.
-    conteudo: Option<String>,
-    reconhecido: Reconhecido,
-    sugestoes: Vec<Sugestao>,
-    avisos: Vec<String>,
+    pub(crate) conteudo: Option<String>,
+    pub(crate) reconhecido: Reconhecido,
+    pub(crate) sugestoes: Vec<Sugestao>,
+    pub(crate) avisos: Vec<String>,
+    /// O reconhecimento da regra (ou o do contracheque já completado), com as propostas.
+    pub(crate) regra: Option<sbf_regras::Reconhecimento>,
+    pub(crate) entrada: Option<sbf_regras::Entrada>,
+    pub(crate) leitura: Option<sbf_regras::Leitura>,
 }
 
 type Saida<T> = Result<(T, Situacao), ErroDoReconhecimento>;
@@ -226,6 +251,9 @@ impl Reconhecedor for ReconhecedorDoCofre {
             },
             sugestoes: Vec::new(),
             avisos: Vec::new(),
+            regra: None,
+            entrada: None,
+            leitura: None,
         };
 
         // 1. Conferir.
@@ -279,7 +307,7 @@ impl Reconhecedor for ReconhecedorDoCofre {
 
         // 4. Leitores locais.
         etapa(andamento, cancelar, Etapa::LerLocalmente, || {
-            let situacao = self.ler_localmente(&mut estado);
+            let situacao = self.ler_localmente(&mut estado, caminho);
             if let Reconhecido::Contracheque {
                 contracheque: c, ..
             } = &estado.reconhecido
@@ -334,6 +362,8 @@ impl Reconhecedor for ReconhecedorDoCofre {
             reconhecido: estado.reconhecido,
             sugestoes: estado.sugestoes,
             avisos: estado.avisos,
+            entrada: estado.entrada,
+            leitura: estado.leitura,
         })
     }
 }
@@ -554,7 +584,11 @@ impl ReconhecedorDoCofre {
         }
     }
 
-    fn ler_localmente(&self, estado: &mut Estado) -> Situacao {
+    fn ler_localmente(&self, estado: &mut Estado, caminho: &Path) -> Situacao {
+        // O motor de regras vai primeiro; sem regra que se aplique, segue o caminho de sempre.
+        if let Some(situacao) = regras::ler_com_regras(self, estado, caminho) {
+            return situacao;
+        }
         let Some(conteudo) = estado.conteudo.as_deref() else {
             estado.reconhecido = Reconhecido::Nada {
                 motivo: "o arquivo não tem texto para ler".to_owned(),
@@ -569,27 +603,7 @@ impl ReconhecedorDoCofre {
             };
             return Situacao::Feita;
         }
-        match sbf_planilha::contracheque::ler(conteudo) {
-            Ok(c) => {
-                if !c.conferido {
-                    estado.avisos.push(
-                        "a soma das rubricas não bate com o líquido do contracheque".to_owned(),
-                    );
-                }
-                estado.avisos.extend(c.avisos.iter().cloned());
-                estado.reconhecido = Reconhecido::Contracheque {
-                    consignacoes: c.consignacoes_com_prazo(),
-                    contracheque: c,
-                };
-                Situacao::Feita
-            }
-            Err(_) => {
-                estado.reconhecido = Reconhecido::Nada {
-                    motivo: "o demonstrativo de pagamento não pôde ser lido".to_owned(),
-                };
-                Situacao::Falhou("o demonstrativo de pagamento não pôde ser lido".to_owned())
-            }
-        }
+        ler_contracheque(estado)
     }
 
     fn perguntar_a_ia(
@@ -673,6 +687,33 @@ impl ReconhecedorDoCofre {
     }
 
     fn sugerir(&self, estado: &mut Estado) -> Situacao {
+        let do_contracheque = self.sugerir_do_contracheque(estado);
+        let Some(rec) = estado.regra.clone().filter(|r| !r.propostas.is_empty()) else {
+            return do_contracheque;
+        };
+        let das_regras = regras::sugerir_das_propostas(
+            &self.cofre,
+            &rec,
+            &estado.sha256,
+            estado.entrada.as_ref(),
+            &mut estado.avisos,
+        );
+        match (das_regras, do_contracheque) {
+            (Ok(novas), anterior) => {
+                let tinha = !novas.is_empty();
+                estado.sugestoes.extend(novas);
+                if tinha && matches!(anterior, Situacao::Pulada(_)) {
+                    Situacao::Feita
+                } else {
+                    anterior
+                }
+            }
+            (Err(m), Situacao::Pulada(_)) => Situacao::Falhou(m),
+            (Err(_), anterior) => anterior,
+        }
+    }
+
+    fn sugerir_do_contracheque(&self, estado: &mut Estado) -> Situacao {
         let Reconhecido::Contracheque {
             contracheque: c, ..
         } = &estado.reconhecido
@@ -822,6 +863,35 @@ fn sugerir_conciliacao(
         },
         provas: *provas,
     }))
+}
+
+/// Lê o texto como contracheque (o leitor nativo) e põe o resultado no estado. Assume que há
+/// texto e que ele parece um demonstrativo de pagamento.
+pub(crate) fn ler_contracheque(estado: &mut Estado) -> Situacao {
+    let Some(conteudo) = estado.conteudo.as_deref() else {
+        return Situacao::Pulada("sem texto para os leitores locais".to_owned());
+    };
+    match sbf_planilha::contracheque::ler(conteudo) {
+        Ok(c) => {
+            if !c.conferido {
+                estado
+                    .avisos
+                    .push("a soma das rubricas não bate com o líquido do contracheque".to_owned());
+            }
+            estado.avisos.extend(c.avisos.iter().cloned());
+            estado.reconhecido = Reconhecido::Contracheque {
+                consignacoes: c.consignacoes_com_prazo(),
+                contracheque: c,
+            };
+            Situacao::Feita
+        }
+        Err(_) => {
+            estado.reconhecido = Reconhecido::Nada {
+                motivo: "o demonstrativo de pagamento não pôde ser lido".to_owned(),
+            };
+            Situacao::Falhou("o demonstrativo de pagamento não pôde ser lido".to_owned())
+        }
+    }
 }
 
 struct SoltarAoSair<'a>(&'a AtomicBool);

@@ -11,6 +11,7 @@ sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-planilha = { path = "../sbf-planilha" }
 sbf-coleta = { path = "../sbf-coleta" }
 sbf-inventario = { workspace = true }
+sbf-regras = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
 sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
@@ -20,6 +21,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
+sbf-script = { workspace = true }
 # O PDF fictício dos testes (a mesma versão do sbf-pdf).
 zeroize = { workspace = true }
 lopdf = { version = "=0.47.0", default-features = false }
