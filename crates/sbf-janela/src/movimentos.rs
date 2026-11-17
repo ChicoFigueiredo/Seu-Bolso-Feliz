@@ -36,6 +36,10 @@ pub struct MovimentoVm {
     pub diferenca: Option<Centavos>,
     /// Documento, valor e conta batem.
     pub tres_provas: bool,
+    /// Foi uma regra que concilou sozinha (as três provas): mostra "automática" e Desfazer.
+    pub automatica: bool,
+    /// A baixa veio do contracheque, não do extrato: o `MM/AAAA` dele.
+    pub pelo_contracheque: Option<String>,
 }
 
 /// O que a seção mostra.
@@ -46,6 +50,8 @@ pub struct VmDeMovimentos {
     pub confirmadas: Vec<MovimentoVm>,
     pub sugestao: Option<MovimentoVm>,
     pub candidatos: Vec<MovimentoCandidato>,
+    /// Desconto em folha: não passa pelo extrato, e a seção só mostra a baixa pelo contracheque.
+    pub de_folha: bool,
 }
 
 /// O que `montar` precisa saber.
@@ -94,6 +100,8 @@ fn de_candidato(e: &EntradaDosMovimentos<'_>, c: &MovimentoCandidato) -> Movimen
         descricao: Some(c.movimento.descricao.clone()),
         diferenca: so_se_difere(c.diferenca),
         tres_provas: tres_provas(e, valor, c.mesma_conta),
+        automatica: false,
+        pelo_contracheque: None,
     }
 }
 
@@ -103,16 +111,44 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
         candidatos: e.candidatos.to_vec(),
         ..Default::default()
     };
+    // As baixas pelo contracheque (spec 12, D3) somam contra o previsto do compromisso: a
+    // diferença é uma só, na primeira linha.
+    let pelo_contracheque =
+        |g: &ConciliacaoComMovimento| g.conciliacao.movimento.starts_with("contracheque:");
+    let total_das_baixas = Centavos(
+        e.gravadas
+            .iter()
+            .filter(|g| g.conciliacao.confirmada && pelo_contracheque(g))
+            .map(|g| g.conciliacao.valor.0)
+            .sum(),
+    );
+    let mut diferenca_das_baixas_dada = false;
     for g in e.gravadas.iter().filter(|g| g.conciliacao.confirmada) {
         let valor = g.conciliacao.valor;
+        let baixa = pelo_contracheque(g);
+        let diferenca = if baixa {
+            let d = so_se_difere(
+                e.previsto
+                    .map(|p| Centavos((p.0 - total_das_baixas.0).abs()))
+                    .filter(|_| !diferenca_das_baixas_dada),
+            );
+            diferenca_das_baixas_dada = true;
+            d
+        } else {
+            so_se_difere(esperado(e).map(|x| Centavos((x.0 - valor.0).abs())))
+        };
+        let competencia = g.conciliacao.ocorrencia.competencia;
         vm.confirmadas.push(MovimentoVm {
             id: Some(g.conciliacao.movimento.clone()),
             data: Some(g.conciliacao.data),
             valor,
             conta: g.movimento.as_ref().map(|m| m.conta_do_extrato.clone()),
             descricao: g.movimento.as_ref().map(|m| m.descricao.clone()),
-            diferenca: so_se_difere(esperado(e).map(|x| Centavos((x.0 - valor.0).abs()))),
+            diferenca,
             tres_provas: tres_provas(e, valor, g.mesma_conta),
+            automatica: g.automatica,
+            pelo_contracheque: baixa
+                .then(|| format!("{:02}/{:04}", competencia.mes, competencia.ano)),
         });
     }
     if let Some(v) = e.conciliado.filter(|_| vm.confirmadas.is_empty()) {
@@ -130,6 +166,8 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
                 descricao: None,
                 diferenca: so_se_difere(esperado(e).map(|x| Centavos((x.0 - v.0).abs()))),
                 tres_provas: false,
+                automatica: false,
+                pelo_contracheque: None,
             },
         });
     }
@@ -148,6 +186,8 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
                 descricao: None,
                 diferenca: so_se_difere(esperado(e).map(|x| Centavos((x.0 - s.valor.0).abs()))),
                 tres_provas: false,
+                automatica: false,
+                pelo_contracheque: None,
             },
         });
     }
@@ -232,6 +272,16 @@ fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
             .on_hover_text("O contracheque vinculado, o valor e a conta do extrato conferem");
         }
     });
+    if let Some(mes) = &m.pelo_contracheque {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(icones::icone_cor("description", 15.0, p.tinta_suave));
+            ui.label(
+                RichText::new(format!("Pelo contracheque {mes}"))
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
+        });
+    }
     if let Some(c) = &m.conta {
         pequeno(ui, c.clone());
     }
@@ -241,11 +291,12 @@ fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
     if let Some(d) = m.diferenca {
         ui.horizontal_wrapped(|ui| {
             ui.label(icones::icone_cor("warning", 15.0, p.aviso));
-            ui.label(
-                RichText::new(format!("Difere do esperado em {}", reais(d)))
-                    .size(12.0)
-                    .color(p.aviso),
-            );
+            let texto = if m.pelo_contracheque.is_some() {
+                format!("O contracheque difere do previsto em {}", reais(d))
+            } else {
+                format!("Difere do esperado em {}", reais(d))
+            };
+            ui.label(RichText::new(texto).size(12.0).color(p.aviso));
         });
     }
 }
@@ -264,6 +315,33 @@ fn moldura(ui: &mut Ui, fundo: egui::Color32, conteudo: impl FnOnce(&mut Ui)) {
     ui.add_space(4.0);
 }
 
+/// A seção de um desconto em folha: só a baixa pelo contracheque (spec 12, D3).
+fn secao_de_folha(ui: &mut Ui, vm: &VmDeMovimentos) {
+    let p = tema::paleta(ui.ctx());
+    ui.label(
+        RichText::new("Baixa pelo contracheque")
+            .strong()
+            .size(13.0)
+            .color(p.tinta),
+    );
+    ui.add_space(2.0);
+    for m in &vm.confirmadas {
+        moldura(ui, p.superficie_2, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
+            });
+            linha_do_movimento(ui, m);
+        });
+    }
+    if vm.confirmadas.is_empty() {
+        pequeno(
+            ui,
+            "O contracheque do mês dá baixa aqui quando a rubrica está ligada a este compromisso.",
+        );
+        ui.add_space(4.0);
+    }
+}
+
 /// Desenha a seção. `aberto` é a lista de "Conciliar com outro…". Devolve `true` quando o
 /// usuário dispensou a oferta de assinatura.
 pub fn secao(
@@ -275,6 +353,10 @@ pub fn secao(
     pedidos: &mut Vec<Pedido>,
 ) -> bool {
     let p = tema::paleta(ui.ctx());
+    if vm.de_folha {
+        secao_de_folha(ui, vm);
+        return false;
+    }
     let mut dispensou = false;
     ui.label(
         RichText::new("Movimentos")
@@ -287,8 +369,27 @@ pub fn secao(
         moldura(ui, p.superficie_2, |ui| {
             ui.horizontal_wrapped(|ui| {
                 componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
+                if m.automatica {
+                    componentes::selo(ui, "automática", p.info_sutil, p.info);
+                }
             });
             linha_do_movimento(ui, m);
+            if m.automatica {
+                ui.horizontal_wrapped(|ui| {
+                    pequeno(ui, "Conciliado automaticamente · as três provas batem.");
+                    if let Some(movimento) = &m.id
+                        && ui
+                            .small_button("Desfazer")
+                            .on_hover_text("Desfaz a conciliação; ela volta a ser uma sugestão")
+                            .clicked()
+                    {
+                        pedidos.push(Pedido::Controle(PedidoDoControle::Desconciliar {
+                            ocorrencia: ocorrencia.clone(),
+                            movimento: movimento.clone(),
+                        }));
+                    }
+                });
+            }
         });
     }
     if let Some(s) = &vm.sugestao {
@@ -473,6 +574,7 @@ mod testes {
             conciliacao: conc,
             movimento: Some(m.clone()),
             mesma_conta: true,
+            automatica: false,
         }];
         let vm = montar(&EntradaDosMovimentos {
             conciliado: Some(Centavos(822_600)),
@@ -603,5 +705,84 @@ mod testes {
         let novo = contracheque("sha-2", "2026-11-05");
         let docs = [&velho, &novo];
         assert_eq!(contracheque_vinculado(&docs).unwrap().sha256, "sha-2");
+    }
+
+    fn gravada(
+        movimento: &str,
+        valor: i64,
+        confirmada: bool,
+        automatica: bool,
+    ) -> ConciliacaoComMovimento {
+        let mut c = sugestao(movimento, valor);
+        c.confirmada = confirmada;
+        ConciliacaoComMovimento {
+            conciliacao: c,
+            movimento: None,
+            mesma_conta: false,
+            automatica,
+        }
+    }
+
+    #[test]
+    fn a_conciliacao_da_regra_vem_marcada_como_automatica() {
+        let gravadas = [gravada("m1", 822_600, true, true)];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: Some(Centavos(822_600)),
+            gravadas: &gravadas,
+            sugestao: None,
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(822_600)),
+        });
+        assert!(vm.confirmadas[0].automatica);
+        assert_eq!(vm.confirmadas[0].pelo_contracheque, None);
+        let manual = [gravada("m1", 822_600, true, false)];
+        let vm = montar(&EntradaDosMovimentos {
+            gravadas: &manual,
+            conciliado: Some(Centavos(822_600)),
+            sugestao: None,
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(822_600)),
+        });
+        assert!(!vm.confirmadas[0].automatica);
+    }
+
+    #[test]
+    fn a_baixa_pelo_contracheque_mostra_o_mes_e_a_diferenca_so_uma_vez() {
+        let gravadas = [
+            gravada("contracheque:abc:3", 98_199, true, false),
+            gravada("contracheque:abc:5", 31_800, true, false),
+        ];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: Some(Centavos(129_999)),
+            gravadas: &gravadas,
+            sugestao: None,
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(120_000)),
+        });
+        assert_eq!(vm.confirmadas.len(), 2);
+        assert_eq!(
+            vm.confirmadas[0].pelo_contracheque.as_deref(),
+            Some("11/2026")
+        );
+        // A soma das rubricas (1.299,99) difere do previsto (1.200,00) em R$ 99,99, na primeira.
+        assert_eq!(vm.confirmadas[0].diferenca, Some(Centavos(9_999)));
+        assert_eq!(vm.confirmadas[1].diferenca, None);
+        // Sem diferença, nada de aviso.
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: Some(Centavos(129_999)),
+            gravadas: &gravadas,
+            sugestao: None,
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(129_999)),
+        });
+        assert_eq!(vm.confirmadas[0].diferenca, None);
     }
 }

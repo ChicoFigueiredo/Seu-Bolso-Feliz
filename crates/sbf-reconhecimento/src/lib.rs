@@ -25,6 +25,7 @@
 //! [`ReconhecedorFicticio`]. Mudar um tipo público exige avisar o integrador.
 
 pub mod cofre;
+pub mod descontos;
 pub mod salario;
 
 pub use cofre::{MotorDeIa, ReconhecedorDoCofre, Segredos};
@@ -34,8 +35,8 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use sbf_planejamento::{
-    Alteracao, AlvoDoDocumento, Centavos, Competencia, Composicao, Conciliacao, Data, IdOcorrencia,
-    TipoDeDocumento,
+    Alteracao, AlvoDoDocumento, BaixaPeloContracheque, Centavos, Competencia, Composicao,
+    Conciliacao, Data, IdOcorrencia, TipoDeDocumento,
 };
 use sbf_planilha::contracheque::{ConsignacaoComPrazo, Contracheque};
 
@@ -158,6 +159,24 @@ pub enum Sugestao {
         /// do líquido e a conta ou a assinatura. De 2 a [`PROVAS_POSSIVEIS`].
         provas: u8,
     },
+    /// Criar os compromissos de desconto em folha das rubricas fixas sem contrato (INSS, IR,
+    /// FUNCEF, Saúde CAIXA) ainda sem compromisso, com o valor seguindo a rubrica, e ligar as
+    /// rubricas a eles na composição (spec 12, D4). A janela aplica por
+    /// [`descontos::aplicar_descontos`], porque os ids dos compromissos só existem depois de
+    /// criados.
+    CriarDescontosEmFolha {
+        /// "Criar compromissos de desconto em folha (INSS, Imposto de renda)".
+        rotulo: String,
+        uso: Box<UsoDeRubricas>,
+        descontos: Vec<descontos::DescontoNovo>,
+    },
+    /// Dar baixa nos descontos em folha que as rubricas ligadas do contracheque provam (D3).
+    DarBaixa {
+        /// "Dar baixa nos 4 descontos em folha".
+        rotulo: String,
+        /// As baixas ainda não gravadas, cada uma como conciliação confirmada.
+        baixas: Vec<BaixaPeloContracheque>,
+    },
 }
 
 /// O total de provas que uma conciliação do contracheque pode ter.
@@ -272,8 +291,16 @@ impl Sugestao {
         match self {
             Sugestao::Vincular { rotulo, .. }
             | Sugestao::UsarRubricas { rotulo, .. }
-            | Sugestao::Conciliar { rotulo, .. } => rotulo,
+            | Sugestao::Conciliar { rotulo, .. }
+            | Sugestao::CriarDescontosEmFolha { rotulo, .. }
+            | Sugestao::DarBaixa { rotulo, .. } => rotulo,
         }
+    }
+
+    /// A conciliação das três provas, que a janela aplica sozinha (`Autor::Regra`) quando o
+    /// resultado chega. As demais esperam o clique.
+    pub fn e_automatica(&self) -> bool {
+        matches!(self, Sugestao::Conciliar { provas, .. } if *provas >= PROVAS_POSSIVEIS)
     }
 
     /// O recorrente cuja `versao_do_registro` a janela lê na hora de confirmar (só
@@ -282,7 +309,10 @@ impl Sugestao {
     pub fn recorrente_para_versao(&self) -> Option<&str> {
         match self {
             Sugestao::UsarRubricas { uso, .. } => Some(&uso.recorrente),
-            Sugestao::Vincular { .. } | Sugestao::Conciliar { .. } => None,
+            Sugestao::Vincular { .. }
+            | Sugestao::Conciliar { .. }
+            | Sugestao::CriarDescontosEmFolha { .. }
+            | Sugestao::DarBaixa { .. } => None,
         }
     }
 
@@ -324,6 +354,19 @@ impl Sugestao {
                     ..conciliacao.clone()
                 },
             }],
+            Sugestao::DarBaixa { baixas, .. } => baixas
+                .iter()
+                .filter(|b| !b.ja_baixada)
+                .map(|b| Alteracao::Conciliar {
+                    conciliacao: Conciliacao {
+                        confirmada: true,
+                        ..b.conciliacao.clone()
+                    },
+                })
+                .collect(),
+            // Os compromissos novos precisam dos ids que só nascem ao criar: a janela chama
+            // `descontos::aplicar_descontos`.
+            Sugestao::CriarDescontosEmFolha { .. } => Vec::new(),
         }
     }
 }

@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 5;
+pub const VERSAO_DO_ESQUEMA: u32 = 6;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -222,6 +222,14 @@ const MIGRACOES: &[&str] = &[
     CREATE TRIGGER assinaturas_sem_delete BEFORE DELETE ON assinaturas
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     ",
+    // 6: desconciliar é exclusão lógica (`desfeita`), e a conciliação lembra quem a gravou
+    // (`autor`, em JSON): a automática das três provas aparece como tal e, desfeita, não é
+    // refeita sozinha (`sem_automatico` fica marcado para sempre no par). Sem DELETE.
+    "
+    ALTER TABLE conciliacoes ADD COLUMN desfeita INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE conciliacoes ADD COLUMN autor TEXT;
+    ALTER TABLE conciliacoes ADD COLUMN sem_automatico INTEGER NOT NULL DEFAULT 0;
+    ",
 ];
 
 impl From<rusqlite::Error> for ErroDoPlanejamento {
@@ -365,9 +373,15 @@ pub(crate) struct Dados {
     pub grupos: Vec<Grupo>,
     /// O início do acompanhamento, se definido.
     pub inicio: Option<Data>,
+    /// Os compromissos cujo valor segue uma rubrica (veja [`ler_rubricas_seguidas`]).
+    pub seguidas: HashMap<String, Vec<Seguida>>,
 }
 
 impl Dados {
+    pub fn seguidas_de(&self, id: &str) -> &[Seguida] {
+        self.seguidas.get(id).map_or(&[], Vec::as_slice)
+    }
+
     pub fn excecoes_de(&self, id: &str) -> &[ExcecaoGravada] {
         self.excecoes.get(id).map_or(&[], Vec::as_slice)
     }
@@ -625,7 +639,8 @@ pub(crate) fn ler_conciliacoes(
 ) -> Resultado<HashMap<String, Vec<Conciliacao>>> {
     let mut stmt = conexao.prepare(
         "SELECT recorrente_id, competencia, parcela, movimento, valor, data, confirmada
-         FROM conciliacoes WHERE (?1 IS NULL OR recorrente_id = ?1) ORDER BY rowid",
+         FROM conciliacoes WHERE desfeita = 0 AND (?1 IS NULL OR recorrente_id = ?1)
+         ORDER BY rowid",
     )?;
     let brutas = stmt
         .query_map(params![so_o], |l| {
@@ -680,7 +695,105 @@ pub(crate) fn carregar_dados(conexao: &Connection) -> Resultado<Dados> {
         conciliacoes: ler_conciliacoes(conexao, None)?,
         grupos: ler_grupos(conexao)?,
         inicio: ler_inicio(conexao)?,
+        seguidas: ler_rubricas_seguidas(conexao)?,
     })
+}
+
+/// Desde `desde`, o valor que a rubrica ligada dá ao compromisso (a soma das rubricas de
+/// desconto que apontam para ele); `None` quando a composição daquela data não o cita mais.
+pub(crate) type Seguida = (Competencia, Option<Centavos>);
+
+/// Para cada compromisso citado por `Rubrica::recorrente` em alguma composição, a série
+/// (ordenada por `desde`) de quanto a composição vigente diz que ele vale. Alimenta o
+/// previsto do desconto em folha (spec 12, D4).
+pub(crate) fn ler_rubricas_seguidas(
+    conexao: &Connection,
+) -> Resultado<HashMap<String, Vec<Seguida>>> {
+    let mut stmt = conexao
+        .prepare("SELECT recorrente_id, desde, rubricas FROM composicoes ORDER BY desde, rowid")?;
+    let linhas = stmt
+        .query_map([], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                l.get::<_, String>(1)?,
+                l.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut composicoes: Vec<(String, Competencia, Vec<crate::Rubrica>)> = Vec::new();
+    for (dono, desde, rubricas) in linhas {
+        composicoes.push((dono, ler_competencia(&desde)?, de_json(&rubricas)?));
+    }
+    let mut citados: Vec<(String, String)> = composicoes
+        .iter()
+        .flat_map(|(dono, _, rubricas)| {
+            rubricas
+                .iter()
+                .filter_map(|r| r.recorrente.clone())
+                .map(|alvo| (dono.clone(), alvo))
+        })
+        .collect();
+    citados.sort();
+    citados.dedup();
+    let mut mapa: HashMap<String, Vec<Seguida>> = HashMap::new();
+    for (dono, alvo) in citados {
+        for (_, desde, rubricas) in composicoes.iter().filter(|(d, _, _)| *d == dono) {
+            let somas: Vec<i64> = rubricas
+                .iter()
+                .filter(|r| {
+                    r.tipo == crate::TipoDeRubrica::Desconto
+                        && r.recorrente.as_deref() == Some(alvo.as_str())
+                })
+                .map(|r| r.valor.0)
+                .collect();
+            let valor = (!somas.is_empty()).then(|| Centavos(somas.iter().sum()));
+            mapa.entry(alvo.clone()).or_default().push((*desde, valor));
+        }
+    }
+    for serie in mapa.values_mut() {
+        serie.sort_by_key(|(desde, _)| *desde);
+    }
+    Ok(mapa)
+}
+
+/// O valor que a rubrica dá ao compromisso na competência, se a composição vigente o cita.
+pub(crate) fn valor_seguido(seguidas: &[Seguida], competencia: Competencia) -> Option<Centavos> {
+    seguidas
+        .iter()
+        .rfind(|(desde, _)| *desde <= competencia)
+        .and_then(|(_, valor)| *valor)
+}
+
+/// A conciliação (ocorrência, movimento) já foi desfeita alguma vez?
+pub(crate) fn conciliacao_foi_desfeita(
+    conexao: &Connection,
+    ocorrencia: &str,
+    movimento: &str,
+) -> Resultado<bool> {
+    existe(
+        conexao,
+        "SELECT 1 FROM conciliacoes WHERE ocorrencia = ?1 AND movimento = ?2 AND sem_automatico = 1",
+        params![ocorrencia, movimento],
+    )
+}
+
+/// Quem gravou a conciliação (ocorrência, movimento) ainda viva, se alguém.
+pub(crate) fn autor_da_conciliacao(
+    conexao: &Connection,
+    ocorrencia: &str,
+    movimento: &str,
+) -> Resultado<Option<Autor>> {
+    conexao
+        .query_row(
+            "SELECT autor FROM conciliacoes
+             WHERE ocorrencia = ?1 AND movimento = ?2 AND desfeita = 0",
+            params![ocorrencia, movimento],
+            |l| l.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(|t| de_json::<Autor>(&t))
+        .transpose()
 }
 
 pub(crate) const CHAVE_INICIO: &str = "inicio_do_acompanhamento";

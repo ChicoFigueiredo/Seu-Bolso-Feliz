@@ -301,6 +301,17 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
                         sbf_reconhecimento::PROVAS_POSSIVEIS
                     ))?;
                 }
+                Sugestao::CriarDescontosEmFolha { descontos, .. } => {
+                    let a_ligar = descontos.iter().filter(|d| d.ligar_a.is_some()).count();
+                    es(writeln!(
+                        saida,
+                        "  compromissos={} a_ligar={a_ligar}",
+                        descontos.len()
+                    ))?;
+                }
+                Sugestao::DarBaixa { baixas, .. } => {
+                    es(writeln!(saida, "  baixas={}", baixas.len()))?;
+                }
                 Sugestao::Vincular { .. } => {}
             }
         }

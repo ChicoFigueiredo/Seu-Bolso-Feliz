@@ -5,7 +5,7 @@
 //! pede que a pessoa diga qual. Só lê o planejamento.
 
 use sbf_planejamento::{
-    AlvoDoDocumento, Centavos, Competencia, Composicao, Natureza, Planejamento, Recorrente,
+    AlvoDoDocumento, Centavos, Competencia, Composicao, Natureza, Planejamento, Recorrente, Rubrica,
 };
 
 /// Por que não saiu um recorrente do salário.
@@ -73,7 +73,8 @@ pub fn valor_digitado(recorrente: &Recorrente, em: Competencia) -> Option<Centav
 }
 
 /// A composição vigente em `composicao.desde` já é exatamente esta (mesmo início e mesmas
-/// rubricas)?
+/// rubricas)? As ligações das rubricas aos compromissos de desconto em folha não contam: ligar
+/// uma rubrica não muda o que o contracheque diz.
 ///
 /// # Errors
 /// Falha do planejamento.
@@ -84,7 +85,19 @@ pub fn composicao_ja_vigente(
     Ok(plan
         .composicao(&composicao.recorrente, composicao.desde)
         .map_err(falha)?
-        .is_some_and(|a| a.desde == composicao.desde && a.rubricas == composicao.rubricas))
+        .is_some_and(|a| {
+            let sem_ligacao = |rubricas: &[Rubrica]| -> Vec<Rubrica> {
+                rubricas
+                    .iter()
+                    .map(|r| Rubrica {
+                        recorrente: None,
+                        ..r.clone()
+                    })
+                    .collect()
+            };
+            a.desde == composicao.desde
+                && sem_ligacao(&a.rubricas) == sem_ligacao(&composicao.rubricas)
+        }))
 }
 
 /// O documento (pelo sha256) já está ligado a este alvo?

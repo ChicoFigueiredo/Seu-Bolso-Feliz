@@ -10,7 +10,7 @@ use crate::conciliacao::{
     self, Alvo, Config, Evidencia, Indicio, credito_da_assinatura, data_de_segundos,
     movimentos_usados, pode_conciliar, tem_como_casar, valor_esperado,
 };
-use crate::projecao::{projetar_competencias_desde, versao_vigente};
+use crate::projecao::{projetar_competencias_seguindo, versao_vigente};
 use crate::{
     Alteracao, Assinatura, Autor, Competencia, Conciliacao, ContaDoPlanejamento, Data,
     ErroDoPlanejamento, Filtro, IdOcorrencia, MovimentoCandidato, Ocorrencia, ParDeConta, Periodo,
@@ -170,10 +170,16 @@ pub(super) fn conciliacoes_da_ocorrencia(
                 .as_ref()
                 .zip(conta_exigida.as_ref())
                 .is_some_and(|(m, conta)| &m.conta_do_extrato == conta);
+            let automatica =
+                banco::autor_da_conciliacao(c, &id.to_string(), &conciliacao.movimento)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|a| matches!(a, Autor::Regra { .. }));
             crate::ConciliacaoComMovimento {
                 conciliacao,
                 movimento,
                 mesma_conta,
+                automatica,
             }
         })
         .collect())
@@ -185,11 +191,66 @@ pub(super) fn buscar(
     hoje: Data,
 ) -> Resultado<usize> {
     let sugestoes = sugerir_do_periodo(s, periodo, hoje)?;
-    let n = sugestoes.len();
+    let mut n = sugestoes.len();
     for conciliacao in sugestoes {
-        s.aplicar(Alteracao::Conciliar { conciliacao }, Autor::Importacao)?;
+        gravar_sugestao_ou_automatica(s, conciliacao, Autor::Importacao)?;
+    }
+    // Uma sugestão que já estava lá e agora fecha as três provas (o contracheque chegou
+    // depois) também é promovida.
+    let controle = s.controle(periodo, Filtro::Todos, None, hoje)?;
+    for o in controle
+        .linhas
+        .iter()
+        .chain(controle.atrasadas_de_antes.iter())
+        .filter(|o| o.sugestao_de_conciliacao && o.conciliado.is_none() && o.e_entrada())
+    {
+        let Some(sugestao) = s.sugestao_de_conciliacao(&o.id)? else {
+            continue;
+        };
+        if promover_se_tres_provas(s, &sugestao)? {
+            n += 1;
+        }
     }
     Ok(n)
+}
+
+/// Grava a sugestão; se as três provas batem e ninguém desfez este par antes, grava confirmada
+/// por `Autor::Regra`.
+fn gravar_sugestao_ou_automatica(
+    s: &mut PlanejamentoSqlite,
+    conciliacao: Conciliacao,
+    autor: Autor,
+) -> Resultado<()> {
+    if promover_se_tres_provas(s, &conciliacao)? {
+        return Ok(());
+    }
+    s.aplicar(Alteracao::Conciliar { conciliacao }, autor)?;
+    Ok(())
+}
+
+/// As três provas batem e o par nunca foi desfeito: grava confirmada, `Autor::Regra`.
+fn promover_se_tres_provas(s: &mut PlanejamentoSqlite, c: &Conciliacao) -> Resultado<bool> {
+    if s.conciliacao_desfeita(&c.ocorrencia, &c.movimento)? {
+        return Ok(false);
+    }
+    let Some(movimento) = super::salario::movimento_do_extrato(s, c) else {
+        return Ok(false);
+    };
+    if !super::salario::tres_provas(s, &c.ocorrencia, &movimento)? {
+        return Ok(false);
+    }
+    s.aplicar(
+        Alteracao::Conciliar {
+            conciliacao: Conciliacao {
+                confirmada: true,
+                ..c.clone()
+            },
+        },
+        Autor::Regra {
+            regra: super::salario::REGRA_TRES_PROVAS.to_owned(),
+        },
+    )?;
+    Ok(true)
 }
 
 /// As sugestões do período, sem gravar: só ocorrências sem conciliação nem sugestão.
@@ -278,13 +339,14 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
             Competencia::de_data(hoje),
             excecoes,
         );
-        for o in projetar_competencias_desde(
+        for o in projetar_competencias_seguindo(
             rec,
             excecoes,
             conciliacoes,
             competencias,
             hoje,
             dados.inicio,
+            dados.seguidas_de(&rec.id),
         )
         .into_iter()
         .filter(|o| !o.suprimida())

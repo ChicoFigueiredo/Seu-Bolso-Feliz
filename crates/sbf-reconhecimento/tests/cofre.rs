@@ -17,7 +17,7 @@ use sbf_planejamento::{
 };
 use sbf_reconhecimento::{
     Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, PROVAS_POSSIVEIS, Reconhecedor,
-    ReconhecedorDoCofre, Reconhecido, Resultado, Situacao, Sugestao,
+    ReconhecedorDoCofre, Reconhecido, Resultado, Situacao, Sugestao, descontos,
 };
 use zeroize::Zeroizing;
 
@@ -131,6 +131,27 @@ impl Cenario {
     fn plan(&self) -> PlanejamentoSqlite {
         let banco = Banco::abrir(self.cofre.join("planejamento.sqlite")).expect("banco");
         PlanejamentoSqlite::novo(banco, Box::new(SemSaldos))
+    }
+}
+
+/// O que o clique em "Confirmar" faz com cada sugestão (a janela faz o mesmo).
+fn confirmar_todas(plan: &mut PlanejamentoSqlite, id: &str, r: &Resultado) {
+    for s in &r.sugestoes {
+        if let Sugestao::CriarDescontosEmFolha { uso, descontos, .. } = s {
+            descontos::aplicar_descontos(plan, uso, descontos, &uso.eventuais_iniciais())
+                .expect("criar descontos");
+            continue;
+        }
+        for mut a in s.alteracoes(&r.sha256, &r.nome, 0, None) {
+            if let Alteracao::DefinirComposicao { versao_base, .. } = &mut a {
+                *versao_base = plan
+                    .recorrente(id)
+                    .expect("r")
+                    .expect("existe")
+                    .versao_do_registro;
+            }
+            plan.aplicar(a, Autor::Usuario).expect("aplicar");
+        }
     }
 }
 
@@ -461,7 +482,11 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
         situacao_de(&vistos, Etapa::PerguntarAIa),
         Situacao::Pulada(_)
     ));
-    assert_eq!(r.sugestoes.len(), 2, "{:?}", r.sugestoes);
+    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
+    assert!(matches!(
+        r.sugestoes[2],
+        Sugestao::CriarDescontosEmFolha { .. }
+    ));
     match &r.sugestoes[0] {
         Sugestao::Vincular {
             alvo, rotulo, tipo, ..
@@ -497,37 +522,41 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
 }
 
 #[test]
-fn contracheque_ja_vinculado_e_com_a_mesma_composicao_nao_sugere_nada() {
+fn contracheque_ja_vinculado_e_com_a_mesma_composicao_so_resta_a_baixa_e_depois_nada() {
     let c = cenario();
     let id = c.planejamento_com_salario(569_950);
     let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
     let r = c.reconhecedor(None);
 
     let primeira = ok(c.rodar(&r, &arquivo).0);
-    // O usuário confirma as duas sugestões.
+    // O usuário confirma as sugestões.
     let mut plan = c.plan();
-    let versao = plan
-        .recorrente(&id)
-        .expect("r")
-        .expect("existe")
-        .versao_do_registro;
-    for s in &primeira.sugestoes {
-        for a in s.alteracoes(&primeira.sha256, &primeira.nome, versao, None) {
-            plan.aplicar(a, Autor::Usuario).expect("aplicar");
-        }
-    }
+    confirmar_todas(&mut plan, &id, &primeira);
     drop(plan);
 
     let segunda = ok(c.rodar(&r, &arquivo).0);
 
-    assert_eq!(primeira.sugestoes.len(), 2);
+    assert_eq!(primeira.sugestoes.len(), 3);
     assert_eq!(
         primeira.sugestoes[1].recorrente_para_versao(),
         Some(id.as_str())
     );
-    assert!(segunda.sugestoes.is_empty(), "{:?}", segunda.sugestoes);
+    // Os compromissos de desconto agora existem e estão ligados: resta dar baixa neles.
+    assert_eq!(segunda.sugestoes.len(), 1, "{:?}", segunda.sugestoes);
+    let Sugestao::DarBaixa { rotulo, baixas } = &segunda.sugestoes[0] else {
+        panic!("{:?}", segunda.sugestoes);
+    };
+    assert!(rotulo.starts_with("Dar baixa nos "), "{rotulo}");
+    assert!(!baixas.is_empty());
+    let mut plan = c.plan();
+    for a in segunda.sugestoes[0].alteracoes(&segunda.sha256, &segunda.nome, 0, None) {
+        plan.aplicar(a, Autor::Usuario).expect("baixa");
+    }
+    drop(plan);
+    let terceira = ok(c.rodar(&r, &arquivo).0);
+    assert!(terceira.sugestoes.is_empty(), "{:?}", terceira.sugestoes);
     assert!(matches!(
-        segunda.reconhecido,
+        terceira.reconhecido,
         Reconhecido::Contracheque { .. }
     ));
 }
@@ -845,8 +874,12 @@ fn contracheque_de_2026_sugere_vincular_e_duas_composicoes_e_nada_de_recebimento
 
     let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
 
-    assert_eq!(r.sugestoes.len(), 2, "{:?}", r.sugestoes);
+    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
     assert!(matches!(r.sugestoes[0], Sugestao::Vincular { .. }));
+    assert!(matches!(
+        r.sugestoes[2],
+        Sugestao::CriarDescontosEmFolha { .. }
+    ));
     match &r.sugestoes[1] {
         Sugestao::UsarRubricas { rotulo, uso } => {
             assert_eq!(
@@ -901,7 +934,7 @@ fn com_o_credito_exato_no_extrato_sugere_conciliar_com_duas_provas() {
 
     let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
 
-    assert_eq!(r.sugestoes.len(), 3, "{:?}", r.sugestoes);
+    assert_eq!(r.sugestoes.len(), 4, "{:?}", r.sugestoes);
     let Some(Sugestao::Conciliar {
         rotulo,
         conciliacao,
@@ -1106,23 +1139,20 @@ fn composicoes_de_2026_confirmadas_nao_sao_sugeridas_de_novo() {
     let r = c.reconhecedor(None);
     let primeira = ok(c.rodar(&r, &arquivo).0);
     let mut plan = c.plan();
-    for s in &primeira.sugestoes {
-        for mut a in s.alteracoes(&primeira.sha256, &primeira.nome, 0, None) {
-            if let Alteracao::DefinirComposicao { versao_base, .. } = &mut a {
-                *versao_base = plan
-                    .recorrente(&id)
-                    .expect("r")
-                    .expect("existe")
-                    .versao_do_registro;
-            }
-            plan.aplicar(a, Autor::Usuario).expect("aplicar");
-        }
-    }
+    confirmar_todas(&mut plan, &id, &primeira);
     drop(plan);
 
     let segunda = ok(c.rodar(&r, &arquivo).0);
 
-    assert!(segunda.sugestoes.is_empty(), "{:?}", segunda.sugestoes);
+    // Vincular, rubricas e compromissos não voltam; só a baixa dos descontos já ligados.
+    assert!(
+        segunda
+            .sugestoes
+            .iter()
+            .all(|s| matches!(s, Sugestao::DarBaixa { .. })),
+        "{:?}",
+        segunda.sugestoes
+    );
 }
 
 #[test]

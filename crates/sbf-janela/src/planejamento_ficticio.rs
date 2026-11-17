@@ -33,6 +33,11 @@ pub struct PlanejamentoFicticio {
     grupos: Vec<Grupo>,
     excecoes: Vec<ExcecaoGravada>,
     conciliacoes: Vec<Conciliacao>,
+    /// Os pares (ocorrência, movimento) cuja conciliação foi desfeita alguma vez: uma regra
+    /// não os refaz sozinha.
+    desfeitas: Vec<(IdOcorrencia, String)>,
+    /// Os pares conciliados por uma regra (as três provas).
+    automaticas: Vec<(IdOcorrencia, String)>,
     propostas: Vec<Proposta>,
     historico: Vec<EntradaDoHistorico>,
     composicoes: Vec<Composicao>,
@@ -101,6 +106,8 @@ impl PlanejamentoFicticio {
             grupos,
             excecoes: Vec::new(),
             conciliacoes: Vec::new(),
+            desfeitas: Vec::new(),
+            automaticas: Vec::new(),
             propostas: Vec::new(),
             historico: Vec::new(),
             composicoes: Vec::new(),
@@ -870,6 +877,11 @@ impl PlanejamentoFicticio {
             vencimento_original = data_regra;
         }
         let mut previsto = v.valor;
+        if matches!(r.natureza, Natureza::DescontoEmFolha)
+            && let Some(seguido) = self.valor_seguido_pela_rubrica(&r.id, comp)
+        {
+            previsto = Some(seguido);
+        }
         let mut pago_informado = None;
         let mut adiada = false;
         let mut dispensada = false;
@@ -886,9 +898,17 @@ impl PlanejamentoFicticio {
                 Excecao::PagoInformado { valor, .. } => pago_informado = Some(*valor),
             }
         }
-        let conc = self.conciliacoes.iter().find(|x| x.ocorrencia == id);
-        let conciliado = conc.filter(|x| x.confirmada).map(|x| x.valor);
-        let sugestao = conc.is_some_and(|x| !x.confirmada);
+        let confirmadas: Vec<Centavos> = self
+            .conciliacoes
+            .iter()
+            .filter(|x| x.ocorrencia == id && x.confirmada)
+            .map(|x| x.valor)
+            .collect();
+        let conciliado = (!confirmadas.is_empty()).then(|| confirmadas.iter().copied().sum());
+        let sugestao = self
+            .conciliacoes
+            .iter()
+            .any(|x| x.ocorrencia == id && !x.confirmada);
         let paga_algo = pago_informado.is_some() || conciliado.is_some();
         let pausa = r
             .pausas
@@ -1453,6 +1473,20 @@ impl Planejamento for PlanejamentoFicticio {
             .cloned())
     }
 
+    fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {
+        Ok(self
+            .desfeitas
+            .iter()
+            .any(|(o, m)| o == ocorrencia && m == movimento))
+    }
+
+    fn baixas_pelo_contracheque(
+        &self,
+        competencia: Competencia,
+    ) -> Resultado<Vec<sbf_planejamento::BaixaPeloContracheque>> {
+        Ok(self.baixas_impl(competencia))
+    }
+
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
         Ok(self.contas_impl())
     }
@@ -1781,8 +1815,25 @@ impl PlanejamentoFicticio {
             }
             Alteracao::Conciliar { conciliacao } => {
                 let rec = conciliacao.ocorrencia.recorrente.clone();
-                self.conciliacoes
-                    .retain(|c| c.ocorrencia != conciliacao.ocorrencia);
+                // Uma conciliação nova substitui a antiga; só as baixas pelo contracheque (uma por
+                // rubrica) convivem.
+                let e_baixa = |m: &str| m.starts_with("contracheque:");
+                self.conciliacoes.retain(|c| {
+                    c.ocorrencia != conciliacao.ocorrencia
+                        || (c.confirmada
+                            && e_baixa(&c.movimento)
+                            && e_baixa(&conciliacao.movimento)
+                            && c.movimento != conciliacao.movimento)
+                });
+                self.automaticas.retain(|(o, m)| {
+                    !(o == &conciliacao.ocorrencia && m == &conciliacao.movimento)
+                });
+                if matches!(autor, Autor::Regra { .. }) && conciliacao.confirmada {
+                    self.automaticas.push((
+                        conciliacao.ocorrencia.clone(),
+                        conciliacao.movimento.clone(),
+                    ));
+                }
                 let confirmada = conciliacao.confirmada;
                 self.conciliacoes.push(conciliacao);
                 let texto = if confirmada {
@@ -1933,10 +1984,28 @@ impl PlanejamentoFicticio {
                 apelido,
                 conta_do_extrato,
             } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
-            // Costura de 2026-11-17: o agente da janela implementa no fictício.
-            Alteracao::Desconciliar { .. } => Err(ErroDoPlanejamento::Invalida(
-                "desconciliar ainda não existe no fictício".to_owned(),
-            )),
+            Alteracao::Desconciliar {
+                ocorrencia,
+                movimento,
+            } => {
+                let antes = self.conciliacoes.len();
+                self.conciliacoes
+                    .retain(|c| !(c.ocorrencia == ocorrencia && c.movimento == movimento));
+                if self.conciliacoes.len() == antes {
+                    return Err(ErroDoPlanejamento::NaoEncontrado(format!(
+                        "conciliação de {ocorrencia}"
+                    )));
+                }
+                self.automaticas
+                    .retain(|(o, m)| !(o == &ocorrencia && m == &movimento));
+                self.desfeitas.push((ocorrencia.clone(), movimento));
+                Ok(self.registrar(
+                    autor,
+                    &ocorrencia.recorrente,
+                    format!("Desfez a conciliação de {ocorrencia}."),
+                    &alt,
+                ))
+            }
             Alteracao::DefinirAssinatura {
                 recorrente,
                 assinatura,
@@ -2296,5 +2365,162 @@ mod testes {
             .controle(&periodo_atual(), Filtro::SemValor, None, hoje())
             .unwrap();
         assert!(sv.linhas.iter().all(|o| o.previsto.is_none()) && !sv.linhas.is_empty());
+    }
+
+    fn salario_de_novembro() -> IdOcorrencia {
+        IdOcorrencia {
+            recorrente: "rec_salario".into(),
+            competencia: Competencia::de_data(hoje()),
+            parcela: None,
+        }
+    }
+
+    fn composicao_de_novembro(s: &mut PlanejamentoFicticio, liquido: i64, previdencia: i64) {
+        let h = Competencia::de_data(hoje());
+        let base = s
+            .recorrente("rec_salario")
+            .unwrap()
+            .unwrap()
+            .versao_do_registro;
+        let r = |codigo: &str, nome: &str, tipo, valor: i64, rec: Option<&str>| Rubrica {
+            codigo: Some(codigo.into()),
+            nome: nome.into(),
+            tipo,
+            valor: Centavos(valor),
+            competencia: None,
+            prazo: None,
+            recorrente: rec.map(Into::into),
+        };
+        s.aplicar(
+            Alteracao::DefinirComposicao {
+                composicao: Composicao {
+                    recorrente: "rec_salario".into(),
+                    desde: h,
+                    rubricas: vec![
+                        r(
+                            "1001",
+                            "Vencimento",
+                            TipoDeRubrica::Provento,
+                            liquido + previdencia,
+                            None,
+                        ),
+                        r(
+                            "2050",
+                            "Previdência",
+                            TipoDeRubrica::Desconto,
+                            previdencia,
+                            Some("rec_previdencia"),
+                        ),
+                    ],
+                    documento: Some(crate::demonstracao::hash_do_nome(
+                        "contracheque-2026-11.pdf",
+                    )),
+                    origem: "contracheque 11/2026".into(),
+                },
+                versao_base: base,
+            },
+            Autor::Usuario,
+        )
+        .expect("composição");
+    }
+
+    #[test]
+    fn desconciliar_tira_a_conciliacao_deixa_historico_e_a_regra_nao_refaz() {
+        let mut s = servico();
+        let id = salario_de_novembro();
+        let sugestao = s.sugestao_de_conciliacao(&id).unwrap().expect("sugestão");
+        let confirmada = Conciliacao {
+            confirmada: true,
+            ..sugestao.clone()
+        };
+        s.aplicar(
+            Alteracao::Conciliar {
+                conciliacao: confirmada,
+            },
+            Autor::Regra {
+                regra: "tres-provas".into(),
+            },
+        )
+        .unwrap();
+        let v = s.conciliacoes_da_ocorrencia(&id).unwrap();
+        assert!(v[0].automatica && v[0].conciliacao.confirmada);
+        s.aplicar(
+            Alteracao::Desconciliar {
+                ocorrencia: id.clone(),
+                movimento: sugestao.movimento.clone(),
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+        assert!(s.conciliacoes_da_ocorrencia(&id).unwrap().is_empty());
+        assert!(s.conciliacao_desfeita(&id, &sugestao.movimento).unwrap());
+        assert!(
+            s.historico(Some("rec_salario"), 50)
+                .unwrap()
+                .iter()
+                .any(|e| e.resumo.contains("Desfez"))
+        );
+        assert!(matches!(
+            s.aplicar(
+                Alteracao::Desconciliar {
+                    ocorrencia: id,
+                    movimento: sugestao.movimento,
+                },
+                Autor::Usuario,
+            ),
+            Err(ErroDoPlanejamento::NaoEncontrado(_))
+        ));
+    }
+
+    #[test]
+    fn buscar_concilia_sozinho_so_com_as_tres_provas() {
+        let mut s = servico();
+        let id = salario_de_novembro();
+        // Sem composição do mês, a sugestão que já existe continua sugestão.
+        s.aplicar(
+            Alteracao::MapearConta {
+                apelido: "CX-0630".into(),
+                conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+        s.buscar_conciliacoes(&periodo_atual(), hoje()).unwrap();
+        assert!(s.sugestao_de_conciliacao(&id).unwrap().is_some());
+        // Com o líquido de um centavo a menos: ainda sugestão.
+        composicao_de_novembro(&mut s, 822_599, 54_000);
+        s.buscar_conciliacoes(&periodo_atual(), hoje()).unwrap();
+        assert!(s.sugestao_de_conciliacao(&id).unwrap().is_some());
+        // Líquido exato: promovida, com a regra.
+        composicao_de_novembro(&mut s, 822_600, 54_000);
+        assert_eq!(s.buscar_conciliacoes(&periodo_atual(), hoje()).unwrap(), 1);
+        assert!(s.sugestao_de_conciliacao(&id).unwrap().is_none());
+        assert!(s.conciliacoes_da_ocorrencia(&id).unwrap()[0].automatica);
+    }
+
+    #[test]
+    fn a_baixa_pelo_contracheque_e_o_previsto_que_segue_a_rubrica_no_ficticio() {
+        let mut s = servico();
+        let h = Competencia::de_data(hoje());
+        composicao_de_novembro(&mut s, 822_600, 56_000);
+        // O previsto da previdência segue a rubrica (R$ 560,00), não o R$ 540,00 de antes.
+        let o = s.proximas("rec_previdencia", h, 1, hoje()).unwrap();
+        assert_eq!(o[0].previsto, Some(Centavos(56_000)));
+        let baixas = s.baixas_pelo_contracheque(h).unwrap();
+        assert_eq!(baixas.len(), 1);
+        assert!(baixas[0].conciliacao.movimento.starts_with("contracheque:"));
+        assert_eq!(baixas[0].diferenca, None);
+        s.aplicar(
+            Alteracao::Conciliar {
+                conciliacao: baixas[0].conciliacao.clone(),
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+        let o = s.proximas("rec_previdencia", h, 1, hoje()).unwrap();
+        assert_eq!(o[0].conciliado, Some(Centavos(56_000)));
+        assert!(s.baixas_pelo_contracheque(h).unwrap()[0].ja_baixada);
+        // Outro mês não tem contracheque próprio.
+        assert!(s.baixas_pelo_contracheque(h.seguinte()).unwrap().is_empty());
     }
 }

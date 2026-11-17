@@ -1,6 +1,6 @@
 //! Capturas de tela do Controle mensal, só com dados fictícios.
 //!
-//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo|arrastar|conciliar|contas|faixa SBF_CAPTURA=/caminho/cena.png \
+//! `SBF_CENA=ciclo|2050|pausada|editar|propostas|rubricas|documentos|anexar|novo|arrastar|conciliar|contas|faixa|salario|salario-detalhe|salario-folha SBF_CAPTURA=/caminho/cena.png \
 //!  xvfb-run -a cargo run -p sbf-janela --example captura_controle`
 //!
 //! Abre a janela da casca com o planejamento fictício ligado, arruma a cena, tira a foto da
@@ -250,6 +250,136 @@ impl App {
                         data: Data::de_iso("2026-12-05"),
                     },
                 ])));
+            }
+            // O contracheque de outubro arrastado: as três provas conciliam sozinhas, o cartão
+            // oferece criar os compromissos de desconto em folha (confirmados no quadro 9) e,
+            // ligados, dar baixa neles.
+            (1, "salario") => {
+                c.resumo_aberto = false;
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("detalhe"));
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "salario") => {
+                let arquivo = std::env::temp_dir().join("contracheque-2026-10.pdf");
+                let _ = std::fs::write(&arquivo, b"arquivo ficticio");
+                janela.soltar_arquivos(vec![arquivo], Some(ctx));
+            }
+            (9, "salario") => {
+                // O usuário confirma "Criar compromissos de desconto em folha" (a terceira).
+                janela.confirmar_sugestao(0, 2);
+            }
+            (11, "salario") => {
+                janela.reconhecimento.rolar_para = Some(RECONHECIMENTO_ROLAGEM_FIM);
+            }
+            // O Detalhe do Salário de novembro depois de a regra conciliar sozinha.
+            (1, "salario-detalhe") => {
+                c.navegador.ir_para_hoje();
+                c.resumo_aberto = false;
+                c.selecionada = Some(id("rec_salario", h));
+                c.aba_do_detalhe = AbaDoDetalhe::Resumo;
+            }
+            (2, "salario-detalhe" | "salario-folha") => {
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "salario-detalhe") => {
+                use sbf_planejamento::{Alteracao, Autor, Conciliacao};
+                let id_do_mes = id("rec_salario", h);
+                if let Some(pl) = janela.planejamento.as_mut()
+                    && let Ok(Some(sugerida)) = pl.0.sugestao_de_conciliacao(&id_do_mes)
+                {
+                    let _ = pl.0.aplicar(
+                        Alteracao::Conciliar {
+                            conciliacao: Conciliacao {
+                                confirmada: true,
+                                ..sugerida
+                            },
+                        },
+                        Autor::Regra {
+                            regra: "tres-provas".into(),
+                        },
+                    );
+                }
+                janela.controle.recarregar();
+            }
+            // Um desconto em folha baixado pelo contracheque, com o valor do mês diferente da
+            // rubrica (o ⚠).
+            (1, "salario-folha") => {
+                c.navegador.ir_para_hoje();
+                c.resumo_aberto = false;
+                c.selecionada = Some(id("rec_previdencia", h));
+                c.aba_do_detalhe = AbaDoDetalhe::Resumo;
+            }
+            (3, "salario-folha") => {
+                use sbf_planejamento::{Alteracao, Autor, Centavos, Composicao, Excecao, Rubrica};
+                let hoje_c = h;
+                if let Some(pl) = janela.planejamento.as_mut() {
+                    let plan = pl.0.as_mut();
+                    let rubrica =
+                        |codigo: &str, nome: &str, tipo, valor: i64, rec: Option<&str>| Rubrica {
+                            codigo: Some(codigo.into()),
+                            nome: nome.into(),
+                            tipo,
+                            valor: Centavos(valor),
+                            competencia: None,
+                            prazo: None,
+                            recorrente: rec.map(Into::into),
+                        };
+                    use sbf_planejamento::TipoDeRubrica::{Desconto, Provento};
+                    let base = plan
+                        .recorrente("rec_salario")
+                        .ok()
+                        .flatten()
+                        .map_or(0, |r| r.versao_do_registro);
+                    let _ = plan.aplicar(
+                        Alteracao::DefinirComposicao {
+                            composicao: Composicao {
+                                recorrente: "rec_salario".into(),
+                                desde: hoje_c,
+                                rubricas: vec![
+                                    rubrica("1001", "Vencimento", Provento, 1_135_000, None),
+                                    rubrica(
+                                        "2050",
+                                        "Previdência",
+                                        Desconto,
+                                        56_000,
+                                        Some("rec_previdencia"),
+                                    ),
+                                    rubrica(
+                                        "2040",
+                                        "Consignado do banco",
+                                        Desconto,
+                                        62_000,
+                                        Some("rec_consignado"),
+                                    ),
+                                ],
+                                documento: Some(sbf_janela::demonstracao::hash_do_nome(
+                                    "contracheque-2026-11.pdf",
+                                )),
+                                origem: "contracheque 11/2026".into(),
+                            },
+                            versao_base: base,
+                        },
+                        Autor::Usuario,
+                    );
+                    let _ = plan.aplicar(
+                        Alteracao::Excecao {
+                            ocorrencia: id("rec_previdencia", hoje_c),
+                            excecao: Excecao::ValorSoDesteMes {
+                                valor: Centavos(54_000),
+                            },
+                        },
+                        Autor::Usuario,
+                    );
+                    for b in plan.baixas_pelo_contracheque(hoje_c).unwrap_or_default() {
+                        let _ = plan.aplicar(
+                            Alteracao::Conciliar {
+                                conciliacao: b.conciliacao,
+                            },
+                            Autor::Usuario,
+                        );
+                    }
+                }
+                janela.controle.recarregar();
             }
             (1, "propostas") => {
                 c.resumo_aberto = false;

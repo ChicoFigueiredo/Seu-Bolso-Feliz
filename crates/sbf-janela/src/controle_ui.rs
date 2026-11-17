@@ -67,6 +67,11 @@ pub enum PedidoDoControle {
         conciliacao: Conciliacao,
         descricao: String,
     },
+    /// Desfaz uma conciliação (a automática das três provas, por exemplo): exclusão lógica.
+    Desconciliar {
+        ocorrencia: IdOcorrencia,
+        movimento: String,
+    },
     /// Define (ou tira) a assinatura de um recorrente, lendo a versão na hora.
     DefinirAssinatura {
         recorrente: String,
@@ -2163,22 +2168,28 @@ fn contracheques_de(dados: &DadosDoDetalhe) -> Vec<&DocumentoVinculado> {
         .collect()
 }
 
-/// A seção Movimentos da ocorrência; desconto em folha não passa pelo extrato.
+/// A seção Movimentos da ocorrência. Desconto em folha não passa pelo extrato: só mostra a
+/// baixa pelo contracheque.
 fn movimentos_do_detalhe(
     sel: &Ocorrencia,
     dados: &DadosDoDetalhe,
 ) -> Option<movimentos::VmDeMovimentos> {
-    (sel.natureza != Natureza::DescontoEmFolha).then(|| {
-        movimentos::montar(&movimentos::EntradaDosMovimentos {
-            conciliado: sel.conciliado,
-            gravadas: &dados.conciliacoes,
-            sugestao: dados.sugestao.as_ref(),
-            candidatos: &dados.candidatos,
-            composicao: dados.composicao.as_ref(),
-            contracheques: &contracheques_de(dados),
-            previsto: sel.previsto,
-        })
-    })
+    let de_folha = sel.natureza == Natureza::DescontoEmFolha;
+    let mut vm = movimentos::montar(&movimentos::EntradaDosMovimentos {
+        conciliado: sel.conciliado,
+        gravadas: &dados.conciliacoes,
+        sugestao: if de_folha {
+            None
+        } else {
+            dados.sugestao.as_ref()
+        },
+        candidatos: if de_folha { &[] } else { &dados.candidatos },
+        composicao: dados.composicao.as_ref(),
+        contracheques: &contracheques_de(dados),
+        previsto: sel.previsto,
+    });
+    vm.de_folha = de_folha;
+    Some(vm)
 }
 
 /// O que um clique no detalhe pede; aplicado depois do desenho.
@@ -4444,5 +4455,83 @@ mod testes {
             crate::areas::grupo_de(&crate::navegacao::Destino::AreaFutura(a.id)),
             "Controle"
         );
+    }
+
+    #[test]
+    fn desfazer_a_conciliacao_automatica_pelo_detalhe_tira_a_conciliacao() {
+        use sbf_planejamento::{Autor, Conciliacao};
+        let mut j = janela_ligada();
+        let sel = selecionar_salario(&mut j);
+        let sugerida = j
+            .planejamento
+            .as_ref()
+            .expect("p")
+            .0
+            .sugestao_de_conciliacao(&sel.id)
+            .expect("s")
+            .expect("sugestão");
+        j.planejamento
+            .as_mut()
+            .expect("p")
+            .0
+            .aplicar(
+                Alteracao::Conciliar {
+                    conciliacao: Conciliacao {
+                        confirmada: true,
+                        ..sugerida.clone()
+                    },
+                },
+                Autor::Regra {
+                    regra: "tres-provas".into(),
+                },
+            )
+            .expect("automática");
+        j.controle.recarregar();
+        let _ = selecionar_salario(&mut j);
+        let (_, vm) = vm_do_salario(&mut j);
+        assert!(vm.confirmadas[0].automatica);
+        j.controle_pedido(PedidoDoControle::Desconciliar {
+            ocorrencia: sel.id.clone(),
+            movimento: sugerida.movimento.clone(),
+        });
+        assert_eq!(j.controle.mensagem.as_ref().map(|m| m.1), Some(false));
+        let plano = &j.planejamento.as_ref().expect("p").0;
+        assert!(
+            plano
+                .conciliacoes_da_ocorrencia(&sel.id)
+                .expect("c")
+                .is_empty()
+        );
+        assert!(
+            plano
+                .conciliacao_desfeita(&sel.id, &sugerida.movimento)
+                .expect("d")
+        );
+    }
+
+    #[test]
+    fn desconto_em_folha_so_mostra_a_baixa_pelo_contracheque() {
+        let mut j = janela_ligada();
+        let pl = j.planejamento.as_ref().expect("p").0.as_ref();
+        j.controle.navegador.ir_para_hoje();
+        j.controle.garantir_cache(pl, hoje());
+        j.controle.selecionada = Some(IdOcorrencia {
+            recorrente: "rec_previdencia".into(),
+            competencia: Competencia::de_data(hoje()),
+            parcela: None,
+        });
+        j.controle.garantir_selecao(pl);
+        j.controle.garantir_detalhe(pl, hoje());
+        let sel = j.controle.linha_selecionada().cloned().expect("linha");
+        assert_eq!(sel.natureza, Natureza::DescontoEmFolha);
+        let dados = j
+            .controle
+            .detalhe
+            .as_ref()
+            .and_then(|d| d.dados.as_ref().ok())
+            .expect("dados");
+        let vm = movimentos_do_detalhe(&sel, dados).expect("seção");
+        assert!(vm.de_folha);
+        assert!(vm.candidatos.is_empty() && vm.sugestao.is_none());
     }
 }

@@ -435,6 +435,26 @@ pub struct ConciliacaoComMovimento {
     pub movimento: Option<MovimentoDoExtrato>,
     /// A conta do movimento é a conta (par confirmado) da ocorrência.
     pub mesma_conta: bool,
+    /// Quem gravou foi uma regra (`Autor::Regra`, as três provas): a janela mostra
+    /// "automática" e oferece Desfazer.
+    pub automatica: bool,
+}
+
+/// Uma baixa pelo contracheque (spec 12, D3): a rubrica de desconto ligada a um compromisso de
+/// desconto em folha prova o desconto do mês, sem passar pelo extrato.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaixaPeloContracheque {
+    /// `movimento = "contracheque:<sha>:<índice da rubrica>"`, o valor da rubrica e
+    /// `confirmada: true`, na ocorrência do compromisso naquele mês.
+    pub conciliacao: Conciliacao,
+    /// O nome da rubrica no contracheque.
+    pub rubrica: String,
+    /// O previsto da ocorrência; `None` sem valor.
+    pub previsto: Option<Centavos>,
+    /// A rubrica menos o previsto, quando diferem (a janela mostra ⚠).
+    pub diferenca: Option<Centavos>,
+    /// A ocorrência já tem esta baixa gravada.
+    pub ja_baixada: bool,
 }
 
 /// Um movimento candidato a uma ocorrência, para a escolha manual ("Conciliar com outro…") e
@@ -1036,6 +1056,24 @@ pub trait Planejamento {
         ocorrencia: &IdOcorrencia,
     ) -> Resultado<Vec<ConciliacaoComMovimento>> {
         let _ = ocorrencia;
+        Ok(Vec::new())
+    }
+
+    /// A conciliação deste par ocorrência e movimento já foi desfeita antes (exclusão lógica):
+    /// uma regra não a refaz sozinha. O padrão é `false`.
+    fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {
+        let _ = (ocorrencia, movimento);
+        Ok(false)
+    }
+
+    /// As baixas que o contracheque da competência prova (D3): cada rubrica de desconto da
+    /// composição do Salário **do mês** (o `desde` é a competência) com `Rubrica::recorrente`
+    /// cai na ocorrência daquele compromisso. Não grava nada; o padrão é nenhuma.
+    fn baixas_pelo_contracheque(
+        &self,
+        competencia: Competencia,
+    ) -> Resultado<Vec<BaixaPeloContracheque>> {
+        let _ = competencia;
         Ok(Vec::new())
     }
 
