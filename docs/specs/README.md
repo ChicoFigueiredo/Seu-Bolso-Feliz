@@ -12,16 +12,16 @@ Substituem a pilha de ~54 documentos antigos (agora em [`../_arquivo/`](../_arqu
 
 ## Índice
 
-| Spec                                                              | Capacidade                        | Estado resumido                |
-| ----------------------------------------------------------------- | --------------------------------- | ------------------------------ |
-| [00-estado-real](00-estado-real.md)                               | Mapa geral + saúde do código      | —                              |
-| [01-ingestao](01-ingestao.md)                                     | Pipeline de documentos (3 canais) | ✅ construído e testado        |
-| [02-conciliacao](02-conciliacao.md)                               | Documento × registros             | ✅ motor · 🟡 UX               |
-| [03-padroes-documentais](03-padroes-documentais.md)               | Memória operacional               | ✅ modelo · 🟡 ligação parsing |
-| [04-ia-e-chat](04-ia-e-chat.md)                                   | Interface inteligente             | ✅ integrado                   |
-| [05-dominio-financeiro](05-dominio-financeiro.md)                 | Núcleo determinístico             | ✅ testado                     |
-| [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md) | Desktop Rust: inventário          | ⬜ proposta                    |
-| [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | 🟡 decidida, em implementação  |
+| Spec                                                              | Capacidade                        | Estado resumido                                           |
+| ----------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------- |
+| [00-estado-real](00-estado-real.md)                               | Mapa geral + saúde do código      | —                                                         |
+| [01-ingestao](01-ingestao.md)                                     | Pipeline de documentos (3 canais) | ✅ construído e testado                                   |
+| [02-conciliacao](02-conciliacao.md)                               | Documento × registros             | ✅ motor · 🟡 UX                                          |
+| [03-padroes-documentais](03-padroes-documentais.md)               | Memória operacional               | ✅ modelo · 🟡 ligação parsing                            |
+| [04-ia-e-chat](04-ia-e-chat.md)                                   | Interface inteligente             | ✅ integrado                                              |
+| [05-dominio-financeiro](05-dominio-financeiro.md)                 | Núcleo determinístico             | ✅ testado                                                |
+| [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md) | Desktop Rust: inventário          | ⬜ proposta                                               |
+| [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | 🟢 implementada (aceite em 13-motor-regras-lua-aceite.md) |
 
 ## Regras de manutenção (spec-driven)
 
