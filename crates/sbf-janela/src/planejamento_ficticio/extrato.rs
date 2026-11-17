@@ -315,6 +315,7 @@ impl PlanejamentoFicticio {
                     conciliacao: c.clone(),
                     movimento,
                     mesma_conta,
+                    automatica: false,
                 }
             })
             .collect()

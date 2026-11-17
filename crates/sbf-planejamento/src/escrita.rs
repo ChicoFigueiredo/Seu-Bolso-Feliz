@@ -68,7 +68,7 @@ pub(crate) fn aplicar_na(
             excecao,
         } => excecao_avulsa(c, ocorrencia, excecao, autor, agora)?,
         Alteracao::DesfazerExcecao { id } => desfazer_excecao(c, id)?,
-        Alteracao::Conciliar { conciliacao } => conciliar(c, conciliacao)?,
+        Alteracao::Conciliar { conciliacao } => conciliar(c, conciliacao, autor)?,
         Alteracao::Excluir {
             recorrente,
             motivo,
@@ -118,12 +118,10 @@ pub(crate) fn aplicar_na(
             autor,
             agora,
         )?,
-        // Costura de 2026-11-17: o agente do planejamento implementa.
-        Alteracao::Desconciliar { .. } => {
-            return Err(crate::ErroDoPlanejamento::Invalida(
-                "desconciliar ainda não é gravado".to_owned(),
-            ));
-        }
+        Alteracao::Desconciliar {
+            ocorrencia,
+            movimento,
+        } => desconciliar(c, ocorrencia, movimento)?,
     };
 
     let alteracao_id = if feito.grava_historico {
@@ -678,17 +676,20 @@ fn desfazer_excecao(c: &Connection, id: &str) -> Resultado<Feito> {
     })
 }
 
-fn conciliar(c: &Connection, x: &Conciliacao) -> Resultado<Feito> {
+fn conciliar(c: &Connection, x: &Conciliacao, autor: &Autor) -> Resultado<Feito> {
     let rec = recorrente_da_ocorrencia(c, &x.ocorrencia)?;
     nao_vazio(&x.movimento, "o movimento")?;
-    // Uma sugestão nunca rebaixa uma conciliação já confirmada.
+    // Uma sugestão nunca rebaixa uma conciliação já confirmada; uma desfeita volta a valer
+    // (como sugestão ou confirmada) quando alguém grava o par de novo.
     c.execute(
         "INSERT INTO conciliacoes (ocorrencia, recorrente_id, competencia, parcela, movimento,
-                                   valor, data, confirmada)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                                   valor, data, confirmada, autor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (ocorrencia, movimento) DO UPDATE
-         SET valor = excluded.valor, data = excluded.data, confirmada = excluded.confirmada
-         WHERE conciliacoes.confirmada = 0 OR excluded.confirmada = 1",
+         SET valor = excluded.valor, data = excluded.data, confirmada = excluded.confirmada,
+             autor = excluded.autor, desfeita = 0
+         WHERE conciliacoes.desfeita = 1 OR conciliacoes.confirmada = 0
+            OR excluded.confirmada = 1",
         params![
             x.ocorrencia.to_string(),
             x.ocorrencia.recorrente,
@@ -697,7 +698,8 @@ fn conciliar(c: &Connection, x: &Conciliacao) -> Resultado<Feito> {
             x.movimento,
             x.valor.0,
             x.data.to_string(),
-            x.confirmada
+            x.confirmada,
+            json(autor)?
         ],
     )?;
     Ok(Feito {
@@ -708,6 +710,29 @@ fn conciliar(c: &Connection, x: &Conciliacao) -> Resultado<Feito> {
         } else {
             format!("Sugeriu a conciliação de {}.", x.ocorrencia)
         },
+        versao_nova: rec.versao_do_registro,
+        grava_historico: true,
+    })
+}
+
+/// Desfaz a conciliação (confirmada ou sugerida) do par: exclusão lógica. A linha fica, marcada
+/// `desfeita`, para o histórico e para uma regra não refazer sozinha o que o usuário desfez.
+fn desconciliar(c: &Connection, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<Feito> {
+    let rec = recorrente_da_ocorrencia(c, ocorrencia)?;
+    let tocadas = c.execute(
+        "UPDATE conciliacoes SET desfeita = 1, sem_automatico = 1
+         WHERE ocorrencia = ?1 AND movimento = ?2 AND desfeita = 0",
+        params![ocorrencia.to_string(), movimento],
+    )?;
+    if tocadas == 0 {
+        return Err(ErroDoPlanejamento::NaoEncontrado(format!(
+            "conciliação de {ocorrencia}"
+        )));
+    }
+    Ok(Feito {
+        alvo: ocorrencia.to_string(),
+        recorrente: Some(rec.id),
+        resumo: format!("Desfez a conciliação de {ocorrencia}."),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
     })

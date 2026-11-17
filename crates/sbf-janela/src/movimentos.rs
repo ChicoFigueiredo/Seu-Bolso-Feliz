@@ -473,6 +473,7 @@ mod testes {
             conciliacao: conc,
             movimento: Some(m.clone()),
             mesma_conta: true,
+            automatica: false,
         }];
         let vm = montar(&EntradaDosMovimentos {
             conciliado: Some(Centavos(822_600)),

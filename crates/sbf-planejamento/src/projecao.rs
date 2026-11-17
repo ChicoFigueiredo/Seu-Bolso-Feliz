@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use crate::banco::{Seguida, valor_seguido};
 use crate::{
     Certeza, Competencia, Conciliacao, Data, EstadoDaOcorrencia, Excecao, ExcecaoGravada,
     Frequencia, IdOcorrencia, Natureza, Ocorrencia, Prazo, Recorrente, Versao,
@@ -48,6 +49,8 @@ struct Contexto<'a> {
     inicio: Option<Data>,
     excecoes: HashMap<&'a IdOcorrencia, Vec<&'a ExcecaoGravada>>,
     conciliacoes: HashMap<&'a IdOcorrencia, Vec<&'a Conciliacao>>,
+    /// Desconto em folha que segue a rubrica: o valor que a composição vigente dá a ele.
+    seguidas: &'a [Seguida],
 }
 
 impl<'a> Contexto<'a> {
@@ -56,6 +59,7 @@ impl<'a> Contexto<'a> {
         excecoes: &'a [ExcecaoGravada],
         conciliacoes: &'a [Conciliacao],
         inicio: Option<Data>,
+        seguidas: &'a [Seguida],
     ) -> Contexto<'a> {
         let mut por_excecao: HashMap<&IdOcorrencia, Vec<&ExcecaoGravada>> = HashMap::new();
         for e in excecoes
@@ -75,6 +79,7 @@ impl<'a> Contexto<'a> {
             inicio,
             excecoes: por_excecao,
             conciliacoes: por_conciliacao,
+            seguidas,
         }
     }
 }
@@ -158,7 +163,30 @@ pub fn projetar_competencias_desde(
     hoje: Data,
     inicio: Option<Data>,
 ) -> Vec<Ocorrencia> {
-    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio);
+    projetar_competencias_seguindo(
+        recorrente,
+        excecoes,
+        conciliacoes,
+        competencias,
+        hoje,
+        inicio,
+        &[],
+    )
+}
+
+/// [`projetar_competencias_desde`] com as rubricas que o desconto em folha segue (spec 12,
+/// D4): o previsto de um compromisso de desconto em folha vem da rubrica ligada na
+/// composição vigente do Salário; sem composição que o cite, vale o último valor (a versão).
+pub(crate) fn projetar_competencias_seguindo(
+    recorrente: &Recorrente,
+    excecoes: &[ExcecaoGravada],
+    conciliacoes: &[Conciliacao],
+    competencias: impl IntoIterator<Item = Competencia>,
+    hoje: Data,
+    inicio: Option<Data>,
+    seguidas: &[Seguida],
+) -> Vec<Ocorrencia> {
+    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio, seguidas);
     competencias
         .into_iter()
         .filter_map(|c| ocorrencia_em(recorrente, &contexto, c, hoje))
@@ -221,7 +249,10 @@ fn ocorrencia_em(
     let confirmadas: Vec<&&Conciliacao> = conciliacoes.iter().filter(|x| x.confirmada).collect();
     let conciliado = (!confirmadas.is_empty()).then(|| confirmadas.iter().map(|x| x.valor).sum());
 
-    let previsto = decisoes.valor_so_deste_mes.or(versao.valor);
+    let seguido = matches!(rec.natureza, Natureza::DescontoEmFolha)
+        .then(|| valor_seguido(contexto.seguidas, c))
+        .flatten();
+    let previsto = decisoes.valor_so_deste_mes.or(seguido).or(versao.valor);
     let vencimento = match decisoes.adiar {
         Some(Some(nova)) => nova,
         _ => vencimento_original,

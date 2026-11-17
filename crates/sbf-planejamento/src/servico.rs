@@ -9,6 +9,7 @@ use std::fmt;
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod extrato;
+mod salario;
 
 use crate::banco::{
     self, Banco, Dados, agora_unix, carregar_dados, carregar_um, de_json, de_rfc3339, json,
@@ -16,7 +17,7 @@ use crate::banco::{
 };
 use crate::conciliacao::normalizar;
 use crate::escrita::aplicar_na;
-use crate::projecao::{projetar_competencias_desde, projetar_desde};
+use crate::projecao::projetar_competencias_seguindo;
 use crate::resumo;
 use crate::{
     Alteracao, AlvoDoDocumento, Assinatura, Autor, Centavos, Competencia, Composicao, Conciliacao,
@@ -189,14 +190,17 @@ fn fotografar(
     let ocorrencias = if rec.excluido.is_some() || rec.arquivado {
         Vec::new()
     } else {
-        projetar_desde(
+        let seguidas = banco::ler_rubricas_seguidas(c)?
+            .remove(id)
+            .unwrap_or_default();
+        projetar_competencias_seguindo(
             &rec,
             &excecoes,
             &conciliacoes,
-            de,
-            de.somar_meses(i32::from(meses) - 1),
+            (0..i32::from(meses)).map(|i| de.somar_meses(i)),
             hoje,
             banco::ler_inicio(c)?,
+            &seguidas,
         )
     };
     Ok(Foto {
@@ -420,27 +424,36 @@ impl Planejamento for PlanejamentoSqlite {
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let no_periodo = candidatas(c_inicio, c_fim, excecoes);
             linhas.extend(
-                projetar_competencias_desde(
+                projetar_competencias_seguindo(
                     rec,
                     excecoes,
                     conciliacoes,
                     no_periodo,
                     hoje,
                     dados.inicio,
+                    dados.seguidas_de(&rec.id),
                 )
                 .into_iter()
                 .filter(|o| inicio <= o.vencimento && o.vencimento <= fim),
             );
             let antes = candidatas(c_antes, c_inicio, excecoes);
             atrasadas.extend(
-                projetar_competencias_desde(rec, excecoes, conciliacoes, antes, hoje, dados.inicio)
-                    .into_iter()
-                    .filter(|o| {
-                        o.vencimento < inicio
-                            && !o.suprimida()
-                            && matches!(o.natureza, Natureza::Saida)
-                            && o.devida_vencida(hoje)
-                    }),
+                projetar_competencias_seguindo(
+                    rec,
+                    excecoes,
+                    conciliacoes,
+                    antes,
+                    hoje,
+                    dados.inicio,
+                    dados.seguidas_de(&rec.id),
+                )
+                .into_iter()
+                .filter(|o| {
+                    o.vencimento < inicio
+                        && !o.suprimida()
+                        && matches!(o.natureza, Natureza::Saida)
+                        && o.devida_vencida(hoje)
+                }),
             );
         }
 
@@ -540,9 +553,15 @@ impl Planejamento for PlanejamentoSqlite {
             let excecoes = dados.excecoes_de(&rec.id);
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let comps = candidatas(inicio, ultimo, excecoes);
-            for o in
-                projetar_competencias_desde(rec, excecoes, conciliacoes, comps, hoje, dados.inicio)
-            {
+            for o in projetar_competencias_seguindo(
+                rec,
+                excecoes,
+                conciliacoes,
+                comps,
+                hoje,
+                dados.inicio,
+                dados.seguidas_de(&rec.id),
+            ) {
                 if o.suprimida() || o.estado == EstadoDaOcorrencia::Dispensada {
                     continue;
                 }
@@ -853,6 +872,21 @@ impl Planejamento for PlanejamentoSqlite {
         ocorrencia: &crate::IdOcorrencia,
     ) -> Resultado<Vec<crate::ConciliacaoComMovimento>> {
         extrato::conciliacoes_da_ocorrencia(self, ocorrencia)
+    }
+
+    fn baixas_pelo_contracheque(
+        &self,
+        competencia: Competencia,
+    ) -> Resultado<Vec<crate::BaixaPeloContracheque>> {
+        salario::baixas(self, competencia)
+    }
+
+    fn conciliacao_desfeita(
+        &self,
+        ocorrencia: &crate::IdOcorrencia,
+        movimento: &str,
+    ) -> Resultado<bool> {
+        banco::conciliacao_foi_desfeita(self.banco.conexao(), &ocorrencia.to_string(), movimento)
     }
 
     /// Para uma ocorrência, devolve também os documentos da regra (o recorrente): um
