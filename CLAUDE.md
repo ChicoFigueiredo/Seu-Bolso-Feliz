@@ -186,7 +186,7 @@ cargo run -p sbf -- --demonstracao   # X11/XWayland by default when DISPLAY exis
 cargo run --release -p sbf-inventario --example medir -- <copy.sqlite>  # timings on a COPY
 ```
 
-A CI do GitHub tem o job Rust (`.github/workflows/rust.yml`); ele baixa a bancada privada com o secret `BANCADA_TOKEN` (configurado por `scripts/desktop/configurar-token-da-bancada.sh`) e, sem o secret, avisa e pula o cargo.
+A CI do GitHub tem o job Rust (`.github/workflows/rust.yml`); ele baixa a bancada privada com o secret `BANCADA_DEPLOY_KEY` (chave privada de uma deploy key só de leitura do repo bancada) e, sem o secret, avisa e pula o cargo.
 
 Each `target/` is 7 to 18 GB and `/mnt/d` also holds the real vault: run `cargo clean`
 in worktrees you are done with. Tests never touch `/mnt/d/Chico/financas/`.

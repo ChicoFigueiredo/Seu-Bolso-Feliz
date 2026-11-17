@@ -3,9 +3,9 @@
 # O workspace depende por caminho de um repositório irmão PRIVADO
 # (`../bancada/crates/...`). O checkout só aceita `path` dentro do workspace do
 # runner, então o SBF vai para `sbf/` e a bancada para `bancada/`, lado a lado.
-# A bancada é baixada com o secret BANCADA_TOKEN (token fine-grained, só leitura
-# de conteúdo). Sem o secret, o job avisa e pula o cargo, sem falhar.
-# Para configurar: scripts/desktop/configurar-token-da-bancada.sh
+# A bancada é baixada com o secret BANCADA_DEPLOY_KEY: a chave privada de uma
+# deploy key SÓ DE LEITURA cadastrada no repositório bancada (vale só para ele).
+# Sem o secret, o job avisa e pula o cargo, sem falhar.
 name: Rust
 
 on:
@@ -27,16 +27,16 @@ jobs:
     name: Rust (fmt, clippy, testes, build)
     runs-on: ubuntu-latest
     env:
-      BANCADA_TOKEN: ${{ secrets.BANCADA_TOKEN }}
+      BANCADA_DEPLOY_KEY: ${{ secrets.BANCADA_DEPLOY_KEY }}
     steps:
-      - name: Verificar o token da bancada
+      - name: Verificar a chave da bancada
         id: token
         run: |
-          if [ -n "$BANCADA_TOKEN" ]; then
+          if [ -n "$BANCADA_DEPLOY_KEY" ]; then
             echo "tem=true" >> "$GITHUB_OUTPUT"
           else
             echo "tem=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Secret BANCADA_TOKEN ausente: passos de cargo pulados. Rode scripts/desktop/configurar-token-da-bancada.sh."
+            echo "::warning::Secret BANCADA_DEPLOY_KEY ausente: passos de cargo pulados."
           fi
 
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
         if: steps.token.outputs.tem == 'true'
         with:
           repository: ChicoFigueiredo/bancada
-          token: ${{ secrets.BANCADA_TOKEN }}
+          ssh-key: ${{ secrets.BANCADA_DEPLOY_KEY }}
           path: bancada
 
       - name: Dependências de sistema
