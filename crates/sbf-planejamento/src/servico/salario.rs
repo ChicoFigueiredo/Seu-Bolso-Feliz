@@ -95,11 +95,26 @@ pub(super) fn baixas(
         if composicao.desde != competencia {
             continue;
         }
+        // Várias rubricas podem seguir o mesmo compromisso (a mensalidade e um ajuste): cada uma
+        // é uma baixa, mas a diferença se mede pela soma, e só a primeira a carrega.
+        let mut ja_somados: Vec<&str> = Vec::new();
         for (indice, rubrica) in composicao.rubricas.iter().enumerate() {
             let (TipoDeRubrica::Desconto, Some(alvo)) = (rubrica.tipo, rubrica.recorrente.as_ref())
             else {
                 continue;
             };
+            let total_do_compromisso = Centavos(
+                composicao
+                    .rubricas
+                    .iter()
+                    .filter(|x| {
+                        x.tipo == TipoDeRubrica::Desconto && x.recorrente.as_ref() == Some(alvo)
+                    })
+                    .map(|x| x.valor.0)
+                    .sum(),
+            );
+            let primeira = !ja_somados.contains(&alvo.as_str());
+            ja_somados.push(alvo.as_str());
             let Ok(ocorrencias) = s.proximas(alvo, competencia, 1, hoje) else {
                 continue;
             };
@@ -117,8 +132,8 @@ pub(super) fn baixas(
                 .any(|x| x.ocorrencia == ocorrencia.id && x.movimento == movimento && x.confirmada);
             let diferenca = ocorrencia
                 .previsto
-                .map(|p| Centavos(rubrica.valor.0 - p.0))
-                .filter(|d| d.0 != 0);
+                .map(|p| Centavos(total_do_compromisso.0 - p.0))
+                .filter(|d| primeira && d.0 != 0);
             saida.push(BaixaPeloContracheque {
                 conciliacao: Conciliacao {
                     ocorrencia: ocorrencia.id.clone(),

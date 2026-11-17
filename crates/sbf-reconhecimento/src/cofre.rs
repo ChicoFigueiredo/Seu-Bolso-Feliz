@@ -30,6 +30,7 @@ use sbf_triagem::rodada::{
     ConfigDaRodada, Progresso, RastroDeFalhas, SituacaoDaRodada, configuracao_da_fila, rodar,
 };
 
+use crate::descontos::{propor_descontos, sugestao_de_baixa};
 use crate::salario::{
     ErroDoSalario, composicao_ja_vigente, ja_vinculado, recorrente_do_salario, valor_digitado,
 };
@@ -687,6 +688,7 @@ impl ReconhecedorDoCofre {
             digitado_depois: valor_digitado(&recorrente, c.pagamento.somar_meses(1)),
         };
         let marcacao = uso.eventuais_iniciais();
+        let uso_dos_descontos = uso.clone();
         let composicoes = uso.composicoes(&marcacao);
         let vinculado = ja_vinculado(&plan, &alvo, &estado.sha256);
         let vigentes: Vec<_> = composicoes
@@ -714,9 +716,21 @@ impl ReconhecedorDoCofre {
                 uso: Box::new(uso),
             });
         }
+        // Os descontos em folha (spec 12): os compromissos que faltam e a baixa dos que já
+        // estão ligados às rubricas.
+        match propor_descontos(&plan, &uso_dos_descontos) {
+            Ok(Some(s)) => sugestoes.push(s),
+            Ok(None) => {}
+            Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
+        }
         // O crédito não se adivinha pela data impressa no contracheque: se o extrato tem o
         // crédito, sugere-se conciliar com ele; senão, nada.
         match sugerir_conciliacao(&plan, &recorrente, c.pagamento, c.liquido) {
+            Ok(Some(s)) => sugestoes.push(s),
+            Ok(None) => {}
+            Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
+        }
+        match sugestao_de_baixa(&plan, c.pagamento, &estado.sha256) {
             Ok(Some(s)) => sugestoes.push(s),
             Ok(None) => {}
             Err(_) => return Situacao::Falhou("não deu para ler o planejamento".to_owned()),
