@@ -32,6 +32,7 @@ pub mod movimento;
 pub mod rastro;
 pub mod relacoes;
 pub mod relatorios;
+pub mod salario;
 pub mod visao_geral;
 pub mod vistas;
 
@@ -40,6 +41,9 @@ pub mod sugestao;
 
 // PDF protegido: alvos, regras, tentativas e pendência por falha.
 pub mod protegidos;
+
+// O texto extraído de um achado e o `canonical_fingerprint`.
+pub mod texto;
 
 // Manutenção pela linha de comando.
 pub mod manutencao;

@@ -4,7 +4,7 @@
  * O caso que motivou isto: a Caixa devolve 31 subcontas TODAS chamadas
  * "CAIXA". Sem o número, o usuário vê 31 cartões idênticos na tela Hoje e
  * nenhuma forma de saber qual é qual. Pior: existe corrente e poupança com o
- * MESMO número (poupança vinculada — ex.: 593889552-5), então nem o número
+ * MESMO número (poupança vinculada — ex.: 000000-1), então nem o número
  * sozinho basta — o subtipo entra no nome.
  *
  * O nome resultante vira `financial_products.name` na criação automática do

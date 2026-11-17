@@ -49,6 +49,9 @@ pub struct Ligacoes {
     pub pdf: bool,
     pub estante: bool,
     pub cofre: bool,
+    /// O planejamento (controle mensal) está ligado. O serviço em si mora em
+    /// [`Janela::planejamento`] (`Ligacoes` é `Copy`, não guarda `Box`).
+    pub planejamento: bool,
 }
 
 /// Um diálogo de Ação que pede dados.
@@ -129,7 +132,7 @@ pub struct Janela {
     relatorios: EstadoDosRelatorios,
     pub lote_atual: Option<Ref>,
     pub paineis_visiveis: Vec<PainelDoDock>,
-    pedidos: Vec<Pedido>,
+    pub(crate) pedidos: Vec<Pedido>,
     pub dialogo: Option<Dialogo>,
     pub mensagem: Option<Mensagem>,
     decisoes_da_sessao: Vec<IdDecisao>,
@@ -168,6 +171,22 @@ pub struct Janela {
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
+    /// O planejamento do controle mensal (spec 11). `None`: a área mostra o selo da fatia e
+    /// a janela abre onde sempre abriu.
+    pub planejamento: Option<crate::controle_ui::PlanejamentoLigado>,
+    /// O arrastar de arquivos para a janela e o reconhecimento deles.
+    pub reconhecimento: crate::reconhecimento::Reconhecimento,
+    /// O que o Controle mensal guarda entre quadros.
+    pub controle: crate::controle_ui::EstadoDoControle,
+    /// O que a janela lembra entre aberturas (zoom e o jeito do Controle mensal).
+    pub guardador: crate::preferencias_da_janela::Guardador,
+    /// A cópia mais recente das preferências da casca (tema, densidade, painéis...). Começa
+    /// com o que o arquivo tinha, para nunca gravar `None` por cima do guardado.
+    pub casca_guardada: Option<bancada_casca::Preferencias>,
+    /// Como a janela do sistema foi deixada (maximizada, tamanho, posição).
+    pub estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela,
+    /// A largura da lateral no último quadro (ou a guardada, antes de restaurar).
+    pub largura_da_lateral: Option<f32>,
 }
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
@@ -273,7 +292,95 @@ impl Janela {
             roteiros: crate::roteiros::Roteiros::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
+            planejamento: None,
+            reconhecimento: crate::reconhecimento::Reconhecimento::default(),
+            controle: crate::controle_ui::EstadoDoControle::novo(
+                sbf_planejamento::Data::hoje_em_sao_paulo(),
+            ),
+            guardador: crate::preferencias_da_janela::Guardador::default(),
+            casca_guardada: None,
+            estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela::default(),
+            largura_da_lateral: None,
         }
+    }
+
+    /// As preferências de agora: o zoom que o egui está usando e o jeito do Controle.
+    pub fn preferencias_atuais(
+        &self,
+        zoom: f32,
+    ) -> crate::preferencias_da_janela::PreferenciasDaJanela {
+        crate::preferencias_da_janela::PreferenciasDaJanela {
+            zoom: Some(zoom),
+            controle: self.controle.preferencias(),
+            casca: self.casca_guardada.clone(),
+            largura_da_lateral: self.largura_da_lateral,
+            janela: self.estado_da_janela,
+        }
+    }
+
+    /// Onde guardar as preferências: ao lado das das Ferramentas (pasta de dados do app,
+    /// fora do cofre). Sem Ferramentas ligadas (demonstração, capturas), nada é guardado.
+    pub fn arquivo_das_preferencias(&self) -> Option<std::path::PathBuf> {
+        self.ferramentas
+            .as_ref()?
+            .arquivo_de_preferencias()
+            .map(|a| a.with_file_name(crate::preferencias_da_janela::NOME_DO_ARQUIVO))
+    }
+
+    /// Lê o que foi guardado, restaura o Controle e devolve o zoom guardado (se valer).
+    /// Chame uma vez, quando o arquivo já puder ser decidido.
+    pub fn restaurar_preferencias(&mut self, arquivo: Option<std::path::PathBuf>) -> Option<f32> {
+        self.restaurar(arquivo).zoom_valido()
+    }
+
+    /// Como `restaurar_preferencias`, mas devolve tudo o que foi lido (a casca e a largura
+    /// da lateral também ficam guardadas aqui, para não serem sobrescritas por `None`).
+    pub fn restaurar(
+        &mut self,
+        arquivo: Option<std::path::PathBuf>,
+    ) -> crate::preferencias_da_janela::PreferenciasDaJanela {
+        let lidas = self.guardador.ligar(arquivo);
+        self.controle.aplicar_preferencias(&lidas.controle);
+        self.casca_guardada = lidas.casca.clone();
+        self.largura_da_lateral = lidas.largura_valida();
+        self.estado_da_janela = lidas.janela;
+        lidas
+    }
+
+    /// Liga o planejamento (o serviço real, ou o fictício da demonstração). O Controle
+    /// mensal passa a ser a primeira tela.
+    pub fn ligar_planejamento(&mut self, planejamento: Box<dyn sbf_planejamento::Planejamento>) {
+        self.planejamento = Some(crate::controle_ui::PlanejamentoLigado(planejamento));
+        self.ligacoes.planejamento = true;
+        let hoje = self.hoje_como_data();
+        self.controle = crate::controle_ui::EstadoDoControle::novo(hoje);
+        self.navegacao = Navegacao::nova(Destino::AreaFutura("controle"));
+    }
+
+    /// `hoje` (texto `AAAA-MM-DD`) como data; se o texto não serve, o relógio.
+    pub fn hoje_como_data(&self) -> sbf_planejamento::Data {
+        sbf_planejamento::Data::de_iso(&self.hoje)
+            .unwrap_or_else(sbf_planejamento::Data::hoje_em_sao_paulo)
+    }
+
+    /// O Controle mensal está no centro?
+    pub fn controle_no_centro(&self) -> bool {
+        self.planejamento.is_some() && *self.navegacao.atual() == Destino::AreaFutura("controle")
+    }
+
+    /// Se uma Ação do controle vale agora; senão o motivo.
+    pub fn controle_disponibilidade(
+        &self,
+        acao: crate::controle::AcaoDoControle,
+    ) -> Result<(), String> {
+        use crate::controle::AcaoDoControle as A;
+        if self.planejamento.is_none() {
+            return Err("O planejamento não está ligado.".into());
+        }
+        if !self.controle_no_centro() && !matches!(acao, A::Propostas) {
+            return Err("Abra o Controle mensal.".into());
+        }
+        crate::controle::disponibilidade(acao, &self.controle.contexto())
     }
 
     /// Liga a caixa de entrada e a edição (a real, ou a fictícia da demonstração).
@@ -433,6 +540,14 @@ impl Janela {
 
     /// O item que o dock mostra: a última linha clicada, ou a página aberta.
     pub fn foco(&self) -> Option<Ref> {
+        // No Controle mensal, o painel Prévia mostra o documento aberto no detalhe.
+        if self.controle_no_centro() {
+            return self
+                .controle
+                .documento_em_previa
+                .as_deref()
+                .map(crate::rubricas::ref_do_documento);
+        }
         self.centro
             .selecao
             .foco
@@ -988,6 +1103,18 @@ impl Janela {
                     );
                 }
             }
+            Destino::AreaFutura("controle") if self.planejamento.is_some() => {
+                if let Some(pl) = self.planejamento.as_ref() {
+                    let hoje = sbf_planejamento::Data::de_iso(&hoje)
+                        .unwrap_or_else(sbf_planejamento::Data::hoje_em_sao_paulo);
+                    crate::controle_ui::area(ui, pl.0.as_ref(), &mut self.controle, hoje, pedidos);
+                }
+            }
+            Destino::AreaFutura(crate::contas_ui::ROTA) if self.planejamento.is_some() => {
+                if let Some(pl) = self.planejamento.as_ref() {
+                    crate::contas_ui::area(ui, pl.0.as_ref(), &mut self.controle, pedidos);
+                }
+            }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
@@ -1024,6 +1151,25 @@ impl Janela {
 
     /// Um painel do dock.
     pub fn dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta, painel: PainelDoDock) {
+        // No Controle mensal, o Detalhe é o da linha escolhida na grade.
+        if painel == PainelDoDock::Detalhe && self.controle_no_centro() {
+            if let Some(pl) = self.planejamento.as_ref() {
+                let hoje = sbf_planejamento::Data::de_iso(&self.hoje)
+                    .unwrap_or_else(sbf_planejamento::Data::hoje_em_sao_paulo);
+                crate::controle_ui::detalhe_no_dock(
+                    ui,
+                    pl.0.as_ref(),
+                    &mut self.controle,
+                    hoje,
+                    &mut self.pedidos,
+                );
+            }
+            return;
+        }
+        if painel == PainelDoDock::Reconhecimento {
+            self.reconhecimento_ui(ui);
+            return;
+        }
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
@@ -1159,7 +1305,18 @@ impl Janela {
     }
 
     /// Os diálogos das Ações que pedem dados (corrigir, rejeitar, sinalizar, novo lote).
-    pub fn dialogos_ui(&mut self, ctx: &Context) {
+    pub fn dialogos_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
+        if let Some(pl) = self.planejamento.as_ref() {
+            let hoje = self.hoje_como_data();
+            crate::controle_ui::desenhar_dialogo(
+                ctx,
+                pl.0.as_ref(),
+                &mut self.controle,
+                hoje,
+                &mut self.pedidos,
+                consulta,
+            );
+        }
         let Some(mut dialogo) = self.dialogo.take() else {
             return;
         };
@@ -1489,6 +1646,7 @@ impl Janela {
                     });
                 }
                 Pedido::Caixa(p) => self.caixa_pedido(p),
+                Pedido::Controle(p) => self.controle_pedido(p),
                 Pedido::Alterar(pedido) => self.alterar(pedido),
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
                 Pedido::DescartarAlteracao(id) => self.descartar(&id),
@@ -1667,6 +1825,273 @@ impl Janela {
     fn ok(&mut self, texto: String) {
         self.cache.limpar();
         self.mensagem = Some(Mensagem { texto, erro: false });
+    }
+
+    /// Um pedido do Controle mensal: abre o diálogo, aplica com `Autor::Usuario` ou resolve
+    /// uma proposta do Claude. É aqui, fora do desenho, que o planejamento recebe escrita.
+    pub(crate) fn controle_pedido(&mut self, pedido: crate::controle_ui::PedidoDoControle) {
+        use crate::controle::AcaoDoControle as A;
+        use crate::controle_ui::{AbaLateral, PedidoDoControle as P, mensagem_de_erro};
+        use sbf_planejamento::{Alteracao, Autor, Conciliacao};
+        // A prévia de documento não escreve no planejamento.
+        match &pedido {
+            P::PreviaDoDocumento(sha) => {
+                self.controle.documento_em_previa = Some(sha.clone());
+                return;
+            }
+            P::DestacarDocumento(sha) => {
+                self.previas
+                    .destacar(&crate::rubricas::ref_do_documento(sha));
+                return;
+            }
+            P::RevisarContracheque(sha) => {
+                let caminho = match self.ferramentas.as_ref() {
+                    Some(f) => f.caminho_do_original(sha),
+                    None => Err(
+                        "Sem inventário ligado: não há cópia do acervo para revisar.".to_owned(),
+                    ),
+                };
+                match caminho {
+                    Ok(c) => self.revisar_contracheque(c),
+                    Err(e) => self.controle.mensagem = Some((e, true)),
+                }
+                return;
+            }
+            _ => {}
+        }
+        let hoje = self.hoje_como_data();
+        let ligador = self.ligador_de_salario();
+        let Some(pl) = self.planejamento.as_mut() else {
+            self.erro("O planejamento ainda não está ligado a esta janela.".to_owned());
+            return;
+        };
+        let plan = pl.0.as_mut();
+        let controle = &mut self.controle;
+        // O resultado de uma escrita: mensagem no topo e releitura.
+        let terminar =
+            |controle: &mut crate::controle_ui::EstadoDoControle,
+             r: Result<sbf_planejamento::Recibo, sbf_planejamento::ErroDoPlanejamento>,
+             ok: &str| {
+                controle.recarregar();
+                match r {
+                    Ok(_) => {
+                        controle.mensagem = Some((ok.to_owned(), false));
+                        true
+                    }
+                    Err(e) => {
+                        controle.mensagem = Some((mensagem_de_erro(&e), true));
+                        false
+                    }
+                }
+            };
+        match pedido {
+            P::Recarregar => controle.recarregar(),
+            P::FecharDialogo => controle.dialogo = None,
+            P::Acao(A::Propostas) => controle.abrir_lateral(AbaLateral::Propostas),
+            P::Acao(A::AdicionarCompromisso) => {
+                match crate::controle_ui::abrir_novo_compromisso(controle, &*plan, hoje) {
+                    Ok(d) => controle.novo = Some(d),
+                    Err(e) => controle.mensagem = Some((e, true)),
+                }
+            }
+            P::Acao(A::AnexarDocumento) => match crate::controle_ui::abrir_anexar(controle) {
+                Ok(s) => controle.anexar = Some(s),
+                Err(e) => controle.mensagem = Some((e, true)),
+            },
+            P::AplicarVarias(lista) => {
+                let pronto = match lista.last() {
+                    Some(Alteracao::CriarRecorrente { .. }) => "Compromisso criado.",
+                    Some(Alteracao::VincularDocumento { .. }) => "Documento anexado.",
+                    Some(Alteracao::DesvincularDocumento { .. }) => "Documento desvinculado.",
+                    Some(Alteracao::MapearConta {
+                        conta_do_extrato: Some(_),
+                        ..
+                    }) => "Par de conta confirmado.",
+                    Some(Alteracao::MapearConta { .. }) => "Par de conta desligado.",
+                    _ => "Feito.",
+                };
+                let mut r = Ok(());
+                let mut ultimo = None;
+                for alteracao in lista {
+                    match plan.aplicar(alteracao, Autor::Usuario) {
+                        Ok(recibo) => ultimo = Some(recibo),
+                        Err(e) => {
+                            r = Err(e);
+                            break;
+                        }
+                    }
+                }
+                controle.recarregar();
+                controle.mensagem = Some(match (r, ultimo) {
+                    (Err(e), _) => (mensagem_de_erro(&e), true),
+                    (Ok(()), _) => (pronto.to_owned(), false),
+                });
+            }
+            P::PreviaDoDocumento(_) | P::DestacarDocumento(_) | P::RevisarContracheque(_) => {}
+            P::Acao(A::BuscarNoExtrato) => {
+                let periodo = controle.navegador.periodo();
+                controle.recarregar();
+                controle.mensagem = Some(match plan.buscar_conciliacoes(&periodo, hoje) {
+                    Ok(0) => ("Nenhuma sugestão nova.".to_owned(), false),
+                    Ok(1) => ("1 sugestão nova.".to_owned(), false),
+                    Ok(n) => (format!("{n} sugestões novas."), false),
+                    Err(e) => (mensagem_de_erro(&e), true),
+                });
+            }
+            P::ConciliarManual {
+                conciliacao,
+                descricao,
+            } => {
+                let recorrente = conciliacao.ocorrencia.recorrente.clone();
+                let ligar = conciliacao.clone();
+                let r = plan.aplicar(Alteracao::Conciliar { conciliacao }, Autor::Usuario);
+                if terminar(controle, r, "Conciliação confirmada.") {
+                    ligar_o_salario(plan, ligador.as_deref(), controle, &ligar);
+                    // Sem assinatura, oferece reconhecer o compromisso pela descrição do banco.
+                    controle.oferta_de_assinatura =
+                        matches!(plan.assinatura(&recorrente), Ok(None)).then_some(
+                            crate::movimentos::OfertaDeAssinatura {
+                                recorrente,
+                                texto: descricao,
+                            },
+                        );
+                }
+            }
+            P::Desconciliar {
+                ocorrencia,
+                movimento,
+            } => {
+                let r = plan.aplicar(
+                    Alteracao::Desconciliar {
+                        ocorrencia,
+                        movimento,
+                    },
+                    Autor::Usuario,
+                );
+                terminar(
+                    controle,
+                    r,
+                    "Conciliação desfeita. Ela volta a ser uma sugestão.",
+                );
+            }
+            P::DefinirAssinatura {
+                recorrente,
+                assinatura,
+            } => {
+                // A versão é lida agora: a conciliação ou a edição de antes já a mudou.
+                let versao = plan.recorrente(&recorrente);
+                let r = match versao {
+                    Ok(Some(rec)) => plan.aplicar(
+                        Alteracao::DefinirAssinatura {
+                            recorrente,
+                            assinatura: assinatura.clone(),
+                            versao_base: rec.versao_do_registro,
+                        },
+                        Autor::Usuario,
+                    ),
+                    Ok(None) => Err(sbf_planejamento::ErroDoPlanejamento::NaoEncontrado(
+                        recorrente,
+                    )),
+                    Err(e) => Err(e),
+                };
+                let ok = if assinatura.is_some() {
+                    "Assinatura guardada."
+                } else {
+                    "Assinatura retirada."
+                };
+                if terminar(controle, r, ok) {
+                    controle.oferta_de_assinatura = None;
+                }
+            }
+            P::Acao(A::ConfirmarConciliacao) => {
+                let Some(o) = controle.linha_selecionada().cloned() else {
+                    return;
+                };
+                match plan.sugestao_de_conciliacao(&o.id) {
+                    Ok(Some(c)) => {
+                        let confirmada = Conciliacao {
+                            confirmada: true,
+                            ..c
+                        };
+                        let r = plan.aplicar(
+                            Alteracao::Conciliar {
+                                conciliacao: confirmada.clone(),
+                            },
+                            Autor::Usuario,
+                        );
+                        if terminar(controle, r, "Conciliação confirmada.") {
+                            ligar_o_salario(plan, ligador.as_deref(), controle, &confirmada);
+                        }
+                    }
+                    Ok(None) => {
+                        controle.mensagem =
+                            Some(("Não há sugestão de conciliação nesta linha.".into(), true));
+                    }
+                    Err(e) => controle.mensagem = Some((mensagem_de_erro(&e), true)),
+                }
+            }
+            P::Acao(a @ (A::Subir | A::Descer)) => {
+                let Some(o) = controle.linha_selecionada().cloned() else {
+                    return;
+                };
+                let vizinha = controle.vizinha_de(&o.id, a == A::Subir);
+                let Some(v) = vizinha else {
+                    controle.mensagem = Some(("Já está no limite do grupo.".into(), true));
+                    return;
+                };
+                let (Ok(Some(eu)), Ok(Some(outra))) = (
+                    plan.recorrente(&o.id.recorrente),
+                    plan.recorrente(&v.id.recorrente),
+                ) else {
+                    controle.mensagem =
+                        Some(("O compromisso não existe mais. Recarregue.".into(), true));
+                    return;
+                };
+                let [a1, a2] = crate::controle::trocar_prioridade(&eu, &outra);
+                let r = plan
+                    .aplicar(a1, Autor::Usuario)
+                    .and_then(|_| plan.aplicar(a2, Autor::Usuario));
+                terminar(controle, r, "Prioridade trocada.");
+            }
+            P::Acao(a) => match crate::controle_ui::abrir_dialogo(a, controle, &*plan, hoje) {
+                Ok(d) => controle.dialogo = Some(d),
+                Err(e) => controle.mensagem = Some((e, true)),
+            },
+            P::Aplicar(alteracao) => {
+                let r = plan.aplicar(*alteracao, Autor::Usuario);
+                let ok = terminar(controle, r, "Aplicado.");
+                // Com erro, o diálogo fecha também: a base ficou velha, o certo é reabrir
+                // depois de recarregar.
+                let _ = ok;
+                controle.dialogo = None;
+            }
+            P::ConfirmarProposta(id) => {
+                let r = plan.confirmar_proposta(&id);
+                terminar(controle, r, "Proposta confirmada e aplicada.");
+            }
+            P::RecusarProposta(id, motivo) => {
+                controle.recarregar();
+                controle.mensagem = Some(match plan.recusar_proposta(&id, &motivo) {
+                    Ok(()) => ("Proposta recusada.".to_owned(), false),
+                    Err(e) => (mensagem_de_erro(&e), true),
+                });
+            }
+        }
+    }
+
+    /// Põe a cópia do acervo de um contracheque na fila do Reconhecimento (a mesma entrada do
+    /// arrastar); o app mostra o painel quando `painel_pedido` está ligado.
+    pub fn revisar_contracheque(&mut self, caminho: std::path::PathBuf) {
+        if !self.reconhecimento.ligado() {
+            self.controle.mensagem =
+                Some((format!("{}.", crate::reconhecimento::NAO_LIGADO), true));
+            return;
+        }
+        self.soltar_arquivos(vec![caminho], None);
+        self.controle.mensagem = Some((
+            "Contracheque no Reconhecimento: confira as rubricas e confirme.".to_owned(),
+            false,
+        ));
     }
 
     fn erro(&mut self, texto: String) {
@@ -2735,6 +3160,24 @@ fn faixa_do_lote(
         });
     });
     ui.add_space(4.0);
+}
+
+/// Depois de uma conciliação confirmada de uma ocorrência com contracheque vinculado, liga o
+/// registro do salário ao crédito no inventário. Falha vira aviso discreto; a conciliação fica.
+fn ligar_o_salario(
+    plan: &dyn sbf_planejamento::Planejamento,
+    ligador: Option<&dyn crate::reconhecimento::LigadorDeSalario>,
+    controle: &mut crate::controle_ui::EstadoDoControle,
+    conciliacao: &sbf_planejamento::Conciliacao,
+) {
+    let Some(sha) =
+        crate::reconhecimento::contracheque_da_ocorrencia(plan, &conciliacao.ocorrencia)
+    else {
+        return;
+    };
+    if let Some(aviso) = crate::reconhecimento::ligar_ao_credito(ligador, &sha, conciliacao) {
+        controle.mensagem = Some((aviso.to_owned(), false));
+    }
 }
 
 #[cfg(test)]

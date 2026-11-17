@@ -13,6 +13,13 @@ da outra, nem na UI nem no código.
 A soma dos saldos das contas bancárias, neste instante. Não desconta nada.
 _Avoid_: saldo, saldo total, dinheiro
 
+**Dinheiro de passagem**:
+Dinheiro de terceiros que entra numa conta do usuário só para sair de novo, como as cotas
+de um bolão repassadas à lotérica. Fica num centro próprio, com entradas e saídas, e não
+é receita nem despesa. Está no disponível agora, mas o livre após compromissos desconta o
+que ainda não foi repassado.
+_Avoid_: receita, renda extra, reembolso
+
 **Livre após compromissos**:
 O disponível agora menos os compromissos já conhecidos e ainda não pagos. É uma
 estimativa e deve ser sinalizada como tal sempre que houver compromisso sem valor
@@ -95,6 +102,103 @@ Algo que se repete em intervalo previsível: assinatura, conta de consumo, parce
 receita fixa.
 _Avoid_: template recorrente, recurring template, série
 
+**Ocorrência**:
+Um recorrente num mês específico: a assinatura de janeiro/2027. Existe porque a regra diz
+que existe, sem ninguém precisar criá-la, e tem sempre a mesma identidade naquele mês.
+Enquanto não é paga, é um compromisso; sozinha, nunca é uma movimentação.
+_Avoid_: instância, lançamento futuro, parcela (parcela é de dívida)
+
+**Versão**:
+Os dados de um recorrente (valor, vencimento, conta, centro, prioridade) que valem a
+partir de uma data. Mudar algo "daqui para a frente" cria uma versão nova; as ocorrências
+anteriores continuam explicadas pela versão delas.
+_Avoid_: edição, revisão
+
+**Exceção**:
+Uma decisão sobre uma única ocorrência: adiar para outra data, dispensar, ou usar outro
+valor só naquele mês. Não muda a regra nem os outros meses. Dispensar não é pagar, e uma
+ocorrência adiada continua devida.
+_Avoid_: ajuste, override, correção pontual
+
+**Pausa**:
+Um intervalo em que o recorrente não gera ocorrências. A regra e o contrato com o
+fornecedor continuam, e uma cobrança já emitida no intervalo continua devida. Retomar
+encerra a pausa numa data.
+_Avoid_: suspensão, cancelamento, desativar
+
+**Cancelamento**:
+O fim de um recorrente a partir de uma data: nenhuma ocorrência depois dela. Não prova
+que o fornecedor aceitou cancelar nem extingue uma dívida real; isso só um documento
+comprova.
+_Avoid_: exclusão, pausa, encerrar
+
+**Pago informado**:
+O valor que o usuário diz ter pago numa ocorrência, sem prova bancária — a coluna "Valor
+Pago" da planilha. Fica a conferir até a ocorrência ser conciliada. Vazio quer dizer "não
+informado", nunca "não pago".
+_Avoid_: pago declarado, quitado, baixado
+
+**Em atraso**:
+A ocorrência cujo vencimento passou sem pagamento conhecido, e que continua devida. Não
+some do mês seguinte nem vira dispensada: aparece junto do mês corrente até ser paga,
+renegociada ou conciliada.
+_Avoid_: inadimplente, vencida e esquecida, perdida
+
+**Conciliada** (ocorrência):
+A ocorrência ligada à movimentação real que a pagou. É o único "pago" que entra como fato
+nos totais; pago informado sozinho, não. Quando três provas batem exatamente — o documento
+(o contracheque), o crédito no banco e a conta —, a ocorrência é conciliada sozinha e pode
+ser desfeita; com qualquer diferença, a ligação é só sugerida.
+_Avoid_: pago confirmado, liquidada
+
+**Desconto em folha**:
+O que o empregador retém do salário antes de depositar: consignação, previdência, plano
+de saúde. O **salário líquido** é o que de fato cai na conta, já sem esses descontos;
+contá-los de novo como saída da conta é dupla contagem. O contracheque do mês é a prova
+de que cada desconto foi feito. Cada desconto de consignação é a parcela de um contrato de
+empréstimo próprio.
+_Avoid_: débito em conta, parcela do salário
+
+**Empréstimo** (contrato):
+Uma dívida com contrato: número, valor contratado, taxa, sistema de amortização, prazo e a
+evolução. O consignado é pago por desconto em folha, uma parcela por contracheque; cada
+contrato é um empréstimo à parte, mesmo quando vários têm o mesmo nome no contracheque.
+_Avoid_: consignação (quando se fala do contrato), débito
+
+**Evolução** (de um empréstimo):
+A tabela parcela a parcela do contrato — amortização, juros e saldo devedor. O que o banco
+informou vale como fato; dali para frente, é calculada pela taxa e pelo sistema.
+_Avoid_: extrato do empréstimo, cronograma
+
+**Renovação**:
+Quando um contrato é quitado por um novo do mesmo credor, que leva o saldo devedor: o
+antigo fica quitado por renovação e o novo nasce ligado a ele.
+_Avoid_: refin, refinanciamento, novo empréstimo
+
+**Data de disponibilidade** e **data do crédito**:
+Duas datas da mesma entrada. A de disponibilidade é quando o dinheiro já pode ser usado; a
+do crédito é quando o banco registra o lançamento. Com feriado, um salário pode estar
+disponível num dia e ter o crédito registrado no dia útil seguinte.
+_Avoid_: data do salário, dia do pagamento
+
+**Grupo**:
+Como o usuário arruma o controle mensal no primeiro nível, do jeito da planilha: Essencial,
+Lar, Empréstimos, Parcial, Assinaturas. É só arrumação: não é categoria, nem centro, nem
+prioridade, e trocar uma linha de grupo não muda nada no livro-caixa.
+_Avoid_: categoria, seção, tipo
+
+**Prioridade**:
+A ordem em que as coisas são pagas, igual à ordem da planilha: o grupo de cima vem antes
+do de baixo, e dentro do grupo a linha de cima vem antes. Mudar a prioridade é mudar a
+posição, não escolher um rótulo.
+_Avoid_: essencialidade, importância, urgência, nível
+
+**Controle mensal**:
+A visão de um mês, civil ou ciclo, com todos os compromissos: o que se previu, o que se
+informou pago, o que está conciliado e o que falta conferir. Qualquer um dos próximos 360
+meses pode ser aberto, e o futuro só mostra o que as regras projetam.
+_Avoid_: planilha, orçamento, dashboard
+
 ## Documentos
 
 **Documento**:
@@ -133,6 +237,20 @@ _Avoid_: lançamento, transação, linha, item
 Um detalhe que compõe um registro sem ser um fato à parte — a parcela 3/10 de uma
 compra, o IOF que veio junto, cada rubrica de um contracheque.
 _Avoid_: item, sub-item, linha
+
+**Contracheque**:
+O documento do empregador que, para um mês de pagamento, lista as rubricas e o salário
+líquido. Declara um registro do tipo salário — o líquido — cujas rubricas são
+sub-registros; o crédito do banco é outro registro do mesmo fato. A data de crédito impressa
+nele não prova quando o dinheiro entrou: quem prova é o banco.
+_Avoid_: holerite, demonstrativo, folha
+
+**Rubrica**:
+Uma linha do contracheque: um provento ou um desconto, com código, competência e, nos
+descontos de contrato, a parcela. É **fixa** quando se repete todo mês, **eventual** quando
+vale só naquele (PLR, prêmio, adiantamento, retroativo) e **informativa** quando aparece no
+contracheque mas fica fora dos totais dele.
+_Avoid_: verba, item, linha do holerite
 
 **Conciliação**:
 O ato de reconhecer que dois registros — uma transação importada e um documento, ou

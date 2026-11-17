@@ -624,7 +624,10 @@ fn ver_texto_do_achado_vem_mascarado_por_padrao_e_inteiro_so_no_nivel_completo()
     // sem nível dito, o cliente é um destinatário novo: mascarado
     let v = c.nucleo.ver_texto_do_achado(&hash).unwrap();
     let t = v["texto"].as_str().unwrap();
-    assert!(!t.contains("123.456.789-09") && !t.contains("12345678901"), "{t}");
+    assert!(
+        !t.contains("123.456.789-09") && !t.contains("12345678901"),
+        "{t}"
+    );
     assert!(t.contains("•••") && t.contains("210,00"));
     // no nível completo (o usuário escolheu), o texto vem inteiro
     let e: Arc<dyn Embedder> = Arc::new(EmbedderFalso::novo());

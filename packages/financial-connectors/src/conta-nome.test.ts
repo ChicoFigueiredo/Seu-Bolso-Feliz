@@ -9,19 +9,19 @@ describe("nomeDeExibicaoDaConta", () => {
   });
 
   it("poupança vinculada com o MESMO número da corrente ganha nomes distintos", () => {
-    // Caso real: 593889552-5 existe como corrente E como poupança.
+    // Caso real: 000000-1 existe como corrente E como poupança.
     const corrente = nomeDeExibicaoDaConta({
       name: "CAIXA",
       subtype: "CHECKING_ACCOUNT",
-      number: "593889552-5",
+      number: "000000-1",
     });
     const poupanca = nomeDeExibicaoDaConta({
       name: "CAIXA",
       subtype: "SAVINGS_ACCOUNT",
-      number: "593889552-5",
+      number: "000000-1",
     });
-    expect(corrente).toBe("CAIXA · 593889552-5");
-    expect(poupanca).toBe("CAIXA Poupança · 593889552-5");
+    expect(corrente).toBe("CAIXA · 000000-1");
+    expect(poupanca).toBe("CAIXA Poupança · 000000-1");
     expect(corrente).not.toBe(poupanca);
   });
 

@@ -1,0 +1,85 @@
+                                       Mês / Ano de Pagamento                 CA/SR                                         Código de Lotação
+
+                                        10/2026                               MZ-MATRIZ                                     00 0000-0
+
+DEMONSTRATIVO DE PAGAMENTO
+
+Nome                                                                                                Data                   Matrícula
+FULANO DE TAL EXEMPLO                                                                               01/10/2026              c000000-0
+Unidade de Lotação                                                                                                         Sigla
+UNIDADE FICTICIA DE EXEMPLO                                                                                                 UFEXE
+Cargo                                                                                  Ref.          Unidade     Produto   Conta de Depósito
+CARGO FICTICIO                                                                         000           0           0           0-0
+Função de Confiança/Cargo em Comissão/Função Gratificada                                             Dep. PAI    SF-INSS    SF-CEF         Dep. IR
+FUNCAO FICTICIA                                                                                      0           0           0             0
+
+     Tipo                         Discriminação da Rubrica                            Competência               Prazo                Valor
+
+    1002        SALARIO PADRAO                                                            09/2026               01              R$ 412,10
+    2002        SALARIO PADRAO                                                            10/2026               00            R$ 6.181,55
+    1005        COMPL TEMP VARIAVEL AJUSTE MERCADO                                        09/2026               01              R$ 520,40
+    2005        COMPL TEMP VARIAVEL AJUSTE MERCADO                                        10/2026               00            R$ 7.806,33
+    1275        FUNCAO GRATIFICADA EFETIVA                                                09/2026               01              R$ 701,12
+    2275        FUNCAO GRATIFICADA EFETIVA                                                10/2026               00           R$ 10.516,90
+    4313        INSS CONTRIBUICAO                                                         10/2026               01              R$ 873,44
+    4325        IMPOSTO DE RENDA                                                          10/2026               99            R$ 6.123,40
+    4342        FUNCEF - CONTRIBUICAO REB2002                                             10/2026               99            R$ 1.422,71
+    4396        IMPOSTO DE RENDA SOBRE PLR                                                10/2026               99            R$ 3.104,55
+    4460        SAUDE CAIXA - MENSALIDADE                                                 10/2026               01              R$ 981,99
+    4460        SAUDE CAIXA - MENSALIDADE                                                 09/2026               01               R$ 42,10
+    4460        SAUDE CAIXA - MENSALIDADE                                                 10/2026               01              R$ 318,00
+    4491        CONTRIBUICAO NEGOCIAL PLR CONF                                            10/2026               00               R$ 18,20
+    4492        CONTRIBUICAO NEGOCIAL PLR SIND                                            10/2026               00              R$ 221,50
+    4493        CONTRIBUICAO NEGOCIAL RB CONF                                             10/2026               00               R$ 13,10
+    4494        CONTRIBUICAO NEGOCIAL RB SIND                                             10/2026               00              R$ 162,20
+    4497        CONTRIBUICAO NEGOCIAL PLR FED                                             10/2026               00                R$ 9,10
+    4498        CONTRIBUICAO NEGOCIAL RB FED                                              10/2026               00                R$ 6,50
+   21041        AJUDA DE CUSTO TRABALHO REMOTO                                            10/2026               00               R$ 95,00
+   21230        PAGAMENTO PLR                                                             10/2026               01           R$ 14.500,00
+   11264        PREMIO CAIXA                                                              10/2026               01            R$ 2.500,00
+   43100        ADIANTAMENTO DE SALARIO                                                   10/2026               01           R$ 12.000,00
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 287,11
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 312,90
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13            R$ 1.457,27
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 488,90
+
+Salário Bruto                         Valor Descontos                         Salário Liquido                    Excesso de Débito
+                     R$ 43.233,40                          R$ 18.628,18                           R$ 24.605,22                                   R$ 0,00
+Liquido creditado em 13/10/2026                                               Liquido creditado em 13/10/2026
+                                                                                                                                             00000
+Marg. Consignável 5% Cartões          Marg. Consignável 35% Empréstimos       Marg. Consignável 40% Limite       Dep. FGTS Mês Anterior
+                        R$ 1.500,00                                     R$ 0,00                       R$ 1.500,00                          R$ 1.200,00
+Salário Contrib. INSS                 Sal. Contrib. Prev. Privada             Base Cálculo Imposto Renda         Valor Remuneração Base
+                        R$ 8.157,41                           R$ 15.000,00                           R$ 18.000,00                         R$ 24.000,00
+                                       Mês / Ano de Pagamento                 CA/SR                                         Código de Lotação
+
+                                        10/2026                               MZ-MATRIZ                                     00 0000-0
+
+DEMONSTRATIVO DE PAGAMENTO
+
+Nome                                                                                                Data                   Matrícula
+FULANO DE TAL EXEMPLO                                                                               01/10/2026              c000000-0
+Unidade de Lotação                                                                                                         Sigla
+UNIDADE FICTICIA DE EXEMPLO                                                                                                 UFEXE
+Cargo                                                                                  Ref.          Unidade     Produto   Conta de Depósito
+CARGO FICTICIO                                                                         000           0           0           0-0
+Função de Confiança/Cargo em Comissão/Função Gratificada                                             Dep. PAI    SF-INSS    SF-CEF         Dep. IR
+FUNCAO FICTICIA                                                                                      0           0           0             0
+
+     Tipo                         Discriminação da Rubrica                            Competência               Prazo                Valor
+
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 173,20
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 501,10
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 225,00
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               13              R$ 370,11
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               14            R$ 1.100,00
+   43355        EMPRESTIMO E-CONSIGNADO                                                   10/2026               14              R$ 415,80
+
+Salário Bruto                         Valor Descontos                         Salário Liquido                    Excesso de Débito
+                     R$ 43.233,40                          R$ 18.628,18                           R$ 24.605,22                                   R$ 0,00
+Liquido creditado em 13/10/2026                                               Liquido creditado em 13/10/2026
+                                                                                                                                             00000
+Marg. Consignável 5% Cartões          Marg. Consignável 35% Empréstimos       Marg. Consignável 40% Limite       Dep. FGTS Mês Anterior
+                        R$ 1.500,00                                     R$ 0,00                       R$ 1.500,00                          R$ 1.200,00
+Salário Contrib. INSS                 Sal. Contrib. Prev. Privada             Base Cálculo Imposto Renda         Valor Remuneração Base
+                        R$ 8.157,41                           R$ 15.000,00                           R$ 18.000,00                         R$ 24.000,00

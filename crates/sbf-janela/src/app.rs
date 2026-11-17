@@ -78,6 +78,12 @@ pub struct AppSbf {
     paineis_visiveis: BTreeMap<String, bool>,
     tema_atual: String,
     textos: Textos,
+    /// O zoom do egui no último quadro (o Ctrl + e o Ctrl − mudam ele sem avisar a casca).
+    zoom_visto: f32,
+    /// Um zoom guardado que a casca ainda não aplicou: enquanto isso, nada é gravado.
+    zoom_restaurando: Option<f32>,
+    /// As preferências da casca lidas do arquivo, à espera de o integrador aplicá-las.
+    casca_a_aplicar: Option<Preferencias>,
 }
 
 impl std::fmt::Debug for AppSbf {
@@ -93,6 +99,9 @@ const PREFIXO_FONTE: &str = "inicio.fonte.";
 const PREFIXO_FONTE_TODAS: &str = "inicio.fonte-todas";
 const PREFIXO_TEMA: &str = "exibir.tema.";
 
+/// O id (egui) do painel lateral que a casca desenha.
+const ID_DA_LATERAL: &str = "casca.dock";
+
 /// O id do painel do dock na casca.
 pub fn id_do_painel(p: PainelDoDock) -> &'static str {
     match p {
@@ -101,6 +110,7 @@ pub fn id_do_painel(p: PainelDoDock) -> &'static str {
         PainelDoDock::Texto => "texto",
         PainelDoDock::Historico => "historico",
         PainelDoDock::Previa => "previa",
+        PainelDoDock::Reconhecimento => "reconhecimento",
     }
 }
 
@@ -151,10 +161,7 @@ impl AppSbf {
             .map(|p| {
                 (
                     id_do_painel(p).to_owned(),
-                    matches!(
-                        p,
-                        PainelDoDock::Detalhe | PainelDoDock::Previa | PainelDoDock::Historico
-                    ),
+                    matches!(p, PainelDoDock::Detalhe | PainelDoDock::Previa),
                 )
             })
             .collect();
@@ -167,7 +174,135 @@ impl AppSbf {
             paineis_visiveis,
             tema_atual: tema::TEMA_PADRAO.to_owned(),
             textos: Textos::pt_br(),
+            zoom_visto: 1.0,
+            zoom_restaurando: None,
+            casca_a_aplicar: None,
         }
+    }
+
+    /// Lembra entre aberturas o zoom e o jeito do Controle mensal. Roda a cada quadro do
+    /// centro; só toca o disco quando algo mudou.
+    fn guardar_preferencias(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        let j = self.janela.get_mut();
+        if !j.guardador.resolvido() {
+            // Sem as Ferramentas (demonstração, capturas) não há pasta de dados: nada a guardar.
+            if j.ferramentas.is_none() {
+                return;
+            }
+            let arquivo = j.arquivo_das_preferencias();
+            let lidas = j.restaurar(arquivo);
+            let guardado = lidas.zoom_valido();
+            self.casca_a_aplicar = lidas.casca_para_aplicar();
+            if let Some(l) = lidas.largura_valida() {
+                // A casca lê este estado ao desenhar a lateral no próximo quadro.
+                ctx.data_mut(|d| {
+                    d.insert_persisted(
+                        egui::Id::new(ID_DA_LATERAL),
+                        egui::containers::panel::PanelState {
+                            outer_rect: egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(l, 0.0),
+                            ),
+                        },
+                    );
+                });
+                ctx.request_repaint();
+                // Neste quadro o estado ainda pode ser o de fábrica: só lê a partir do próximo.
+                self.zoom_visto = zoom;
+                if let Some(z) = guardado
+                    && (z - zoom).abs() > 1e-3
+                {
+                    self.zoom_restaurando = Some(z);
+                    bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(z));
+                }
+                return;
+            }
+            self.zoom_visto = zoom;
+            if let Some(z) = guardado
+                && (z - zoom).abs() > 1e-3
+            {
+                self.zoom_restaurando = Some(z);
+                bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(z));
+                ctx.request_repaint();
+                return;
+            }
+        }
+        if let Some(z) = self.zoom_restaurando {
+            if (zoom - z).abs() > 1e-3 {
+                ctx.request_repaint();
+                return;
+            }
+            self.zoom_restaurando = None;
+            self.zoom_visto = zoom;
+        }
+        if (zoom - self.zoom_visto).abs() > 1e-3 {
+            // O Ctrl + e o Ctrl − mexem no zoom do egui; a casca precisa saber, senão ela o
+            // desfaz na próxima troca de tema.
+            bancada_casca::pedir(ctx, bancada_casca::Pedido::Escala(zoom));
+            self.zoom_visto = zoom;
+        }
+        if let Some(estado) =
+            egui::containers::panel::PanelState::load(ctx, egui::Id::new(ID_DA_LATERAL))
+            && let Some(l) =
+                crate::preferencias_da_janela::limitar_largura(estado.outer_rect.width())
+        {
+            j.largura_da_lateral = Some(l);
+        }
+        let (obs, botao) = ctx.input(|i| {
+            let v = i.viewport();
+            (
+                crate::preferencias_da_janela::Observacao {
+                    maximizada: v.maximized.unwrap_or(false),
+                    tela_cheia: v.fullscreen.unwrap_or(false),
+                    minimizada: v.minimized.unwrap_or(false),
+                    tamanho: v.inner_rect.map(|r| [r.width(), r.height()]),
+                    posicao: v.outer_rect.map(|r| [r.min.x, r.min.y]),
+                },
+                i.pointer.any_down(),
+            )
+        });
+        j.estado_da_janela = j.estado_da_janela.depois_de(&obs);
+        let atual = j.preferencias_atuais(zoom);
+        let gravou = j
+            .guardador
+            .quadro_com_espera(&atual, std::time::Instant::now(), botao);
+        if j.guardador.tem_pendente() {
+            // Sem entrada nenhuma não vem outro quadro: peça o da hora de gravar.
+            ctx.request_repaint_after(crate::preferencias_da_janela::ESPERA_DE_GRAVACAO);
+        }
+        if gravou.is_err() {
+            j.mensagem = Some(Mensagem {
+                texto: "Não deu para guardar as preferências da janela.".to_owned(),
+                erro: true,
+            });
+        }
+    }
+
+    /// O arrastar de arquivos: lê o input do quadro, e ao soltar faz o painel Reconhecimento
+    /// aparecer (a casca alterna painéis; só pede quando ele está fechado).
+    fn arrastar(&mut self, ctx: &egui::Context) {
+        let j = self.janela.get_mut();
+        j.arrastar_ui(ctx);
+        if std::mem::take(&mut j.reconhecimento.painel_pedido) {
+            let id = id_do_painel(PainelDoDock::Reconhecimento);
+            self.paineis_visiveis.insert(id.to_owned(), true);
+            // Mostra o painel E o deixa como a aba ativa da pilha (antes ele só aparecia,
+            // atrás da aba aberta). O pedido é idempotente.
+            bancada_casca::mostrar_painel(ctx, id);
+        }
+    }
+
+    /// As preferências da casca lidas do arquivo, uma vez: o integrador as passa a
+    /// `Casca::aplicar_preferencias` depois de desenhar.
+    pub fn tomar_preferencias_da_casca(&mut self) -> Option<Preferencias> {
+        self.casca_a_aplicar.take()
+    }
+
+    /// O app vai fechar: grava as preferências que ainda esperavam a hora (mexer e fechar em
+    /// menos de um segundo não perde a mudança).
+    pub fn ao_fechar(&mut self) {
+        let _ = self.janela.get_mut().guardador.descarregar();
     }
 
     /// A janela (estado da interface), para testes e para o integrador.
@@ -407,6 +542,26 @@ impl AppCasca for AppSbf {
             drop(j);
             v.push(a);
         }
+        // As Ações do Controle mensal (só com o planejamento ligado).
+        if self.janela.borrow().planejamento.is_some() {
+            for d in &crate::controle::ACOES_DO_CONTROLE {
+                let disp = self.janela.borrow().controle_disponibilidade(d.id);
+                let mut a = AcaoCasca::nova(d.codigo, d.rotulo)
+                    .icone(d.icone)
+                    .dica(d.dica)
+                    .keytip(d.keytip)
+                    .atalho(AtalhoCasca {
+                        ctrl: d.atalho.ctrl,
+                        alt: d.atalho.alt,
+                        shift: d.atalho.shift,
+                        tecla: d.atalho.tecla,
+                    });
+                if let Err(m) = disp {
+                    a = a.desabilitada(m);
+                }
+                v.push(a);
+            }
+        }
         // As Ações geradas dos dados: uma por conexão (filtro) e uma por tema.
         let fonte_atual = self.janela.borrow().fonte.clone();
         v.push(
@@ -485,6 +640,22 @@ impl AppCasca for AppSbf {
                 a = a.grupo(Grupo::novo(id_grupo, *g, ids_do_grupo));
             }
             abas.push(a);
+        }
+        if self.janela.borrow().planejamento.is_some() {
+            let mut a = AbaCasca::nova("controle", "Controle", "M");
+            let mut grupos: Vec<(&str, Vec<&str>)> = Vec::new();
+            for d in &crate::controle::ACOES_DO_CONTROLE {
+                match grupos.iter_mut().find(|(g, _)| *g == d.grupo) {
+                    Some((_, ids)) => ids.push(d.codigo),
+                    None => grupos.push((d.grupo, vec![d.codigo])),
+                }
+            }
+            for (g, ids_do_grupo) in &grupos {
+                let id_grupo = format!("controle.{}", g.to_lowercase().replace(' ', "-"));
+                a = a.grupo(Grupo::novo(id_grupo, *g, ids_do_grupo));
+            }
+            // A aba do Controle vai primeiro: é a primeira tela.
+            abas.insert(0, a);
         }
         abas
     }
@@ -574,7 +745,7 @@ impl AppCasca for AppSbf {
                 item
             })
             .collect();
-        vec![
+        let mut grupos = vec![
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", futuras(&["caixa"])),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
@@ -595,7 +766,25 @@ impl AppCasca for AppSbf {
                 v.extend(futuras(&["destinatarios"]));
                 v
             }),
-        ]
+        ];
+        // O Controle mensal é o primeiro grupo quando o planejamento está ligado.
+        if self.janela.borrow().planejamento.is_some() {
+            grupos.insert(
+                0,
+                GrupoNavegacao::novo(
+                    "Controle",
+                    vec![
+                        ItemNavegacao::novo("controle", "Controle mensal", "calendar_month"),
+                        ItemNavegacao::novo(
+                            crate::contas_ui::ROTA,
+                            "Contas do planejamento",
+                            "account_balance",
+                        ),
+                    ],
+                ),
+            );
+        }
+        grupos
     }
 
     fn destinos(&self) -> Vec<DestinoPaleta> {
@@ -636,6 +825,9 @@ impl AppCasca for AppSbf {
     }
 
     fn rota_inicial(&self) -> Rota {
+        if self.janela.borrow().planejamento.is_some() {
+            return Rota::nova(Destino::AreaFutura("controle").rota());
+        }
         Rota::nova(Destino::Area(Area::VisaoGeral).rota())
     }
 
@@ -679,6 +871,10 @@ impl AppCasca for AppSbf {
             );
             return;
         };
+        if local == Local::Centro {
+            self.guardar_preferencias(&ctx);
+            self.arrastar(&ctx);
+        }
         let AppSbf {
             janela,
             consulta,
@@ -690,7 +886,7 @@ impl AppCasca for AppSbf {
             Local::Centro => {
                 janela.mensagem_ui(ui);
                 janela.desenhar_destino(ui, consulta.as_ref(), &destino, None);
-                janela.dialogos_ui(&ctx);
+                janela.dialogos_ui(&ctx, consulta.as_ref());
                 janela.ferramentas_ui(&ctx);
                 janela.previas_ui(&ctx, consulta.as_ref());
             }
@@ -716,7 +912,15 @@ impl AppCasca for AppSbf {
                     _ => 0,
                 };
                 let mut d = PainelDock::novo(id_do_painel(p), p.titulo(), pilha).icone(p.icone());
-                if matches!(p, PainelDoDock::Origens | PainelDoDock::Texto) {
+                // O Histórico de decisões abre fechado: o Detalhe do Controle mensal (tabelas
+                // de rubricas, documentos) precisa da altura, e `Ver decisões` o abre.
+                if matches!(
+                    p,
+                    PainelDoDock::Origens
+                        | PainelDoDock::Texto
+                        | PainelDoDock::Historico
+                        | PainelDoDock::Reconhecimento
+                ) {
                     d = d.escondido();
                 }
                 d
@@ -969,6 +1173,15 @@ impl AppCasca for AppSbf {
             bancada_casca::pedir(ctx, bancada_casca::Pedido::Tema(t.to_owned()));
             return;
         }
+        if let Some(a) = crate::controle::acao_do_codigo(id) {
+            self.janela
+                .get_mut()
+                .pedir(crate::navegacao::Pedido::Controle(
+                    crate::controle_ui::PedidoDoControle::Acao(a),
+                ));
+            self.processar(ctx);
+            return;
+        }
         let Some(acao) = acao_do_codigo(id) else {
             return;
         };
@@ -1025,6 +1238,7 @@ impl AppCasca for AppSbf {
                     Some("triagem")
                 }
                 Destino::Item(r) if r.tipo == Tipo::Lote => Some("lotes"),
+                Destino::AreaFutura("controle" | crate::contas_ui::ROTA) => Some("controle"),
                 _ => None,
             };
             if let Some(aba) = aba {
@@ -1035,6 +1249,10 @@ impl AppCasca for AppSbf {
     }
 
     fn ao_mudar_preferencias(&mut self, preferencias: &Preferencias) {
+        // Enquanto as lidas esperam para ser aplicadas, o que chega é o de fábrica.
+        if self.casca_a_aplicar.is_none() {
+            self.janela.get_mut().casca_guardada = Some(preferencias.clone());
+        }
         self.paineis_visiveis = preferencias.paineis_visiveis.clone();
         self.tema_atual = preferencias.tema.clone();
     }

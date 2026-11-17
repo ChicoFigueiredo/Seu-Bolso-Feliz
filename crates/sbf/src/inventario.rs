@@ -104,6 +104,20 @@ impl AppDoInventario {
                 };
                 let mut janela = Janela::nova();
                 janela.ligacoes.cofre = true;
+                // O controle mensal (spec 11): o planejamento do cofre, quando já existe.
+                let arquivo_do_plano = self.pasta.join("planejamento.sqlite");
+                if arquivo_do_plano.exists() {
+                    match sbf_planejamento::Banco::abrir(&arquivo_do_plano) {
+                        Ok(banco) => janela.ligar_planejamento(Box::new(
+                            sbf_planejamento::PlanejamentoSqlite::novo(
+                                banco,
+                                crate::mcp::saldos_do_cofre(&self.pasta),
+                            )
+                            .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
+                        )),
+                        Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
+                    }
+                }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());
                 // Só lê o estado: não pede senha. Se o keyring travar, a barra mostra "—".
@@ -127,6 +141,13 @@ impl AppDoInventario {
                 let mut janela_chaveiro_para_perguntar = f.chaveiro.clone();
                 let chaves_da_ia = f.chaveiro.clone();
                 let chaveiro_dos_roteiros = f.chaveiro.clone();
+                // Arrastar documento (spec 11): o reconhecedor do cofre. A IA entra sozinha só
+                // quando os leitores locais não reconhecem; sem IA montada, segue sem ela.
+                let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
+                    .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
+                if let Ok(r) = reconhecedor {
+                    janela.ligar_reconhecedor(std::sync::Arc::new(r));
+                }
                 janela.ferramentas = Some(f);
                 // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
                 // usuário. Nada roda até você clicar em Executar ou em Gravar novo.

@@ -178,7 +178,11 @@ pub fn iso_de(t: SystemTime) -> String {
     )
 }
 
-fn sha256_do_arquivo(caminho: &Path) -> std::io::Result<String> {
+/// O SHA-256 hex do arquivo, lido em blocos de 1 MiB (nunca o arquivo inteiro na memória).
+///
+/// # Errors
+/// Falha de leitura.
+pub fn sha256_do_arquivo(caminho: &Path) -> std::io::Result<String> {
     let mut f = std::fs::File::open(caminho)?;
     let mut h = Sha256::new();
     let mut buf = vec![0_u8; 1 << 20];
@@ -834,6 +838,141 @@ pub fn indexar_arquivo(
         &mut BTreeMap::new(),
         &mut Vec::new(),
     )
+}
+
+/// A fonte dos arquivos que o usuário solta na janela.
+pub const FONTE_ARRASTADO: &str = "arrastado";
+
+/// O que [`registrar_arrastado`] fez.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Arrastado {
+    /// O achado não existia e foi criado agora.
+    pub achado_novo: bool,
+    /// A cópia ao acervo foi feita agora.
+    pub copiado_agora: bool,
+    /// `acervo/ab/<hash>.<ext>`, relativo ao cofre; `None` se o arquivo passa do limite de
+    /// cópia ([`LIMITE_COPIA_BYTES`]) ou a cópia falhou.
+    pub caminho_acervo: Option<String>,
+}
+
+/// Registra **um** arquivo que o usuário soltou na janela: achado (camada A), origem na
+/// fonte [`FONTE_ARRASTADO`] e cópia ao acervo do cofre. `hash` é o SHA-256 que quem chama já
+/// calculou ([`sha256_do_arquivo`]).
+///
+/// Soltar é uma decisão explícita: diferente de [`indexar_arquivo`], nenhuma regra de área
+/// (`ignorar`, camada C, extensão que não é candidata) impede o registro nem a cópia. O
+/// original **fica onde está**; só se escreve dentro do cofre. Se o achado já existe sem
+/// cópia, copia agora; se já tem, não toca em nada. A cópia só vale se o conteúdo dela tem o
+/// `hash` (o arquivo pode ter mudado entre o cálculo e a cópia).
+///
+/// Quem chama garante que `caminho` não está dentro do cofre.
+///
+/// # Errors
+/// Falha do banco ou da leitura do arquivo. Erro só de cópia não é `Err`: o achado fica
+/// registrado e `caminho_acervo` vem `None`.
+pub fn registrar_arrastado(
+    conn: &Connection,
+    cofre: &Path,
+    caminho: &Path,
+    hash: &str,
+) -> Resultado<Arrastado> {
+    let meta = std::fs::metadata(caminho)?;
+    if !meta.is_file() {
+        return Err(std::io::Error::other("não é um arquivo").into());
+    }
+    let tamanho = meta.len();
+    let tamanho_i = i64::try_from(tamanho).unwrap_or(i64::MAX);
+    let nome = caminho
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = extensao_de(&nome);
+    let texto = caminho.to_string_lossy().into_owned();
+    conn.execute(
+        "INSERT OR IGNORE INTO fonte (id, tipo, descricao, raiz, escopo)
+         VALUES (?1, 'app', 'Arquivos soltos na janela', ?2, 'dentro')",
+        params![FONTE_ARRASTADO, cofre.to_string_lossy()],
+    )?;
+    let varredura_id = abrir_varredura_do_vigia(conn, FONTE_ARRASTADO, cofre)?;
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let gravado =
+        (|| -> Resultado<(bool, Option<String>)> {
+            let existente: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT caminho_acervo FROM achado WHERE content_hash = ?1",
+                    [hash],
+                    |l| l.get(0),
+                )
+                .optional()?;
+            if existente.is_none() {
+                conn.execute(
+                "INSERT INTO achado (content_hash, file_size_bytes, mime_type, extensao, camada)
+                 VALUES (?1, ?2, ?3, ?4, 'A')",
+                params![hash, tamanho_i, mime(&ext), (!ext.is_empty()).then_some(&ext)],
+            )?;
+            } else {
+                conn.execute(
+                    "UPDATE achado SET camada = 'A' WHERE content_hash = ?1 AND camada = 'B'",
+                    [hash],
+                )?;
+            }
+            let mtime = meta.modified().map_or_else(|_| iso_de(UNIX_EPOCH), iso_de);
+            conn.execute(
+                "INSERT OR IGNORE INTO origem (content_hash, fonte_id, varredura_id, origin_type,
+               origin_key, local_filepath, local_mtime, filename, file_size_bytes)
+             VALUES (?1, ?2, ?3, 'local_file', ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    hash,
+                    FONTE_ARRASTADO,
+                    varredura_id,
+                    format!("local:{texto}:{}", mtime_ms(&meta)),
+                    texto,
+                    mtime,
+                    nome,
+                    tamanho_i
+                ],
+            )?;
+            Ok((existente.is_none(), existente.flatten()))
+        })();
+    let (achado_novo, acervo_atual) = match gravado {
+        Ok(v) => {
+            conn.execute_batch("COMMIT")?;
+            v
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(e);
+        }
+    };
+    if acervo_atual.is_some() || tamanho > LIMITE_COPIA_BYTES {
+        return Ok(Arrastado {
+            achado_novo,
+            copiado_agora: false,
+            caminho_acervo: acervo_atual,
+        });
+    }
+    let nucleo = Nucleo {
+        conn,
+        cofre,
+        fonte: FONTE_ARRASTADO,
+        varredura_id,
+    };
+    let relativo = caminho_no_acervo(hash, &ext);
+    let mut copiou = nucleo.copiar(caminho, hash, &ext, tamanho, &meta).is_ok();
+    if copiou && !sha256_do_arquivo(&cofre.join(&relativo)).is_ok_and(|h| h == hash) {
+        // O arquivo mudou entre o hash e a cópia: a cópia não pode ficar sob este hash.
+        let _ = std::fs::remove_file(cofre.join(&relativo));
+        conn.execute(
+            "UPDATE achado SET caminho_acervo = NULL WHERE content_hash = ?1",
+            [hash],
+        )?;
+        copiou = false;
+    }
+    Ok(Arrastado {
+        achado_novo,
+        copiado_agora: copiou,
+        caminho_acervo: copiou.then_some(relativo),
+    })
 }
 
 /// A varredura que agrega o que o vigia indexa (etapa `E1`, responsável `sbf-vigia`). Uma por
