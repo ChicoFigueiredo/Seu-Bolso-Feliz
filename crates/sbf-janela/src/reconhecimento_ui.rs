@@ -29,6 +29,8 @@ use sbf_inventario::consulta::Area;
 enum Pedido {
     Confirmar(usize, usize),
     Ignorar(usize, usize),
+    /// Desfaz a conciliação que a regra fez sozinha.
+    Desfazer(usize, usize),
     /// (cartão, sugestão, rubrica): troca a rubrica entre fixa e só deste mês.
     AlternarEventual(usize, usize, usize),
     Cancelar(usize),
@@ -123,6 +125,7 @@ impl Janela {
             match pedido {
                 Pedido::Confirmar(c, s) => self.confirmar_sugestao(c, s),
                 Pedido::Ignorar(c, s) => self.ignorar_sugestao(c, s),
+                Pedido::Desfazer(c, s) => self.desfazer_automatica(c, s),
                 Pedido::AlternarEventual(c, s, r) => self.alternar_eventual(c, s, r),
                 Pedido::Cancelar(c) => self.cancelar_reconhecimento(c),
                 Pedido::Limpar => self.limpar_reconhecimento(),
@@ -452,9 +455,14 @@ fn sugestao(
             pequeno(
                 ui,
                 format!(
-                    "Crédito de {} em {}. Confirmar liga o Salário do mês a ele.",
+                    "Crédito de {} em {}. {}",
                     reais(conciliacao.valor),
-                    data_texto(conciliacao.data)
+                    data_texto(conciliacao.data),
+                    if c.automaticas.contains(&s) {
+                        "O Salário do mês ficou ligado a ele."
+                    } else {
+                        "Confirmar liga o Salário do mês a ele."
+                    }
                 ),
                 p.tinta_suave,
             );
@@ -473,12 +481,64 @@ fn sugestao(
                 );
             }
         }
+        (Sugestao::CriarDescontosEmFolha { descontos, .. }, _) => {
+            for d in descontos {
+                let o_que = if d.ligar_a.is_some() {
+                    "liga ao que já existe"
+                } else {
+                    "cria"
+                };
+                pequeno(
+                    ui,
+                    format!(
+                        "{} · {} ({o_que}). O valor segue a rubrica do contracheque.",
+                        d.nome,
+                        reais(d.valor)
+                    ),
+                    p.tinta_suave,
+                );
+            }
+        }
+        (Sugestao::DarBaixa { baixas, .. }, _) => {
+            for b in baixas.iter().filter(|b| !b.ja_baixada) {
+                pequeno(
+                    ui,
+                    format!("{} · {}", b.rubrica, reais(b.conciliacao.valor)),
+                    p.tinta_suave,
+                );
+                if let Some(d) = b.diferenca {
+                    aviso_com_triangulo(
+                        ui,
+                        p,
+                        &format!(
+                            "A rubrica difere do previsto em {}.",
+                            reais(Centavos(d.0.abs()))
+                        ),
+                    );
+                }
+            }
+        }
         _ => {}
     }
     if let Some((k, erro)) = &c.erro_de_sugestao
         && *k == s
     {
         componentes::aviso(ui, "error", erro, p.perigo_sutil, p.borda, p.perigo);
+    }
+    if c.automaticas.contains(&s) {
+        ui.horizontal_wrapped(|ui| {
+            componentes::selo(ui, "automática", p.info_sutil, p.info);
+            pequeno(ui, "Conciliado automaticamente ·", p.sucesso);
+            if ui
+                .small_button("Desfazer")
+                .on_hover_text("Desfaz a conciliação; ela volta a ser uma sugestão")
+                .clicked()
+            {
+                pedidos.push(Pedido::Desfazer(cartao, s));
+            }
+        });
+        ui.add_space(3.0);
+        return;
     }
     ui.horizontal(|ui| {
         if feita {

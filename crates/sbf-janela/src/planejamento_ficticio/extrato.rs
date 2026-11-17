@@ -3,9 +3,10 @@
 //! inventário nem da Pluggy reais.
 
 use sbf_planejamento::{
-    Alteracao, Assinatura, Autor, Centavos, Competencia, Conciliacao, ContaDoPlanejamento, Data,
-    ErroDoPlanejamento, Filtro, IdOcorrencia, MovimentoCandidato, MovimentoDoExtrato, Natureza,
-    Ocorrencia, ParDeConta, Periodo, Planejamento, Recibo, Resultado,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Centavos, Competencia, Conciliacao,
+    ContaDoPlanejamento, Data, ErroDoPlanejamento, Filtro, IdOcorrencia, MovimentoCandidato,
+    MovimentoDoExtrato, Natureza, Ocorrencia, ParDeConta, Periodo, Planejamento, Recibo, Resultado,
+    TipoDeDocumento, TipoDeRubrica,
 };
 
 use super::PlanejamentoFicticio;
@@ -315,7 +316,10 @@ impl PlanejamentoFicticio {
                     conciliacao: c.clone(),
                     movimento,
                     mesma_conta,
-                    automatica: false,
+                    automatica: self
+                        .automaticas
+                        .iter()
+                        .any(|(o, m)| o == id && *m == c.movimento),
                 }
             })
             .collect()
@@ -332,7 +336,20 @@ impl PlanejamentoFicticio {
         let mut gravadas = 0;
         for o in linhas {
             let livre = self.conciliacoes.iter().all(|c| c.ocorrencia != o.id);
-            if !livre || o.pago_informado.is_some() || o.conciliado.is_some() {
+            if o.pago_informado.is_some() || o.conciliado.is_some() {
+                continue;
+            }
+            if !livre {
+                // Uma sugestão que já estava lá e agora fecha as três provas é promovida.
+                if let Some(s) = self
+                    .conciliacoes
+                    .iter()
+                    .find(|c| c.ocorrencia == o.id && !c.confirmada)
+                    .cloned()
+                    && self.promover_se_tres_provas(&s)
+                {
+                    gravadas += 1;
+                }
                 continue;
             }
             let usados: Vec<String> = self
@@ -349,17 +366,196 @@ impl PlanejamentoFicticio {
                     && (c.bate_assinatura || (c.mesma_conta && c.diferenca == Some(Centavos(0))))
             });
             if let Some(c) = melhor {
-                self.conciliacoes.push(Conciliacao {
+                let sugestao = Conciliacao {
                     ocorrencia: o.id.clone(),
                     movimento: c.movimento.movimento,
                     valor: Centavos(c.movimento.valor.0.abs()),
                     data: c.movimento.data,
                     confirmada: false,
-                });
+                };
+                self.conciliacoes.push(sugestao.clone());
+                self.promover_se_tres_provas(&sugestao);
                 gravadas += 1;
             }
         }
         Ok(gravadas)
+    }
+
+    /// Documento, crédito e conta batem exatamente (a mesma regra do serviço real).
+    fn tres_provas(&self, id: &IdOcorrencia, m: &MovimentoDoExtrato) -> bool {
+        if m.valor.0 <= 0 {
+            return false;
+        }
+        let Some(k) = self.composicao_vigente(id) else {
+            return false;
+        };
+        let Some(sha) = k.documento.as_deref() else {
+            return false;
+        };
+        if k.desde != id.competencia || k.liquido() != m.valor {
+            return false;
+        }
+        let contracheque = self.documentos.iter().any(|d| {
+            !d.desvinculado
+                && d.sha256 == sha
+                && d.tipo == TipoDeDocumento::Contracheque
+                && match &d.alvo {
+                    AlvoDoDocumento::Recorrente { id: r } => *r == id.recorrente,
+                    AlvoDoDocumento::Ocorrencia { id: o } => o == id,
+                }
+        });
+        let conta_certa = self
+            .ocorrencia_de(&id.recorrente, id.competencia, self.hoje)
+            .and_then(|o| o.conta)
+            .and_then(|a| self.conta_do_apelido(&a).map(str::to_owned));
+        contracheque && conta_certa.as_deref() == Some(m.conta_do_extrato.as_str())
+    }
+
+    /// Promove a sugestão a conciliação confirmada por `Autor::Regra`, se as três provas
+    /// batem e ninguém desfez este par antes.
+    fn promover_se_tres_provas(&mut self, s: &Conciliacao) -> bool {
+        if self
+            .desfeitas
+            .iter()
+            .any(|(o, m)| *o == s.ocorrencia && *m == s.movimento)
+        {
+            return false;
+        }
+        let Some(m) = self
+            .extrato
+            .iter()
+            .find(|m| m.movimento == s.movimento)
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.tres_provas(&s.ocorrencia, &m) {
+            return false;
+        }
+        let confirmada = Conciliacao {
+            confirmada: true,
+            ..s.clone()
+        };
+        let _ = self.aplicar_interno(
+            Alteracao::Conciliar {
+                conciliacao: confirmada,
+            },
+            Autor::Regra {
+                regra: "tres-provas".to_owned(),
+            },
+        );
+        true
+    }
+
+    /// O valor que as rubricas ligadas dão a um compromisso de desconto em folha (spec 12, D4).
+    pub(super) fn valor_seguido_pela_rubrica(
+        &self,
+        recorrente: &str,
+        comp: Competencia,
+    ) -> Option<Centavos> {
+        let donos: Vec<&str> = self
+            .composicoes
+            .iter()
+            .filter(|c| {
+                c.rubricas
+                    .iter()
+                    .any(|r| r.recorrente.as_deref() == Some(recorrente))
+            })
+            .map(|c| c.recorrente.as_str())
+            .collect();
+        donos.into_iter().find_map(|dono| {
+            let k = self
+                .composicoes
+                .iter()
+                .filter(|c| c.recorrente == dono && c.desde <= comp)
+                .max_by_key(|c| c.desde)?;
+            let soma: i64 = k
+                .rubricas
+                .iter()
+                .filter(|r| {
+                    r.tipo == TipoDeRubrica::Desconto && r.recorrente.as_deref() == Some(recorrente)
+                })
+                .map(|r| r.valor.0)
+                .sum();
+            k.rubricas
+                .iter()
+                .any(|r| r.recorrente.as_deref() == Some(recorrente))
+                .then_some(Centavos(soma))
+        })
+    }
+
+    /// As baixas que o contracheque do mês prova (D3), como no serviço real.
+    pub(super) fn baixas_impl(
+        &self,
+        competencia: Competencia,
+    ) -> Vec<sbf_planejamento::BaixaPeloContracheque> {
+        let mut saida = Vec::new();
+        for dono in self
+            .recorrentes
+            .iter()
+            .filter(|r| r.natureza == Natureza::Entrada && r.excluido.is_none())
+        {
+            let Some(k) = self
+                .composicoes
+                .iter()
+                .filter(|c| c.recorrente == dono.id && c.desde <= competencia)
+                .max_by_key(|c| c.desde)
+            else {
+                continue;
+            };
+            let Some(sha) = k.documento.as_deref() else {
+                continue;
+            };
+            if k.desde != competencia {
+                continue;
+            }
+            let mut somados: Vec<&str> = Vec::new();
+            for (indice, rubrica) in k.rubricas.iter().enumerate() {
+                let (TipoDeRubrica::Desconto, Some(alvo)) =
+                    (rubrica.tipo, rubrica.recorrente.as_deref())
+                else {
+                    continue;
+                };
+                let Some(o) = self.ocorrencia_de(alvo, competencia, self.hoje) else {
+                    continue;
+                };
+                if o.suprimida() {
+                    continue;
+                }
+                let total: i64 = k
+                    .rubricas
+                    .iter()
+                    .filter(|x| {
+                        x.tipo == TipoDeRubrica::Desconto && x.recorrente.as_deref() == Some(alvo)
+                    })
+                    .map(|x| x.valor.0)
+                    .sum();
+                let primeira = !somados.contains(&alvo);
+                somados.push(alvo);
+                let movimento = format!("contracheque:{sha}:{indice}");
+                let ja_baixada = self
+                    .conciliacoes
+                    .iter()
+                    .any(|c| c.ocorrencia == o.id && c.movimento == movimento && c.confirmada);
+                saida.push(sbf_planejamento::BaixaPeloContracheque {
+                    conciliacao: Conciliacao {
+                        ocorrencia: o.id.clone(),
+                        movimento,
+                        valor: rubrica.valor,
+                        data: o.vencimento,
+                        confirmada: true,
+                    },
+                    rubrica: rubrica.nome.clone(),
+                    previsto: o.previsto,
+                    diferenca: o
+                        .previsto
+                        .map(|p| Centavos(total - p.0))
+                        .filter(|d| primeira && d.0 != 0),
+                    ja_baixada,
+                });
+            }
+        }
+        saida
     }
 
     pub(super) fn mapear_conta(

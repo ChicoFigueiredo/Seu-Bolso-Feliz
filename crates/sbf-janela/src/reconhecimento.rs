@@ -18,9 +18,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::JoinHandle;
 
-use sbf_planejamento::{Alteracao, Autor};
+use sbf_planejamento::{
+    Alteracao, AlvoDoDocumento, Autor, Conciliacao, Planejamento, TipoDeDocumento,
+};
+use sbf_reconhecimento::descontos::{self, preservar_ligacoes};
 use sbf_reconhecimento::{
-    Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Resultado, Situacao, Sugestao,
+    Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Reconhecido, Resultado, Situacao,
+    Sugestao,
 };
 
 use crate::controle_ui::mensagem_de_erro;
@@ -51,6 +55,9 @@ pub struct Cartao {
     pub confirmadas: Vec<usize>,
     /// Os índices das sugestões ignoradas.
     pub ignoradas: Vec<usize>,
+    /// Os índices das conciliações que a janela fez sozinha (as três provas, `Autor::Regra`):
+    /// aparecem como "Conciliado automaticamente · Desfazer". Também estão em `confirmadas`.
+    pub automaticas: Vec<usize>,
     /// O erro da última tentativa de confirmar (índice da sugestão, motivo).
     pub erro_de_sugestao: Option<(usize, String)>,
     /// A marcação de eventuais que a pessoa deixou em cada sugestão de rubricas (índice da
@@ -71,6 +78,7 @@ impl Cartao {
             situacao: SituacaoDoCartao::Aguardando,
             confirmadas: Vec::new(),
             ignoradas: Vec::new(),
+            automaticas: Vec::new(),
             erro_de_sugestao: None,
             marcacoes: BTreeMap::new(),
         }
@@ -135,10 +143,40 @@ impl std::fmt::Debug for Execucao {
     }
 }
 
+/// Liga o registro do contracheque no inventário ao crédito do banco depois de uma
+/// conciliação confirmada (spec 12, D1; `sbf_inventario::salario::ligar_salario_ao_credito`).
+pub trait LigadorDeSalario: Send + Sync + std::fmt::Debug {
+    /// `Ok(false)` quando falta o registro do contracheque ou o do crédito.
+    ///
+    /// # Errors
+    /// O motivo, sem conteúdo do documento.
+    fn ligar(&self, sha256: &str, movimento: &str) -> Result<bool, String>;
+}
+
+/// O ligador real: abre o `inventario.sqlite` das Ferramentas.
+#[derive(Debug, Clone)]
+pub struct LigadorDoInventario {
+    pub banco: PathBuf,
+}
+
+impl LigadorDeSalario for LigadorDoInventario {
+    fn ligar(&self, sha256: &str, movimento: &str) -> Result<bool, String> {
+        let inv =
+            sbf_inventario::banco::Inventario::abrir(&self.banco).map_err(|e| e.to_string())?;
+        sbf_inventario::salario::ligar_salario_ao_credito(inv.conexao(), sha256, movimento)
+    }
+}
+
+/// O texto do aviso discreto quando o elo no inventário falha (a conciliação fica).
+pub const AVISO_DO_ELO: &str =
+    "A conciliação ficou, mas não deu para ligar o registro do salário ao crédito no inventário.";
+
 /// O estado do arrastar e do reconhecimento na janela.
 #[derive(Debug, Default)]
 pub struct Reconhecimento {
     reconhecedor: Option<Arc<dyn Reconhecedor>>,
+    /// Quem liga o registro do salário ao crédito; sem ele, o das Ferramentas (se houver).
+    pub ligador: Option<Arc<dyn LigadorDeSalario>>,
     pub cartoes: Vec<Cartao>,
     fila: VecDeque<usize>,
     execucao: Option<Execucao>,
@@ -226,6 +264,7 @@ impl Janela {
         if let Some(exec) = self.reconhecimento.execucao.as_ref() {
             let indice = exec.indice;
             let mut terminou = false;
+            let mut chegou = false;
             loop {
                 match exec.canal.try_recv() {
                     Ok(Aviso::Andamento(a)) => {
@@ -238,6 +277,7 @@ impl Janela {
                     }
                     Ok(Aviso::Fim(r)) => {
                         let r = *r;
+                        chegou = r.is_ok();
                         if let Some(c) = self.reconhecimento.cartoes.get_mut(indice) {
                             c.situacao = match r {
                                 Ok(resultado) => SituacaoDoCartao::Pronto(Box::new(resultado)),
@@ -262,6 +302,9 @@ impl Janela {
             }
             if terminou {
                 self.reconhecimento.execucao = None;
+            }
+            if chegou {
+                self.aplicar_automaticas(indice);
             }
         }
         if self.reconhecimento.execucao.is_none() {
@@ -378,10 +421,150 @@ impl Janela {
         c.marcacoes.insert(sugestao, marcacao);
     }
 
-    /// Confirmar uma sugestão: o único caminho que escreve no planejamento (`Autor::Usuario`).
+    /// Quem liga o registro do salário ao crédito: o da janela ou, no inventário real, o das
+    /// Ferramentas.
+    pub(crate) fn ligador_de_salario(&self) -> Option<Arc<dyn LigadorDeSalario>> {
+        self.reconhecimento.ligador.clone().or_else(|| {
+            self.ferramentas.as_ref().map(|f| {
+                Arc::new(LigadorDoInventario {
+                    banco: f.banco.clone(),
+                }) as Arc<dyn LigadorDeSalario>
+            })
+        })
+    }
+
+    /// As conciliações das três provas que o reconhecimento achou: a janela as grava sozinha
+    /// (`Autor::Regra`), exceto o par que já foi desfeito alguma vez. É a única escrita sem
+    /// clique (AC-07), e o cartão mostra "Conciliado automaticamente · Desfazer".
+    fn aplicar_automaticas(&mut self, cartao: usize) {
+        let ligador = self.ligador_de_salario();
+        let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
+            return;
+        };
+        let Some(resultado) = c.resultado() else {
+            return;
+        };
+        let sha = resultado.sha256.clone();
+        let automaticas: Vec<(usize, Conciliacao)> = resultado
+            .sugestoes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| match s {
+                Sugestao::Conciliar { conciliacao, .. } if s.e_automatica() => {
+                    Some((i, conciliacao.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if automaticas.is_empty() {
+            return;
+        }
+        let Some(pl) = self.planejamento.as_mut() else {
+            return;
+        };
+        let plan = pl.0.as_mut();
+        let mut aviso = None;
+        let mut feitas = 0usize;
+        for (i, conciliacao) in automaticas {
+            // O usuário já disse "não" a este par: a regra não o refaz.
+            if plan
+                .conciliacao_desfeita(&conciliacao.ocorrencia, &conciliacao.movimento)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let confirmada = Conciliacao {
+                confirmada: true,
+                ..conciliacao
+            };
+            let ja = plan
+                .conciliacoes_da_ocorrencia(&confirmada.ocorrencia)
+                .map(|v| {
+                    v.iter().any(|g| {
+                        g.conciliacao.confirmada && g.conciliacao.movimento == confirmada.movimento
+                    })
+                })
+                .unwrap_or(false);
+            if !ja {
+                let r = plan.aplicar(
+                    Alteracao::Conciliar {
+                        conciliacao: confirmada.clone(),
+                    },
+                    Autor::Regra {
+                        regra: "tres-provas".to_owned(),
+                    },
+                );
+                if let Err(e) = r {
+                    c.erro_de_sugestao = Some((i, mensagem_de_erro(&e)));
+                    continue;
+                }
+            }
+            c.confirmadas.push(i);
+            c.automaticas.push(i);
+            feitas += 1;
+            aviso = aviso.or(ligar_ao_credito(ligador.as_deref(), &sha, &confirmada));
+        }
+        if feitas > 0 {
+            self.controle.recarregar();
+            self.controle.mensagem = Some((
+                aviso.map_or_else(
+                    || {
+                        "Conciliado automaticamente: as três provas batem. Dá para desfazer."
+                            .to_owned()
+                    },
+                    str::to_owned,
+                ),
+                false,
+            ));
+        }
+    }
+
+    /// Desfaz a conciliação que a regra fez sozinha: exclusão lógica, com histórico. A sugestão
+    /// volta ao cartão para ser confirmada à mão, e a regra não a refaz.
+    pub fn desfazer_automatica(&mut self, cartao: usize, sugestao: usize) {
+        let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
+            return;
+        };
+        if !c.automaticas.contains(&sugestao) {
+            return;
+        }
+        let Some(Sugestao::Conciliar { conciliacao, .. }) = c
+            .resultado()
+            .and_then(|r| r.sugestoes.get(sugestao))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(pl) = self.planejamento.as_mut() else {
+            return;
+        };
+        let r = pl.0.as_mut().aplicar(
+            Alteracao::Desconciliar {
+                ocorrencia: conciliacao.ocorrencia,
+                movimento: conciliacao.movimento,
+            },
+            Autor::Usuario,
+        );
+        self.controle.recarregar();
+        match r {
+            Ok(_) => {
+                c.confirmadas.retain(|i| *i != sugestao);
+                c.automaticas.retain(|i| *i != sugestao);
+                self.controle.mensagem = Some((
+                    "Conciliação desfeita. Ela volta a ser uma sugestão.".to_owned(),
+                    false,
+                ));
+            }
+            Err(e) => c.erro_de_sugestao = Some((sugestao, mensagem_de_erro(&e))),
+        }
+    }
+
+    /// Confirmar uma sugestão: o único caminho (com as três provas) que escreve no
+    /// planejamento (`Autor::Usuario`).
     /// Confirmar de novo a mesma sugestão não faz nada. As rubricas aplicam uma composição
     /// por vez, cada uma com a versão do recorrente lida logo antes.
     pub fn confirmar_sugestao(&mut self, cartao: usize, sugestao: usize) {
+        let ligador = self.ligador_de_salario();
         let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
             return;
         };
@@ -390,6 +573,14 @@ impl Janela {
         }
         c.erro_de_sugestao = None;
         let marcacao = c.eventuais_da(sugestao);
+        let marcacao_das_rubricas = c
+            .resultado()
+            .and_then(|r| {
+                r.sugestoes
+                    .iter()
+                    .position(|s| matches!(s, Sugestao::UsarRubricas { .. }))
+            })
+            .and_then(|i| c.eventuais_da(i));
         let Some(resultado) = c.resultado() else {
             return;
         };
@@ -406,35 +597,159 @@ impl Janela {
         };
         let plan = pl.0.as_mut();
         let mut resultado_final = Ok(());
-        for mut alteracao in s.alteracoes(&sha, &nome, 0, marcacao.as_deref()) {
-            // A versão do recorrente lida agora: se mudou desde o reconhecimento, o conflito
-            // aparece no cartão em vez de sobrescrever.
-            if let (Alteracao::DefinirComposicao { versao_base, .. }, Some(id)) =
-                (&mut alteracao, s.recorrente_para_versao())
-            {
-                match plan.recorrente(id) {
-                    Ok(Some(r)) => *versao_base = r.versao_do_registro,
-                    Ok(None) => *versao_base = 0,
-                    Err(e) => {
-                        resultado_final = Err(mensagem_de_erro(&e));
-                        break;
+        if let Sugestao::CriarDescontosEmFolha {
+            uso, descontos: ds, ..
+        } = &s
+        {
+            // As rubricas ligadas seguem a marcação de fixas e eventuais que a pessoa deixou.
+            let m = marcacao_das_rubricas.unwrap_or_else(|| uso.eventuais_iniciais());
+            if let Err(e) = descontos::aplicar_descontos(plan, uso, ds, &m) {
+                resultado_final = Err(mensagem_de_erro(&e));
+            }
+        } else {
+            for mut alteracao in s.alteracoes(&sha, &nome, 0, marcacao.as_deref()) {
+                // A versão do recorrente lida agora: se mudou desde o reconhecimento, o
+                // conflito aparece no cartão em vez de sobrescrever.
+                if let (Alteracao::DefinirComposicao { versao_base, .. }, Some(id)) =
+                    (&mut alteracao, s.recorrente_para_versao())
+                {
+                    match plan.recorrente(id) {
+                        Ok(Some(r)) => *versao_base = r.versao_do_registro,
+                        Ok(None) => *versao_base = 0,
+                        Err(e) => {
+                            resultado_final = Err(mensagem_de_erro(&e));
+                            break;
+                        }
                     }
                 }
+                // Usar as rubricas de novo não desliga o que "criar compromissos" ligou.
+                if let Alteracao::DefinirComposicao { composicao, .. } = &mut alteracao
+                    && let Ok(Some(anterior)) =
+                        plan.composicao(&composicao.recorrente, composicao.desde)
+                    && anterior.desde == composicao.desde
+                {
+                    preservar_ligacoes(composicao, &anterior);
+                }
+                if let Err(e) = plan.aplicar(alteracao, Autor::Usuario) {
+                    resultado_final = Err(mensagem_de_erro(&e));
+                    break;
+                }
             }
-            if let Err(e) = plan.aplicar(alteracao, Autor::Usuario) {
-                resultado_final = Err(mensagem_de_erro(&e));
-                break;
+        }
+        let mut aviso = None;
+        if resultado_final.is_ok() {
+            if let Sugestao::Conciliar { conciliacao, .. } = &s {
+                aviso = ligar_ao_credito(
+                    ligador.as_deref(),
+                    &sha,
+                    &Conciliacao {
+                        confirmada: true,
+                        ..conciliacao.clone()
+                    },
+                );
+            }
+            if matches!(
+                s,
+                Sugestao::UsarRubricas { .. } | Sugestao::CriarDescontosEmFolha { .. }
+            ) {
+                atualizar_baixa(c, plan);
             }
         }
         self.controle.recarregar();
         match resultado_final {
             Ok(()) => {
                 c.confirmadas.push(sugestao);
-                self.controle.mensagem = Some((format!("Feito: {}.", s.rotulo()), false));
+                self.controle.mensagem = Some((
+                    aviso.map_or_else(|| format!("Feito: {}.", s.rotulo()), str::to_owned),
+                    false,
+                ));
             }
             Err(e) => c.erro_de_sugestao = Some((sugestao, e)),
         }
     }
+}
+
+/// Depois de ligar as rubricas aos compromissos, as baixas passam a existir: o cartão ganha
+/// (ou renova) "Dar baixa nos N descontos em folha".
+fn atualizar_baixa(c: &mut Cartao, plan: &dyn Planejamento) {
+    let Some((sha, pagamento)) = c.resultado().and_then(|r| match &r.reconhecido {
+        Reconhecido::Contracheque { contracheque, .. } => {
+            Some((r.sha256.clone(), contracheque.pagamento))
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    let Ok(nova) = descontos::sugestao_de_baixa(plan, pagamento, &sha) else {
+        return;
+    };
+    let SituacaoDoCartao::Pronto(r) = &mut c.situacao else {
+        return;
+    };
+    let existente = r
+        .sugestoes
+        .iter()
+        .position(|s| matches!(s, Sugestao::DarBaixa { .. }));
+    match (existente, nova) {
+        (Some(i), Some(n)) if !c.confirmadas.contains(&i) => r.sugestoes[i] = n,
+        (None, Some(n)) => r.sugestoes.push(n),
+        _ => {}
+    }
+}
+
+/// O elo do registro do salário com o crédito, depois de uma conciliação confirmada.
+/// Devolve o aviso discreto quando falha (a conciliação não se desfaz).
+pub(crate) fn ligar_ao_credito(
+    ligador: Option<&dyn LigadorDeSalario>,
+    sha256: &str,
+    conciliacao: &Conciliacao,
+) -> Option<&'static str> {
+    if !conciliacao.confirmada || conciliacao.movimento.starts_with("contracheque:") {
+        return None;
+    }
+    match ligador?.ligar(sha256, &conciliacao.movimento) {
+        Ok(_) => None,
+        Err(_) => Some(AVISO_DO_ELO),
+    }
+}
+
+/// O contracheque vinculado à ocorrência (ou ao compromisso), se houver: o da composição
+/// vigente, senão o mais recente.
+pub(crate) fn contracheque_da_ocorrencia(
+    plan: &dyn Planejamento,
+    id: &sbf_planejamento::IdOcorrencia,
+) -> Option<String> {
+    // Os da ocorrência e os do compromisso inteiro (o contracheque costuma estar ligado à regra).
+    let mut docs = plan
+        .documentos(&AlvoDoDocumento::Ocorrencia { id: id.clone() })
+        .ok()?;
+    for d in plan
+        .documentos(&AlvoDoDocumento::Recorrente {
+            id: id.recorrente.clone(),
+        })
+        .ok()?
+    {
+        if docs.iter().all(|x| x.id != d.id) {
+            docs.push(d);
+        }
+    }
+    let contracheques: Vec<_> = docs
+        .iter()
+        .filter(|d| d.tipo == TipoDeDocumento::Contracheque && !d.desvinculado)
+        .collect();
+    let da_composicao = plan
+        .composicao(&id.recorrente, id.competencia)
+        .ok()
+        .flatten()
+        .and_then(|k| k.documento);
+    da_composicao
+        .filter(|sha| contracheques.iter().any(|d| &d.sha256 == sha))
+        .or_else(|| {
+            contracheques
+                .iter()
+                .max_by_key(|d| d.data)
+                .map(|d| d.sha256.clone())
+        })
 }
 
 #[cfg(test)]
@@ -443,7 +758,7 @@ mod testes {
     use crate::planejamento_ficticio::{HOJE_DA_DEMONSTRACAO, PlanejamentoFicticio};
     use crate::reconhecimento_ficticio::{ID_DO_SALARIO, reconhecedor_do_contracheque};
     use sbf_planejamento::{AlvoDoDocumento, Competencia, Data, IdOcorrencia};
-    use sbf_reconhecimento::{ReconhecedorFicticio, Reconhecido, Sugestao};
+    use sbf_reconhecimento::{Reconhecedor as _, ReconhecedorFicticio, Reconhecido, Sugestao};
     use std::time::{Duration, Instant};
 
     fn hoje() -> Data {
@@ -517,7 +832,7 @@ mod testes {
         }
         let res = c.resultado().expect("resultado");
         assert!(matches!(res.reconhecido, Reconhecido::Contracheque { .. }));
-        assert_eq!(res.sugestoes.len(), 3);
+        assert_eq!(res.sugestoes.len(), 4);
         assert_eq!(r.recebidos.lock().expect("trava").as_slice(), &[a]);
     }
 
@@ -734,7 +1049,7 @@ mod testes {
         let i = indice_de_rubricas(&j);
         j.confirmar_sugestao(0, i);
         let c = &j.reconhecimento.cartoes[0];
-        assert!(c.confirmadas.is_empty());
+        assert!(!c.confirmadas.contains(&i));
         assert!(matches!(&c.erro_de_sugestao, Some((k, m)) if *k == i && !m.is_empty()));
     }
 
@@ -782,5 +1097,315 @@ mod testes {
             SituacaoDoCartao::Cancelado
         );
         assert!(!r.recebidos.lock().expect("trava").contains(&b));
+    }
+
+    /// Um ligador que anota as chamadas e responde o que se mandar.
+    #[derive(Debug, Default)]
+    struct LigadorFalso {
+        chamadas: std::sync::Mutex<Vec<(String, String)>>,
+        falha: bool,
+    }
+
+    impl LigadorDeSalario for LigadorFalso {
+        fn ligar(&self, sha256: &str, movimento: &str) -> Result<bool, String> {
+            self.chamadas
+                .lock()
+                .expect("trava")
+                .push((sha256.to_owned(), movimento.to_owned()));
+            if self.falha {
+                Err("banco ocupado".to_owned())
+            } else {
+                Ok(true)
+            }
+        }
+    }
+
+    fn janela_com_ligador(falha: bool) -> (Janela, Arc<LigadorFalso>) {
+        let (mut j, _) = janela_com_tudo();
+        let ligador = Arc::new(LigadorFalso {
+            falha,
+            ..LigadorFalso::default()
+        });
+        j.reconhecimento.ligador = Some(ligador.clone());
+        (j, ligador)
+    }
+
+    fn indice_de(j: &Janela, procura: impl Fn(&Sugestao) -> bool) -> usize {
+        j.reconhecimento.cartoes[0]
+            .resultado()
+            .expect("resultado")
+            .sugestoes
+            .iter()
+            .position(procura)
+            .expect("sugestão")
+    }
+
+    fn ocorrencia_de_outubro() -> sbf_planejamento::IdOcorrencia {
+        IdOcorrencia {
+            recorrente: ID_DO_SALARIO.to_owned(),
+            competencia: Competencia { ano: 2026, mes: 10 },
+            parcela: None,
+        }
+    }
+
+    fn conciliado_de_outubro(j: &Janela) -> Option<sbf_planejamento::Centavos> {
+        j.planejamento
+            .as_ref()
+            .expect("planejamento")
+            .0
+            .proximas(ID_DO_SALARIO, Competencia { ano: 2026, mes: 10 }, 1, hoje())
+            .expect("proximas")[0]
+            .conciliado
+    }
+
+    #[test]
+    fn as_tres_provas_conciliam_sozinhas_com_autor_regra_e_ligam_o_salario() {
+        let (mut j, ligador) = janela_com_ligador(false);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let i = indice_de(&j, |s| matches!(s, Sugestao::Conciliar { .. }));
+        let c = &j.reconhecimento.cartoes[0];
+        assert!(c.automaticas.contains(&i) && c.confirmadas.contains(&i));
+        assert_eq!(
+            conciliado_de_outubro(&j),
+            Some(sbf_planejamento::Centavos(2_460_522))
+        );
+        let h = j
+            .planejamento
+            .as_ref()
+            .expect("p")
+            .0
+            .historico(Some(&ocorrencia_de_outubro().recorrente), 20)
+            .expect("historico");
+        assert!(
+            h.iter()
+                .any(|e| matches!(&e.autor, Autor::Regra { regra } if regra == "tres-provas"))
+        );
+        // O registro do salário foi ligado ao crédito (sha do PDF, movimento do extrato).
+        let chamadas = ligador.chamadas.lock().expect("trava").clone();
+        assert_eq!(chamadas.len(), 1);
+        assert_eq!(
+            chamadas[0].1,
+            crate::reconhecimento_ficticio::MOVIMENTO_DO_SALARIO
+        );
+    }
+
+    #[test]
+    fn so_as_tres_provas_agem_sozinhas_duas_esperam_o_clique() {
+        let (mut j, ligador) = janela_com_ligador(false);
+        // Com duas provas só, o cartão não grava nada sem o clique.
+        let resposta = {
+            let mut r = reconhecedor_do_contracheque()
+                .reconhecer(
+                    std::path::Path::new("a.pdf"),
+                    &mut |_| {},
+                    &AtomicBool::new(false),
+                )
+                .expect("resposta");
+            for s in &mut r.sugestoes {
+                if let Sugestao::Conciliar { provas, .. } = s {
+                    *provas = 2;
+                }
+            }
+            r
+        };
+        j.ligar_reconhecedor(Arc::new(ReconhecedorFicticio::novo(Ok(resposta))));
+        // O planejamento fictício já traz R$ 8.199,00 conciliados em outubro (o extrato dele).
+        let antes = conciliado_de_outubro(&j);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        assert_eq!(conciliado_de_outubro(&j), antes);
+        assert!(j.reconhecimento.cartoes[0].automaticas.is_empty());
+        assert!(ligador.chamadas.lock().expect("trava").is_empty());
+        // O clique grava com o usuário e liga o salário.
+        let i = indice_de(&j, |s| matches!(s, Sugestao::Conciliar { .. }));
+        j.confirmar_sugestao(0, i);
+        assert_eq!(
+            conciliado_de_outubro(&j),
+            Some(sbf_planejamento::Centavos(2_460_522))
+        );
+        assert_eq!(ligador.chamadas.lock().expect("trava").len(), 1);
+    }
+
+    #[test]
+    fn desfazer_a_automatica_devolve_a_sugestao_e_a_regra_nao_refaz() {
+        let (mut j, _) = janela_com_ligador(false);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let i = indice_de(&j, |s| matches!(s, Sugestao::Conciliar { .. }));
+        assert!(conciliado_de_outubro(&j).is_some());
+        j.desfazer_automatica(0, i);
+        let c = &j.reconhecimento.cartoes[0];
+        assert!(!c.confirmadas.contains(&i) && !c.automaticas.contains(&i));
+        assert_eq!(conciliado_de_outubro(&j), None);
+        // Soltar o mesmo arquivo de novo não refaz a conciliação sozinho.
+        j.limpar_reconhecimento();
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        assert_eq!(conciliado_de_outubro(&j), None);
+        assert!(j.reconhecimento.cartoes[0].automaticas.is_empty());
+        // Mas o clique confirma, como qualquer sugestão.
+        let i = indice_de(&j, |s| matches!(s, Sugestao::Conciliar { .. }));
+        j.confirmar_sugestao(0, i);
+        assert!(conciliado_de_outubro(&j).is_some());
+    }
+
+    #[test]
+    fn erro_ao_ligar_o_salario_vira_aviso_discreto_e_a_conciliacao_fica() {
+        let (mut j, ligador) = janela_com_ligador(true);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        assert!(conciliado_de_outubro(&j).is_some());
+        assert_eq!(ligador.chamadas.lock().expect("trava").len(), 1);
+        let (texto, erro) = j.controle.mensagem.clone().expect("aviso");
+        assert_eq!(texto, AVISO_DO_ELO);
+        assert!(!erro, "o aviso é discreto");
+    }
+
+    #[test]
+    fn conciliar_a_mao_no_detalhe_liga_o_salario_quando_ha_contracheque_vinculado() {
+        let (mut j, ligador) = janela_com_ligador(false);
+        let id = IdOcorrencia {
+            recorrente: ID_DO_SALARIO.to_owned(),
+            competencia: Competencia { ano: 2026, mes: 11 },
+            parcela: None,
+        };
+        j.controle_pedido(crate::controle_ui::PedidoDoControle::ConciliarManual {
+            conciliacao: Conciliacao {
+                ocorrencia: id,
+                movimento: "pluggy:txn_ficticia_sal_manual".to_owned(),
+                valor: sbf_planejamento::Centavos(822_600),
+                data: Data::de_iso("2026-11-05").expect("data"),
+                confirmada: true,
+            },
+            descricao: "SALARIO".to_owned(),
+        });
+        let chamadas = ligador.chamadas.lock().expect("trava").clone();
+        assert_eq!(chamadas.len(), 1);
+        assert_eq!(
+            chamadas[0].0,
+            crate::demonstracao::hash_do_nome("contracheque-2026-11.pdf")
+        );
+        assert_eq!(chamadas[0].1, "pluggy:txn_ficticia_sal_manual");
+        // Um compromisso sem contracheque vinculado não liga nada.
+        j.controle_pedido(crate::controle_ui::PedidoDoControle::ConciliarManual {
+            conciliacao: Conciliacao {
+                ocorrencia: IdOcorrencia {
+                    recorrente: "rec_energia".to_owned(),
+                    competencia: Competencia { ano: 2026, mes: 11 },
+                    parcela: None,
+                },
+                movimento: "pluggy:txn_ficticia_luz".to_owned(),
+                valor: sbf_planejamento::Centavos(18_000),
+                data: Data::de_iso("2026-11-05").expect("data"),
+                confirmada: true,
+            },
+            descricao: "ENERGIA".to_owned(),
+        });
+        assert_eq!(ligador.chamadas.lock().expect("trava").len(), 1);
+    }
+
+    #[test]
+    fn criar_compromissos_cria_o_grupo_liga_as_rubricas_e_oferece_a_baixa() {
+        let (mut j, ligador) = janela_com_ligador(false);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let criar = indice_de(&j, |s| matches!(s, Sugestao::CriarDescontosEmFolha { .. }));
+        assert!(
+            j.reconhecimento.cartoes[0]
+                .resultado()
+                .expect("r")
+                .sugestoes
+                .iter()
+                .all(|s| !matches!(s, Sugestao::DarBaixa { .. })),
+            "a baixa só existe depois de ligar"
+        );
+        let antes = j
+            .planejamento
+            .as_ref()
+            .expect("p")
+            .0
+            .recorrentes(false)
+            .expect("l")
+            .len();
+        j.confirmar_sugestao(0, criar);
+        assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
+        let novos: Vec<_> = j
+            .planejamento
+            .as_ref()
+            .expect("p")
+            .0
+            .recorrentes(false)
+            .expect("l")
+            .into_iter()
+            .filter(|r| r.grupo == "Descontos em folha")
+            .collect();
+        assert_eq!(novos.len(), 4);
+        assert_eq!(
+            j.planejamento
+                .as_ref()
+                .expect("p")
+                .0
+                .recorrentes(false)
+                .expect("l")
+                .len(),
+            antes + 4
+        );
+        assert!(
+            novos
+                .iter()
+                .all(|r| r.natureza == sbf_planejamento::Natureza::DescontoEmFolha)
+        );
+        // As rubricas ficaram ligadas na composição do mês.
+        let k = composicao_em(&j, Competencia { ano: 2026, mes: 10 }).expect("composição");
+        assert_eq!(
+            k.rubricas.iter().filter(|r| r.recorrente.is_some()).count(),
+            5
+        );
+        // E a baixa apareceu no cartão, sem ninguém ter conciliado nada.
+        let baixa = indice_de(&j, |s| matches!(s, Sugestao::DarBaixa { .. }));
+        let o_inss = novos.iter().find(|r| r.nome == "INSS").expect("inss");
+        let previsto = |j: &Janela| {
+            j.planejamento
+                .as_ref()
+                .expect("p")
+                .0
+                .proximas(&o_inss.id, Competencia { ano: 2026, mes: 10 }, 1, hoje())
+                .expect("proximas")[0]
+                .clone()
+        };
+        assert_eq!(previsto(&j).conciliado, None, "dar baixa pede o clique");
+        j.confirmar_sugestao(0, baixa);
+        assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
+        assert!(previsto(&j).conciliado.is_some());
+        // A baixa pelo contracheque não liga o salário ao crédito (não há crédito nela).
+        assert!(
+            ligador
+                .chamadas
+                .lock()
+                .expect("trava")
+                .iter()
+                .all(|(_, m)| !m.starts_with("contracheque:"))
+        );
+    }
+
+    #[test]
+    fn confirmar_as_rubricas_depois_dos_compromissos_nao_desliga_nada() {
+        let (mut j, _) = janela_com_ligador(false);
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let criar = indice_de(&j, |s| matches!(s, Sugestao::CriarDescontosEmFolha { .. }));
+        j.confirmar_sugestao(0, criar);
+        let rubricas = indice_de_rubricas(&j);
+        j.confirmar_sugestao(0, rubricas);
+        assert_eq!(j.reconhecimento.cartoes[0].erro_de_sugestao, None);
+        let k = composicao_em(&j, Competencia { ano: 2026, mes: 10 }).expect("composição");
+        assert!(k.rubricas.iter().filter(|r| r.recorrente.is_some()).count() >= 4);
     }
 }

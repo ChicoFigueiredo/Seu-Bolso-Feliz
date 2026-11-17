@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
-use sbf_planejamento::{Centavos, Conciliacao, IdOcorrencia, TipoDeDocumento};
+use sbf_planejamento::{Centavos, Conciliacao, Data, IdOcorrencia, TipoDeDocumento};
 use sbf_planilha::contracheque;
+use sbf_reconhecimento::descontos::propor_descontos;
 use sbf_reconhecimento::{
     ErroDoReconhecimento, PROVAS_POSSIVEIS, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao,
     UsoDeRubricas, ocorrencia_do_mes,
@@ -57,6 +58,15 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                 digitado_depois: Some(Centavos(VALOR_DIGITADO_DO_SALARIO)),
                 contracheque: c.clone(),
             };
+            // Os compromissos de desconto em folha que o planejamento fictício ainda não tem.
+            let planejamento = crate::planejamento_ficticio::PlanejamentoFicticio::novo(
+                Data::de_iso(crate::planejamento_ficticio::HOJE_DA_DEMONSTRACAO).unwrap_or(Data {
+                    ano: 2026,
+                    mes: 11,
+                    dia: 16,
+                }),
+            );
+            let descontos = propor_descontos(&planejamento, &uso).ok().flatten();
             let mut sugestoes = vec![
                 Sugestao::Vincular {
                     alvo: ocorrencia_do_mes(ID_DO_SALARIO, c.pagamento),
@@ -69,6 +79,7 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     uso: Box::new(uso),
                 },
             ];
+            sugestoes.extend(descontos);
             // O crédito do extrato fictício caiu três dias antes da data impressa no
             // contracheque (a data impressa não é a do crédito).
             if let (Some(impressa), Some(liquido)) = (c.credito, c.liquido) {

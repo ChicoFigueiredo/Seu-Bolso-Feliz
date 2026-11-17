@@ -1860,6 +1860,7 @@ impl Janela {
             _ => {}
         }
         let hoje = self.hoje_como_data();
+        let ligador = self.ligador_de_salario();
         let Some(pl) = self.planejamento.as_mut() else {
             self.erro("O planejamento ainda não está ligado a esta janela.".to_owned());
             return;
@@ -1942,8 +1943,10 @@ impl Janela {
                 descricao,
             } => {
                 let recorrente = conciliacao.ocorrencia.recorrente.clone();
+                let ligar = conciliacao.clone();
                 let r = plan.aplicar(Alteracao::Conciliar { conciliacao }, Autor::Usuario);
                 if terminar(controle, r, "Conciliação confirmada.") {
+                    ligar_o_salario(plan, ligador.as_deref(), controle, &ligar);
                     // Sem assinatura, oferece reconhecer o compromisso pela descrição do banco.
                     controle.oferta_de_assinatura =
                         matches!(plan.assinatura(&recorrente), Ok(None)).then_some(
@@ -1953,6 +1956,23 @@ impl Janela {
                             },
                         );
                 }
+            }
+            P::Desconciliar {
+                ocorrencia,
+                movimento,
+            } => {
+                let r = plan.aplicar(
+                    Alteracao::Desconciliar {
+                        ocorrencia,
+                        movimento,
+                    },
+                    Autor::Usuario,
+                );
+                terminar(
+                    controle,
+                    r,
+                    "Conciliação desfeita. Ela volta a ser uma sugestão.",
+                );
             }
             P::DefinirAssinatura {
                 recorrente,
@@ -1989,16 +2009,19 @@ impl Janela {
                 };
                 match plan.sugestao_de_conciliacao(&o.id) {
                     Ok(Some(c)) => {
+                        let confirmada = Conciliacao {
+                            confirmada: true,
+                            ..c
+                        };
                         let r = plan.aplicar(
                             Alteracao::Conciliar {
-                                conciliacao: Conciliacao {
-                                    confirmada: true,
-                                    ..c
-                                },
+                                conciliacao: confirmada.clone(),
                             },
                             Autor::Usuario,
                         );
-                        terminar(controle, r, "Conciliação confirmada.");
+                        if terminar(controle, r, "Conciliação confirmada.") {
+                            ligar_o_salario(plan, ligador.as_deref(), controle, &confirmada);
+                        }
                     }
                     Ok(None) => {
                         controle.mensagem =
@@ -3137,6 +3160,24 @@ fn faixa_do_lote(
         });
     });
     ui.add_space(4.0);
+}
+
+/// Depois de uma conciliação confirmada de uma ocorrência com contracheque vinculado, liga o
+/// registro do salário ao crédito no inventário. Falha vira aviso discreto; a conciliação fica.
+fn ligar_o_salario(
+    plan: &dyn sbf_planejamento::Planejamento,
+    ligador: Option<&dyn crate::reconhecimento::LigadorDeSalario>,
+    controle: &mut crate::controle_ui::EstadoDoControle,
+    conciliacao: &sbf_planejamento::Conciliacao,
+) {
+    let Some(sha) =
+        crate::reconhecimento::contracheque_da_ocorrencia(plan, &conciliacao.ocorrencia)
+    else {
+        return;
+    };
+    if let Some(aviso) = crate::reconhecimento::ligar_ao_credito(ligador, &sha, conciliacao) {
+        controle.mensagem = Some((aviso.to_owned(), false));
+    }
 }
 
 #[cfg(test)]
