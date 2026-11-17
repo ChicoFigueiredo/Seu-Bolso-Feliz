@@ -12,8 +12,8 @@ mlua = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
+landlock = "0.4.7"
+rlimit = "0.11.0"
 tempfile = { workspace = true }
 
 [lints]

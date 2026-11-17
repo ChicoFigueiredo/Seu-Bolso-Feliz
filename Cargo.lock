@@ -3082,6 +3082,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cca98e95f35b29d469dade6724c6f96cec9236640f745a0e99b0334ec320ab1"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4893,6 +4904,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlimit"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f35ee2729c56bb610f6dba436bf78135f728b7373bdffae2ec815b2d3eb98cc3"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "rmcp"
 version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5557,7 +5577,9 @@ dependencies = [
 name = "sbf-script"
 version = "0.1.0"
 dependencies = [
+ "landlock",
  "mlua",
+ "rlimit",
  "sbf-regras",
  "serde",
  "serde_json",

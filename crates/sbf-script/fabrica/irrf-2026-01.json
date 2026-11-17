@@ -1,0 +1,20 @@
+{
+  "versao": "irrf-2026-01",
+  "fonte": "https://www.gov.br/receitafederal/pt-br/assuntos/meu-imposto-de-renda/tabelas/2026",
+  "faixas": [
+    { "teto_centavos": 242880, "aliquota_ppm": 0, "parcela_deduzir_centavos": 0 },
+    { "teto_centavos": 282665, "aliquota_ppm": 75000, "parcela_deduzir_centavos": 18216 },
+    { "teto_centavos": 375105, "aliquota_ppm": 150000, "parcela_deduzir_centavos": 39416 },
+    { "teto_centavos": 466468, "aliquota_ppm": 225000, "parcela_deduzir_centavos": 67549 },
+    { "aliquota_ppm": 275000, "parcela_deduzir_centavos": 90873 }
+  ],
+  "dependente_centavos": 18959,
+  "simplificado_centavos": 60720,
+  "redutor": {
+    "zera_ate_centavos": 500000,
+    "maximo_centavos": 31289,
+    "ate_centavos": 735000,
+    "fixo_centavos": 97862,
+    "fator_ppm": 133145
+  }
+}
