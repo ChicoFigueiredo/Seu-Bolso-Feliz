@@ -12,7 +12,7 @@ Termos do glossário (`CONTEXT.md`): **Regra de reconhecimento**, **Script**, **
 
 - `cargo fmt --all --check`: ok.
 - `cargo clippy --workspace --all-targets -- -D warnings`: 0 avisos.
-- `cargo test --workspace`: 1671 testes, 0 falhas (eram 1508 antes da spec 13).
+- `cargo test --workspace`: 1674 testes, 0 falhas (eram 1508 antes da spec 13). `cargo build --release -p sbf` ok.
 - Ambiente: Linux. Windows segue adiado (D16 da spec 11).
 
 Os resultados acima foram informados pelo coordenador. Não foram reexecutados na redação deste relatório; o auditor deve reexecutá-los.
@@ -80,7 +80,7 @@ Arquivos em `docs/specs/capturas/`. Descrição pelo nome; o auditor deve abrir 
 1. **D14, ativação.** A confirmação digitada num terminal interativo barra MCP, pipelines e scripts. Mas um agente com shell consegue emular um terminal, então essa confirmação não é uma barreira contra um agente. A barreira real é o MCP não ter nenhuma ferramenta de ativação, consolidação, desativação ou reversão (teste `nenhuma_ferramenta_ativa_consolida_desativa_ou_reverte`). No ensaio, o coordenador ativou uma vez a v2 do contracheque numa CÓPIA descartável, emulando o terminal. O agente do CLI fez o mesmo na demo fictícia; na segunda tentativa, a ativação foi bloqueada pelo controle de permissões, corretamente. Nada foi ativado no cofre real.
 2. **Três provas.** As sugestões de regra de consolidação seguem o modelo do salário: documento que identifica o alvo, valor exato, conta ou assinatura.
 3. **Fábrica.** `semear_fabrica` roda a cada leitura. É idempotente: a leitura grava as regras de fábrica que faltam.
-4. **Revisão de código.** Dois achados foram corrigidos depois da revisão: o rebaixamento da regra consolidada em rejeição ou correção, e a categoria do erro sem texto na tabela de execuções. (Correções da revisão; o coordenador completa a referência do commit.)
+4. **Revisão de código.** Dois achados foram corrigidos depois da revisão: o rebaixamento da regra consolidada em rejeição ou correção, e a categoria do erro sem texto na tabela de execuções. Commits `96cd877` (D4: rejeição e correção rebaixam a consolidada; testes `rejeitado_e_corrigido_devolvem_a_consolidada_a_ativa` e `rejeitado_numa_ativa_so_zera_a_sequencia`) e `c17538a` (só a categoria do erro vai para `execucao`; teste `erro_de_script_grava_so_a_categoria_nunca_o_texto_do_documento`).
 5. **Commits do PR #26.** Os commits `docs(spec)` do PR #26 são do dono e usam um escopo fora da lista de escopos; o merge por squash resolve.
 
 ## Como ativar no seu cofre
@@ -92,7 +92,7 @@ Antes de ativar no cofre real, a re-checagem no dado real com a tolerância de 1
 ## Comandos rodados
 
 - Por este redator: somente leitura. Conferidos com `grep` os nomes de teste, as capturas, a CLI (`crates/sbf/src/regras.rs`), a janela (`crates/sbf-janela/src/app.rs`), a CI (`.github/workflows/rust.yml`) e o termo do glossário. `cargo` não foi reexecutado.
-- Pelo coordenador (não reexecutado aqui): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (1671 testes, 0 falhas).
+- Pelo coordenador (não reexecutado aqui): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (1674 testes, 0 falhas).
 
 ## O que falta para o auditor
 
