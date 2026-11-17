@@ -31,7 +31,13 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod catalogo;
+pub mod definicao;
+pub mod fabrica;
+pub mod motor;
+pub mod rascunho;
 pub mod script;
+pub mod simulacao;
 
 /// Propostas aceitas seguidas, sem correção, para o sbf sugerir consolidar (D4).
 pub const LIMIAR_DE_CONSOLIDACAO: u32 = 5;
