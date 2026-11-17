@@ -1912,6 +1912,7 @@ fn autor_texto(a: &Autor) -> &'static str {
         Autor::Importacao => "importação",
         Autor::Ia { .. } => "IA",
         Autor::Mcp => "Claude (MCP)",
+        Autor::Regra { .. } => "regra automática",
     }
 }
 

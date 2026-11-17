@@ -118,6 +118,12 @@ pub(crate) fn aplicar_na(
             autor,
             agora,
         )?,
+        // Costura de 2026-11-17: o agente do planejamento implementa.
+        Alteracao::Desconciliar { .. } => {
+            return Err(crate::ErroDoPlanejamento::Invalida(
+                "desconciliar ainda não é gravado".to_owned(),
+            ));
+        }
     };
 
     let alteracao_id = if feito.grava_historico {

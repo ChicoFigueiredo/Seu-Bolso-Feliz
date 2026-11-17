@@ -48,7 +48,7 @@ formato.
   `data_tipo = 'pagamento'`, `valor_centavos` = líquido, `extraido_por = 'contracheque@1'`, e
   um `sub_registro` por rubrica (`tipo = 'rubrica'`, `codigo`, `parcela_numero` quando
   houver). Idempotente pelo sha.
-- O par com o crédito vai para `relacao_registro` (`tipo = 'mesmo_fato'`), e o crédito do
+- O par com o crédito vai para `relacao_registro` (`tipo = 'conciliacao'`, o mesmo das sugestões de conciliação do inventário), e o crédito do
   Pluggy muda de `tipo` para `salario` — ambos pelo log de decisões, nunca por `UPDATE`
   solto, para o Rastro e o desfazer valerem.
 - Quem chama: o reconhecimento cria o registro; a conciliação do Salário (automática ou

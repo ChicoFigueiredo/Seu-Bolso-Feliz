@@ -1500,6 +1500,7 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
+        Alteracao::Desconciliar { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::CriarRecorrente { .. }
         | Alteracao::DesfazerExcecao { .. }
         | Alteracao::CriarGrupo { .. }
@@ -1932,6 +1933,10 @@ impl PlanejamentoFicticio {
                 apelido,
                 conta_do_extrato,
             } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
+            // Costura de 2026-11-17: o agente da janela implementa no fictício.
+            Alteracao::Desconciliar { .. } => Err(ErroDoPlanejamento::Invalida(
+                "desconciliar ainda não existe no fictício".to_owned(),
+            )),
             Alteracao::DefinirAssinatura {
                 recorrente,
                 assinatura,

@@ -217,6 +217,7 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
+        Alteracao::Desconciliar { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::DesfazerExcecao { id } => c
             .query_row(
                 "SELECT recorrente_id FROM excecoes WHERE id = ?1",

@@ -32,6 +32,7 @@ pub mod movimento;
 pub mod rastro;
 pub mod relacoes;
 pub mod relatorios;
+pub mod salario;
 pub mod visao_geral;
 pub mod vistas;
 

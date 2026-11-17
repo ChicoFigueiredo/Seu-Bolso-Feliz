@@ -677,8 +677,14 @@ pub struct DocumentoVinculado {
 pub enum Autor {
     Usuario,
     Importacao,
-    Ia { modelo: String },
+    Ia {
+        modelo: String,
+    },
     Mcp,
+    /// Uma regra que agiu sozinha (`"tres-provas"`); o usuário pode desfazer.
+    Regra {
+        regra: String,
+    },
 }
 
 /// Onde a mudança vale.
@@ -810,6 +816,12 @@ pub enum Alteracao {
     },
     DesvincularDocumento {
         id: String,
+    },
+    /// Desfaz uma conciliação (confirmada ou sugerida): exclusão lógica, com histórico. A
+    /// ocorrência volta a poder ser sugerida.
+    Desconciliar {
+        ocorrencia: IdOcorrencia,
+        movimento: String,
     },
     /// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato.
     MapearConta {
