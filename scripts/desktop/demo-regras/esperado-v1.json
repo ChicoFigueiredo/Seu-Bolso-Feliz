@@ -1,0 +1,8 @@
+{
+  "esperado": "reconhece",
+  "tipo_documental": "comprovante-pix",
+  "campos": {
+    "valor_centavos": { "tipo": "centavos", "valor": 123456 },
+    "favorecido": { "tipo": "texto", "valor": "Fulano de Tal" }
+  }
+}
