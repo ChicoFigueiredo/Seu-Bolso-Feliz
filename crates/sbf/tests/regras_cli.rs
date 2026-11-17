@@ -235,6 +235,8 @@ fn ativar_sem_terminal_e_recusado_e_nada_muda() {
     let v = a.catalogo().versao(REGRA, 1).unwrap();
     assert_eq!(v.estado, Estado::Rascunho);
 
+    // A fábrica já semeia o IRRF de 2026; o que importa é não entrar nenhum novo.
+    let antes = a.catalogo().parametros().unwrap().len();
     let p = a.arquivo("p.json", "{}");
     let o = a.sbf(&[
         "parametro",
@@ -245,7 +247,7 @@ fn ativar_sem_terminal_e_recusado_e_nada_muda() {
         "https://exemplo.invalid/tabela",
     ]);
     assert!(!o.status.success());
-    assert!(a.catalogo().parametros().unwrap().is_empty());
+    assert_eq!(a.catalogo().parametros().unwrap().len(), antes);
 }
 
 #[test]

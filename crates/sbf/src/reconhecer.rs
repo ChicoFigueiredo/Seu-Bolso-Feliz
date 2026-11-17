@@ -122,7 +122,9 @@ pub fn montar(
         Some(c) => Arc::new(c.clone()),
         None => Arc::new(SemChaveiro),
     };
-    let mut reconhecedor = ReconhecedorDoCofre::novo(cofre, segredos, None);
+    // As regras de reconhecimento do cofre (spec 13); sem executor, só as declarativas.
+    let mut reconhecedor = ReconhecedorDoCofre::novo(cofre, segredos, None)
+        .com_regras(crate::script::executor_de_script().ok());
     if com_ia {
         let insumos = crate::triagem::Insumos::do_ambiente(chaveiro);
         let m = crate::triagem::montar_motor(&cofre.join("inventario.sqlite"), &insumos, false)?;
@@ -251,6 +253,30 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
             es(writeln!(saida, "reconhecido: nada ({motivo})"))?;
         }
         Reconhecido::Nada { .. } => es(writeln!(saida, "reconhecido: nada"))?,
+        Reconhecido::PelaRegra { reconhecimento: r } => {
+            let campos: Vec<&str> = r.campos.keys().map(String::as_str).collect();
+            es(writeln!(
+                saida,
+                "reconhecido: regra {}@{} tipo={} campos={}{}",
+                r.regra,
+                r.versao,
+                r.tipo_documental,
+                campos.join(","),
+                if r.revisar { " revisar" } else { "" }
+            ))?;
+            if o.detalhar {
+                for m in &r.motivos {
+                    es(writeln!(saida, "  motivo: {m}"))?;
+                }
+            }
+        }
+        Reconhecido::Ambiguo { candidatas, motivo } => {
+            es(writeln!(
+                saida,
+                "reconhecido: ambiguo entre {} regras ({motivo})",
+                candidatas.len()
+            ))?;
+        }
     }
     es(writeln!(
         saida,
@@ -313,6 +339,32 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
                     es(writeln!(saida, "  baixas={}", baixas.len()))?;
                 }
                 Sugestao::Vincular { .. } => {}
+                Sugestao::ProvarRegistro {
+                    regra,
+                    provas,
+                    automatica,
+                    ..
+                }
+                | Sugestao::ConciliarOcorrencia {
+                    regra,
+                    provas,
+                    automatica,
+                    ..
+                }
+                | Sugestao::PagarFatura {
+                    regra,
+                    provas,
+                    automatica,
+                    ..
+                } => {
+                    es(writeln!(
+                        saida,
+                        "  regra={}@{} provas={provas}/{} automatica={automatica}",
+                        regra.0,
+                        regra.1,
+                        sbf_reconhecimento::PROVAS_POSSIVEIS
+                    ))?;
+                }
             }
         }
         for a in &r.avisos {
@@ -349,6 +401,8 @@ mod testes {
                 data: None,
             }],
             avisos: vec!["aviso ficticio".to_owned()],
+            entrada: None,
+            leitura: None,
         }
     }
 
