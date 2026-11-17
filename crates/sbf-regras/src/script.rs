@@ -108,6 +108,24 @@ pub enum ErroDoScript {
     Processo(String),
 }
 
+impl ErroDoScript {
+    /// A categoria do erro, sem a mensagem livre (que pode ter texto do documento).
+    #[must_use]
+    pub fn categoria(&self) -> &'static str {
+        match self {
+            Self::Sintaxe(_) => "sintaxe",
+            Self::SemTransformar => "sem_transformar",
+            Self::Tempo => "tempo",
+            Self::Memoria => "memoria",
+            Self::Instrucoes => "instrucoes",
+            Self::Grande(_) => "grande",
+            Self::Retorno(_) => "retorno",
+            Self::Execucao(_) => "execucao",
+            Self::Processo(_) => "processo",
+        }
+    }
+}
+
 /// Quem executa scripts. Implementado pelo `sbf-script`; os testes deste crate usam um
 /// executor de mentira.
 pub trait ExecutorDeScript: Send + Sync + std::fmt::Debug {

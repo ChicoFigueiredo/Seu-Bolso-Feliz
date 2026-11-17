@@ -332,7 +332,13 @@ pub struct Execucao {
     pub regra: IdDaRegra,
     pub versao: u32,
     pub resultado: ResultadoDaExecucao,
+    /// Só a CATEGORIA do erro (`sintaxe`, `tempo`, `regex`...), nunca texto livre: é o que
+    /// vai para a tabela `execucao`, que não guarda texto do documento.
     pub motivo: Option<String>,
+    /// A mensagem completa do erro, só em memória (o editor mostra ao testar um rascunho);
+    /// nunca é gravada, pois pode conter texto do documento.
+    #[serde(default, skip)]
+    pub detalhe: Option<String>,
     pub duracao_us: u64,
 }
 
