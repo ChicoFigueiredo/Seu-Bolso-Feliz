@@ -45,6 +45,8 @@ pub mod previa;
 pub mod reconhecimento;
 pub mod reconhecimento_ficticio;
 pub mod reconhecimento_ui;
+pub mod regras;
+pub mod regras_ui;
 pub mod roteiros;
 pub mod rubricas;
 pub mod tabela;
