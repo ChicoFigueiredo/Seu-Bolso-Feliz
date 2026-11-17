@@ -867,13 +867,15 @@ fn script_errado_nao_trava_a_fila_nem_as_outras_regras() {
         .collect();
     assert_eq!(erros.len(), 3);
     assert!(
-        erros[0]
-            .motivo
-            .as_deref()
-            .unwrap()
-            .contains("passou do tempo")
+        erros[0].motivo.as_deref() == Some("tempo")
+            && erros[0]
+                .detalhe
+                .as_deref()
+                .unwrap()
+                .contains("passou do tempo")
     );
-    assert!(erros[1].motivo.as_deref().unwrap().contains("inteiro"));
+    assert_eq!(erros[1].motivo.as_deref(), Some("retorno"));
+    assert!(erros[1].detalhe.as_deref().unwrap().contains("inteiro"));
     // As execuções com erro ficam registradas.
     c.registrar_execucao(&l).unwrap();
     assert_eq!(c.total_de_execucoes().unwrap(), 4);
@@ -1217,4 +1219,94 @@ fn definicao_json_do_catalogo_ida_e_volta() {
     let d = def_comprovante();
     let json = serde_json::to_string(&d).unwrap();
     assert_eq!(serde_json::from_str::<Definicao>(&json).unwrap(), d);
+}
+
+// ---------------------------------------------------------------- D4 e execuções sem texto
+
+/// Consolida a regra "r" (5 aceitos) e devolve as chaves das propostas (a sexta, aberta).
+fn consolidada_com_proposta_aberta(c: &mut Catalogo) -> Vec<String> {
+    ativa(c, nova("r", def_comprovante()), None);
+    let chaves = propostas(c, 6);
+    for k in chaves.iter().take(5) {
+        c.registrar_retorno(k, Retorno::Aceito, &Quem::Usuario, "ok")
+            .unwrap();
+    }
+    c.consolidar("r", 1, &Quem::Usuario).unwrap();
+    chaves
+}
+
+#[test]
+fn rejeitado_e_corrigido_devolvem_a_consolidada_a_ativa() {
+    for (retorno, motivo) in [
+        (Retorno::Rejeitado, "rejeitada pelo usuário"),
+        (Retorno::Corrigido, "corrigida pelo usuário"),
+    ] {
+        let mut c = Catalogo::em_memoria().unwrap();
+        let chaves = consolidada_com_proposta_aberta(&mut c);
+        assert_eq!(c.versao("r", 1).unwrap().estado, Estado::Consolidada);
+        c.registrar_retorno(&chaves[5], retorno, &Quem::Usuario, "")
+            .unwrap();
+        let v = c.versao("r", 1).unwrap();
+        assert_eq!((v.estado, v.aceitas_seguidas), (Estado::Ativa, 0));
+        let h = c.historico_de_estado("r", 1).unwrap();
+        assert!(
+            h.iter().any(|l| l.3 == motivo),
+            "sem o motivo {motivo}: {h:?}"
+        );
+    }
+}
+
+#[test]
+fn rejeitado_numa_ativa_so_zera_a_sequencia() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(&mut c, nova("r", def_comprovante()), None);
+    let chaves = propostas(&mut c, 3);
+    for k in &chaves[..2] {
+        c.registrar_retorno(k, Retorno::Aceito, &Quem::Usuario, "")
+            .unwrap();
+    }
+    c.registrar_retorno(&chaves[2], Retorno::Rejeitado, &Quem::Usuario, "")
+        .unwrap();
+    let v = c.versao("r", 1).unwrap();
+    assert_eq!((v.estado, v.aceitas_seguidas), (Estado::Ativa, 0));
+}
+
+#[test]
+fn erro_de_script_grava_so_a_categoria_nunca_o_texto_do_documento() {
+    const MARCADOR: &str = "SEGREDO-FICTICIO-123";
+    let exec = Arc::new(ExecutorFicticio::novo().com_funcao("f", |p| {
+        Err(ErroDoScript::Execucao(
+            p.entrada["texto"].as_str().unwrap_or_default().to_owned(),
+        ))
+    }));
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("regras.sqlite");
+    let mut c = Catalogo::abrir(&arquivo).unwrap();
+    let mut n = nova("r", Definicao::simples("t", "comprovante pix"));
+    n.definicao.script_le_texto = true;
+    n.script = Some("f".into());
+    ativa(&mut c, n, Some(&*exec));
+    let motor = Motor::das_vigentes(&c, Some(exec)).unwrap();
+    let l = motor.ler(&entrada("x", &format!("Comprovante PIX {MARCADOR}")));
+    assert_eq!(l.execucoes.len(), 1);
+    assert_eq!(l.execucoes[0].motivo.as_deref(), Some("execucao"));
+    // A mensagem completa só existe em memória, para o editor.
+    assert!(
+        l.execucoes[0]
+            .detalhe
+            .as_deref()
+            .unwrap()
+            .contains(MARCADOR)
+    );
+    c.registrar_execucao(&l).unwrap();
+
+    let conn = rusqlite::Connection::open(&arquivo).unwrap();
+    let mut st = conn.prepare("SELECT motivo FROM execucao").unwrap();
+    let motivos: Vec<Option<String>> = st
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(motivos, vec![Some("execucao".to_owned())]);
+    assert!(!motivos.iter().flatten().any(|m| m.contains(MARCADOR)));
 }

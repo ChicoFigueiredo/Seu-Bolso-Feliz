@@ -1168,8 +1168,8 @@ impl Catalogo {
     }
 
     /// O que o usuário fez com a proposta de `chave`. `Aceito` soma uma aceita seguida;
-    /// `Corrigido` e `Rejeitado` zeram; `Desfeito` zera e, se a versão era consolidada,
-    /// a rebaixa para ativa (pode ser pedido por [`Quem::Sistema`]). A IA não registra
+    /// `Corrigido`, `Rejeitado` e `Desfeito` zeram e, se a versão era consolidada,
+    /// a rebaixam para ativa (D4) (pode ser pedido por [`Quem::Sistema`]). A IA não registra
     /// retornos pelo usuário.
     ///
     /// # Errors
@@ -1244,19 +1244,16 @@ impl Catalogo {
                 params![regra, versao],
             )
             .map_err(banco)?;
-            if retorno == Retorno::Desfeito {
-                let v = carregar_versao(&tx, &regra, versao)?;
-                if v.estado == Estado::Consolidada {
-                    // `trocar_estado(Ativa)` limparia a data de consolidação e o contador,
-                    // que é o que se quer num rebaixamento.
-                    trocar_estado(
-                        &tx,
-                        &v,
-                        Estado::Ativa,
-                        quem_texto(quem),
-                        "rebaixada: conciliação desfeita",
-                    )?;
-                }
+            let porque = match retorno {
+                Retorno::Rejeitado => "rejeitada pelo usuário",
+                Retorno::Corrigido => "corrigida pelo usuário",
+                _ => "conciliação automática desfeita",
+            };
+            let v = carregar_versao(&tx, &regra, versao)?;
+            if v.estado == Estado::Consolidada {
+                // `trocar_estado(Ativa)` limparia a data de consolidação e o contador,
+                // que é o que se quer num rebaixamento.
+                trocar_estado(&tx, &v, Estado::Ativa, quem_texto(quem), porque)?;
             }
         }
         tx.commit().map_err(banco)

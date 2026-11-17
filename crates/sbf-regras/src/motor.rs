@@ -81,6 +81,22 @@ struct VersaoCompilada {
     especificidade: usize,
 }
 
+/// Um erro ao avaliar uma versão: a `categoria` é o que o catálogo grava; a `mensagem`
+/// pode conter texto do documento e só vive em memória.
+struct ErroDeLeitura {
+    categoria: &'static str,
+    mensagem: String,
+}
+
+impl ErroDeLeitura {
+    fn novo(categoria: &'static str, mensagem: impl Into<String>) -> Self {
+        Self {
+            categoria,
+            mensagem: mensagem.into(),
+        }
+    }
+}
+
 struct Candidata {
     prioridade: i32,
     especificidade: usize,
@@ -162,13 +178,20 @@ impl Motor {
                     });
                     (ResultadoDaExecucao::Reconhecido, None)
                 }
-                Err(m) => (ResultadoDaExecucao::Erro, Some(m)),
+                Err(e) => (ResultadoDaExecucao::Erro, Some(e)),
+            };
+            let (motivo, detalhe) = match motivo {
+                Some(e) if resultado == ResultadoDaExecucao::Erro => {
+                    (Some(e.categoria.to_owned()), Some(e.mensagem))
+                }
+                _ => (None, None),
             };
             execucoes.push(Execucao {
                 regra: vc.versao.regra.clone(),
                 versao: vc.versao.versao,
                 resultado,
                 motivo,
+                detalhe,
                 duracao_us,
             });
         }
@@ -214,7 +237,7 @@ impl Motor {
             Err(m) => {
                 let mut r = copia;
                 r.revisar = true;
-                r.motivos.push(m);
+                r.motivos.push(m.mensagem);
                 r
             }
         }
@@ -226,8 +249,11 @@ impl Motor {
         entrada: &Entrada,
         normalizado: &str,
         executor: Option<&dyn ExecutorDeScript>,
-    ) -> Result<Option<Reconhecimento>, String> {
-        let comp = vc.compilada.as_ref().map_err(Clone::clone)?;
+    ) -> Result<Option<Reconhecimento>, ErroDeLeitura> {
+        let comp = vc
+            .compilada
+            .as_ref()
+            .map_err(|m| ErroDeLeitura::novo("regex", m.clone()))?;
         if !comp.detecta(entrada, normalizado) {
             return Ok(None);
         }
@@ -261,11 +287,13 @@ impl Motor {
         entrada: &Entrada,
         mut rec: Reconhecimento,
         executor: Option<&dyn ExecutorDeScript>,
-    ) -> Result<Option<Reconhecimento>, String> {
+    ) -> Result<Option<Reconhecimento>, ErroDeLeitura> {
         let v = &vc.versao;
         let mut checksums_dos_parametros = Vec::new();
         if let Some(fonte) = &v.script {
-            let executor = executor.ok_or("a versão tem script e não há executor")?;
+            let executor = executor.ok_or_else(|| {
+                ErroDeLeitura::novo("execucao", "a versão tem script e não há executor")
+            })?;
             match preparar_parametros(self, vc, entrada, &rec) {
                 Err(motivo) => {
                     rec.revisar = true;
@@ -283,11 +311,14 @@ impl Motor {
                         parametros: Json::Object(parametros),
                         limites: Limites::default(),
                     };
-                    let resposta = executor.executar(&pedido).map_err(|e| e.to_string())?;
+                    let resposta = executor
+                        .executar(&pedido)
+                        .map_err(|e| ErroDeLeitura::novo(e.categoria(), e.to_string()))?;
                     if !resposta.corresponde {
                         return Ok(None);
                     }
-                    aplicar_resposta(&mut rec, resposta)?;
+                    aplicar_resposta(&mut rec, resposta)
+                        .map_err(|m| ErroDeLeitura::novo("retorno", m))?;
                     for p in &usados {
                         rec.evidencias
                             .push(format!("tabela:{}:{}", p.nome, p.versao));
