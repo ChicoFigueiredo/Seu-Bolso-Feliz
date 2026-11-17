@@ -1124,3 +1124,25 @@ fn composicoes_de_2026_confirmadas_nao_sao_sugeridas_de_novo() {
 
     assert!(segunda.sugestoes.is_empty(), "{:?}", segunda.sugestoes);
 }
+
+#[test]
+fn contracheque_de_2026_gera_o_registro_salario_uma_vez_so() {
+    let c = cenario();
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+    let r = c.reconhecedor(None);
+    let primeiro = ok(c.rodar(&r, &arquivo).0);
+    let _ = ok(c.rodar(&r, &arquivo).0);
+    assert!(
+        !primeiro
+            .avisos
+            .iter()
+            .any(|a| a.contains("registrar o salário")),
+        "{:?}",
+        primeiro.avisos
+    );
+    assert_eq!(
+        c.contar("SELECT COUNT(*) FROM registro WHERE tipo = 'salario' AND extraido_por = 'contracheque@1'"),
+        1
+    );
+    assert!(c.contar("SELECT COUNT(*) FROM sub_registro WHERE tipo = 'rubrica'") > 0);
+}

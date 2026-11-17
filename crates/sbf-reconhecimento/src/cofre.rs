@@ -279,6 +279,37 @@ impl Reconhecedor for ReconhecedorDoCofre {
         // 4. Leitores locais.
         etapa(andamento, cancelar, Etapa::LerLocalmente, || {
             let situacao = self.ler_localmente(&mut estado);
+            if let Reconhecido::Contracheque {
+                contracheque: c, ..
+            } = &estado.reconhecido
+            {
+                // D1 da spec 12: o contracheque declara o registro `salario` (uma vez só).
+                let data = c.credito.unwrap_or_else(|| c.pagamento.dia(1));
+                let rubricas = c
+                    .rubricas
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !c.informativas.get(*i).copied().unwrap_or(false))
+                    .map(|(i, r)| sbf_inventario::salario::RubricaDoContracheque {
+                        codigo: r.codigo.clone(),
+                        descricao: r.nome.clone(),
+                        valor_centavos: r.valor.0,
+                        desconto: r.tipo == sbf_planejamento::TipoDeRubrica::Desconto,
+                        parcela: c.parcelas_atuais.get(i).copied().flatten(),
+                    })
+                    .collect();
+                let salario = sbf_inventario::salario::SalarioDoContracheque {
+                    sha256: estado.sha256.clone(),
+                    data: format!("{:04}-{:02}-{:02}", data.ano, data.mes, data.dia),
+                    liquido_centavos: c.liquido_do_mes().0,
+                    rubricas,
+                };
+                if sbf_inventario::salario::registrar_salario(&conn, &salario).is_err() {
+                    estado.avisos.push(
+                        "não consegui registrar o salário do contracheque no inventário".to_owned(),
+                    );
+                }
+            }
             Ok(((), situacao))
         })?;
 
