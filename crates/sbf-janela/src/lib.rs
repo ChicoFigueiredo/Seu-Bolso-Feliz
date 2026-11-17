@@ -44,6 +44,8 @@ pub mod preferencias_da_janela;
 pub mod previa;
 pub mod reconhecimento;
 pub mod reconhecimento_ficticio;
+pub mod reconhecimento_regras;
+pub mod reconhecimento_regras_ui;
 pub mod reconhecimento_ui;
 pub mod regras;
 pub mod regras_ui;

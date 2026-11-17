@@ -147,6 +147,38 @@ pub enum Valor {
     Booleano(bool),
 }
 
+impl std::fmt::Display for Valor {
+    /// O valor como a pessoa lê: `R$ 2.310,45`, `12/10/2026`, `10/2026`, `sim`/`não`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Valor::Texto(t) => f.write_str(t),
+            Valor::Centavos(c) => {
+                let n = c.unsigned_abs();
+                let digitos = (n / 100).to_string();
+                let mut agrupado = String::new();
+                for (i, d) in digitos.chars().enumerate() {
+                    if i > 0 && (digitos.len() - i).is_multiple_of(3) {
+                        agrupado.push('.');
+                    }
+                    agrupado.push(d);
+                }
+                let sinal = if *c < 0 { "-" } else { "" };
+                write!(f, "{sinal}R$ {agrupado},{:02}", n % 100)
+            }
+            Valor::Data(d) => match d.split('-').collect::<Vec<_>>().as_slice() {
+                [a, m, dia] => write!(f, "{dia}/{m}/{a}"),
+                _ => f.write_str(d),
+            },
+            Valor::Competencia(c) => match c.split_once('-') {
+                Some((a, m)) => write!(f, "{m}/{a}"),
+                None => f.write_str(c),
+            },
+            Valor::Inteiro(n) => write!(f, "{n}"),
+            Valor::Booleano(b) => f.write_str(if *b { "sim" } else { "não" }),
+        }
+    }
+}
+
 /// De onde um campo veio (AC-LUA-08): nada derivado sem origem.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "de", rename_all = "snake_case")]
@@ -339,4 +371,27 @@ pub enum ErroDasRegras {
     NaoEncontrada(String),
     #[error("script: {0}")]
     Script(#[from] script::ErroDoScript),
+}
+
+#[cfg(test)]
+mod testes_do_valor {
+    use super::Valor;
+
+    #[test]
+    fn o_valor_se_le_como_a_pessoa_escreve() {
+        assert_eq!(Valor::Centavos(231_045).to_string(), "R$ 2.310,45");
+        assert_eq!(Valor::Centavos(5).to_string(), "R$ 0,05");
+        assert_eq!(Valor::Centavos(-125_000).to_string(), "-R$ 1.250,00");
+        assert_eq!(Valor::Centavos(100_000_000).to_string(), "R$ 1.000.000,00");
+        assert_eq!(Valor::Data("2026-10-12".into()).to_string(), "12/10/2026");
+        assert_eq!(Valor::Competencia("2026-10".into()).to_string(), "10/2026");
+        assert_eq!(Valor::Inteiro(7).to_string(), "7");
+        assert_eq!(Valor::Booleano(false).to_string(), "não");
+        assert_eq!(
+            Valor::Texto("Fulano de Tal".into()).to_string(),
+            "Fulano de Tal"
+        );
+        // Formato que não reconhece vai como veio.
+        assert_eq!(Valor::Data("amanhã".into()).to_string(), "amanhã");
+    }
 }

@@ -46,6 +46,15 @@ struct NovoExemplo {
     erro: Option<String>,
 }
 
+/// O formulário "Nova regra".
+#[derive(Debug, Default, Clone)]
+struct NovaRegra {
+    id: String,
+    nome: String,
+    tipo_documental: String,
+    erro: Option<String>,
+}
+
 /// Uma regra aberta, com tudo o que a página mostra.
 #[derive(Debug)]
 struct Pagina {
@@ -81,6 +90,8 @@ pub struct Regras {
     sugestoes: Vec<(String, u32)>,
     pagina: Option<Pagina>,
     mensagem: Option<Mensagem>,
+    /// O formulário "Nova regra", enquanto aberto.
+    nova: Option<NovaRegra>,
     /// Quanto rolar a página no próximo quadro (as capturas usam).
     pub rolar_para: Option<f32>,
 }
@@ -93,6 +104,19 @@ impl Regras {
         self.pagina = None;
     }
 
+    /// O catálogo ligado, se há (o Reconhecimento fala com ele).
+    pub fn fonte(&self) -> Option<&FonteDasRegras> {
+        self.fonte.as_ref()
+    }
+
+    /// Mostra uma mensagem no alto da área (o Reconhecimento avisa o que criou).
+    pub fn avisar(&mut self, erro: bool, texto: &str) {
+        self.mensagem = Some(Mensagem {
+            erro,
+            texto: texto.to_owned(),
+        });
+    }
+
     /// O catálogo está ligado?
     pub fn ligada(&self) -> bool {
         self.fonte.is_some()
@@ -102,6 +126,11 @@ impl Regras {
     pub fn abrir(&mut self, regra: &str) {
         self.mensagem = None;
         self.pagina = self.carregar_pagina(regra, None);
+    }
+
+    /// Abre o formulário "Nova regra" (o botão da lista).
+    pub fn abrir_nova_regra(&mut self) {
+        self.nova = Some(NovaRegra::default());
     }
 
     /// Volta para a lista.
@@ -217,6 +246,86 @@ impl Regras {
             }
         });
         let _ = p;
+        self.dialogo_da_nova_regra(ui.ctx());
+    }
+
+    /// "Nova regra": id, nome, tipo documental e uma definição mínima (rascunho; nada é
+    /// ativado). Depois de criar, abre a página para o usuário editar.
+    fn dialogo_da_nova_regra(&mut self, ctx: &egui::Context) {
+        let (Some(fonte), Some(n)) = (self.fonte.clone(), self.nova.as_mut()) else {
+            return;
+        };
+        let p = tema::paleta(ctx);
+        let mut criar = false;
+        let mut fechar = false;
+        let resposta = egui::Modal::new(egui::Id::new("regras-nova")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            componentes::titulo(ui, "Nova regra", 17.0);
+            texto_pequeno(
+                ui,
+                "Nasce em rascunho, com uma definição mínima para você completar na página da regra. Nada é ativado.",
+            );
+            ui.add_space(8.0);
+            egui::Grid::new("regras-nova-campos")
+                .num_columns(2)
+                .spacing([14.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Id");
+                    ui.add(
+                        TextEdit::singleline(&mut n.id)
+                            .hint_text("comprovante-pix-banco-exemplo")
+                            .desired_width(300.0),
+                    );
+                    ui.end_row();
+                    ui.label("Nome");
+                    ui.add(
+                        TextEdit::singleline(&mut n.nome)
+                            .hint_text("Comprovante Pix · Banco Exemplo")
+                            .desired_width(300.0),
+                    );
+                    ui.end_row();
+                    ui.label("Tipo documental");
+                    ui.add(
+                        TextEdit::singleline(&mut n.tipo_documental)
+                            .hint_text("comprovante-pix")
+                            .desired_width(300.0),
+                    );
+                    ui.end_row();
+                });
+            if let Some(e) = &n.erro {
+                ui.add_space(4.0);
+                componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Criar rascunho").clicked() {
+                    criar = true;
+                }
+                if ui.button("Cancelar").clicked() {
+                    fechar = true;
+                }
+            });
+        });
+        if resposta.should_close() {
+            fechar = true;
+        }
+        if fechar {
+            self.nova = None;
+        } else if criar {
+            match fonte.criar_regra(&n.id, &n.nome, &n.tipo_documental) {
+                Ok(()) => {
+                    let id = n.id.trim().to_owned();
+                    self.nova = None;
+                    self.abrir(&id);
+                    self.avisar(
+                        false,
+                        "Regra criada em rascunho. Complete a definição, teste com exemplos e só então ative.",
+                    );
+                    self.recarregar_lista();
+                }
+                Err(e) => n.erro = Some(e),
+            }
+        }
     }
 
     fn mostrar_mensagem(&self, ui: &mut Ui) {
@@ -242,7 +351,18 @@ impl Regras {
 
     fn desenhar_lista(&mut self, ui: &mut Ui) {
         let p = tema::paleta(ui.ctx());
-        componentes::titulo(ui, TITULO, 20.0);
+        ui.horizontal(|ui| {
+            componentes::titulo(ui, TITULO, 20.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .button("Nova regra")
+                    .on_hover_text("Cria uma regra em rascunho com uma definição mínima")
+                    .clicked()
+                {
+                    self.nova = Some(NovaRegra::default());
+                }
+            });
+        });
         texto_pequeno(
             ui,
             "Como o sbf reconhece cada tipo de documento. Uma regra só propõe; consolidada, concilia sozinha quando as três provas batem.",
@@ -1265,13 +1385,7 @@ fn descrever(r: &sbf_regras::simulacao::ResumoDaDecisao) -> String {
 }
 
 fn valor(v: &sbf_regras::Valor) -> String {
-    use sbf_regras::Valor::{Booleano, Centavos, Competencia, Data, Inteiro, Texto};
-    match v {
-        Texto(t) | Data(t) | Competencia(t) => t.clone(),
-        Centavos(c) => format!("R$ {},{:02}", c / 100, c.abs() % 100),
-        Inteiro(i) => i.to_string(),
-        Booleano(b) => if *b { "sim" } else { "não" }.to_owned(),
-    }
+    v.to_string()
 }
 
 fn secao_do_rastro(ui: &mut Ui, p: &Pagina) {

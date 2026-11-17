@@ -1624,7 +1624,7 @@ fn conferir(esperado: &Esperado, leitura: &Leitura) -> Option<String> {
                     Some(c) if c.valor == *valor => {}
                     // Com leitor nativo, os campos do leitor só chegam em `completar`.
                     None if r.leitor.is_some() => {}
-                    Some(c) => erros.push(format!("`{nome}` = {:?}, esperado {valor:?}", c.valor)),
+                    Some(c) => erros.push(format!("`{nome}` = {}, esperado {valor}", c.valor)),
                     None => erros.push(format!("`{nome}` não foi extraído")),
                 }
             }

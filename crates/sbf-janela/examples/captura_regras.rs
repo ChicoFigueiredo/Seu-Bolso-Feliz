@@ -1,7 +1,11 @@
 //! Capturas de tela da área Regras de reconhecimento, só com dados fictícios.
 //!
-//! `SBF_CENA=lista|pagina|pagina-exemplos|simulacao SBF_CAPTURA=/caminho/cena.png \
-//!  xvfb-run -a cargo run -p sbf-janela --example captura_regras`
+//! `SBF_CENA=lista|pagina|pagina-exemplos|simulacao|reconhecimento-regra|reconhecimento-ambiguo|criar-regra \
+//!  SBF_CAPTURA=/caminho/cena.png cargo run -p sbf-janela --example captura_regras`
+//!
+//! As três últimas cenas mostram o painel Reconhecimento falando com as regras (spec 13): o
+//! comprovante de Pix reconhecido pela regra, o caso ambíguo e o formulário "Criar regra a
+//! partir daqui". Tudo fictício: um catálogo em memória e arquivos de mentira na pasta temporária.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9,6 +13,8 @@ use std::path::{Path, PathBuf};
 use bancada_casca::Casca;
 use bancada_casca::eframe;
 use bancada_casca::egui;
+use sbf_janela::planejamento_ficticio::{HOJE_DA_DEMONSTRACAO, PlanejamentoFicticio};
+use sbf_janela::reconhecimento_ficticio::{NOME_DO_AMBIGUO, NOME_DO_PIX};
 use sbf_janela::regras::FonteDasRegras;
 use sbf_janela::{AppSbf, Destino, EstadoDaBarra, Janela};
 
@@ -76,8 +82,53 @@ struct App {
     pedida: bool,
 }
 
+fn soltar(janela: &mut Janela, ctx: &egui::Context, nome: &str) {
+    let arquivo = std::env::temp_dir().join(nome);
+    let _ = std::fs::write(&arquivo, b"arquivo ficticio");
+    janela.soltar_arquivos(vec![arquivo], Some(ctx));
+}
+
 impl App {
+    /// As cenas do painel Reconhecimento: só ele no dock, e o arquivo solto no quadro 3.
+    fn arrumar_o_reconhecimento(&mut self, ctx: &egui::Context) {
+        let mut janela = self.casca.app.janela();
+        match (self.quadros, self.cena.as_str()) {
+            (1, _) => {
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("detalhe"));
+                bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
+            }
+            (3, "reconhecimento-ambiguo") => soltar(&mut janela, ctx, NOME_DO_AMBIGUO),
+            (3, _) => soltar(&mut janela, ctx, NOME_DO_PIX),
+            (8, "reconhecimento-regra") => {
+                if let Some(c) = janela.reconhecimento.cartoes.first_mut() {
+                    c.rastro_aberto = true;
+                }
+                janela.reconhecimento.rolar_para = Some(330.0);
+            }
+            (8, "criar-regra") => janela.abrir_criacao(0),
+            (10, "criar-regra") => {
+                if let Some(c) = janela.reconhecimento.criacao.as_mut() {
+                    c.nome = "Pix para pessoas · Banco Exemplo".to_owned();
+                    c.tipo_documental = "comprovante-pix".to_owned();
+                    for l in &mut c.linhas {
+                        match l.nome.as_str() {
+                            "autenticacao" => l.texto = "D7K2-9QX1-EXEMPLO".to_owned(),
+                            "vencimento" => l.texto = "20/11/2026".to_owned(),
+                            _ => {}
+                        }
+                    }
+                }
+                janela.montar_criacao();
+            }
+            _ => {}
+        }
+    }
+
     fn arrumar(&mut self, ctx: &egui::Context) {
+        if self.cena.starts_with("reconhecimento") || self.cena == "criar-regra" {
+            self.arrumar_o_reconhecimento(ctx);
+            return;
+        }
         let mut janela = self.casca.app.janela();
         match self.quadros {
             1 => {
@@ -140,6 +191,10 @@ fn main() -> std::process::ExitCode {
     );
     let (consulta, comandos) = sbf_janela::demonstracao::nova();
     let mut janela = Janela::nova();
+    janela.hoje = HOJE_DA_DEMONSTRACAO.to_owned();
+    if let Some(hoje) = sbf_planejamento::Data::de_iso(HOJE_DA_DEMONSTRACAO) {
+        janela.ligar_planejamento(Box::new(PlanejamentoFicticio::novo(hoje)));
+    }
     match FonteDasRegras::ficticia(None) {
         Ok(f) => janela.regras.ligar(f),
         Err(e) => {
@@ -147,6 +202,7 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     }
+    sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);
     let barra = EstadoDaBarra {
         inventario: "Modo demonstração · dados fictícios".to_owned(),
         selo: Some("Demonstração · dados fictícios".to_owned()),

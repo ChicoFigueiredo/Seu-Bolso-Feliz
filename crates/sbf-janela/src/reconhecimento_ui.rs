@@ -21,12 +21,13 @@ use crate::icones;
 use crate::janela::Janela;
 use crate::navegacao::{self, Destino};
 use crate::reconhecimento::{Cartao, SituacaoDoCartao};
+use crate::reconhecimento_regras_ui::{self, EdicaoDoCartao, ExtrasDaRegra};
 use crate::tema::{self, Paleta};
 use sbf_inventario::consulta::Area;
 
 /// O que o usuário pediu num cartão (aplicado depois do desenho).
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Pedido {
+pub(crate) enum Pedido {
     Confirmar(usize, usize),
     Ignorar(usize, usize),
     /// Desfaz a conciliação que a regra fez sozinha.
@@ -37,6 +38,14 @@ enum Pedido {
     Limpar,
     AbrirNoControle(IdOcorrencia),
     AbrirNaTriagem,
+    /// Abre a página da regra na área Regras.
+    AbrirRegra(String),
+    /// Liga ou desliga o "Corrigir campos" do cartão.
+    AlternarCorrecao(usize),
+    /// "Testar com este documento".
+    AbrirTeste(usize),
+    /// "Criar regra a partir daqui".
+    AbrirCriacao(usize),
 }
 
 impl Janela {
@@ -76,7 +85,8 @@ impl Janela {
             componentes::aviso(ui, "error", &m.texto, p.perigo_sutil, p.borda, p.perigo);
         }
         let ocupado = self.reconhecimento.ocupado();
-        let cartoes = &self.reconhecimento.cartoes;
+        let regras_ligadas = self.regras.ligada();
+        let cartoes = &mut self.reconhecimento.cartoes;
         if cartoes.is_empty() {
             ui.add_space(6.0);
             let texto = if self.reconhecimento.ligado() {
@@ -112,12 +122,24 @@ impl Janela {
             area = area.vertical_scroll_offset(y);
         }
         area.show(ui, |ui| {
-            for (i, c) in cartoes.iter().enumerate() {
-                cartao(ui, &p, i, c, &mut pedidos);
+            for (i, c) in cartoes.iter_mut().enumerate() {
+                cartao(ui, &p, i, c, regras_ligadas, &mut pedidos);
                 ui.add_space(6.0);
             }
         });
         self.aplicar(ui.ctx(), pedidos);
+        self.dialogos_das_regras(ui.ctx());
+    }
+
+    /// Abre a página da regra na área Regras.
+    pub(crate) fn abrir_a_regra(&mut self, ctx: &Context, id: &str) {
+        self.regras.abrir(id);
+        navegacao::pedir_abrir(
+            ctx,
+            &mut self.pedidos,
+            Destino::AreaFutura(crate::regras_ui::ROTA),
+            false,
+        );
     }
 
     fn aplicar(&mut self, ctx: &Context, pedidos: Vec<Pedido>) {
@@ -147,6 +169,10 @@ impl Janela {
                         false,
                     );
                 }
+                Pedido::AbrirRegra(id) => self.abrir_a_regra(ctx, &id),
+                Pedido::AlternarCorrecao(c) => self.alternar_correcao(c),
+                Pedido::AbrirTeste(c) => self.abrir_teste(c),
+                Pedido::AbrirCriacao(c) => self.abrir_criacao(c),
             }
         }
     }
@@ -196,11 +222,11 @@ fn camada_de_soltar(ctx: &Context) {
     );
 }
 
-fn pequeno(ui: &mut Ui, texto: impl Into<String>, cor: Color32) {
+pub(crate) fn pequeno(ui: &mut Ui, texto: impl Into<String>, cor: Color32) {
     ui.label(RichText::new(texto.into()).size(12.0).color(cor));
 }
 
-fn aviso_com_triangulo(ui: &mut Ui, p: &Paleta, texto: &str) {
+pub(crate) fn aviso_com_triangulo(ui: &mut Ui, p: &Paleta, texto: &str) {
     ui.horizontal_wrapped(|ui| {
         ui.label(icones::icone_cor("warning", 15.0, p.aviso))
             .on_hover_text(format!("Atenção: {texto}"));
@@ -208,21 +234,54 @@ fn aviso_com_triangulo(ui: &mut Ui, p: &Paleta, texto: &str) {
     });
 }
 
-fn cartao(ui: &mut Ui, p: &Paleta, indice: usize, c: &Cartao, pedidos: &mut Vec<Pedido>) {
+fn cartao(
+    ui: &mut Ui,
+    p: &Paleta,
+    indice: usize,
+    c: &mut Cartao,
+    regras_ligadas: bool,
+    pedidos: &mut Vec<Pedido>,
+) {
     componentes::cartao(ui, |ui| {
         ui.set_width(ui.available_width());
         cabecalho(ui, p, indice, c, pedidos);
         ui.add_space(4.0);
         etapas(ui, p, c);
+        if matches!(c.situacao, SituacaoDoCartao::Pronto(_)) {
+            ui.add_space(6.0);
+            ui.separator();
+            let Cartao {
+                situacao,
+                nomes_das_regras,
+                corrigindo,
+                edicao,
+                rastro_aberto,
+                ..
+            } = &mut *c;
+            if let SituacaoDoCartao::Pronto(r) = situacao {
+                let extras = ExtrasDaRegra {
+                    entrada: r.entrada.as_ref(),
+                    leitura: r.leitura.as_ref(),
+                    nomes: nomes_das_regras,
+                    regras_ligadas,
+                };
+                let mut estado = EdicaoDoCartao {
+                    corrigindo,
+                    edicao,
+                    rastro_aberto,
+                };
+                reconhecido(ui, p, indice, &r.reconhecido, &extras, &mut estado, pedidos);
+            }
+        }
         match &c.situacao {
             SituacaoDoCartao::Pronto(r) => {
-                ui.add_space(6.0);
-                ui.separator();
-                reconhecido(ui, p, &r.reconhecido, pedidos);
                 if let EstadoDoTexto::SemTexto(m) | EstadoDoTexto::Protegido(m) = &r.texto {
                     aviso_com_triangulo(ui, p, m);
                 }
                 for a in &r.avisos {
+                    aviso_com_triangulo(ui, p, a);
+                }
+                if let Some(a) = &c.aviso_de_retorno {
                     aviso_com_triangulo(ui, p, a);
                 }
                 if !r.sugestoes.is_empty() {
@@ -327,7 +386,15 @@ fn par(ui: &mut Ui, p: &Paleta, rotulo: &str, valor: Option<Centavos>) {
     ui.end_row();
 }
 
-fn reconhecido(ui: &mut Ui, p: &Paleta, r: &Reconhecido, pedidos: &mut Vec<Pedido>) {
+fn reconhecido(
+    ui: &mut Ui,
+    p: &Paleta,
+    indice: usize,
+    r: &Reconhecido,
+    extras: &ExtrasDaRegra<'_>,
+    estado: &mut EdicaoDoCartao<'_>,
+    pedidos: &mut Vec<Pedido>,
+) {
     match r {
         Reconhecido::Contracheque {
             contracheque: c,
@@ -392,25 +459,10 @@ fn reconhecido(ui: &mut Ui, p: &Paleta, r: &Reconhecido, pedidos: &mut Vec<Pedid
             }
         }
         Reconhecido::PelaRegra { reconhecimento: r } => {
-            ui.horizontal(|ui| {
-                ui.label(icones::icone_cor("task_alt", 16.0, p.sucesso));
-                ui.label(
-                    RichText::new(format!(
-                        "{} · regra {}@{}",
-                        r.tipo_documental, r.regra, r.versao
-                    ))
-                    .strong(),
-                );
-            });
-            for motivo in &r.motivos {
-                pequeno(ui, motivo, p.tinta_suave);
-            }
+            reconhecimento_regras_ui::pela_regra(ui, p, indice, r, extras, estado, pedidos);
         }
-        Reconhecido::Ambiguo { motivo, .. } => {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(icones::icone_cor("warning", 16.0, p.aviso));
-                ui.label(RichText::new(format!("Precisa revisar: {motivo}")).color(p.aviso));
-            });
+        Reconhecido::Ambiguo { candidatas, motivo } => {
+            reconhecimento_regras_ui::ambiguo(ui, p, candidatas, motivo, extras, pedidos);
         }
         Reconhecido::Nada { motivo } => {
             ui.horizontal_wrapped(|ui| {
@@ -419,6 +471,7 @@ fn reconhecido(ui: &mut Ui, p: &Paleta, r: &Reconhecido, pedidos: &mut Vec<Pedid
             });
         }
     }
+    reconhecimento_regras_ui::acoes_da_regra(ui, indice, extras, pedidos);
 }
 
 fn sugestao(
@@ -539,6 +592,14 @@ fn sugestao(
                 }
             }
         }
+        (
+            Sugestao::ProvarRegistro { .. }
+            | Sugestao::ConciliarOcorrencia { .. }
+            | Sugestao::PagarFatura { .. },
+            _,
+        ) => {
+            reconhecimento_regras_ui::detalhe_da_sugestao(ui, p, sug, c.automaticas.contains(&s));
+        }
         _ => {}
     }
     if let Some((k, erro)) = &c.erro_de_sugestao
@@ -549,7 +610,11 @@ fn sugestao(
     if c.automaticas.contains(&s) {
         ui.horizontal_wrapped(|ui| {
             componentes::selo(ui, "automática", p.info_sutil, p.info);
-            pequeno(ui, "Conciliado automaticamente ·", p.sucesso);
+            pequeno(
+                ui,
+                reconhecimento_regras_ui::texto_da_automatica(sug, &c.nomes_das_regras),
+                p.sucesso,
+            );
             if ui
                 .small_button("Desfazer")
                 .on_hover_text("Desfaz a conciliação; ela volta a ser uma sugestão")

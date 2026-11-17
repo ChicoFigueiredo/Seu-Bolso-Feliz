@@ -19,11 +19,12 @@ use sbf_regras::definicao::{
     Condicao, Definicao, Extracao, FonteDaExtracao, Formato, ModeloDeProposta,
 };
 use sbf_regras::motor::Motor;
+use sbf_regras::rascunho::{Correcao, rascunho_da_correcao};
 use sbf_regras::script::ExecutorDeScript;
 use sbf_regras::simulacao::{Diferencas, simular};
 use sbf_regras::{
-    Autor, Canal, Decisao, Dicas, Entrada, ErroDasRegras, Estado, IdDaRegra, Origem, Quem, Retorno,
-    TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    Autor, Canal, Decisao, Dicas, Entrada, ErroDasRegras, Estado, IdDaRegra, Leitura, Origem, Quem,
+    Retorno, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
 };
 use sha2::{Digest, Sha256};
 
@@ -306,17 +307,7 @@ impl FonteDasRegras {
         let v = c.versao(regra, versao).map_err(erro)?;
         let motor = Motor::novo(vec![v], c.parametros().map_err(erro)?, None);
         let leitura = motor.ler_com(&entrada_de_texto(texto), self.executor_ref());
-        Ok(match leitura.decisao {
-            Decisao::Reconhecido(r) => Esperado::Reconhece {
-                tipo_documental: r.tipo_documental,
-                campos: r
-                    .campos
-                    .into_iter()
-                    .map(|(n, c)| (n, c.valor))
-                    .collect::<BTreeMap<String, Valor>>(),
-            },
-            _ => Esperado::NaoSeAplica,
-        })
+        Ok(esperado_da_leitura(&leitura))
     }
 
     /// Apaga um exemplo.
@@ -442,6 +433,208 @@ impl FonteDasRegras {
             .map(|v| v.versao)
     }
 
+    // ---- o painel do Reconhecimento (spec 13, D4, D7, D12) ----
+
+    /// O nome de cada regra pelo id, para os cartões ("Comprovante Pix · Banco Exemplo").
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn nomes(&self) -> Result<BTreeMap<IdDaRegra, String>, String> {
+        Ok(self
+            .resumos()?
+            .into_iter()
+            .map(|r| (r.id, r.nome))
+            .collect())
+    }
+
+    /// O que o usuário fez com a proposta de `chave` (aceitou, corrigiu ou rejeitou). Sempre
+    /// como [`Quem::Usuario`]: quem chama é o clique do cartão (D4). `Ok(false)` quando a
+    /// proposta já tinha sido decidida antes (o retorno não se repete).
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo (chave desconhecida, banco que não abre).
+    pub fn registrar_retorno(&self, chave: &str, retorno: Retorno) -> Result<bool, String> {
+        match self
+            .catalogo()?
+            .registrar_retorno(chave, retorno, &Quem::Usuario, "")
+        {
+            Ok(()) => Ok(true),
+            Err(ErroDasRegras::NaoPermitido(_)) => Ok(false),
+            Err(e) => Err(erro(e)),
+        }
+    }
+
+    /// O usuário desfez a conciliação que a regra fez sozinha. A proposta automática nunca
+    /// passou por um "aceito"; aqui, no clique do Desfazer, ela é registrada como aceita e em
+    /// seguida desfeita, o que zera a sequência e rebaixa a regra consolidada a ativa.
+    /// `Ok(false)` quando a proposta já tinha sido decidida de outro modo.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn registrar_desfeito(&self, chave: &str) -> Result<bool, String> {
+        let mut c = self.catalogo()?;
+        match c.registrar_retorno(chave, Retorno::Desfeito, &Quem::Usuario, "") {
+            Ok(()) => Ok(true),
+            Err(ErroDasRegras::NaoPermitido(_)) => {
+                match c.registrar_retorno(chave, Retorno::Aceito, &Quem::Usuario, "") {
+                    Ok(()) => {}
+                    Err(ErroDasRegras::NaoPermitido(_)) => return Ok(false),
+                    Err(e) => return Err(erro(e)),
+                }
+                c.registrar_retorno(chave, Retorno::Desfeito, &Quem::Usuario, "")
+                    .map(|()| true)
+                    .map_err(erro)
+            }
+            Err(e) => Err(erro(e)),
+        }
+    }
+
+    /// As versões que dá para testar contra um documento: todas, rascunhos inclusive, da
+    /// mais nova para a mais antiga, com o nome da regra.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn versoes_para_testar(&self) -> Result<Vec<OpcaoDeTeste>, String> {
+        let c = self.catalogo()?;
+        let mut saida = Vec::new();
+        for r in c.regras().map_err(erro)? {
+            for v in c.versoes(&r.id).map_err(erro)?.into_iter().rev() {
+                saida.push(OpcaoDeTeste {
+                    regra: r.id.clone(),
+                    nome: r.nome.clone(),
+                    versao: v.versao,
+                    estado: v.estado,
+                });
+            }
+        }
+        Ok(saida)
+    }
+
+    /// O que a versão leria deste documento, com um [`Motor`] só dela. Não grava nada.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn testar_documento(
+        &self,
+        regra: &str,
+        versao: u32,
+        entrada: &Entrada,
+    ) -> Result<Leitura, String> {
+        let c = self.catalogo()?;
+        let v = c.versao(regra, versao).map_err(erro)?;
+        let motor = Motor::novo(vec![v], c.parametros().map_err(erro)?, None);
+        Ok(motor.ler_com(entrada, self.executor_ref()))
+    }
+
+    /// Guarda o documento como exemplo da regra, com o que a versão leu agora ("Guardar como
+    /// exemplo"): o tipo e os campos, ou "não se aplica".
+    ///
+    /// # Errors
+    /// O texto do erro de nome ou do catálogo.
+    pub fn guardar_como_exemplo(
+        &self,
+        regra: &str,
+        versao: u32,
+        nome: &str,
+        entrada: &Entrada,
+    ) -> Result<Esperado, String> {
+        let nome = nome.trim();
+        if nome.is_empty() {
+            return Err("dê um nome ao exemplo".to_owned());
+        }
+        let leitura = self.testar_documento(regra, versao, entrada)?;
+        let esperado = esperado_da_leitura(&leitura);
+        self.catalogo()?
+            .salvar_exemplo(regra, nome, entrada, esperado.clone())
+            .map_err(erro)?;
+        Ok(esperado)
+    }
+
+    /// Monta o rascunho de uma correção (D7), sem gravar. Os motivos são os campos que a
+    /// regra não conseguiu aprender do texto.
+    ///
+    /// # Errors
+    /// O texto do erro (documento sem texto, nenhuma linha distintiva).
+    pub fn montar_rascunho(
+        &self,
+        entrada: &Entrada,
+        correcao: &Correcao,
+    ) -> Result<RascunhoMontado, String> {
+        let (nova, esperado) = rascunho_da_correcao(entrada, correcao).map_err(erro)?;
+        let motivos = nova
+            .motivo
+            .split_once("; fora: ")
+            .map(|(_, fora)| fora.split("; ").map(|m| m.replace('`', "")).collect())
+            .unwrap_or_default();
+        Ok(RascunhoMontado {
+            nova,
+            esperado,
+            motivos,
+        })
+    }
+
+    /// Salva o rascunho montado (autor `Correcao`) e o documento como primeiro exemplo.
+    /// Continua rascunho: ativar é do usuário, na página da regra (D14).
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn salvar_rascunho_montado(
+        &self,
+        montado: &RascunhoMontado,
+        entrada: &Entrada,
+    ) -> Result<VersaoDeRegra, String> {
+        let mut c = self.catalogo()?;
+        let v = c.salvar_rascunho(montado.nova.clone()).map_err(erro)?;
+        c.salvar_exemplo(
+            &v.regra,
+            "Documento corrigido",
+            entrada,
+            montado.esperado.clone(),
+        )
+        .map_err(erro)?;
+        Ok(v)
+    }
+
+    /// Cria uma regra nova, em rascunho, com a definição mínima (detecta por uma palavra a
+    /// trocar). Não ativa nada.
+    ///
+    /// # Errors
+    /// O texto do erro de id, de tipo ou do catálogo.
+    pub fn criar_regra(&self, id: &str, nome: &str, tipo_documental: &str) -> Result<(), String> {
+        let id = id.trim();
+        let ok = !id.is_empty()
+            && !id.starts_with('-')
+            && !id.ends_with('-')
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !ok {
+            return Err(
+                "o id usa só letras minúsculas sem acento, números e hífen (comprovante-pix-banco-exemplo)"
+                    .to_owned(),
+            );
+        }
+        if nome.trim().is_empty() {
+            return Err("dê um nome à regra".to_owned());
+        }
+        let tipo = tipo_documental.trim();
+        if tipo.is_empty() {
+            return Err("diga o tipo documental (comprovante-pix, fatura-de-cartao...)".to_owned());
+        }
+        if self.resumos()?.iter().any(|r| r.id == id) {
+            return Err(format!("já existe a regra {id}"));
+        }
+        let definicao = Definicao::simples(tipo, "troque por uma palavra do documento");
+        self.salvar_rascunho(
+            id,
+            nome.trim(),
+            &definicao_em_texto(&definicao),
+            "",
+            "criada na janela",
+        )
+        .map(|_| ())
+    }
+
     // ---- demonstração ----
 
     /// Um catálogo em memória com três regras inventadas (nada real):
@@ -462,12 +655,48 @@ impl FonteDasRegras {
     }
 }
 
+/// Uma versão que o diálogo "Testar com este documento" oferece.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpcaoDeTeste {
+    pub regra: IdDaRegra,
+    pub nome: String,
+    pub versao: u32,
+    pub estado: Estado,
+}
+
+/// O rascunho de uma correção, ainda sem gravar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RascunhoMontado {
+    pub nova: NovaVersao,
+    pub esperado: Esperado,
+    /// Os campos que a regra não conseguiu aprender, e por quê.
+    pub motivos: Vec<String>,
+}
+
+/// O que uma leitura produziu, no formato de um exemplo: reconhece (tipo e campos) ou
+/// "não se aplica".
+pub fn esperado_da_leitura(leitura: &Leitura) -> Esperado {
+    match &leitura.decisao {
+        Decisao::Reconhecido(r) => Esperado::Reconhece {
+            tipo_documental: r.tipo_documental.clone(),
+            campos: r
+                .campos
+                .iter()
+                .map(|(n, c)| (n.clone(), c.valor.clone()))
+                .collect::<BTreeMap<String, Valor>>(),
+        },
+        _ => Esperado::NaoSeAplica,
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Dados fictícios
 // ---------------------------------------------------------------------------------------
 
 const PIX_TEXTO: &str = "Banco Exemplo\nComprovante de Pix\nValor: R$ 1.250,00\nData: 12/10/2026\nPara: Maria Exemplo\nAutenticação: ABC123DEF456";
 const PIX_TEXTO_2: &str = "Banco Exemplo\nComprovante de Pix\nValor: R$ 89,90\nData: 14/10/2026\nPara: Mercado Exemplo\nAutenticação: XYZ987";
+/// Um comprovante que a regra do Pix e a do Pix agendado leem (a demonstração do ambíguo).
+pub const PIX_AGENDADO_TEXTO: &str = "Banco Exemplo\nComprovante de Pix agendado\nValor: R$ 640,00\nData: 20/11/2026\nPara: Fulano de Tal";
 const OUTRO_BANCO: &str = "Banco Imaginário\nComprovante de Pix\nValor: R$ 40,00\nData: 02/10/2026";
 const FATURA_TEXTO: &str =
     "Cartão Exemplo\nFatura fechada\nTotal da fatura: R$ 2.310,45\nVencimento: 10/11/2026";
@@ -505,6 +734,27 @@ fn definicao_do_pix(com_favorecido: bool) -> Definicao {
     }
     d.obrigatorios = vec!["valor_centavos".to_owned(), "data".to_owned()];
     d.propor = vec![ModeloDeProposta::ProvarRegistro { janela_dias: 2 }];
+    d
+}
+
+/// Um Pix agendado do mesmo banco: o texto dele também contém "comprovante de pix", então um
+/// comprovante agendado empata com a regra do Pix (a demonstração do caso ambíguo).
+fn definicao_do_pix_agendado() -> Definicao {
+    let mut d = Definicao::simples("pix-agendado", "pix agendado");
+    d.detectar
+        .todos
+        .push(Condicao::Contem("banco exemplo".to_owned()));
+    d.extrair = BTreeMap::from([
+        (
+            "valor_centavos".to_owned(),
+            extracao(r"(?i)valor:\s*R\$\s*([\d.,]+)", Formato::Centavos),
+        ),
+        (
+            "data".to_owned(),
+            extracao(r"(?i)data:\s*(\d{2}/\d{2}/\d{4})", Formato::Data),
+        ),
+    ]);
+    d.obrigatorios = vec!["valor_centavos".to_owned(), "data".to_owned()];
     d
 }
 
@@ -676,13 +926,33 @@ fn povoar_demonstracao(
     c.consolidar(ENERGIA, e1.versao, &Quem::Usuario)?;
 
     // O Pix ganha cinco aceitas seguidas depois da consolidação da energia (a sugestão).
-    aceitar_cinco(c, executor, |n| {
+    aceitar_cinco(c, executor.clone(), |n| {
         format!(
             "Banco Exemplo\nComprovante de Pix\nValor: R$ {},00\nData: {:02}/10/2026\nPara: Pessoa {n} Exemplo",
             20 + n * 15,
             3 + n
         )
     })?;
+
+    // O Pix agendado: ativo, e empata com o Pix quando o comprovante diz "agendado".
+    const AGENDADO: &str = "pix-agendado-banco-exemplo";
+    let a1 = c.salvar_rascunho(nova(
+        AGENDADO,
+        "Pix agendado · Banco Exemplo",
+        definicao_do_pix_agendado(),
+        Autor::Usuario,
+        "regra fictícia para a demonstração do caso ambíguo",
+    ))?;
+    c.salvar_exemplo(
+        AGENDADO,
+        "Pix agendado de R$ 640,00",
+        &entrada_de_texto(PIX_AGENDADO_TEXTO),
+        reconhece(
+            "pix-agendado",
+            &[("valor_centavos", Valor::Centavos(64_000))],
+        ),
+    )?;
+    c.ativar(AGENDADO, a1.versao, &Quem::Usuario, executor.as_deref())?;
 
     // A fatura: rascunho cujo exemplo espera o valor errado.
     const FATURA: &str = "fatura-cartao-banco-exemplo";
@@ -767,6 +1037,13 @@ mod testes {
         let bloqueios = f.bloqueios_da_ativacao(FATURA, 1).expect("bloqueios");
         assert_eq!(bloqueios.len(), 1, "{bloqueios:?}");
         assert!(bloqueios[0].starts_with("Fatura de outubro"));
+        // O valor se lê como gente escreve, não como `Centavos(231045)`.
+        assert!(
+            bloqueios[0].contains("R$ 2.310,45") && bloqueios[0].contains("R$ 2.310,00"),
+            "{}",
+            bloqueios[0]
+        );
+        assert!(!bloqueios[0].contains("Centavos("), "{}", bloqueios[0]);
         let e = f.ativar(FATURA, 1).expect_err("deve bloquear");
         assert!(e.contains("Fatura de outubro"), "{e}");
         assert_eq!(resumo(&f, FATURA).estado, None);

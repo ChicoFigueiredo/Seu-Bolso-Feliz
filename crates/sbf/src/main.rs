@@ -379,7 +379,6 @@ fn app_de_demonstracao() -> Result<App, String> {
         ))),
         Some(std::path::PathBuf::from("/home/exemplo/.local/bin/claude")),
     );
-    sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);
     // Regras de reconhecimento fictícias (spec 13): catálogo em memória, executor no processo.
     match sbf_janela::regras::FonteDasRegras::ficticia(Some(std::sync::Arc::new(
         sbf_script::ExecutorNoProcesso::novo(),
@@ -387,6 +386,8 @@ fn app_de_demonstracao() -> Result<App, String> {
         Ok(f) => janela.regras.ligar(f),
         Err(e) => eprintln!("sbf: as regras fictícias não abriram ({e})"),
     }
+    // O reconhecedor fictício vem depois das regras: o Pix e o caso ambíguo leem o catálogo.
+    sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);
     let cena = preparar_cena_da_caixa(&caixa, &consulta, &livro, &mut janela);
     let consulta = sbf_janela::ConsultaComposta::nova(Box::new(consulta), Some(Box::new(livro)));
     let mut app = App::novo(janela, Box::new(consulta), Box::new(comandos), barra)
