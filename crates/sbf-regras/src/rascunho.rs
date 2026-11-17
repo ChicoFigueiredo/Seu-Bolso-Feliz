@@ -212,26 +212,36 @@ fn tem_digitos_longos(s: &str) -> bool {
 }
 
 fn ancoras(texto: &str, valores_achados: &[String]) -> Vec<String> {
-    let mut saida: Vec<String> = Vec::new();
-    for linha in texto.lines() {
-        if saida.len() == 3 {
+    let candidatas: Vec<String> = texto
+        .lines()
+        .filter(|linha| !valores_achados.iter().any(|v| linha.contains(v.as_str())))
+        .map(normalizar)
+        .filter(|n| {
+            (6..=60).contains(&n.chars().count())
+                && n.chars().any(char::is_alphabetic)
+                && !tem_digitos_longos(n)
+        })
+        .collect();
+    // Linhas sem nenhum dígito são as mais estáveis entre documentos do mesmo tipo; as
+    // com dígitos curtos só entram se não sobrar nada melhor.
+    let mut escolhidas: Vec<String> = Vec::new();
+    for exigir_sem_digito in [true, false] {
+        for n in &candidatas {
+            if escolhidas.len() == 3 {
+                break;
+            }
+            if (exigir_sem_digito && n.chars().any(|c| c.is_ascii_digit()))
+                || escolhidas.contains(n)
+            {
+                continue;
+            }
+            escolhidas.push(n.clone());
+        }
+        if !escolhidas.is_empty() {
             break;
         }
-        if valores_achados.iter().any(|v| linha.contains(v.as_str())) {
-            continue;
-        }
-        let n = normalizar(linha);
-        let tamanho = n.chars().count();
-        if !(6..=60).contains(&tamanho)
-            || tem_digitos_longos(&n)
-            || !n.chars().any(char::is_alphabetic)
-            || saida.contains(&n)
-        {
-            continue;
-        }
-        saida.push(n);
     }
-    saida
+    escolhidas
 }
 
 fn slug(nome: &str) -> String {
