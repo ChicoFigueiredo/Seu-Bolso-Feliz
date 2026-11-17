@@ -26,6 +26,7 @@
 
 pub mod cofre;
 pub mod descontos;
+pub mod regras;
 pub mod salario;
 
 pub use cofre::{MotorDeIa, ReconhecedorDoCofre, Segredos};
@@ -36,9 +37,10 @@ use std::sync::atomic::AtomicBool;
 
 use sbf_planejamento::{
     Alteracao, AlvoDoDocumento, BaixaPeloContracheque, Centavos, Competencia, Composicao,
-    Conciliacao, Data, IdOcorrencia, TipoDeDocumento,
+    Conciliacao, Data, IdOcorrencia, MovimentoDoExtrato, TipoDeDocumento,
 };
 use sbf_planilha::contracheque::{ConsignacaoComPrazo, Contracheque};
+use sbf_regras::{Entrada, IdDaRegra, Leitura, Reconhecimento};
 
 /// As etapas, na ordem em que rodam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,6 +123,15 @@ pub enum Reconhecido {
         /// Uma linha para o cartão ("Boleto · Fornecedor X · vence 24/11/2026").
         resumo: String,
     },
+    /// Uma regra de reconhecimento (spec 13) que não é o leitor de contracheque reconheceu o
+    /// documento: tipo, campos rastreáveis, avisos e propostas. As propostas viram
+    /// [`Sugestao`]es no passo de sugerir; nada é gravado no planejamento por aqui.
+    PelaRegra { reconhecimento: Box<Reconhecimento> },
+    /// Duas regras empatadas discordam: nada é gravado e o arquivo vai para "Precisa revisar".
+    Ambiguo {
+        candidatas: Vec<Reconhecimento>,
+        motivo: String,
+    },
     /// Nada reconheceu (o motivo, em português).
     Nada { motivo: String },
 }
@@ -176,6 +187,44 @@ pub enum Sugestao {
         rotulo: String,
         /// As baixas ainda não gravadas, cada uma como conciliação confirmada.
         baixas: Vec<BaixaPeloContracheque>,
+    },
+    /// Proposta `ProvarRegistro` de uma regra: o comprovante prova um débito que **já existe**
+    /// no extrato. Nunca cria gasto nem registro. Se o débito já está conciliado a uma
+    /// ocorrência, aplicar liga o comprovante a ela; senão a sugestão só informa.
+    ProvarRegistro {
+        /// "Este comprovante prova o débito de 12/11 · R$ 187,50".
+        rotulo: String,
+        /// O registro do extrato que o documento prova.
+        movimento: MovimentoDoExtrato,
+        /// A ocorrência a que o débito já está conciliado, quando há.
+        alvo: Option<AlvoDoDocumento>,
+        tipo: TipoDeDocumento,
+        regra: (IdDaRegra, u32),
+        /// A chave de idempotência da proposta (`registrar_retorno`).
+        chave: String,
+        /// Quantas das três provas batem (documento, valor exato, conta ou assinatura).
+        provas: u8,
+        automatica: bool,
+    },
+    /// Proposta `ConciliarOcorrencia`: a ocorrência do compromisso com o débito do extrato
+    /// que o documento descreve.
+    ConciliarOcorrencia {
+        rotulo: String,
+        conciliacao: Conciliacao,
+        regra: (IdDaRegra, u32),
+        chave: String,
+        provas: u8,
+        automatica: bool,
+    },
+    /// Proposta `PagarFatura` (D11): o débito paga a ocorrência da fatura do cartão. É
+    /// pagamento de fatura, não gasto novo: os itens da fatura já são os gastos.
+    PagarFatura {
+        rotulo: String,
+        conciliacao: Conciliacao,
+        regra: (IdDaRegra, u32),
+        chave: String,
+        provas: u8,
+        automatica: bool,
     },
 }
 
@@ -293,14 +342,55 @@ impl Sugestao {
             | Sugestao::UsarRubricas { rotulo, .. }
             | Sugestao::Conciliar { rotulo, .. }
             | Sugestao::CriarDescontosEmFolha { rotulo, .. }
-            | Sugestao::DarBaixa { rotulo, .. } => rotulo,
+            | Sugestao::DarBaixa { rotulo, .. }
+            | Sugestao::ProvarRegistro { rotulo, .. }
+            | Sugestao::ConciliarOcorrencia { rotulo, .. }
+            | Sugestao::PagarFatura { rotulo, .. } => rotulo,
         }
     }
 
     /// A conciliação das três provas, que a janela aplica sozinha (`Autor::Regra`) quando o
     /// resultado chega. As demais esperam o clique.
     pub fn e_automatica(&self) -> bool {
-        matches!(self, Sugestao::Conciliar { provas, .. } if *provas >= PROVAS_POSSIVEIS)
+        match self {
+            Sugestao::Conciliar { provas, .. } => *provas >= PROVAS_POSSIVEIS,
+            Sugestao::ProvarRegistro { automatica, .. }
+            | Sugestao::ConciliarOcorrencia { automatica, .. }
+            | Sugestao::PagarFatura { automatica, .. } => *automatica,
+            _ => false,
+        }
+    }
+
+    /// A conciliação que a janela grava sozinha, com o nome do autor (`Autor::Regra`):
+    /// `"tres-provas"` para o salário; `"<id>@<versão>"` para uma regra consolidada. `None`
+    /// quando a sugestão não é automática ou não é uma conciliação.
+    pub fn conciliacao_automatica(&self) -> Option<(&Conciliacao, String)> {
+        if !self.e_automatica() {
+            return None;
+        }
+        match self {
+            Sugestao::Conciliar { conciliacao, .. } => {
+                Some((conciliacao, "tres-provas".to_owned()))
+            }
+            Sugestao::ConciliarOcorrencia {
+                conciliacao, regra, ..
+            }
+            | Sugestao::PagarFatura {
+                conciliacao, regra, ..
+            } => Some((conciliacao, format!("{}@{}", regra.0, regra.1))),
+            _ => None,
+        }
+    }
+
+    /// A regra e a chave da proposta que gerou a sugestão (para `regras::registrar_retorno`);
+    /// `None` nas sugestões que não vêm de uma regra.
+    pub fn da_regra(&self) -> Option<(&(IdDaRegra, u32), &str)> {
+        match self {
+            Sugestao::ProvarRegistro { regra, chave, .. }
+            | Sugestao::ConciliarOcorrencia { regra, chave, .. }
+            | Sugestao::PagarFatura { regra, chave, .. } => Some((regra, chave)),
+            _ => None,
+        }
     }
 
     /// O recorrente cuja `versao_do_registro` a janela lê na hora de confirmar (só
@@ -312,7 +402,10 @@ impl Sugestao {
             Sugestao::Vincular { .. }
             | Sugestao::Conciliar { .. }
             | Sugestao::CriarDescontosEmFolha { .. }
-            | Sugestao::DarBaixa { .. } => None,
+            | Sugestao::DarBaixa { .. }
+            | Sugestao::ProvarRegistro { .. }
+            | Sugestao::ConciliarOcorrencia { .. }
+            | Sugestao::PagarFatura { .. } => None,
         }
     }
 
@@ -348,12 +441,30 @@ impl Sugestao {
                     })
                     .collect()
             }
-            Sugestao::Conciliar { conciliacao, .. } => vec![Alteracao::Conciliar {
+            Sugestao::Conciliar { conciliacao, .. }
+            | Sugestao::ConciliarOcorrencia { conciliacao, .. }
+            | Sugestao::PagarFatura { conciliacao, .. } => vec![Alteracao::Conciliar {
                 conciliacao: Conciliacao {
                     confirmada: true,
                     ..conciliacao.clone()
                 },
             }],
+            // O comprovante não cria nada: só se liga à ocorrência que já tem o débito.
+            Sugestao::ProvarRegistro {
+                alvo,
+                tipo,
+                movimento,
+                ..
+            } => alvo
+                .iter()
+                .map(|alvo| Alteracao::VincularDocumento {
+                    alvo: alvo.clone(),
+                    sha256: sha256.to_owned(),
+                    tipo_documento: *tipo,
+                    nome: nome.to_owned(),
+                    data: Some(movimento.data),
+                })
+                .collect(),
             Sugestao::DarBaixa { baixas, .. } => baixas
                 .iter()
                 .filter(|b| !b.ja_baixada)
@@ -385,6 +496,11 @@ pub struct Resultado {
     pub sugestoes: Vec<Sugestao>,
     /// Avisos para o cartão ("a soma das rubricas não bate com o líquido").
     pub avisos: Vec<String>,
+    /// A entrada que o motor de regras recebeu (spec 13); `None` sem `com_regras`. A janela
+    /// a usa para "Testar com este documento" e "Criar regra a partir daqui".
+    pub entrada: Option<Entrada>,
+    /// O que o motor decidiu e quais regras rodaram (o Rastro); `None` sem `com_regras`.
+    pub leitura: Option<Leitura>,
 }
 
 /// Por que o reconhecimento parou.
@@ -496,6 +612,8 @@ mod testes {
                 data: None,
             }],
             avisos: Vec::new(),
+            entrada: None,
+            leitura: None,
         }
     }
 

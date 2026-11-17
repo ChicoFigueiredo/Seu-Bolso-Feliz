@@ -1548,9 +1548,36 @@ impl Catalogo {
                     "só regra de autor Fabrica é semeada".to_owned(),
                 ));
             }
-            let v = self.salvar_rascunho(nova)?;
+            // Uma regra pode ter várias versões de fábrica: acha pela identidade do
+            // conteúdo (checksum), não pela última versão.
+            let checksum = checksum_da_versao(&nova.definicao, nova.script.as_deref());
+            let existente = self
+                .versoes(&nova.regra)?
+                .into_iter()
+                .find(|v| v.checksum == checksum);
+            let v = match existente {
+                Some(v) => v,
+                None => self.salvar_rascunho(nova)?,
+            };
             if estado == Estado::Ativa && v.estado == Estado::Rascunho {
                 self.ativar_como(&v.regra, v.versao, &Quem::Sistema, "regra de fábrica", None)?;
+            }
+        }
+        for p in fabrica::parametros_de_fabrica() {
+            let ja = self.parametros()?.into_iter().any(|x| {
+                x.nome == p.nome
+                    && x.vigencia_inicio == p.vigencia_inicio
+                    && serde_json::from_str::<Json>(p.valor).is_ok_and(|v| v == x.valor)
+            });
+            if !ja {
+                let valor: Json = serde_json::from_str(p.valor)
+                    .map_err(|e| ErroDasRegras::Definicao(format!("parâmetro de fábrica: {e}")))?;
+                self.salvar_parametro(p.nome, p.vigencia_inicio, None, valor, p.fonte)?;
+            }
+        }
+        for (regra, nome, entrada, esperado) in fabrica::exemplos_de_fabrica() {
+            if !self.exemplos(regra)?.iter().any(|e| e.nome == nome) {
+                self.salvar_exemplo(regra, nome, &entrada, esperado)?;
             }
         }
         Ok(())

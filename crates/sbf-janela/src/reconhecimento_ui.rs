@@ -391,6 +391,27 @@ fn reconhecido(ui: &mut Ui, p: &Paleta, r: &Reconhecido, pedidos: &mut Vec<Pedid
                 pedidos.push(Pedido::AbrirNaTriagem);
             }
         }
+        Reconhecido::PelaRegra { reconhecimento: r } => {
+            ui.horizontal(|ui| {
+                ui.label(icones::icone_cor("task_alt", 16.0, p.sucesso));
+                ui.label(
+                    RichText::new(format!(
+                        "{} · regra {}@{}",
+                        r.tipo_documental, r.regra, r.versao
+                    ))
+                    .strong(),
+                );
+            });
+            for motivo in &r.motivos {
+                pequeno(ui, motivo, p.tinta_suave);
+            }
+        }
+        Reconhecido::Ambiguo { motivo, .. } => {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(icones::icone_cor("warning", 16.0, p.aviso));
+                ui.label(RichText::new(format!("Precisa revisar: {motivo}")).color(p.aviso));
+            });
+        }
         Reconhecido::Nada { motivo } => {
             ui.horizontal_wrapped(|ui| {
                 ui.label(icones::icone_cor("block", 16.0, p.tinta_suave));

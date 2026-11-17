@@ -943,7 +943,20 @@ fn fabrica_e_idempotente_e_o_contracheque_pede_o_leitor() {
     c.semear_fabrica().unwrap();
     let regras = c.regras().unwrap();
     assert_eq!(regras.len(), 2);
-    assert_eq!(c.versoes("contracheque").unwrap().len(), 1);
+    assert_eq!(
+        c.versoes("contracheque").unwrap().len(),
+        2,
+        "a v1 ativa e a v2 (IRRF) rascunho"
+    );
+    assert_eq!(
+        c.versao("contracheque", 2).unwrap().estado,
+        Estado::Rascunho
+    );
+    assert_eq!(
+        c.parametros().unwrap().len(),
+        1,
+        "a tabela do IRRF, uma vez só"
+    );
     assert_eq!(c.versoes("pix-na-descricao").unwrap().len(), 1);
     let vigentes = c.vigentes().unwrap();
     assert_eq!(vigentes.len(), 1, "só o contracheque é ativo");
