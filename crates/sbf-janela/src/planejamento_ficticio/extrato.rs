@@ -637,12 +637,12 @@ mod testes {
     fn o_salario_nasce_sem_par_e_o_historico_sugere_a_conta_do_extrato() {
         let s = servico();
         let contas = s.contas().unwrap();
-        let cx = contas.iter().find(|c| c.apelido == "CX-0630").expect("cx");
+        let cx = contas.iter().find(|c| c.apelido == "CX-0001").expect("cx");
         assert_eq!(cx.conta_do_extrato, None);
         let nu = contas.iter().find(|c| c.apelido == "Nubank").expect("nu");
         assert_eq!(nu.conta_do_extrato.as_deref(), Some(CONTA_DO_NUBANK));
         let pares = s.pares_de_conta_sugeridos().unwrap();
-        let par = pares.iter().find(|p| p.apelido == "CX-0630").expect("par");
+        let par = pares.iter().find(|p| p.apelido == "CX-0001").expect("par");
         assert_eq!(par.conta_do_extrato, CONTA_DO_SALARIO);
         assert!(par.evidencias >= 3, "{par:?}");
         assert!(par.motivo.contains("conciliaç"), "{}", par.motivo);
@@ -654,25 +654,25 @@ mod testes {
         let mut s = servico();
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,
         )
         .unwrap();
         let contas = s.contas().unwrap();
-        let cx = contas.iter().find(|c| c.apelido == "CX-0630").unwrap();
+        let cx = contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
         assert_eq!(cx.conta_do_extrato.as_deref(), Some(CONTA_DO_SALARIO));
         assert!(
             s.pares_de_conta_sugeridos()
                 .unwrap()
                 .iter()
-                .all(|p| p.apelido != "CX-0630")
+                .all(|p| p.apelido != "CX-0001")
         );
         // Conta que não existe no extrato não vira par.
         let erro = s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: Some("NADA · 1".into()),
             },
             Autor::Usuario,
@@ -681,7 +681,7 @@ mod testes {
         // Desligar volta ao estado sem par.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: None,
             },
             Autor::Usuario,
@@ -691,7 +691,7 @@ mod testes {
         assert!(
             contas
                 .iter()
-                .find(|c| c.apelido == "CX-0630")
+                .find(|c| c.apelido == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .is_none()
@@ -703,7 +703,7 @@ mod testes {
         let mut s = servico();
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,

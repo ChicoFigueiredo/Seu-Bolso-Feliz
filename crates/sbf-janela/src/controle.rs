@@ -2231,7 +2231,7 @@ mod testes {
         let a = montar_alteracao(
             &alvo(),
             comp,
-            &f(EscopoEscolhido::DaquiEmDiante, "130,00", "CX-0630"),
+            &f(EscopoEscolhido::DaquiEmDiante, "130,00", "CX-0001"),
             &atual(),
         )
         .unwrap();
@@ -2244,7 +2244,7 @@ mod testes {
             } => {
                 assert_eq!(escopo, sbf_planejamento::Escopo::DaquiEmDiante(comp));
                 assert_eq!(mudanca.valor, Some(Some(Centavos(13_000))));
-                assert_eq!(mudanca.conta, Some(Some("CX-0630".into())));
+                assert_eq!(mudanca.conta, Some(Some("CX-0001".into())));
                 assert_eq!(versao_base, 1);
             }
             outra => panic!("{outra:?}"),
@@ -2254,7 +2254,7 @@ mod testes {
             montar_alteracao(
                 &alvo(),
                 comp,
-                &f(EscopoEscolhido::SoEsteMes, "130,00", "CX-0630"),
+                &f(EscopoEscolhido::SoEsteMes, "130,00", "CX-0001"),
                 &atual()
             )
             .is_err()

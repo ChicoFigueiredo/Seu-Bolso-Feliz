@@ -48,7 +48,7 @@ fn aluguel() -> Recorrente {
             certeza: Certeza::Confirmado,
             fonte: Fonte::Usuario,
             frequencia: Frequencia::Mensal { dia: 5 },
-            conta: Some("CX-0630".into()),
+            conta: Some("CX-0001".into()),
             centro: None,
             fornecedor: None,
             categoria: None,

@@ -163,7 +163,7 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
         Natureza::Saida,
         5,
         Some(100_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     criar(
         &mut s,
@@ -179,23 +179,23 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
             .iter()
             .map(|c| (c.apelido.as_str(), c.conta_do_extrato.as_deref()))
             .collect::<Vec<_>>(),
-        [("CX-0630", None), ("Nubank", None)]
+        [("CX-0001", None), ("Nubank", None)]
     );
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     let contas = s.contas().expect("contas");
     assert_eq!(contas[0].conta_do_extrato.as_deref(), Some("BANCO · 1"));
     assert_eq!(contas[1].conta_do_extrato, None);
     assert_eq!(
-        s.historico(Some("CX-0630"), 10).expect("historico").len(),
+        s.historico(Some("CX-0001"), 10).expect("historico").len(),
         1
     );
 
     // Trocar e desfazer: a linha continua, o histórico só cresce.
-    mapear(&mut s, "CX-0630", Some("BANCO · 2"));
-    mapear(&mut s, "CX-0630", None);
+    mapear(&mut s, "CX-0001", Some("BANCO · 2"));
+    mapear(&mut s, "CX-0001", None);
     assert_eq!(s.contas().expect("contas")[0].conta_do_extrato, None);
     assert_eq!(
-        s.historico(Some("CX-0630"), 10).expect("historico").len(),
+        s.historico(Some("CX-0001"), 10).expect("historico").len(),
         3
     );
 }
@@ -337,7 +337,7 @@ fn buscar_concilia_por_valor_e_data_sem_par_a_conta_nao_pesa() {
         Natureza::Saida,
         5,
         Some(100_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 1);
     let c = sugestoes(&s, &id);
@@ -357,9 +357,9 @@ fn com_par_confirmado_a_conta_certa_e_exigida() {
         Natureza::Saida,
         5,
         Some(100_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 0);
     assert!(sugestoes(&s, &id).is_empty());
     extrato.por("pluggy:txn_certa", 7, -100_000, "BANCO · 1", "IMOBILIARIA");
@@ -522,9 +522,9 @@ fn assinatura_acha_o_credito_com_valor_diferente_na_conta_certa() {
         Natureza::Entrada,
         5,
         Some(500_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     assinar(&mut s, &id, "salário empresa", 5);
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 1);
     let c = sugestoes(&s, &id);
@@ -554,9 +554,9 @@ fn candidatos_vem_ordenados_e_marcam_assinatura_conta_e_diferenca() {
         Natureza::Entrada,
         5,
         Some(500_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     assinar(&mut s, &id, "SALARIO EMPRESA", 5);
     let c = s
         .candidatos_de_conciliacao(&ocorrencia(&id))
@@ -596,7 +596,7 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
         Natureza::Saida,
         5,
         Some(100_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     let luz = criar(
         &mut s,
@@ -604,7 +604,7 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
         Natureza::Saida,
         8,
         Some(10_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     let net = criar(
         &mut s,
@@ -634,7 +634,7 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
     conciliar(&mut s, &net, "pluggy:txn_3", 5_000, 9, false);
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 2);
-    assert_eq!(pares[0].apelido, "CX-0630");
+    assert_eq!(pares[0].apelido, "CX-0001");
     assert_eq!(pares[0].conta_do_extrato, "BANCO · 1");
     assert_eq!(pares[0].evidencias, 2);
     assert_eq!(
@@ -645,7 +645,7 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
     assert_eq!(pares[1].conta_do_extrato, "BANCO · 2");
 
     // Com o par confirmado, o apelido sai da lista.
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 1);
     assert_eq!(pares[0].apelido, "Nubank");
@@ -662,7 +662,7 @@ fn pares_sugeridos_contam_os_creditos_da_assinatura() {
         Natureza::Entrada,
         5,
         Some(500_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     // Sem assinatura, nada indica a conta.
     assert!(s.pares_de_conta_sugeridos().expect("pares").is_empty());
@@ -702,14 +702,14 @@ fn conciliacoes_da_ocorrencia_trazem_o_movimento_e_a_conta() {
         Natureza::Entrada,
         20,
         Some(845_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     assert!(
         s.conciliacoes_da_ocorrencia(&ocorrencia(&id))
             .expect("vazio")
             .is_empty()
     );
-    mapear(&mut s, "CX-0630", Some("BANCO · 1"));
+    mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     s.aplicar(
         Alteracao::Conciliar {
             conciliacao: Conciliacao {
@@ -732,7 +732,7 @@ fn conciliacoes_da_ocorrencia_trazem_o_movimento_e_a_conta() {
     let m = v[0].movimento.as_ref().expect("movimento");
     assert_eq!(m.descricao, "SALARIO EMPRESA");
     // Sem par, a conta não bate (mas o movimento continua achado).
-    mapear(&mut s, "CX-0630", None);
+    mapear(&mut s, "CX-0001", None);
     let v = s
         .conciliacoes_da_ocorrencia(&ocorrencia(&id))
         .expect("conciliações");

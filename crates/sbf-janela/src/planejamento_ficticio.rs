@@ -121,7 +121,7 @@ impl PlanejamentoFicticio {
             hoje,
         };
         let mensal = |dia| Frequencia::Mensal { dia };
-        let cx = "CX-0630";
+        let cx = "CX-0001";
         let nu = "Nubank";
         // (id, nome, grupo, sub, natureza, prazo, versão)
         #[allow(clippy::type_complexity)]
@@ -569,7 +569,7 @@ impl PlanejamentoFicticio {
         // Saldos: um fresco e um desatualizado.
         s.saldos = vec![
             Saldo {
-                conta: "CX-0630".into(),
+                conta: "CX-0001".into(),
                 valor: Centavos(341_270),
                 quando: format!("{hoje}T10:30:00Z"),
             },
@@ -2479,7 +2479,7 @@ mod testes {
         // Sem composição do mês, a sugestão que já existe continua sugestão.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,

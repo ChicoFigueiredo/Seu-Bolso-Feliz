@@ -3368,7 +3368,7 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                     ui.label("Conta");
                     ui.add_enabled(
                         daqui,
-                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0630"),
+                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0001"),
                     );
                     ui.end_row();
                     ui.label("Centro");
@@ -4143,7 +4143,7 @@ mod testes {
     fn mapear_salario(j: &mut crate::janela::Janela) {
         j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
             Alteracao::MapearConta {
-                apelido: "CX-0630".into(),
+                apelido: "CX-0001".into(),
                 conta_do_extrato: Some(crate::planejamento_ficticio::CONTA_DO_SALARIO.into()),
             },
         ]));
@@ -4155,9 +4155,9 @@ mod testes {
         let j = janela_ligada();
         let pl = j.planejamento.as_ref().unwrap().0.as_ref();
         let d = crate::contas_ui::carregar(pl).expect("contas");
-        let cx = d.contas.iter().find(|c| c.apelido == "CX-0630").unwrap();
+        let cx = d.contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
         assert!(cx.conta_do_extrato.is_none());
-        let s = d.sugestao_de("CX-0630").expect("sugestão");
+        let s = d.sugestao_de("CX-0001").expect("sugestão");
         assert_eq!(
             s.conta_do_extrato,
             crate::planejamento_ficticio::CONTA_DO_SALARIO
@@ -4171,7 +4171,7 @@ mod testes {
     fn confirmar_o_par_pelo_pedido_grava_e_diz_em_portugues() {
         let mut j = janela_ligada();
         let Pedido::Controle(p) = crate::contas_ui::pedido_de_par(
-            "CX-0630",
+            "CX-0001",
             Some(crate::planejamento_ficticio::CONTA_DO_SALARIO),
         ) else {
             panic!("pedido do controle");
@@ -4186,14 +4186,14 @@ mod testes {
         assert_eq!(
             d.contas
                 .iter()
-                .find(|c| c.apelido == "CX-0630")
+                .find(|c| c.apelido == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .as_deref(),
             Some(crate::planejamento_ficticio::CONTA_DO_SALARIO)
         );
         // Desligar.
-        let Pedido::Controle(p) = crate::contas_ui::pedido_de_par("CX-0630", None) else {
+        let Pedido::Controle(p) = crate::contas_ui::pedido_de_par("CX-0001", None) else {
             panic!("pedido do controle");
         };
         j.controle_pedido(p);
@@ -4356,7 +4356,7 @@ mod testes {
         let Formulario::Editar { conta, .. } = &d.formulario else {
             panic!("formulário de editar");
         };
-        assert_eq!(conta, "CX-0630");
+        assert_eq!(conta, "CX-0001");
         let campo = d.assinatura.clone().expect("campo da assinatura");
         assert_eq!(campo.texto, crate::planejamento_ficticio::TEXTO_DO_SALARIO);
         assert_eq!(campo.janela, "5");

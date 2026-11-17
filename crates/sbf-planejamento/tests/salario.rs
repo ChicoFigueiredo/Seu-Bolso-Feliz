@@ -201,9 +201,9 @@ fn cenario(
         Natureza::Entrada,
         5,
         Some(700_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", CONTA);
+    mapear(&mut s, "CX-0001", CONTA);
     definir(
         &mut s,
         &id,
@@ -274,7 +274,7 @@ fn sem_a_conta_certa_sem_o_contracheque_ou_sem_composicao_do_mes_so_sugere() {
         Natureza::Entrada,
         5,
         Some(700_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
     definir(
         &mut s,
@@ -300,9 +300,9 @@ fn sem_a_conta_certa_sem_o_contracheque_ou_sem_composicao_do_mes_so_sugere() {
         Natureza::Entrada,
         5,
         Some(700_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", CONTA);
+    mapear(&mut s, "CX-0001", CONTA);
     definir(
         &mut s,
         &id,
@@ -348,9 +348,9 @@ fn sem_a_conta_certa_sem_o_contracheque_ou_sem_composicao_do_mes_so_sugere() {
         Natureza::Entrada,
         5,
         Some(700_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s2, "CX-0630", CONTA);
+    mapear(&mut s2, "CX-0001", CONTA);
     definir(
         &mut s2,
         &id2,
@@ -379,9 +379,9 @@ fn contracheque_ligado_ao_recorrente_tambem_vale() {
         Natureza::Entrada,
         5,
         Some(700_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", CONTA);
+    mapear(&mut s, "CX-0001", CONTA);
     definir(
         &mut s,
         &id,
@@ -418,9 +418,9 @@ fn sugestao_que_ja_existia_e_promovida_quando_o_contracheque_chega() {
         Natureza::Entrada,
         5,
         Some(480_000),
-        Some("CX-0630"),
+        Some("CX-0001"),
     );
-    mapear(&mut s, "CX-0630", CONTA);
+    mapear(&mut s, "CX-0001", CONTA);
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 1);
     assert!(!conciliacoes(&s, &id)[0].confirmada);
     definir(

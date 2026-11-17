@@ -48,7 +48,7 @@ pub fn planilha_ficticia(caminho: &Path) {
             "Essencial",
             "Aluguel Fictício",
             Some((2026, 11, 5)),
-            "CX-0630",
+            "CX-0001",
             Some(1500.0),
             Some(1500.0),
         ),
@@ -65,7 +65,7 @@ pub fn planilha_ficticia(caminho: &Path) {
             "Lar",
             "Luz Exemplo",
             Some((2026, 11, 12)),
-            "CX-0630",
+            "CX-0001",
             Some(180.5),
             None,
         ),
@@ -174,7 +174,7 @@ pub fn planilha_ficticia(caminho: &Path) {
 
     // Legenda dos meios.
     for (i, (c, t)) in [
-        ("CX-0630", "Conta corrente 0630"),
+        ("CX-0001", "Conta corrente 0630"),
         ("Nubank", "Cartão Nubank"),
         ("Salário", "Desconto Contracheque"),
     ]

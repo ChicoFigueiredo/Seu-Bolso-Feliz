@@ -232,7 +232,7 @@ pub struct Versao {
     pub certeza: Certeza,
     pub fonte: Fonte,
     pub frequencia: Frequencia,
-    /// O meio, como na planilha: `CX-0630`, `Nubank`, `Salário` (desconto em folha).
+    /// O meio, como na planilha: `CX-0001`, `Nubank`, `Salário` (desconto em folha).
     pub conta: Option<String>,
     pub centro: Option<String>,
     pub fornecedor: Option<String>,
@@ -383,8 +383,8 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
-/// Uma conta do planejamento (o apelido da planilha, como `CX-0630`) e a conta do extrato a
-/// que ela corresponde (o `conta_provavel` do inventário, como `CAIXA · 593889552-5`).
+/// Uma conta do planejamento (o apelido da planilha, como `CX-0001`) e a conta do extrato a
+/// que ela corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO · 000000-1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContaDoPlanejamento {
     pub apelido: String,

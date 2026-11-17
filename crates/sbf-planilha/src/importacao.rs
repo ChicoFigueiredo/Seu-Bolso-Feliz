@@ -989,7 +989,7 @@ mod testes {
         );
         assert_eq!(
             aluguel.recorrente.primeira_versao.conta.as_deref(),
-            Some("CX-0630")
+            Some("CX-0001")
         );
         assert_eq!(
             aluguel.recorrente.primeira_versao.certeza,

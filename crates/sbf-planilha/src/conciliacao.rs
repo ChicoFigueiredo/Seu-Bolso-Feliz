@@ -394,14 +394,14 @@ mod testes {
             "EMPRESA",
         );
         let mut p = Falso {
-            ocorrencias: vec![entrada("r1", 5, 150_000, "CX-0630")],
+            ocorrencias: vec![entrada("r1", 5, 150_000, "CX-0001")],
             ..Falso::default()
         };
         let cfg = ConfigConciliacao::default();
         let sem = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("sem par");
         assert_eq!(sem[0].movimento, "pluggy:txn_o");
         p.contas = vec![ContaDoPlanejamento {
-            apelido: "CX-0630".to_owned(),
+            apelido: "CX-0001".to_owned(),
             conta_do_extrato: Some("BANCO · 1".to_owned()),
         }];
         let com = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("com par");
@@ -421,7 +421,7 @@ mod testes {
             "SALARIO EMPRESA",
         );
         let mut p = Falso {
-            ocorrencias: vec![entrada("r1", 5, 500_000, "CX-0630")],
+            ocorrencias: vec![entrada("r1", 5, 500_000, "CX-0001")],
             ..Falso::default()
         };
         let cfg = ConfigConciliacao::default();
@@ -473,7 +473,7 @@ mod testes {
             recorrente: None,
         };
         let p = Falso {
-            ocorrencias: vec![entrada("r1", 5, 700_000, "CX-0630")],
+            ocorrencias: vec![entrada("r1", 5, 700_000, "CX-0001")],
             composicoes: vec![Composicao {
                 recorrente: "r1".to_owned(),
                 desde: Competencia { ano: 2026, mes: 11 },

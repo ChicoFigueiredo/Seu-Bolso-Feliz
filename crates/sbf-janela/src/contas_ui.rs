@@ -1,4 +1,4 @@
-//! A tela "Contas do planejamento": uma linha por apelido da planilha (`CX-0630`), com a conta
+//! A tela "Contas do planejamento": uma linha por apelido da planilha (`CX-0001`), com a conta
 //! do extrato a que ele corresponde. O histórico **propõe** o par e o usuário confirma cada
 //! um; nada é ligado sozinho. Só lê por `&dyn Planejamento`; escrever é um pedido
 //! (`MapearConta`) que a janela aplica fora do desenho.
