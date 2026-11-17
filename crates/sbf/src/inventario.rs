@@ -118,16 +118,18 @@ impl AppDoInventario {
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }
                 }
-                // As regras de reconhecimento (spec 13): `<cofre>/regras.sqlite`. O executor de
-                // scripts do integrador (`sbf::executor_de_script()`) entra no lugar do `None`;
-                // sem ele, a janela edita e testa, mas não ativa regra com script.
+                // As regras de reconhecimento (spec 13): `<cofre>/regras.sqlite`, com as de
+                // fábrica semeadas e os scripts no processo filho `sbf script --servir`.
                 match sbf_regras::catalogo::Catalogo::abrir(&self.pasta.join("regras.sqlite")) {
-                    Ok(c) => janela
-                        .regras
-                        .ligar(sbf_janela::regras::FonteDasRegras::nova(
+                    Ok(mut c) => {
+                        if let Err(e) = c.semear_fabrica() {
+                            eprintln!("sbf: as regras de fábrica não entraram ({e})");
+                        }
+                        janela.regras.ligar(sbf_janela::regras::FonteDasRegras::nova(
                             std::sync::Arc::new(std::sync::Mutex::new(c)),
-                            None,
-                        )),
+                            crate::script::executor_de_script().ok(),
+                        ));
+                    }
                     Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
                 }
                 let mut f =
