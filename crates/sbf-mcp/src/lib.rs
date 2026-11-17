@@ -11,6 +11,7 @@
 
 pub mod ferramentas;
 pub mod plano;
+pub mod regras;
 pub mod servidor;
 
 pub use ferramentas::Nucleo;

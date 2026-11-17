@@ -18,6 +18,10 @@ use crate::plano::{
     PedidoDeExclusao, PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao,
     PedidoDePropostas, PedidoDeRetomada, PedidoDeSimulacao, PedidoNovoCompromisso,
 };
+use crate::regras::{
+    FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, PedidoDeProposta, PedidoDeRegra,
+    PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste, Regras,
+};
 
 macro_rules! esquema {
     ($nome:ident, $alvo:ident { $( $(#[$m:meta])* $campo:ident : $tipo:ty ),* $(,)? }) => {
@@ -172,6 +176,11 @@ impl Servidor {
         let mut tool_router = Self::tool_router();
         if !nucleo.tem_planejamento() {
             for nome in FERRAMENTAS_DO_PLANO {
+                tool_router.remove_route(nome);
+            }
+        }
+        if !nucleo.tem_regras() {
+            for nome in FERRAMENTAS_DAS_REGRAS {
                 tool_router.remove_route(nome);
             }
         }
@@ -442,6 +451,44 @@ impl Servidor {
     }
 
     #[tool(
+        description = "Lista as regras de reconhecimento do cofre: id, nome, tipo de documento, versão em vigor, estado, execuções e taxa de acerto, e as que estão prontas para consolidar (quem consolida é o usuário). Só leitura."
+    )]
+    fn listar_regras(&self) -> Result<String, String> {
+        self.regras("listar_regras", |r| r.listar())
+    }
+
+    #[tool(
+        description = "Explica uma regra de reconhecimento: as versões (estado, autor, motivo), a definição e o script da versão em vigor e da última, e os exemplos (nome e resultado esperado). Só leitura."
+    )]
+    fn explicar_regra(&self, Parameters(p): Parameters<PedidoDeRegra>) -> Result<String, String> {
+        self.regras("explicar_regra", |r| r.explicar(&p))
+    }
+
+    #[tool(
+        description = "Roda os exemplos de uma versão de regra e diz, para cada um, se passou e o que divergiu. Só leitura: não ativa nem muda nada."
+    )]
+    fn testar_regra(&self, Parameters(p): Parameters<PedidoDeTeste>) -> Result<String, String> {
+        self.regras("testar_regra", |r| r.testar(&p))
+    }
+
+    #[tool(
+        description = "SIMULA uma regra sobre entradas dadas e mostra o que muda em relação às regras em vigor: uma versão salva (regra + versao) ou uma definição nova ainda não salva (definicao, script opcional). Não grava nada e não ativa nada."
+    )]
+    fn simular_regra(
+        &self,
+        Parameters(p): Parameters<PedidoDeSimulacaoDeRegra>,
+    ) -> Result<String, String> {
+        self.regras("simular_regra", |r| r.simular(&p))
+    }
+
+    #[tool(
+        description = "PROPÕE uma versão nova de regra: salva um RASCUNHO com autor IA. PROPOR NÃO ATIVA: a versão em vigor continua a mesma, e ativar é só na janela do SBF (área Regras de reconhecimento), pelo usuário. Confere o script antes de salvar. Não consolida nem reverte."
+    )]
+    fn propor_regra(&self, Parameters(p): Parameters<PedidoDeProposta>) -> Result<String, String> {
+        self.regras("propor_regra", |r| r.propor(&p))
+    }
+
+    #[tool(
         description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
     )]
     fn propor_exclusao_logica(
@@ -483,6 +530,14 @@ impl Servidor {
         f: impl FnOnce(&crate::plano::Plano) -> Result<Value, String>,
     ) -> Result<String, String> {
         responder(nome, self.nucleo.plano().and_then(f))
+    }
+
+    fn regras(
+        &self,
+        nome: &str,
+        f: impl FnOnce(&Regras) -> Result<Value, String>,
+    ) -> Result<String, String> {
+        responder(nome, self.nucleo.regras().and_then(f))
     }
 
     fn propor(&self, nome: &str, chave: &str, e: Alt) -> Result<String, String> {

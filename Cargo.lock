@@ -5408,6 +5408,8 @@ dependencies = [
  "sbf-indice",
  "sbf-inventario",
  "sbf-planejamento",
+ "sbf-regras",
+ "sbf-script",
  "sbf-triagem",
  "serde",
  "serde_json",
