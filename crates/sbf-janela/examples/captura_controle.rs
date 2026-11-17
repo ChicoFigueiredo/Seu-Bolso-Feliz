@@ -282,23 +282,22 @@ impl App {
                 bancada_casca::executar(ctx, bancada_casca::ids::painel("previa"));
             }
             (3, "salario-detalhe") => {
-                use sbf_planejamento::{Alteracao, Autor, Centavos, Conciliacao};
+                use sbf_planejamento::{Alteracao, Autor, Conciliacao};
                 let id_do_mes = id("rec_salario", h);
-                if let Some(pl) = janela.planejamento.as_mut() {
-                    if let Ok(Some(sugerida)) = pl.0.sugestao_de_conciliacao(&id_do_mes) {
-                        let _ = pl.0.aplicar(
-                            Alteracao::Conciliar {
-                                conciliacao: Conciliacao {
-                                    confirmada: true,
-                                    valor: Centavos(sugerida.valor.0),
-                                    ..sugerida
-                                },
+                if let Some(pl) = janela.planejamento.as_mut()
+                    && let Ok(Some(sugerida)) = pl.0.sugestao_de_conciliacao(&id_do_mes)
+                {
+                    let _ = pl.0.aplicar(
+                        Alteracao::Conciliar {
+                            conciliacao: Conciliacao {
+                                confirmada: true,
+                                ..sugerida
                             },
-                            Autor::Regra {
-                                regra: "tres-provas".into(),
-                            },
-                        );
-                    }
+                        },
+                        Autor::Regra {
+                            regra: "tres-provas".into(),
+                        },
+                    );
                 }
                 janela.controle.recarregar();
             }

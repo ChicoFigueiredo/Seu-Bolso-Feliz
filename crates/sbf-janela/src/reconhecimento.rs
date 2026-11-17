@@ -758,7 +758,7 @@ mod testes {
     use crate::planejamento_ficticio::{HOJE_DA_DEMONSTRACAO, PlanejamentoFicticio};
     use crate::reconhecimento_ficticio::{ID_DO_SALARIO, reconhecedor_do_contracheque};
     use sbf_planejamento::{AlvoDoDocumento, Competencia, Data, IdOcorrencia};
-    use sbf_reconhecimento::{Reconhecedor as _, ReconhecedorFicticio, Reconhecido, Sugestao};
+    use sbf_reconhecimento::{ReconhecedorFicticio, Reconhecido, Sugestao};
     use std::time::{Duration, Instant};
 
     fn hoje() -> Data {
