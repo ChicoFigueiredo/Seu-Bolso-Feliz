@@ -29,10 +29,10 @@ fn livro_da_estacao() -> Option<PathBuf> {
 fn abrir_planejamento(arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
     let banco = sbf_planejamento::Banco::abrir(arquivo).map_err(|e| e.to_string())?;
     let cofre = arquivo.parent().unwrap_or(Path::new("."));
-    Ok(Box::new(
+    Ok(Box::new(crate::script::com_calculo(
         sbf_planejamento::PlanejamentoSqlite::novo(banco, saldos_do_cofre(cofre))
             .com_movimentos(movimentos_do_cofre(cofre)),
-    ))
+    )))
 }
 
 /// O extrato da Pluggy guardado no inventário do cofre: de onde o planejamento tira os

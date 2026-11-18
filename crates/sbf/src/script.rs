@@ -24,6 +24,19 @@ pub fn executor_de_script() -> std::io::Result<Arc<dyn ExecutorDeScript>> {
     )))
 }
 
+/// Liga ao planejamento o executor do Cálculo dos Modelos de compromisso: o mesmo processo
+/// filho dos scripts das regras (`sbf script --servir`), subido só no primeiro cálculo. Sem
+/// como achar o próprio executável, o planejamento segue sem cálculo (o previsto cai no último
+/// valor conhecido, com aviso).
+pub fn com_calculo(
+    plano: sbf_planejamento::PlanejamentoSqlite,
+) -> sbf_planejamento::PlanejamentoSqlite {
+    match executor_de_script() {
+        Ok(executor) => plano.com_calculo(executor),
+        Err(_) => plano,
+    }
+}
+
 pub fn rodar(args: &[String]) -> ExitCode {
     if args != ["--servir"] {
         eprintln!("sbf: `sbf script --servir` é interno; veja `sbf regras --ajuda`.");

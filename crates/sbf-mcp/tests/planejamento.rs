@@ -98,6 +98,7 @@ fn ocorrencia(r: &Recorrente, c: Competencia) -> Ocorrencia {
         centro: None,
         fornecedor: None,
         versao: v.id.clone(),
+        calculo: None,
         prazo_desconhecido: false,
         sugestao_de_conciliacao: false,
     }

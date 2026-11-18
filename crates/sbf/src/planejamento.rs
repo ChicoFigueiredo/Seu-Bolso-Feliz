@@ -40,10 +40,10 @@ type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 fn abrir_planejamento(cofre: &Path) -> Result<Box<dyn Planejamento>, String> {
     let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
         .map_err(|e| e.to_string())?;
-    Ok(Box::new(
+    Ok(Box::new(crate::script::com_calculo(
         sbf_planejamento::PlanejamentoSqlite::novo(banco, crate::mcp::saldos_do_cofre(cofre))
             .com_movimentos(crate::mcp::movimentos_do_cofre(cofre)),
-    ))
+    )))
 }
 
 pub fn rodar(args: &[String]) -> ExitCode {

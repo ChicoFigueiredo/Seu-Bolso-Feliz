@@ -2837,6 +2837,7 @@ fn aba_excecoes(ui: &mut Ui, v: &[sbf_planejamento::ExcecaoGravada]) {
             Excecao::Dispensar { .. } => "Dispensada",
             Excecao::ValorSoDesteMes { .. } => "Valor só deste mês",
             Excecao::PagoInformado { .. } => "Pago informado",
+            Excecao::QuantidadeSoDesteMes { .. } => "Quantidade só deste mês",
         };
         componentes::cartao(ui, |ui| {
             ui.label(

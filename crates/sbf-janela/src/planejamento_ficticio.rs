@@ -896,6 +896,8 @@ impl PlanejamentoFicticio {
                 Excecao::Dispensar { .. } => dispensada = true,
                 Excecao::ValorSoDesteMes { valor } => previsto = Some(*valor),
                 Excecao::PagoInformado { valor, .. } => pago_informado = Some(*valor),
+                // O conjunto fictício não tem modelos: não há cálculo a ajustar.
+                Excecao::QuantidadeSoDesteMes { .. } => {}
             }
         }
         let confirmadas: Vec<Centavos> = self
@@ -960,6 +962,7 @@ impl PlanejamentoFicticio {
             versao: v.id.clone(),
             prazo_desconhecido: matches!(r.prazo, Prazo::Desconhecido),
             sugestao_de_conciliacao: sugestao,
+            calculo: None,
         })
     }
 
@@ -1551,8 +1554,12 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::DefinirComposicao { .. }
         | Alteracao::VincularDocumento { .. }
         | Alteracao::DesvincularDocumento { .. }
-        | Alteracao::MapearConta { .. } => None,
-        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
+        | Alteracao::MapearConta { .. }
+        | Alteracao::CriarModelo { .. }
+        | Alteracao::NovaVersaoDoCalculo { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. }
+        | Alteracao::AplicarModelo { recorrente, .. }
+        | Alteracao::DefinirParametro { recorrente, .. } => Some(recorrente.clone()),
     }
 }
 
@@ -1798,6 +1805,11 @@ impl PlanejamentoFicticio {
                     .iter()
                     .position(|r| r.id == rec)
                     .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(rec.clone()))?;
+                if matches!(excecao, Excecao::QuantidadeSoDesteMes { .. }) {
+                    return Err(ErroDoPlanejamento::Invalida(
+                        "o conjunto fictício não tem modelos de compromisso".into(),
+                    ));
+                }
                 self.substituir_excecao(ocorrencia.clone(), excecao.clone(), autor.clone());
                 self.recorrentes[i].versao_do_registro += 1;
                 let texto = match excecao {
@@ -1805,6 +1817,7 @@ impl PlanejamentoFicticio {
                     Excecao::Dispensar { .. } => "Dispensou",
                     Excecao::ValorSoDesteMes { .. } => "Mudou o valor só deste mês de",
                     Excecao::PagoInformado { .. } => "Informou pagamento de",
+                    Excecao::QuantidadeSoDesteMes { .. } => "Ajustou a quantidade de",
                 };
                 Ok(self.registrar(
                     autor,
@@ -2032,6 +2045,12 @@ impl PlanejamentoFicticio {
                 assinatura,
                 versao_base,
             } => self.definir_assinatura(recorrente, assinatura, versao_base, autor, &alt),
+            Alteracao::CriarModelo { .. }
+            | Alteracao::NovaVersaoDoCalculo { .. }
+            | Alteracao::AplicarModelo { .. }
+            | Alteracao::DefinirParametro { .. } => Err(ErroDoPlanejamento::Invalida(
+                "o conjunto fictício não tem modelos de compromisso".into(),
+            )),
         }
     }
 

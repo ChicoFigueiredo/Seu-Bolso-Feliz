@@ -16,7 +16,8 @@ use sbf_ia::NivelDeConfianca;
 use sbf_planejamento::{
     Alteracao, Autor, Centavos, Certeza, Ciclo, Competencia, Conciliacao, Data, DiaDeCorte,
     ErroDoPlanejamento, Escopo, Excecao, Filtro, Fonte, Frequencia, HORIZONTE_MESES, IdOcorrencia,
-    MudancaDeVersao, Natureza, NovoRecorrente, Periodo, Planejamento, Prazo, Sentido, Versao,
+    MudancaDeVersao, Natureza, NovoRecorrente, ParametroDeModelo, Periodo, Planejamento, Prazo,
+    Sentido, TipoDeParametro, ValorDeParametro, ValorDoParametro, Versao,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -45,7 +46,7 @@ pub const AVISO_DE_PROPOSTA: &str = "proposta pendente: confirme na janela do SB
 
 /// As ferramentas que **aplicam** (D15). Todas passam pelo backup da primeira escrita e
 /// gravam no histórico com autor `Mcp`.
-pub const FERRAMENTAS_DE_ESCRITA: [&str; 12] = [
+pub const FERRAMENTAS_DE_ESCRITA: [&str; 16] = [
     "aplicar_alteracao",
     "criar_compromisso",
     "pausar",
@@ -58,6 +59,10 @@ pub const FERRAMENTAS_DE_ESCRITA: [&str; 12] = [
     "aplicar_proposta",
     "recusar_proposta",
     "desfazer",
+    "criar_modelo",
+    "aplicar_modelo",
+    "definir_parametro",
+    "ajustar_quantidade",
 ];
 
 /// O aviso que o Claude lê depois de aplicar.
@@ -68,8 +73,9 @@ pub const AVISO_DE_APLICACAO: &str =
 pub const MAXIMO_DE_MOVIMENTOS: usize = 20;
 
 /// Os nomes das ferramentas do controle mensal que leem, simulam e propõem.
-pub const FERRAMENTAS: [&str; 14] = [
+pub const FERRAMENTAS: [&str; 15] = [
     "listar_compromissos",
+    "listar_modelos",
     "resumo_de_caixa",
     "projetar_compromissos",
     "obter_compromisso",
@@ -390,6 +396,77 @@ pub struct PedidoDeDesfazer {
     pub alteracao_id: Option<String>,
 }
 
+/// Um parâmetro que o modelo declara.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ParametroDeclarado {
+    /// Minúsculas sem acento, dígitos e `_` (ex.: diaria, dia_da_semana). É a chave em
+    /// `entrada.parametros` do script.
+    pub nome: String,
+    /// centavos, dia_da_semana, inteiro ou texto.
+    pub tipo: String,
+}
+
+/// Cria um Modelo de compromisso: o molde que vários compromissos compartilham.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeCriarModelo {
+    /// O nome do modelo (único).
+    pub nome: String,
+    /// De 1 a 20 parâmetros.
+    pub parametros: Vec<ParametroDeclarado>,
+    /// O Cálculo, em Luau: define `calcular(entrada, ajuda)` e devolve
+    /// `{valor_centavos, quantidade?, explicacao}`. `entrada.competencia` é "AAAA-MM",
+    /// `entrada.parametros` tem os valores vigentes, `entrada.quantidade_ajustada` é um número
+    /// ou nil. `ajuda.dias_da_semana_no_mes(ano, mes, dia_semana)` (1 = segunda ... 7 =
+    /// domingo), `ajuda.nome_do_dia_da_semana(n)`, `ajuda.reais(centavos)`,
+    /// `ajuda.mul_div_arred(a, b, c)`. Sem io, os, relógio nem aleatório.
+    pub calculo: String,
+}
+
+/// O valor de um parâmetro, com vigência.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ValorEntrada {
+    /// O nome do parâmetro (veja listar_modelos).
+    pub parametro: String,
+    /// AAAA-MM: vale desta competência em diante, até o próximo valor.
+    pub desde: String,
+    /// centavos e inteiro: número. dia_da_semana: 1 (segunda) a 7 (domingo) ou o nome
+    /// ("sexta"). texto: texto.
+    pub valor: Value,
+}
+
+/// Liga um compromisso a um modelo e preenche os valores dos parâmetros.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAplicarModelo {
+    /// O id do compromisso (recorrente).
+    pub recorrente: String,
+    /// O id ou o nome do modelo (veja listar_modelos).
+    pub modelo: String,
+    /// Os valores iniciais (cada um com a vigência `desde`). Pode ficar vazio ao religar.
+    #[serde(default)]
+    pub valores: Vec<ValorEntrada>,
+}
+
+/// Um valor de parâmetro com vigência num compromisso que já usa um modelo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeDefinirParametro {
+    /// O id do compromisso (recorrente).
+    pub recorrente: String,
+    pub parametro: String,
+    /// AAAA-MM: vale desta competência em diante.
+    pub desde: String,
+    /// Veja `aplicar_modelo`.
+    pub valor: Value,
+}
+
+/// A quantidade (as diárias) de UM mês só; o resto segue o cálculo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAjustarQuantidade {
+    /// "rec:AAAA-MM" (o mês a ajustar).
+    pub id_ocorrencia: String,
+    /// De 0 a 1000.
+    pub quantidade: i64,
+}
+
 /// Qualquer alteração, para `simular_mudanca`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "tipo", rename_all = "snake_case")]
@@ -537,6 +614,95 @@ fn versao_base(p: &dyn Planejamento, id: &str) -> Result<i64, String> {
             Err("não encontrei esse compromisso (confira o id com obter_compromisso)".to_owned())
         }
     }
+}
+
+fn tipo_de_parametro(t: &str) -> Result<TipoDeParametro, String> {
+    match t.trim() {
+        "centavos" => Ok(TipoDeParametro::Centavos),
+        "dia_da_semana" => Ok(TipoDeParametro::DiaDaSemana),
+        "inteiro" => Ok(TipoDeParametro::Inteiro),
+        "texto" => Ok(TipoDeParametro::Texto),
+        _ => Err("tipo deve ser centavos, dia_da_semana, inteiro ou texto".to_owned()),
+    }
+}
+
+/// "sexta", "Sexta-feira", "sábado"... → 1 a 7 (ISO).
+fn dia_da_semana_por_nome(t: &str) -> Option<i64> {
+    let t = t.trim().to_lowercase().replace("-feira", "");
+    let t: String = t
+        .chars()
+        .map(|c| match c {
+            'ç' => 'c',
+            'á' | 'à' | 'ã' | 'â' => 'a',
+            'é' | 'ê' => 'e',
+            'í' => 'i',
+            'ó' | 'ô' | 'õ' => 'o',
+            'ú' => 'u',
+            outro => outro,
+        })
+        .collect();
+    Some(match t.as_str() {
+        "segunda" => 1,
+        "terca" => 2,
+        "quarta" => 3,
+        "quinta" => 4,
+        "sexta" => 5,
+        "sabado" => 6,
+        "domingo" => 7,
+        _ => return None,
+    })
+}
+
+fn valor_de_parametro(
+    parametros: &[ParametroDeModelo],
+    nome: &str,
+    desde: &str,
+    v: &Value,
+) -> Result<ValorDeParametro, String> {
+    let nome = texto(nome, "parametro", MAX_NOME)?;
+    let tipo = parametros
+        .iter()
+        .find(|p| p.nome == nome)
+        .map(|p| p.tipo)
+        .ok_or_else(|| {
+            format!(
+                "o modelo não tem o parâmetro {nome} (os dele: {})",
+                parametros
+                    .iter()
+                    .map(|p| p.nome.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+    let invalido = || format!("o valor de {nome} não bate com o tipo do parâmetro");
+    let valor = match (tipo, v) {
+        (TipoDeParametro::Texto, Value::String(t)) => {
+            ValorDoParametro::Texto(texto(t, "valor", MAX_NOME)?)
+        }
+        (TipoDeParametro::DiaDaSemana, Value::String(t)) => ValorDoParametro::Inteiro(
+            dia_da_semana_por_nome(t).ok_or("dia da semana desconhecido (use 1 a 7 ou o nome)")?,
+        ),
+        (
+            TipoDeParametro::Centavos | TipoDeParametro::DiaDaSemana | TipoDeParametro::Inteiro,
+            n,
+        ) if n.is_i64() => ValorDoParametro::Inteiro(n.as_i64().ok_or_else(invalido)?),
+        _ => return Err(invalido()),
+    };
+    Ok(ValorDeParametro {
+        parametro: nome,
+        desde: competencia(desde, "desde")?,
+        valor,
+    })
+}
+
+/// O modelo pelo id ou pelo nome.
+fn achar_modelo(p: &dyn Planejamento, t: &str) -> Result<sbf_planejamento::Modelo, String> {
+    let t = texto(t, "modelo", MAX_NOME)?;
+    p.modelos()
+        .map_err(pt)?
+        .into_iter()
+        .find(|m| m.id == t || m.nome.eq_ignore_ascii_case(&t))
+        .ok_or_else(|| "não encontrei esse modelo (veja listar_modelos)".to_owned())
 }
 
 fn montar_novo(p: &PedidoNovoCompromisso) -> Result<Alteracao, String> {
@@ -1389,6 +1555,144 @@ impl Plano {
             let motivo = texto(&a.motivo, "motivo", MAX_MOTIVO)?;
             p.recusar_proposta(&id, &motivo).map_err(pt)?;
             Ok(json!({ "recusada": true, "proposta": { "id": id, "estado": "recusada" } }))
+        })
+    }
+
+    /// `listar_modelos`: os modelos de compromisso, com os parâmetros, o Cálculo e quem usa.
+    ///
+    /// # Errors
+    /// Falha do serviço.
+    pub fn listar_modelos(&self) -> Resultado {
+        self.executar("listar_modelos", |p, _| {
+            let ligacoes = p.ligacoes_de_modelo().map_err(pt)?;
+            let modelos: Vec<Value> = p
+                .modelos()
+                .map_err(pt)?
+                .into_iter()
+                .map(|m| {
+                    let usado_por: Vec<Value> = ligacoes
+                        .iter()
+                        .filter(|l| l.modelo_id == m.id)
+                        .map(|l| {
+                            let nome = p.recorrente(&l.recorrente).ok().flatten().map(|r| r.nome);
+                            json!({
+                                "recorrente": l.recorrente,
+                                "nome": nome,
+                                "versao_do_calculo": l.versao_do_calculo,
+                                "valores": l.valores.iter().map(|v| json!({
+                                    "parametro": v.parametro,
+                                    "desde": v.desde.to_string(),
+                                    "valor": v.valor,
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+                    json!({
+                        "id": m.id,
+                        "nome": m.nome,
+                        "de_fabrica": m.de_fabrica,
+                        "parametros": m.parametros,
+                        "versao_do_calculo": m.versao_do_calculo,
+                        "checksum": m.checksum,
+                        "calculo": m.calculo,
+                        "usado_por": usado_por,
+                    })
+                })
+                .collect();
+            Ok(json!({ "modelos": modelos, "valores": "em centavos" }))
+        })
+    }
+
+    /// `criar_modelo`: cria o modelo e a versão 1 do Cálculo (o script é conferido antes).
+    ///
+    /// # Errors
+    /// Argumento inválido, script que não compila ou não define `calcular`, backup que falhou.
+    pub fn criar_modelo(&self, a: &PedidoDeCriarModelo) -> Resultado {
+        self.escrever("criar_modelo", |p, hoje| {
+            let nome = texto(&a.nome, "nome", MAX_NOME)?;
+            let parametros = a
+                .parametros
+                .iter()
+                .map(|x| {
+                    Ok(ParametroDeModelo {
+                        nome: texto(&x.nome, "nome do parâmetro", MAX_NOME)?,
+                        tipo: tipo_de_parametro(&x.tipo)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let alt = Alteracao::CriarModelo {
+                nome,
+                parametros,
+                calculo: a.calculo.clone(),
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            let mut v = Self::resposta_de_aplicacao(&recibo, sim);
+            v["modelo"] = json!({ "id": recibo.alvo });
+            Ok(v)
+        })
+    }
+
+    /// `aplicar_modelo`: liga o compromisso ao modelo e grava os valores, com vigência.
+    ///
+    /// # Errors
+    /// Modelo ou compromisso inexistente, valor de tipo errado, backup que falhou.
+    pub fn aplicar_modelo(&self, a: &PedidoDeAplicarModelo) -> Resultado {
+        self.escrever("aplicar_modelo", |p, hoje| {
+            let rec = id_do_recorrente(&a.recorrente)?;
+            let modelo = achar_modelo(p, &a.modelo)?;
+            let valores = a
+                .valores
+                .iter()
+                .map(|v| valor_de_parametro(&modelo.parametros, &v.parametro, &v.desde, &v.valor))
+                .collect::<Result<Vec<_>, String>>()?;
+            let alt = Alteracao::AplicarModelo {
+                versao_base: versao_base(p, &rec)?,
+                recorrente: rec,
+                modelo: modelo.id,
+                valores,
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `definir_parametro`: um valor de parâmetro com vigência.
+    ///
+    /// # Errors
+    /// Compromisso sem modelo, parâmetro desconhecido, valor de tipo errado, backup que falhou.
+    pub fn definir_parametro(&self, a: &PedidoDeDefinirParametro) -> Resultado {
+        self.escrever("definir_parametro", |p, hoje| {
+            let rec = id_do_recorrente(&a.recorrente)?;
+            let ligacao = p
+                .ligacao_de_modelo(&rec)
+                .map_err(pt)?
+                .ok_or("o compromisso não usa um modelo (veja aplicar_modelo)")?;
+            let valor = valor_de_parametro(&ligacao.parametros, &a.parametro, &a.desde, &a.valor)?;
+            let alt = Alteracao::DefinirParametro {
+                versao_base: versao_base(p, &rec)?,
+                recorrente: rec,
+                valor,
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `ajustar_quantidade`: a quantidade de um mês só (exceção daquele mês).
+    ///
+    /// # Errors
+    /// Compromisso sem modelo, quantidade fora de 0 a 1000, backup que falhou.
+    pub fn ajustar_quantidade(&self, a: &PedidoDeAjustarQuantidade) -> Resultado {
+        self.escrever("ajustar_quantidade", |p, hoje| {
+            let ocorrencia = id_de_ocorrencia(&a.id_ocorrencia)?;
+            let alt = Alteracao::Excecao {
+                ocorrencia,
+                excecao: Excecao::QuantidadeSoDesteMes {
+                    quantidade: a.quantidade,
+                },
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
         })
     }
 
