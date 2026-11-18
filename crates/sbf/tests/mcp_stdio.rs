@@ -125,6 +125,9 @@ fn initialize_listar_e_chamar_ferramentas() {
         "livro_movimentacoes",
         "sugerir",
         "sugestoes_abertas",
+        "telegram_conversas",
+        "telegram_seguir",
+        "telegram_coletar",
     ] {
         assert!(
             nomes.contains(&esperado),

@@ -47,6 +47,7 @@ pub struct Nucleo {
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
     gmail: ColetaDoGmail,
+    telegram: Option<crate::telegram::Ponte>,
     backups: crate::backup::Backups,
 }
 
@@ -262,6 +263,7 @@ impl Nucleo {
             plano: None,
             regras: None,
             gmail: ColetaDoGmail::default(),
+            telegram: None,
             backups,
         })
     }
@@ -367,6 +369,29 @@ impl Nucleo {
                 .com_backups(self.backups.clone()),
         );
         self
+    }
+
+    /// Liga as ferramentas do Telegram (a ponte é do `sbf`; o MCP não fala MTProto).
+    #[must_use]
+    pub fn com_telegram(mut self, ponte: Arc<dyn crate::telegram::PonteDoTelegram>) -> Self {
+        self.telegram = Some(crate::telegram::Ponte(ponte));
+        self
+    }
+
+    /// Há Telegram ligado?
+    #[must_use]
+    pub fn tem_telegram(&self) -> bool {
+        self.telegram.is_some()
+    }
+
+    /// A ponte do Telegram.
+    ///
+    /// # Errors
+    /// Telegram não ligado.
+    pub fn telegram(&self) -> Result<&crate::telegram::Ponte, String> {
+        self.telegram
+            .as_ref()
+            .ok_or_else(|| "o Telegram não está ligado a este servidor".to_owned())
     }
 
     /// Há regras de reconhecimento ligadas?

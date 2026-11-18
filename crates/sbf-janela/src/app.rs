@@ -759,8 +759,10 @@ impl AppCasca for AppSbf {
             }),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
             GrupoNavegacao::novo("Fontes", {
-                // Roteiros (spec 10, C1) já funcionam: o item não leva o selo de fatia.
-                let mut v = futuras(&["conexoes", "alertas"]);
+                // Conexões (Telegram, Pluggy, pastas) e Roteiros (spec 10, C1) já funcionam: os
+                // itens não levam o selo de fatia.
+                let mut v = vec![ItemNavegacao::novo("conexoes", "Conexões", "hub")];
+                v.extend(futuras(&["alertas"]));
                 v.push(ItemNavegacao::novo("roteiros", "Roteiros", "route"));
                 v
             }),

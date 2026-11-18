@@ -96,6 +96,13 @@ pub enum Evento<'a> {
         /// Origens novas.
         novos: usize,
     },
+    /// Coleta do Telegram (conversas seguidas).
+    Telegram {
+        /// Conversas consultadas.
+        conversas: usize,
+        /// Arquivos novos.
+        novos: usize,
+    },
     /// Roteiros agendados executados.
     Roteiros {
         /// Roteiros executados.
@@ -143,7 +150,7 @@ pub enum Evento<'a> {
     },
     /// Um passo falhou.
     Falhou {
-        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `triagem`, `estado`).
+        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `telegram`, `triagem`, `estado`).
         passo: &'static str,
         /// A categoria.
         falha: Falha,
@@ -173,6 +180,9 @@ impl fmt::Display for Evento<'_> {
             }
             Self::Mensageiros { mensagens, novos } => {
                 write!(f, "mensageiros mensagens={mensagens} novos={novos}")
+            }
+            Self::Telegram { conversas, novos } => {
+                write!(f, "telegram conversas={conversas} novos={novos}")
             }
             Self::Roteiros {
                 executados,

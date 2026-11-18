@@ -11,6 +11,7 @@
 //! 5. **Gmail**: a cada `gmail_minutos` (padrão 30; `0` desliga), se o coletor foi ligado (o
 //!    `sbf` só liga quando as credenciais OAuth estão no ambiente): anexos para
 //!    `<cofre>/entrada/gmail/` e reconhecimento com as regras;
+//!    **Telegram**: as conversas seguidas (`telegram.json`), a cada `telegram_minutos` (15);
 //! 6. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
 //!    que já passaram do intervalo (spec 10, C1);
 //! 7. **Triagem**: um pequeno lote do agente, no horário configurado.
@@ -163,6 +164,25 @@ pub trait ColetorDeGmail {
     fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoGmail, Falha>;
 }
 
+/// O que uma coleta do Telegram fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoTelegram {
+    /// Conversas consultadas.
+    pub conversas: usize,
+    /// Arquivos novos no inventário.
+    pub novos: usize,
+}
+
+/// Uma coleta do Telegram (a real é `sbf_telegram::coleta`, montada no `sbf`).
+pub trait ColetorDeTelegram {
+    /// Coleta as conversas seguidas. Sem sessão guardada ou sem conversa seguida, é um `Ok`
+    /// vazio (não é falha: o usuário ainda não ligou).
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoTelegram, Falha>;
+}
+
 /// O que uma coleta de nuvem fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDaNuvem {
@@ -299,6 +319,7 @@ pub struct Worker {
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
     mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
     gmail: Option<Box<dyn ColetorDeGmail>>,
+    telegram: Option<Box<dyn ColetorDeTelegram>>,
     roteiros: Option<Box<dyn ColetorDeRoteiros>>,
     triador: Option<Box<dyn Triador>>,
     indexador: Option<Box<dyn Indexador>>,
@@ -314,6 +335,7 @@ pub struct Worker {
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
     proxima_gmail: u64,
+    proxima_telegram: u64,
     proxima_roteiros: u64,
     proxima_triagem: u64,
     proximo_indice: u64,
@@ -372,6 +394,7 @@ impl Worker {
             nuvem,
             mensageiros: None,
             gmail: None,
+            telegram: None,
             roteiros: None,
             triador,
             indexador: None,
@@ -387,6 +410,7 @@ impl Worker {
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
             proxima_gmail: agora_,
+            proxima_telegram: agora_,
             proxima_roteiros: agora_,
             proxima_triagem: agora_,
             proximo_indice: agora_,
@@ -412,6 +436,13 @@ impl Worker {
     #[must_use]
     pub fn com_gmail(mut self, coletor: Box<dyn ColetorDeGmail>) -> Self {
         self.gmail = Some(coletor);
+        self
+    }
+
+    /// Liga a coleta do Telegram (conversas seguidas), de `telegram_minutos` em `telegram_minutos`.
+    #[must_use]
+    pub fn com_telegram(mut self, coletor: Box<dyn ColetorDeTelegram>) -> Self {
+        self.telegram = Some(coletor);
         self
     }
 
@@ -610,6 +641,14 @@ impl Worker {
             self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
             self.passo_do_gmail(cancelar, agora_);
         }
+        if self.config.telegram_minutos > 0
+            && self.telegram.is_some()
+            && agora_ >= self.proxima_telegram
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.proxima_telegram = agora_ + self.config.telegram_minutos * 60;
+            self.passo_do_telegram(cancelar, agora_);
+        }
         if self.dados.pasta.join("roteiros.sqlite").exists()
             && agora_ >= self.proxima_roteiros
             && !cancelar.load(Ordering::Relaxed)
@@ -752,6 +791,25 @@ impl Worker {
             Err(f) => self.falhou("gmail", f),
         }
         self.gmail = Some(g);
+    }
+
+    fn passo_do_telegram(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut t) = self.telegram.take() else {
+            return;
+        };
+        match t.coletar(cancelar) {
+            Ok(r) => {
+                if r.conversas > 0 {
+                    let _ = self.registro.registrar(&Evento::Telegram {
+                        conversas: r.conversas,
+                        novos: r.novos,
+                    });
+                }
+                self.coletou("telegram", r.novos as u64, agora_);
+            }
+            Err(f) => self.falhou("telegram", f),
+        }
+        self.telegram = Some(t);
     }
 
     fn passo_dos_roteiros(&mut self, cancelar: &AtomicBool, agora_: u64) {
