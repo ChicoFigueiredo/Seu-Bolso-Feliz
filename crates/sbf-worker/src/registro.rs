@@ -82,6 +82,13 @@ pub enum Evento<'a> {
         /// Itens baixados.
         baixados: usize,
     },
+    /// Coleta do Gmail.
+    Gmail {
+        /// Mensagens lidas.
+        mensagens: usize,
+        /// Conteúdos novos no inventário.
+        novos: usize,
+    },
     /// Coleta de mensageiros.
     Mensageiros {
         /// Mensagens vistas.
@@ -160,6 +167,9 @@ impl fmt::Display for Evento<'_> {
             } => write!(f, "reconciliou fonte={fonte} novos={novos} erros={erros}"),
             Self::Nuvem { listados, baixados } => {
                 write!(f, "nuvem listados={listados} baixados={baixados}")
+            }
+            Self::Gmail { mensagens, novos } => {
+                write!(f, "gmail mensagens={mensagens} novos={novos}")
             }
             Self::Mensageiros { mensagens, novos } => {
                 write!(f, "mensageiros mensagens={mensagens} novos={novos}")

@@ -196,6 +196,9 @@ pub(crate) struct Estado {
     pub(crate) regra: Option<sbf_regras::Reconhecimento>,
     pub(crate) entrada: Option<sbf_regras::Entrada>,
     pub(crate) leitura: Option<sbf_regras::Leitura>,
+    /// O canal de onde o arquivo veio e o id dele no canal (`Canal::Gmail` e o id da
+    /// mensagem). `None`: solto na janela ou já no cofre, como sempre.
+    pub(crate) origem: Option<(sbf_regras::Canal, String)>,
 }
 
 type Saida<T> = Result<(T, Situacao), ErroDoReconhecimento>;
@@ -239,6 +242,27 @@ impl Reconhecedor for ReconhecedorDoCofre {
         andamento: &mut dyn FnMut(Andamento),
         cancelar: &AtomicBool,
     ) -> Result<Resultado, ErroDoReconhecimento> {
+        self.reconhecer_de(None, caminho, andamento, cancelar)
+    }
+}
+
+impl ReconhecedorDoCofre {
+    /// Como [`Reconhecedor::reconhecer`], mas dizendo de que canal o arquivo veio (o Gmail, por
+    /// exemplo) e o id dele no canal: é o que as regras de reconhecimento veem em
+    /// `Entrada.origem`. `None` é o comportamento de sempre (solto na janela ou já no cofre).
+    ///
+    /// Um arquivo de dentro do cofre só segue as etapas de texto se o inventário já o
+    /// conhece: quem entrega por um canal registra o achado antes de chamar.
+    ///
+    /// # Errors
+    /// [`ErroDoReconhecimento`], como no trait.
+    pub fn reconhecer_de(
+        &self,
+        origem: Option<(sbf_regras::Canal, String)>,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
         let meta = std::fs::metadata(caminho).map_err(|e| do_arquivo(&e))?;
         if !meta.is_file() {
             return Err(ErroDoReconhecimento::Arquivo(
@@ -265,6 +289,7 @@ impl Reconhecedor for ReconhecedorDoCofre {
             regra: None,
             entrada: None,
             leitura: None,
+            origem,
         };
 
         // 1. Conferir.
@@ -449,7 +474,8 @@ impl ReconhecedorDoCofre {
         }
         match extensao(caminho).as_str() {
             "pdf" => self.extrair_do_pdf(conn, caminho, sha),
-            "txt" => extrair_do_txt(conn, caminho, sha),
+            // O XML de NF-e é texto: as regras casam pelo conteúdo dele.
+            "txt" | "xml" => extrair_do_txt(conn, caminho, sha),
             e if sbf_ocr::EXTENSOES_DE_IMAGEM.contains(&e) => {
                 self.extrair_da_imagem(conn, caminho, sha)
             }

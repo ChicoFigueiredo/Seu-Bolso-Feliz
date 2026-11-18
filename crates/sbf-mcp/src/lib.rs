@@ -17,6 +17,6 @@ pub mod plano;
 pub mod regras;
 pub mod servidor;
 
-pub use ferramentas::Nucleo;
+pub use ferramentas::{ColetorDoGmail, Nucleo, ParamsDeColetaDoGmail};
 pub use plano::Fabrica;
 pub use servidor::servir_stdio;
