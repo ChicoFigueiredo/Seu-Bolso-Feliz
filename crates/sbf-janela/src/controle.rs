@@ -1763,6 +1763,67 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
     }
 }
 
+/// O que o Detalhe mostra de um compromisso que usa um Modelo de compromisso.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinhaDoModelo {
+    /// "Modelo: Diarista por dia da semana · diária R$ 210,00 × 5 sextas = R$ 1.050,00".
+    pub texto: String,
+    /// Por que o cálculo não valeu (o previsto segue o último valor conhecido).
+    pub aviso: Option<String>,
+    /// A quantidade que o cálculo usou neste mês.
+    pub quantidade: Option<i64>,
+    /// A quantidade foi digitada só para este mês.
+    pub ajustada: bool,
+}
+
+/// A linha "Modelo: X · diária R$ 210 · 5 sextas = R$ 1.050" de uma ocorrência, se o
+/// compromisso usa um modelo.
+pub fn linha_do_modelo(o: &Ocorrencia) -> Option<LinhaDoModelo> {
+    let k = o.calculo.as_ref()?;
+    let previsto = dinheiro_ou_sem_valor(o.previsto);
+    let texto = if k.explicacao.is_empty() {
+        format!("Modelo: {} · sem cálculo neste mês = {previsto}", k.modelo)
+    } else {
+        format!("Modelo: {} · {} = {previsto}", k.modelo, k.explicacao)
+    };
+    Some(LinhaDoModelo {
+        texto,
+        aviso: k.aviso.clone(),
+        quantidade: k.quantidade,
+        ajustada: k.ajustada,
+    })
+}
+
+/// O ajuste de quantidade só deste mês, a partir do que o usuário digitou.
+///
+/// # Errors
+/// Texto que não é um número inteiro de 0 a 1000.
+pub fn alteracao_de_quantidade(id: &IdOcorrencia, texto: &str) -> Result<Alteracao, String> {
+    let n: i64 = texto
+        .trim()
+        .parse()
+        .map_err(|_| "Digite a quantidade como um número inteiro (ex.: 6).".to_owned())?;
+    if !(0..=1000).contains(&n) {
+        return Err("A quantidade vai de 0 a 1000.".to_owned());
+    }
+    Ok(Alteracao::Excecao {
+        ocorrencia: id.clone(),
+        excecao: Excecao::QuantidadeSoDesteMes { quantidade: n },
+    })
+}
+
+/// A exceção de quantidade viva (não desfeita) de uma ocorrência, para "Voltar ao cálculo".
+pub fn excecao_de_quantidade<'a>(
+    excecoes: &'a [sbf_planejamento::ExcecaoGravada],
+    id: &IdOcorrencia,
+) -> Option<&'a sbf_planejamento::ExcecaoGravada> {
+    excecoes.iter().rfind(|e| {
+        !e.desfeita
+            && &e.ocorrencia == id
+            && matches!(e.excecao, Excecao::QuantidadeSoDesteMes { .. })
+    })
+}
+
 /// Uma proposta como uma linha: quem propôs e o quê.
 pub fn origem_da_proposta(p: &Proposta) -> &'static str {
     match p.origem.as_str() {
@@ -1803,6 +1864,92 @@ mod testes {
         PlanejamentoFicticio::novo(hoje())
             .controle(&nav.periodo(), Filtro::Todos, None, hoje())
             .expect("controle")
+    }
+
+    fn ocorrencia_com_modelo(
+        explicacao: &str,
+        aviso: Option<&str>,
+        ajustada: bool,
+    ) -> sbf_planejamento::Ocorrencia {
+        let controle = controle_do(&Navegador::novo(hoje()));
+        let mut o = controle.linhas.first().expect("uma linha").clone();
+        o.previsto = Some(Centavos(105_000));
+        o.calculo = Some(sbf_planejamento::CalculoDaOcorrencia {
+            modelo: "Diarista por dia da semana".into(),
+            explicacao: explicacao.into(),
+            quantidade: Some(5),
+            ajustada,
+            aviso: aviso.map(str::to_owned),
+        });
+        o
+    }
+
+    #[test]
+    fn a_linha_do_modelo_diz_modelo_parametros_quantidade_e_total() {
+        let o = ocorrencia_com_modelo("diária R$ 210,00 × 5 sextas", None, false);
+        let l = linha_do_modelo(&o).expect("linha");
+        assert_eq!(
+            l.texto,
+            "Modelo: Diarista por dia da semana · diária R$ 210,00 × 5 sextas = R$ 1.050,00"
+        );
+        assert_eq!(l.aviso, None);
+        assert_eq!(l.quantidade, Some(5));
+        assert!(!l.ajustada);
+        // Sem modelo, sem linha.
+        let mut sem = o.clone();
+        sem.calculo = None;
+        assert_eq!(linha_do_modelo(&sem), None);
+    }
+
+    #[test]
+    fn a_linha_do_modelo_leva_o_aviso_quando_o_calculo_falhou() {
+        let o = ocorrencia_com_modelo(
+            "",
+            Some("O cálculo não valeu em 2026-05: o script falhou."),
+            false,
+        );
+        let l = linha_do_modelo(&o).expect("linha");
+        assert!(l.texto.contains("sem cálculo neste mês"));
+        assert!(l.aviso.expect("aviso").contains("não valeu"));
+    }
+
+    #[test]
+    fn digitar_a_quantidade_vira_a_excecao_de_um_mes_so() {
+        let id = IdOcorrencia {
+            recorrente: "rec".into(),
+            competencia: Competencia { ano: 2026, mes: 1 },
+            parcela: None,
+        };
+        assert_eq!(
+            alteracao_de_quantidade(&id, " 6 "),
+            Ok(Alteracao::Excecao {
+                ocorrencia: id.clone(),
+                excecao: Excecao::QuantidadeSoDesteMes { quantidade: 6 },
+            })
+        );
+        for ruim in ["", "seis", "-1", "1001", "2,5"] {
+            assert!(alteracao_de_quantidade(&id, ruim).is_err(), "{ruim}");
+        }
+    }
+
+    #[test]
+    fn a_descricao_da_proposta_de_modelo_fala_em_portugues() {
+        let nome = |_: &str| "Diarista Exemplo".to_owned();
+        let t = descrever(
+            &Alteracao::Excecao {
+                ocorrencia: IdOcorrencia {
+                    recorrente: "rec".into(),
+                    competencia: Competencia { ano: 2026, mes: 1 },
+                    parcela: None,
+                },
+                excecao: Excecao::QuantidadeSoDesteMes { quantidade: 6 },
+            },
+            &nome,
+        );
+        assert_eq!(
+            t,
+            "Ajustar a quantidade de \u{201c}Diarista Exemplo\u{201d} só em 01/2026 para 6."
+        );
     }
 
     #[test]

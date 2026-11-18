@@ -2065,6 +2065,10 @@ impl Janela {
                         ..
                     }) => "Par de conta confirmado.",
                     Some(Alteracao::MapearConta { .. }) => "Par de conta desligado.",
+                    Some(Alteracao::Excecao {
+                        excecao: sbf_planejamento::Excecao::QuantidadeSoDesteMes { .. },
+                        ..
+                    }) => "Quantidade ajustada só neste mês.",
                     _ => "Feito.",
                 };
                 let mut r = Ok(());
