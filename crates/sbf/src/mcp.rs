@@ -120,6 +120,27 @@ pub fn rodar(args: &[String]) -> ExitCode {
             nucleo
         }
     };
+    // `gmail_coletar` (D15): coleta o Gmail para o cofre e passa pelas regras. Só liga com as
+    // credenciais OAuth no ambiente do servidor MCP.
+    let nucleo = if sbf_gmail::fonte::credenciais_presentes() {
+        let cofre = PathBuf::from(pasta);
+        nucleo.com_gmail(std::sync::Arc::new(move |p| {
+            let opcoes = sbf_gmail::OpcoesDaColeta {
+                consulta: p.consulta.clone(),
+                desde: p.desde.clone(),
+                limite: p.limite,
+            };
+            crate::gmail::coletar_do_cofre(
+                &cofre,
+                &opcoes,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .map(|r| crate::gmail::resumo_em_json(&r))
+            .map_err(|e| e.to_string())
+        }))
+    } else {
+        nucleo
+    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

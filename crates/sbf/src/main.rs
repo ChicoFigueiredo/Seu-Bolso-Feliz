@@ -10,6 +10,8 @@
 //! - `sbf worker rodar|instalar|desinstalar|estado`: o worker local sem janela (`worker.rs`);
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf coletor-vps`: as coletas da VPS, Gmail e Pluggy (ADR-014; ver `coletor.rs`);
+//! - `sbf gmail coletar --inventario <cofre>`: anexos de e-mail para o cofre, com as regras
+//!   de reconhecimento (ver `gmail.rs`);
 //! - `sbf canais`: o bot do Telegram e os alertas, na VPS (ADR-014, ADR-017; ver `canais.rs`);
 //! - `sbf reconhecer --inventario <cofre> --arquivo <caminho>`: o reconhecimento de um arquivo
 //!   solto, sem janela (ver `reconhecer.rs`);
@@ -23,6 +25,7 @@ mod captura;
 mod coletor;
 mod entrada;
 mod estacao;
+mod gmail;
 mod inventario;
 mod mcp;
 mod ocr;
@@ -491,7 +494,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf gmail coletar --inventario <pasta-do-cofre> [--consulta \"<query>\"] [--desde AAAA-MM-DD] [--limite N] | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -543,6 +546,7 @@ fn main() -> ExitCode {
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("worker") => worker::rodar(&args[1..]),
+        Some("gmail") => gmail::rodar(&args[1..]),
         Some("canais") => canais::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("planejamento") => planejamento::rodar(&args[1..]),

@@ -277,6 +277,7 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
         dados: dados.clone(),
     });
     let dados_dos_roteiros = dados.clone();
+    let dados_do_gmail = dados.clone();
     let dados_do_rag = dados.clone();
     let dados_do_ocr = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
@@ -291,6 +292,13 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
                 )))
                 .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)))
                 .com_ocr(Box::new(crate::ocr::LeitorReal::novo(dados_do_ocr)));
+            // O Gmail só liga com as credenciais OAuth no ambiente do worker; sem elas o laço
+            // não tenta (e não registra falha a cada intervalo).
+            if sbf_gmail::fonte::credenciais_presentes() {
+                w = w.com_gmail(Box::new(crate::gmail::GmailReal {
+                    dados: dados_do_gmail,
+                }));
+            }
             w.rodar(&parar);
             ExitCode::SUCCESS
         }

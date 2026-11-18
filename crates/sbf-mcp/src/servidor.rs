@@ -9,8 +9,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::ferramentas::{
-    Nucleo, ParamsDeAchados, ParamsDeDecisoes, ParamsDeFornecedores, ParamsDeRegistros,
-    ParamsDeSugestoesAbertas, ParamsDoLivro, SugestaoProposta,
+    Nucleo, ParamsDeAchados, ParamsDeColetaDoGmail, ParamsDeDecisoes, ParamsDeFornecedores,
+    ParamsDeRegistros, ParamsDeSugestoesAbertas, ParamsDoLivro, SugestaoProposta,
 };
 use crate::plano::{
     ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO,
@@ -70,6 +70,15 @@ esquema!(PedidoDeAchados, ParamsDeAchados {
     limite: Option<i64>,
     /// Quantos itens pular.
     deslocamento: Option<i64>,
+});
+
+esquema!(PedidoDeColetaDoGmail, ParamsDeColetaDoGmail {
+    /// Consulta do Gmail (a mesma da caixa de busca). Padrão: has:attachment newer_than:30d -category:promotions.
+    consulta: Option<String>,
+    /// AAAA-MM-DD: coleta desde esta data e ignora o checkpoint.
+    desde: Option<String>,
+    /// Quantas mensagens, no máximo, nesta coleta (padrão 200).
+    limite: Option<usize>,
 });
 
 esquema!(PedidoDeFornecedores, ParamsDeFornecedores {
@@ -183,6 +192,9 @@ impl Servidor {
             for nome in FERRAMENTAS_DO_PLANO.iter().chain(&ESCRITA_DO_PLANO) {
                 tool_router.remove_route(nome);
             }
+        }
+        if !nucleo.tem_gmail() {
+            tool_router.remove_route("gmail_coletar");
         }
         if !nucleo.tem_regras() {
             for nome in FERRAMENTAS_DAS_REGRAS.iter().chain(&ESCRITA_DAS_REGRAS) {
@@ -714,6 +726,16 @@ impl Servidor {
     }
 
     #[tool(
+        description = "COLETA AGORA o Gmail do usuario: baixa os anexos (PDF, imagem, XML) para <cofre>/entrada/gmail/, registra no inventario com origem gmail:<mensagem>:<parte>, deduplica por sha256 e passa cada documento novo pelas regras de reconhecimento; e-mail sem anexo vira entrada Mensagem. Aplica direto (D15), sem confirmacao; nada vai para o planejamento (as regras so propoem). Checkpoint automatico: coletar de novo so traz o que e novo. Devolve so contagens. Backup automatico do inventario e das regras antes da primeira escrita da sessao."
+    )]
+    fn gmail_coletar(
+        &self,
+        Parameters(p): Parameters<PedidoDeColetaDoGmail>,
+    ) -> Result<String, String> {
+        responder("gmail_coletar", self.nucleo.gmail_coletar(&p.into()))
+    }
+
+    #[tool(
         description = "Faz AGORA o backup de todos os bancos do cofre (inventário, planejamento, regras...) em <cofre>/backups/mcp/, com a API de backup do SQLite (consistente com o WAL); guarda os 20 mais recentes por banco. Os bancos que o MCP escreve já são copiados sozinhos antes da primeira escrita de cada sessão."
     )]
     fn fazer_backup(&self) -> Result<String, String> {
@@ -750,7 +772,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar tambem aplica direto: coleta o Gmail para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 
