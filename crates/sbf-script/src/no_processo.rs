@@ -25,8 +25,9 @@ use std::time::{Duration, Instant};
 
 use mlua::{Function, Lua, LuaOptions, MultiValue, StdLib, Table, Value, VmState};
 use sbf_regras::script::{
-    ErroDoScript, ExecutorDeScript, Limites, MAX_CARACTERES_EXIBIR, MAX_LINHAS_EXIBIR,
-    PedidoDeScript, RespostaDoScript,
+    ErroDoScript, ExecutorDeScript, ItemDeCalculo, Limites, MAX_CARACTERES_EXIBIR,
+    MAX_CARACTERES_EXPLICACAO, MAX_LINHAS_EXIBIR, PedidoDeCalculo, PedidoDeScript,
+    RespostaDeCalculo, RespostaDoScript, ResultadoDeCalculo,
 };
 use serde_json::Value as Json;
 
@@ -126,6 +127,111 @@ impl ExecutorDeScript for ExecutorNoProcesso {
         let lua = preparar(&limites, &vigia).map_err(|e| mapear(&e, &vigia))?;
         carregar(&lua, fonte, &vigia).map(|_| ())
     }
+
+    fn calcular(&self, pedido: &PedidoDeCalculo) -> Result<Vec<ResultadoDeCalculo>, ErroDoScript> {
+        let tamanho = pedido.fonte.len()
+            + serde_json::to_vec(&pedido.itens).map_or(usize::MAX / 4, |v| v.len());
+        if tamanho > pedido.limites.entrada_bytes {
+            return Err(ErroDoScript::Grande(format!(
+                "pedido de {tamanho} bytes passa de {}",
+                pedido.limites.entrada_bytes
+            )));
+        }
+        Ok(pedido
+            .itens
+            .iter()
+            .map(|item| calcular_um(&pedido.fonte, item, &pedido.limites))
+            .collect())
+    }
+
+    fn verificar_calculo(&self, fonte: &str) -> Result<(), ErroDoScript> {
+        let limites = Limites {
+            memoria_bytes: 4 * 1024 * 1024,
+            tempo_ms: 100,
+            instrucoes: 100_000,
+            ..Limites::default()
+        };
+        if fonte.len() > limites.entrada_bytes {
+            return Err(ErroDoScript::Grande("fonte grande demais".into()));
+        }
+        let vigia = Vigia::nova(&limites);
+        let lua = preparar(&limites, &vigia).map_err(|e| mapear(&e, &vigia))?;
+        carregar_funcao(&lua, fonte, &vigia, "calcular", ErroDoScript::SemCalcular).map(|_| ())
+    }
+}
+
+/// Um mês do Cálculo, numa VM nova.
+fn calcular_um(fonte: &str, item: &ItemDeCalculo, limites: &Limites) -> ResultadoDeCalculo {
+    let vigia = Vigia::nova(limites);
+    let lua = preparar(limites, &vigia).map_err(|e| mapear(&e, &vigia))?;
+    let calcular = carregar_funcao(&lua, fonte, &vigia, "calcular", ErroDoScript::SemCalcular)?;
+    let entrada = entrada_do_calculo(&lua, item).map_err(|e| mapear(&e, &vigia))?;
+    let ajuda = criar_ajuda(&lua).map_err(|e| mapear(&e, &vigia))?;
+    let retorno: Value = calcular
+        .call((entrada, ajuda))
+        .map_err(|e| mapear(&e, &vigia))?;
+    validar_calculo(&retorno)
+}
+
+/// `{competencia, parametros, quantidade_ajustada}`, congelada.
+fn entrada_do_calculo(lua: &Lua, item: &ItemDeCalculo) -> mlua::Result<Value> {
+    let t = lua.create_table()?;
+    t.raw_set("competencia", lua.create_string(&item.competencia)?)?;
+    t.raw_set("parametros", json_para_lua(lua, &item.parametros, 0)?)?;
+    #[allow(clippy::cast_precision_loss)]
+    if let Some(q) = item.quantidade_ajustada {
+        t.raw_set("quantidade_ajustada", q as f64)?;
+    }
+    t.set_readonly(true);
+    Ok(Value::Table(t))
+}
+
+fn validar_calculo(v: &Value) -> ResultadoDeCalculo {
+    let Value::Table(t) = v else {
+        return Err(retorno("calcular deve devolver uma tabela"));
+    };
+    for par in t.pairs::<Value, Value>() {
+        let (k, _) = par.map_err(|e| retorno(e.to_string()))?;
+        let ok = matches!(&k, Value::String(s)
+            if s.to_str().is_ok_and(|s| ["valor_centavos", "quantidade", "explicacao"].contains(&&*s)));
+        if !ok {
+            return Err(retorno("a tabela devolvida tem chave desconhecida"));
+        }
+    }
+    let valor = t
+        .raw_get::<Value>("valor_centavos")
+        .map_err(|e| retorno(e.to_string()))?;
+    if matches!(valor, Value::Nil) {
+        return Err(retorno("falta `valor_centavos`"));
+    }
+    let valor_centavos = numero_inteiro(&valor, "valor_centavos")?;
+    if valor_centavos < 0 {
+        return Err(retorno("`valor_centavos` não pode ser negativo"));
+    }
+    let quantidade = match t
+        .raw_get::<Value>("quantidade")
+        .map_err(|e| retorno(e.to_string()))?
+    {
+        Value::Nil => None,
+        outro => Some(numero_inteiro(&outro, "quantidade")?),
+    };
+    let explicacao = match t
+        .raw_get::<Value>("explicacao")
+        .map_err(|e| retorno(e.to_string()))?
+    {
+        Value::Nil => return Err(retorno("falta `explicacao`")),
+        outro => texto_de(&outro, "explicacao")?,
+    };
+    if explicacao.chars().count() > MAX_CARACTERES_EXPLICACAO {
+        return Err(retorno(format!(
+            "`explicacao` aceita no máximo {MAX_CARACTERES_EXPLICACAO} caracteres"
+        )));
+    }
+    Ok(RespostaDeCalculo {
+        valor_centavos,
+        quantidade,
+        explicacao,
+    })
 }
 
 /// Estado compartilhado com a interrupção: o contador, o prazo e o motivo do corte.
@@ -197,6 +303,24 @@ fn preparar(limites: &Limites, vigia: &Vigia) -> mlua::Result<Lua> {
 /// Compila (só texto), roda o corpo do script (que só deve definir funções) e devolve
 /// `transformar`.
 fn carregar(lua: &Lua, fonte: &str, vigia: &Vigia) -> Result<Function, ErroDoScript> {
+    carregar_funcao(
+        lua,
+        fonte,
+        vigia,
+        "transformar",
+        ErroDoScript::SemTransformar,
+    )
+}
+
+/// Como [`carregar`], para a função global `nome` (`transformar` das regras, `calcular` do
+/// Modelo de compromisso); `ausente` é o erro de quando ela não existe.
+fn carregar_funcao(
+    lua: &Lua,
+    fonte: &str,
+    vigia: &Vigia,
+    nome: &str,
+    ausente: ErroDoScript,
+) -> Result<Function, ErroDoScript> {
     // Bytecode do Luau começa por um byte de versão (< 0x20); fonte nunca começa assim.
     if fonte
         .as_bytes()
@@ -216,9 +340,9 @@ fn carregar(lua: &Lua, fonte: &str, vigia: &Vigia) -> Result<Function, ErroDoScr
     bloco
         .call::<MultiValue>(())
         .map_err(|e| mapear(&e, vigia))?;
-    match lua.globals().get::<Value>("transformar") {
+    match lua.globals().get::<Value>(nome) {
         Ok(Value::Function(f)) => Ok(f),
-        Ok(_) => Err(ErroDoScript::SemTransformar),
+        Ok(_) => Err(ausente),
         Err(e) => Err(mapear(&e, vigia)),
     }
 }
@@ -353,6 +477,31 @@ fn criar_ajuda(lua: &Lua) -> mlua::Result<Table> {
                 .map_err(|_| mlua::Error::runtime("normalizar: texto inválido"))?;
             Ok(ajuda::normalizar(&texto))
         })?,
+    )?;
+    t.set(
+        "dias_da_semana_no_mes",
+        lua.create_function(|_, (ano, mes, dia): (Value, Value, Value)| {
+            let n = ajuda::dias_da_semana_no_mes(
+                inteiro(&ano, "dias_da_semana_no_mes")?,
+                inteiro(&mes, "dias_da_semana_no_mes")?,
+                inteiro(&dia, "dias_da_semana_no_mes")?,
+            )
+            .map_err(mlua::Error::runtime)?;
+            #[allow(clippy::cast_precision_loss)]
+            Ok(n as f64)
+        })?,
+    )?;
+    t.set(
+        "nome_do_dia_da_semana",
+        lua.create_function(|_, dia: Value| {
+            ajuda::nome_do_dia_da_semana(inteiro(&dia, "nome_do_dia_da_semana")?)
+                .map(str::to_owned)
+                .map_err(mlua::Error::runtime)
+        })?,
+    )?;
+    t.set(
+        "reais",
+        lua.create_function(|_, v: Value| Ok(ajuda::reais(inteiro(&v, "reais")?)))?,
     )?;
     t.set_readonly(true);
     Ok(t)
