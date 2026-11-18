@@ -22,8 +22,8 @@ use crate::texto::normalizar;
 pub const MESES_DE_RESTO_ANTIGO: i32 = 6;
 /// Dia do salário quando nem a planilha nem o mapa dizem.
 const DIA_PADRAO_DO_SALARIO: u8 = 1;
-const NOME_DO_SALARIO: &str = "Salário";
-const LINHA_DO_SALARIO: u32 = 3;
+pub(crate) const NOME_DO_SALARIO: &str = "Salário";
+pub(crate) const LINHA_DO_SALARIO: u32 = 3;
 
 /// O pago informado da coluna J, para virar `Excecao::PagoInformado`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,18 +169,18 @@ pub struct Confirmacao {
 }
 
 /// O que se sabe de uma linha (ou do salário) antes de decidir criar, casar ou atualizar.
-struct Candidato {
-    linha: u32,
-    nome: String,
-    grupo: String,
-    posicao: i64,
-    natureza: Natureza,
-    prazo: Prazo,
-    versao: Versao,
-    pago: Option<PagoDoMes>,
-    adiar: Option<Competencia>,
+pub(crate) struct Candidato {
+    pub(crate) linha: u32,
+    pub(crate) nome: String,
+    pub(crate) grupo: String,
+    pub(crate) posicao: i64,
+    pub(crate) natureza: Natureza,
+    pub(crate) prazo: Prazo,
+    pub(crate) versao: Versao,
+    pub(crate) pago: Option<PagoDoMes>,
+    pub(crate) adiar: Option<Competencia>,
     /// Origem própria (os extras do mapa); as linhas usam `(sha256, aba, linha)`.
-    origem: Option<OrigemImportada>,
+    pub(crate) origem: Option<OrigemImportada>,
 }
 
 pub fn previa(
@@ -484,7 +484,7 @@ fn composicao_da_aba(
     })
 }
 
-fn candidato_do_salario(
+pub(crate) fn candidato_do_salario(
     aba: &AbaLida,
     mapa: &Mapa,
     competencia: Competencia,
@@ -592,7 +592,7 @@ fn candidato_do_extra(
     }
 }
 
-fn candidato_da_linha(
+pub(crate) fn candidato_da_linha(
     aba: &AbaLida,
     l: &LinhaDaPlanilha,
     posicao: i64,
@@ -713,7 +713,7 @@ fn candidato_da_linha(
     }
 }
 
-fn excecao_de_pago(recorrente: &str, prazo: &Prazo, pago: &PagoDoMes) -> Alteracao {
+pub(crate) fn excecao_de_pago(recorrente: &str, prazo: &Prazo, pago: &PagoDoMes) -> Alteracao {
     let parcela = match prazo {
         Prazo::Parcelas { primeira, .. } if *primeira == pago.competencia => Some(1),
         _ => None,
