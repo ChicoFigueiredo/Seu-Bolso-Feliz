@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 6;
+pub const VERSAO_DO_ESQUEMA: u32 = 7;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -229,6 +229,32 @@ const MIGRACOES: &[&str] = &[
     ALTER TABLE conciliacoes ADD COLUMN desfeita INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE conciliacoes ADD COLUMN autor TEXT;
     ALTER TABLE conciliacoes ADD COLUMN sem_automatico INTEGER NOT NULL DEFAULT 0;
+    ",
+    // 7: Desfazer (D15). `inversas` guarda, por linha do histórico, a alteração que a desfaz;
+    // `desfeitos` liga a linha desfeita à linha do Desfazer. Desfazer um cancelamento deixa a
+    // linha marcada (`desfeito`), sem DELETE. Tudo só cresce.
+    "
+    ALTER TABLE cancelamentos ADD COLUMN desfeito INTEGER NOT NULL DEFAULT 0;
+
+    CREATE TABLE inversas (
+        historico_id TEXT PRIMARY KEY,
+        inversa      TEXT NOT NULL
+    );
+
+    CREATE TABLE desfeitos (
+        original_id  TEXT PRIMARY KEY,
+        desfazedor_id TEXT NOT NULL UNIQUE,
+        quando       TEXT NOT NULL
+    );
+
+    CREATE TRIGGER inversas_sem_update BEFORE UPDATE ON inversas
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER inversas_sem_delete BEFORE DELETE ON inversas
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER desfeitos_sem_update BEFORE UPDATE ON desfeitos
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER desfeitos_sem_delete BEFORE DELETE ON desfeitos
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
     ",
 ];
 
@@ -522,7 +548,7 @@ fn ler_cancelamentos(
 ) -> Resultado<HashMap<String, Cancelamento>> {
     let mut stmt = conexao.prepare(
         "SELECT recorrente_id, desde, motivo, comprovado FROM cancelamentos
-         WHERE (?1 IS NULL OR recorrente_id = ?1)",
+         WHERE desfeito = 0 AND (?1 IS NULL OR recorrente_id = ?1)",
     )?;
     let brutas = stmt
         .query_map(params![so_o], |l| {

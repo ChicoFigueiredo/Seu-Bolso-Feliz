@@ -231,14 +231,18 @@ pub enum Autor {
 }
 
 /// Quem pede uma ação no catálogo. Ativar, consolidar, desativar e reverter exigem
-/// [`Quem::Usuario`] (D14); o catálogo recusa os outros com [`ErroDasRegras::NaoPermitido`].
+/// [`Quem::Usuario`] ou [`Quem::Mcp`] (D14, substituída em parte pela D15); o catálogo recusa
+/// os outros com [`ErroDasRegras::NaoPermitido`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Quem {
     /// O usuário, na janela ou num terminal interativo que confirmou.
     Usuario,
-    /// A IA, pelo MCP.
+    /// Uma IA sem a decisão do dono (rascunhos, sugestões): nunca ativa nada.
     Ia,
+    /// O servidor MCP, com controle total (D15): ativa, desativa, reverte e consolida, com
+    /// `mcp` no histórico de estado. Os exemplos que falham (D12) bloqueiam do mesmo jeito.
+    Mcp,
     /// O próprio sbf (semear a fábrica, rebaixar uma consolidada depois de um Desfazer).
     Sistema,
 }

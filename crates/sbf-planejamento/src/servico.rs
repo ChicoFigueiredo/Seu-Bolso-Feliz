@@ -16,7 +16,7 @@ use crate::banco::{
     novo_id, rfc3339,
 };
 use crate::conciliacao::normalizar;
-use crate::escrita::aplicar_na;
+use crate::escrita::{aplicar_na, desfazer_na};
 use crate::projecao::projetar_competencias_seguindo;
 use crate::resumo;
 use crate::{
@@ -218,6 +218,7 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         | Alteracao::Excluir { recorrente, .. }
         | Alteracao::Restaurar { recorrente, .. }
         | Alteracao::Arquivar { recorrente, .. }
+        | Alteracao::Renomear { recorrente, .. }
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
@@ -643,6 +644,51 @@ impl Planejamento for PlanejamentoSqlite {
         let recibo = aplicar_na(&tx, &alteracao, &autor, &agora)?;
         tx.commit()?;
         Ok(recibo)
+    }
+
+    fn desfazer(&mut self, alteracao_id: &str, autor: Autor) -> Resultado<Recibo> {
+        let agora = rfc3339(self.agora());
+        let tx = self.banco.conexao_mut().transaction()?;
+        let recibo = desfazer_na(&tx, alteracao_id, &autor, &agora)?;
+        tx.commit()?;
+        Ok(recibo)
+    }
+
+    fn ultima_desfazivel(&self, autor: &Autor) -> Resultado<Option<EntradaDoHistorico>> {
+        let c = self.banco.conexao();
+        let linha: Option<(String, String, String, String, String, String)> = c
+            .query_row(
+                "SELECT h.id, h.quando, h.autor, h.alvo, h.resumo, h.alteracao
+                 FROM historico h JOIN inversas i ON i.historico_id = h.id
+                 WHERE h.autor = ?1
+                   AND h.id NOT IN (SELECT original_id FROM desfeitos)
+                   AND h.id NOT IN (SELECT desfazedor_id FROM desfeitos)
+                 ORDER BY h.sequencia DESC LIMIT 1",
+                params![json(autor)?],
+                |l| {
+                    Ok((
+                        l.get(0)?,
+                        l.get(1)?,
+                        l.get(2)?,
+                        l.get(3)?,
+                        l.get(4)?,
+                        l.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        linha
+            .map(|(id, quando, autor, alvo, resumo, alteracao)| {
+                Ok(EntradaDoHistorico {
+                    id,
+                    quando,
+                    autor: de_json(&autor)?,
+                    alvo,
+                    resumo,
+                    alteracao,
+                })
+            })
+            .transpose()
     }
 
     fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str) -> Resultado<Proposta> {
