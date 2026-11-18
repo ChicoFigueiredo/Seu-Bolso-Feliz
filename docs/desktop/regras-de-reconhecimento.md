@@ -213,7 +213,13 @@ devolve uma proposta. Nunca grava, paga, concilia nem acessa arquivo, rede ou ba
 - `campos` (nome → valor). Nomes que terminam em `_centavos` têm de ser inteiros e viram
   centavos; nomes que começam por `data` ou `vencimento` viram data (`AAAA-MM-DD`); inteiros
   viram inteiro; o resto vira texto;
-- `revisar` (booleano), `motivos` e `evidencias` (listas de texto).
+- `revisar` (booleano), `motivos` e `evidencias` (listas de texto);
+- `exibir` (lista de textos, opcional): linhas curtas que o script quer mostrar no cartão do
+  Reconhecimento, abaixo da linha "Regra <nome> · versão N". No máximo 5 linhas, cada uma
+  com até 160 caracteres, só texto; fora disso é retorno inválido. Ausente vale lista vazia,
+  então scripts antigos seguem válidos. É só para a tela: não entra na chave de
+  idempotência, não vai para a tabela `execucao` nem para a proposta gravada, porque pode
+  conter texto do documento. Linhas que começam por `⚠` saem na cor de aviso.
 
 Qualquer outra forma de retorno é erro, e a entrada vai para revisão sem travar a fila.
 
@@ -272,7 +278,12 @@ sbf regras --inventario <cofre> parametro irrf 2026-01 irrf-2026.json \
 ```
 
 O IRRF é só **conferência**: o script calcula a estimativa e mostra um alerta quando ela
-diverge do imposto retido no contracheque. Nunca sobrescreve a rubrica do documento.
+diverge do imposto retido no contracheque. Nunca sobrescreve a rubrica do documento. No
+cartão do contracheque ele diz o que concluiu numa linha (`exibir`): "IRRF conferido ✓ ·
+tabela <versão>", a mesma com "(1 centavo de arredondamento)", "⚠ IRRF diverge da tabela
+<versão>" (o aviso com os valores continua vindo do sbf) ou "IRRF não conferido: <motivo>".
+Como o script de fábrica mudou, o sbf grava uma versão nova (rascunho) da regra
+`contracheque` ao abrir; quem ativa é você.
 
 ## 6. Comandos de terminal
 

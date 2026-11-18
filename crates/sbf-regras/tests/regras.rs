@@ -697,6 +697,7 @@ fn resposta(campos: serde_json::Value) -> RespostaDoScript {
         revisar: false,
         motivos: vec![],
         evidencias: vec!["rubrica_irrf".into()],
+        exibir: vec![],
     }
 }
 
@@ -906,6 +907,89 @@ fn script_que_nao_corresponde_nao_se_aplica_e_texto_so_se_pedido() {
     assert_eq!(l.execucoes[0].resultado, ResultadoDaExecucao::NaoSeAplica);
 }
 
+fn resposta_com_exibir(linhas: &[&str]) -> RespostaDoScript {
+    RespostaDoScript {
+        exibir: linhas.iter().map(|l| (*l).to_owned()).collect(),
+        ..resposta(json!({}))
+    }
+}
+
+/// Uma regra de script (sem parâmetros) com o executor de mentira dado.
+fn motor_do_script(exec: &Arc<ExecutorFicticio>, leitor: bool) -> Motor {
+    let mut c = Catalogo::em_memoria().unwrap();
+    let mut n = nova("r", Definicao::simples("t", "comprovante pix"));
+    n.definicao.leitor = leitor.then(|| "contracheque".to_owned());
+    n.script = Some("f".into());
+    ativa(&mut c, n, Some(&**exec));
+    Motor::das_vigentes(&c, Some(exec.clone())).unwrap()
+}
+
+#[test]
+fn exibir_do_script_chega_ao_reconhecimento_sem_mexer_na_chave() {
+    let com = |linhas: &'static [&'static str]| {
+        Arc::new(ExecutorFicticio::novo().com_funcao("f", move |_| Ok(resposta_com_exibir(linhas))))
+    };
+    let e = entrada("doc-1", COMPROVANTE);
+    let l1 = motor_do_script(&com(&["IRRF conferido ✓", "segunda"]), false).ler(&e);
+    let l2 = motor_do_script(&com(&["outra coisa"]), false).ler(&e);
+    let l3 = motor_do_script(&com(&[]), false).ler(&e);
+    assert_eq!(reconhecido(&l1).exibir, ["IRRF conferido ✓", "segunda"]);
+    assert_eq!(reconhecido(&l2).exibir, ["outra coisa"]);
+    assert!(reconhecido(&l3).exibir.is_empty());
+    // O texto exibido não entra na chave de idempotência.
+    assert_eq!(reconhecido(&l1).chave, reconhecido(&l2).chave);
+    assert_eq!(reconhecido(&l1).chave, reconhecido(&l3).chave);
+}
+
+#[test]
+fn exibir_tambem_chega_quando_o_leitor_completa() {
+    let exec = Arc::new(
+        ExecutorFicticio::novo().com_funcao("f", |_| Ok(resposta_com_exibir(&["linha do script"]))),
+    );
+    let motor = motor_do_script(&exec, true);
+    let e = entrada("doc-1", COMPROVANTE);
+    let l = motor.ler(&e);
+    let antes = reconhecido(&l).clone();
+    assert!(antes.leitor.is_some() && antes.exibir.is_empty());
+    let pronto = motor.completar(antes.clone(), BTreeMap::new(), &e);
+    assert_eq!(pronto.exibir, ["linha do script"]);
+    assert_eq!(pronto.chave, antes.chave, "exibir não mexe na chave");
+}
+
+#[test]
+fn exibir_nao_vai_para_a_tabela_de_execucao_nem_para_a_proposta() {
+    let exec = Arc::new(
+        ExecutorFicticio::novo()
+            .com_funcao("f", |_| Ok(resposta_com_exibir(&["texto-do-documento"]))),
+    );
+    let mut c = Catalogo::em_memoria().unwrap();
+    let mut n = nova("r", def_comprovante());
+    n.script = Some("f".into());
+    ativa(&mut c, n, Some(&*exec));
+    let motor = Motor::das_vigentes(&c, Some(exec.clone())).unwrap();
+    let l = motor.ler(&entrada("doc-1", COMPROVANTE));
+    assert_eq!(reconhecido(&l).exibir, ["texto-do-documento"]);
+    c.registrar_execucao(&l).unwrap();
+    assert!(reconhecido(&l).propostas.len() == 1);
+    assert!(c.registrar_proposta(reconhecido(&l), "doc-1").unwrap());
+    let gravada = c.propostas(None).unwrap().remove(0);
+    assert!(
+        gravada.conteudo.exibir.is_empty(),
+        "a proposta gravada não guarda as linhas de exibir"
+    );
+    assert_eq!(gravada.conteudo.campos, reconhecido(&l).campos);
+}
+
+#[test]
+fn reconhecimento_antigo_sem_exibir_ainda_le() {
+    let exec = Arc::new(ExecutorFicticio::novo().com_funcao("f", |_| Ok(resposta(json!({})))));
+    let l = motor_do_script(&exec, false).ler(&entrada("doc-1", COMPROVANTE));
+    let mut json = serde_json::to_value(reconhecido(&l)).unwrap();
+    json.as_object_mut().unwrap().remove("exibir");
+    let lido: sbf_regras::Reconhecimento = serde_json::from_value(json).unwrap();
+    assert!(lido.exibir.is_empty());
+}
+
 #[test]
 fn parametros_vigentes_por_competencia() {
     let mut c = Catalogo::em_memoria().unwrap();
@@ -999,6 +1083,46 @@ fn fabrica_e_idempotente_e_o_contracheque_pede_o_leitor() {
         motor.ler(&entrada("x", "Recibo qualquer")).decisao,
         Decisao::Nenhuma
     );
+}
+
+#[test]
+fn script_novo_de_fabrica_vira_versao_nova_em_rascunho_sem_mexer_na_ativa() {
+    // Um catálogo semeado por um sbf antigo: a v2 (IRRF) tem o script de antes do `exibir`,
+    // e o usuário já a ativou.
+    let antigo = ExecutorFicticio::novo().com(
+        "-- script antigo\nfunction transformar() end",
+        Ok(resposta(json!({}))),
+    );
+    let mut c = Catalogo::em_memoria().unwrap();
+    for (i, (mut nova, estado)) in sbf_regras::fabrica::regras_de_fabrica()
+        .into_iter()
+        .enumerate()
+    {
+        if nova.regra == "contracheque" && nova.script.is_some() {
+            nova.script = Some("-- script antigo\nfunction transformar() end".to_owned());
+        }
+        let v = c.salvar_rascunho(nova).unwrap();
+        if estado == Estado::Ativa || i == 1 {
+            c.ativar(&v.regra, v.versao, &Quem::Usuario, Some(&antigo))
+                .unwrap();
+        }
+    }
+    assert_eq!(c.versoes("contracheque").unwrap().len(), 2);
+    assert_eq!(c.versao("contracheque", 2).unwrap().estado, Estado::Ativa);
+
+    c.semear_fabrica().unwrap();
+    c.semear_fabrica().unwrap();
+
+    let versoes = c.versoes("contracheque").unwrap();
+    assert_eq!(versoes.len(), 3, "o script novo é a v3, uma vez só");
+    let v3 = c.versao("contracheque", 3).unwrap();
+    assert_eq!(v3.estado, Estado::Rascunho, "quem ativa a v3 é o usuário");
+    assert_eq!(v3.script.as_deref(), Some(sbf_regras::fabrica::SCRIPT_IRRF));
+    assert!(
+        sbf_regras::fabrica::SCRIPT_IRRF.contains("exibir"),
+        "o script de fábrica devolve exibir"
+    );
+    assert_eq!(c.versao("contracheque", 2).unwrap().estado, Estado::Ativa);
 }
 
 #[test]

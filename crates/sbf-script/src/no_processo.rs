@@ -25,7 +25,8 @@ use std::time::{Duration, Instant};
 
 use mlua::{Function, Lua, LuaOptions, MultiValue, StdLib, Table, Value, VmState};
 use sbf_regras::script::{
-    ErroDoScript, ExecutorDeScript, Limites, PedidoDeScript, RespostaDoScript,
+    ErroDoScript, ExecutorDeScript, Limites, MAX_CARACTERES_EXIBIR, MAX_LINHAS_EXIBIR,
+    PedidoDeScript, RespostaDoScript,
 };
 use serde_json::Value as Json;
 
@@ -466,6 +467,7 @@ fn validar_retorno(v: &Value) -> Result<RespostaDoScript, ErroDoScript> {
         "revisar",
         "motivos",
         "evidencias",
+        "exibir",
     ];
     for par in t.pairs::<Value, Value>() {
         let (k, _) = par.map_err(|e| retorno(e.to_string()))?;
@@ -505,5 +507,26 @@ fn validar_retorno(v: &Value) -> Result<RespostaDoScript, ErroDoScript> {
         revisar: booleano(t, "revisar", false)?,
         motivos: lista_de_textos(t, "motivos")?,
         evidencias: lista_de_textos(t, "evidencias")?,
+        exibir: linhas_de_exibir(t)?,
     })
+}
+
+/// `exibir`: no máximo [`MAX_LINHAS_EXIBIR`] textos de até [`MAX_CARACTERES_EXIBIR`]
+/// caracteres (contados como caracteres, não bytes).
+fn linhas_de_exibir(t: &Table) -> Result<Vec<String>, ErroDoScript> {
+    let linhas = lista_de_textos(t, "exibir")?;
+    if linhas.len() > MAX_LINHAS_EXIBIR {
+        return Err(retorno(format!(
+            "`exibir` aceita no máximo {MAX_LINHAS_EXIBIR} linhas"
+        )));
+    }
+    if linhas
+        .iter()
+        .any(|l| l.chars().count() > MAX_CARACTERES_EXIBIR)
+    {
+        return Err(retorno(format!(
+            "cada linha de `exibir` aceita no máximo {MAX_CARACTERES_EXIBIR} caracteres"
+        )));
+    }
+    Ok(linhas)
 }

@@ -24,12 +24,23 @@
 //! `campos` (nome → valor; nomes terminados em `_centavos` têm de ser inteiros e viram
 //! centavos, outros inteiros viram inteiro, texto `AAAA-MM-DD` em nomes que começam por
 //! `data` ou `vencimento` vira data, o resto vira texto); `revisar` (booleano);
-//! `motivos` e `evidencias` (listas de texto). Qualquer outra coisa é
-//! [`ErroDoScript::Retorno`].
+//! `motivos` e `evidencias` (listas de texto); `exibir` (lista de textos, opcional): linhas
+//! curtas que o script quer mostrar no cartão do Reconhecimento, no máximo
+//! [`MAX_LINHAS_EXIBIR`] linhas de [`MAX_CARACTERES_EXIBIR`] caracteres, só texto (fora
+//! disso é [`ErroDoScript::Retorno`]). Ausente vale lista vazia, então scripts antigos
+//! seguem válidos. `exibir` é só para a tela: não entra na chave de idempotência, não vai
+//! para a tabela `execucao` nem para a proposta gravada (pode conter texto do documento).
+//! Qualquer outra coisa é [`ErroDoScript::Retorno`].
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+
+/// Quantas linhas de `exibir` um script pode devolver.
+pub const MAX_LINHAS_EXIBIR: usize = 5;
+
+/// Quantos caracteres cabem em cada linha de `exibir`.
+pub const MAX_CARACTERES_EXIBIR: usize = 160;
 
 /// Os limites de uma execução. O executor encerra o script (e, no processo filho, o próprio
 /// processo) quando um deles estoura; o motor registra o erro e segue para a próxima
@@ -81,6 +92,9 @@ pub struct RespostaDoScript {
     pub revisar: bool,
     pub motivos: Vec<String>,
     pub evidencias: Vec<String>,
+    /// Linhas curtas para o cartão do Reconhecimento (ver o módulo). Ausente = vazia.
+    #[serde(default)]
+    pub exibir: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]

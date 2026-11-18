@@ -295,6 +295,11 @@ pub struct Reconhecimento {
     pub motivos: Vec<String>,
     /// Rótulos das evidências usadas (`rubrica_irrf`, `tabela:irrf-2026-01`).
     pub evidencias: Vec<String>,
+    /// Linhas curtas que o script quer mostrar no cartão do Reconhecimento. **Só para a
+    /// tela**: não entra na chave de idempotência, não vai para a tabela `execucao` nem para
+    /// a proposta gravada, porque pode conter texto do documento.
+    #[serde(default)]
+    pub exibir: Vec<String>,
     pub propostas: Vec<Proposta>,
     /// Chave de idempotência: sha256 de (entrada.id, regra, versão, checksum, checksums dos
     /// parâmetros usados). Reprocessar não duplica proposta (AC-LUA-04, AC-LUA-09).

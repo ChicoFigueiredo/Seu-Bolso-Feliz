@@ -1107,7 +1107,13 @@ impl Catalogo {
     /// # Errors
     /// [`ErroDasRegras::Banco`].
     pub fn registrar_proposta(&mut self, r: &Reconhecimento, entrada: &str) -> Resultado<bool> {
-        let conteudo = serde_json::to_string(r).map_err(banco)?;
+        // As linhas de `exibir` são só para a tela e podem ter texto do documento: não ficam
+        // gravadas.
+        let sem_exibir = Reconhecimento {
+            exibir: Vec::new(),
+            ..r.clone()
+        };
+        let conteudo = serde_json::to_string(&sem_exibir).map_err(banco)?;
         let n = self
             .conn
             .execute(

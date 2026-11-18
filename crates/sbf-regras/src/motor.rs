@@ -270,6 +270,7 @@ impl Motor {
             revisar: false,
             motivos,
             evidencias: Vec::new(),
+            exibir: Vec::new(),
             propostas: Vec::new(),
             chave: chave_de_idempotencia(&entrada.id, &v.regra, v.versao, &v.checksum, &[]),
         };
@@ -455,6 +456,8 @@ fn aplicar_resposta(rec: &mut Reconhecimento, resposta: RespostaDoScript) -> Res
     rec.revisar |= resposta.revisar;
     rec.motivos.extend(resposta.motivos);
     rec.evidencias.extend(resposta.evidencias);
+    // Só para a tela: a chave de idempotência (calculada depois) não olha para isto.
+    rec.exibir = resposta.exibir;
     Ok(())
 }
 
