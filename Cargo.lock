@@ -5143,6 +5143,7 @@ dependencies = [
  "eframe",
  "egui",
  "rusqlite",
+ "rust_xlsxwriter",
  "sbf-canais",
  "sbf-chaveiro",
  "sbf-coleta",
