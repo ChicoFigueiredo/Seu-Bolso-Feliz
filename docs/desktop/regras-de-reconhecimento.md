@@ -444,3 +444,28 @@ rollback. No Reconhecimento, "Testar com este documento" roda a regra no documen
   declara é executado.
 - Cálculo tributário depende de tabela válida por competência e de revisão técnica. Um
   alerta de divergência é a saída certa, não uma correção automática da rubrica.
+
+## 10. A biblioteca de fábrica
+
+O sbf traz 16 regras prontas para documentos financeiros brasileiros comuns, todas em
+**rascunho** (nenhuma reconhece nada até você ativar). Os arquivos ficam em
+`crates/sbf-regras/fabrica/biblioteca/` (`<id>.json`, com a definição e os exemplos
+fictícios, e `<id>.luau` quando há script; `_comum.luau` é colado antes de cada script).
+`sbf regras ... listar` mostra todas depois da primeira abertura do cofre.
+
+| Regra                                       | Tipo documental                         | Propõe                                              |
+| ------------------------------------------- | --------------------------------------- | --------------------------------------------------- |
+| `caixa-habitacao-comprovante-prestacao`     | `comprovante-prestacao-caixa-habitacao` | conciliar "Prestação Casa"                          |
+| `caixa-habitacao-prestacoes-pagas`          | `prestacoes-pagas-caixa-habitacao`      | nada (resumo por mês)                               |
+| `caixa-habitacao-fgts`                      | `uso-do-fgts-caixa-habitacao`           | nada (resumo)                                       |
+| `comprovante-pix-caixa` / `-c6` / `-nubank` | `comprovante-pix-<banco>`               | provar o registro                                   |
+| `boleto` (geral, prioridade 0)              | `boleto`                                | nada (valida a linha digitável)                     |
+| `fatura-cartao-c6` / `-caixa` / `-nubank`   | `fatura-cartao-<banco>`                 | pagar a fatura                                      |
+| `conta-neoenergia` / `-vivo` / `-canaa`     | `conta-<fornecedor>`                    | conciliar "Luz" / "Celular Vivo" / "Internet Canaã" |
+| `recibo-uber`                               | `recibo-uber`                           | nada (valor em reais)                               |
+| `invoice-anthropic` / `invoice-openai`      | `invoice-<empresa>`                     | nada (guarda `moeda` e `valor_usd_centavos`)        |
+
+Regras de banco ou fornecedor têm prioridade 10 e vencem o `boleto` geral (a fatura e a conta
+trazem a linha digitável do boleto de pagamento); a de FGTS tem 20. Os Pix de banco só casam
+quando a marca do banco aparece nas 3 primeiras linhas do texto (o logotipo do emissor), para
+não confundir o banco de destino com o de origem. Dólar nunca vai em `valor_centavos`.

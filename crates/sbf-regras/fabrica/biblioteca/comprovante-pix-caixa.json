@@ -1,0 +1,141 @@
+{
+  "regra": "comprovante-pix-caixa",
+  "nome": "Comprovante Pix · CAIXA",
+  "motivo": "regra de fábrica: comprovante de Pix emitido pelo app da CAIXA; propõe provar o débito",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "comprovante-pix-caixa",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bcaixa\\b)"
+        },
+        {
+          "contem": "pix"
+        },
+        {
+          "contem": "comprovante"
+        }
+      ],
+      "nenhum": [
+        {
+          "contem": "pagamento minimo"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:valor)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "data": {
+        "regex": "(?i)(?:(?:data|realizad\\S+\\s+em|efetivad\\S+\\s+em))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "favorecido": {
+        "regex": "(?im)^[ \\t]*(?:para|favorecido|destinat\\S*|recebedor)[ \\t]*:?[ \\t]*\\n?[ \\t]*([^\\n]{3,80})$",
+        "formato": "texto"
+      },
+      "documento_favorecido": {
+        "regex": "(?i)(?:cpf\\s*/\\s*cnpj|cpf|cnpj)[ \\t]*:?[ \\t]*([\\d.*\\-/]{11,18})",
+        "formato": "texto"
+      },
+      "instituicao": {
+        "regex": "(?im)^[ \\t]*institui\\S*[ \\t]*:?[ \\t]*([^\\n]{3,60})$",
+        "formato": "texto"
+      },
+      "autenticacao": {
+        "regex": "(?i)autentica\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9.\\-]{8,64})",
+        "formato": "texto"
+      },
+      "id_transacao": {
+        "regex": "(?i)id\\s+(?:da\\s+)?transa\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9]{20,40})",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "provar_registro": {
+          "janela_dias": 2
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "Pix enviado com todos os campos",
+      "texto": "CAIXA\nComprovante de Pix\nPix enviado\nValor: R$ 250,00\nData: 10/11/2026 14:32\nPara: Fulano de Tal\nCPF/CNPJ: ***.000.000-**\nInstituição: Banco Exemplo S.A.\nID da transação: E00000000202611101432ABCDE12345\nAutenticação: 1A2B3C4D5E6F7A8B\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-caixa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 25000
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-10"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Fulano de Tal"
+          },
+          "documento_favorecido": {
+            "tipo": "texto",
+            "valor": "***.000.000-**"
+          },
+          "instituicao": {
+            "tipo": "texto",
+            "valor": "Banco Exemplo S.A."
+          },
+          "id_transacao": {
+            "tipo": "texto",
+            "valor": "E00000000202611101432ABCDE12345"
+          },
+          "autenticacao": {
+            "tipo": "texto",
+            "valor": "1A2B3C4D5E6F7A8B"
+          }
+        }
+      }
+    },
+    {
+      "nome": "rótulos em linhas separadas",
+      "texto": "CAIXA\nCOMPROVANTE DE PIX\nValor\nR$ 1.200,00\nData\n03/12/2026\nFavorecido\nBeltrano de Tal\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-caixa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 120000
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-03"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Beltrano de Tal"
+          }
+        }
+      }
+    },
+    {
+      "nome": "Pix de outro banco não é da CAIXA",
+      "texto": "Banco Exemplo\nComprovante de Pix\nValor: R$ 90,00\nData: 10/11/2026\nPara: Fulano de Tal\nInstituição: CAIXA ECONÔMICA FEDERAL\nID da transação: E00000000202611101432ABCDE12345\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

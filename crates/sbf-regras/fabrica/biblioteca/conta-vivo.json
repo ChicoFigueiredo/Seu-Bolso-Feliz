@@ -1,0 +1,123 @@
+{
+  "regra": "conta-vivo",
+  "nome": "Conta de celular · Vivo",
+  "motivo": "regra de fábrica: conta da Vivo; propõe conciliar com o compromisso Celular Vivo",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "conta-vivo",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "regex": "(?i)\\bvivo\\b"
+        },
+        {
+          "contem": "vencimento"
+        }
+      ],
+      "nenhum": [
+        {
+          "contem": "pagamento minimo"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:(?:total\\s+a\\s+pagar|valor\\s+a\\s+pagar|valor\\s+total|total\\s+da\\s+fatura|valor\\s+da\\s+fatura))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "data": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "codigo_cliente": {
+        "regex": "(?i)(?:c\\S{0,2}digo\\s+do\\s+cliente|n\\S{0,2}mero\\s+do\\s+cliente|unidade\\s+consumidora|instala\\S{1,3}o)[^\\d\\n]{0,15}(\\d[\\d.\\-/]{2,20}\\d)",
+        "formato": "texto"
+      },
+      "competencia": {
+        "regex": "(?i)(?:m\\S*s\\s+de\\s+refer\\S+|refer\\S+ncia)[^\\d\\n]{0,20}(\\d{2}/\\d{4})",
+        "formato": "competencia"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "conciliar_ocorrencia": {
+          "janela_dias": 5,
+          "compromisso": "Celular Vivo"
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "conta com número do cliente",
+      "texto": "Vivo\nSua conta Vivo\nNúmero do cliente: 000000000\nMês de referência: 12/2026\nVencimento: 15/12/2026\nValor total: R$ 129,90\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-vivo",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 12990
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-15"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-15"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "000000000"
+          },
+          "competencia": {
+            "tipo": "competencia",
+            "valor": "2026-12"
+          }
+        }
+      }
+    },
+    {
+      "nome": "caixa alta",
+      "texto": "VIVO\nCONTA\nCÓDIGO DO CLIENTE 111222333\nVENCIMENTO 20/01/2027\nTOTAL A PAGAR R$ 1.099,00\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-vivo",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 109900
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2027-01-20"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "111222333"
+          }
+        }
+      }
+    },
+    {
+      "nome": "fatura de cartão não é conta de celular",
+      "texto": "C6 Bank\nFatura do cartão C6 Mastercard final 0000\nVencimento 10/12/2026\nFechamento 03/12/2026\nTotal da fatura R$ 2.345,67\nPagamento mínimo R$ 351,85\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "regra": "fatura-cartao-caixa",
+  "nome": "Fatura de cartão · CAIXA (Visa/Elo)",
+  "motivo": "regra de fábrica: fatura do cartão CAIXA (Visa ou Elo); propõe pagar a fatura",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "fatura-cartao-caixa",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bcaixa\\b)"
+        },
+        {
+          "contem": "total da fatura"
+        },
+        {
+          "contem": "vencimento"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:total\\s+da\\s+fatura)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "pagamento_minimo_centavos": {
+        "regex": "(?i)(?:pagamento\\s+m\\S*nimo)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "fechamento": {
+        "regex": "(?i)(?:fechamento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "cartao": {
+        "regex": "(?i)final\\s+(\\d{4})",
+        "formato": "texto"
+      },
+      "bandeira": {
+        "regex": "(?i)\\b(mastercard|visa|elo)\\b",
+        "formato": "minusculas"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "vencimento"
+    ],
+    "propor": [
+      "pagar_fatura"
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "fatura Visa",
+      "texto": "CAIXA\nFatura do cartão CAIXA Visa final 0000\nVencimento 05/12/2026\nTotal da fatura R$ 1.250,00\nPagamento mínimo R$ 187,50\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "fatura-cartao-caixa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 125000
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-05"
+          },
+          "pagamento_minimo_centavos": {
+            "tipo": "centavos",
+            "valor": 18750
+          },
+          "cartao": {
+            "tipo": "texto",
+            "valor": "0000"
+          },
+          "bandeira": {
+            "tipo": "texto",
+            "valor": "visa"
+          }
+        }
+      }
+    },
+    {
+      "nome": "fatura Elo em caixa alta",
+      "texto": "CAIXA ECONOMICA FEDERAL\nFATURA CARTAO ELO FINAL 0000\nVENCIMENTO: 05/01/2027\nTOTAL DA FATURA: R$ 3.100,40\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "fatura-cartao-caixa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 310040
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2027-01-05"
+          },
+          "bandeira": {
+            "tipo": "texto",
+            "valor": "elo"
+          }
+        }
+      }
+    },
+    {
+      "nome": "prestação da CAIXA Habitação não é fatura",
+      "texto": "CAIXA Habitação\nComprovante de pagamento\nPagamento de prestação\nNº do contrato 000000000000-0\nData de vencimento 10/11/2026\nData de pagamento 09/11/2026\nValor da prestação R$ 1.500,00\nValor pago R$ 1.512,34\nValor devido R$ 1.500,00\nAmortização R$ 700,00\nJuros R$ 650,00\nTaxas R$ 150,00\nEncargo líquido R$ 1.500,00\nValor da diferença R$ 12,34\nCorreção monetária R$ 0,00\nSaldo devedor R$ 150.000,00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

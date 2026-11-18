@@ -8,9 +8,12 @@
 //!   script que confere o IRRF contra o parâmetro `irrf` (D8). Ativar é decisão do usuário.
 //! - `pix-na-descricao`: **rascunho**; lê o favorecido e o tipo na descrição de um
 //!   registro do banco (D13).
+//! - a biblioteca de [`crate::biblioteca`]: comprovantes, boletos, faturas, contas e
+//!   recibos comuns, todos **rascunho**.
 
 use std::collections::BTreeMap;
 
+use crate::biblioteca;
 use crate::catalogo::{Esperado, NovaVersao};
 use crate::definicao::{Condicao, Definicao, Extracao, FonteDaExtracao, Formato};
 use crate::{Autor, Canal, Dicas, Entrada, Estado, Origem, TipoDeEntrada, VERSAO_DO_ESQUEMA};
@@ -46,7 +49,7 @@ pub fn parametros_de_fabrica() -> Vec<ParametroDeFabrica> {
 
 /// O exemplo fictício do contracheque: o título basta para a regra reconhecer; os campos
 /// vêm do leitor nativo (`Motor::completar`).
-pub fn exemplos_de_fabrica() -> Vec<(&'static str, &'static str, Entrada, Esperado)> {
+pub fn exemplos_de_fabrica() -> Vec<(String, String, Entrada, Esperado)> {
     let entrada = Entrada {
         versao_do_esquema: VERSAO_DO_ESQUEMA,
         id: "exemplo-contracheque-ficticio".to_owned(),
@@ -65,15 +68,17 @@ pub fn exemplos_de_fabrica() -> Vec<(&'static str, &'static str, Entrada, Espera
         dicas: Dicas::default(),
         momento: None,
     };
-    vec![(
-        "contracheque",
-        "contracheque-ficticio",
+    let mut todos = vec![(
+        "contracheque".to_owned(),
+        "contracheque-ficticio".to_owned(),
         entrada,
         Esperado::Reconhece {
             tipo_documental: "contracheque".to_owned(),
             campos: BTreeMap::new(),
         },
-    )]
+    )];
+    todos.extend(biblioteca::exemplos());
+    todos
 }
 
 /// As regras de fábrica e o estado em que cada uma deve ficar.
@@ -110,7 +115,7 @@ pub fn regras_de_fabrica() -> Vec<(NovaVersao, Estado)> {
         ),
     ]);
 
-    vec![
+    let mut regras = vec![
         (
             NovaVersao {
                 regra: "contracheque".to_owned(),
@@ -147,5 +152,7 @@ pub fn regras_de_fabrica() -> Vec<(NovaVersao, Estado)> {
             },
             Estado::Rascunho,
         ),
-    ]
+    ];
+    regras.extend(biblioteca::regras());
+    regras
 }

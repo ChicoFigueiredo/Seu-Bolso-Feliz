@@ -1,0 +1,121 @@
+{
+  "regra": "boleto",
+  "nome": "Boleto · linha digitável",
+  "motivo": "regra de fábrica geral: confere o dígito verificador da linha digitável (47 ou 48 dígitos) e tira o valor e o vencimento dela; regras de banco ou de fornecedor vencem esta",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "boleto",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 0,
+    "detectar": {
+      "todos": [],
+      "algum": [
+        {
+          "regex": "\\d{5}[. ]?\\d{5}\\s+\\d{5}[. ]?\\d{6}\\s+\\d{5}[. ]?\\d{6}\\s+\\d\\s+\\d{14}"
+        },
+        {
+          "regex": "\\d{11}[- ]?\\d\\s+\\d{11}[- ]?\\d\\s+\\d{11}[- ]?\\d\\s+\\d{11}[- ]?\\d"
+        },
+        {
+          "contem": "linha digitavel"
+        }
+      ]
+    },
+    "extrair": {
+      "beneficiario": {
+        "regex": "(?i)benefici\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([^\\n]{3,80})",
+        "formato": "texto"
+      },
+      "valor_centavos": {
+        "regex": "(?i)(?:valor\\s+do\\s+documento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos"
+    ],
+    "script_le_texto": true,
+    "propor": []
+  },
+  "exemplos": [
+    {
+      "nome": "boleto bancário com dígitos conferidos",
+      "texto": "Banco Exemplo\nRecibo do pagador\nBeneficiário: Empresa Exemplo Ltda\nVencimento 10/12/2026\nValor do documento R$ 1.234,56\nLinha digitável: 99990.00012 00000.000000 00000.000000 9 16560000123456\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "boleto",
+        "campos": {
+          "linha_digitavel": {
+            "tipo": "texto",
+            "valor": "99990000120000000000000000000000916560000123456"
+          },
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 123456
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-10"
+          },
+          "beneficiario": {
+            "tipo": "texto",
+            "valor": "Empresa Exemplo Ltda"
+          }
+        }
+      }
+    },
+    {
+      "nome": "linha com dígito errado fica para revisão",
+      "texto": "Banco Exemplo\nBeneficiário\nLoja Exemplo Ltda\nVencimento 10/12/2026\nValor do documento R$ 1.234,56\nLinha digitável: 99990.00012 00000.000001 00000.000000 9 16560000123456\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "boleto",
+        "campos": {
+          "linha_digitavel": {
+            "tipo": "texto",
+            "valor": "99990000120000000000100000000000916560000123456"
+          },
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 123456
+          },
+          "beneficiario": {
+            "tipo": "texto",
+            "valor": "Loja Exemplo Ltda"
+          }
+        }
+      }
+    },
+    {
+      "nome": "boleto de convênio (arrecadação)",
+      "texto": "Prefeitura Exemplo\nGuia de arrecadação\n82600000001-6 50750000000-9 00000000000-0 00000000000-0\nValor R$ 150,75\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "boleto",
+        "campos": {
+          "linha_digitavel": {
+            "tipo": "texto",
+            "valor": "826000000016507500000009000000000000000000000000"
+          },
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 15075
+          }
+        }
+      }
+    },
+    {
+      "nome": "fatura sem linha digitável",
+      "texto": "C6 Bank\nFatura do cartão\nVencimento 10/12/2026\nTotal da fatura R$ 2.345,67\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}
