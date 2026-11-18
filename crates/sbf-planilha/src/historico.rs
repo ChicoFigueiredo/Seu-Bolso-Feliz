@@ -303,6 +303,9 @@ pub struct Plano {
     passos: Vec<Passo>,
     /// Por compromisso: o id e a versão do registro, se já existe no banco.
     do_banco: Vec<Option<(String, i64)>>,
+    /// Compromissos casados com um recorrente de outro nome (renomeado no app): o importador
+    /// normal, que só olha o nome de hoje, não pode criá-los de novo.
+    por_apelido: HashSet<String>,
 }
 
 impl std::fmt::Debug for Plano {
@@ -323,18 +326,57 @@ fn rotulo(e: &ErroDoPlanejamento) -> &'static str {
     }
 }
 
-/// O recorrente do banco que casa com o compromisso: mesmo nome normalizado, preferindo o
-/// mesmo grupo, cada um uma vez só.
+/// O que se sabe de um recorrente do banco para casá-lo com a planilha.
+struct Conhecido {
+    /// Nasceu da planilha (a primeira versão vem dela): só estes o histórico encerra,
+    /// dispensa ou estende para trás. Pluggy, achados, MCP e o que você criou ficam como estão.
+    da_planilha: bool,
+    /// Os nomes normalizados que ele já teve: o atual, o da criação e os das renomeações.
+    nomes: Vec<String>,
+}
+
+fn conhecer(plan: &dyn Planejamento, r: &Recorrente) -> Resultado<Conhecido> {
+    let mut nomes = vec![normalizar(&r.nome)];
+    for e in plan.historico(Some(&r.id), 1000)? {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&e.alteracao) else {
+            continue;
+        };
+        let nome = match v.get("tipo").and_then(|t| t.as_str()) {
+            Some("criar_recorrente") => v.pointer("/recorrente/nome"),
+            Some("renomear") => v.get("nome"),
+            _ => None,
+        };
+        if let Some(n) = nome.and_then(|n| n.as_str()) {
+            let n = normalizar(n);
+            if !nomes.contains(&n) {
+                nomes.push(n);
+            }
+        }
+    }
+    let da_planilha = r
+        .versoes
+        .iter()
+        .min_by_key(|v| v.desde)
+        .is_some_and(|v| v.fonte == Fonte::Planilha);
+    Ok(Conhecido { da_planilha, nomes })
+}
+
+/// O recorrente do banco que casa com o compromisso: um dos nomes que ele já teve igual ao
+/// da planilha, preferindo o mesmo grupo, cada um uma vez só. `da_planilha` separa os que
+/// nasceram dela dos demais.
 fn casar_no_banco(
     existentes: &[Recorrente],
+    conhecidos: &[Conhecido],
     chave: &str,
     grupo: &str,
     usados: &HashSet<String>,
+    da_planilha: bool,
 ) -> Option<usize> {
     let grupo = normalizar(grupo);
     let mesmos = |i: &usize| {
-        let r: &Recorrente = &existentes[*i];
-        !usados.contains(&r.id) && normalizar(&r.nome) == chave
+        !usados.contains(&existentes[*i].id)
+            && conhecidos[*i].da_planilha == da_planilha
+            && conhecidos[*i].nomes.iter().any(|n| n == chave)
     };
     (0..existentes.len())
         .filter(mesmos)
@@ -384,6 +426,7 @@ pub fn planejar(
         observadas: Vec::new(),
         passos: Vec::new(),
         do_banco: Vec::new(),
+        por_apelido: HashSet::new(),
     };
     if observadas.is_empty() {
         return Ok(plano);
@@ -471,6 +514,11 @@ pub fn planejar(
     // 3) Casa com o que o banco já tem: primeiro pela origem, depois pelo nome. Quem está
     // na aba mais recente casa primeiro (foi dela que o banco costuma ter vindo).
     let existentes = plan.recorrentes(false)?;
+    let conhecidos: Vec<Conhecido> = existentes
+        .iter()
+        .map(|r| conhecer(plan, r))
+        .collect::<Resultado<_>>()?;
+    let mut por_apelido: HashSet<String> = HashSet::new();
     let mut usados_banco: HashSet<String> = HashSet::new();
     let mut alvos: Vec<Alvo> = (0..compromissos.len()).map(|_| Alvo::Novo).collect();
     let mut ordem: Vec<usize> = (0..compromissos.len()).collect();
@@ -499,19 +547,54 @@ pub fn planejar(
                 Some(i) => {
                     usados_banco.insert(id);
                     alvos[ci] = Alvo::Existente(i);
+                    if normalizar(&existentes[i].nome) != compromissos[ci].chave {
+                        por_apelido.insert(compromissos[ci].chave.clone());
+                    }
                 }
                 None => alvos[ci] = Alvo::Ignorado,
             }
             continue;
         }
-        if let Some(i) = casar_no_banco(
+        // Primeiro os que nasceram da planilha (mesmo renomeados no app). Um que não nasceu
+        // dela só casa se o compromisso está na aba mais recente (como ao importar só ela)
+        // e então só entra o mês mais recente: nada de encerrar ou estender o passado dele.
+        let na_ultima = compromissos[ci]
+            .aparicoes
+            .last()
+            .is_some_and(|a| a.obs == ultima_obs);
+        let achado = casar_no_banco(
             &existentes,
+            &conhecidos,
             &compromissos[ci].chave,
             &grupos_finais[ci],
             &usados_banco,
-        ) {
+            true,
+        )
+        .map(|i| (i, true))
+        .or_else(|| {
+            if !na_ultima {
+                return None;
+            }
+            casar_no_banco(
+                &existentes,
+                &conhecidos,
+                &compromissos[ci].chave,
+                &grupos_finais[ci],
+                &usados_banco,
+                false,
+            )
+            .map(|i| (i, false))
+        });
+        if let Some((i, da_planilha)) = achado {
             usados_banco.insert(existentes[i].id.clone());
             alvos[ci] = Alvo::Existente(i);
+            if normalizar(&existentes[i].nome) != compromissos[ci].chave {
+                por_apelido.insert(compromissos[ci].chave.clone());
+            }
+            if !da_planilha {
+                let n = compromissos[ci].aparicoes.len();
+                compromissos[ci].aparicoes.drain(..n - 1);
+            }
         }
     }
 
@@ -779,6 +862,7 @@ pub fn planejar(
 
     plano.observadas = observadas;
     plano.passos = passos;
+    plano.por_apelido = por_apelido;
     plano.do_banco = alvos
         .iter()
         .map(|a| match a {
@@ -920,6 +1004,8 @@ impl Plano {
                     for a in &mut p.atualizaveis {
                         a.pago = None;
                     }
+                    p.novos
+                        .retain(|n| !self.por_apelido.contains(&normalizar(&n.recorrente.nome)));
                     importacao::confirmar(&p, plan)
                 });
             match feito {
@@ -1453,5 +1539,136 @@ mod testes {
                 .iter()
                 .all(|v| v.valor != Some(sbf_planejamento::Centavos(7_000)))
         );
+    }
+
+    fn criar_do_usuario(plan: &mut PlanejamentoSqlite, nome: &str, grupo: &str) -> String {
+        use sbf_planejamento::{Certeza, Frequencia, Natureza, NovoRecorrente, Prazo, Versao};
+        plan.aplicar(
+            Alteracao::CriarGrupo {
+                nome: grupo.to_owned(),
+                posicao: 50,
+            },
+            sbf_planejamento::Autor::Usuario,
+        )
+        .expect("grupo");
+        plan.aplicar(
+            Alteracao::CriarRecorrente {
+                recorrente: NovoRecorrente {
+                    nome: nome.to_owned(),
+                    grupo: grupo.to_owned(),
+                    subgrupo: None,
+                    posicao: 1,
+                    natureza: Natureza::Saida,
+                    prazo: Prazo::SemFim,
+                    primeira_versao: Versao {
+                        id: String::new(),
+                        desde: comp(2026, 3),
+                        valor: Some(sbf_planejamento::Centavos(1_000)),
+                        certeza: Certeza::Estimado,
+                        fonte: sbf_planejamento::Fonte::Pluggy,
+                        frequencia: Frequencia::Mensal { dia: 3 },
+                        conta: None,
+                        centro: None,
+                        fornecedor: None,
+                        categoria: None,
+                        nota: None,
+                    },
+                },
+                origem: None,
+            },
+            sbf_planejamento::Autor::Usuario,
+        )
+        .expect("criar")
+        .alvo
+    }
+
+    #[test]
+    fn renomeado_no_app_continua_o_mesmo_compromisso() {
+        let (_p, arq) = arquivo(&quatro_meses());
+        let mut plan = banco();
+        rodar(&arq, &mut plan, true);
+        let c = por_nome(&plan, "Item C");
+        plan.aplicar(
+            Alteracao::Renomear {
+                recorrente: c.id.clone(),
+                nome: "Item C curto".to_owned(),
+                versao_base: c.versao_do_registro,
+            },
+            sbf_planejamento::Autor::Usuario,
+        )
+        .expect("renomear");
+        let antes = plan.recorrentes(true).expect("r").len();
+
+        // O mesmo arquivo (casa pela origem) e um arquivo maior (outro sha: casa pelo
+        // nome com que nasceu).
+        let r = rodar(&arq, &mut plan, true);
+        assert_eq!(r.total().novos, 0);
+        let mut abas = quatro_meses();
+        abas.push(aba_do_mes(
+            "2026.05",
+            vec![
+                linha("Casa", "Item B", 6, 60.0, None),
+                linha("", "Item C", 7, 70.0, None),
+            ],
+        ));
+        let (_p2, arq2) = arquivo(&abas);
+        let r = rodar(&arq2, &mut plan, true);
+        assert_eq!(r.total().novos, 0, "{:?}", r.falhas);
+        assert_eq!(plan.recorrentes(true).expect("r").len(), antes);
+        assert!(
+            plan.recorrentes(false)
+                .expect("r")
+                .iter()
+                .all(|r| r.nome != "Item C")
+        );
+        // E a prévia também não o criaria.
+        let r = rodar(&arq2, &mut plan, false);
+        assert_eq!(r.total().novos, 0);
+    }
+
+    #[test]
+    fn so_o_que_nasceu_da_planilha_e_encerrado_ou_dispensado() {
+        let (_p, arq) = arquivo(&quatro_meses());
+        let mut plan = banco();
+        // Um achado da Pluggy que a planilha não tem, e outro com o mesmo nome de um item
+        // que a planilha encerrou (Item A).
+        let achado = criar_do_usuario(&mut plan, "Achado Pluggy", "Achados na Pluggy");
+        let homonimo = criar_do_usuario(&mut plan, "Item A", "Achados na Pluggy");
+        let r = rodar(&arq, &mut plan, true);
+        assert_eq!(r.total().falhas, 0, "{:?}", r.falhas);
+        for id in [&achado, &homonimo] {
+            let rec = plan.recorrente(id).expect("r").expect("existe");
+            assert!(rec.cancelamento.is_none());
+            assert_eq!(rec.versoes.len(), 1);
+            assert!(plan.excecoes_do_recorrente(id).expect("e").is_empty());
+        }
+        // O Item A da planilha nasceu à parte e foi encerrado.
+        let nascidos: Vec<_> = plan
+            .recorrentes(false)
+            .expect("r")
+            .into_iter()
+            .filter(|r| r.nome == "Item A" && r.id != homonimo)
+            .collect();
+        assert_eq!(nascidos.len(), 1);
+        assert!(nascidos[0].cancelamento.is_some());
+    }
+
+    #[test]
+    fn nao_planilha_na_aba_mais_recente_casa_so_pelo_mes_mais_recente() {
+        let (_p, arq) = arquivo(&quatro_meses());
+        let mut plan = banco();
+        // Mesmo nome de um item da última aba (Item D), mas criado por fora.
+        let d = criar_do_usuario(&mut plan, "Item D", "Achados na Pluggy");
+        let r = rodar(&arq, &mut plan, true);
+        assert_eq!(r.total().falhas, 0, "{:?}", r.falhas);
+        let ds: Vec<_> = plan
+            .recorrentes(false)
+            .expect("r")
+            .into_iter()
+            .filter(|r| r.nome == "Item D")
+            .collect();
+        assert_eq!(ds.len(), 1, "não duplica");
+        assert_eq!(ds[0].id, d);
+        assert!(ds[0].cancelamento.is_none());
     }
 }
