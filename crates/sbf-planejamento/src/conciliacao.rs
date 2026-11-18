@@ -573,6 +573,7 @@ mod testes {
             centro: None,
             fornecedor: None,
             versao: "v".to_owned(),
+            calculo: None,
             prazo_desconhecido: false,
             sugestao_de_conciliacao: false,
         }

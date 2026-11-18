@@ -6,9 +6,10 @@
 use std::collections::HashMap;
 
 use crate::banco::{Seguida, valor_seguido};
+use crate::modelo::Calculado;
 use crate::{
-    Certeza, Competencia, Conciliacao, Data, EstadoDaOcorrencia, Excecao, ExcecaoGravada,
-    Frequencia, IdOcorrencia, Natureza, Ocorrencia, Prazo, Recorrente, Versao,
+    CalculoDaOcorrencia, Certeza, Competencia, Conciliacao, Data, EstadoDaOcorrencia, Excecao,
+    ExcecaoGravada, Frequencia, IdOcorrencia, Natureza, Ocorrencia, Prazo, Recorrente, Versao,
 };
 
 /// A versão vigente numa competência: a de maior `desde` que ainda não passou dela.
@@ -43,6 +44,14 @@ fn passo_em_meses(frequencia: &Frequencia) -> i32 {
     }
 }
 
+/// O que a projeção recebe de fora do recorrente: as rubricas que o desconto em folha segue
+/// e o que o Cálculo do Modelo de compromisso deu para cada competência.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Apoio<'a> {
+    pub seguidas: &'a [Seguida],
+    pub calculados: Option<&'a HashMap<Competencia, Calculado>>,
+}
+
 /// As exceções e conciliações de um recorrente, indexadas por ocorrência.
 struct Contexto<'a> {
     /// O início do acompanhamento: antes dele, sem pago informado, nada está em atraso.
@@ -51,6 +60,8 @@ struct Contexto<'a> {
     conciliacoes: HashMap<&'a IdOcorrencia, Vec<&'a Conciliacao>>,
     /// Desconto em folha que segue a rubrica: o valor que a composição vigente dá a ele.
     seguidas: &'a [Seguida],
+    /// O previsto que o Cálculo do modelo deu a cada competência.
+    calculados: Option<&'a HashMap<Competencia, Calculado>>,
 }
 
 impl<'a> Contexto<'a> {
@@ -59,7 +70,7 @@ impl<'a> Contexto<'a> {
         excecoes: &'a [ExcecaoGravada],
         conciliacoes: &'a [Conciliacao],
         inicio: Option<Data>,
-        seguidas: &'a [Seguida],
+        apoio: Apoio<'a>,
     ) -> Contexto<'a> {
         let mut por_excecao: HashMap<&IdOcorrencia, Vec<&ExcecaoGravada>> = HashMap::new();
         for e in excecoes
@@ -79,7 +90,8 @@ impl<'a> Contexto<'a> {
             inicio,
             excecoes: por_excecao,
             conciliacoes: por_conciliacao,
-            seguidas,
+            seguidas: apoio.seguidas,
+            calculados: apoio.calculados,
         }
     }
 }
@@ -101,6 +113,8 @@ fn decisoes(excecoes: &[&ExcecaoGravada]) -> Decisoes {
             Excecao::Dispensar { .. } => d.dispensada = true,
             Excecao::ValorSoDesteMes { valor } => d.valor_so_deste_mes = Some(*valor),
             Excecao::PagoInformado { valor, .. } => d.pago_informado = Some(*valor),
+            // Quem a usa é o Cálculo (a quantidade vai ao script); aqui não muda o estado.
+            Excecao::QuantidadeSoDesteMes { .. } => {}
         }
     }
     d
@@ -170,7 +184,7 @@ pub fn projetar_competencias_desde(
         competencias,
         hoje,
         inicio,
-        &[],
+        Apoio::default(),
     )
 }
 
@@ -184,9 +198,9 @@ pub(crate) fn projetar_competencias_seguindo(
     competencias: impl IntoIterator<Item = Competencia>,
     hoje: Data,
     inicio: Option<Data>,
-    seguidas: &[Seguida],
+    apoio: Apoio<'_>,
 ) -> Vec<Ocorrencia> {
-    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio, seguidas);
+    let contexto = Contexto::novo(recorrente, excecoes, conciliacoes, inicio, apoio);
     competencias
         .into_iter()
         .filter_map(|c| ocorrencia_em(recorrente, &contexto, c, hoje))
@@ -252,7 +266,12 @@ fn ocorrencia_em(
     let seguido = matches!(rec.natureza, Natureza::DescontoEmFolha)
         .then(|| valor_seguido(contexto.seguidas, c))
         .flatten();
-    let previsto = decisoes.valor_so_deste_mes.or(seguido).or(versao.valor);
+    let calculado = contexto.calculados.and_then(|m| m.get(&c));
+    let previsto = decisoes
+        .valor_so_deste_mes
+        .or(calculado.and_then(|k| k.valor))
+        .or(seguido)
+        .or(versao.valor);
     let vencimento = match decisoes.adiar {
         Some(Some(nova)) => nova,
         _ => vencimento_original,
@@ -296,6 +315,13 @@ fn ocorrencia_em(
         centro: versao.centro.clone(),
         fornecedor: versao.fornecedor.clone(),
         versao: versao.id.clone(),
+        calculo: calculado.map(|k| CalculoDaOcorrencia {
+            modelo: k.modelo.clone(),
+            explicacao: k.explicacao.clone(),
+            quantidade: k.quantidade,
+            ajustada: k.ajustada,
+            aviso: k.aviso.clone(),
+        }),
         prazo_desconhecido: matches!(rec.prazo, Prazo::Desconhecido),
         sugestao_de_conciliacao,
     })

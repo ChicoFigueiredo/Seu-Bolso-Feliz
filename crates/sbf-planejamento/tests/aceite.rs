@@ -1718,7 +1718,7 @@ fn abrir_cria_o_arquivo_com_permissao_0600_e_os_dados_sobrevivem() {
         & 0o777;
     assert_eq!(modo, 0o600);
     let banco = Banco::abrir(&caminho).expect("reabrir");
-    assert_eq!(banco.versao_do_esquema().expect("versão"), 7);
+    assert_eq!(banco.versao_do_esquema().expect("versão"), 8);
     let s = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
     assert!(s.recorrente(&id).expect("ler").is_some());
 }
@@ -1922,9 +1922,11 @@ fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
             [],
         )
         .expect("config");
-        // Volta ao esquema 2: o que as migrações 4 a 7 criaram sai para elas poderem rodar de novo.
+        // Volta ao esquema 2: o que as migrações 4 a 8 criaram sai para elas poderem rodar de novo.
         c.execute_batch(
-            "DROP TABLE inversas; DROP TABLE desfeitos;
+            "DROP TABLE valores_de_parametro; DROP TABLE ligacoes_de_modelo;
+             DROP TABLE calculos; DROP TABLE modelos;
+             DROP TABLE inversas; DROP TABLE desfeitos;
              ALTER TABLE cancelamentos DROP COLUMN desfeito;
              DROP TABLE composicoes; DROP TABLE documentos_vinculados;
              DROP TABLE contas_do_planejamento; DROP TABLE assinaturas;
@@ -1932,7 +1934,7 @@ fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
              ALTER TABLE conciliacoes DROP COLUMN autor;
              ALTER TABLE conciliacoes DROP COLUMN sem_automatico;",
         )
-        .expect("desfaz as migrações 4 a 7");
+        .expect("desfaz as migrações 4 a 8");
         c.pragma_update(None, "user_version", 2_i64)
             .expect("versão");
     }
