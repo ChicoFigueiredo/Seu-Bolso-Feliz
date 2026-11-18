@@ -172,6 +172,16 @@ pub fn ler_aba(arquivo: &Path, aba: &str) -> Resultado<AbaLida> {
     ler_do_livro(&mut wb, aba)
 }
 
+/// Lê várias abas abrindo o arquivo uma vez só (o histórico lê dezenas). Cada aba que não
+/// der para ler vem como erro próprio, sem derrubar as outras.
+pub fn ler_abas(arquivo: &Path, abas: &[String]) -> Resultado<Vec<(String, Resultado<AbaLida>)>> {
+    let mut wb = open_workbook_auto(arquivo).map_err(|e| ErroPlanilha::Abrir(e.to_string()))?;
+    Ok(abas
+        .iter()
+        .map(|a| (a.clone(), ler_do_livro(&mut wb, a)))
+        .collect())
+}
+
 fn ler_do_livro<R: Reader<RS>, RS: Read + Seek>(wb: &mut R, aba: &str) -> Resultado<AbaLida> {
     if !wb.sheet_names().iter().any(|n| n == aba) {
         return Err(ErroPlanilha::AbaInexistente(aba.to_owned()));
