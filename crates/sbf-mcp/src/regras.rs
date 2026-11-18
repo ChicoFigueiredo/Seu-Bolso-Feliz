@@ -1,8 +1,10 @@
-//! As ferramentas de regras de reconhecimento (spec 13, D14). Leem o `regras.sqlite` do cofre
-//! e, no máximo, criam um **rascunho** com autor `Ia`. **Nunca** ativam, consolidam,
-//! desativam nem revertem: isso é do usuário, na janela ou num terminal interativo que
-//! confirmou. Por isso não existe, aqui, nenhuma chamada a `ativar`, `consolidar`,
-//! `desativar` ou `reverter`.
+//! As ferramentas de regras de reconhecimento (spec 13, D14 e D15). Leem o `regras.sqlite` do
+//! cofre, criam **rascunho** com autor `Ia` e, desde a D15, **ativam, desativam, revertem e
+//! consolidam** com `Quem::Mcp` (gravado em `historico_de_estado`). A D12 vale para todos:
+//! um exemplo que falha bloqueia a ativação, inclusive a do MCP.
+//!
+//! Antes da primeira escrita da sessão o `regras.sqlite` é copiado (ver [`crate::backup`]); se
+//! o backup falha, a escrita é recusada.
 //!
 //! Como em [`crate::plano`], cada chamada grava uma linha em `saida_ia` (destinatário
 //! `mcp:<ferramenta>`), sem o conteúdo, e o texto que sai passa pelo nível de confiança do
@@ -17,7 +19,9 @@ use sbf_regras::catalogo::{Catalogo, NovaVersao, VersaoDeRegra};
 use sbf_regras::definicao::Definicao;
 use sbf_regras::motor::Motor;
 use sbf_regras::script::ExecutorDeScript;
-use sbf_regras::{Autor, Entrada, ErroDasRegras, Estado, LIMIAR_DE_CONSOLIDACAO, simulacao};
+use sbf_regras::{Autor, Entrada, ErroDasRegras, Estado, LIMIAR_DE_CONSOLIDACAO, Quem, simulacao};
+
+use crate::backup::{Backups, Qual};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -28,6 +32,14 @@ pub const FERRAMENTAS: [&str; 5] = [
     "testar_regra",
     "simular_regra",
     "propor_regra",
+];
+
+/// As ferramentas de regras que **decidem** (D15).
+pub const FERRAMENTAS_DE_ESCRITA: [&str; 4] = [
+    "ativar_regra",
+    "desativar_regra",
+    "reverter_regra",
+    "consolidar_regra",
 ];
 
 /// O máximo de entradas numa simulação.
@@ -93,6 +105,15 @@ pub struct PedidoDeProposta {
     pub motivo: String,
 }
 
+/// Uma versão de uma regra (para ativar ou consolidar).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeVersao {
+    /// O id da regra.
+    pub regra: String,
+    /// O número da versão (veja explicar_regra).
+    pub versao: u32,
+}
+
 // ---------------------------------------------------------------------------------------
 // As regras
 // ---------------------------------------------------------------------------------------
@@ -105,6 +126,7 @@ pub struct Regras {
     banco: PathBuf,
     executor: Arc<dyn ExecutorDeScript>,
     nivel: NivelDeConfianca,
+    backups: Option<Backups>,
 }
 
 /// O executor de scripts que usa o próprio binário: `sbf script --servir` num processo
@@ -135,6 +157,21 @@ impl Regras {
             banco,
             executor,
             nivel,
+            backups: None,
+        }
+    }
+
+    /// Liga o backup da primeira escrita da sessão.
+    #[must_use]
+    pub fn com_backups(mut self, backups: Backups) -> Self {
+        self.backups = Some(backups);
+        self
+    }
+
+    fn antes_de_escrever(&self) -> Result<(), String> {
+        match &self.backups {
+            Some(b) => b.antes_de_escrever(Qual::Regras),
+            None => Ok(()),
         }
     }
 
@@ -178,7 +215,95 @@ impl Regras {
     /// Pedido inválido, script que não compila, regra com outro nome ou tipo, ou falha do
     /// banco.
     pub fn propor(&self, p: &PedidoDeProposta) -> Resultado {
+        self.antes_de_escrever()?;
         self.executar("propor_regra", |s| s.proposta(p))
+    }
+
+    /// `ativar_regra`: ativa a versão **agora**, com `Quem::Mcp`. Os exemplos rodam antes e,
+    /// se algum falha, a ativação é bloqueada (D12, vale para o MCP). A versão em vigor
+    /// anterior vira desativada; `reverter_regra` volta atrás.
+    ///
+    /// # Errors
+    /// Versão inexistente, exemplo que falha, script que não compila, backup que falhou.
+    pub fn ativar(&self, p: &PedidoDeVersao) -> Resultado {
+        self.antes_de_escrever()?;
+        self.executar("ativar_regra", |s| {
+            let regra = texto(&p.regra, "regra", 80)?;
+            let mut c = s.catalogo()?;
+            c.ativar(&regra, p.versao, &Quem::Mcp, Some(s.executor.as_ref()))
+                .map_err(pt_de_decisao)?;
+            s.resposta_de_decisao(&c, &regra, "ativada")
+        })
+    }
+
+    /// `desativar_regra`: tira a versão em vigor de cena (volta com `ativar_regra`).
+    ///
+    /// # Errors
+    /// Regra sem versão em vigor, backup que falhou.
+    pub fn desativar(&self, p: &PedidoDeRegra) -> Resultado {
+        self.antes_de_escrever()?;
+        self.executar("desativar_regra", |s| {
+            let regra = texto(&p.regra, "regra", 80)?;
+            let mut c = s.catalogo()?;
+            c.desativar(&regra, &Quem::Mcp).map_err(pt_de_decisao)?;
+            s.resposta_de_decisao(&c, &regra, "desativada")
+        })
+    }
+
+    /// `reverter_regra`: rollback para a versão que estava em vigor antes (reverter de novo
+    /// volta à de agora). Não roda os exemplos de novo: a versão já esteve em vigor.
+    ///
+    /// # Errors
+    /// Regra sem versão em vigor ou sem anterior, backup que falhou.
+    pub fn reverter(&self, p: &PedidoDeRegra) -> Resultado {
+        self.antes_de_escrever()?;
+        self.executar("reverter_regra", |s| {
+            let regra = texto(&p.regra, "regra", 80)?;
+            let mut c = s.catalogo()?;
+            c.reverter(&regra, &Quem::Mcp).map_err(pt_de_decisao)?;
+            s.resposta_de_decisao(&c, &regra, "revertida")
+        })
+    }
+
+    /// `consolidar_regra`: consolida uma versão ativa com aceitas seguidas suficientes. A
+    /// consolidada concilia sozinha só com as três provas, com Desfazer na janela.
+    ///
+    /// # Errors
+    /// Versão que não está ativa ou sem aceitas suficientes, backup que falhou.
+    pub fn consolidar(&self, p: &PedidoDeVersao) -> Resultado {
+        self.antes_de_escrever()?;
+        self.executar("consolidar_regra", |s| {
+            let regra = texto(&p.regra, "regra", 80)?;
+            let mut c = s.catalogo()?;
+            c.consolidar(&regra, p.versao, &Quem::Mcp)
+                .map_err(pt_de_decisao)?;
+            s.resposta_de_decisao(&c, &regra, "consolidada")
+        })
+    }
+
+    fn resposta_de_decisao(&self, c: &Catalogo, regra: &str, o_que: &str) -> Resultado {
+        let em_vigor = c
+            .vigentes()
+            .map_err(pt)?
+            .into_iter()
+            .find(|v| v.regra == regra);
+        let versoes = c.versoes(regra).map_err(pt)?;
+        let historico = versoes
+            .last()
+            .map(|v| c.historico_de_estado(regra, v.versao))
+            .transpose()
+            .map_err(pt)?
+            .unwrap_or_default();
+        Ok(json!({
+            "aplicado": true,
+            "mensagem": format!("regra {o_que} agora, sem confirmação na janela (autor mcp no histórico de estado)"),
+            "regra": regra,
+            "em_vigor": em_vigor.map(|v| json!({"versao": v.versao, "estado": ok(&v.estado)})),
+            "ultimo_estado": historico.last().map(|(de, para, quem, motivo, em)| json!({
+                "de": de, "para": para, "quem": quem, "motivo": motivo, "em": em,
+            })),
+            "como_desfazer": "reverter_regra volta à versão de antes; desativar_regra tira a regra de cena; ativar_regra reativa uma versão",
+        }))
     }
 
     fn executar(&self, ferramenta: &str, f: impl FnOnce(&Self) -> Resultado) -> Resultado {
@@ -451,6 +576,17 @@ fn pt(e: ErroDasRegras) -> String {
     match e {
         ErroDasRegras::Banco(_) => "falha ao consultar as regras".to_owned(),
         outro => outro.to_string(),
+    }
+}
+
+/// Como [`pt`], e diz que a D12 vale também para o MCP quando os exemplos bloqueiam.
+fn pt_de_decisao(e: ErroDasRegras) -> String {
+    match e {
+        ErroDasRegras::Exemplos(falhas) => format!(
+            "ativação bloqueada: os exemplos {} falharam (D12 vale para o MCP também); corrija a regra ou os exemplos e teste de novo com testar_regra",
+            falhas.join(", ")
+        ),
+        outro => pt(outro),
     }
 }
 

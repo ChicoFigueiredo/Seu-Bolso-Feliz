@@ -1735,4 +1735,85 @@ fn a_chave_de_idempotencia_nao_depende_do_documento_nem_do_nome() {
     let a = motor.ler(&registro_pix("pluggy:a", Some("A"), Some(DOC_FICTICIO)));
     let b = motor.ler(&registro_pix("pluggy:a", None, None));
     assert_eq!(reconhecido(&a).chave, reconhecido(&b).chave);
+// ---------------------------------------------------------------- D15: o MCP decide
+
+#[test]
+fn d15_mcp_ativa_desativa_reverte_e_consolida_com_quem_mcp_no_historico() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(&mut c, nova("r", def_comprovante()), None);
+    let mut d2 = def_comprovante();
+    d2.prioridade = 7;
+    let v2 = c.salvar_rascunho(nova("r", d2)).unwrap();
+
+    // Ativa a versão 2 pelo MCP: a 1 sai de cena, tudo gravado com quem = mcp.
+    c.ativar("r", v2.versao, &Quem::Mcp, None).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Ativa);
+    let h = c.historico_de_estado("r", 2).unwrap();
+    let ativacao = h.last().unwrap();
+    assert_eq!((ativacao.1.as_str(), ativacao.2.as_str()), ("ativa", "mcp"));
+    assert!(
+        ativacao.3.contains("mcp"),
+        "o motivo diz quem decidiu: {h:?}"
+    );
+    let h1 = c.historico_de_estado("r", 1).unwrap();
+    assert_eq!(
+        h1.last().unwrap().2,
+        "mcp",
+        "a 1 saiu de cena por decisão do mcp"
+    );
+
+    // Reverte (volta à 1) e reverte de novo (volta à 2).
+    c.reverter("r", &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 1).unwrap().estado, Estado::Ativa);
+    c.reverter("r", &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Ativa);
+
+    // Desativa.
+    c.desativar("r", &Quem::Mcp).unwrap();
+    assert!(c.vigentes().unwrap().is_empty());
+    let h = c.historico_de_estado("r", 2).unwrap();
+    assert_eq!(h.last().unwrap().2, "mcp");
+
+    // Consolida: precisa das aceitas seguidas, e a decisão do MCP é gravada.
+    c.ativar("r", 2, &Quem::Mcp, None).unwrap();
+    let chaves = propostas(&mut c, 5);
+    for k in &chaves {
+        c.registrar_retorno(k, Retorno::Aceito, &Quem::Usuario, "ok")
+            .unwrap();
+    }
+    c.consolidar("r", 2, &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Consolidada);
+    assert_eq!(
+        c.historico_de_estado("r", 2).unwrap().last().unwrap().2,
+        "mcp"
+    );
+}
+
+#[test]
+fn d15_mcp_nao_registra_retorno_do_usuario() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(&mut c, nova("r", def_comprovante()), None);
+    let chaves = propostas(&mut c, 1);
+    assert!(matches!(
+        c.registrar_retorno(&chaves[0], Retorno::Aceito, &Quem::Mcp, ""),
+        Err(ErroDasRegras::NaoPermitido(_))
+    ));
+}
+
+#[test]
+fn d12_vale_para_o_mcp_exemplo_falhando_bloqueia_a_ativacao() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    let v = c.salvar_rascunho(nova("r", def_comprovante())).unwrap();
+    c.salvar_exemplo(
+        "r",
+        "nao",
+        &entrada("e", COMPROVANTE),
+        Esperado::NaoSeAplica,
+    )
+    .unwrap();
+    assert_eq!(
+        c.ativar("r", v.versao, &Quem::Mcp, None),
+        Err(ErroDasRegras::Exemplos(vec!["nao".into()]))
+    );
+    assert_eq!(c.versao("r", v.versao).unwrap().estado, Estado::Rascunho);
 }

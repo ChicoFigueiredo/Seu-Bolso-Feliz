@@ -1531,6 +1531,7 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::Excluir { recorrente, .. }
         | Alteracao::Restaurar { recorrente, .. }
         | Alteracao::Arquivar { recorrente, .. }
+        | Alteracao::Renomear { recorrente, .. }
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
@@ -1891,6 +1892,17 @@ impl PlanejamentoFicticio {
                     "Tirou do arquivo."
                 };
                 Ok(self.registrar(autor, &recorrente, t.into(), &alt))
+            }
+            Alteracao::Renomear {
+                recorrente,
+                nome,
+                versao_base,
+            } => {
+                let i = self.conferir_base(&recorrente, versao_base)?;
+                let r = &mut self.recorrentes[i];
+                r.nome = nome.trim().to_owned();
+                r.versao_do_registro += 1;
+                Ok(self.registrar(autor, &recorrente, "Renomeou.".into(), &alt))
             }
             Alteracao::Mover {
                 recorrente,

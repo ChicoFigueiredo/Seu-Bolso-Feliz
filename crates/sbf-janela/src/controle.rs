@@ -1698,6 +1698,14 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             },
             nome(recorrente)
         ),
+        Alteracao::Renomear {
+            recorrente,
+            nome: novo,
+            ..
+        } => format!(
+            "Renomear \u{201c}{}\u{201d} para \u{201c}{novo}\u{201d}.",
+            nome(recorrente)
+        ),
         Alteracao::Mover {
             recorrente, grupo, ..
         } => format!(

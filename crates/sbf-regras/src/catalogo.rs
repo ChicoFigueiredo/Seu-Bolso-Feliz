@@ -553,17 +553,27 @@ fn quem_texto(q: &Quem) -> &'static str {
     match q {
         Quem::Usuario => "usuario",
         Quem::Ia => "ia",
+        Quem::Mcp => "mcp",
         Quem::Sistema => "sistema",
     }
 }
 
-fn exigir_usuario(quem: &Quem, acao: &str) -> Resultado<()> {
-    if *quem == Quem::Usuario {
+/// Quem decide o ciclo de vida: o usuário e, desde a D15, o MCP.
+fn exigir_decisor(quem: &Quem, acao: &str) -> Resultado<()> {
+    if matches!(quem, Quem::Usuario | Quem::Mcp) {
         Ok(())
     } else {
         Err(ErroDasRegras::NaoPermitido(format!(
-            "só o usuário pode {acao} uma regra"
+            "só o usuário (ou o MCP) pode {acao} uma regra"
         )))
+    }
+}
+
+/// "pelo usuário" ou "pelo mcp", para o motivo gravado no histórico.
+fn pelo(quem: &Quem) -> &'static str {
+    match quem {
+        Quem::Mcp => "pelo mcp",
+        _ => "pelo usuário",
     }
 }
 
@@ -853,7 +863,7 @@ impl Catalogo {
         })
     }
 
-    /// Ativa uma versão (rascunho ou desativada). Só [`Quem::Usuario`]. Bloqueia se algum
+    /// Ativa uma versão (rascunho ou desativada). Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15). Bloqueia se algum
     /// exemplo falha (D12) ou se há script e não há executor que o verifique. A versão
     /// vigente anterior vira desativada; tudo numa transação.
     ///
@@ -867,8 +877,9 @@ impl Catalogo {
         quem: &Quem,
         executor: Option<&dyn ExecutorDeScript>,
     ) -> Resultado<()> {
-        exigir_usuario(quem, "ativar")?;
-        self.ativar_como(regra, versao, quem, "ativada pelo usuário", executor)
+        exigir_decisor(quem, "ativar")?;
+        let motivo = format!("ativada {}", pelo(quem));
+        self.ativar_como(regra, versao, quem, &motivo, executor)
     }
 
     fn ativar_como(
@@ -914,12 +925,12 @@ impl Catalogo {
         tx.commit().map_err(banco)
     }
 
-    /// Desativa a versão em vigor da regra. Só [`Quem::Usuario`].
+    /// Desativa a versão em vigor da regra. Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`], [`ErroDasRegras::NaoEncontrada`].
     pub fn desativar(&mut self, regra: &str, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "desativar")?;
+        exigir_decisor(quem, "desativar")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let v = versao_vigente(&tx, regra)?.ok_or_else(|| {
             ErroDasRegras::NaoEncontrada(format!("`{regra}` não tem versão em vigor"))
@@ -929,7 +940,7 @@ impl Catalogo {
             &v,
             Estado::Desativada,
             quem_texto(quem),
-            "desativada pelo usuário",
+            &format!("desativada {}", pelo(quem)),
         )?;
         tx.commit().map_err(banco)
     }
@@ -937,12 +948,12 @@ impl Catalogo {
     /// Rollback: reativa a versão que estava em vigor antes da atual (a mais recente que
     /// foi ativada e hoje está desativada) e desativa a atual. Preserva todas as versões
     /// e não roda os exemplos de novo (a versão já esteve em vigor). Reverter duas vezes
-    /// volta à versão de antes. Só [`Quem::Usuario`].
+    /// volta à versão de antes. Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`], [`ErroDasRegras::NaoEncontrada`].
     pub fn reverter(&mut self, regra: &str, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "reverter")?;
+        exigir_decisor(quem, "reverter")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let atual = versao_vigente(&tx, regra)?.ok_or_else(|| {
             ErroDasRegras::NaoEncontrada(format!("`{regra}` não tem versão em vigor"))
@@ -982,12 +993,12 @@ impl Catalogo {
     }
 
     /// Consolida uma versão ativa que tem [`LIMIAR_DE_CONSOLIDACAO`] aceitas seguidas.
-    /// Só [`Quem::Usuario`].
+    /// Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`].
     pub fn consolidar(&mut self, regra: &str, versao: u32, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "consolidar")?;
+        exigir_decisor(quem, "consolidar")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let v = carregar_versao(&tx, regra, versao)?;
         if v.estado != Estado::Ativa {
@@ -1006,7 +1017,7 @@ impl Catalogo {
             &v,
             Estado::Consolidada,
             quem_texto(quem),
-            "consolidada pelo usuário",
+            &format!("consolidada {}", pelo(quem)),
         )?;
         tx.commit().map_err(banco)
     }
@@ -1191,9 +1202,9 @@ impl Catalogo {
         quem: &Quem,
         motivo: &str,
     ) -> Resultado<()> {
-        if *quem == Quem::Ia {
+        if matches!(quem, Quem::Ia | Quem::Mcp) {
             return Err(ErroDasRegras::NaoPermitido(
-                "a IA não registra retorno do usuário".to_owned(),
+                "a IA e o MCP não registram retorno do usuário".to_owned(),
             ));
         }
         let tx = self.conn.transaction().map_err(banco)?;
