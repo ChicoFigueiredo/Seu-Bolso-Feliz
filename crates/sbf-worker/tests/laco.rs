@@ -11,8 +11,9 @@ use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
-    Analista, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador, ResumoDaNuvem,
-    ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDosPontos, Triador, Worker,
+    Analista, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador,
+    ResumoDaNuvem, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice,
+    ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -319,6 +320,80 @@ fn mensageiros_so_rodam_ligados_e_no_intervalo_do_arquivo() {
     assert_eq!(n.get(), 2);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("mensageiros mensagens=5 novos=3"), "{log}");
+}
+
+struct GmailFalso(Rc<Cell<u32>>, bool);
+impl ColetorDeGmail for GmailFalso {
+    fn coletar(&mut self, _: &AtomicBool) -> Result<ResumoDoGmail, Falha> {
+        self.0.set(self.0.get() + 1);
+        if self.1 {
+            Err(Falha::Externo)
+        } else {
+            Ok(ResumoDoGmail {
+                mensagens: 4,
+                novos: 2,
+            })
+        }
+    }
+}
+
+#[test]
+fn gmail_roda_a_cada_gmail_minutos_padrao_30_e_zero_desliga() {
+    let c = cenario();
+    assert_eq!(Config::default().gmail_minutos, 30);
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailFalso(n.clone(), false)));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "a primeira coleta é logo");
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().origem, "gmail");
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().novos, 2);
+    w.passo(t0 + 29 * 60, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "antes do intervalo");
+    w.passo(t0 + 30 * 60 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("gmail mensagens=4 novos=2"), "{log}");
+
+    // gmail_minutos = 0 desliga; outro valor muda o intervalo.
+    let n = Rc::new(Cell::new(0));
+    let desligado = Config {
+        gmail_minutos: 0,
+        ..Config::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), desligado, None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailFalso(n.clone(), false)));
+    w.passo(t0, Duration::from_millis(1), &nao);
+    w.passo(t0 + 3600, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 0);
+    let curto = Config {
+        gmail_minutos: 5,
+        ..Config::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), curto, None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailFalso(n.clone(), false)));
+    w.passo(t0, Duration::from_millis(1), &nao);
+    w.passo(t0 + 5 * 60 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+}
+
+#[test]
+fn falha_do_gmail_vira_falha_no_estado_sem_derrubar_o_laco() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailFalso(n.clone(), true)));
+    w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
+    assert_eq!(n.get(), 1);
+    assert_eq!(w.estado.falhas, 1);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("gmail"), "{log}");
 }
 
 struct RoteirosFalsos(Rc<Cell<u32>>);

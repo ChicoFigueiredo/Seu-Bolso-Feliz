@@ -1,0 +1,30 @@
+[package]
+name = "sbf-gmail"
+description = "O Gmail no desktop: anexos e avisos por e-mail entram no cofre (entrada/gmail) e passam pelas regras de reconhecimento. Reaproveita o cliente do sbf-coletor; o cliente fica atrás de um trait para os testes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# O cliente OAuth2 do Gmail e os tipos da mensagem (os mesmos do `sbf coletor-vps gmail`).
+sbf-coletor = { path = "../sbf-coletor" }
+sbf-reconhecimento = { path = "../sbf-reconhecimento" }
+sbf-regras = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+regex = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+tokio = { version = "1", features = ["rt", "time", "net"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sbf-inventario = { workspace = true }
+sbf-pdf = { path = "../sbf-pdf" }
+zeroize = { workspace = true }
+base64 = "0.22"
+
+[lints]
+workspace = true

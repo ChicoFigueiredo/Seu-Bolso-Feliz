@@ -5151,6 +5151,7 @@ dependencies = [
  "sbf-contrato",
  "sbf-disco",
  "sbf-estacao",
+ "sbf-gmail",
  "sbf-ia",
  "sbf-indice",
  "sbf-inventario",
@@ -5310,6 +5311,27 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",
+ "zeroize",
+]
+
+[[package]]
+name = "sbf-gmail"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "regex",
+ "rusqlite",
+ "sbf-coletor",
+ "sbf-inventario",
+ "sbf-pdf",
+ "sbf-reconhecimento",
+ "sbf-regras",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
  "zeroize",
 ]
 
