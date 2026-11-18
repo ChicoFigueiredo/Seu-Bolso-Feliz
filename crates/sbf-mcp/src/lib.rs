@@ -16,6 +16,7 @@ pub mod ferramentas;
 pub mod plano;
 pub mod regras;
 pub mod servidor;
+pub mod telegram;
 
 pub use ferramentas::Nucleo;
 pub use plano::Fabrica;
