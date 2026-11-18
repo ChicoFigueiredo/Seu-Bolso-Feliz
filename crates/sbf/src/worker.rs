@@ -278,6 +278,7 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
     });
     let dados_dos_roteiros = dados.clone();
     let dados_do_rag = dados.clone();
+    let dados_do_ocr = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
         Ok(w) => {
             let mut w = w
@@ -288,7 +289,8 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
                 .com_indice(Box::new(crate::rag::IndexadorReal::novo(
                     dados_do_rag.clone(),
                 )))
-                .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)));
+                .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)))
+                .com_ocr(Box::new(crate::ocr::LeitorReal::novo(dados_do_ocr)));
             w.rodar(&parar);
             ExitCode::SUCCESS
         }

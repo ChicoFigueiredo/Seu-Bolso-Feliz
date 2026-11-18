@@ -12,6 +12,7 @@
 //! regra; é o desempate da precedência depois da `prioridade`.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ fn esquema_padrao() -> u32 {
 
 fn aplica_padrao() -> Vec<TipoDeEntrada> {
     vec![TipoDeEntrada::Documento]
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn grupo_padrao() -> usize {
@@ -61,6 +66,12 @@ pub struct Definicao {
     /// O script recebe o texto do documento (padrão: não).
     #[serde(default)]
     pub script_le_texto: bool,
+    /// O texto do documento vem de OCR (imagem): antes de detectar e extrair, o motor o
+    /// passa por [`normalizar_ocr`] (espaços juntos, `O`/`l` consertados dentro de números,
+    /// `RS`/`R§` lidos como `R$`). Falso por padrão, e **não entra no JSON quando é falso**,
+    /// para não mudar o checksum das versões que já existem.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub texto_de_ocr: bool,
     #[serde(default)]
     pub propor: Vec<ModeloDeProposta>,
 }
@@ -83,6 +94,7 @@ impl Definicao {
             leitor: None,
             parametros: Vec::new(),
             script_le_texto: false,
+            texto_de_ocr: false,
             propor: Vec::new(),
         }
     }
@@ -564,6 +576,51 @@ pub fn normalizar(texto: &str) -> String {
         }
     }
     saida.trim_end().to_owned()
+}
+
+/// O texto de um OCR com o ruído mais comum desfeito, para a regra que pede
+/// `"texto_de_ocr": true`:
+///
+/// - espaços e tabs seguidos viram um espaço, e o fim de cada linha é aparado (as quebras
+///   de linha ficam, porque os regexes das regras as usam);
+/// - `RS` e `R§` viram `R$` quando vêm antes de um valor com vírgula e dois decimais
+///   (`RS 1.234,56`; o `RS` de Rio Grande do Sul, antes de um CEP, fica);
+/// - dentro de um **número** (um token só de dígitos, `.`, `,`, `/`, `:`, `-`, `O` e `l`,
+///   com ao menos um dígito de verdade), `O` vira `0` e `l` vira `1`. Palavra, ou token com
+///   outras letras (`Pol1`, `BOL2`), não é tocada.
+///
+/// Idempotente. Só `O` e `l` são trocados; o resto do texto passa como veio.
+pub fn normalizar_ocr(texto: &str) -> String {
+    static ESPACOS: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[ \t\u{00A0}]+"));
+    static FIM_DE_LINHA: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"(?m) +(\r?\n|$)"));
+    static MOEDA: LazyLock<Regex> =
+        LazyLock::new(|| regex_fixo(r"\bR[S§](\s*)([0-9Ol.]+,[0-9Ol]{2})\b"));
+    static TOKEN: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[\p{L}\p{N}.,/:\-]+"));
+    let juntos = ESPACOS.replace_all(texto, " ");
+    let aparado = FIM_DE_LINHA.replace_all(&juntos, "$1");
+    let moeda = MOEDA.replace_all(&aparado, "R$$${1}${2}");
+    TOKEN
+        .replace_all(&moeda, |c: &regex::Captures<'_>| {
+            let t = &c[0];
+            let so_de_numero = t.chars().all(|ch| {
+                ch.is_ascii_digit() || matches!(ch, 'O' | 'l' | '.' | ',' | '/' | ':' | '-')
+            });
+            if so_de_numero && t.chars().any(|ch| ch.is_ascii_digit()) {
+                t.replace('O', "0").replace('l', "1")
+            } else {
+                t.to_owned()
+            }
+        })
+        .into_owned()
+}
+
+fn regex_fixo(padrao: &str) -> Regex {
+    // Os padrões são constantes deste arquivo e compilam (os testes de `normalizar_ocr`
+    // exercitam os quatro). Se um dia não compilar, o regex que não casa nada deixa o
+    // texto como veio.
+    RegexBuilder::new(padrao)
+        .build()
+        .unwrap_or_else(|_| Regex::new(r"[^\s\S]").unwrap_or_else(|_| unreachable!()))
 }
 
 /// Dinheiro em centavos. Padrão brasileiro primeiro:

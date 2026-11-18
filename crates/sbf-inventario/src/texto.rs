@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 /// Uma linha de `texto`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextoGravado {
-    /// `pdftotext`, `pdf-sem-texto`, `texto-simples`, `ocr-por`...
+    /// `pdftotext`, `pdf-sem-texto`, `texto-simples`, `ocr-tesseract`, `ocr-sem-texto`...
     pub metodo: String,
     /// Já cortado como o Bun corta; vazio quando não há texto.
     pub conteudo: String,
@@ -18,6 +18,10 @@ pub struct TextoGravado {
 
 /// `texto.metodo` de um arquivo de texto simples lido direto.
 pub const METODO_TEXTO_SIMPLES: &str = "texto-simples";
+/// `texto.metodo` de uma imagem lida pelo `tesseract` (`sbf-ocr`).
+pub const METODO_OCR_TESSERACT: &str = "ocr-tesseract";
+/// `texto.metodo` de uma imagem que o `tesseract` leu e não achou texto (conteúdo vazio).
+pub const METODO_OCR_SEM_TEXTO: &str = "ocr-sem-texto";
 
 /// O achado já tem linha em `texto`?
 ///

@@ -29,7 +29,7 @@ use std::time::Instant;
 use serde_json::{Value as Json, json};
 
 use crate::catalogo::{Catalogo, Parametro, VersaoDeRegra, parametro_vigente, sha256_hex};
-use crate::definicao::{Compilada, normalizar};
+use crate::definicao::{Compilada, normalizar, normalizar_ocr};
 use crate::script::{ExecutorDeScript, Limites, PedidoDeScript, RespostaDoScript};
 use crate::{
     Campo, DeOnde, Decisao, Entrada, ErroDasRegras, Execucao, Leitura, Reconhecimento,
@@ -159,14 +159,29 @@ impl Motor {
     /// Lê uma entrada com um executor emprestado (o catálogo usa em `testar`).
     pub fn ler_com(&self, entrada: &Entrada, executor: Option<&dyn ExecutorDeScript>) -> Leitura {
         let normalizado = normalizar(entrada.texto.as_deref().unwrap_or(""));
+        // A versão que pede `texto_de_ocr` lê o texto já limpo do ruído do OCR (uma vez só
+        // por entrada, e só se alguma versão pede).
+        let do_ocr = self
+            .versoes
+            .iter()
+            .any(|v| v.versao.definicao.texto_de_ocr)
+            .then(|| {
+                let e = com_texto_de_ocr(entrada);
+                let n = normalizar(e.texto.as_deref().unwrap_or(""));
+                (e, n)
+            });
         let mut execucoes = Vec::new();
         let mut candidatas = Vec::new();
         for vc in &self.versoes {
             if !vc.versao.definicao.aplica_a.contains(&entrada.tipo) {
                 continue;
             }
+            let (entrada, normalizado) = match &do_ocr {
+                Some((e, n)) if vc.versao.definicao.texto_de_ocr => (e, n.as_str()),
+                _ => (entrada, normalizado.as_str()),
+            };
             let t0 = Instant::now();
-            let avaliada = self.avaliar(vc, entrada, &normalizado, executor);
+            let avaliada = self.avaliar(vc, entrada, normalizado, executor);
             let duracao_us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX);
             let (resultado, motivo) = match avaliada {
                 Ok(None) => (ResultadoDaExecucao::NaoSeAplica, None),
@@ -221,6 +236,13 @@ impl Motor {
                 .motivos
                 .push("a versão da regra não está neste motor".to_owned());
             return reconhecimento;
+        };
+        let do_ocr;
+        let entrada = if vc.versao.definicao.texto_de_ocr {
+            do_ocr = com_texto_de_ocr(entrada);
+            &do_ocr
+        } else {
+            entrada
         };
         reconhecimento.campos.extend(campos_do_leitor);
         reconhecimento.leitor = None;
@@ -351,6 +373,14 @@ impl Motor {
         );
         Ok(Some(rec))
     }
+}
+
+/// A entrada com o texto passado por [`normalizar_ocr`]. As posições dos campos extraídos
+/// (`DeOnde::Trecho`) valem para este texto limpo, não para o que o tesseract devolveu.
+fn com_texto_de_ocr(entrada: &Entrada) -> Entrada {
+    let mut e = entrada.clone();
+    e.texto = e.texto.as_deref().map(normalizar_ocr);
+    e
 }
 
 /// Os campos com que as propostas são geradas: os extraídos e, para o que falta, o que a

@@ -18,6 +18,7 @@ use sbf_coleta::pastas::{registrar_arrastado, sha256_do_arquivo};
 use sbf_ia::{Controle, Fila, Provedor, Registro};
 use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
+use sbf_ocr::{DesfechoDoOcr, FalhaDoOcr, Ocr};
 use sbf_pdf::texto::{LIMITE_DO_TEXTO, cortar_como_o_js, impressao_canonica};
 use sbf_pdf::{Desfecho, Ferramentas, FonteDeSegredos, OpcoesDaRodada, PdfProtegido};
 use sbf_planejamento::{
@@ -83,6 +84,8 @@ pub struct ReconhecedorDoCofre {
     segredos: Segredos,
     ia: Ia,
     ferramentas: Ferramentas,
+    /// O tesseract das imagens (PNG, JPG, WEBP).
+    ocr: Ocr,
     /// As regras de reconhecimento (spec 13); `None` é o caminho de sempre.
     pub(crate) regras: Option<Ligadas>,
 }
@@ -113,6 +116,7 @@ impl ReconhecedorDoCofre {
             segredos,
             ia: provedor.map_or(Ia::Nenhuma, Ia::Provedor),
             ferramentas: Ferramentas::default(),
+            ocr: Ocr::do_sistema(),
             regras: None,
         }
     }
@@ -138,6 +142,13 @@ impl ReconhecedorDoCofre {
     #[must_use]
     pub fn com_motor_de_ia(mut self, motor: MotorDeIa) -> Self {
         self.ia = Ia::Motor(motor);
+        self
+    }
+
+    /// O tesseract das imagens (Opções; os testes). O padrão é o do sistema.
+    #[must_use]
+    pub fn com_ocr(mut self, ocr: Ocr) -> Self {
+        self.ocr = ocr;
         self
     }
 
@@ -439,6 +450,9 @@ impl ReconhecedorDoCofre {
         match extensao(caminho).as_str() {
             "pdf" => self.extrair_do_pdf(conn, caminho, sha),
             "txt" => extrair_do_txt(conn, caminho, sha),
+            e if sbf_ocr::EXTENSOES_DE_IMAGEM.contains(&e) => {
+                self.extrair_da_imagem(conn, caminho, sha)
+            }
             _ => {
                 let motivo = "ainda sem leitor de texto para este formato".to_owned();
                 Ok((
@@ -446,6 +460,47 @@ impl ReconhecedorDoCofre {
                     None,
                     Situacao::Pulada(motivo),
                 ))
+            }
+        }
+    }
+
+    /// Imagem (print de app, foto de comprovante): OCR com o tesseract, gravado em `texto`
+    /// com o método `ocr-tesseract`. Sem tesseract não é erro e nada é gravado.
+    fn extrair_da_imagem(
+        &self,
+        conn: &Connection,
+        caminho: &Path,
+        sha: &str,
+    ) -> Result<(EstadoDoTexto, Option<String>, Situacao), ErroDoReconhecimento> {
+        let sem = |motivo: &str, situacao: Situacao| {
+            Ok((EstadoDoTexto::SemTexto(motivo.to_owned()), None, situacao))
+        };
+        match sbf_ocr::ocr_do_achado(conn, sha, caminho, &self.ocr).map_err(banco)? {
+            DesfechoDoOcr::Lido(t) => Ok((EstadoDoTexto::Extraido, Some(t), Situacao::Feita)),
+            DesfechoDoOcr::JaHavia(t) => Ok((
+                EstadoDoTexto::JaHavia,
+                (!t.trim().is_empty()).then_some(t),
+                Situacao::Pulada("o inventário já tinha o texto".to_owned()),
+            )),
+            DesfechoDoOcr::Indisponivel => {
+                let m = "OCR indisponível";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::SemTexto => {
+                let m = "o OCR não achou texto na imagem";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::Falhou(FalhaDoOcr::ImagemGrande) => {
+                let m = "a imagem passa do limite do OCR (15 MiB)";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::Falhou(_) => {
+                let m = "o OCR não leu a imagem";
+                sem(m, Situacao::Falhou(m.to_owned()))
+            }
+            _ => {
+                let m = "o OCR não deu resultado";
+                sem(m, Situacao::Falhou(m.to_owned()))
             }
         }
     }

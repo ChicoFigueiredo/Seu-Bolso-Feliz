@@ -43,6 +43,7 @@ sbf-pontos = { path = "../sbf-pontos" }
 sbf-livro = { path = "../sbf-livro" }
 sbf-planilha = { path = "../sbf-planilha" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
+sbf-ocr = { path = "../sbf-ocr" }
 sbf-regras = { workspace = true }
 sbf-script = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }

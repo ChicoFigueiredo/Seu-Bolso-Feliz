@@ -1,0 +1,25 @@
+[package]
+name = "sbf-ocr"
+description = "OCR de imagens do Seu Bolso Feliz: tesseract pela regra única do sbf-processo (caminho do sistema, ambiente mínimo, prazo, sem rede), imagem pela entrada padrão, e o texto gravado no inventário com método ocr-tesseract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-inventario = { workspace = true }
+# Ver o `sbf-reconhecimento`: o corte de 20 KB e a impressão canônica são os do PDF.
+sbf-pdf = { path = "../sbf-pdf" }
+# A regra única de como chamar um programa externo (ADR-012).
+sbf-processo = { path = "../sbf-processo" }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+# Decodifica, inverte o fundo escuro e amplia a imagem antes do tesseract (MIT OR Apache-2.0).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

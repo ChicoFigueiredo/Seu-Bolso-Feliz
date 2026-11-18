@@ -62,6 +62,7 @@ campos são:
 | `leitor`            | texto ou nulo | nulo            | Um leitor nativo do sbf que roda antes do script (hoje: `contracheque`).            |
 | `parametros`        | lista         | `[]`            | Nomes dos parâmetros versionados que o script recebe (ex.: `irrf`).                 |
 | `script_le_texto`   | booleano      | falso           | Se `true`, o script recebe o texto do documento.                                    |
+| `texto_de_ocr`      | booleano      | falso           | Se `true`, o texto vem de OCR (imagem) e é limpo do ruído antes de ler (ver 2.6).   |
 | `propor`            | lista         | `[]`            | As propostas que a regra faz (ver abaixo).                                          |
 
 ### 2.1 Condições de `detectar`
@@ -222,6 +223,34 @@ casa `00000000000`) e cada documento da lista precisa ter 11 (CPF) ou 14 (CNPJ) 
 documento nunca vai para a tabela `execucao` nem para a proposta gravada (o catálogo tira o
 campo cuja origem é `contraparte_doc`) e nunca vai a log. O script só recebe os campos já
 extraídos: se a regra não extrai o documento, o script não o vê.
+
+### 2.6 Texto de imagem (OCR): `"texto_de_ocr": true`
+
+Prints de app e fotos de comprovante (PNG, JPG, JPEG, WEBP, até 15 MiB) passam pelo OCR do
+`tesseract` (idioma `por`) quando o sbf extrai o texto, tanto ao reconhecer um arquivo solto
+quanto no worker, que lê as imagens novas do inventário. O texto fica em `texto` com o método
+`ocr-tesseract`. Sem o `tesseract` instalado a imagem fica "sem texto (OCR indisponível)": não é
+erro, nada é gravado, e o OCR roda quando ele for instalado.
+
+Texto de OCR vem com ruído, e uma regra que lê imagem pode pedir a limpeza:
+
+```json
+"definicao": { "texto_de_ocr": true, "...": "..." }
+```
+
+Com a opção ligada, o motor passa o texto por esta normalização **antes** de detectar, extrair
+e entregar ao script (quem não liga continua lendo o texto como saiu do extrator):
+
+| O que o OCR erra                                  | O que a normalização faz                                                                                                                                                                                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Espaços e tabs repetidos, espaço no fim da linha  | Junta em um espaço e apara o fim de cada linha (as quebras de linha ficam).                                                                                                                                                                                                           |
+| `O` (letra) e `l` (L minúsculo) no meio de número | `O` vira `0` e `l` vira `1`, **só dentro de um número**: um token só de dígitos, `.`, `,`, `/`, `:`, `-`, `O` e `l`, com ao menos um dígito de verdade (`2O26` vira `2026`, `l.234,5O` vira `1.234,50`). Palavras e tokens com outras letras (`Pol1`, `Olá`, `BOL2`) não são tocados. |
+| `RS` ou `R§` no lugar de `R$`                     | Vira `R$` quando vem antes de um valor com vírgula e dois decimais (`RS 1.234,56`). O `RS` de Rio Grande do Sul antes de um CEP fica.                                                                                                                                                 |
+
+A normalização é idempotente e só vale para a regra que pede. A opção **não aparece no JSON
+quando é falsa**, então as regras que já existem mantêm o mesmo checksum. As posições dos campos
+extraídos (`de_onde`) valem para o texto já limpo, não para o que o tesseract devolveu. Escreva o
+regex da regra pensando no texto limpo: `Valor:\s*R\$\s*([\d.,]+)` lê `Valor:  RS 1.234,5O`.
 
 ## 3. Exemplos: o teste que libera a ativação
 
