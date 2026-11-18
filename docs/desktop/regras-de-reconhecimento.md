@@ -68,14 +68,16 @@ Uma condição casa quando: **todas** de `todos` são verdadeiras, **ao menos um
 é verdadeira (se a lista não estiver vazia) e **nenhuma** de `nenhum` é verdadeira. Precisa
 haver ao menos uma condição em `todos` ou em `algum`.
 
-| Forma                           | Exemplo                            | Casa quando                                                                                                   |
-| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `{"contem": "trecho"}`          | `{"contem": "comprovante pix"}`    | O texto normalizado (minúsculas, sem acento, espaços juntos) contém o trecho.                                 |
-| `{"regex": "..."}`              | `{"regex": "Chave:\\s*\\S+"}`      | Uma expressão regular casa o texto original.                                                                  |
-| `{"mime": ["application/pdf"]}` | `{"mime": ["image/*"]}`            | O tipo real do conteúdo é um destes (pela assinatura, não pela extensão).                                     |
-| `{"canal": ["pluggy"]}`         | `{"canal": ["gmail", "telegram"]}` | O canal da origem é um destes: `arrastado`, `pasta`, `cofre`, `gmail`, `telegram`, `pluggy`, `mcp`, `manual`. |
-| `{"descricao": "..."}`          | `{"descricao": "PIX ENVIADO"}`     | Regex sobre a descrição que a origem já trouxe (ex.: a transação da Pluggy).                                  |
-| `{"nome": "..."}`               | `{"nome": "^comprovante_"}`        | Regex sobre o nome do arquivo.                                                                                |
+| Forma                           | Exemplo                                   | Casa quando                                                                                                    |
+| ------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `{"contem": "trecho"}`          | `{"contem": "comprovante pix"}`           | O texto normalizado (minúsculas, sem acento, espaços juntos) contém o trecho.                                  |
+| `{"regex": "..."}`              | `{"regex": "Chave:\\s*\\S+"}`             | Uma expressão regular casa o texto original.                                                                   |
+| `{"mime": ["application/pdf"]}` | `{"mime": ["image/*"]}`                   | O tipo real do conteúdo é um destes (pela assinatura, não pela extensão).                                      |
+| `{"canal": ["pluggy"]}`         | `{"canal": ["gmail", "telegram"]}`        | O canal da origem é um destes: `arrastado`, `pasta`, `cofre`, `gmail`, `telegram`, `pluggy`, `mcp`, `manual`.  |
+| `{"descricao": "..."}`          | `{"descricao": "PIX ENVIADO"}`            | Regex sobre a descrição que a origem já trouxe (ex.: a transação da Pluggy).                                   |
+| `{"nome": "..."}`               | `{"nome": "^comprovante_"}`               | Regex sobre o nome do arquivo.                                                                                 |
+| `{"contraparte_doc": [...]}`    | `{"contraparte_doc": ["000.000.000-00"]}` | O CPF/CNPJ do favorecido do registro é igual a algum da lista. Só os dígitos contam (ver 2.5).                 |
+| `{"contraparte": "..."}`        | `{"contraparte": "^fulana de tal$"}`      | Regex sobre o nome do favorecido do registro, **normalizado** (minúsculas, sem acento), sem diferenciar caixa. |
 
 ### 2.2 Extração (`extrair`)
 
@@ -94,8 +96,10 @@ Cada campo tem uma regex, um grupo (padrão `1`: o primeiro parêntese), um form
 | `inteiro`     | Número inteiro.                                              |
 | `minusculas`  | Texto em minúsculas (para constantes como `pix`).            |
 
-`fonte` é `texto` (padrão: o texto do documento) ou `descricao` (a descrição que a origem já
-trouxe, como a da Pluggy). Dinheiro é sempre em centavos; nunca use ponto flutuante.
+`fonte` é `texto` (padrão: o texto do documento), `descricao` (a descrição que a origem já
+trouxe, como a da Pluggy), `contraparte` (o nome do favorecido do registro) ou
+`contraparte_doc` (o CPF/CNPJ dele). O campo extraído de uma `contraparte_doc` nunca fica
+gravado na proposta (ver 2.5). Dinheiro é sempre em centavos; nunca use ponto flutuante.
 
 Os nomes dos campos que o sbf conhece com significado próprio são `valor_centavos`, `data`,
 `vencimento`, `conta`, `contrato`, `autenticacao` e `cartao`. Se duas regras empatadas
@@ -162,6 +166,60 @@ Autenticação: ABC123XYZ
 
 Ela extrai `valor_centavos = 15000`, `data = 2026-11-10` e `autenticacao = ABC123XYZ`, e
 propõe provar um registro com até 2 dias de folga em volta da data.
+
+### 2.5 O favorecido de um Pix: o exemplo da diarista (fictício)
+
+Na CAIXA a descrição de um Pix é só "PIX ENVIADO". O favorecido vem em colunas à parte do
+registro da Pluggy no inventário: `contraparte` (o nome) e `contraparte_doc` (o CPF/CNPJ, às
+vezes formatado). Uma regra com `aplica_a: ["registro"]` reconhece o favorecido por elas e
+propõe conciliar o compromisso mensal que ele recebe. A ocorrência do compromisso nomeado em
+`compromisso` ("Diarista") junta os débitos que a regra reconhece:
+
+- **Janela**: a competência inteira da ocorrência, mais a folga `janela_dias` (no máximo 60)
+  em volta do vencimento.
+- **Um débito** com o valor previsto: sugestão de um. **Vários** que somam o previsto (todos,
+  ou o menor subconjunto de até 6): sugestão combinada, "Pix para Fulana de Tal · 2 débitos
+  somam o previsto". Senão, todos os reconhecidos, com o aviso "⚠ soma R$ X difere do
+  previsto R$ Y".
+- Débito já conciliado a outra ocorrência, ou de uma proposta que você já decidiu, não entra.
+- **Confirmar** grava uma conciliação por débito, todas na mesma ocorrência, e o "Conciliado"
+  soma; cada proposta recebe `Aceito`. **Ignorar** desfaz as sugestões e registra `Rejeitado`.
+  Nada muda sem o clique. Só uma regra **consolidada**, com soma exata e a conta certa (as
+  três provas), concilia sozinha, com Desfazer.
+- As sugestões aparecem no Controle mensal (selo "conciliar?" e a seção Movimentos do
+  Detalhe) depois de "Buscar no extrato", e o MCP `listar_compromissos` mostra
+  `sugestao_de_conciliacao: true`. Regra em rascunho nunca sugere.
+
+Arquivo `pix-da-diarista.json` (documento fictício):
+
+```json
+{
+  "regra": "pix-da-diarista",
+  "nome": "Pix · Diarista",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "pix-da-diarista",
+    "aplica_a": ["registro"],
+    "detectar": {
+      "todos": [{ "contraparte_doc": ["000.000.000-00"] }]
+    },
+    "extrair": {
+      "favorecido": {
+        "regex": "(.+)",
+        "formato": "texto",
+        "fonte": "contraparte"
+      }
+    },
+    "propor": [{ "conciliar_ocorrencia": { "janela_dias": 5, "compromisso": "Diarista" } }]
+  }
+}
+```
+
+Cuidados com o documento: a comparação ignora a pontuação dos dois lados (`000.000.000-00`
+casa `00000000000`) e cada documento da lista precisa ter 11 (CPF) ou 14 (CNPJ) dígitos. O
+documento nunca vai para a tabela `execucao` nem para a proposta gravada (o catálogo tira o
+campo cuja origem é `contraparte_doc`) e nunca vai a log. O script só recebe os campos já
+extraídos: se a regra não extrai o documento, o script não o vê.
 
 ## 3. Exemplos: o teste que libera a ativação
 

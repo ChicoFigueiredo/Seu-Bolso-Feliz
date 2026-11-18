@@ -49,6 +49,11 @@ pub struct VmDeMovimentos {
     /// extrato ainda o tem.
     pub confirmadas: Vec<MovimentoVm>,
     pub sugestao: Option<MovimentoVm>,
+    /// Todos os débitos sugeridos quando o banco informa o favorecido (um Pix pode ser
+    /// pago em vários): o Confirmar concilia todos, um por débito. Vazio sem favorecido.
+    pub sugeridas: Vec<MovimentoVm>,
+    /// "Pix para Fulana de Tal · 2 débitos somam o previsto", ou o aviso da soma.
+    pub rotulo_da_sugestao: Option<String>,
     pub candidatos: Vec<MovimentoCandidato>,
     /// Desconto em folha: não passa pelo extrato, e a seção só mostra a baixa pelo contracheque.
     pub de_folha: bool,
@@ -191,7 +196,52 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
             },
         });
     }
+    agrupar_sugestoes(e, &mut vm);
     vm
+}
+
+/// Quando as sugestões pendentes trazem o favorecido do banco (`contraparte`), mostra todas
+/// juntas com o rótulo do que a soma faz. O Confirmar da seção concilia todas.
+fn agrupar_sugestoes(e: &EntradaDosMovimentos<'_>, vm: &mut VmDeMovimentos) {
+    let pendentes: Vec<&ConciliacaoComMovimento> = e
+        .gravadas
+        .iter()
+        .filter(|g| {
+            !g.conciliacao.confirmada && !g.conciliacao.movimento.starts_with("contracheque:")
+        })
+        .collect();
+    let favorecido = |g: &ConciliacaoComMovimento| {
+        g.movimento
+            .as_ref()
+            .and_then(|m| m.contraparte.as_deref())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned)
+    };
+    if pendentes.is_empty() || pendentes.iter().any(|g| favorecido(g).is_none()) {
+        return;
+    }
+    let soma: i64 = pendentes.iter().map(|g| g.conciliacao.valor.0).sum();
+    vm.rotulo_da_sugestao = Some(sbf_reconhecimento::favorecido::rotulo_da_sugestao(
+        pendentes.first().and_then(|g| favorecido(g)).as_deref(),
+        pendentes.len(),
+        soma,
+        e.previsto.map(|p| p.0.abs()),
+    ));
+    vm.sugeridas = pendentes
+        .iter()
+        .map(|g| MovimentoVm {
+            id: Some(g.conciliacao.movimento.clone()),
+            data: Some(g.conciliacao.data),
+            valor: g.conciliacao.valor,
+            conta: g.movimento.as_ref().map(|m| m.conta_do_extrato.clone()),
+            descricao: g.movimento.as_ref().map(|m| m.descricao.clone()),
+            diferenca: None,
+            tres_provas: false,
+            automatica: false,
+            pelo_contracheque: None,
+        })
+        .collect();
 }
 
 /// O contracheque mais recente (pela data do documento) entre os vinculados.
@@ -253,6 +303,21 @@ impl OfertaDeAssinatura {
 fn pequeno(ui: &mut Ui, t: impl Into<String>) {
     let p = tema::paleta(ui.ctx());
     ui.label(RichText::new(t.into()).size(11.5).color(p.tinta_suave));
+}
+
+/// "Ignorar": a sugestão some e a regra (se foi ela) não a repete.
+fn botao_de_ignorar(ui: &mut Ui, ocorrencia: &IdOcorrencia, pedidos: &mut Vec<Pedido>) {
+    if ui
+        .button("Ignorar")
+        .on_hover_text(
+            "Descarta a sugestão; uma regra de reconhecimento registra que foi rejeitada",
+        )
+        .clicked()
+    {
+        pedidos.push(Pedido::Controle(PedidoDoControle::IgnorarSugestao {
+            ocorrencia: ocorrencia.clone(),
+        }));
+    }
 }
 
 fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
@@ -392,7 +457,40 @@ pub fn secao(
             }
         });
     }
-    if let Some(s) = &vm.sugestao {
+    if !vm.sugeridas.is_empty() {
+        moldura(ui, p.info_sutil, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                componentes::selo(ui, "Sugestão", p.superficie_3, p.info);
+                if let Some(r) = &vm.rotulo_da_sugestao {
+                    ui.label(RichText::new(r).strong());
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                let n = vm.sugeridas.len();
+                if ui
+                    .button(format!(
+                        "{}  {}",
+                        icones::texto("task_alt"),
+                        if n == 1 {
+                            "Confirmar".to_owned()
+                        } else {
+                            format!("Confirmar os {n}")
+                        }
+                    ))
+                    .on_hover_text("Confirma uma conciliação por débito, todas nesta ocorrência")
+                    .clicked()
+                {
+                    pedidos.push(Pedido::Controle(PedidoDoControle::Acao(
+                        AcaoDoControle::ConfirmarConciliacao,
+                    )));
+                }
+                botao_de_ignorar(ui, ocorrencia, pedidos);
+            });
+            for m in &vm.sugeridas {
+                linha_do_movimento(ui, m);
+            }
+        });
+    } else if let Some(s) = &vm.sugestao {
         moldura(ui, p.info_sutil, |ui| {
             ui.horizontal_wrapped(|ui| {
                 componentes::selo(ui, "Sugestão", p.superficie_3, p.info);
@@ -405,11 +503,12 @@ pub fn secao(
                         AcaoDoControle::ConfirmarConciliacao,
                     )));
                 }
+                botao_de_ignorar(ui, ocorrencia, pedidos);
             });
             linha_do_movimento(ui, s);
         });
     }
-    if vm.confirmadas.is_empty() && vm.sugestao.is_none() {
+    if vm.confirmadas.is_empty() && vm.sugestao.is_none() && vm.sugeridas.is_empty() {
         pequeno(ui, "Nenhum movimento do extrato ligado a esta ocorrência.");
         ui.add_space(4.0);
     }
@@ -786,5 +885,78 @@ mod testes {
             previsto: Some(Centavos(129_999)),
         });
         assert_eq!(vm.confirmadas[0].diferenca, None);
+    }
+
+    fn pix_sugerido(
+        movimento: &str,
+        valor: i64,
+        favorecido: Option<&str>,
+    ) -> ConciliacaoComMovimento {
+        let mut g = gravada(movimento, valor, false, false);
+        g.movimento = Some(MovimentoDoExtrato {
+            movimento: movimento.into(),
+            data: Data::nova(2026, 11, 5).unwrap(),
+            valor: Centavos(-valor),
+            conta_do_extrato: "BANCO EXEMPLO · 000000-1".into(),
+            descricao: "PIX ENVIADO".into(),
+            tipo: "debito".into(),
+            contraparte: favorecido.map(str::to_owned),
+            contraparte_doc: Some("000.000.000-00".into()),
+        });
+        g
+    }
+
+    #[test]
+    fn varios_debitos_sugeridos_do_mesmo_favorecido_viram_um_grupo_com_rotulo() {
+        let gravadas = [
+            pix_sugerido("pluggy:txn_1", 15_000, Some("Fulana de Tal")),
+            pix_sugerido("pluggy:txn_2", 15_000, Some("Fulana de Tal")),
+        ];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas,
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(30_000)),
+        });
+        assert_eq!(vm.sugeridas.len(), 2);
+        assert_eq!(
+            vm.rotulo_da_sugestao.as_deref(),
+            Some("Pix para Fulana de Tal \u{b7} 2 d\u{e9}bitos somam o previsto")
+        );
+        assert_eq!(vm.sugeridas[0].descricao.as_deref(), Some("PIX ENVIADO"));
+        // Soma que não bate: o aviso entra no rótulo.
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas[..1],
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(30_000)),
+        });
+        assert!(
+            vm.rotulo_da_sugestao
+                .as_deref()
+                .is_some_and(|r| r.contains("\u{26a0} soma R$ 150,00 difere do previsto R$ 300,00"))
+        );
+    }
+
+    #[test]
+    fn sem_favorecido_do_banco_a_sugestao_segue_a_de_sempre() {
+        let gravadas = [pix_sugerido("pluggy:txn_1", 15_000, None)];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas,
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(15_000)),
+        });
+        assert!(vm.sugeridas.is_empty() && vm.rotulo_da_sugestao.is_none());
+        assert!(vm.sugestao.is_some());
     }
 }

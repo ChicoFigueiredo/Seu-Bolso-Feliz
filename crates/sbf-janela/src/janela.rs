@@ -1836,7 +1836,7 @@ impl Janela {
     pub(crate) fn controle_pedido(&mut self, pedido: crate::controle_ui::PedidoDoControle) {
         use crate::controle::AcaoDoControle as A;
         use crate::controle_ui::{AbaLateral, PedidoDoControle as P, mensagem_de_erro};
-        use sbf_planejamento::{Alteracao, Autor, Conciliacao};
+        use sbf_planejamento::{Alteracao, Autor};
         // A prévia de documento não escreve no planejamento.
         match &pedido {
             P::PreviaDoDocumento(sha) => {
@@ -1865,6 +1865,9 @@ impl Janela {
         }
         let hoje = self.hoje_como_data();
         let ligador = self.ligador_de_salario();
+        // As regras de reconhecimento e o extrato: o favorecido de um Pix concilia por elas.
+        let regras = self.regras.fonte().cloned();
+        let inventario = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let Some(pl) = self.planejamento.as_mut() else {
             self.erro("O planejamento ainda não está ligado a esta janela.".to_owned());
             return;
@@ -1935,11 +1938,27 @@ impl Janela {
             P::Acao(A::BuscarNoExtrato) => {
                 let periodo = controle.navegador.periodo();
                 controle.recarregar();
-                controle.mensagem = Some(match plan.buscar_conciliacoes(&periodo, hoje) {
-                    Ok(0) => ("Nenhuma sugestão nova.".to_owned(), false),
-                    Ok(1) => ("1 sugestão nova.".to_owned(), false),
-                    Ok(n) => (format!("{n} sugestões novas."), false),
-                    Err(e) => (mensagem_de_erro(&e), true),
+                // Primeiro as assinaturas; depois o favorecido de um Pix, nas ocorrências que
+                // ainda não têm sugestão.
+                let padrao = plan.buscar_conciliacoes(&periodo, hoje);
+                let pelas_regras = match &padrao {
+                    Ok(_) => buscar_pelas_regras(
+                        plan,
+                        regras.as_ref(),
+                        inventario.as_deref(),
+                        &periodo,
+                        hoje,
+                    ),
+                    Err(_) => Ok(0),
+                };
+                controle.mensagem = Some(match (padrao, pelas_regras) {
+                    (Err(e), _) => (mensagem_de_erro(&e), true),
+                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelas regras: {e}"), true),
+                    (Ok(n), Ok(m)) => match n + m {
+                        0 => ("Nenhuma sugestão nova.".to_owned(), false),
+                        1 => ("1 sugestão nova.".to_owned(), false),
+                        total => (format!("{total} sugestões novas."), false),
+                    },
                 });
             }
             P::ConciliarManual {
@@ -1965,6 +1984,7 @@ impl Janela {
                 ocorrencia,
                 movimento,
             } => {
+                let desfeito = movimento.clone();
                 let r = plan.aplicar(
                     Alteracao::Desconciliar {
                         ocorrencia,
@@ -1972,6 +1992,13 @@ impl Janela {
                     },
                     Autor::Usuario,
                 );
+                // Uma conciliação que uma regra consolidada fez sozinha: o Desfazer é o
+                // retorno que a rebaixa a ativa (D4).
+                if r.is_ok()
+                    && let Some(mut catalogo) = regras.as_ref().and_then(|f| f.catalogo.lock().ok())
+                {
+                    sbf_reconhecimento::favorecido::desfeito(&mut catalogo, &desfeito);
+                }
                 terminar(
                     controle,
                     r,
@@ -2011,28 +2038,54 @@ impl Janela {
                 let Some(o) = controle.linha_selecionada().cloned() else {
                     return;
                 };
-                match plan.sugestao_de_conciliacao(&o.id) {
-                    Ok(Some(c)) => {
-                        let confirmada = Conciliacao {
-                            confirmada: true,
-                            ..c
-                        };
-                        let r = plan.aplicar(
-                            Alteracao::Conciliar {
-                                conciliacao: confirmada.clone(),
-                            },
-                            Autor::Usuario,
-                        );
-                        if terminar(controle, r, "Conciliação confirmada.") {
-                            ligar_o_salario(plan, ligador.as_deref(), controle, &confirmada);
-                        }
-                    }
-                    Ok(None) => {
+                // Todas as sugestões pendentes da ocorrência: uma por débito (o favorecido de
+                // um Pix pode somar vários). Cada proposta de regra recebe `Aceito`.
+                let mut catalogo = regras.as_ref().and_then(|f| f.catalogo.lock().ok());
+                let r =
+                    sbf_reconhecimento::favorecido::confirmar(plan, catalogo.as_deref_mut(), &o.id);
+                drop(catalogo);
+                controle.recarregar();
+                match r {
+                    Ok(feitas) if feitas.is_empty() => {
                         controle.mensagem =
                             Some(("Não há sugestão de conciliação nesta linha.".into(), true));
                     }
-                    Err(e) => controle.mensagem = Some((mensagem_de_erro(&e), true)),
+                    Ok(feitas) => {
+                        controle.mensagem = Some((
+                            if feitas.len() == 1 {
+                                "Conciliação confirmada.".to_owned()
+                            } else {
+                                format!(
+                                    "{} conciliações confirmadas, uma por débito.",
+                                    feitas.len()
+                                )
+                            },
+                            false,
+                        ));
+                        for confirmada in &feitas {
+                            ligar_o_salario(plan, ligador.as_deref(), controle, confirmada);
+                        }
+                    }
+                    Err(e) => controle.mensagem = Some((e, true)),
                 }
+            }
+            P::IgnorarSugestao { ocorrencia } => {
+                let mut catalogo = regras.as_ref().and_then(|f| f.catalogo.lock().ok());
+                let r = sbf_reconhecimento::favorecido::ignorar(
+                    plan,
+                    catalogo.as_deref_mut(),
+                    &ocorrencia,
+                );
+                drop(catalogo);
+                controle.recarregar();
+                controle.mensagem = Some(match r {
+                    Ok(0) => (
+                        "Não há sugestão de conciliação nesta linha.".to_owned(),
+                        true,
+                    ),
+                    Ok(_) => ("Sugestão ignorada. A regra não a repete.".to_owned(), false),
+                    Err(e) => (e, true),
+                });
             }
             P::Acao(a @ (A::Subir | A::Descer)) => {
                 let Some(o) = controle.linha_selecionada().cloned() else {
@@ -3168,6 +3221,32 @@ fn faixa_do_lote(
 
 /// Depois de uma conciliação confirmada de uma ocorrência com contracheque vinculado, liga o
 /// registro do salário ao crédito no inventário. Falha vira aviso discreto; a conciliação fica.
+/// A busca pelo favorecido do Pix (regras de reconhecimento sobre o extrato). Sem catálogo ou
+/// sem inventário ligados, não há o que buscar.
+fn buscar_pelas_regras(
+    plan: &mut dyn sbf_planejamento::Planejamento,
+    regras: Option<&crate::regras::FonteDasRegras>,
+    inventario: Option<&std::path::Path>,
+    periodo: &sbf_planejamento::Periodo,
+    hoje: sbf_planejamento::Data,
+) -> Result<usize, String> {
+    let (Some(fonte), Some(inventario)) = (regras, inventario) else {
+        return Ok(0);
+    };
+    let mut catalogo = fonte
+        .catalogo
+        .lock()
+        .map_err(|_| "o catálogo de regras está ocupado".to_owned())?;
+    sbf_reconhecimento::favorecido::buscar(
+        plan,
+        &mut catalogo,
+        fonte.executor.clone(),
+        &sbf_planilha::movimentos::MovimentosDaPluggy::novo(inventario),
+        periodo,
+        hoje,
+    )
+}
+
 fn ligar_o_salario(
     plan: &dyn sbf_planejamento::Planejamento,
     ligador: Option<&dyn crate::reconhecimento::LigadorDeSalario>,
