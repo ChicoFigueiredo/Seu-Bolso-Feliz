@@ -12,6 +12,7 @@ use crate::componentes;
 use crate::controle::{AcaoDoControle, data_texto, reais};
 use crate::controle_ui::PedidoDoControle;
 use crate::icones;
+use crate::ligacoes_do_registro::PedidoDeLigacao;
 use crate::navegacao::Pedido;
 use crate::tema;
 
@@ -366,6 +367,63 @@ fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
     }
 }
 
+/// O id do movimento quando ele vem do extrato da Pluggy (a baixa pelo contracheque não tem
+/// registro no inventário).
+pub fn movimento_do_registro(m: &MovimentoVm) -> Option<&str> {
+    m.id.as_deref()
+        .filter(|id| !id.starts_with("contracheque:") && !id.trim().is_empty())
+}
+
+/// Faz do que `conteudo` desenha um cartão clicável: o clique abre o registro da Pluggy de
+/// onde veio o movimento, e Ctrl+clique (ou o botão do meio) o abre num painel flutuante.
+/// O que tem botão dentro (Desfazer) fica fora do `conteudo`, para o botão receber o clique.
+fn cartao_clicavel(
+    ui: &mut Ui,
+    m: &MovimentoVm,
+    pedidos: &mut Vec<Pedido>,
+    conteudo: impl FnOnce(&mut Ui),
+) {
+    let resposta = ui.scope(conteudo).response;
+    let Some(movimento) = movimento_do_registro(m) else {
+        return;
+    };
+    let p = tema::paleta(ui.ctx());
+    let mut dica =
+        "Abre o registro da Pluggy deste movimento. Ctrl+clique abre ao lado.".to_owned();
+    if m.tres_provas {
+        dica.push_str("\n\nO contracheque vinculado, o valor e a conta do extrato conferem.");
+    }
+    let clique = ui
+        .interact(
+            resposta.rect,
+            resposta.id.with("abrir-registro"),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(dica);
+    if clique.hovered() {
+        ui.painter().rect_stroke(
+            resposta.rect.expand(2.0),
+            egui::CornerRadius::same(4),
+            Stroke::new(1.0, p.destaque_borda),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let flutuante = if clique.clicked() {
+        Some(componentes::ctrl(ui))
+    } else if clique.middle_clicked() {
+        Some(true)
+    } else {
+        None
+    };
+    if let Some(flutuante) = flutuante {
+        pedidos.push(Pedido::Ligacao(PedidoDeLigacao::Registro {
+            movimento: movimento.to_owned(),
+            flutuante,
+        }));
+    }
+}
+
 fn moldura(ui: &mut Ui, fundo: egui::Color32, conteudo: impl FnOnce(&mut Ui)) {
     let p = tema::paleta(ui.ctx());
     Frame::new()
@@ -432,13 +490,15 @@ pub fn secao(
     ui.add_space(2.0);
     for m in &vm.confirmadas {
         moldura(ui, p.superficie_2, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
-                if m.automatica {
-                    componentes::selo(ui, "automática", p.info_sutil, p.info);
-                }
+            cartao_clicavel(ui, m, pedidos, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
+                    if m.automatica {
+                        componentes::selo(ui, "automática", p.info_sutil, p.info);
+                    }
+                });
+                linha_do_movimento(ui, m);
             });
-            linha_do_movimento(ui, m);
             if m.automatica {
                 ui.horizontal_wrapped(|ui| {
                     pequeno(ui, "Conciliado automaticamente · as três provas batem.");
@@ -487,7 +547,7 @@ pub fn secao(
                 botao_de_ignorar(ui, ocorrencia, pedidos);
             });
             for m in &vm.sugeridas {
-                linha_do_movimento(ui, m);
+                cartao_clicavel(ui, m, pedidos, |ui| linha_do_movimento(ui, m));
             }
         });
     } else if let Some(s) = &vm.sugestao {
@@ -505,7 +565,7 @@ pub fn secao(
                 }
                 botao_de_ignorar(ui, ocorrencia, pedidos);
             });
-            linha_do_movimento(ui, s);
+            cartao_clicavel(ui, s, pedidos, |ui| linha_do_movimento(ui, s));
         });
     }
     if vm.confirmadas.is_empty() && vm.sugestao.is_none() && vm.sugeridas.is_empty() {
@@ -596,6 +656,35 @@ pub fn secao(
 mod testes {
     use super::*;
     use sbf_planejamento::{AlvoDoDocumento, Autor, MovimentoDoExtrato, Rubrica, TipoDeRubrica};
+
+    fn vm_com_id(id: Option<&str>) -> MovimentoVm {
+        MovimentoVm {
+            id: id.map(Into::into),
+            data: None,
+            valor: Centavos(100),
+            conta: None,
+            descricao: None,
+            diferenca: None,
+            tres_provas: false,
+            automatica: false,
+            pelo_contracheque: None,
+        }
+    }
+
+    #[test]
+    fn so_o_movimento_da_pluggy_abre_registro() {
+        assert_eq!(
+            movimento_do_registro(&vm_com_id(Some("pluggy:txn_a"))),
+            Some("pluggy:txn_a")
+        );
+        // A baixa pelo contracheque e o valor sem movimento conhecido não têm registro.
+        assert_eq!(
+            movimento_do_registro(&vm_com_id(Some("contracheque:abc:1"))),
+            None
+        );
+        assert_eq!(movimento_do_registro(&vm_com_id(None)), None);
+        assert_eq!(movimento_do_registro(&vm_com_id(Some("  "))), None);
+    }
 
     fn candidato(id: &str, valor: i64, mesma_conta: bool, dif: i64) -> MovimentoCandidato {
         MovimentoCandidato {

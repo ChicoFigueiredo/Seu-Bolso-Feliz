@@ -19,6 +19,7 @@ use crate::dock::{self, PainelDoDock};
 use crate::formato;
 use crate::icones;
 use crate::leitura::{Cache, Leitor};
+use crate::ligacoes_do_registro::{self, LigacoesDoRegistro, PedidoDeLigacao};
 use crate::navegacao::{Destino, Navegacao, Pedido};
 use crate::pagina::{self, Vista};
 use crate::painel::{self, EstadoDosRelatorios};
@@ -189,7 +190,16 @@ pub struct Janela {
     pub estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela,
     /// A largura da lateral no último quadro (ou a guardada, antes de restaurar).
     pub largura_da_lateral: Option<f32>,
+    /// Os bancos do cofre que outros processos escrevem (MCP, worker): a janela relê o que
+    /// mostra quando um deles muda.
+    pub mudancas: crate::mudancas::Mudancas,
+    /// "Concilia" e "Reconhecido pela regra" da página de cada registro aberto, com a hora
+    /// da leitura (vale por alguns segundos e some quando um banco muda).
+    ligacoes_dos_registros: HashMap<Ref, (std::time::Instant, Option<LigacoesDoRegistro>)>,
 }
+
+/// Quanto tempo as ligações de um registro valem antes de serem lidas de novo.
+const VALIDADE_DAS_LIGACOES: std::time::Duration = std::time::Duration::from_secs(5);
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
 
@@ -304,6 +314,29 @@ impl Janela {
             casca_guardada: None,
             estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela::default(),
             largura_da_lateral: None,
+            mudancas: crate::mudancas::Mudancas::default(),
+            ligacoes_dos_registros: HashMap::new(),
+        }
+    }
+
+    /// Vigia os bancos do cofre (`planejamento`, `regras` e `inventario`): quando outro
+    /// processo escreve num deles, a janela relê o que mostra.
+    pub fn vigiar_cofre(&mut self, cofre: &std::path::Path) {
+        self.mudancas
+            .vigiar(crate::mudancas::Mudancas::bancos_do_cofre(cofre));
+    }
+
+    /// Relê o que depende dos bancos que mudaram por fora, preservando seleção, abas e
+    /// rolagem (o egui guarda a rolagem pelo id; aqui só se esquece o que foi lido).
+    fn reler_o_que_mudou(&mut self, ctx: &Context) {
+        use crate::mudancas::Banco;
+        for banco in self.mudancas.mudaram(ctx) {
+            self.ligacoes_dos_registros.clear();
+            match banco {
+                Banco::Planejamento => self.controle.recarregar(),
+                Banco::Regras => self.regras.recarregar_de_fora(),
+                Banco::Inventario => self.cache.limpar(),
+            }
         }
     }
 
@@ -836,6 +869,10 @@ impl Janela {
     ) {
         let p = tema::paleta(ui.ctx());
         let filtro = self.filtro();
+        let ligacoes = match destino {
+            Destino::Item(r) => self.ligacoes_do_registro(consulta, r),
+            _ => None,
+        };
         let banco = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let descricao_do_filtro_atual = descricao_do_filtro(&filtro, &self.ciclo_atual());
         let hoje = self.hoje.clone();
@@ -850,6 +887,7 @@ impl Janela {
             estacao,
             caixa,
             hoje: &hoje,
+            ligacoes: ligacoes.as_ref(),
         };
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
@@ -1230,6 +1268,10 @@ impl Janela {
         let lista: Vec<_> = self.navegacao.flutuantes().to_vec();
         let hoje = self.hoje.clone();
         for f in lista {
+            let ligacoes = match &f.destino {
+                Destino::Item(r) => self.ligacoes_do_registro(consulta, r),
+                _ => None,
+            };
             let contexto_da_pagina = pagina::ContextoDaPagina {
                 estacao: self.estacao.as_ref().map(|e| e.0.as_ref()),
                 caixa: self
@@ -1237,6 +1279,7 @@ impl Janela {
                     .as_ref()
                     .map(|c| &*c.0 as &dyn crate::caixa::FonteDaCaixa),
                 hoje: &hoje,
+                ligacoes: ligacoes.as_ref(),
             };
             let mut leitor = Leitor::novo(consulta, &mut self.cache);
             let titulo = match &f.destino {
@@ -1578,6 +1621,7 @@ impl Janela {
         consulta: &dyn Consulta,
         comandos: &mut dyn Comandos,
     ) {
+        self.reler_o_que_mudou(ctx);
         // Clicar num lote (na área Lotes ou numa aba) faz dele o lote atual.
         if let Some(r) = &self.centro.selecao.foco
             && r.tipo == Tipo::Lote
@@ -1651,6 +1695,7 @@ impl Janela {
                 }
                 Pedido::Caixa(p) => self.caixa_pedido(p),
                 Pedido::Controle(p) => self.controle_pedido(p),
+                Pedido::Ligacao(p) => self.ligacao(ctx, p),
                 Pedido::Alterar(pedido) => self.alterar(pedido),
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
                 Pedido::DescartarAlteracao(id) => self.descartar(&id),
@@ -1685,6 +1730,111 @@ impl Janela {
                 | Pedido::Avancar => {}
             }
         }
+    }
+
+    /// Um clique numa ligação do registro.
+    fn ligacao(&mut self, ctx: &Context, pedido: PedidoDeLigacao) {
+        match pedido {
+            PedidoDeLigacao::Registro {
+                movimento,
+                flutuante,
+            } => {
+                let Some(banco) = self.ferramentas.as_ref().map(|f| f.banco.clone()) else {
+                    self.controle.mensagem = Some((
+                        "Sem inventário ligado: não há registro para abrir.".to_owned(),
+                        true,
+                    ));
+                    return;
+                };
+                match ligacoes_do_registro::registro_do_movimento(&banco, &movimento) {
+                    Ok(Some(registro)) => {
+                        crate::navegacao::pedir_abrir(
+                            ctx,
+                            &mut self.pedidos,
+                            Destino::Item(registro),
+                            flutuante,
+                        );
+                        ctx.request_repaint();
+                    }
+                    Ok(None) => {
+                        self.controle.mensagem = Some((
+                            "Este movimento não está mais no inventário.".to_owned(),
+                            true,
+                        ));
+                    }
+                    Err(e) => {
+                        self.controle.mensagem =
+                            Some((format!("Não deu para achar o registro: {e}"), true));
+                    }
+                }
+            }
+            PedidoDeLigacao::Ocorrencia {
+                ocorrencia,
+                flutuante,
+            } => {
+                if let Err(e) = self.controle.navegador.ir_para(ocorrencia.competencia) {
+                    self.controle.mensagem = Some((e, true));
+                }
+                self.controle.selecionada = Some(ocorrencia);
+                crate::navegacao::pedir_abrir(
+                    ctx,
+                    &mut self.pedidos,
+                    ligacoes_do_registro::destino_do_controle(),
+                    flutuante,
+                );
+                ctx.request_repaint();
+            }
+            PedidoDeLigacao::Regra { regra, flutuante } => {
+                self.regras.abrir(&regra);
+                crate::navegacao::pedir_abrir(
+                    ctx,
+                    &mut self.pedidos,
+                    ligacoes_do_registro::destino_das_regras(),
+                    flutuante,
+                );
+                ctx.request_repaint();
+            }
+        }
+    }
+
+    /// As ligações da página de um registro (só no inventário real, com planejamento ou
+    /// regras ligados). Guardadas por [`VALIDADE_DAS_LIGACOES`]; um banco que muda por fora
+    /// as descarta.
+    fn ligacoes_do_registro(
+        &mut self,
+        consulta: &dyn Consulta,
+        alvo: &Ref,
+    ) -> Option<LigacoesDoRegistro> {
+        if !ligacoes_do_registro::se_aplica(alvo) {
+            return None;
+        }
+        if let Some((quando, l)) = self.ligacoes_dos_registros.get(alvo)
+            && quando.elapsed() < VALIDADE_DAS_LIGACOES
+        {
+            return l.clone();
+        }
+        let banco = self.ferramentas.as_ref().map(|f| f.banco.clone())?;
+        let externo = Leitor::novo(consulta, &mut self.cache)
+            .item(alvo)
+            .ok()
+            .and_then(|i| {
+                i.as_ref()
+                    .as_ref()
+                    .and_then(ligacoes_do_registro::id_externo_do_item)
+            });
+        let lidas = externo.and_then(|externo| {
+            let movimento = ligacoes_do_registro::movimento_do_registro(&banco, &externo)
+                .ok()
+                .flatten()?;
+            Some(ligacoes_do_registro::montar(
+                self.planejamento.as_ref().map(|p| p.0.as_ref()),
+                self.regras.fonte(),
+                &movimento,
+            ))
+        });
+        self.ligacoes_dos_registros
+            .insert(alvo.clone(), (std::time::Instant::now(), lidas.clone()));
+        lidas
     }
 
     /// Na casca, os pedidos de navegação vão para a fila dela.
@@ -3266,6 +3416,66 @@ fn ligar_o_salario(
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn clicar_numa_ocorrencia_do_registro_seleciona_e_abre_o_controle_mensal() {
+        use sbf_planejamento::{Competencia, IdOcorrencia};
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        let id = IdOcorrencia {
+            recorrente: "rec_salario".into(),
+            competencia: Competencia::nova(2026, 11).expect("competência"),
+            parcela: None,
+        };
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Ocorrencia {
+                ocorrencia: id.clone(),
+                flutuante: true,
+            },
+        );
+        assert_eq!(j.controle.selecionada, Some(id));
+        assert_eq!(
+            j.controle.navegador.ancora(),
+            Competencia::nova(2026, 11).expect("competência")
+        );
+        assert_eq!(
+            j.pedidos,
+            vec![Pedido::AbrirFlutuante(Destino::AreaFutura("controle"))]
+        );
+    }
+
+    #[test]
+    fn clicar_numa_regra_do_registro_abre_a_area_de_regras() {
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Regra {
+                regra: "pix-da-diarista".into(),
+                flutuante: false,
+            },
+        );
+        assert_eq!(
+            j.pedidos,
+            vec![Pedido::Abrir(Destino::AreaFutura(crate::regras_ui::ROTA))]
+        );
+    }
+
+    #[test]
+    fn abrir_o_registro_sem_inventario_avisa_em_vez_de_falhar() {
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Registro {
+                movimento: "pluggy:txn_a".into(),
+                flutuante: false,
+            },
+        );
+        assert!(j.pedidos.is_empty());
+        assert!(matches!(&j.controle.mensagem, Some((_, true))));
+    }
 
     #[test]
     fn filtro_em_palavras() {

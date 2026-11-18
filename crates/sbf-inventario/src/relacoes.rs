@@ -228,6 +228,23 @@ fn primeiro_texto(
     Ok(lidas.pop().flatten())
 }
 
+/// O registro do inventário cujo `external_ref` é `externo` (`pluggy:txn_…`): é por aqui que
+/// um movimento do planejamento abre a página do registro. `None` quando não existe.
+pub fn registro_pelo_id_externo(
+    conn: &rusqlite::Connection,
+    externo: &str,
+) -> ResultadoDeConsulta<Option<Ref>> {
+    let mut linhas = consultar(
+        conn,
+        "SELECT id FROM registro WHERE external_ref = ? ORDER BY id LIMIT 1",
+        &[texto(externo)],
+        |l| l.get::<_, i64>(0),
+    )?;
+    Ok(linhas
+        .pop()
+        .map(|id| Ref::nova(Tipo::Registro, id.to_string())))
+}
+
 /// O nome de um item para link, trilha e título. `None` quando o item não existe.
 pub fn rotulo_do_item(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Option<String>> {
     let chave = alvo.chave.as_str();

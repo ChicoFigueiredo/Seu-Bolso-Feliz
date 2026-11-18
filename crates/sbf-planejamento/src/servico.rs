@@ -919,6 +919,14 @@ impl Planejamento for PlanejamentoSqlite {
         extrato::conciliacoes_da_ocorrencia(self, ocorrencia)
     }
 
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<crate::Conciliacao>> {
+        Ok(banco::ler_conciliacoes(self.banco.conexao(), None)?
+            .into_values()
+            .flatten()
+            .filter(|c| c.movimento == movimento)
+            .collect())
+    }
+
     fn baixas_pelo_contracheque(
         &self,
         competencia: Competencia,
