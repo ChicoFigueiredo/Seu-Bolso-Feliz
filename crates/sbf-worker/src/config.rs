@@ -71,6 +71,8 @@ pub struct Config {
     pub reconciliar_minutos: u64,
     /// Minutos entre as coletas de nuvem (se a coleta estiver ligada em Opções › Nuvens).
     pub nuvem_minutos: u64,
+    /// Minutos entre as coletas do Telegram (conversas seguidas, `telegram.json`); `0` desliga.
+    pub telegram_minutos: u64,
     /// A triagem contínua.
     pub triagem: ConfigDaTriagem,
     /// Diferença do fuso local para o UTC, em horas (Brasil: -3).
@@ -83,6 +85,7 @@ impl Default for Config {
             pastas: Vec::new(),
             reconciliar_minutos: 30,
             nuvem_minutos: 60,
+            telegram_minutos: 15,
             triagem: ConfigDaTriagem::default(),
             fuso_horas: -3,
         }

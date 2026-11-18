@@ -11,8 +11,9 @@ use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
-    Analista, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador, ResumoDaNuvem,
-    ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDosPontos, Triador, Worker,
+    Analista, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram, Dados, Indexador,
+    ResumoDaNuvem, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDoTelegram,
+    ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -428,4 +429,56 @@ fn indice_sem_modelo_baixado_nao_e_falha() {
     w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
     assert_eq!(i.get(), 1);
     assert_eq!(w.estado.falhas, 0);
+}
+
+struct TelegramFalso(Rc<Cell<u32>>);
+impl ColetorDeTelegram for TelegramFalso {
+    fn coletar(&mut self, _: &AtomicBool) -> Result<ResumoDoTelegram, Falha> {
+        self.0.set(self.0.get() + 1);
+        Ok(ResumoDoTelegram {
+            conversas: 2,
+            novos: 4,
+        })
+    }
+}
+
+#[test]
+fn telegram_coleta_no_intervalo_do_worker_json_e_registra_sem_conteudo() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let cfg = Config {
+        telegram_minutos: 15,
+        ..Config::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), cfg, None, None)
+        .unwrap()
+        .com_telegram(Box::new(TelegramFalso(n.clone())));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "a primeira coleta é logo");
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().origem, "telegram");
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().novos, 4);
+    w.passo(t0 + 14 * 60, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "antes do intervalo");
+    w.passo(t0 + 15 * 60 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("telegram conversas=2 novos=4"), "{log}");
+}
+
+#[test]
+fn telegram_minutos_tem_padrao_15_e_zero_desliga() {
+    assert_eq!(Config::default().telegram_minutos, 15);
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let cfg = Config {
+        telegram_minutos: 0,
+        ..Config::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), cfg, None, None)
+        .unwrap()
+        .com_telegram(Box::new(TelegramFalso(n.clone())));
+    w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
+    assert_eq!(n.get(), 0);
 }
