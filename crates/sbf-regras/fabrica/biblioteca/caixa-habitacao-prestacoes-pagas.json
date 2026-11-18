@@ -1,0 +1,156 @@
+{
+  "regra": "caixa-habitacao-prestacoes-pagas",
+  "nome": "CAIXA Habitação · Prestações pagas",
+  "motivo": "regra de fábrica: lê a lista mensal de prestações pagas (script) e soma o total",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "prestacoes-pagas-caixa-habitacao",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "prestacao paga"
+        }
+      ],
+      "algum": [
+        {
+          "contem": "janeiro"
+        },
+        {
+          "contem": "fevereiro"
+        },
+        {
+          "contem": "marco"
+        },
+        {
+          "contem": "abril"
+        },
+        {
+          "contem": "maio"
+        },
+        {
+          "contem": "junho"
+        },
+        {
+          "contem": "julho"
+        },
+        {
+          "contem": "agosto"
+        },
+        {
+          "contem": "setembro"
+        },
+        {
+          "contem": "outubro"
+        },
+        {
+          "contem": "novembro"
+        },
+        {
+          "contem": "dezembro"
+        }
+      ]
+    },
+    "extrair": {
+      "contrato": {
+        "regex": "(?i)contrato[^\\d\\n]{0,20}(?:\\n[^\\d\\n]{0,10})?(\\d[\\d.\\-/]{5,24}\\d)",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": [
+      "total_centavos"
+    ],
+    "script_le_texto": true,
+    "propor": []
+  },
+  "exemplos": [
+    {
+      "nome": "lista de janeiro a março",
+      "mime": "image/png",
+      "texto": "Prestações pagas\nContrato 000000000000-0\n2026\nJaneiro\nPrestação paga R$ 1.500,00 10/01\nFevereiro\nPrestação paga R$ 1.500,00 10/02\nMarço\nPrestação paga R$ 1.512,34 10/03\nAbril\nPrestação a vencer\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "prestacoes-pagas-caixa-habitacao",
+        "campos": {
+          "mes_01_centavos": {
+            "tipo": "centavos",
+            "valor": 150000
+          },
+          "mes_01_pago_em": {
+            "tipo": "texto",
+            "valor": "10/01"
+          },
+          "mes_02_centavos": {
+            "tipo": "centavos",
+            "valor": 150000
+          },
+          "mes_03_centavos": {
+            "tipo": "centavos",
+            "valor": 151234
+          },
+          "total_centavos": {
+            "tipo": "centavos",
+            "valor": 451234
+          },
+          "meses_pagos": {
+            "tipo": "inteiro",
+            "valor": 3
+          },
+          "ano": {
+            "tipo": "inteiro",
+            "valor": 2026
+          },
+          "contrato": {
+            "tipo": "texto",
+            "valor": "000000000000-0"
+          }
+        }
+      }
+    },
+    {
+      "nome": "meses na mesma linha e valor na linha de baixo",
+      "mime": "image/png",
+      "texto": "Prestações pagas\nSetembro Prestação paga R$ 1.000,00 08/09\nOutubro Prestação paga R$ 1.000,00 09/10\nNovembro\nPrestação paga\nR$ 1.020,50 10/11\nDezembro\nPrestação a vencer\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "prestacoes-pagas-caixa-habitacao",
+        "campos": {
+          "mes_09_centavos": {
+            "tipo": "centavos",
+            "valor": 100000
+          },
+          "mes_10_centavos": {
+            "tipo": "centavos",
+            "valor": 100000
+          },
+          "mes_11_centavos": {
+            "tipo": "centavos",
+            "valor": 102050
+          },
+          "mes_11_pago_em": {
+            "tipo": "texto",
+            "valor": "10/11"
+          },
+          "total_centavos": {
+            "tipo": "centavos",
+            "valor": 302050
+          },
+          "meses_pagos": {
+            "tipo": "inteiro",
+            "valor": 3
+          }
+        }
+      }
+    },
+    {
+      "nome": "o comprovante de uma prestação não é a lista",
+      "texto": "CAIXA Habitação\nComprovante de pagamento\nPagamento de prestação\nNº do contrato 000000000000-0\nData de vencimento 10/11/2026\nData de pagamento 09/11/2026\nValor da prestação R$ 1.500,00\nValor pago R$ 1.512,34\nValor devido R$ 1.500,00\nAmortização R$ 700,00\nJuros R$ 650,00\nTaxas R$ 150,00\nEncargo líquido R$ 1.500,00\nValor da diferença R$ 12,34\nCorreção monetária R$ 0,00\nSaldo devedor R$ 150.000,00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

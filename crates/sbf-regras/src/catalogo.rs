@@ -1594,8 +1594,8 @@ impl Catalogo {
             }
         }
         for (regra, nome, entrada, esperado) in fabrica::exemplos_de_fabrica() {
-            if !self.exemplos(regra)?.iter().any(|e| e.nome == nome) {
-                self.salvar_exemplo(regra, nome, &entrada, esperado)?;
+            if !self.exemplos(&regra)?.iter().any(|e| e.nome == nome) {
+                self.salvar_exemplo(&regra, &nome, &entrada, esperado)?;
             }
         }
         Ok(())

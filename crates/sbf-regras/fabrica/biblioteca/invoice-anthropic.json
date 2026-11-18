@@ -1,0 +1,91 @@
+{
+  "regra": "invoice-anthropic",
+  "nome": "Invoice · Anthropic",
+  "motivo": "regra de fábrica: receipt ou invoice da Anthropic em dólar; guarda a moeda e o valor em USD (script)",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "invoice-anthropic",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "anthropic"
+        }
+      ],
+      "algum": [
+        {
+          "contem": "receipt"
+        },
+        {
+          "contem": "invoice"
+        }
+      ]
+    },
+    "extrair": {},
+    "obrigatorios": [
+      "valor_usd_centavos"
+    ],
+    "script_le_texto": true,
+    "propor": []
+  },
+  "exemplos": [
+    {
+      "nome": "receipt com amount paid",
+      "texto": "Anthropic, PBC\nReceipt\nReceipt number 0000-0000-0000\nDate paid November 12, 2026\nBill to Fulano de Tal\nClaude Max plan $100.00\nSubtotal $100.00\nTotal $100.00\nAmount paid $100.00\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "invoice-anthropic",
+        "campos": {
+          "valor_usd_centavos": {
+            "tipo": "centavos",
+            "valor": 10000
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "usd"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-12"
+          },
+          "numero_do_documento": {
+            "tipo": "texto",
+            "valor": "0000-0000-0000"
+          }
+        }
+      }
+    },
+    {
+      "nome": "invoice com total e milhar",
+      "texto": "Anthropic, PBC\nInvoice\nInvoice number ABCD1234-0001\nDate paid Dec 3, 2026\nTotal\n$1,234.56\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "invoice-anthropic",
+        "campos": {
+          "valor_usd_centavos": {
+            "tipo": "centavos",
+            "valor": 123456
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "usd"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-03"
+          }
+        }
+      }
+    },
+    {
+      "nome": "receipt de outra empresa",
+      "texto": "Example Corp\nReceipt\nAmount paid $5.00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}
