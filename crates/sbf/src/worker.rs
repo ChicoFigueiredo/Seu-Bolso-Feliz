@@ -276,12 +276,16 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
     let mensageiros = Box::new(MensageirosReais {
         dados: dados.clone(),
     });
+    let telegram = Box::new(crate::telegram::TelegramReal {
+        dados: dados.clone(),
+    });
     let dados_dos_roteiros = dados.clone();
     let dados_do_rag = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
         Ok(w) => {
             let mut w = w
                 .com_mensageiros(mensageiros)
+                .com_telegram(telegram)
                 .com_roteiros(Box::new(crate::roteiros::RoteirosReais::novo(
                     dados_dos_roteiros,
                 )))

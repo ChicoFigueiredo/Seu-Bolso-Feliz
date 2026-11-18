@@ -37,6 +37,7 @@ sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-coleta = { path = "../sbf-coleta" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
+sbf-telegram = { path = "../sbf-telegram" }
 sbf-roteiros = { path = "../sbf-roteiros" }
 sbf-indice = { path = "../sbf-indice" }
 sbf-pontos = { path = "../sbf-pontos" }
