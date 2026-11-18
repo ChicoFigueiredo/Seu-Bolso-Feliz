@@ -27,6 +27,7 @@ pub struct UltimaColeta {
     /// Quando (segundos unix).
     pub quando: u64,
     /// De onde: `pastas`, `nuvem`, `gmail` ou `mensageiros`.
+    /// De onde: `pastas`, `nuvem`, `mensageiros` ou `telegram`.
     pub origem: String,
     /// Quantas origens novas.
     pub novos: u64,

@@ -58,7 +58,7 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         rotulo: "Conexões",
         icone: "hub",
         fatia: 4,
-        motivo: "Chega na fatia 4, com conexões, alertas e canais",
+        motivo: "O Telegram, a Pluggy e as pastas do worker só aparecem no inventário de verdade",
     },
     AreaFutura {
         id: "alertas",

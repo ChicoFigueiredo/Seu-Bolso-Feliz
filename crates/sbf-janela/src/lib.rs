@@ -19,6 +19,7 @@ pub mod chaves_ia;
 pub mod componentes;
 pub mod composta;
 pub mod compromisso;
+pub mod conexoes_ui;
 pub mod contas_ui;
 pub mod controle;
 pub mod controle_ui;

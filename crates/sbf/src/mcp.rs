@@ -141,6 +141,11 @@ pub fn rodar(args: &[String]) -> ExitCode {
     } else {
         nucleo
     };
+    // O Telegram da conta do usuário (só leitura): conversas, seguir e coletar. A sessão e as
+    // credenciais ficam no chaveiro; nada é aberto até a primeira chamada.
+    let nucleo = nucleo.com_telegram(std::sync::Arc::new(crate::telegram::PonteReal {
+        cofre: Path::new(pasta).to_path_buf(),
+    }));
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
