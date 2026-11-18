@@ -5444,6 +5444,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-ocr"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rusqlite",
+ "sbf-inventario",
+ "sbf-pdf",
+ "sbf-processo",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "sbf-pdf"
 version = "0.1.0"
 dependencies = [
