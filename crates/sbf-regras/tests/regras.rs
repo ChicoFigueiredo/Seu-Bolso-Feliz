@@ -1819,3 +1819,99 @@ fn d12_vale_para_o_mcp_exemplo_falhando_bloqueia_a_ativacao() {
     );
     assert_eq!(c.versao("r", v.versao).unwrap().estado, Estado::Rascunho);
 }
+
+// ---------------------------------------------------------------- texto de OCR
+
+/// O que o tesseract devolve de um comprovante em tela escura: espaços sobrando, `RS` no
+/// lugar de `R$`, `O` no lugar de `0` e `l` no lugar de `1` dentro dos números.
+const COMPROVANTE_DE_OCR: &str = "Banco  Exemplo\nComprovante   PIX\n\
+Favorecido:  Fulano de Tal\nValor:  RS 1.234,5O\nData:  O6/lO/2O26\n";
+
+fn def_do_ocr(texto_de_ocr: bool) -> Definicao {
+    let mut d = def_comprovante();
+    d.extrair.remove("autenticacao");
+    d.texto_de_ocr = texto_de_ocr;
+    d
+}
+
+fn leitura_do_ocr(texto_de_ocr: bool) -> sbf_regras::Leitura {
+    let pasta = tempfile::tempdir().unwrap();
+    let mut c = Catalogo::abrir(&pasta.path().join("regras.sqlite")).unwrap();
+    ativa(
+        &mut c,
+        nova("comprovante-ocr", def_do_ocr(texto_de_ocr)),
+        None,
+    );
+    Motor::das_vigentes(&c, None)
+        .unwrap()
+        .ler(&entrada("img-1", COMPROVANTE_DE_OCR))
+}
+
+#[test]
+fn regra_sem_texto_de_ocr_nao_le_o_texto_ruidoso() {
+    let l = leitura_do_ocr(false);
+    // `Valor: RS 1.234,5O` não casa `R\$` e a data com `O` não é data: a regra reconhece
+    // (a detecção é por `contem`), mas sem os campos e com o obrigatório faltando.
+    let r = reconhecido(&l);
+    assert!(!r.campos.contains_key("valor_centavos"));
+    assert!(!r.campos.contains_key("data"));
+    assert!(r.revisar);
+}
+
+#[test]
+fn regra_com_texto_de_ocr_le_valor_e_data_do_texto_ruidoso() {
+    let l = leitura_do_ocr(true);
+    let r = reconhecido(&l);
+    assert_eq!(r.campos["valor_centavos"].valor, Valor::Centavos(123_450));
+    assert_eq!(r.campos["data"].valor, Valor::Data("2026-10-06".into()));
+    assert!(!r.revisar);
+}
+
+#[test]
+fn texto_de_ocr_falso_nao_muda_o_checksum_das_regras_que_ja_existem() {
+    let d = def_comprovante();
+    let json = serde_json::to_string(&d).unwrap();
+    assert!(!json.contains("texto_de_ocr"), "{json}");
+    let lido: Definicao = serde_json::from_str(&json).unwrap();
+    assert!(!lido.texto_de_ocr);
+    let com: Definicao = serde_json::from_str(
+        r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"x"}]},"texto_de_ocr":true}"#,
+    )
+    .unwrap();
+    assert!(com.texto_de_ocr);
+}
+
+#[test]
+fn normalizacao_de_ocr_junta_espacos_e_conserta_so_dentro_de_numeros() {
+    use sbf_regras::definicao::normalizar_ocr;
+    // Espaços juntos; quebras de linha ficam.
+    assert_eq!(normalizar_ocr("a   b \t c  \nd"), "a b c\nd");
+    // O -> 0 e l -> 1 só em tokens que são número.
+    assert_eq!(normalizar_ocr("R$ l.234,5O"), "R$ 1.234,50");
+    assert_eq!(normalizar_ocr("12/ll/2O26"), "12/11/2026");
+    assert_eq!(normalizar_ocr("10:3O"), "10:30");
+    // Palavras ficam como estão, mesmo com O e l, e também as que misturam letras e dígitos.
+    assert_eq!(
+        normalizar_ocr("Olá Lola Pol1 BOL2 ol"),
+        "Olá Lola Pol1 BOL2 ol"
+    );
+    // `l` ou `O` sem nenhum dígito de verdade não é número.
+    assert_eq!(normalizar_ocr("OO ll l O"), "OO ll l O");
+    // R$, RS e R§ (esta só antes de valor com vírgula e dois decimais).
+    assert_eq!(normalizar_ocr("RS 1.234,56"), "R$ 1.234,56");
+    assert_eq!(normalizar_ocr("R§ 12,OO"), "R$ 12,00");
+    assert_eq!(normalizar_ocr("R$1.234,56"), "R$1.234,56");
+    assert_eq!(normalizar_ocr("RS1.234,56"), "R$1.234,56");
+    // `RS` de Rio Grande do Sul não vira dinheiro.
+    assert_eq!(
+        normalizar_ocr("Porto Alegre RS 90000-000"),
+        "Porto Alegre RS 90000-000"
+    );
+}
+
+#[test]
+fn normalizacao_de_ocr_e_idempotente() {
+    use sbf_regras::definicao::normalizar_ocr;
+    let uma = normalizar_ocr(COMPROVANTE_DE_OCR);
+    assert_eq!(normalizar_ocr(&uma), uma);
+}
