@@ -84,7 +84,8 @@
           "compromisso": "Prestação Casa"
         }
       }
-    ]
+    ],
+    "texto_de_ocr": true
   },
   "exemplos": [
     {
