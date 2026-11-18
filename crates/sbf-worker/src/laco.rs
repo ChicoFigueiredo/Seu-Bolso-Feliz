@@ -8,12 +8,15 @@
 //! 3. **Nuvem**: se a coleta está ligada em Opções › Nuvens, no intervalo configurado;
 //! 4. **Mensageiros**: se ligados em Opções › Mensageiros, WhatsApp e Telegram (só as conversas
 //!    que o usuário incluiu), no intervalo de `mensageiros.json`;
-//! 5. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
+//! 5. **Gmail**: a cada `gmail_minutos` (padrão 30; `0` desliga), se o coletor foi ligado (o
+//!    `sbf` só liga quando as credenciais OAuth estão no ambiente): anexos para
+//!    `<cofre>/entrada/gmail/` e reconhecimento com as regras;
+//! 6. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
 //!    que já passaram do intervalo (spec 10, C1);
-//! 6. **Triagem**: um pequeno lote do agente, no horário configurado.
-//! 7. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
+//! 7. **Triagem**: um pequeno lote do agente, no horário configurado.
+//! 8. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
 //!    só se o modelo já foi baixado pela janela (o worker nunca baixa modelo);
-//! 8. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
+//! 9. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -142,6 +145,24 @@ pub trait ColetorDeMensageiros {
     fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDeMensageiros, Falha>;
 }
 
+/// O que uma coleta do Gmail fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoGmail {
+    /// Mensagens lidas.
+    pub mensagens: usize,
+    /// Conteúdos novos no inventário.
+    pub novos: usize,
+}
+
+/// Uma coleta do Gmail (a real é `sbf_gmail::coletar`, montada no `sbf`).
+pub trait ColetorDeGmail {
+    /// Coleta as mensagens novas que casam com a consulta padrão.
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoGmail, Falha>;
+}
+
 /// O que uma coleta de nuvem fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDaNuvem {
@@ -249,6 +270,7 @@ pub struct Worker {
     config: Config,
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
     mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
+    gmail: Option<Box<dyn ColetorDeGmail>>,
     roteiros: Option<Box<dyn ColetorDeRoteiros>>,
     triador: Option<Box<dyn Triador>>,
     indexador: Option<Box<dyn Indexador>>,
@@ -262,6 +284,7 @@ pub struct Worker {
     proxima_reconciliacao: u64,
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
+    proxima_gmail: u64,
     proxima_roteiros: u64,
     proxima_triagem: u64,
     proximo_indice: u64,
@@ -318,6 +341,7 @@ impl Worker {
             config,
             nuvem,
             mensageiros: None,
+            gmail: None,
             roteiros: None,
             triador,
             indexador: None,
@@ -331,6 +355,7 @@ impl Worker {
             proxima_reconciliacao: agora_,
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
+            proxima_gmail: agora_,
             proxima_roteiros: agora_,
             proxima_triagem: agora_,
             proximo_indice: agora_,
@@ -348,6 +373,13 @@ impl Worker {
     #[must_use]
     pub fn com_mensageiros(mut self, coletor: Box<dyn ColetorDeMensageiros>) -> Self {
         self.mensageiros = Some(coletor);
+        self
+    }
+
+    /// Liga a coleta do Gmail (sem mudar a assinatura de [`Worker::novo`]).
+    #[must_use]
+    pub fn com_gmail(mut self, coletor: Box<dyn ColetorDeGmail>) -> Self {
+        self.gmail = Some(coletor);
         self
     }
 
@@ -531,6 +563,14 @@ impl Worker {
             self.proxima_mensageiros = agora_ + minutos.max(1) * 60;
             self.passo_dos_mensageiros(cancelar, agora_);
         }
+        if self.config.gmail_minutos > 0
+            && self.gmail.is_some()
+            && agora_ >= self.proxima_gmail
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
+            self.passo_do_gmail(cancelar, agora_);
+        }
         if self.dados.pasta.join("roteiros.sqlite").exists()
             && agora_ >= self.proxima_roteiros
             && !cancelar.load(Ordering::Relaxed)
@@ -629,6 +669,23 @@ impl Worker {
             Err(f) => self.falhou("mensageiros", f),
         }
         self.mensageiros = Some(m);
+    }
+
+    fn passo_do_gmail(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut g) = self.gmail.take() else {
+            return;
+        };
+        match g.coletar(cancelar) {
+            Ok(r) => {
+                let _ = self.registro.registrar(&Evento::Gmail {
+                    mensagens: r.mensagens,
+                    novos: r.novos,
+                });
+                self.coletou("gmail", r.novos as u64, agora_);
+            }
+            Err(f) => self.falhou("gmail", f),
+        }
+        self.gmail = Some(g);
     }
 
     fn passo_dos_roteiros(&mut self, cancelar: &AtomicBool, agora_: u64) {
