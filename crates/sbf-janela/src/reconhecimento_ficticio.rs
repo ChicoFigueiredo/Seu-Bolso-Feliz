@@ -214,6 +214,8 @@ fn sugestoes_do_pix(rec: &sbf_regras::Reconhecimento) -> Vec<Sugestao> {
             conta_do_extrato: "Conta Corrente Exemplo".to_owned(),
             descricao: "PIX ENVIADO FULANO DE TAL".to_owned(),
             tipo: "debito".to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         },
         alvo: Some(ocorrencia_do_mes(
             "rec_energia",

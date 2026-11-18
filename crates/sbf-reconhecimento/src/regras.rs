@@ -130,6 +130,8 @@ pub fn entrada_do_registro(m: &MovimentoDoExtrato) -> Entrada {
             valor_centavos: Some(m.valor.0),
             data: Some(m.data.to_string()),
             descricao: (!m.descricao.trim().is_empty()).then(|| m.descricao.clone()),
+            contraparte: m.contraparte.clone().filter(|c| !c.trim().is_empty()),
+            contraparte_doc: m.contraparte_doc.clone().filter(|c| !c.trim().is_empty()),
         },
         momento: Some(m.data.to_string()),
     }

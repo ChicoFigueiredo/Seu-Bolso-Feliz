@@ -45,7 +45,8 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
         }
     };
     let sql = format!(
-        "SELECT external_ref, tipo, data, valor_centavos, {conta}, {descricao}, {bruto}, {fornecedor}
+        "SELECT external_ref, tipo, data, valor_centavos, {conta}, {descricao}, {bruto}, {fornecedor},
+                {contraparte}, {contraparte_doc}
          FROM registro
          WHERE external_ref IS NOT NULL AND valor_centavos <> 0 AND data >= ?1 AND data <= ?2
          ORDER BY data, external_ref",
@@ -53,6 +54,8 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
         descricao = opcional("descricao_original"),
         bruto = opcional("supplier_name_raw"),
         fornecedor = opcional("fornecedor_normalizado"),
+        contraparte = opcional("contraparte"),
+        contraparte_doc = opcional("contraparte_doc"),
     );
     let mut st = conn.prepare(&sql).map_err(erro)?;
     let linhas = st
@@ -66,13 +69,25 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
                 r.get::<_, Option<String>>(5)?,
                 r.get::<_, Option<String>>(6)?,
                 r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
             ))
         })
         .map_err(erro)?;
     let mut saida = Vec::new();
     for l in linhas {
-        let (movimento, tipo, data, valor, conta, descricao, bruto, fornecedor) =
-            l.map_err(erro)?;
+        let (
+            movimento,
+            tipo,
+            data,
+            valor,
+            conta,
+            descricao,
+            bruto,
+            fornecedor,
+            contraparte,
+            contraparte_doc,
+        ) = l.map_err(erro)?;
         let Some(data) = Data::de_iso(&data) else {
             continue;
         };
@@ -87,6 +102,8 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
                     .or_else(|| fornecedor.clone())
                     .unwrap_or_default(),
                 tipo,
+                contraparte: contraparte.filter(|c| !c.trim().is_empty()),
+                contraparte_doc: contraparte_doc.filter(|c| !c.trim().is_empty()),
             },
             fornecedor,
         });
@@ -247,6 +264,44 @@ mod testes {
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].descricao, "FORNECEDOR");
         assert_eq!(m[0].conta_do_extrato, "");
+    }
+
+    #[test]
+    fn le_a_contraparte_e_o_documento_do_favorecido_quando_o_inventario_tem() {
+        let c = inventario_ficticio();
+        c.execute_batch(
+            "ALTER TABLE registro ADD COLUMN contraparte TEXT;
+             ALTER TABLE registro ADD COLUMN contraparte_doc TEXT;",
+        )
+        .expect("alter");
+        registro_completo(
+            &c,
+            "pluggy:txn_a",
+            "debito",
+            "2026-11-05",
+            -15_000,
+            Some("BANCO FICTICIO · 0001"),
+            "PIX ENVIADO",
+        );
+        registro_completo(
+            &c,
+            "pluggy:txn_b",
+            "debito",
+            "2026-11-06",
+            -1_000,
+            None,
+            "COMPRA",
+        );
+        c.execute(
+            "UPDATE registro SET contraparte = 'Fulana de Tal', contraparte_doc = '000.000.000-00'
+             WHERE external_ref = 'pluggy:txn_a'",
+            [],
+        )
+        .expect("update");
+        let m = movimentos_entre(&c, d(1), d(30)).expect("ler");
+        assert_eq!(m[0].contraparte.as_deref(), Some("Fulana de Tal"));
+        assert_eq!(m[0].contraparte_doc.as_deref(), Some("000.000.000-00"));
+        assert_eq!((&m[1].contraparte, &m[1].contraparte_doc), (&None, &None));
     }
 
     #[test]

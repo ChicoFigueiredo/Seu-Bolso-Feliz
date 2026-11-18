@@ -335,8 +335,9 @@ impl Motor {
                     .push(format!("campo obrigatório ausente: `{nome}`"));
             }
         }
+        let para_propor = campos_para_propor(&rec.campos, entrada);
         for modelo in &v.definicao.propor {
-            match modelo.gerar(&rec.campos) {
+            match modelo.gerar(&para_propor) {
                 Ok(p) => rec.propostas.push(p),
                 Err(m) => rec.motivos.push(m),
             }
@@ -350,6 +351,49 @@ impl Motor {
         );
         Ok(Some(rec))
     }
+}
+
+/// Os campos com que as propostas são geradas: os extraídos e, para o que falta, o que a
+/// origem já sabia (`valor_centavos` em módulo, `data` e `conta`). Um registro do banco traz
+/// valor, data e conta nas dicas; a regra por favorecido não precisa extraí-los. Não muda os
+/// campos do reconhecimento.
+fn campos_para_propor(
+    campos: &BTreeMap<String, Campo>,
+    entrada: &Entrada,
+) -> BTreeMap<String, Campo> {
+    let mut saida = campos.clone();
+    let da_dica = |nome: &str, valor: Valor| Campo {
+        valor,
+        de_onde: DeOnde::Dica {
+            nome: nome.to_owned(),
+        },
+    };
+    if let Some(c) = entrada.dicas.valor_centavos
+        && !saida.contains_key("valor_centavos")
+    {
+        saida.insert(
+            "valor_centavos".to_owned(),
+            da_dica("valor_centavos", Valor::Centavos(c.abs())),
+        );
+    }
+    if let Some(d) = entrada
+        .dicas
+        .data
+        .as_deref()
+        .and_then(crate::definicao::parse_data)
+        && !saida.contains_key("data")
+    {
+        saida.insert("data".to_owned(), da_dica("data", Valor::Data(d)));
+    }
+    if let Some(c) = entrada.dicas.conta.as_deref()
+        && !saida.contains_key("conta")
+    {
+        saida.insert(
+            "conta".to_owned(),
+            da_dica("conta", Valor::Texto(c.to_owned())),
+        );
+    }
+    saida
 }
 
 /// A competência `AAAA-MM`: o campo `competencia`, senão o mês de `data`, de `dicas.data`

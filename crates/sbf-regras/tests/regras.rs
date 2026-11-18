@@ -1434,3 +1434,305 @@ fn erro_de_script_grava_so_a_categoria_nunca_o_texto_do_documento() {
     assert_eq!(motivos, vec![Some("execucao".to_owned())]);
     assert!(!motivos.iter().flatten().any(|m| m.contains(MARCADOR)));
 }
+
+// ---------------------------------------------------------------- favorecido de um Pix (D4, D13)
+
+const DOC_FICTICIO: &str = "000.000.000-00";
+
+fn registro_pix(id: &str, nome: Option<&str>, doc: Option<&str>) -> Entrada {
+    Entrada {
+        versao_do_esquema: 1,
+        id: id.to_owned(),
+        tipo: TipoDeEntrada::Registro,
+        origem: Origem {
+            canal: Canal::Pluggy,
+            id_externo: Some(id.to_owned()),
+        },
+        sha256: None,
+        mime: None,
+        nome: None,
+        texto: None,
+        dicas: Dicas {
+            conta: Some("Banco Exemplo 000000-1".to_owned()),
+            valor_centavos: Some(-15_000),
+            data: Some("2026-11-12".to_owned()),
+            descricao: Some("PIX ENVIADO".to_owned()),
+            contraparte: nome.map(str::to_owned),
+            contraparte_doc: doc.map(str::to_owned),
+        },
+        momento: Some("2026-11-12".to_owned()),
+    }
+}
+
+fn def_do_favorecido(condicao: Condicao) -> Definicao {
+    let mut d = Definicao::simples("pix-do-favorecido", "x");
+    d.aplica_a = vec![TipoDeEntrada::Registro];
+    d.detectar.todos = vec![condicao];
+    d
+}
+
+fn casa(def: &Definicao, e: &Entrada) -> bool {
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", def.clone()), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    matches!(motor.ler(e).decisao, Decisao::Reconhecido(_))
+}
+
+#[test]
+fn condicao_por_documento_ignora_a_pontuacao_dos_dois_lados() {
+    let formatada = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    let seca = def_do_favorecido(Condicao::ContraparteDoc(vec!["12345678909".into()]));
+    // A regra formatada casa o registro com e sem pontuação.
+    assert!(casa(
+        &formatada,
+        &registro_pix("pluggy:a", None, Some(DOC_FICTICIO))
+    ));
+    assert!(casa(
+        &formatada,
+        &registro_pix("pluggy:b", None, Some("00000000000"))
+    ));
+    // A regra só com dígitos casa o registro formatado.
+    assert!(casa(
+        &seca,
+        &registro_pix("pluggy:c", None, Some("123.456.789-09"))
+    ));
+    assert!(casa(
+        &seca,
+        &registro_pix("pluggy:d", None, Some("12345678909"))
+    ));
+    // Outro documento, ou nenhum, não casa.
+    assert!(!casa(
+        &seca,
+        &registro_pix("pluggy:e", None, Some("987.654.321-00"))
+    ));
+    assert!(!casa(
+        &seca,
+        &registro_pix("pluggy:f", Some("Fulana de Tal"), None)
+    ));
+}
+
+#[test]
+fn condicao_por_documento_casa_se_for_igual_a_algum_da_lista() {
+    let d = def_do_favorecido(Condicao::ContraparteDoc(vec![
+        "111.111.111-11".into(),
+        DOC_FICTICIO.into(),
+    ]));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:a", None, Some("00000000000"))
+    ));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:b", None, Some("11111111111"))
+    ));
+    assert!(!casa(
+        &d,
+        &registro_pix("pluggy:c", None, Some("22222222222"))
+    ));
+}
+
+#[test]
+fn condicao_por_nome_usa_regex_sobre_o_nome_normalizado() {
+    let d = def_do_favorecido(Condicao::Contraparte("^fulana de tal$".into()));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:a", Some("FULANA DE TAL"), None)
+    ));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:b", Some("  Fulana  de Tal "), None)
+    ));
+    let acento = def_do_favorecido(Condicao::Contraparte("antonia".into()));
+    assert!(casa(
+        &acento,
+        &registro_pix("pluggy:c", Some("Antônia Exemplo"), None)
+    ));
+    assert!(!casa(
+        &d,
+        &registro_pix("pluggy:d", Some("Fulano de Tal"), None)
+    ));
+    assert!(!casa(&d, &registro_pix("pluggy:e", None, None)));
+}
+
+#[test]
+fn as_condicoes_novas_entram_na_especificidade_e_na_validacao() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.detectar
+        .todos
+        .push(Condicao::Contraparte("fulana".into()));
+    d.detectar
+        .nenhum
+        .push(Condicao::Descricao("ESTORNO".into()));
+    assert_eq!(d.especificidade(), 3);
+    assert!(d.validar().is_ok());
+    // Lista vazia, documento sem 11 ou 14 dígitos e regex quebrado são recusados.
+    for ruim in [
+        Condicao::ContraparteDoc(Vec::new()),
+        Condicao::ContraparteDoc(vec!["123".into()]),
+        Condicao::ContraparteDoc(vec!["abc.def.ghi-jk".into()]),
+        Condicao::Contraparte("(fulana".into()),
+    ] {
+        assert!(def_do_favorecido(ruim).validar().is_err());
+    }
+    // O formato em JSON.
+    let j = r#"{"tipo_documental":"x","aplica_a":["registro"],
+        "detectar":{"todos":[{"contraparte_doc":["000.000.000-00"]},{"contraparte":"fulana"}]}}"#;
+    let lida: Definicao = serde_json::from_str(j).unwrap();
+    assert!(lida.validar().is_ok());
+}
+
+#[test]
+fn dicas_antigas_sem_contraparte_ainda_se_leem() {
+    let j = r#"{"conta":null,"valor_centavos":-100,"data":"2026-11-12","descricao":"PIX"}"#;
+    let d: Dicas = serde_json::from_str(j).unwrap();
+    assert_eq!((d.contraparte, d.contraparte_doc), (None, None));
+}
+
+#[test]
+fn favorecido_e_documento_saem_da_contraparte_com_origem_de_dica() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.extrair.insert(
+        "favorecido".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::Contraparte,
+        },
+    );
+    d.extrair.insert(
+        "favorecido_doc".into(),
+        Extracao {
+            regex: "([0-9.\\-/]+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::ContraparteDoc,
+        },
+    );
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let l = motor.ler(&registro_pix(
+        "pluggy:a",
+        Some("Fulana de Tal"),
+        Some(DOC_FICTICIO),
+    ));
+    let r = reconhecido(&l);
+    assert_eq!(
+        r.campos["favorecido"].valor,
+        Valor::Texto("Fulana de Tal".into())
+    );
+    assert_eq!(
+        r.campos["favorecido"].de_onde,
+        DeOnde::Dica {
+            nome: "contraparte".into()
+        }
+    );
+    assert_eq!(
+        r.campos["favorecido_doc"].de_onde,
+        DeOnde::Dica {
+            nome: "contraparte_doc".into()
+        }
+    );
+}
+
+#[test]
+fn o_documento_do_favorecido_nunca_e_gravado_na_execucao_nem_na_proposta() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.extrair.insert(
+        "favorecido".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::Contraparte,
+        },
+    );
+    d.extrair.insert(
+        "favorecido_doc".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::ContraparteDoc,
+        },
+    );
+    d.propor = vec![ModeloDeProposta::ConciliarOcorrencia {
+        janela_dias: 3,
+        compromisso: Some("Diarista".into()),
+    }];
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("regras.sqlite");
+    let mut c = Catalogo::abrir(&arquivo).unwrap();
+    ativa(&mut c, nova("r", d), None);
+    let motor = Motor::das_vigentes(&c, None).unwrap();
+    let e = registro_pix("pluggy:a", Some("Fulana de Tal"), Some(DOC_FICTICIO));
+    let l = motor.ler(&e);
+    c.registrar_execucao(&l).unwrap();
+    c.registrar_proposta(reconhecido(&l), &e.id).unwrap();
+
+    let p = &c.propostas(None).unwrap()[0];
+    assert!(p.conteudo.campos.contains_key("favorecido"));
+    assert!(
+        !p.conteudo.campos.contains_key("favorecido_doc"),
+        "o documento não fica na proposta"
+    );
+    drop(c);
+    let conn = rusqlite::Connection::open(&arquivo).unwrap();
+    for tabela in ["execucao", "proposta", "retorno"] {
+        let mut st = conn.prepare(&format!("SELECT * FROM {tabela}")).unwrap();
+        let n = st.column_count();
+        let mut linhas = st.query([]).unwrap();
+        while let Some(l) = linhas.next().unwrap() {
+            for i in 0..n {
+                if let Ok(t) = l.get::<_, String>(i) {
+                    assert!(!t.contains("000.000.000-00") && !t.contains("00000000000"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_proposta_de_um_registro_usa_valor_data_e_conta_da_origem() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.propor = vec![ModeloDeProposta::ConciliarOcorrencia {
+        janela_dias: 3,
+        compromisso: Some("Diarista".into()),
+    }];
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let l = motor.ler(&registro_pix("pluggy:a", None, Some(DOC_FICTICIO)));
+    let r = reconhecido(&l);
+    assert_eq!(
+        r.propostas,
+        vec![Proposta::ConciliarOcorrencia {
+            valor_centavos: 15_000,
+            data: "2026-11-12".into(),
+            janela_dias: 3,
+            compromisso: Some("Diarista".into()),
+        }]
+    );
+    // Os campos continuam só os extraídos: a dica não vira campo.
+    assert!(r.campos.is_empty());
+}
+
+#[test]
+fn a_chave_de_idempotencia_nao_depende_do_documento_nem_do_nome() {
+    let d = def_do_favorecido(Condicao::Descricao("PIX".into()));
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let a = motor.ler(&registro_pix("pluggy:a", Some("A"), Some(DOC_FICTICIO)));
+    let b = motor.ler(&registro_pix("pluggy:a", None, None));
+    assert_eq!(reconhecido(&a).chave, reconhecido(&b).chave);
+}

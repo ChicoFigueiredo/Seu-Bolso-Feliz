@@ -52,6 +52,8 @@ fn movimento(
         conta_do_extrato: conta.into(),
         descricao: descricao.into(),
         tipo: tipo.into(),
+        contraparte: None,
+        contraparte_doc: None,
     }
 }
 

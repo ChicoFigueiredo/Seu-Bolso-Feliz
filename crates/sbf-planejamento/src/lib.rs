@@ -425,6 +425,13 @@ pub struct MovimentoDoExtrato {
     pub descricao: String,
     /// O `tipo` do inventário (`credito`, `pagamento_fatura`, `transferencia_interna`…).
     pub tipo: String,
+    /// O nome do favorecido (ou de quem pagou) que o banco informa à parte da descrição.
+    /// Na CAIXA a descrição é só "PIX ENVIADO": o favorecido só aparece aqui.
+    #[serde(default)]
+    pub contraparte: Option<String>,
+    /// O CPF/CNPJ da contraparte, às vezes formatado. Dado pessoal: nunca vai a log.
+    #[serde(default)]
+    pub contraparte_doc: Option<String>,
 }
 
 /// Uma conciliação gravada da ocorrência, com o movimento do extrato quando ele ainda aparece

@@ -507,6 +507,8 @@ mod testes {
                 conta_do_extrato: "BANCO EXEMPLO · 000000-1".into(),
                 descricao: "SALARIO EMPRESA EXEMPLO".into(),
                 tipo: "credito".into(),
+                contraparte: None,
+                contraparte_doc: None,
             },
             bate_assinatura: true,
             mesma_conta,
