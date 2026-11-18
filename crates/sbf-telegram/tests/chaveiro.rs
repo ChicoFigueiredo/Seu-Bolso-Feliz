@@ -104,3 +104,35 @@ fn credenciais_ficam_no_chaveiro_para_o_worker_sem_env() {
     assert_eq!(do_chaveiro.api_id, 4242);
     assert_eq!(do_chaveiro.api_hash.as_str(), "hash-ficticio");
 }
+
+#[test]
+fn o_painel_sabe_se_ha_sessao_e_se_o_telegram_a_recusou() {
+    use sbf_telegram::estado::{ARQUIVO_DO_ESTADO, Estado};
+    use sbf_telegram::painel::{Painel, Situacao};
+
+    let dados = tempfile::tempdir().unwrap();
+    let pasta = tempfile::tempdir().unwrap();
+    let c = chaveiro(pasta.path());
+    assert_eq!(
+        Painel::ler(dados.path(), Some(&c)).situacao,
+        Situacao::PrecisaEntrar
+    );
+
+    sessao::guardar(&c, &sessao_com_chave()).unwrap();
+    assert_eq!(
+        Painel::ler(dados.path(), Some(&c)).situacao,
+        Situacao::Conectado
+    );
+
+    // A última coleta foi recusada: precisa entrar de novo, mesmo com a sessão guardada.
+    let estado = Estado {
+        ultimo_erro: Some(Erro::PrecisaEntrar.to_string()),
+        ..Estado::default()
+    };
+    estado
+        .salvar(&dados.path().join(ARQUIVO_DO_ESTADO))
+        .unwrap();
+    let p = Painel::ler(dados.path(), Some(&c));
+    assert_eq!(p.situacao, Situacao::PrecisaEntrar);
+    assert!(p.ultimo_erro.is_some());
+}

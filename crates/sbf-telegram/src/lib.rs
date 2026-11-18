@@ -9,6 +9,8 @@
 //! | [`coleta`] | o ciclo: baixa para `entrada/telegram/<conversa>/`, registra, reconhece |
 //! | [`sessao`] | a sessão MTProto, serializada e guardada no chaveiro |
 //! | [`credenciais`] | `TELEGRAM_API_ID` e `TELEGRAM_API_HASH` do ambiente ou do `.env` |
+//! | [`painel`] | o que a janela mostra, lido sem rede |
+//! | [`datas`] | `AAAA-MM-DD` para segundos unix |
 //! | [`cliente`] | a fonte real, sobre `grammers-client`, e o login |
 
 mod arquivos;
@@ -16,10 +18,12 @@ pub mod cliente;
 pub mod coleta;
 pub mod config;
 pub mod credenciais;
+pub mod datas;
 pub mod erro;
 pub mod estado;
 pub mod fonte;
 pub mod modelo;
+pub mod painel;
 pub mod sessao;
 
 pub use erro::{Erro, Resultado};
