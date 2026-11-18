@@ -1660,6 +1660,11 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
                         reais(*valor)
                     )
                 }
+                Excecao::QuantidadeSoDesteMes { quantidade } => {
+                    format!(
+                        "Ajustar a quantidade de \u{201c}{n}\u{201d} só em {mes} para {quantidade}."
+                    )
+                }
             }
         }
         Alteracao::DesfazerExcecao { .. } => "Desfazer uma exceção.".into(),
@@ -1734,6 +1739,27 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             ..
         } => format!("Reconhecer no extrato por \"{}\".", a.texto),
         Alteracao::DefinirAssinatura { .. } => "Tirar a assinatura do extrato.".to_owned(),
+        Alteracao::CriarModelo { nome, .. } => {
+            format!("Criar o modelo \u{201c}{nome}\u{201d}.")
+        }
+        Alteracao::NovaVersaoDoCalculo { .. } => "Nova versão do cálculo de um modelo.".to_owned(),
+        Alteracao::AplicarModelo {
+            recorrente,
+            valores,
+            ..
+        } => format!(
+            "Ligar \u{201c}{}\u{201d} a um modelo de compromisso ({} valor(es) de parâmetro).",
+            nome(recorrente),
+            valores.len()
+        ),
+        Alteracao::DefinirParametro {
+            recorrente, valor, ..
+        } => format!(
+            "Definir o parâmetro {} de \u{201c}{}\u{201d} desde {}.",
+            valor.parametro,
+            nome(recorrente),
+            competencia_texto(valor.desde)
+        ),
     }
 }
 

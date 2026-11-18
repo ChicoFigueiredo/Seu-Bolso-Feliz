@@ -14,11 +14,13 @@ use crate::ferramentas::{
 };
 use crate::plano::{
     ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO,
-    FERRAMENTAS_DE_ESCRITA as ESCRITA_DO_PLANO, PedidoDeAlteracao, PedidoDeAplicacao,
-    PedidoDeAplicarProposta, PedidoDeCancelamento, PedidoDeCompromisso, PedidoDeConciliacao,
-    PedidoDeConciliar, PedidoDeDesconciliar, PedidoDeDesfazer, PedidoDeExcecao, PedidoDeExclusao,
-    PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao, PedidoDePropostas,
-    PedidoDeRecusaDeProposta, PedidoDeRetomada, PedidoDeSimulacao, PedidoNovoCompromisso,
+    FERRAMENTAS_DE_ESCRITA as ESCRITA_DO_PLANO, PedidoDeAjustarQuantidade, PedidoDeAlteracao,
+    PedidoDeAplicacao, PedidoDeAplicarModelo, PedidoDeAplicarProposta, PedidoDeCancelamento,
+    PedidoDeCompromisso, PedidoDeConciliacao, PedidoDeConciliar, PedidoDeCriarModelo,
+    PedidoDeDefinirParametro, PedidoDeDesconciliar, PedidoDeDesfazer, PedidoDeExcecao,
+    PedidoDeExclusao, PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao,
+    PedidoDePropostas, PedidoDeRecusaDeProposta, PedidoDeRetomada, PedidoDeSimulacao,
+    PedidoNovoCompromisso,
 };
 use crate::regras::{
     FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, FERRAMENTAS_DE_ESCRITA as ESCRITA_DAS_REGRAS,
@@ -627,6 +629,53 @@ impl Servidor {
     }
 
     #[tool(
+        description = "Lista os modelos de compromisso (o molde que vários compromissos compartilham: parâmetros + o Cálculo em Luau), com a versão e o checksum do Cálculo, o script e quais compromissos usam cada um, com os valores e vigências. De fábrica: \"Diarista por dia da semana\" (parâmetros diaria em centavos e dia_da_semana; previsto = diária × quantas vezes aquele dia cai no mês). Só leitura."
+    )]
+    fn listar_modelos(&self) -> Result<String, String> {
+        self.plano("listar_modelos", |l| l.listar_modelos())
+    }
+
+    #[tool(
+        description = "APLICA AGORA um modelo de compromisso novo: parâmetros declarados (centavos, dia_da_semana, inteiro, texto) e o Cálculo em Luau (função calcular(entrada, ajuda) que devolve {valor_centavos, quantidade?, explicacao}). O script é conferido antes. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn criar_modelo(
+        &self,
+        Parameters(p): Parameters<PedidoDeCriarModelo>,
+    ) -> Result<String, String> {
+        self.plano("criar_modelo", |l| l.criar_modelo(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a ligação de um compromisso a um modelo (id ou nome do modelo), com os valores dos parâmetros e a vigência de cada um (desde AAAA-MM). O previsto de cada mês passa a ser o resultado do Cálculo. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn aplicar_modelo(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicarModelo>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_modelo", |l| l.aplicar_modelo(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA um valor de parâmetro com vigência (desde AAAA-MM) num compromisso que já usa um modelo (ex.: diaria 21000 desde 2026-05). Os meses anteriores não mudam. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn definir_parametro(
+        &self,
+        Parameters(p): Parameters<PedidoDeDefinirParametro>,
+    ) -> Result<String, String> {
+        self.plano("definir_parametro", |l| l.definir_parametro(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a quantidade (ex.: 6 diárias) de UM mês só, num compromisso com modelo: o Cálculo usa esta quantidade naquele mês e o resto segue o cálculo. Aparece no Rastro com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn ajustar_quantidade(
+        &self,
+        Parameters(p): Parameters<PedidoDeAjustarQuantidade>,
+    ) -> Result<String, String> {
+        self.plano("ajustar_quantidade", |l| l.ajustar_quantidade(&p))
+    }
+
+    #[tool(
         description = "DESFAZ uma alteração que o MCP aplicou: a última ainda não desfeita, ou a de alteracao_id (só as do mcp). O Desfazer vai para o histórico com autor mcp. Não desfaz o que o usuário fez. Backup automático antes da primeira escrita."
     )]
     fn desfazer(&self, Parameters(p): Parameters<PedidoDeDesfazer>) -> Result<String, String> {
@@ -701,7 +750,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 

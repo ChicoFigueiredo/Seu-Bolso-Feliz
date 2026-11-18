@@ -108,13 +108,15 @@ impl AppDoInventario {
                 let arquivo_do_plano = self.pasta.join("planejamento.sqlite");
                 if arquivo_do_plano.exists() {
                     match sbf_planejamento::Banco::abrir(&arquivo_do_plano) {
-                        Ok(banco) => janela.ligar_planejamento(Box::new(
-                            sbf_planejamento::PlanejamentoSqlite::novo(
-                                banco,
-                                crate::mcp::saldos_do_cofre(&self.pasta),
-                            )
-                            .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
-                        )),
+                        Ok(banco) => {
+                            janela.ligar_planejamento(Box::new(crate::script::com_calculo(
+                                sbf_planejamento::PlanejamentoSqlite::novo(
+                                    banco,
+                                    crate::mcp::saldos_do_cofre(&self.pasta),
+                                )
+                                .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
+                            )))
+                        }
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }
                 }

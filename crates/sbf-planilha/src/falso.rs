@@ -111,6 +111,7 @@ impl Planejamento for Falso {
             versao: v.id.clone(),
             prazo_desconhecido: false,
             sugestao_de_conciliacao: false,
+            calculo: None,
         }])
     }
 
