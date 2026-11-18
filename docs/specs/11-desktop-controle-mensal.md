@@ -15,7 +15,7 @@ usa hoje, com algumas diferenças:
 - qualquer um dos próximos 360 meses pode ser aberto, com o que as regras projetam;
 - pausar, retomar, cancelar, adiar e dispensar são ações distintas, versionadas e
   auditadas;
-- o Claude consulta, simula e propõe pelo MCP, e a confirmação é sempre na janela.
+- o Claude consulta, simula, propõe e (D15) aplica pelo MCP, com autor `mcp`, backup e Desfazer.
 
 ## Decisões do CEO (2026-11-16)
 
@@ -150,8 +150,16 @@ crates/
 - **Proposta:** `propor_compromisso`, `propor_alteracao`, `propor_pausa`,
   `propor_retomada`, `propor_cancelamento`, `propor_exclusao_logica` e
   `propor_conciliacao`. Todas usam `Planejamento::propor` com chave de idempotência.
-- **Nunca no MCP:** `aplicar`, `confirmar_proposta`, SQL livre, pagamento ou cancelamento
-  no fornecedor.
+- **Aplicar (D15 da spec 13, 2026-11-18): o MCP tem controle total.** `aplicar_alteracao`
+  (inclui renomear), `criar_compromisso`, `pausar`, `retomar`, `cancelar`, `excecao`,
+  `excluir_logicamente`, `conciliar` (uma ocorrência com um ou vários movimentos, tudo ou
+  nada), `desconciliar`, `aplicar_proposta`, `recusar_proposta` e `desfazer` aplicam na hora,
+  sem confirmação na janela. Tudo vai para o histórico com autor `mcp` e `desfazer` volta
+  atrás a última alteração do MCP (só as dele). As `propor_*` continuam só propondo.
+- **Backup.** Antes da primeira escrita de cada banco em cada sessão, o banco é copiado para
+  `<cofre>/backups/mcp/` com a API de backup do SQLite; se falha, a escrita é recusada.
+  `fazer_backup` copia todos os bancos sob demanda. Ficam os 20 mais recentes por banco.
+- **Nunca no MCP:** SQL livre, pagamento ou cancelamento no fornecedor.
 - **Nível de confiança.** O texto devolvido passa pelo nível do cliente (mascarado por
   padrão), e cada chamada grava uma linha em `saida_ia`, sem o conteúdo.
 
@@ -185,7 +193,7 @@ A numeração segue a da especificação original.
 | AC-26 | Pausa ou cancelamento não apaga cobrança devida nem conciliação                                       | teste                      |
 | AC-27 | O exemplo das consignações: o livre não desconta de novo o desconto em folha                          | teste                      |
 | AC-29 | Reimportação: zero duplicatas                                                                         | teste                      |
-| AC-30 | O MCP só cria proposta; sem confirmação na janela, nada muda                                          | teste                      |
+| AC-30 | (D15) `propor_*` só cria proposta; as ferramentas que aplicam gravam com autor `mcp` e têm Desfazer   | teste                      |
 | AC-31 | Proposta com versão de base velha é recusada, sem alteração parcial                                   | teste                      |
 | AC-33 | Cada total é rastreável; o desconhecido impede o livre "confirmado"                                   | teste                      |
 | AC-34 | O calendário de 360 meses com 100 regras tem a latência medida e reportada                            | medida                     |

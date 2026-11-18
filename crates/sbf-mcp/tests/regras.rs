@@ -519,16 +519,14 @@ fn propor_com_script_valido_cria_a_regra_como_rascunho() {
 }
 
 #[test]
-fn nenhuma_ferramenta_ativa_consolida_desativa_ou_reverte() {
+fn d15_as_ferramentas_de_decisao_existem_e_o_propor_nao_decide() {
     let c = cenario();
     let nomes = Servidor::novo(c.nucleo.clone()).nomes_das_ferramentas();
-    for f in FERRAMENTAS {
+    for f in FERRAMENTAS
+        .iter()
+        .chain(&sbf_mcp::regras::FERRAMENTAS_DE_ESCRITA)
+    {
         assert!(nomes.iter().any(|n| n == f), "falta {f}");
-    }
-    for n in &nomes {
-        for proibido in ["ativar", "consolidar", "desativar", "reverter"] {
-            assert!(!n.contains(proibido), "ferramenta proibida: {n}");
-        }
     }
 }
 
@@ -578,4 +576,186 @@ fn sequencia_de_chamadas_nao_muda_o_estado_da_vigente() {
     let item = &c.regras().listar().unwrap()["itens"][0];
     assert_eq!(item["versao_em_vigor"], 1);
     assert_eq!(item["estado"], "ativa");
+}
+
+// ------------------------------------------------------------------------ D15: o MCP decide
+
+fn v2_exige_autenticacao(c: &Cenario) -> u32 {
+    salvar(
+        &c.caminho,
+        nova(
+            PIX_ID,
+            PIX_NOME,
+            serde_json::from_value(def_pix_exige_autenticacao()).unwrap(),
+            None,
+        ),
+    )
+    .versao
+}
+
+fn estado_de(c: &Cenario, versao: u32) -> sbf_regras::Estado {
+    Catalogo::abrir(&c.caminho)
+        .unwrap()
+        .versao(PIX_ID, versao)
+        .unwrap()
+        .estado
+}
+
+fn pedido_de_versao(versao: u32) -> sbf_mcp::regras::PedidoDeVersao {
+    sbf_mcp::regras::PedidoDeVersao {
+        regra: PIX_ID.to_owned(),
+        versao,
+    }
+}
+
+fn pedido_de_regra() -> PedidoDeRegra {
+    PedidoDeRegra {
+        regra: PIX_ID.to_owned(),
+    }
+}
+
+#[test]
+fn d15_ativar_regra_pelo_mcp_aplica_e_grava_quem_mcp_no_historico_de_estado() {
+    let c = cenario();
+    let v2 = v2_exige_autenticacao(&c);
+    let r = c.regras().ativar(&pedido_de_versao(v2)).unwrap();
+    assert_eq!(r["aplicado"], true);
+    assert_eq!(r["em_vigor"]["versao"], v2);
+    assert_eq!(estado_de(&c, v2), sbf_regras::Estado::Ativa);
+    assert_eq!(estado_de(&c, 1), sbf_regras::Estado::Desativada);
+    let h = Catalogo::abrir(&c.caminho)
+        .unwrap()
+        .historico_de_estado(PIX_ID, v2)
+        .unwrap();
+    assert_eq!(h.last().unwrap().2, "mcp");
+    assert_eq!(c.saidas("mcp:ativar_regra"), 1);
+}
+
+#[test]
+fn d12_ativar_regra_com_exemplo_falhando_continua_bloqueado_para_o_mcp() {
+    let c = cenario();
+    // Um exemplo que a regra não satisfaz: a versão nova não pode entrar em vigor.
+    Catalogo::abrir(&c.caminho)
+        .unwrap()
+        .salvar_exemplo(
+            PIX_ID,
+            "sem autenticação",
+            &entrada("pix-2", TEXTO_PIX_SEM_AUTENTICACAO),
+            Esperado::NaoSeAplica,
+        )
+        .unwrap();
+    let v2 = v2_exige_autenticacao(&c);
+    let erro = c.regras().ativar(&pedido_de_versao(v2)).unwrap_err();
+    assert!(erro.contains("bloqueada"), "{erro}");
+    assert!(erro.contains("sem autenticação"), "{erro}");
+    assert_eq!(estado_de(&c, v2), sbf_regras::Estado::Rascunho);
+    assert_eq!(
+        estado_de(&c, 1),
+        sbf_regras::Estado::Ativa,
+        "a vigente não mudou"
+    );
+}
+
+#[test]
+fn d15_reverter_desativar_e_reativar_pelo_mcp() {
+    let c = cenario();
+    let v2 = v2_exige_autenticacao(&c);
+    c.regras().ativar(&pedido_de_versao(v2)).unwrap();
+
+    let r = c.regras().reverter(&pedido_de_regra()).unwrap();
+    assert_eq!(r["em_vigor"]["versao"], 1);
+    assert_eq!(estado_de(&c, 1), sbf_regras::Estado::Ativa);
+    assert_eq!(estado_de(&c, v2), sbf_regras::Estado::Desativada);
+
+    let r = c.regras().desativar(&pedido_de_regra()).unwrap();
+    assert!(r["em_vigor"].is_null());
+    assert_eq!(estado_de(&c, 1), sbf_regras::Estado::Desativada);
+
+    c.regras().ativar(&pedido_de_versao(1)).unwrap();
+    assert_eq!(estado_de(&c, 1), sbf_regras::Estado::Ativa);
+    let h = Catalogo::abrir(&c.caminho)
+        .unwrap()
+        .historico_de_estado(PIX_ID, 1)
+        .unwrap();
+    // As duas primeiras linhas são do usuário (rascunho e a ativação semeada).
+    assert!(
+        h.iter().skip(2).all(|(_, _, quem, _, _)| quem == "mcp"),
+        "{h:?}"
+    );
+}
+
+#[test]
+fn d15_consolidar_regra_exige_as_aceitas_seguidas_e_depois_aplica() {
+    let c = cenario();
+    // Sem as 5 aceitas seguidas, o catálogo recusa (para o MCP também).
+    let erro = c.regras().consolidar(&pedido_de_versao(1)).unwrap_err();
+    assert!(erro.contains("faltam propostas aceitas"), "{erro}");
+    assert_eq!(estado_de(&c, 1), sbf_regras::Estado::Ativa);
+}
+
+#[test]
+fn d15_o_mcp_nao_ativa_o_que_nao_existe_e_a_ia_continua_recusada_no_catalogo() {
+    let c = cenario();
+    assert!(c.regras().ativar(&pedido_de_versao(9)).is_err());
+    let mut cat = Catalogo::abrir(&c.caminho).unwrap();
+    let v2 = v2_exige_autenticacao(&c);
+    assert!(cat.ativar(PIX_ID, v2, &Quem::Ia, None).is_err());
+}
+
+#[test]
+fn d15_primeira_escrita_de_regras_faz_backup_do_regras_sqlite_e_so_uma_vez() {
+    let c = cenario();
+    let pasta = c._banco.caminho.parent().unwrap().join("backups/mcp");
+    let v2 = v2_exige_autenticacao(&c);
+    // Leituras não copiam nada.
+    c.regras().listar().unwrap();
+    assert!(!pasta.exists());
+    c.regras().ativar(&pedido_de_versao(v2)).unwrap();
+    c.regras().reverter(&pedido_de_regra()).unwrap();
+    let copias: Vec<_> = std::fs::read_dir(&pasta)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(copias.len(), 1, "{copias:?}");
+    assert!(copias[0].starts_with("regras-") && copias[0].ends_with(".sqlite"));
+    // A cópia é do regras.sqlite de antes da escrita: a versão 1 ainda era a ativa.
+    let copia = Catalogo::abrir(&pasta.join(&copias[0])).unwrap();
+    assert_eq!(
+        copia.versao(PIX_ID, 1).unwrap().estado,
+        sbf_regras::Estado::Ativa
+    );
+}
+
+#[test]
+fn d15_sem_backup_a_escrita_de_regra_e_recusada() {
+    let c = cenario();
+    let v2 = v2_exige_autenticacao(&c);
+    // Uma FILE no lugar da pasta `backups` impede criar a pasta de backup.
+    let cofre = c._banco.caminho.parent().unwrap().to_path_buf();
+    std::fs::write(cofre.join("backups"), "obstáculo").unwrap();
+    let erro = c.regras().ativar(&pedido_de_versao(v2)).unwrap_err();
+    assert!(erro.contains("escrita foi recusada"), "{erro}");
+    assert_eq!(estado_de(&c, v2), sbf_regras::Estado::Rascunho);
+    let erro = c.regras().propor(&PedidoDeProposta {
+        regra: "outra".into(),
+        nome: "Outra".into(),
+        definicao: def_pix_json(),
+        script: None,
+        motivo: "x".into(),
+    });
+    assert!(erro.is_err());
+}
+
+#[test]
+fn d15_fazer_backup_pelo_nucleo_copia_o_inventario_e_o_regras() {
+    let c = cenario();
+    let r = c.nucleo.fazer_backup().unwrap();
+    let bancos: Vec<&str> = r["feitos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["banco"].as_str().unwrap())
+        .collect();
+    assert!(bancos.contains(&"inventario"));
+    assert!(bancos.contains(&"regras"));
 }

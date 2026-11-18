@@ -725,17 +725,62 @@ pub enum Escopo {
 }
 
 /// Um remendo de versão: `None` mantém o campo; `Some(None)` limpa.
+///
+/// No JSON (propostas, inversos do Desfazer) o `Some(None)` vira `{"limpar": true}`: com o
+/// serde padrão ele viraria `null` e voltaria como `None`, e "limpar a nota" se perderia.
+/// `null` continua lendo como "não muda", como no que já foi gravado.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MudancaDeVersao {
+    #[serde(with = "limpavel")]
     pub valor: Option<Option<Centavos>>,
     pub certeza: Option<Certeza>,
     pub fonte: Option<Fonte>,
     pub frequencia: Option<Frequencia>,
+    #[serde(with = "limpavel")]
     pub conta: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub centro: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub fornecedor: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub categoria: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub nota: Option<Option<String>>,
+}
+
+/// `Option<Option<T>>` que sobrevive ao JSON: `null` = não muda, `{"limpar": true}` = limpa.
+mod limpavel {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Forma<T> {
+        Limpar { limpar: bool },
+        Valor(T),
+    }
+
+    #[allow(clippy::option_option)]
+    pub fn serialize<S: Serializer, T: Serialize>(
+        v: &Option<Option<T>>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match v {
+            None => s.serialize_none(),
+            Some(None) => Forma::<&T>::Limpar { limpar: true }.serialize(s),
+            Some(Some(x)) => Forma::Valor(x).serialize(s),
+        }
+    }
+
+    #[allow(clippy::option_option)]
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        d: D,
+    ) -> Result<Option<Option<T>>, D::Error> {
+        Ok(match Option::<Forma<T>>::deserialize(d)? {
+            None => None,
+            Some(Forma::Limpar { limpar }) => limpar.then_some(None),
+            Some(Forma::Valor(x)) => Some(Some(x)),
+        })
+    }
 }
 
 /// Uma linha de origem importada: a mesma origem nunca gera duas regras.
@@ -815,6 +860,12 @@ pub enum Alteracao {
     Arquivar {
         recorrente: String,
         arquivado: bool,
+        versao_base: i64,
+    },
+    /// Muda o nome do compromisso (o histórico guarda o nome de antes; dá para desfazer).
+    Renomear {
+        recorrente: String,
+        nome: String,
         versao_base: i64,
     },
     /// Muda o grupo e/ou a posição (prioridade).
@@ -974,20 +1025,55 @@ pub trait Planejamento {
     /// O efeito de uma alteração, sem gravar nada.
     fn simular(&self, alteracao: &Alteracao, hoje: Data) -> Resultado<Simulacao>;
 
-    /// Aplica e grava no histórico. A janela e a importação usam; o MCP nunca.
+    /// Aplica e grava no histórico. A janela, a importação e (D15) o MCP usam.
     fn aplicar(&mut self, alteracao: Alteracao, autor: Autor) -> Resultado<Recibo>;
+
+    /// Desfaz uma alteração do histórico (`alteracao_id`): aplica o inverso que ela guardou,
+    /// com novo registro no histórico (autor `autor`), e marca a original como desfeita.
+    /// Recusa a que já foi desfeita, a que é um Desfazer e a que não tem inverso. O padrão
+    /// recusa tudo (quem não guarda o inverso não sabe desfazer).
+    fn desfazer(&mut self, alteracao_id: &str, autor: Autor) -> Resultado<Recibo> {
+        let _ = (alteracao_id, autor);
+        Err(ErroDoPlanejamento::Invalida(
+            "este planejamento não sabe desfazer alterações".to_owned(),
+        ))
+    }
+
+    /// A alteração mais recente de `autor` que ainda dá para desfazer: não foi desfeita, não
+    /// é ela mesma um Desfazer e tem inverso. O padrão é nenhuma.
+    fn ultima_desfazivel(&self, autor: &Autor) -> Resultado<Option<EntradaDoHistorico>> {
+        let _ = autor;
+        Ok(None)
+    }
 
     /// Guarda uma proposta pendente. A mesma `chave` devolve a mesma proposta.
     fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str) -> Resultado<Proposta>;
 
     fn propostas(&self, so_pendentes: bool) -> Resultado<Vec<Proposta>>;
 
-    /// Só a janela chama: revalida a versão de base e aplica com autor `Usuario`.
+    /// A janela chama: revalida a versão de base e aplica com autor `Usuario`.
     fn confirmar_proposta(&mut self, id: &str) -> Resultado<Recibo>;
+
+    /// Como [`Planejamento::confirmar_proposta`], mas com o autor dado no histórico (D15: o MCP
+    /// aplica as propostas que ele mesmo fez, com autor `Mcp`). O padrão recusa.
+    fn confirmar_proposta_como(&mut self, id: &str, autor: Autor) -> Resultado<Recibo> {
+        let _ = (id, autor);
+        Err(ErroDoPlanejamento::Invalida(
+            "este planejamento não confirma proposta em nome de outro autor".to_owned(),
+        ))
+    }
 
     fn recusar_proposta(&mut self, id: &str, motivo: &str) -> Resultado<()>;
 
     fn historico(&self, alvo: Option<&str>, limite: u32) -> Resultado<Vec<EntradaDoHistorico>>;
+
+    /// Uma linha do histórico pelo id (o `alteracao_id` do recibo).
+    fn entrada_do_historico(&self, id: &str) -> Resultado<Option<EntradaDoHistorico>> {
+        Ok(self
+            .historico(None, 100_000)?
+            .into_iter()
+            .find(|e| e.id == id))
+    }
 
     /// O recorrente que já nasceu desta origem, se houver.
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>>;

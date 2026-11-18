@@ -16,7 +16,7 @@ use crate::banco::{
     novo_id, rfc3339,
 };
 use crate::conciliacao::normalizar;
-use crate::escrita::aplicar_na;
+use crate::escrita::{aplicar_na, desfazer_na};
 use crate::projecao::projetar_competencias_seguindo;
 use crate::resumo;
 use crate::{
@@ -218,6 +218,7 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         | Alteracao::Excluir { recorrente, .. }
         | Alteracao::Restaurar { recorrente, .. }
         | Alteracao::Arquivar { recorrente, .. }
+        | Alteracao::Renomear { recorrente, .. }
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
@@ -645,6 +646,51 @@ impl Planejamento for PlanejamentoSqlite {
         Ok(recibo)
     }
 
+    fn desfazer(&mut self, alteracao_id: &str, autor: Autor) -> Resultado<Recibo> {
+        let agora = rfc3339(self.agora());
+        let tx = self.banco.conexao_mut().transaction()?;
+        let recibo = desfazer_na(&tx, alteracao_id, &autor, &agora)?;
+        tx.commit()?;
+        Ok(recibo)
+    }
+
+    fn ultima_desfazivel(&self, autor: &Autor) -> Resultado<Option<EntradaDoHistorico>> {
+        let c = self.banco.conexao();
+        let linha: Option<(String, String, String, String, String, String)> = c
+            .query_row(
+                "SELECT h.id, h.quando, h.autor, h.alvo, h.resumo, h.alteracao
+                 FROM historico h JOIN inversas i ON i.historico_id = h.id
+                 WHERE h.autor = ?1
+                   AND h.id NOT IN (SELECT original_id FROM desfeitos)
+                   AND h.id NOT IN (SELECT desfazedor_id FROM desfeitos)
+                 ORDER BY h.sequencia DESC LIMIT 1",
+                params![json(autor)?],
+                |l| {
+                    Ok((
+                        l.get(0)?,
+                        l.get(1)?,
+                        l.get(2)?,
+                        l.get(3)?,
+                        l.get(4)?,
+                        l.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        linha
+            .map(|(id, quando, autor, alvo, resumo, alteracao)| {
+                Ok(EntradaDoHistorico {
+                    id,
+                    quando,
+                    autor: de_json(&autor)?,
+                    alvo,
+                    resumo,
+                    alteracao,
+                })
+            })
+            .transpose()
+    }
+
     fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str) -> Resultado<Proposta> {
         if chave.trim().is_empty() {
             return Err(ErroDoPlanejamento::Invalida(
@@ -695,6 +741,10 @@ impl Planejamento for PlanejamentoSqlite {
     }
 
     fn confirmar_proposta(&mut self, id: &str) -> Resultado<Recibo> {
+        self.confirmar_proposta_como(id, Autor::Usuario)
+    }
+
+    fn confirmar_proposta_como(&mut self, id: &str, autor: Autor) -> Resultado<Recibo> {
         let agora = self.agora();
         let texto_agora = rfc3339(agora);
         let mut tx = self.banco.conexao_mut().transaction()?;
@@ -720,12 +770,7 @@ impl Planejamento for PlanejamentoSqlite {
         // A alteração roda num ponto de salvamento: se falhar, nada dela fica, e a proposta
         // continua pendente com o motivo da falha.
         let savepoint = tx.savepoint()?;
-        match aplicar_na(
-            &savepoint,
-            &proposta.alteracao,
-            &Autor::Usuario,
-            &texto_agora,
-        ) {
+        match aplicar_na(&savepoint, &proposta.alteracao, &autor, &texto_agora) {
             Ok(recibo) => {
                 savepoint.commit()?;
                 tx.execute(

@@ -13,14 +13,17 @@ use crate::ferramentas::{
     ParamsDeSugestoesAbertas, ParamsDoLivro, SugestaoProposta,
 };
 use crate::plano::{
-    ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO, PedidoDeAlteracao,
-    PedidoDeCancelamento, PedidoDeCompromisso, PedidoDeConciliacao, PedidoDeExcecao,
-    PedidoDeExclusao, PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao,
-    PedidoDePropostas, PedidoDeRetomada, PedidoDeSimulacao, PedidoNovoCompromisso,
+    ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO,
+    FERRAMENTAS_DE_ESCRITA as ESCRITA_DO_PLANO, PedidoDeAlteracao, PedidoDeAplicacao,
+    PedidoDeAplicarProposta, PedidoDeCancelamento, PedidoDeCompromisso, PedidoDeConciliacao,
+    PedidoDeConciliar, PedidoDeDesconciliar, PedidoDeDesfazer, PedidoDeExcecao, PedidoDeExclusao,
+    PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao, PedidoDePropostas,
+    PedidoDeRecusaDeProposta, PedidoDeRetomada, PedidoDeSimulacao, PedidoNovoCompromisso,
 };
 use crate::regras::{
-    FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, PedidoDeProposta, PedidoDeRegra,
-    PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste, Regras,
+    FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, FERRAMENTAS_DE_ESCRITA as ESCRITA_DAS_REGRAS,
+    PedidoDeProposta, PedidoDeRegra, PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste,
+    PedidoDeVersao, Regras,
 };
 
 macro_rules! esquema {
@@ -175,12 +178,12 @@ impl Servidor {
     pub fn novo(nucleo: Nucleo) -> Self {
         let mut tool_router = Self::tool_router();
         if !nucleo.tem_planejamento() {
-            for nome in FERRAMENTAS_DO_PLANO {
+            for nome in FERRAMENTAS_DO_PLANO.iter().chain(&ESCRITA_DO_PLANO) {
                 tool_router.remove_route(nome);
             }
         }
         if !nucleo.tem_regras() {
-            for nome in FERRAMENTAS_DAS_REGRAS {
+            for nome in FERRAMENTAS_DAS_REGRAS.iter().chain(&ESCRITA_DAS_REGRAS) {
                 tool_router.remove_route(nome);
             }
         }
@@ -296,7 +299,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA."
+        description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA (decidir achado e registro continua so do usuario)."
     )]
     fn sugerir(&self, Parameters(p): Parameters<PedidoDeSugestoes>) -> Result<String, String> {
         let lista: Vec<SugestaoProposta> = p
@@ -391,7 +394,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Lista as propostas feitas pelo MCP e o estado de cada uma (pendente, confirmada, recusada, expirada). Só leitura; confirmar e recusar acontecem na janela do SBF."
+        description = "Lista as propostas feitas pelo MCP e o estado de cada uma (pendente, confirmada, recusada, expirada). Só leitura. Para decidir use aplicar_proposta ou recusar_proposta (ou a janela do SBF)."
     )]
     fn listar_propostas(
         &self,
@@ -401,7 +404,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE um compromisso novo. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF; a resposta traz a simulação (meses afetados, antes e depois)."
+        description = "PROPÕE um compromisso novo (não aplica). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta); a resposta traz a simulação (meses afetados, antes e depois). Há backup automático antes da primeira escrita da sessão."
     )]
     fn propor_compromisso(
         &self,
@@ -411,7 +414,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE alterar um compromisso (valor, certeza, conta, centro...), só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE alterar um compromisso (valor, certeza, conta, centro...), só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_alteracao(
         &self,
@@ -421,7 +424,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE pausar um compromisso por um período (ate é exclusivo; sem ate, até retomar). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE pausar um compromisso por um período (ate é exclusivo; sem ate, até retomar). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_pausa(
         &self,
@@ -431,7 +434,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE retomar um compromisso pausado a partir de um mês. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE retomar um compromisso pausado a partir de um mês. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_retomada(
         &self,
@@ -441,7 +444,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE marcar um compromisso como cancelado a partir de um mês (só no app; não cancela nada no fornecedor). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE marcar um compromisso como cancelado a partir de um mês (só no app; não cancela nada no fornecedor). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_cancelamento(
         &self,
@@ -451,7 +454,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Lista as regras de reconhecimento do cofre: id, nome, tipo de documento, versão em vigor, estado, execuções e taxa de acerto, e as que estão prontas para consolidar (quem consolida é o usuário). Só leitura."
+        description = "Lista as regras de reconhecimento do cofre: id, nome, tipo de documento, versão em vigor, estado, execuções e taxa de acerto, e as que estão prontas para consolidar (consolidar_regra aplica). Só leitura."
     )]
     fn listar_regras(&self) -> Result<String, String> {
         self.regras("listar_regras", |r| r.listar())
@@ -465,7 +468,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Roda os exemplos de uma versão de regra e diz, para cada um, se passou e o que divergiu. Só leitura: não ativa nem muda nada."
+        description = "Roda os exemplos de uma versão de regra e diz, para cada um, se passou e o que divergiu. Só leitura: não ativa nem muda nada. Rode antes de ativar_regra: exemplo falhando bloqueia a ativação."
     )]
     fn testar_regra(&self, Parameters(p): Parameters<PedidoDeTeste>) -> Result<String, String> {
         self.regras("testar_regra", |r| r.testar(&p))
@@ -482,14 +485,14 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE uma versão nova de regra: salva um RASCUNHO com autor IA. PROPOR NÃO ATIVA: a versão em vigor continua a mesma, e ativar é só na janela do SBF (área Regras de reconhecimento), pelo usuário. Confere o script antes de salvar. Não consolida nem reverte."
+        description = "PROPÕE uma versão nova de regra: salva um RASCUNHO com autor IA. PROPOR NÃO ATIVA: a versão em vigor continua a mesma; para ativar use ativar_regra (ou a janela do SBF). Confere o script antes de salvar. Há backup automático antes da primeira escrita da sessão."
     )]
     fn propor_regra(&self, Parameters(p): Parameters<PedidoDeProposta>) -> Result<String, String> {
         self.regras("propor_regra", |r| r.propor(&p))
     }
 
     #[tool(
-        description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_exclusao_logica(
         &self,
@@ -503,7 +506,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE ligar uma ocorrência a um movimento real (como sugestão de conciliação). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE ligar uma ocorrência a um movimento real (como sugestão de conciliação). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_conciliacao(
         &self,
@@ -513,13 +516,159 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE uma exceção em uma ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE uma exceção em uma ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_excecao(
         &self,
         Parameters(p): Parameters<ComChave<PedidoDeExcecao>>,
     ) -> Result<String, String> {
         self.propor("propor_excecao", &p.chave, Alt::Excecao(p.pedido))
+    }
+
+    // ------------------------------------------------------------ D15: o MCP aplica direto
+
+    #[tool(
+        description = "APLICA AGORA (sem confirmação na janela) uma mudança num compromisso: renomear (nome), valor só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante), certeza, conta, centro, fornecedor, categoria, nota. Vai para o histórico com autor mcp. Para voltar atrás: desfazer. Backup automático do planejamento antes da primeira escrita da sessão."
+    )]
+    fn aplicar_alteracao(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicacao>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_alteracao", |l| l.aplicar_alteracao(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA um compromisso novo (recusa o mesmo nome no mesmo grupo). Vai para o histórico com autor mcp; a resposta traz a simulação. Para voltar atrás: desfazer. Backup automático do planejamento antes da primeira escrita da sessão."
+    )]
+    fn criar_compromisso(
+        &self,
+        Parameters(p): Parameters<PedidoNovoCompromisso>,
+    ) -> Result<String, String> {
+        self.plano("criar_compromisso", |l| {
+            l.aplicar("criar_compromisso", &Alt::Compromisso(p))
+        })
+    }
+
+    #[tool(
+        description = "APLICA AGORA a pausa de um compromisso por um período (ate é exclusivo; sem ate, até retomar). Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn pausar(&self, Parameters(p): Parameters<PedidoDePausa>) -> Result<String, String> {
+        self.plano("pausar", |l| l.aplicar("pausar", &Alt::Pausa(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a retomada de um compromisso pausado a partir de um mês. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn retomar(&self, Parameters(p): Parameters<PedidoDeRetomada>) -> Result<String, String> {
+        self.plano("retomar", |l| l.aplicar("retomar", &Alt::Retomada(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA o cancelamento de um compromisso a partir de um mês (só no app; não cancela nada no fornecedor). Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn cancelar(&self, Parameters(p): Parameters<PedidoDeCancelamento>) -> Result<String, String> {
+        self.plano("cancelar", |l| l.aplicar("cancelar", &Alt::Cancelamento(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA uma exceção numa ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn excecao(&self, Parameters(p): Parameters<PedidoDeExcecao>) -> Result<String, String> {
+        self.plano("excecao", |l| l.aplicar("excecao", &Alt::Excecao(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a exclusão lógica de um compromisso, com motivo; o histórico fica e dá para restaurar. Autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn excluir_logicamente(
+        &self,
+        Parameters(p): Parameters<PedidoDeExclusao>,
+    ) -> Result<String, String> {
+        self.plano("excluir_logicamente", |l| {
+            l.aplicar("excluir_logicamente", &Alt::ExclusaoLogica(p))
+        })
+    }
+
+    #[tool(
+        description = "APLICA AGORA a conciliação CONFIRMADA de uma ocorrência com um ou VÁRIOS movimentos (de 1 a 20; tudo ou nada). Autor mcp no histórico. Para voltar atrás: desfazer (um por movimento, o último primeiro) ou desconciliar. Backup automático antes da primeira escrita."
+    )]
+    fn conciliar(&self, Parameters(p): Parameters<PedidoDeConciliar>) -> Result<String, String> {
+        self.plano("conciliar", |l| l.conciliar(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA o desfazer de uma conciliação (um movimento da ocorrência): exclusão lógica, com histórico e autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn desconciliar(
+        &self,
+        Parameters(p): Parameters<PedidoDeDesconciliar>,
+    ) -> Result<String, String> {
+        self.plano("desconciliar", |l| l.desconciliar(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA uma proposta pendente (veja listar_propostas), revalidando a versão de base, com autor mcp no histórico. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn aplicar_proposta(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicarProposta>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_proposta", |l| l.aplicar_proposta(&p))
+    }
+
+    #[tool(
+        description = "RECUSA uma proposta pendente, com motivo. Não aplica nada. Backup automático antes da primeira escrita."
+    )]
+    fn recusar_proposta(
+        &self,
+        Parameters(p): Parameters<PedidoDeRecusaDeProposta>,
+    ) -> Result<String, String> {
+        self.plano("recusar_proposta", |l| l.recusar_proposta(&p))
+    }
+
+    #[tool(
+        description = "DESFAZ uma alteração que o MCP aplicou: a última ainda não desfeita, ou a de alteracao_id (só as do mcp). O Desfazer vai para o histórico com autor mcp. Não desfaz o que o usuário fez. Backup automático antes da primeira escrita."
+    )]
+    fn desfazer(&self, Parameters(p): Parameters<PedidoDeDesfazer>) -> Result<String, String> {
+        self.plano("desfazer", |l| l.desfazer(&p))
+    }
+
+    #[tool(
+        description = "ATIVA AGORA uma versão de regra de reconhecimento (autor mcp em historico_de_estado). Os exemplos rodam antes: exemplo falhando BLOQUEIA a ativação (vale para o MCP também). A versão em vigor anterior vira desativada. Para voltar atrás: reverter_regra. Backup automático do regras.sqlite antes da primeira escrita da sessão."
+    )]
+    fn ativar_regra(&self, Parameters(p): Parameters<PedidoDeVersao>) -> Result<String, String> {
+        self.regras("ativar_regra", |r| r.ativar(&p))
+    }
+
+    #[tool(
+        description = "DESATIVA AGORA a versão em vigor de uma regra (autor mcp no histórico). Para voltar atrás: ativar_regra com a versão. Backup automático antes da primeira escrita."
+    )]
+    fn desativar_regra(&self, Parameters(p): Parameters<PedidoDeRegra>) -> Result<String, String> {
+        self.regras("desativar_regra", |r| r.desativar(&p))
+    }
+
+    #[tool(
+        description = "REVERTE AGORA uma regra à versão que estava em vigor antes (rollback; reverter de novo volta à de agora). Autor mcp no histórico. Backup automático antes da primeira escrita."
+    )]
+    fn reverter_regra(&self, Parameters(p): Parameters<PedidoDeRegra>) -> Result<String, String> {
+        self.regras("reverter_regra", |r| r.reverter(&p))
+    }
+
+    #[tool(
+        description = "CONSOLIDA AGORA uma versão ativa que já tem as aceitas seguidas necessárias (veja listar_regras); a consolidada concilia sozinha só com as três provas, com Desfazer na janela. Autor mcp no histórico. Backup automático antes da primeira escrita."
+    )]
+    fn consolidar_regra(
+        &self,
+        Parameters(p): Parameters<PedidoDeVersao>,
+    ) -> Result<String, String> {
+        self.regras("consolidar_regra", |r| r.consolidar(&p))
+    }
+
+    #[tool(
+        description = "Faz AGORA o backup de todos os bancos do cofre (inventário, planejamento, regras...) em <cofre>/backups/mcp/, com a API de backup do SQLite (consistente com o WAL); guarda os 20 mais recentes por banco. Os bancos que o MCP escreve já são copiados sozinhos antes da primeira escrita de cada sessão."
+    )]
+    fn fazer_backup(&self) -> Result<String, String> {
+        responder("fazer_backup", self.nucleo.fazer_backup())
     }
 }
 
@@ -552,7 +701,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro e livro-caixa do usuario, somente leitura, mais a ferramenta sugerir, que apenas PROPOE classificacoes: o usuario confirma depois no app (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; leia fornecedores e decisoes_recentes para seguir o criterio do usuario antes de sugerir."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 

@@ -28,8 +28,10 @@ Regras do ciclo:
 - **Rollback**: `sbf regras ... reverter <regra>` reativa a versão anterior, sem apagar nada.
   Ele não roda os exemplos de novo, porque a versão já esteve em vigor.
 
-Quem pode mudar o estado: só o usuário, na janela do sbf ou num terminal interativo que
-confirmou. O MCP e a IA nunca ativam, consolidam, desativam nem revertem (ADR-021, D14).
+Quem pode mudar o estado: o usuário, na janela do sbf ou num terminal interativo que
+confirmou, e o MCP (D15, 2026-11-18: controle total, com `mcp` no histórico de estado). Os
+exemplos que falham bloqueiam a ativação para todos. Uma IA sem essa decisão (`Quem::Ia`)
+segue sem ativar, consolidar, desativar nem reverter (ADR-021).
 
 ## 2. A definição (formato JSON)
 
@@ -402,7 +404,7 @@ A área **Regras de reconhecimento** da janela do sbf é a forma pensada para o 
 lista das regras, página de cada uma com editor, exemplos, diff da simulação e versões com
 rollback. No Reconhecimento, "Testar com este documento" roda a regra no documento aberto, e
 "Criar regra a partir daqui" monta um rascunho a partir de uma correção, sem IA. Enquanto essa
-área não estiver entregue na sua versão, use o terminal (seção 6); o MCP só propõe.
+área não estiver entregue na sua versão, use o terminal (seção 6). O MCP propõe rascunhos (`propor_regra`) e também ativa, desativa, reverte e consolida (`ativar_regra`, `desativar_regra`, `reverter_regra`, `consolidar_regra`); `reverter_regra` volta atrás.
 
 ## 9. Cuidados
 

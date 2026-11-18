@@ -2,10 +2,13 @@
 
 O `sbf mcp` é um servidor MCP local (stdio), do binário único (ADR-012, ADR-015 item 4). O Claude
 Code ou o Claude Desktop o iniciam como processo filho, pela sua assinatura, e usam as ferramentas
-para ler o inventário e o livro-caixa e **propor** classificações. Nada sai da máquina por conta do
-servidor, e ele **nunca grava decisão**: a única escrita é `sugerir`, que põe linhas em
-`sugestao_ia` (modelo `mcp`) e uma rodada própria em `rodada_ia`. Quem confirma é você, em
-Inventário › Triagem por IA.
+para ler o inventário e o livro-caixa, **propor** classificações e (D15, 2026-11-18) **aplicar**
+mudanças no planejamento e nas regras de reconhecimento. Nada sai da máquina por conta do
+servidor. No inventário ele **nunca grava decisão**: a única escrita é `sugerir`, que põe linhas
+em `sugestao_ia` (modelo `mcp`) e uma rodada própria em `rodada_ia`; quem confirma é você, em
+Inventário › Triagem por IA. No planejamento e nas regras ele tem **controle total**: aplica na
+hora, com autor `mcp` no histórico e no Rastro, e `desfazer` volta atrás. Antes da primeira
+escrita de cada banco por sessão há backup em `<cofre>/backups/mcp/` (veja abaixo).
 
 ```text
 sbf mcp --inventario <pasta-do-cofre> [--livro <livro-caixa.sqlite>] [--planejamento <arquivo>]
@@ -71,8 +74,8 @@ caracteres. Uma sugestão nova do MCP para o mesmo alvo e campo torna a anterior
 ## Controle mensal (spec 11)
 
 Quando existe planejamento (`<cofre>/planejamento.sqlite`, ou o arquivo dado em
-`--planejamento`), o servidor liga mais 14 ferramentas. Sem planejamento elas nem aparecem na
-lista. Todas usam só o serviço `Planejamento`: leem, simulam e **propõem**. Valores em centavos;
+`--planejamento`), o servidor liga mais 14 ferramentas de leitura, simulação e proposta (e as que aplicam, abaixo).
+Sem planejamento elas nem aparecem na lista. Todas usam só o serviço `Planejamento`. Valores em centavos;
 datas em AAAA-MM-DD; competências em AAAA-MM.
 
 | Ferramenta                         | Para quê                                                                                                                |
@@ -96,8 +99,32 @@ devolve a mesma proposta e, se o conteúdo for outro, avisa em vez de criar. A r
 "proposta pendente: confirme na janela do SBF" e traz a simulação. A proposta leva a versão
 atual do compromisso; se ele mudar até a confirmação, a janela recusa (AC-31).
 
-**Nunca no MCP:** aplicar, confirmar ou recusar proposta, SQL, pagamento ou cancelamento no
-fornecedor. Nenhuma chamada muda o estado além de criar uma proposta pendente (AC-30).
+### Aplicar direto (D15)
+
+| Ferramenta                              | O que faz (na hora, autor `mcp`)                                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `aplicar_alteracao`                     | Renomeia (`nome`) e/ou muda valor só neste mês ou daqui em diante, certeza, conta, centro, fornecedor, categoria, nota. |
+| `criar_compromisso`                     | Compromisso novo (recusa o mesmo nome no mesmo grupo).                                                                  |
+| `pausar` / `retomar` / `cancelar`       | Pausa por período, retomada e cancelamento (só no app).                                                                 |
+| `excecao`                               | Adiar, dispensar, pago informado ou valor só deste mês.                                                                 |
+| `excluir_logicamente`                   | Exclusão lógica com motivo; o histórico fica.                                                                           |
+| `conciliar` / `desconciliar`            | Liga (confirmada) uma ocorrência a um ou vários movimentos, tudo ou nada; solta um movimento.                           |
+| `aplicar_proposta` / `recusar_proposta` | Decide uma proposta pendente (com autor `mcp`; recusar exige motivo).                                                   |
+| `desfazer`                              | Volta atrás a última alteração do MCP ainda não desfeita, ou a de `alteracao_id`. Só as do MCP.                         |
+| `ativar_regra` / `desativar_regra`      | Ativa uma versão (exemplo falhando bloqueia, D12) ou tira a regra de cena.                                              |
+| `reverter_regra` / `consolidar_regra`   | Rollback à versão de antes; consolida uma versão ativa com as aceitas seguidas.                                         |
+| `fazer_backup`                          | Copia agora todos os bancos do cofre para `<cofre>/backups/mcp/`.                                                       |
+
+Cada resposta traz o `alteracao_id` e como desfazer. O `desfazer` tem histórico próprio com autor
+`mcp`. As `propor_*` continuam só propondo.
+
+**Backup.** Antes da primeira escrita de cada banco (planejamento, regras, inventário) em cada
+sessão, o banco é copiado para `<cofre>/backups/mcp/<banco>-AAAAMMDD-HHMMSS.sqlite` (UTC) pela API
+de backup do SQLite, consistente com o WAL, nunca cópia de arquivo cru. Se o backup falha, a
+escrita é recusada com erro claro. Ficam os 20 mais recentes por banco; só essa pasta é aparada.
+
+**Nunca no MCP:** SQL livre, pagamento, cancelamento no fornecedor e decidir a triagem do
+inventário (isso segue só seu).
 
 **Limites.** `meses` até 360; `por_pagina` de 1 a 100; nomes até 120 caracteres, motivos até
 200, notas até 500, busca até 100; valores de 0 a 100 bilhões de centavos. Os erros vêm em

@@ -1,6 +1,7 @@
 //! O modo `sbf mcp --inventario <pasta-do-cofre> [--livro <livro-caixa.sqlite>]`: o servidor
 //! MCP local por stdio (ADR-012, ADR-015 item 4). O stdout é só do protocolo; mensagens vão
-//! para o stderr. O livro-caixa vem do cache local da estação, se existir (só leitura).
+//! para o stderr. O livro-caixa vem do cache local da estação, se existir (só leitura). Desde a
+//! D15 o servidor aplica direto (com backup antes da primeira escrita de cada banco).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -97,6 +98,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
         .or_else(|| Some(Path::new(pasta).join("planejamento.sqlite")).filter(|p| p.is_file()));
     let nucleo = match planejamento {
         Some(arquivo) if arquivo.is_file() => {
+            let nucleo = nucleo.com_arquivo_do_planejamento(&arquivo);
             nucleo.com_planejamento(std::sync::Arc::new(move || abrir_planejamento(&arquivo)))
         }
         Some(arquivo) => {
@@ -108,8 +110,9 @@ pub fn rodar(args: &[String]) -> ExitCode {
         }
         None => nucleo,
     };
-    // As regras de reconhecimento (spec 13): consultar, testar, simular e propor rascunho.
-    // O MCP nunca ativa (D14); os scripts rodam no processo filho `sbf script --servir`.
+    // As regras de reconhecimento (spec 13): consultar, testar, simular, propor rascunho e,
+    // desde a D15, ativar, desativar, reverter e consolidar (autor mcp). Os scripts rodam no
+    // processo filho `sbf script --servir`.
     let nucleo = match crate::script::executor_de_script() {
         Ok(executor) => nucleo.com_regras(Path::new(pasta).join("regras.sqlite"), executor),
         Err(_) => {

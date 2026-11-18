@@ -46,6 +46,7 @@ pub struct Nucleo {
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
+    backups: crate::backup::Backups,
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -227,12 +228,16 @@ impl Nucleo {
         abrir_leitura(banco)
             .and_then(|c| c.query_row("SELECT COUNT(*) FROM sqlite_master", [], |_| Ok(())))
             .map_err(|e| format!("não deu para abrir o inventário: {e}"))?;
+        let cofre = banco.parent().unwrap_or_else(|| Path::new("."));
+        let backups = crate::backup::Backups::novo(cofre);
+        backups.registrar(crate::backup::Qual::Inventario, banco.to_path_buf());
         Ok(Self {
             banco: banco.to_path_buf(),
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
             semelhantes: Semelhantes(None),
             plano: None,
             regras: None,
+            backups,
         })
     }
 
@@ -257,8 +262,35 @@ impl Nucleo {
             banco: self.banco.clone(),
             nivel: self.nivel(),
             hoje: None,
+            backups: self.backups.clone(),
         });
         self
+    }
+
+    /// Diz onde está o `planejamento.sqlite` que a fábrica abre, para o backup da primeira
+    /// escrita da sessão e para `fazer_backup`. Sem isso o planejamento não é copiado.
+    #[must_use]
+    pub fn com_arquivo_do_planejamento(self, arquivo: &Path) -> Self {
+        self.backups
+            .registrar(crate::backup::Qual::Planejamento, arquivo.to_path_buf());
+        self
+    }
+
+    /// Troca o guarda de backups (os testes fixam o relógio). Chame antes de `com_planejamento`
+    /// e `com_regras`.
+    #[must_use]
+    pub fn com_backups(mut self, backups: crate::backup::Backups) -> Self {
+        backups.registrar(crate::backup::Qual::Inventario, self.banco.clone());
+        self.backups = backups;
+        self
+    }
+
+    /// `fazer_backup`: copia, agora, todos os bancos do cofre (API de backup do SQLite).
+    ///
+    /// # Errors
+    /// Qualquer banco que não deu para copiar.
+    pub fn fazer_backup(&self) -> Resultado {
+        self.backups.fazer_todos()
     }
 
     /// Liga as ferramentas de regras de reconhecimento sobre `caminho` (o `regras.sqlite`
@@ -271,12 +303,12 @@ impl Nucleo {
         caminho: PathBuf,
         executor: Arc<dyn sbf_regras::script::ExecutorDeScript>,
     ) -> Self {
-        self.regras = Some(crate::regras::Regras::novo(
-            caminho,
-            self.banco.clone(),
-            executor,
-            self.nivel(),
-        ));
+        self.backups
+            .registrar(crate::backup::Qual::Regras, caminho.clone());
+        self.regras = Some(
+            crate::regras::Regras::novo(caminho, self.banco.clone(), executor, self.nivel())
+                .com_backups(self.backups.clone()),
+        );
         self
     }
 
@@ -1002,6 +1034,8 @@ impl Nucleo {
                 "no máximo {MAXIMO_DE_SUGESTOES} sugestões por chamada"
             ));
         }
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
         let leitura = self.leitura()?;
         if !tem_triagem(&leitura) {
             return Err("o inventário ainda não tem a triagem (abra o app e migre)".to_owned());
