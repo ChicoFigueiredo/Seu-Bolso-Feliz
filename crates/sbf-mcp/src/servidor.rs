@@ -25,6 +25,9 @@ use crate::regras::{
     PedidoDeProposta, PedidoDeRegra, PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste,
     PedidoDeVersao, Regras,
 };
+use crate::telegram::{
+    FERRAMENTAS as FERRAMENTAS_DO_TELEGRAM, PedidoDeColeta, PedidoDeConversas, PedidoDeSeguir,
+};
 
 macro_rules! esquema {
     ($nome:ident, $alvo:ident { $( $(#[$m:meta])* $campo:ident : $tipo:ty ),* $(,)? }) => {
@@ -184,6 +187,11 @@ impl Servidor {
         }
         if !nucleo.tem_regras() {
             for nome in FERRAMENTAS_DAS_REGRAS.iter().chain(&ESCRITA_DAS_REGRAS) {
+                tool_router.remove_route(nome);
+            }
+        }
+        if !nucleo.tem_telegram() {
+            for nome in &FERRAMENTAS_DO_TELEGRAM {
                 tool_router.remove_route(nome);
             }
         }
@@ -665,6 +673,48 @@ impl Servidor {
     }
 
     #[tool(
+        description = "Lista as conversas (grupos, canais e privadas) da conta do Telegram do usuário, com id, nome, tipo e se já é seguida. atualizar=true pergunta ao Telegram agora; sem isso vale a última lista guardada. Só leitura: nada é enviado, apagado nem marcado como lido."
+    )]
+    fn telegram_conversas(
+        &self,
+        Parameters(p): Parameters<PedidoDeConversas>,
+    ) -> Result<String, String> {
+        responder(
+            "telegram_conversas",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::conversas(t, &p)),
+        )
+    }
+
+    #[tool(
+        description = "APLICA AGORA: passa a seguir (ou, com deixar=true, deixa de seguir) uma conversa do Telegram, pelo id ou pelo nome. Só as conversas seguidas são coletadas. Para voltar atrás: telegram_seguir com deixar=true."
+    )]
+    fn telegram_seguir(&self, Parameters(p): Parameters<PedidoDeSeguir>) -> Result<String, String> {
+        responder(
+            "telegram_seguir",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::seguir(t, &p)),
+        )
+    }
+
+    #[tool(
+        description = "COLETA AGORA as mídias novas (fotos, documentos e PDFs) das conversas seguidas do Telegram: baixa para <cofre>/entrada/telegram/<conversa>/, registra no inventário como achado com origem telegram:<conversa>:<mensagem> (o mesmo arquivo em outra mensagem é só uma origem a mais) e roda o Reconhecimento em cada arquivo novo. conversa limita a uma; desde (AAAA-MM-DD) vale só na primeira coleta de cada conversa. Só leitura no Telegram."
+    )]
+    fn telegram_coletar(
+        &self,
+        Parameters(p): Parameters<PedidoDeColeta>,
+    ) -> Result<String, String> {
+        responder(
+            "telegram_coletar",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::coletar(t, &p)),
+        )
+    }
+
+    #[tool(
         description = "Faz AGORA o backup de todos os bancos do cofre (inventário, planejamento, regras...) em <cofre>/backups/mcp/, com a API de backup do SQLite (consistente com o WAL); guarda os 20 mais recentes por banco. Os bancos que o MCP escreve já são copiados sozinhos antes da primeira escrita de cada sessão."
     )]
     fn fazer_backup(&self) -> Result<String, String> {
@@ -701,7 +751,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) e as do Telegram (telegram_seguir, telegram_coletar) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro; desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 
