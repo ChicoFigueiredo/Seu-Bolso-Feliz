@@ -173,6 +173,17 @@ impl AppDoInventario {
                 if let Ok(dados) = sbf_chaveiro::pasta_de_dados_do_app()
                     && sbf_chaveiro::garantir_fora_do_cofre(&dados, &self.pasta).is_ok()
                 {
+                    // Conexões › Telegram, Pluggy e pastas do worker (só estado, mais o
+                    // "Coletar agora" do Telegram).
+                    janela.conexoes.ligar(
+                        self.pasta.clone(),
+                        dados.clone(),
+                        chaveiro_dos_roteiros.clone(),
+                        std::sync::Arc::new(crate::telegram::ColetaDaJanela {
+                            cofre: self.pasta.clone(),
+                            chaveiro: chaveiro_dos_roteiros.clone(),
+                        }),
+                    );
                     janela.roteiros.ligar(
                         crate::roteiros::ambiente(&self.pasta, &dados),
                         Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {
