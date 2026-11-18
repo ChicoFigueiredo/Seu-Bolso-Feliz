@@ -69,6 +69,60 @@ fn selo_de_provas(ui: &mut Ui, p: &Paleta, provas: u8) {
     );
 }
 
+/// "Regra <nome> · versão N": o texto da linha discreta que aponta para a regra que
+/// reconheceu.
+pub(crate) fn rotulo_da_regra(nome: &str, versao: u32) -> String {
+    format!("Regra {nome} · versão {versao}")
+}
+
+/// A regra que reconheceu a entrada, segundo a leitura do motor (no contracheque, já
+/// completada pelo leitor nativo e pelo script).
+pub(crate) fn regra_da_leitura(leitura: Option<&Leitura>) -> Option<&Reconhecimento> {
+    match &leitura?.decisao {
+        Decisao::Reconhecido(r) => Some(r),
+        _ => None,
+    }
+}
+
+/// As linhas de `exibir` que o script quis mostrar, discretas, uma por linha. As que
+/// começam por aviso (`⚠`) saem na cor de aviso.
+pub(crate) fn linhas_de_exibir(ui: &mut Ui, p: &Paleta, linhas: &[String]) {
+    for linha in linhas {
+        let cor = if linha.starts_with('⚠') {
+            p.aviso
+        } else {
+            p.tinta
+        };
+        ui.label(RichText::new(linha).size(12.0).color(cor));
+    }
+}
+
+/// No cartão do contracheque: a linha "Regra <nome> · versão N" (link para a regra) e,
+/// abaixo, o `exibir` do script. Nada quando a leitura não trouxe a regra.
+pub(crate) fn regra_do_contracheque(
+    ui: &mut Ui,
+    p: &Paleta,
+    extras: &ExtrasDaRegra<'_>,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let Some(r) = regra_da_leitura(extras.leitura) else {
+        return;
+    };
+    ui.add_space(3.0);
+    if ui
+        .link(
+            RichText::new(rotulo_da_regra(extras.nome_da(&r.regra), r.versao))
+                .size(12.0)
+                .color(p.tinta_suave),
+        )
+        .on_hover_text("Abrir a regra na área Regras de reconhecimento")
+        .clicked()
+    {
+        pedidos.push(Pedido::AbrirRegra(r.regra.clone()));
+    }
+    linhas_de_exibir(ui, p, &r.exibir);
+}
+
 fn selo_precisa_revisar(ui: &mut Ui, p: &Paleta) {
     componentes::selo(ui, "Precisa revisar", p.aviso_sutil, p.aviso);
 }
@@ -107,6 +161,7 @@ pub(crate) fn pela_regra(
             selo_precisa_revisar(ui, p);
         }
     });
+    linhas_de_exibir(ui, p, &r.exibir);
     pequeno(
         ui,
         format!("Tipo documental: {}", r.tipo_documental),

@@ -676,6 +676,7 @@ mod testes_do_painel {
 
     use super::*;
     use crate::planejamento_ficticio::{HOJE_DA_DEMONSTRACAO, PlanejamentoFicticio};
+    use crate::reconhecimento::SituacaoDoCartao;
     use crate::reconhecimento_ficticio::{NOME_DO_AMBIGUO, NOME_DO_PIX, ligar_na_demonstracao};
     use crate::tema;
 
@@ -1320,6 +1321,130 @@ mod testes_do_painel {
         quadro(&ctx, &mut j);
         j.abrir_teste(1);
         quadro(&ctx, &mut j);
+    }
+
+    // ---- `exibir` e a linha da regra no cartão ----
+
+    /// Todo o texto que o quadro pintou.
+    fn textos_pintados(ctx: &egui::Context, j: &mut Janela) -> Vec<String> {
+        fn colher(forma: &egui::Shape, fora: &mut Vec<String>) {
+            match forma {
+                egui::Shape::Text(t) => fora.push(t.galley.text().to_owned()),
+                egui::Shape::Vec(v) => v.iter().for_each(|f| colher(f, fora)),
+                _ => {}
+            }
+        }
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1000.0, 1400.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut saida = ctx.run_ui(entrada, |ui| {
+            j.reconhecimento_ui(ui);
+        });
+        saida.textures_delta.clear();
+        let mut textos = Vec::new();
+        for c in &saida.shapes {
+            colher(&c.shape, &mut textos);
+        }
+        textos
+    }
+
+    fn contem(textos: &[String], trecho: &str) -> bool {
+        textos.iter().any(|t| t.contains(trecho))
+    }
+
+    fn ctx_pronto() -> egui::Context {
+        let ctx = egui::Context::default();
+        tema::instalar_fontes(&ctx);
+        tema::aplicar(&ctx, "claro");
+        ctx
+    }
+
+    fn leitura_da_regra(mut rec: sbf_regras::Reconhecimento) -> sbf_regras::Leitura {
+        rec.leitor = None;
+        sbf_regras::Leitura {
+            entrada: "doc-ficticio".to_owned(),
+            decisao: Decisao::Reconhecido(Box::new(rec)),
+            execucoes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn o_rotulo_da_regra_traz_nome_e_versao() {
+        assert_eq!(
+            crate::reconhecimento_regras_ui::rotulo_da_regra("Contracheque", 3),
+            "Regra Contracheque · versão 3"
+        );
+    }
+
+    #[test]
+    fn o_cartao_do_contracheque_desenha_a_regra_e_as_linhas_de_exibir() {
+        let ctx = ctx_pronto();
+        let (mut j, _) = janela();
+        let _p = soltar(&mut j, NOME_DO_PIX);
+        // Qualquer reconhecimento serve de molde para a regra que "leu" o contracheque.
+        let mut rec = match &j.reconhecimento.cartoes[0]
+            .resultado()
+            .expect("r")
+            .reconhecido
+        {
+            Reconhecido::PelaRegra { reconhecimento } => (**reconhecimento).clone(),
+            outro => panic!("esperava PelaRegra, veio {outro:?}"),
+        };
+        rec.regra = "contracheque".to_owned();
+        rec.versao = 3;
+        rec.exibir = vec![
+            "IRRF conferido ✓ · tabela irrf-teste".to_owned(),
+            "⚠ IRRF diverge da tabela irrf-teste".to_owned(),
+        ];
+        let _c = soltar(&mut j, "contracheque.pdf");
+        {
+            let c = &mut j.reconhecimento.cartoes[1];
+            c.nomes_das_regras
+                .insert("contracheque".to_owned(), "Contracheque".to_owned());
+            let SituacaoDoCartao::Pronto(r) = &mut c.situacao else {
+                panic!("o contracheque deveria estar pronto");
+            };
+            assert!(matches!(r.reconhecido, Reconhecido::Contracheque { .. }));
+            r.leitura = Some(leitura_da_regra(rec));
+        }
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(
+            contem(&textos, "Regra Contracheque · versão 3"),
+            "{textos:?}"
+        );
+        assert!(contem(&textos, "IRRF conferido ✓ · tabela irrf-teste"));
+        assert!(contem(&textos, "⚠ IRRF diverge da tabela irrf-teste"));
+
+        // Sem a regra na leitura, o cartão do contracheque segue como sempre.
+        let SituacaoDoCartao::Pronto(r) = &mut j.reconhecimento.cartoes[1].situacao else {
+            panic!("pronto");
+        };
+        r.leitura = None;
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(!contem(&textos, "Regra Contracheque"));
+        assert!(!contem(&textos, "IRRF conferido"));
+    }
+
+    #[test]
+    fn o_cartao_pela_regra_desenha_as_linhas_de_exibir() {
+        let ctx = ctx_pronto();
+        let (mut j, _) = janela();
+        let _p = soltar(&mut j, NOME_DO_PIX);
+        let SituacaoDoCartao::Pronto(r) = &mut j.reconhecimento.cartoes[0].situacao else {
+            panic!("pronto");
+        };
+        let Reconhecido::PelaRegra { reconhecimento } = &mut r.reconhecido else {
+            panic!("esperava PelaRegra");
+        };
+        reconhecimento.exibir = vec!["linha curta do script".to_owned()];
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(contem(&textos, "linha curta do script"), "{textos:?}");
+        assert!(contem(&textos, "Reconhecido pela regra"));
+        assert!(contem(&textos, "· versão"));
     }
 
     #[test]

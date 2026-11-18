@@ -447,6 +447,7 @@ fn reconhecido(
                     );
                 }
             }
+            reconhecimento_regras_ui::regra_do_contracheque(ui, p, extras, pedidos);
         }
         Reconhecido::PelaIa { resumo, .. } => {
             ui.horizontal(|ui| {

@@ -10,6 +10,8 @@
 --   rendimento_tributavel_centavos  (opcional) rendimentos tributáveis sujeitos à incidência
 --                                   mensal, para o redutor da Lei 15.270/2025
 -- Parâmetros: parametros.irrf (faixas, redutor, versao).
+-- Saída `exibir`: uma linha curta para o cartão do Reconhecimento (conferido, arredondamento,
+-- diverge ou não conferido); o aviso com valores é do host.
 
 local function imposto_da_tabela(base, irrf, ajuda)
   local faixa = nil
@@ -46,41 +48,39 @@ local function redutor(imposto, base, rendimento, irrf, ajuda)
   return 0
 end
 
+-- Quando não dá para conferir: revisar, o motivo e a linha curta para o cartão.
+local function nao_conferido(motivo, evidencias, campos)
+  return {
+    corresponde = true,
+    revisar = true,
+    campos = campos,
+    motivos = { motivo },
+    evidencias = evidencias,
+    exibir = { "IRRF não conferido: " .. motivo },
+  }
+end
+
 function transformar(entrada, parametros, ajuda)
   local campos = entrada.campos or {}
   local irrf = parametros.irrf
   local base = campos.base_irrf_centavos
   if base == nil or irrf == nil then
-    return {
-      corresponde = true,
-      revisar = true,
-      motivos = { base == nil and "falta a base do IRRF no contracheque" or "falta a tabela do IRRF" },
-    }
+    return nao_conferido(base == nil and "falta a base do IRRF no contracheque" or "falta a tabela do IRRF")
   end
-  local evidencias = { "rubrica_irrf", "tabela:irrf:" .. tostring(irrf.versao) }
+  local versao = tostring(irrf.versao)
+  local evidencias = { "rubrica_irrf", "tabela:irrf:" .. versao }
   local imposto = imposto_da_tabela(base, irrf, ajuda)
   if imposto == nil then
-    return { corresponde = true, revisar = true, motivos = { "a tabela do IRRF não tem faixa para a base" }, evidencias = evidencias }
+    return nao_conferido("a tabela do IRRF não tem faixa para a base", evidencias)
   end
   local desconto = redutor(imposto, base, campos.rendimento_tributavel_centavos, irrf, ajuda)
   if desconto == nil then
-    return {
-      corresponde = true,
-      revisar = true,
-      motivos = { "falta o rendimento tributável para o redutor" },
-      evidencias = evidencias,
-    }
+    return nao_conferido("falta o rendimento tributável para o redutor", evidencias)
   end
   local estimado = imposto - desconto
   local retido = campos.irrf_retido_centavos
   if retido == nil then
-    return {
-      corresponde = true,
-      revisar = true,
-      campos = { irrf_estimado_centavos = estimado },
-      motivos = { "falta o IRRF retido para conferir" },
-      evidencias = evidencias,
-    }
+    return nao_conferido("falta o IRRF retido para conferir", evidencias, { irrf_estimado_centavos = estimado })
   end
   local diferenca = retido - estimado
   -- A folha pode truncar onde o script arredonda: até 1 centavo é arredondamento, não
@@ -88,10 +88,16 @@ function transformar(entrada, parametros, ajuda)
   local TOLERANCIA_CENTAVOS = 1
   local diverge = math.abs(diferenca) > TOLERANCIA_CENTAVOS
   local motivos = {}
+  local exibir
   if diverge then
     motivos = { "o IRRF retido difere do estimado pela tabela" }
+    -- Os valores do aviso vêm do host; aqui só a linha curta.
+    exibir = { "⚠ IRRF diverge da tabela " .. versao }
   elseif diferenca ~= 0 then
     motivos = { "diferença de arredondamento de 1 centavo" }
+    exibir = { "IRRF conferido ✓ (1 centavo de arredondamento) · tabela " .. versao }
+  else
+    exibir = { "IRRF conferido ✓ · tabela " .. versao }
   end
   return {
     corresponde = true,
@@ -99,5 +105,6 @@ function transformar(entrada, parametros, ajuda)
     revisar = diverge,
     motivos = motivos,
     evidencias = evidencias,
+    exibir = exibir,
   }
 end
