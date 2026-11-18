@@ -26,11 +26,14 @@
 //!   e devolve o diff.
 //! - `rascunho`: monta, sem IA, uma versão-rascunho a partir de uma correção do usuário.
 //! - `fabrica`: as regras que vêm com o sbf (D10).
+//! - `biblioteca`: a biblioteca de regras de fábrica para documentos financeiros brasileiros comuns
+//!   (arquivos em `fabrica/biblioteca/`), todas em rascunho.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod biblioteca;
 pub mod catalogo;
 pub mod definicao;
 pub mod fabrica;

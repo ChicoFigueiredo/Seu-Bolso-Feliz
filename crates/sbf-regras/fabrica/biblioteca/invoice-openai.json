@@ -1,0 +1,91 @@
+{
+  "regra": "invoice-openai",
+  "nome": "Invoice · OpenAI",
+  "motivo": "regra de fábrica: receipt ou invoice da OpenAI em dólar; guarda a moeda e o valor em USD (script)",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "invoice-openai",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "openai"
+        }
+      ],
+      "algum": [
+        {
+          "contem": "receipt"
+        },
+        {
+          "contem": "invoice"
+        }
+      ]
+    },
+    "extrair": {},
+    "obrigatorios": [
+      "valor_usd_centavos"
+    ],
+    "script_le_texto": true,
+    "propor": []
+  },
+  "exemplos": [
+    {
+      "nome": "receipt de uso da API",
+      "texto": "OpenAI, LLC\nReceipt\nReceipt number 1111-2222\nDate paid November 20, 2026\nDescription API usage\nTotal $42.17\nAmount paid $42.17\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "invoice-openai",
+        "campos": {
+          "valor_usd_centavos": {
+            "tipo": "centavos",
+            "valor": 4217
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "usd"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-20"
+          },
+          "numero_do_documento": {
+            "tipo": "texto",
+            "valor": "1111-2222"
+          }
+        }
+      }
+    },
+    {
+      "nome": "invoice com date of issue",
+      "texto": "OpenAI, LLC\nInvoice\nDate of issue January 5, 2027\nAmount due\n$1,020.00 USD\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "invoice-openai",
+        "campos": {
+          "valor_usd_centavos": {
+            "tipo": "centavos",
+            "valor": 102000
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "usd"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2027-01-05"
+          }
+        }
+      }
+    },
+    {
+      "nome": "receipt da Anthropic não é da OpenAI",
+      "texto": "Anthropic, PBC\nReceipt\nReceipt number 0000-0000-0000\nDate paid November 12, 2026\nBill to Fulano de Tal\nClaude Max plan $100.00\nSubtotal $100.00\nTotal $100.00\nAmount paid $100.00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

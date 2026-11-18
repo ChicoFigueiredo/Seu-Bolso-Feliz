@@ -1,0 +1,204 @@
+{
+  "regra": "caixa-habitacao-comprovante-prestacao",
+  "nome": "CAIXA Habitação · Comprovante de pagamento de prestação",
+  "motivo": "regra de fábrica: lê o comprovante (print do app) com amortização, juros, taxas e saldo devedor; propõe conciliar com a Prestação Casa",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "comprovante-prestacao-caixa-habitacao",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "comprovante de pagamento"
+        },
+        {
+          "contem": "pagamento de prestacao"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:valor\\s+pago)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "valor_prestacao_centavos": {
+        "regex": "(?i)(?:valor\\s+da\\s+presta\\S+)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "valor_devido_centavos": {
+        "regex": "(?i)(?:valor\\s+devido)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "amortizacao_centavos": {
+        "regex": "(?i)(?:amortiza\\S*)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "juros_centavos": {
+        "regex": "(?i)(?:\\bjuros\\b)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "taxas_centavos": {
+        "regex": "(?i)(?:\\btaxas?\\b)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "encargo_liquido_centavos": {
+        "regex": "(?i)(?:encargo\\s+l\\S*quido)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "valor_diferenca_centavos": {
+        "regex": "(?i)(?:valor\\s+da\\s+diferen\\S+)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "correcao_monetaria_centavos": {
+        "regex": "(?i)(?:corre\\S*\\s+monet\\S+)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "saldo_devedor_centavos": {
+        "regex": "(?i)(?:saldo\\s+devedor)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:data\\s+de\\s+vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "data": {
+        "regex": "(?i)(?:data\\s+de\\s+pagamento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "contrato": {
+        "regex": "(?i)contrato[^\\d\\n]{0,20}(?:\\n[^\\d\\n]{0,10})?(\\d[\\d.\\-/]{5,24}\\d)",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "conciliar_ocorrencia": {
+          "janela_dias": 5,
+          "compromisso": "Prestação Casa"
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "comprovante do app com todos os rótulos",
+      "mime": "image/png",
+      "texto": "CAIXA Habitação\nComprovante de pagamento\nPagamento de prestação\nNº do contrato 000000000000-0\nData de vencimento 10/11/2026\nData de pagamento 09/11/2026\nValor da prestação R$ 1.500,00\nValor pago R$ 1.512,34\nValor devido R$ 1.500,00\nAmortização R$ 700,00\nJuros R$ 650,00\nTaxas R$ 150,00\nEncargo líquido R$ 1.500,00\nValor da diferença R$ 12,34\nCorreção monetária R$ 0,00\nSaldo devedor R$ 150.000,00\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-prestacao-caixa-habitacao",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 151234
+          },
+          "valor_prestacao_centavos": {
+            "tipo": "centavos",
+            "valor": 150000
+          },
+          "valor_devido_centavos": {
+            "tipo": "centavos",
+            "valor": 150000
+          },
+          "amortizacao_centavos": {
+            "tipo": "centavos",
+            "valor": 70000
+          },
+          "juros_centavos": {
+            "tipo": "centavos",
+            "valor": 65000
+          },
+          "taxas_centavos": {
+            "tipo": "centavos",
+            "valor": 15000
+          },
+          "encargo_liquido_centavos": {
+            "tipo": "centavos",
+            "valor": 150000
+          },
+          "valor_diferenca_centavos": {
+            "tipo": "centavos",
+            "valor": 1234
+          },
+          "correcao_monetaria_centavos": {
+            "tipo": "centavos",
+            "valor": 0
+          },
+          "saldo_devedor_centavos": {
+            "tipo": "centavos",
+            "valor": 15000000
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-11-10"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-09"
+          },
+          "contrato": {
+            "tipo": "texto",
+            "valor": "000000000000-0"
+          }
+        }
+      }
+    },
+    {
+      "nome": "caixa alta, sem acento e valor na linha de baixo",
+      "mime": "image/png",
+      "texto": "CAIXA HABITACAO\nCOMPROVANTE DE PAGAMENTO\nPAGAMENTO DE PRESTACAO\nContrato\n000000000000-0\nData de vencimento\n10/12/2026\nData de pagamento\n10/12/2026\nValor pago\nR$ 987,65\nAmortizacao\nR$ 400,00\nJuros\nR$ 500,00\nTaxas\nR$ 87,65\nSaldo devedor\nR$ 99.000,00\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-prestacao-caixa-habitacao",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 98765
+          },
+          "amortizacao_centavos": {
+            "tipo": "centavos",
+            "valor": 40000
+          },
+          "juros_centavos": {
+            "tipo": "centavos",
+            "valor": 50000
+          },
+          "taxas_centavos": {
+            "tipo": "centavos",
+            "valor": 8765
+          },
+          "saldo_devedor_centavos": {
+            "tipo": "centavos",
+            "valor": 9900000
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-10"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-10"
+          },
+          "contrato": {
+            "tipo": "texto",
+            "valor": "000000000000-0"
+          }
+        }
+      }
+    },
+    {
+      "nome": "um Pix não é prestação",
+      "texto": "Banco Exemplo\nComprovante de Pix\nValor: R$ 150,00\nData: 10/11/2026\nPara: Fulano de Tal\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

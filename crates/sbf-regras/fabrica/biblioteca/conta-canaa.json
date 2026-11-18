@@ -1,0 +1,123 @@
+{
+  "regra": "conta-canaa",
+  "nome": "Conta de internet · Canaã Telecom",
+  "motivo": "regra de fábrica: fatura da Canaã Telecom; propõe conciliar com o compromisso Internet Canaã",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "conta-canaa",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "canaa"
+        },
+        {
+          "contem": "vencimento"
+        }
+      ],
+      "nenhum": [
+        {
+          "contem": "pagamento minimo"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:(?:total\\s+a\\s+pagar|valor\\s+a\\s+pagar|valor\\s+total|total\\s+da\\s+fatura|valor\\s+da\\s+fatura)|\\bvalor\\b)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "data": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "codigo_cliente": {
+        "regex": "(?i)(?:c\\S{0,2}digo\\s+do\\s+cliente|n\\S{0,2}mero\\s+do\\s+cliente|unidade\\s+consumidora|instala\\S{1,3}o|\\bcliente\\b)[^\\d\\n]{0,15}(\\d[\\d.\\-/]{2,20}\\d)",
+        "formato": "texto"
+      },
+      "competencia": {
+        "regex": "(?i)(?:m\\S*s\\s+de\\s+refer\\S+|refer\\S+ncia)[^\\d\\n]{0,20}(\\d{2}/\\d{4})",
+        "formato": "competencia"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "conciliar_ocorrencia": {
+          "janela_dias": 5,
+          "compromisso": "Internet Canaã"
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "fatura com valor simples",
+      "texto": "Canaã Telecom\nFatura de internet\nCódigo do cliente: 000123\nVencimento 12/12/2026\nValor R$ 99,90\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-canaa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 9990
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-12"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-12"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "000123"
+          }
+        }
+      }
+    },
+    {
+      "nome": "caixa alta sem acento",
+      "texto": "CANAA TELECOM\nFATURA\nCLIENTE 4567\nREFERENCIA 12/2026\nVENCIMENTO: 12/01/2027\nVALOR A PAGAR: R$ 109,90\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-canaa",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 10990
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2027-01-12"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "4567"
+          },
+          "competencia": {
+            "tipo": "competencia",
+            "valor": "2026-12"
+          }
+        }
+      }
+    },
+    {
+      "nome": "conta da Vivo não é da Canaã",
+      "texto": "Vivo\nSua conta Vivo\nNúmero do cliente: 000000000\nMês de referência: 12/2026\nVencimento: 15/12/2026\nValor total: R$ 129,90\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}
