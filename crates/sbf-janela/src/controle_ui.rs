@@ -72,6 +72,11 @@ pub enum PedidoDoControle {
         ocorrencia: IdOcorrencia,
         movimento: String,
     },
+    /// Ignora as sugestões pendentes da ocorrência (uma regra de reconhecimento recebe
+    /// `Rejeitado`): exclusão lógica, a regra não as repete.
+    IgnorarSugestao {
+        ocorrencia: IdOcorrencia,
+    },
     /// Define (ou tira) a assinatura de um recorrente, lendo a versão na hora.
     DefinirAssinatura {
         recorrente: String,
@@ -4250,6 +4255,27 @@ mod testes {
                 .as_deref()
                 .is_some_and(|d| d.contains("SALARIO"))
         );
+    }
+
+    #[test]
+    fn ignorar_a_sugestao_tira_o_selo_e_nao_concilia_nada() {
+        let mut j = janela_ligada();
+        let (sel, _) = vm_do_salario(&mut j);
+        assert!(sel.sugestao_de_conciliacao);
+        j.controle_pedido(PedidoDoControle::IgnorarSugestao {
+            ocorrencia: sel.id.clone(),
+        });
+        let (sel, vm) = vm_do_salario(&mut j);
+        assert!(!sel.sugestao_de_conciliacao);
+        assert_eq!(sel.conciliado, None);
+        assert!(vm.sugestao.is_none() && vm.confirmadas.is_empty());
+        assert_eq!(
+            j.controle.mensagem,
+            Some(("Sugestão ignorada. A regra não a repete.".to_owned(), false))
+        );
+        // Sem sugestão pendente, avisa em vez de calar.
+        j.controle_pedido(PedidoDoControle::IgnorarSugestao { ocorrencia: sel.id });
+        assert!(j.controle.mensagem.as_ref().is_some_and(|(_, erro)| *erro));
     }
 
     #[test]
