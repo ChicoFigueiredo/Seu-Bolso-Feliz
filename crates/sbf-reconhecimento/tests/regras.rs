@@ -555,6 +555,8 @@ fn movimento_pix() -> sbf_planejamento::MovimentoDoExtrato {
         conta_do_extrato: CONTA.into(),
         descricao: "PIX ENVIADO Fulano de Tal".into(),
         tipo: "debito".into(),
+        contraparte: None,
+        contraparte_doc: None,
     }
 }
 

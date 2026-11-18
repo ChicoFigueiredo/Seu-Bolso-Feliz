@@ -22,8 +22,8 @@ use crate::definicao::{Definicao, parse_competencia};
 use crate::motor::Motor;
 use crate::script::ExecutorDeScript;
 use crate::{
-    Autor, Decisao, Entrada, ErroDasRegras, Estado, IdDaRegra, LIMIAR_DE_CONSOLIDACAO, Leitura,
-    Quem, Reconhecimento, ResultadoDaExecucao, Retorno, Valor, fabrica,
+    Autor, DeOnde, Decisao, Entrada, ErroDasRegras, Estado, IdDaRegra, LIMIAR_DE_CONSOLIDACAO,
+    Leitura, Quem, Reconhecimento, ResultadoDaExecucao, Retorno, Valor, fabrica,
 };
 
 type Resultado<T> = Result<T, ErroDasRegras>;
@@ -1109,10 +1109,14 @@ impl Catalogo {
     pub fn registrar_proposta(&mut self, r: &Reconhecimento, entrada: &str) -> Resultado<bool> {
         // As linhas de `exibir` são só para a tela e podem ter texto do documento: não ficam
         // gravadas.
-        let sem_exibir = Reconhecimento {
+        // O CPF/CNPJ da contraparte nunca fica gravado, nem como campo extraído.
+        let mut sem_exibir = Reconhecimento {
             exibir: Vec::new(),
             ..r.clone()
         };
+        sem_exibir.campos.retain(
+            |_, c| !matches!(&c.de_onde, DeOnde::Dica { nome } if nome == "contraparte_doc"),
+        );
         let conteudo = serde_json::to_string(&sem_exibir).map_err(banco)?;
         let n = self
             .conn

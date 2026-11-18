@@ -586,6 +586,8 @@ mod testes {
             conta_do_extrato: conta.to_owned(),
             descricao: descricao.to_owned(),
             tipo: if valor > 0 { "credito" } else { "debito" }.to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         }
     }
 
@@ -616,6 +618,8 @@ mod testes {
             mov("m_errado", 15, -9_500, "B1", "NET"),
             MovimentoDoExtrato {
                 tipo: "transferencia_interna".to_owned(),
+                contraparte: None,
+                contraparte_doc: None,
                 ..mov("m_interna", 15, -9_000, "B1", "NET")
             },
         ];

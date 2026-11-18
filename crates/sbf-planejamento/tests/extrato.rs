@@ -42,6 +42,8 @@ impl Extrato {
             conta_do_extrato: conta.to_owned(),
             descricao: descricao.to_owned(),
             tipo: if valor > 0 { "credito" } else { "debito" }.to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         });
     }
 }

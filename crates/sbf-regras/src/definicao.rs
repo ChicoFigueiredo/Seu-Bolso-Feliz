@@ -197,7 +197,48 @@ fn compilar_condicoes(condicoes: &[Condicao]) -> Result<Vec<CondicaoCompilada>, 
                 Condicao::Canal(c) => CondicaoCompilada::Canal(c.clone()),
                 Condicao::Descricao(p) => CondicaoCompilada::Descricao(regex(p)?),
                 Condicao::Nome(p) => CondicaoCompilada::Nome(regex(p)?),
+                Condicao::ContraparteDoc(docs) => {
+                    CondicaoCompilada::ContraparteDoc(documentos_validos(docs)?)
+                }
+                Condicao::Contraparte(p) => CondicaoCompilada::Contraparte(
+                    RegexBuilder::new(p)
+                        .case_insensitive(true)
+                        .size_limit(LIMITE_DO_REGEX)
+                        .dfa_size_limit(LIMITE_DO_REGEX)
+                        .build()
+                        .map_err(|m| {
+                            ErroDasRegras::Definicao(format!("regex inválido em `{p}`: {m}"))
+                        })?,
+                ),
             })
+        })
+        .collect()
+}
+
+/// Os dígitos de um documento (CPF/CNPJ), sem a pontuação.
+pub fn so_os_digitos(documento: &str) -> String {
+    documento.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// Confere a lista de `contraparte_doc`: ao menos um, cada um com 11 (CPF) ou 14 (CNPJ)
+/// dígitos. Devolve só os dígitos.
+fn documentos_validos(docs: &[String]) -> Result<Vec<String>, ErroDasRegras> {
+    if docs.is_empty() {
+        return Err(ErroDasRegras::Definicao(
+            "contraparte_doc precisa de ao menos um documento".to_owned(),
+        ));
+    }
+    docs.iter()
+        .map(|d| {
+            let digitos = so_os_digitos(d);
+            if matches!(digitos.len(), 11 | 14) {
+                Ok(digitos)
+            } else {
+                // Sem repetir o documento na mensagem: é dado pessoal.
+                Err(ErroDasRegras::Definicao(
+                    "contraparte_doc: cada documento tem 11 (CPF) ou 14 (CNPJ) dígitos".to_owned(),
+                ))
+            }
         })
         .collect()
 }
@@ -232,6 +273,12 @@ pub enum Condicao {
     Descricao(String),
     /// Regex sobre o nome do arquivo.
     Nome(String),
+    /// O CPF/CNPJ da contraparte do registro (`dicas.contraparte_doc`) é igual a algum destes.
+    /// Só os dígitos contam: `000.000.000-00` e `00000000000` são o mesmo documento.
+    ContraparteDoc(Vec<String>),
+    /// Regex sobre o nome da contraparte (`dicas.contraparte`) **normalizado** (minúsculas,
+    /// sem acento, espaços juntos), sem diferenciar maiúsculas do padrão.
+    Contraparte(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +304,11 @@ pub enum FonteDaExtracao {
     Texto,
     /// `dicas.descricao`.
     Descricao,
+    /// `dicas.contraparte`: o nome do favorecido do registro.
+    Contraparte,
+    /// `dicas.contraparte_doc`: o CPF/CNPJ do favorecido. Só vale para o motor; o documento
+    /// nunca é gravado na execução nem na proposta.
+    ContraparteDoc,
 }
 
 /// Como extrair um campo.
@@ -348,6 +400,9 @@ enum CondicaoCompilada {
     Canal(Vec<Canal>),
     Descricao(Regex),
     Nome(Regex),
+    /// Só dígitos.
+    ContraparteDoc(Vec<String>),
+    Contraparte(Regex),
 }
 
 impl CondicaoCompilada {
@@ -369,6 +424,18 @@ impl CondicaoCompilada {
                 .as_deref()
                 .is_some_and(|d| r.is_match(d)),
             Self::Nome(r) => entrada.nome.as_deref().is_some_and(|n| r.is_match(n)),
+            Self::ContraparteDoc(docs) => entrada
+                .dicas
+                .contraparte_doc
+                .as_deref()
+                .map(so_os_digitos)
+                .is_some_and(|d| !d.is_empty() && docs.contains(&d)),
+            Self::Contraparte(r) => entrada
+                .dicas
+                .contraparte
+                .as_deref()
+                .map(normalizar)
+                .is_some_and(|n| r.is_match(&n)),
         }
     }
 }
@@ -406,9 +473,18 @@ impl Compilada {
         let mut campos = BTreeMap::new();
         let mut motivos = Vec::new();
         for e in &self.extracoes {
-            let (texto, descricao) = match e.fonte {
-                FonteDaExtracao::Texto => (entrada.texto.as_deref(), false),
-                FonteDaExtracao::Descricao => (entrada.dicas.descricao.as_deref(), true),
+            let (texto, dica) = match e.fonte {
+                FonteDaExtracao::Texto => (entrada.texto.as_deref(), None),
+                FonteDaExtracao::Descricao => {
+                    (entrada.dicas.descricao.as_deref(), Some("descricao"))
+                }
+                FonteDaExtracao::Contraparte => {
+                    (entrada.dicas.contraparte.as_deref(), Some("contraparte"))
+                }
+                FonteDaExtracao::ContraparteDoc => (
+                    entrada.dicas.contraparte_doc.as_deref(),
+                    Some("contraparte_doc"),
+                ),
             };
             let Some(texto) = texto else { continue };
             let Some(caps) = e.regex.captures(texto) else {
@@ -425,12 +501,11 @@ impl Compilada {
             let recorte = &texto[inicio..fim];
             match e.formato.aplicar(recorte) {
                 Some(valor) => {
-                    let de_onde = if descricao {
-                        DeOnde::Dica {
-                            nome: "descricao".to_owned(),
-                        }
-                    } else {
-                        DeOnde::Trecho { inicio, fim }
+                    let de_onde = match dica {
+                        Some(nome) => DeOnde::Dica {
+                            nome: nome.to_owned(),
+                        },
+                        None => DeOnde::Trecho { inicio, fim },
                     };
                     campos.insert(e.nome.clone(), Campo { valor, de_onde });
                 }

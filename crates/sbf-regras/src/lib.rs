@@ -127,6 +127,14 @@ pub struct Dicas {
     pub data: Option<String>,
     /// A descrição do registro no banco ("PIX ENVIADO FULANO").
     pub descricao: Option<String>,
+    /// O nome do favorecido (ou de quem pagou) que o banco informa à parte da descrição.
+    /// Na CAIXA a descrição é só "PIX ENVIADO": o favorecido só aparece aqui.
+    #[serde(default)]
+    pub contraparte: Option<String>,
+    /// O CPF/CNPJ da contraparte, às vezes formatado. Dado pessoal: casa condições e pode
+    /// ser extraído, mas **nunca** é gravado em `execucao` nem na proposta.
+    #[serde(default)]
+    pub contraparte_doc: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------
