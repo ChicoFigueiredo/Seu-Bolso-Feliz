@@ -90,6 +90,82 @@ fn dias_no_mes(ano: i64, mes: i64) -> i64 {
     }
 }
 
+/// Dias desde 1970-01-01 (algoritmo de Howard Hinnant, calendário gregoriano proléptico).
+fn dias_desde_1970(ano: i64, mes: i64, dia: i64) -> i64 {
+    let a = if mes <= 2 { ano - 1 } else { ano };
+    let era = a.div_euclid(400);
+    let ano_da_era = a - era * 400;
+    let mes_deslocado = (mes + 9) % 12;
+    let dia_do_ano = (153 * mes_deslocado + 2) / 5 + dia - 1;
+    let dia_da_era = ano_da_era * 365 + ano_da_era / 4 - ano_da_era / 100 + dia_do_ano;
+    era * 146_097 + dia_da_era - 719_468
+}
+
+/// O dia da semana ISO (1 = segunda ... 7 = domingo) de uma data de calendário.
+fn dia_da_semana_iso(ano: i64, mes: i64, dia: i64) -> i64 {
+    // 1970-01-01 foi uma quinta-feira (4).
+    (dias_desde_1970(ano, mes, dia) + 3).rem_euclid(7) + 1
+}
+
+/// Quantas vezes o dia da semana `dia_semana` (ISO: 1 = segunda ... 7 = domingo) cai no mês.
+///
+/// # Errors
+/// Mês fora de 1 a 12, ano fora de 1 a 9999 ou dia da semana fora de 1 a 7.
+pub fn dias_da_semana_no_mes(ano: i64, mes: i64, dia_semana: i64) -> Result<i64, String> {
+    if !(1..=9999).contains(&ano) || !(1..=12).contains(&mes) {
+        return Err("dias_da_semana_no_mes: mês inválido".into());
+    }
+    if !(1..=7).contains(&dia_semana) {
+        return Err(
+            "dias_da_semana_no_mes: o dia da semana vai de 1 (segunda) a 7 (domingo)".into(),
+        );
+    }
+    let dias = dias_no_mes(ano, mes);
+    let primeiro = dia_da_semana_iso(ano, mes, 1);
+    let primeiro_dia_buscado = 1 + (dia_semana - primeiro).rem_euclid(7);
+    if primeiro_dia_buscado > dias {
+        return Ok(0);
+    }
+    Ok((dias - primeiro_dia_buscado) / 7 + 1)
+}
+
+/// O nome (sem "-feira", minúsculo) do dia da semana ISO.
+///
+/// # Errors
+/// Dia da semana fora de 1 a 7.
+pub fn nome_do_dia_da_semana(dia_semana: i64) -> Result<&'static str, String> {
+    Ok(match dia_semana {
+        1 => "segunda",
+        2 => "terça",
+        3 => "quarta",
+        4 => "quinta",
+        5 => "sexta",
+        6 => "sábado",
+        7 => "domingo",
+        _ => return Err("nome_do_dia_da_semana: o dia vai de 1 a 7".into()),
+    })
+}
+
+/// `105000` → `"R$ 1.050,00"` (centavos inteiros, sinal na frente).
+#[must_use]
+pub fn reais(centavos: i64) -> String {
+    let negativo = centavos < 0;
+    let total = centavos.unsigned_abs();
+    let (inteira, fracao) = (total / 100, total % 100);
+    let digitos = inteira.to_string();
+    let mut agrupada = String::with_capacity(digitos.len() + digitos.len() / 3);
+    for (i, c) in digitos.chars().enumerate() {
+        if i > 0 && (digitos.len() - i).is_multiple_of(3) {
+            agrupada.push('.');
+        }
+        agrupada.push(c);
+    }
+    format!(
+        "{}R$ {agrupada},{fracao:02}",
+        if negativo { "-" } else { "" }
+    )
+}
+
 /// `"06/10/2026"` (ou `-`/`.` como separador, ou já ISO) → `"2026-10-06"`.
 ///
 /// # Errors
@@ -221,6 +297,50 @@ mod testes {
         assert!(data("01/13/2026").is_err());
         assert!(data("01/01/26").is_err());
         assert!(data("amanha").is_err());
+    }
+
+    #[test]
+    fn dias_da_semana_no_mes_conta_quatro_e_cinco_sextas() {
+        // Abril de 2026 tem 4 sextas (3, 10, 17, 24); maio de 2026 tem 5 (1, 8, 15, 22, 29).
+        assert_eq!(dias_da_semana_no_mes(2026, 4, 5), Ok(4));
+        assert_eq!(dias_da_semana_no_mes(2026, 5, 5), Ok(5));
+        assert_eq!(dias_da_semana_no_mes(2026, 1, 5), Ok(5));
+        // Fevereiro de 2027 tem 28 dias: toda semana cai 4 vezes.
+        for d in 1..=7 {
+            assert_eq!(dias_da_semana_no_mes(2027, 2, d), Ok(4), "dia {d}");
+        }
+        // Fevereiro bissexto: 2028-02-01 é terça, então só a terça cai 5 vezes.
+        assert_eq!(dias_da_semana_no_mes(2028, 2, 2), Ok(5));
+        assert_eq!(dias_da_semana_no_mes(2028, 2, 3), Ok(4));
+        // A soma dos sete dias é o tamanho do mês.
+        for (a, m, t) in [(2026, 4, 30), (2026, 5, 31), (2028, 2, 29), (2100, 2, 28)] {
+            let soma: i64 = (1..=7)
+                .map(|d| dias_da_semana_no_mes(a, m, d).unwrap())
+                .sum();
+            assert_eq!(soma, t);
+        }
+    }
+
+    #[test]
+    fn dias_da_semana_no_mes_recusa_argumentos_fora_do_intervalo() {
+        assert!(dias_da_semana_no_mes(2026, 0, 5).is_err());
+        assert!(dias_da_semana_no_mes(2026, 13, 5).is_err());
+        assert!(dias_da_semana_no_mes(2026, 5, 0).is_err());
+        assert!(dias_da_semana_no_mes(2026, 5, 8).is_err());
+        assert!(dias_da_semana_no_mes(0, 5, 5).is_err());
+    }
+
+    #[test]
+    fn nome_do_dia_e_reais_formatam() {
+        assert_eq!(nome_do_dia_da_semana(5), Ok("sexta"));
+        assert_eq!(nome_do_dia_da_semana(6), Ok("sábado"));
+        assert!(nome_do_dia_da_semana(0).is_err());
+        assert_eq!(reais(105_000), "R$ 1.050,00");
+        assert_eq!(reais(21_000), "R$ 210,00");
+        assert_eq!(reais(5), "R$ 0,05");
+        assert_eq!(reais(-123_456_789), "-R$ 1.234.567,89");
+        assert_eq!(reais(0), "R$ 0,00");
+        assert_eq!(reais(100_000_000), "R$ 1.000.000,00");
     }
 
     #[test]

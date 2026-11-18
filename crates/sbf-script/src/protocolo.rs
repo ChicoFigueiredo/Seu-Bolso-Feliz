@@ -1,13 +1,18 @@
 //! O protocolo do processo filho: uma linha JSON por mensagem.
 //!
-//! Pedidos: `{"executar": PedidoDeScript}`, `{"verificar": "<fonte>"}` e
+//! Pedidos: `{"executar": PedidoDeScript}`, `{"verificar": "<fonte>"}`,
+//! `{"calcular": PedidoDeCalculo}`, `{"verificar_calculo": "<fonte>"}` e
 //! `{"endurecimento": null}`. Respostas: `{"ok": RespostaDoScript}`, `{"ok": null}`,
-//! `{"erro": ErroDoScript}` e `{"endurecimento": RelatorioDeEndurecimento}`.
+//! `{"calculos": [ResultadoDeCalculo]}`, `{"erro": ErroDoScript}` e
+//! `{"endurecimento": RelatorioDeEndurecimento}`.
 
 use std::io::{self, BufRead, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use sbf_regras::script::{ErroDoScript, ExecutorDeScript, PedidoDeScript, RespostaDoScript};
+use sbf_regras::script::{
+    ErroDoScript, ExecutorDeScript, PedidoDeCalculo, PedidoDeScript, RespostaDoScript,
+    ResultadoDeCalculo,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::endurecer::{RelatorioDeEndurecimento, endurecer};
@@ -18,6 +23,8 @@ use crate::no_processo::ExecutorNoProcesso;
 pub(crate) enum Mensagem {
     Executar(Box<PedidoDeScript>),
     Verificar(String),
+    Calcular(Box<PedidoDeCalculo>),
+    VerificarCalculo(String),
     Endurecimento(Option<()>),
 }
 
@@ -25,6 +32,7 @@ pub(crate) enum Mensagem {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Resposta {
     Ok(Option<RespostaDoScript>),
+    Calculos(Vec<ResultadoDeCalculo>),
     Erro(ErroDoScript),
     Endurecimento(RelatorioDeEndurecimento),
 }
@@ -78,12 +86,16 @@ fn servir_com(
 
 fn atender(executor: &ExecutorNoProcesso, m: Mensagem) -> Resposta {
     let feito = catch_unwind(AssertUnwindSafe(|| match m {
-        Mensagem::Executar(p) => executor.executar(&p).map(Some),
-        Mensagem::Verificar(fonte) => executor.verificar(&fonte).map(|()| None),
-        Mensagem::Endurecimento(_) => Ok(None),
+        Mensagem::Executar(p) => executor.executar(&p).map(|r| Resposta::Ok(Some(r))),
+        Mensagem::Verificar(fonte) => executor.verificar(&fonte).map(|()| Resposta::Ok(None)),
+        Mensagem::Calcular(p) => executor.calcular(&p).map(Resposta::Calculos),
+        Mensagem::VerificarCalculo(fonte) => executor
+            .verificar_calculo(&fonte)
+            .map(|()| Resposta::Ok(None)),
+        Mensagem::Endurecimento(_) => Ok(Resposta::Ok(None)),
     }));
     match feito {
-        Ok(Ok(r)) => Resposta::Ok(r),
+        Ok(Ok(r)) => r,
         Ok(Err(e)) => Resposta::Erro(e),
         Err(_) => Resposta::Erro(ErroDoScript::Processo("o executor entrou em pânico".into())),
     }
