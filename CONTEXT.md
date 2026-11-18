@@ -97,6 +97,19 @@ Uma movimentação futura já conhecida — vence em uma data, com um valor prev
 confirmado.
 _Avoid_: conta a pagar, obrigação, pendência
 
+**Modelo de compromisso**:
+O molde que vários compromissos compartilham: declara os parâmetros (a diária, o dia da
+semana) e o cálculo que transforma esses parâmetros no previsto de cada mês. Cada compromisso
+que usa o modelo preenche os próprios valores, com vigência. Ex.: "Diarista por dia da semana".
+_Avoid_: template, tipo de compromisso (tipo é natureza ou grupo)
+
+**Cálculo** (de um compromisso):
+O script que, a partir dos parâmetros do modelo e dos valores do compromisso, dá o previsto
+de um mês (a diária vezes as sextas-feiras do mês). Um ajuste digitado num mês ("6 diárias")
+vale só para aquele mês e fica no rastro. Diferente da regra de reconhecimento: o cálculo
+diz quanto deve ser; a regra reconhece o que aconteceu.
+_Avoid_: fórmula, regra de cálculo, script de compromisso
+
 **Recorrente**:
 Algo que se repete em intervalo previsível: assinatura, conta de consumo, parcelamento,
 receita fixa.
