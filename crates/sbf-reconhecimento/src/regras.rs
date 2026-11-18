@@ -37,7 +37,7 @@ use sbf_regras::{
 };
 
 use crate::cofre::{Estado, ReconhecedorDoCofre, ler_contracheque};
-use crate::{PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
+use crate::{ErroDoReconhecimento, PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
 
 /// O catálogo das regras, na pasta do cofre.
 pub const ARQUIVO_DAS_REGRAS: &str = "regras.sqlite";
@@ -306,10 +306,10 @@ pub(crate) fn ler_com_regras(
     catalogo.semear_fabrica().ok()?;
     let motor = Motor::das_vigentes(&catalogo, ligadas.executor.clone()).ok()?;
 
-    let canal = if estado.dentro_do_cofre {
-        Canal::Cofre
-    } else {
-        Canal::Arrastado
+    let (canal, id_externo) = match &estado.origem {
+        Some((canal, id)) => (*canal, Some(id.as_str())),
+        None if estado.dentro_do_cofre => (Canal::Cofre, None),
+        None => (Canal::Arrastado, None),
     };
     let nome = caminho
         .file_name()
@@ -321,7 +321,7 @@ pub(crate) fn ler_com_regras(
         mime_do_arquivo(caminho),
         estado.conteudo.as_deref(),
         canal,
-        None,
+        id_externo,
     );
     let mut leitura = motor.ler(&entrada);
 
@@ -380,6 +380,97 @@ pub(crate) fn ler_com_regras(
     estado.entrada = Some(entrada);
     estado.leitura = Some(leitura);
     situacao
+}
+
+/// Uma mensagem sem arquivo (o corpo de um e-mail, um texto do Telegram) que chegou por um
+/// canal e vai passar pelas regras.
+#[derive(Debug, Clone, Copy)]
+pub struct MensagemRecebida<'a> {
+    pub canal: Canal,
+    /// A identidade estável da entrada (`gmail:<id da mensagem>`).
+    pub id: &'a str,
+    /// O id no canal (o id da mensagem), que a regra vê em `Entrada.origem`.
+    pub id_externo: &'a str,
+    /// O assunto e o corpo, como vieram.
+    pub texto: &'a str,
+    /// Quando chegou, ISO 8601, se o canal diz.
+    pub momento: Option<&'a str>,
+    /// `AAAA-MM-DD`, se o canal diz.
+    pub data: Option<&'a str>,
+}
+
+impl ReconhecedorDoCofre {
+    /// Passa uma mensagem pelas regras de reconhecimento (entrada tipo `Mensagem`). Grava só o
+    /// rastro das regras (execução e propostas abertas); nada vai para o planejamento e a
+    /// mensagem em si não é gravada aqui (quem a entrega guarda no inventário, se quiser).
+    ///
+    /// Sem `com_regras`, ou com o catálogo fechado, devolve [`Reconhecido::Nada`].
+    ///
+    /// # Errors
+    /// Nenhum hoje: falhas do catálogo viram [`Reconhecido::Nada`] com o motivo genérico.
+    pub fn reconhecer_mensagem(
+        &self,
+        m: &MensagemRecebida<'_>,
+    ) -> Result<Reconhecido, ErroDoReconhecimento> {
+        let nada = |motivo: &str| {
+            Ok(Reconhecido::Nada {
+                motivo: motivo.to_owned(),
+            })
+        };
+        let Some(ligadas) = self.regras.as_ref() else {
+            return nada("as regras de reconhecimento não estão ligadas");
+        };
+        let Ok(mut catalogo) = Catalogo::abrir(&self.cofre.join(ARQUIVO_DAS_REGRAS)) else {
+            return nada("não deu para abrir o catálogo de regras");
+        };
+        if catalogo.semear_fabrica().is_err() {
+            return nada("não deu para preparar o catálogo de regras");
+        }
+        let Ok(motor) = Motor::das_vigentes(&catalogo, ligadas.executor.clone()) else {
+            return nada("não deu para montar o motor de regras");
+        };
+        let entrada = Entrada {
+            versao_do_esquema: VERSAO_DO_ESQUEMA,
+            id: m.id.to_owned(),
+            tipo: TipoDeEntrada::Mensagem,
+            origem: Origem {
+                canal: m.canal,
+                id_externo: Some(m.id_externo.to_owned()),
+            },
+            sha256: None,
+            mime: None,
+            nome: None,
+            texto: Some(m.texto.to_owned()),
+            dicas: Dicas {
+                data: m.data.map(str::to_owned),
+                ..Dicas::default()
+            },
+            momento: m.momento.map(str::to_owned),
+        };
+        let leitura = motor.ler(&entrada);
+        let reconhecido = match leitura.decisao.clone() {
+            Decisao::Reconhecido(rec) => Reconhecido::PelaRegra {
+                reconhecimento: rec,
+            },
+            Decisao::Ambiguo { candidatas, motivo } => Reconhecido::Ambiguo { candidatas, motivo },
+            Decisao::Nenhuma => Reconhecido::Nada {
+                motivo: "nenhuma regra reconheceu a mensagem".to_owned(),
+            },
+        };
+        let gravou = catalogo.registrar_execucao(&leitura).is_ok();
+        let propostas_ok = match &reconhecido {
+            Reconhecido::PelaRegra { reconhecimento } if !reconhecimento.propostas.is_empty() => {
+                catalogo
+                    .registrar_proposta(reconhecimento, &entrada.id)
+                    .is_ok()
+            }
+            _ => true,
+        };
+        if !(gravou && propostas_ok) {
+            return nada("não consegui gravar o rastro das regras de reconhecimento");
+        }
+        Ok(reconhecido)
+    }
 }
 
 fn mime_do_arquivo(caminho: &Path) -> &'static str {
