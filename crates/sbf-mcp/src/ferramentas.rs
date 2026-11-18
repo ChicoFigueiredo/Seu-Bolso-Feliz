@@ -46,7 +46,31 @@ pub struct Nucleo {
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
+    gmail: ColetaDoGmail,
     backups: crate::backup::Backups,
+}
+
+/// O que `gmail_coletar` recebe.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ParamsDeColetaDoGmail {
+    pub consulta: Option<String>,
+    pub desde: Option<String>,
+    pub limite: Option<usize>,
+}
+
+/// A coleta do Gmail que o `sbf` injeta (o MCP não conhece o cliente do Gmail nem o
+/// reconhecimento): recebe os parâmetros e devolve o resumo em JSON.
+pub type ColetorDoGmail = dyn Fn(&ParamsDeColetaDoGmail) -> Result<Value, String> + Send + Sync;
+
+#[derive(Clone, Default)]
+struct ColetaDoGmail(Option<Arc<ColetorDoGmail>>);
+
+impl std::fmt::Debug for ColetaDoGmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColetaDoGmail")
+            .field("ligada", &self.0.is_some())
+            .finish()
+    }
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -237,8 +261,41 @@ impl Nucleo {
             semelhantes: Semelhantes(None),
             plano: None,
             regras: None,
+            gmail: ColetaDoGmail::default(),
             backups,
         })
+    }
+
+    /// Liga `gmail_coletar`. `coletor` roda a coleta do Gmail no cofre (anexos para
+    /// `entrada/gmail/` e reconhecimento com as regras).
+    #[must_use]
+    pub fn com_gmail(mut self, coletor: Arc<ColetorDoGmail>) -> Self {
+        self.gmail = ColetaDoGmail(Some(coletor));
+        self
+    }
+
+    /// Há coleta do Gmail ligada?
+    #[must_use]
+    pub fn tem_gmail(&self) -> bool {
+        self.gmail.0.is_some()
+    }
+
+    /// `gmail_coletar` (D15: aplica direto): coleta agora. Há backup do inventário e das
+    /// regras antes da primeira escrita da sessão; se falha, a coleta é recusada.
+    ///
+    /// # Errors
+    /// Gmail não ligado, backup que falhou ou a falha da coleta (sem conteúdo de e-mail).
+    pub fn gmail_coletar(&self, p: &ParamsDeColetaDoGmail) -> Resultado {
+        let coletor = self
+            .gmail
+            .0
+            .as_ref()
+            .ok_or_else(|| "a coleta do Gmail não está ligada".to_owned())?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Regras)?;
+        coletor(p)
     }
 
     /// Liga `buscar_semelhantes` ao índice local. `nivel` é o nível de confiança deste

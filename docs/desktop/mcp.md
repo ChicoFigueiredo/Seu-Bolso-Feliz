@@ -101,19 +101,20 @@ atual do compromisso; se ele mudar até a confirmação, a janela recusa (AC-31)
 
 ### Aplicar direto (D15)
 
-| Ferramenta                              | O que faz (na hora, autor `mcp`)                                                                                        |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `aplicar_alteracao`                     | Renomeia (`nome`) e/ou muda valor só neste mês ou daqui em diante, certeza, conta, centro, fornecedor, categoria, nota. |
-| `criar_compromisso`                     | Compromisso novo (recusa o mesmo nome no mesmo grupo).                                                                  |
-| `pausar` / `retomar` / `cancelar`       | Pausa por período, retomada e cancelamento (só no app).                                                                 |
-| `excecao`                               | Adiar, dispensar, pago informado ou valor só deste mês.                                                                 |
-| `excluir_logicamente`                   | Exclusão lógica com motivo; o histórico fica.                                                                           |
-| `conciliar` / `desconciliar`            | Liga (confirmada) uma ocorrência a um ou vários movimentos, tudo ou nada; solta um movimento.                           |
-| `aplicar_proposta` / `recusar_proposta` | Decide uma proposta pendente (com autor `mcp`; recusar exige motivo).                                                   |
-| `desfazer`                              | Volta atrás a última alteração do MCP ainda não desfeita, ou a de `alteracao_id`. Só as do MCP.                         |
-| `ativar_regra` / `desativar_regra`      | Ativa uma versão (exemplo falhando bloqueia, D12) ou tira a regra de cena.                                              |
-| `reverter_regra` / `consolidar_regra`   | Rollback à versão de antes; consolida uma versão ativa com as aceitas seguidas.                                         |
-| `fazer_backup`                          | Copia agora todos os bancos do cofre para `<cofre>/backups/mcp/`.                                                       |
+| Ferramenta                              | O que faz (na hora, autor `mcp`)                                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aplicar_alteracao`                     | Renomeia (`nome`) e/ou muda valor só neste mês ou daqui em diante, certeza, conta, centro, fornecedor, categoria, nota.                                                         |
+| `criar_compromisso`                     | Compromisso novo (recusa o mesmo nome no mesmo grupo).                                                                                                                          |
+| `pausar` / `retomar` / `cancelar`       | Pausa por período, retomada e cancelamento (só no app).                                                                                                                         |
+| `excecao`                               | Adiar, dispensar, pago informado ou valor só deste mês.                                                                                                                         |
+| `excluir_logicamente`                   | Exclusão lógica com motivo; o histórico fica.                                                                                                                                   |
+| `conciliar` / `desconciliar`            | Liga (confirmada) uma ocorrência a um ou vários movimentos, tudo ou nada; solta um movimento.                                                                                   |
+| `aplicar_proposta` / `recusar_proposta` | Decide uma proposta pendente (com autor `mcp`; recusar exige motivo).                                                                                                           |
+| `desfazer`                              | Volta atrás a última alteração do MCP ainda não desfeita, ou a de `alteracao_id`. Só as do MCP.                                                                                 |
+| `ativar_regra` / `desativar_regra`      | Ativa uma versão (exemplo falhando bloqueia, D12) ou tira a regra de cena.                                                                                                      |
+| `reverter_regra` / `consolidar_regra`   | Rollback à versão de antes; consolida uma versão ativa com as aceitas seguidas.                                                                                                 |
+| `gmail_coletar`                         | Coleta o Gmail agora (`consulta`, `desde`, `limite`): anexos para `entrada/gmail/`, regras de reconhecimento; só contagens. Só com credenciais no ambiente. Veja `conexoes.md`. |
+| `fazer_backup`                          | Copia agora todos os bancos do cofre para `<cofre>/backups/mcp/`.                                                                                                               |
 
 Cada resposta traz o `alteracao_id` e como desfazer. O `desfazer` tem histórico próprio com autor
 `mcp`. As `propor_*` continuam só propondo.
