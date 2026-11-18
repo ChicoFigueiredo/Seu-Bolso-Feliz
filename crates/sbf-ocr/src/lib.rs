@@ -10,16 +10,20 @@
 //!   `psm 4` e o `psm 6` empataram, e o `6` mantém a ordem das linhas de um cartão de app.
 //! - [`ocr_do_achado`]: o que o reconhecimento de um arquivo e o worker fazem com uma imagem
 //!   nova, gravando em `texto` com o método [`METODO_OCR`] e reaproveitando o que já existe.
+//! - [`ler_imagens_novas`]: as imagens (até 15 MiB) do inventário que ainda não têm texto, em
+//!   lote, para o worker.
 //!
 //! Sem `tesseract` no sistema o OCR é "indisponível": não é erro e nada é gravado, para
 //! tentar de novo quando ele for instalado.
 
 mod achado;
 mod leitura;
+mod lote;
 
 pub use achado::{DesfechoDoOcr, ocr_do_achado};
 pub use leitura::{
     EXTENSOES_DE_IMAGEM, FalhaDoOcr, IDIOMA_PADRAO, LIMITE_DA_IMAGEM, LIMITE_DA_SAIDA, Ocr,
     PRAZO_DO_OCR, e_imagem, preparar,
 };
+pub use lote::{LOTE_PADRAO, ResumoDoLote, ler_imagens_novas};
 pub use sbf_inventario::texto::{METODO_OCR_SEM_TEXTO, METODO_OCR_TESSERACT as METODO_OCR};
