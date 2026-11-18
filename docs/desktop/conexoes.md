@@ -29,14 +29,14 @@ avisos e recebe documentos mandados a ele.
 
 ## Comandos
 
-| Comando | O que faz |
-| --- | --- |
-| `sbf telegram entrar` | Login interativo (número, código, senha 2FA). Quem roda é você. |
-| `sbf telegram sair` | Encerra a sessão no Telegram e apaga a guardada. |
-| `sbf telegram conversas` | Lista as conversas da conta (e atualiza a lista que a janela usa). |
-| `sbf telegram seguir <id\|nome>` / `deixar <id\|nome>` | Passa a coletar / deixa de coletar. |
-| `sbf telegram coletar --inventario <cofre> [--desde AAAA-MM-DD] [--conversa <id\|nome>]` | Coleta já. `--desde` vale só na primeira coleta de cada conversa. |
-| `sbf telegram estado` | O que a janela mostra: situação, conversas seguidas, última coleta. |
+| Comando                                                                                  | O que faz                                                           |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `sbf telegram entrar`                                                                    | Login interativo (número, código, senha 2FA). Quem roda é você.     |
+| `sbf telegram sair`                                                                      | Encerra a sessão no Telegram e apaga a guardada.                    |
+| `sbf telegram conversas`                                                                 | Lista as conversas da conta (e atualiza a lista que a janela usa).  |
+| `sbf telegram seguir <id\|nome>` / `deixar <id\|nome>`                                   | Passa a coletar / deixa de coletar.                                 |
+| `sbf telegram coletar --inventario <cofre> [--desde AAAA-MM-DD] [--conversa <id\|nome>]` | Coleta já. `--desde` vale só na primeira coleta de cada conversa.   |
+| `sbf telegram estado`                                                                    | O que a janela mostra: situação, conversas seguidas, última coleta. |
 
 ## O que a coleta faz
 
@@ -57,14 +57,14 @@ tratado), da mais antiga para a mais nova, no máximo 200 por conversa e por rod
 
 ## Onde ficam as coisas
 
-| O quê | Onde |
-| --- | --- |
+| O quê                                 | Onde                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Sessão MTProto (chave de autorização) | **Só o chaveiro** (`mensageiro:telegram`). Nunca arquivo solto, log ou mensagem de erro. |
-| `api_id` / `api_hash` | Ambiente, `.env` da raiz e (depois do `entrar`) chaveiro (`mensageiro:telegram-api`). |
-| Conversas seguidas | `telegram.json`, na pasta de dados do app (fora do cofre). |
-| Checkpoint, última coleta, contagens | `telegram-estado.json`, na pasta de dados do app. |
-| Última lista de conversas | `telegram-conversas.json`, na pasta de dados do app. |
-| Mídias baixadas | `<cofre>/entrada/telegram/`. |
+| `api_id` / `api_hash`                 | Ambiente, `.env` da raiz e (depois do `entrar`) chaveiro (`mensageiro:telegram-api`).    |
+| Conversas seguidas                    | `telegram.json`, na pasta de dados do app (fora do cofre).                               |
+| Checkpoint, última coleta, contagens  | `telegram-estado.json`, na pasta de dados do app.                                        |
+| Última lista de conversas             | `telegram-conversas.json`, na pasta de dados do app.                                     |
+| Mídias baixadas                       | `<cofre>/entrada/telegram/`.                                                             |
 
 ## Worker, MCP e janela
 
@@ -87,6 +87,6 @@ tratado), da mais antiga para a mais nova, no máximo 200 por conversa e por rod
   conversas continua pelo caminho do export (`docs/desktop/mensageiros.md`).
 - Conta nova no Telegram não se cria por aqui (o Telegram exige o app oficial).
 - A sessão aparece na lista de dispositivos da conta no Telegram; `sbf telegram
-  sair` o remove.
+sair` o remove.
 - Nada foi testado contra a conta real nesta entrega: os testes usam uma fonte falsa. A primeira
   coleta de verdade é com você, depois do `entrar`.
