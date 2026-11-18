@@ -294,6 +294,29 @@ pub fn aviso_do_irrf(rec: &Reconhecimento) -> Option<String> {
 // O passo "Leitores locais" com o motor
 // ---------------------------------------------------------------------------------------
 
+/// A pasta, dentro do cofre, onde a coleta do Telegram deixa as mídias (`sbf telegram coletar`).
+pub const PASTA_DO_TELEGRAM: &str = "entrada/telegram";
+
+/// O canal de um arquivo: o que chegou pela coleta do Telegram (em `entrada/telegram/`) é
+/// `Telegram`; o resto do cofre é `Cofre`; fora dele, `Arrastado`.
+pub(crate) fn canal_do_arquivo(cofre: &Path, caminho: &Path, dentro_do_cofre: bool) -> Canal {
+    if !dentro_do_cofre {
+        return Canal::Arrastado;
+    }
+    let da_pasta = match (
+        caminho.canonicalize(),
+        cofre.join(PASTA_DO_TELEGRAM).canonicalize(),
+    ) {
+        (Ok(a), Ok(t)) => a.starts_with(t),
+        _ => false,
+    };
+    if da_pasta {
+        Canal::Telegram
+    } else {
+        Canal::Cofre
+    }
+}
+
 /// Roda o motor no passo de leitura local. `None` quando as regras não estão ligadas, o
 /// catálogo não abre ou nenhuma regra se aplica: aí vale o caminho de sempre (AC-LUA-14).
 pub(crate) fn ler_com_regras(
@@ -306,11 +329,7 @@ pub(crate) fn ler_com_regras(
     catalogo.semear_fabrica().ok()?;
     let motor = Motor::das_vigentes(&catalogo, ligadas.executor.clone()).ok()?;
 
-    let canal = if estado.dentro_do_cofre {
-        Canal::Cofre
-    } else {
-        Canal::Arrastado
-    };
+    let canal = canal_do_arquivo(&reconhecedor.cofre, caminho, estado.dentro_do_cofre);
     let nome = caminho
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -825,4 +844,29 @@ fn pagar_fatura(
         automatica: automatica(ctx, provas, desfeita),
         provas,
     })))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod testes_do_canal {
+    use super::*;
+
+    #[test]
+    fn o_que_veio_do_telegram_tem_canal_telegram() {
+        let d = tempfile::tempdir().unwrap();
+        let cofre = d.path();
+        let do_telegram = cofre.join("entrada/telegram/Casa-1/10-boleto.pdf");
+        let do_acervo = cofre.join("acervo/ab/abcdef.pdf");
+        for a in [&do_telegram, &do_acervo] {
+            std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+            std::fs::write(a, b"%PDF").unwrap();
+        }
+        assert_eq!(canal_do_arquivo(cofre, &do_telegram, true), Canal::Telegram);
+        assert_eq!(canal_do_arquivo(cofre, &do_acervo, true), Canal::Cofre);
+        // Fora do cofre é sempre arrastado, mesmo com nome de pasta parecido.
+        assert_eq!(
+            canal_do_arquivo(cofre, &do_telegram, false),
+            Canal::Arrastado
+        );
+    }
 }
