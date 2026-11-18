@@ -10,6 +10,7 @@ use crate::conciliacao::{
     self, Alvo, Config, Evidencia, Indicio, credito_da_assinatura, data_de_segundos,
     movimentos_usados, pode_conciliar, tem_como_casar, valor_esperado,
 };
+use crate::modelo::calculados_de;
 use crate::projecao::{projetar_competencias_seguindo, versao_vigente};
 use crate::{
     Alteracao, Assinatura, Autor, Competencia, Conciliacao, ContaDoPlanejamento, Data,
@@ -339,6 +340,12 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
             Competencia::de_data(hoje),
             excecoes,
         );
+        let calculados = calculados_de(
+            &s.calculadora,
+            dados.ligacao_de(&rec.id),
+            excecoes,
+            competencias.iter().copied(),
+        );
         for o in projetar_competencias_seguindo(
             rec,
             excecoes,
@@ -346,7 +353,7 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
             competencias,
             hoje,
             dados.inicio,
-            dados.seguidas_de(&rec.id),
+            dados.apoio_de(&rec.id, &calculados),
         )
         .into_iter()
         .filter(|o| !o.suprimida())

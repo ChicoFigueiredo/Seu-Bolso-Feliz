@@ -5,6 +5,9 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
+use std::sync::Arc;
+
+use sbf_regras::script::ExecutorDeScript;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -17,7 +20,8 @@ use crate::banco::{
 };
 use crate::conciliacao::normalizar;
 use crate::escrita::{aplicar_na, desfazer_na};
-use crate::projecao::projetar_competencias_seguindo;
+use crate::modelo::{self, Calculadora, calculados_de};
+use crate::projecao::{Apoio, projetar_competencias_seguindo};
 use crate::resumo;
 use crate::{
     Alteracao, AlvoDoDocumento, Assinatura, Autor, Centavos, Competencia, Composicao, Conciliacao,
@@ -41,6 +45,8 @@ pub struct PlanejamentoSqlite {
     /// O extrato (a Pluggy no inventário); sem ele, nenhuma sugestão de conciliação.
     pub movimentos: Box<dyn FonteDeMovimentos>,
     relogio: Box<dyn Fn() -> i64 + Send>,
+    /// Quem executa o Cálculo dos Modelos de compromisso, e o cache dele.
+    calculadora: Calculadora,
 }
 
 impl fmt::Debug for PlanejamentoSqlite {
@@ -58,7 +64,28 @@ impl PlanejamentoSqlite {
             saldos,
             movimentos: Box::new(SemMovimentos),
             relogio: Box::new(agora_unix),
+            calculadora: Calculadora::nova(),
         }
+    }
+
+    /// Liga o executor do Cálculo dos Modelos de compromisso (o processo filho do script).
+    /// Sem ele, um compromisso com modelo cai no último valor conhecido, com aviso.
+    #[must_use]
+    pub fn com_calculo(mut self, executor: Arc<dyn ExecutorDeScript>) -> PlanejamentoSqlite {
+        self.calculadora = Calculadora::com_executor(executor);
+        self
+    }
+
+    /// Recusa o script de Cálculo que não compila ou não define `calcular`.
+    fn conferir_calculo(&self, alteracao: &Alteracao) -> Resultado<()> {
+        let fonte = match alteracao {
+            Alteracao::CriarModelo { calculo, .. }
+            | Alteracao::NovaVersaoDoCalculo { calculo, .. } => calculo,
+            _ => return Ok(()),
+        };
+        self.calculadora
+            .verificar(fonte)
+            .map_err(ErroDoPlanejamento::Invalida)
     }
 
     /// Liga o extrato: de onde vêm os candidatos, as sugestões de conciliação e as contas.
@@ -164,6 +191,7 @@ struct Foto {
 
 fn fotografar(
     c: &Connection,
+    calculadora: &Calculadora,
     recorrente: Option<&str>,
     de: Competencia,
     meses: u16,
@@ -193,14 +221,26 @@ fn fotografar(
         let seguidas = banco::ler_rubricas_seguidas(c)?
             .remove(id)
             .unwrap_or_default();
+        let ligacao = modelo::ler_ligacoes(c, Some(id))?.remove(id);
+        let competencias: Vec<Competencia> =
+            (0..i32::from(meses)).map(|i| de.somar_meses(i)).collect();
+        let calculados = calculados_de(
+            calculadora,
+            ligacao.as_ref(),
+            &excecoes,
+            competencias.iter().copied(),
+        );
         projetar_competencias_seguindo(
             &rec,
             &excecoes,
             &conciliacoes,
-            (0..i32::from(meses)).map(|i| de.somar_meses(i)),
+            competencias,
             hoje,
             banco::ler_inicio(c)?,
-            &seguidas,
+            Apoio {
+                seguidas: &seguidas,
+                calculados: Some(&calculados),
+            },
         )
     };
     Ok(Foto {
@@ -238,8 +278,12 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         Alteracao::CriarRecorrente { .. }
         | Alteracao::CriarGrupo { .. }
         | Alteracao::DesvincularDocumento { .. }
-        | Alteracao::MapearConta { .. } => None,
-        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
+        | Alteracao::MapearConta { .. }
+        | Alteracao::CriarModelo { .. }
+        | Alteracao::NovaVersaoDoCalculo { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. }
+        | Alteracao::AplicarModelo { recorrente, .. }
+        | Alteracao::DefinirParametro { recorrente, .. } => Some(recorrente.clone()),
     })
 }
 
@@ -257,6 +301,12 @@ fn inicio_da_simulacao(alteracao: &Alteracao, hoje: Data) -> Competencia {
         Alteracao::Excecao { ocorrencia, .. } => ocorrencia.competencia,
         Alteracao::Conciliar { conciliacao } => conciliacao.ocorrencia.competencia,
         Alteracao::CriarRecorrente { recorrente, .. } => recorrente.primeira_versao.desde,
+        Alteracao::DefinirParametro { valor, .. } => valor.desde,
+        Alteracao::AplicarModelo { valores, .. } => valores
+            .iter()
+            .map(|v| v.desde)
+            .min()
+            .unwrap_or_else(|| Competencia::de_data(hoje)),
         _ => Competencia::de_data(hoje),
     }
 }
@@ -424,6 +474,12 @@ impl Planejamento for PlanejamentoSqlite {
             let excecoes = dados.excecoes_de(&rec.id);
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let no_periodo = candidatas(c_inicio, c_fim, excecoes);
+            let calculados = calculados_de(
+                &self.calculadora,
+                dados.ligacao_de(&rec.id),
+                excecoes,
+                no_periodo.iter().copied(),
+            );
             linhas.extend(
                 projetar_competencias_seguindo(
                     rec,
@@ -432,12 +488,18 @@ impl Planejamento for PlanejamentoSqlite {
                     no_periodo,
                     hoje,
                     dados.inicio,
-                    dados.seguidas_de(&rec.id),
+                    dados.apoio_de(&rec.id, &calculados),
                 )
                 .into_iter()
                 .filter(|o| inicio <= o.vencimento && o.vencimento <= fim),
             );
             let antes = candidatas(c_antes, c_inicio, excecoes);
+            let calculados = calculados_de(
+                &self.calculadora,
+                dados.ligacao_de(&rec.id),
+                excecoes,
+                antes.iter().copied(),
+            );
             atrasadas.extend(
                 projetar_competencias_seguindo(
                     rec,
@@ -446,7 +508,7 @@ impl Planejamento for PlanejamentoSqlite {
                     antes,
                     hoje,
                     dados.inicio,
-                    dados.seguidas_de(&rec.id),
+                    dados.apoio_de(&rec.id, &calculados),
                 )
                 .into_iter()
                 .filter(|o| {
@@ -516,7 +578,14 @@ impl Planejamento for PlanejamentoSqlite {
                 "recorrente {recorrente}"
             )));
         }
-        let foto = fotografar(self.banco.conexao(), Some(recorrente), desde, meses, hoje)?;
+        let foto = fotografar(
+            self.banco.conexao(),
+            &self.calculadora,
+            Some(recorrente),
+            desde,
+            meses,
+            hoje,
+        )?;
         Ok(foto
             .ocorrencias
             .into_iter()
@@ -554,6 +623,12 @@ impl Planejamento for PlanejamentoSqlite {
             let excecoes = dados.excecoes_de(&rec.id);
             let conciliacoes = dados.conciliacoes_de(&rec.id);
             let comps = candidatas(inicio, ultimo, excecoes);
+            let calculados = calculados_de(
+                &self.calculadora,
+                dados.ligacao_de(&rec.id),
+                excecoes,
+                comps.iter().copied(),
+            );
             for o in projetar_competencias_seguindo(
                 rec,
                 excecoes,
@@ -561,7 +636,7 @@ impl Planejamento for PlanejamentoSqlite {
                 comps,
                 hoje,
                 dados.inicio,
-                dados.seguidas_de(&rec.id),
+                dados.apoio_de(&rec.id, &calculados),
             ) {
                 if o.suprimida() || o.estado == EstadoDaOcorrencia::Dispensada {
                     continue;
@@ -593,10 +668,18 @@ impl Planejamento for PlanejamentoSqlite {
     }
 
     fn simular(&self, alteracao: &Alteracao, hoje: Data) -> Resultado<Simulacao> {
+        self.conferir_calculo(alteracao)?;
         let tx = self.banco.conexao().unchecked_transaction()?;
         let inicio = inicio_da_simulacao(alteracao, hoje);
         let alvo = recorrente_do_alvo(&tx, alteracao)?;
-        let antes = fotografar(&tx, alvo.as_deref(), inicio, MESES_DA_SIMULACAO, hoje)?;
+        let antes = fotografar(
+            &tx,
+            &self.calculadora,
+            alvo.as_deref(),
+            inicio,
+            MESES_DA_SIMULACAO,
+            hoje,
+        )?;
         let recibo = aplicar_na(&tx, alteracao, &Autor::Usuario, &rfc3339(self.agora()))?;
         let alvo_depois = match alteracao {
             Alteracao::CriarRecorrente { .. } => Some(recibo.alvo),
@@ -604,6 +687,7 @@ impl Planejamento for PlanejamentoSqlite {
         };
         let depois = fotografar(
             &tx,
+            &self.calculadora,
             alvo_depois.as_deref(),
             inicio,
             MESES_DA_SIMULACAO,
@@ -639,6 +723,7 @@ impl Planejamento for PlanejamentoSqlite {
     }
 
     fn aplicar(&mut self, alteracao: Alteracao, autor: Autor) -> Resultado<Recibo> {
+        self.conferir_calculo(&alteracao)?;
         let agora = rfc3339(self.agora());
         let tx = self.banco.conexao_mut().transaction()?;
         let recibo = aplicar_na(&tx, &alteracao, &autor, &agora)?;
@@ -883,6 +968,27 @@ impl Planejamento for PlanejamentoSqlite {
         competencia: Competencia,
     ) -> Resultado<Option<Composicao>> {
         banco::ler_composicao(self.banco.conexao(), recorrente, competencia)
+    }
+
+    fn modelos(&self) -> Resultado<Vec<crate::Modelo>> {
+        modelo::ler_modelos(self.banco.conexao())
+    }
+
+    fn ligacao_de_modelo(&self, recorrente: &str) -> Resultado<Option<crate::LigacaoDeModelo>> {
+        Ok(
+            modelo::ler_ligacoes(self.banco.conexao(), Some(recorrente))?
+                .remove(recorrente)
+                .map(|l| l.publica()),
+        )
+    }
+
+    fn ligacoes_de_modelo(&self) -> Resultado<Vec<crate::LigacaoDeModelo>> {
+        let mut todas: Vec<_> = modelo::ler_ligacoes(self.banco.conexao(), None)?
+            .into_values()
+            .map(|l| l.publica())
+            .collect();
+        todas.sort_by(|a, b| a.recorrente.cmp(&b.recorrente));
+        Ok(todas)
     }
 
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {

@@ -27,11 +27,13 @@ use std::fmt;
 mod banco;
 pub mod conciliacao;
 mod escrita;
+mod modelo;
 mod projecao;
 mod resumo;
 mod servico;
 
 pub use banco::Banco;
+pub use modelo::FABRICA_NOME_DO_MODELO;
 pub use projecao::{
     projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
 };
@@ -359,6 +361,12 @@ pub enum Excecao {
         valor: Centavos,
         data: Option<Data>,
     },
+    /// O usuário digitou a quantidade (as diárias) só deste mês: o Cálculo do Modelo de
+    /// compromisso usa esta quantidade no lugar da que ele mesmo conta. Só vale em
+    /// compromisso ligado a um modelo.
+    QuantidadeSoDesteMes {
+        quantidade: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -520,6 +528,8 @@ pub struct Ocorrencia {
     pub fornecedor: Option<String>,
     /// O id da versão que explica o valor.
     pub versao: String,
+    /// O Cálculo do Modelo de compromisso que deu o `previsto`, se o compromisso usa um.
+    pub calculo: Option<CalculoDaOcorrencia>,
     pub prazo_desconhecido: bool,
     /// Há sugestão de conciliação à espera de confirmação.
     pub sugestao_de_conciliacao: bool,
@@ -530,6 +540,21 @@ pub struct Ocorrencia {
 // ---------------------------------------------------------------------------------------
 
 /// O último saldo conhecido de uma conta, com a data da coleta.
+/// De onde veio o previsto de uma ocorrência de compromisso com modelo (Cálculo).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalculoDaOcorrencia {
+    /// O nome do Modelo de compromisso.
+    pub modelo: String,
+    /// O que o script diz ("diária R$ 210,00 × 5 sextas"); vazio quando o cálculo falhou.
+    pub explicacao: String,
+    /// A quantidade usada (as sextas do mês, ou a que o usuário ajustou).
+    pub quantidade: Option<i64>,
+    /// A quantidade foi digitada para este mês ([`Excecao::QuantidadeSoDesteMes`]).
+    pub ajustada: bool,
+    /// Por que o cálculo não valeu (⚠): o previsto cai no último valor conhecido.
+    pub aviso: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Saldo {
     pub conta: String,
@@ -693,6 +718,76 @@ pub struct DocumentoVinculado {
     pub quando: String,
     pub autor: Autor,
     pub desvinculado: bool,
+}
+
+// ---------------------------------------------------------------------------------------
+// Modelo de compromisso e Cálculo
+// ---------------------------------------------------------------------------------------
+
+/// O tipo de um parâmetro de Modelo de compromisso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeParametro {
+    /// Dinheiro, em centavos inteiros (≥ 0).
+    Centavos,
+    /// De 1 (segunda) a 7 (domingo).
+    DiaDaSemana,
+    Inteiro,
+    Texto,
+}
+
+/// Um parâmetro que o modelo declara.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParametroDeModelo {
+    /// Minúsculas, sem acento, `_` e dígitos: é a chave em `entrada.parametros`.
+    pub nome: String,
+    pub tipo: TipoDeParametro,
+}
+
+/// O valor de um parâmetro: centavos, dia da semana e inteiro são [`Inteiro`](Self::Inteiro).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ValorDoParametro {
+    Inteiro(i64),
+    Texto(String),
+}
+
+/// O valor de um parâmetro num compromisso, a partir de uma competência (inclusive).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValorDeParametro {
+    pub parametro: String,
+    pub desde: Competencia,
+    pub valor: ValorDoParametro,
+}
+
+/// Um Modelo de compromisso, com a versão mais recente do Cálculo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Modelo {
+    pub id: String,
+    pub nome: String,
+    pub parametros: Vec<ParametroDeModelo>,
+    /// A versão mais recente do Cálculo (1, 2...).
+    pub versao_do_calculo: u32,
+    /// O sha256 do script dessa versão.
+    pub checksum: String,
+    /// O script Luau dessa versão.
+    pub calculo: String,
+    /// Veio de fábrica (semeado ao abrir o banco).
+    pub de_fabrica: bool,
+}
+
+/// A ligação de um compromisso a um modelo, com os valores que ele preencheu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LigacaoDeModelo {
+    pub recorrente: String,
+    pub modelo_id: String,
+    pub modelo: String,
+    /// A versão do Cálculo a que a ligação está presa.
+    pub versao_do_calculo: u32,
+    pub checksum: String,
+    pub parametros: Vec<ParametroDeModelo>,
+    /// Os valores vigentes, do mais antigo ao mais novo, por parâmetro.
+    pub valores: Vec<ValorDeParametro>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -910,6 +1005,33 @@ pub enum Alteracao {
     DefinirAssinatura {
         recorrente: String,
         assinatura: Option<Assinatura>,
+        versao_base: i64,
+    },
+    /// Cria um Modelo de compromisso: os parâmetros e a versão 1 do Cálculo (script Luau com
+    /// `calcular(entrada, ajuda)`).
+    CriarModelo {
+        nome: String,
+        parametros: Vec<ParametroDeModelo>,
+        calculo: String,
+    },
+    /// Uma versão nova do Cálculo do modelo `modelo` (id). As anteriores não mudam; os
+    /// compromissos continuam presos à versão que usavam até serem ligados de novo.
+    NovaVersaoDoCalculo {
+        modelo: String,
+        calculo: String,
+    },
+    /// Liga o compromisso ao modelo `modelo` (id), na versão mais recente do Cálculo, e
+    /// grava os `valores` dos parâmetros com vigência.
+    AplicarModelo {
+        recorrente: String,
+        modelo: String,
+        valores: Vec<ValorDeParametro>,
+        versao_base: i64,
+    },
+    /// Um valor de parâmetro com vigência (o de mesmo parâmetro e `desde` é substituído).
+    DefinirParametro {
+        recorrente: String,
+        valor: ValorDeParametro,
         versao_base: i64,
     },
 }
@@ -1175,6 +1297,22 @@ pub trait Planejamento {
         competencia: Competencia,
     ) -> Resultado<Vec<BaixaPeloContracheque>> {
         let _ = competencia;
+        Ok(Vec::new())
+    }
+
+    /// Os Modelos de compromisso (sem os desfeitos), com a versão mais recente do Cálculo.
+    fn modelos(&self) -> Resultado<Vec<Modelo>> {
+        Ok(Vec::new())
+    }
+
+    /// A ligação do compromisso a um modelo e os valores que ele preencheu, se houver.
+    fn ligacao_de_modelo(&self, recorrente: &str) -> Resultado<Option<LigacaoDeModelo>> {
+        let _ = recorrente;
+        Ok(None)
+    }
+
+    /// Todas as ligações vigentes (para listar quem usa cada modelo).
+    fn ligacoes_de_modelo(&self) -> Resultado<Vec<LigacaoDeModelo>> {
         Ok(Vec::new())
     }
 

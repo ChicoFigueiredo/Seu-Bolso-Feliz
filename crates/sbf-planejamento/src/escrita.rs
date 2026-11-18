@@ -6,6 +6,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+mod modelos;
+
 use crate::banco::{self, carregar_um, de_json, json, novo_id};
 use crate::projecao::{projetar_competencias, versao_vigente};
 use crate::{
@@ -46,6 +48,20 @@ pub(crate) enum Inversa {
     Cancelamento {
         recorrente: String,
         anterior: Option<Cancelamento>,
+    },
+    /// Desfaz a criação de um modelo (marca `desfeito`).
+    ModeloCriado {
+        modelo: String,
+    },
+    /// Desfaz uma versão nova do Cálculo (marca `desfeita`).
+    CalculoCriado {
+        calculo: String,
+    },
+    /// Volta a ligação a modelo e os valores de parâmetro de um compromisso ao que eram.
+    Modelo {
+        recorrente: String,
+        ligacao: modelos::RestauroDaLigacao,
+        valores: Vec<modelos::ValorAnterior>,
     },
 }
 
@@ -159,6 +175,25 @@ pub(crate) fn aplicar_na(
             ocorrencia,
             movimento,
         } => desconciliar(c, ocorrencia, movimento)?,
+        Alteracao::CriarModelo {
+            nome,
+            parametros,
+            calculo,
+        } => modelos::criar_modelo(c, nome, parametros, calculo, autor, agora)?,
+        Alteracao::NovaVersaoDoCalculo { modelo, calculo } => {
+            modelos::nova_versao(c, modelo, calculo, autor, agora)?
+        }
+        Alteracao::AplicarModelo {
+            recorrente,
+            modelo,
+            valores,
+            versao_base,
+        } => modelos::aplicar_modelo(c, recorrente, modelo, valores, *versao_base, autor, agora)?,
+        Alteracao::DefinirParametro {
+            recorrente,
+            valor,
+            versao_base,
+        } => modelos::definir_parametro(c, recorrente, valor, *versao_base, autor, agora)?,
     };
 
     fechar(c, feito, &json(alteracao)?, autor, agora)
@@ -340,6 +375,23 @@ pub(crate) fn desfazer_na(
                 grava_historico: true,
                 inversa: None,
             };
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::ModeloCriado { modelo } => {
+            let feito = modelos::desfazer_modelo_criado(c, modelo)?;
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::CalculoCriado { calculo } => {
+            let feito = modelos::desfazer_calculo_criado(c, calculo)?;
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::Modelo {
+            recorrente,
+            ligacao,
+            valores,
+        } => {
+            carregar(c, recorrente)?;
+            let feito = modelos::desfazer_ligacao(c, recorrente, ligacao, valores)?;
             fechar(c, feito, &json(&inversa)?, autor, agora)?
         }
     };
@@ -709,6 +761,7 @@ fn tipo_da_excecao(e: &Excecao) -> &'static str {
         Excecao::Dispensar { .. } => "dispensar",
         Excecao::ValorSoDesteMes { .. } => "valor_so_deste_mes",
         Excecao::PagoInformado { .. } => "pago_informado",
+        Excecao::QuantidadeSoDesteMes { .. } => "quantidade_so_deste_mes",
     }
 }
 
@@ -887,6 +940,12 @@ fn excecao_avulsa(
     if let Excecao::Dispensar { motivo } = excecao {
         nao_vazio(motivo, "o motivo")?;
     }
+    if let Excecao::QuantidadeSoDesteMes { quantidade } = excecao {
+        if !(0..=1000).contains(quantidade) {
+            return invalida("a quantidade vai de 0 a 1000");
+        }
+        modelos::exige_modelo(c, &rec.id)?;
+    }
     let exc = registrar_excecao(c, ocorrencia, excecao, autor, agora)?;
     let resumo = match excecao {
         Excecao::Adiar { nova_data: Some(d) } => format!("Adiou {ocorrencia} para {d}."),
@@ -896,6 +955,9 @@ fn excecao_avulsa(
             format!("Mudou o valor só de {}.", ocorrencia.competencia)
         }
         Excecao::PagoInformado { .. } => format!("Informou pago em {ocorrencia}."),
+        Excecao::QuantidadeSoDesteMes { .. } => {
+            format!("Ajustou a quantidade só de {}.", ocorrencia.competencia)
+        }
     };
     Ok(Feito {
         alvo: ocorrencia.to_string(),
