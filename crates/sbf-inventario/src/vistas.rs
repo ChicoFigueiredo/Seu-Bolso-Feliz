@@ -39,6 +39,8 @@ pub struct Dialeto {
     pub contraparte: bool,
     pub data_compra: bool,
     pub fatura_ref: bool,
+    pub contraparte_doc: bool,
+    pub tipo_original: bool,
 }
 
 impl Dialeto {
@@ -47,6 +49,8 @@ impl Dialeto {
         contraparte: true,
         data_compra: true,
         fatura_ref: true,
+        contraparte_doc: true,
+        tipo_original: true,
     };
 
     pub fn detectar(conn: &Connection) -> ResultadoDeConsulta<Dialeto> {
@@ -59,6 +63,8 @@ impl Dialeto {
             contraparte: tem("contraparte"),
             data_compra: tem("data_compra"),
             fatura_ref: tem("fatura_ref"),
+            contraparte_doc: tem("contraparte_doc"),
+            tipo_original: tem("tipo_original"),
         })
     }
 
@@ -79,6 +85,12 @@ impl Dialeto {
     }
     pub fn fatura_ref(&self, alias: &str) -> String {
         Self::coluna(self.fatura_ref, alias, "fatura_ref")
+    }
+    pub fn contraparte_doc(&self, alias: &str) -> String {
+        Self::coluna(self.contraparte_doc, alias, "contraparte_doc")
+    }
+    pub fn tipo_original(&self, alias: &str) -> String {
+        Self::coluna(self.tipo_original, alias, "tipo_original")
     }
 }
 
@@ -546,6 +558,22 @@ pub(crate) fn celula_estado_registro(estado: &str, decidido_por: &Option<String>
 /// Os 8 primeiros caracteres do hash, para nomear um achado sem nome de arquivo.
 pub fn hash_curto(hash: &str) -> &str {
     hash.get(..8).unwrap_or(hash)
+}
+
+/// O documento (CPF ou CNPJ) da contraparte sem o que identifica: só os 3 primeiros e os 2
+/// últimos dígitos, o resto vira `*`. Pontuação some. Dado pessoal: a página nunca mostra o
+/// documento inteiro.
+pub fn mascarar_documento(doc: &str) -> String {
+    let digitos: Vec<char> = doc.chars().filter(char::is_ascii_digit).collect();
+    let n = digitos.len();
+    if n < 6 {
+        return "*".repeat(n);
+    }
+    digitos
+        .iter()
+        .enumerate()
+        .map(|(i, c)| if i < 3 || i >= n - 2 { *c } else { '*' })
+        .collect()
 }
 
 /// O nome de um registro: a descrição original, ou `Registro N`.

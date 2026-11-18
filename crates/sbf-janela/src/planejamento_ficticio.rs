@@ -1520,6 +1520,15 @@ impl Planejamento for PlanejamentoFicticio {
     ) -> Resultado<Vec<sbf_planejamento::ConciliacaoComMovimento>> {
         Ok(self.conciliacoes_da_ocorrencia_impl(ocorrencia))
     }
+
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<Conciliacao>> {
+        Ok(self
+            .conciliacoes
+            .iter()
+            .filter(|c| c.movimento == movimento)
+            .cloned()
+            .collect())
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {

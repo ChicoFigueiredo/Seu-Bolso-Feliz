@@ -19,13 +19,9 @@ pub fn ctrl(ui: &Ui) -> bool {
     ui.input(|i| i.modifiers.command)
 }
 
-/// Um texto clicável que abre um destino. Ctrl+clique abre no painel flutuante.
-pub fn link_para(
-    ui: &mut Ui,
-    texto: &str,
-    destino: Destino,
-    pedidos: &mut Vec<Pedido>,
-) -> Response {
+/// Um texto clicável. Devolve a resposta e, quando houve clique, `Some(flutuante)`: Ctrl ou o
+/// botão do meio pedem o painel flutuante.
+pub fn link_cru(ui: &mut Ui, texto: &str) -> (Response, Option<bool>) {
     let p = tema::paleta(ui.ctx());
     let resposta = ui.add(
         egui::Label::new(RichText::new(texto).color(p.destaque_tinta))
@@ -41,11 +37,26 @@ pub fn link_para(
             Stroke::new(1.0, p.destaque_tinta),
         );
     }
-    if resposta.clicked() {
-        let flutuante = ctrl(ui);
-        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, flutuante);
+    let clique = if resposta.clicked() {
+        Some(ctrl(ui))
     } else if resposta.middle_clicked() {
-        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, true);
+        Some(true)
+    } else {
+        None
+    };
+    (resposta, clique)
+}
+
+/// Um texto clicável que abre um destino. Ctrl+clique abre no painel flutuante.
+pub fn link_para(
+    ui: &mut Ui,
+    texto: &str,
+    destino: Destino,
+    pedidos: &mut Vec<Pedido>,
+) -> Response {
+    let (resposta, clique) = link_cru(ui, texto);
+    if let Some(flutuante) = clique {
+        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, flutuante);
     }
     resposta
 }

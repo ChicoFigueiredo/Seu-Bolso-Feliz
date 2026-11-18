@@ -1152,6 +1152,14 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
+    /// As ocorrências a que este movimento do extrato está ligado (conciliações confirmadas e
+    /// sugestões, sem as desfeitas): é como a página do registro diz "Concilia". O padrão é
+    /// nenhuma.
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<Conciliacao>> {
+        let _ = movimento;
+        Ok(Vec::new())
+    }
+
     /// A conciliação deste par ocorrência e movimento já foi desfeita antes (exclusão lógica):
     /// uma regra não a refaz sozinha. O padrão é `false`.
     fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {

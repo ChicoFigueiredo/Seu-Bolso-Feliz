@@ -165,6 +165,9 @@ impl AppDoInventario {
                     janela.ligar_reconhecedor(std::sync::Arc::new(r));
                 }
                 janela.ferramentas = Some(f);
+                // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
+                // `inventario.sqlite`: a janela percebe e relê o que mostra.
+                janela.vigiar_cofre(&self.pasta);
                 // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
                 // usuário. Nada roda até você clicar em Executar ou em Gravar novo.
                 if let Ok(dados) = sbf_chaveiro::pasta_de_dados_do_app()

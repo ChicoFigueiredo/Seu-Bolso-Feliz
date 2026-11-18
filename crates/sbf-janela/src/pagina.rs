@@ -338,6 +338,8 @@ pub struct ContextoDaPagina<'a> {
     /// A caixa de entrada e a edição (fatia 3): Editar, Ratear, Excluir e a marca de pendente.
     pub caixa: Option<&'a dyn crate::caixa::FonteDaCaixa>,
     pub hoje: &'a str,
+    /// "Concilia" e "Reconhecido pela regra" do registro aberto (a janela as lê).
+    pub ligacoes: Option<&'a crate::ligacoes_do_registro::LigacoesDoRegistro>,
 }
 
 impl std::fmt::Debug for ContextoDaPagina<'_> {
@@ -346,6 +348,7 @@ impl std::fmt::Debug for ContextoDaPagina<'_> {
             .field("estacao", &self.estacao.is_some())
             .field("caixa", &self.caixa.is_some())
             .field("hoje", &self.hoje)
+            .field("ligacoes", &self.ligacoes.is_some())
             .finish()
     }
 }
@@ -518,6 +521,12 @@ pub fn desenhar(
             }
         });
 
+    // As ligações do registro com o planejamento e as regras.
+    if let Some(l) = contexto.ligacoes {
+        ui.add_space(6.0);
+        crate::ligacoes_do_registro::bloco(ui, l, pedidos);
+    }
+
     // Abas.
     ui.add_space(10.0);
     let abas = abas_de(alvo.tipo);
@@ -585,7 +594,7 @@ pub fn desenhar(
     }
     match &a.conteudo {
         ConteudoDaAba::Rastro => match leitor.rastro(alvo) {
-            Ok(r) => desenhar_rastro(ui, alvo, &item.rotulo, &r, pedidos),
+            Ok(r) => desenhar_rastro(ui, alvo, &item.rotulo, &r, contexto.ligacoes, pedidos),
             Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
         },
         ConteudoDaAba::Arquivo => {
@@ -929,6 +938,7 @@ pub fn desenhar_rastro(
     alvo: &Ref,
     rotulo: &str,
     rastro: &Rastro,
+    ligacoes: Option<&crate::ligacoes_do_registro::LigacoesDoRegistro>,
     pedidos: &mut Vec<Pedido>,
 ) {
     let p = tema::paleta(ui.ctx());
@@ -1002,6 +1012,10 @@ pub fn desenhar_rastro(
                     trilho(ui);
                 }
                 desenhar_elo(ui, e, pedidos);
+            }
+            if let Some(l) = ligacoes {
+                ui.add_space(6.0);
+                crate::ligacoes_do_registro::bloco(ui, l, pedidos);
             }
             if rastro
                 .abaixo

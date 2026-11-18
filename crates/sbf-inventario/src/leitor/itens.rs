@@ -296,8 +296,10 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
     let extras = consultar(
         ctx.conn,
         &format!(
-            "SELECT r.extraido_por, r.confianca, r.external_ref, r.tipo, {} FROM registro r WHERE r.id = ?",
-            ctx.dialeto.fatura_ref("r.")
+            "SELECT r.extraido_por, r.confianca, r.external_ref, r.tipo, {}, {}, {} FROM registro r WHERE r.id = ?",
+            ctx.dialeto.fatura_ref("r."),
+            ctx.dialeto.tipo_original("r."),
+            ctx.dialeto.contraparte_doc("r.")
         ),
         &[inteiro(id)],
         |x| {
@@ -307,13 +309,16 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
                 x.get::<_, Option<String>>(2)?,
                 x.get::<_, String>(3)?,
                 x.get::<_, Option<String>>(4)?,
+                x.get::<_, Option<String>>(5)?,
+                x.get::<_, Option<String>>(6)?,
             ))
         },
     )?;
-    let (extraido_por, conf, externo, tipo, fatura_ref) = extras
+    let (extraido_por, conf, externo, tipo, fatura_ref, tipo_original, doc) = extras
         .into_iter()
         .next()
-        .unwrap_or_else(|| (String::new(), None, None, String::new(), None));
+        .unwrap_or_else(|| (String::new(), None, None, String::new(), None, None, None));
+    let externo_para_o_campo = externo.clone();
     let fatura = fatura_ref.or_else(|| {
         (tipo == "fatura_cartao")
             .then(|| {
@@ -345,12 +350,20 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         campo("Data", Celula::Data(l.data.clone())),
         campo("Valor", celula_valor(l.valor)),
         campo("Tipo", celula_texto(&l.tipo)),
+        campo("Tipo original", celula_texto_opt(&tipo_original)),
         campo(
             "Fornecedor",
             celula_link_opt(Tipo::Fornecedor, &nome_fornecedor),
         ),
         campo("Contraparte", celula_texto_opt(&l.contraparte)),
-        campo("Categoria", celula_texto_opt(&l.categoria)),
+        campo(
+            "Documento da contraparte",
+            celula_texto_opt(
+                &doc.filter(|d| !d.trim().is_empty())
+                    .map(|d| vistas::mascarar_documento(&d)),
+            ),
+        ),
+        campo("Categoria provável", celula_texto_opt(&l.categoria)),
         campo("Conta", celula_link_opt(Tipo::Conta, &l.conta)),
         campo("Ciclo", celula_link_opt(Tipo::Ciclo, &l.ciclo)),
         campo("Fatura", celula_link_opt(Tipo::Fatura, &fatura)),
@@ -394,7 +407,8 @@ fn registro(ctx: &Contexto<'_>, alvo: &Ref) -> ResultadoDeConsulta<Vec<Campo>> {
         ),
         campo("Extraído por", Celula::Texto(extraido_por)),
         campo("Confiança", confianca(conf)),
-        campo("Descrição", celula_texto_opt(&l.descricao)),
+        campo("Id externo", celula_texto_opt(&externo_para_o_campo)),
+        campo("Descrição original", celula_texto_opt(&l.descricao)),
     ])
 }
 
