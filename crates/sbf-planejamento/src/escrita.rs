@@ -34,7 +34,7 @@ struct Feito {
 #[serde(tag = "tipo", rename_all = "snake_case")]
 pub(crate) enum Inversa {
     Alteracao {
-        alteracao: Alteracao,
+        alteracao: Box<Alteracao>,
     },
     /// Fixa o fim de uma pausa (`ate = desde` a esvazia; o valor de antes a reabre).
     AjustarPausa {
@@ -50,7 +50,9 @@ pub(crate) enum Inversa {
 }
 
 fn inversa_de(alteracao: Alteracao) -> Option<Inversa> {
-    Some(Inversa::Alteracao { alteracao })
+    Some(Inversa::Alteracao {
+        alteracao: Box::new(alteracao),
+    })
 }
 
 fn invalida<T>(motivo: &str) -> Resultado<T> {
@@ -285,7 +287,7 @@ pub(crate) fn desfazer_na(
     let inversa: Inversa = de_json(&inversa)?;
     let recibo = match &inversa {
         Inversa::Alteracao { alteracao } => {
-            let alteracao = com_base_atual(c, alteracao.clone())?;
+            let alteracao = com_base_atual(c, (**alteracao).clone())?;
             aplicar_na(c, &alteracao, autor, agora)?
         }
         Inversa::AjustarPausa {
