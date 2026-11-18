@@ -26,6 +26,7 @@ sbf-pontos = { path = "../sbf-pontos" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
+sbf-telegram = { path = "../sbf-telegram" }
 sbf-roteiros = { path = "../sbf-roteiros" }
 # QR do pareamento do WhatsApp (MIT OR Apache-2.0); só desenhamos a matriz.
 qrcode = { version = "0.14", default-features = false }
