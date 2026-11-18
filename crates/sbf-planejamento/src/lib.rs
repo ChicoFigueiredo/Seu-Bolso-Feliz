@@ -1044,12 +1044,29 @@ pub trait Planejamento {
 
     fn propostas(&self, so_pendentes: bool) -> Resultado<Vec<Proposta>>;
 
-    /// Só a janela chama: revalida a versão de base e aplica com autor `Usuario`.
+    /// A janela chama: revalida a versão de base e aplica com autor `Usuario`.
     fn confirmar_proposta(&mut self, id: &str) -> Resultado<Recibo>;
+
+    /// Como [`Planejamento::confirmar_proposta`], mas com o autor dado no histórico (D15: o MCP
+    /// aplica as propostas que ele mesmo fez, com autor `Mcp`). O padrão recusa.
+    fn confirmar_proposta_como(&mut self, id: &str, autor: Autor) -> Resultado<Recibo> {
+        let _ = (id, autor);
+        Err(ErroDoPlanejamento::Invalida(
+            "este planejamento não confirma proposta em nome de outro autor".to_owned(),
+        ))
+    }
 
     fn recusar_proposta(&mut self, id: &str, motivo: &str) -> Resultado<()>;
 
     fn historico(&self, alvo: Option<&str>, limite: u32) -> Resultado<Vec<EntradaDoHistorico>>;
+
+    /// Uma linha do histórico pelo id (o `alteracao_id` do recibo).
+    fn entrada_do_historico(&self, id: &str) -> Resultado<Option<EntradaDoHistorico>> {
+        Ok(self
+            .historico(None, 100_000)?
+            .into_iter()
+            .find(|e| e.id == id))
+    }
 
     /// O recorrente que já nasceu desta origem, se houver.
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>>;

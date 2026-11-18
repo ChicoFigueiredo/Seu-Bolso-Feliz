@@ -741,6 +741,10 @@ impl Planejamento for PlanejamentoSqlite {
     }
 
     fn confirmar_proposta(&mut self, id: &str) -> Resultado<Recibo> {
+        self.confirmar_proposta_como(id, Autor::Usuario)
+    }
+
+    fn confirmar_proposta_como(&mut self, id: &str, autor: Autor) -> Resultado<Recibo> {
         let agora = self.agora();
         let texto_agora = rfc3339(agora);
         let mut tx = self.banco.conexao_mut().transaction()?;
@@ -766,12 +770,7 @@ impl Planejamento for PlanejamentoSqlite {
         // A alteração roda num ponto de salvamento: se falhar, nada dela fica, e a proposta
         // continua pendente com o motivo da falha.
         let savepoint = tx.savepoint()?;
-        match aplicar_na(
-            &savepoint,
-            &proposta.alteracao,
-            &Autor::Usuario,
-            &texto_agora,
-        ) {
+        match aplicar_na(&savepoint, &proposta.alteracao, &autor, &texto_agora) {
             Ok(recibo) => {
                 savepoint.commit()?;
                 tx.execute(

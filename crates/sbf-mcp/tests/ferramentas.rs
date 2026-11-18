@@ -649,3 +649,27 @@ fn a_descricao_de_buscar_semelhantes_nao_manda_ler_o_texto_do_achado() {
         .expect("a descrição existe");
     assert!(!linha.contains("ver_texto_do_achado"), "{linha}");
 }
+
+#[test]
+fn d15_sugerir_faz_backup_do_inventario_na_primeira_escrita_e_so_nela() {
+    let c = cenario();
+    let pasta = c.banco.caminho.parent().unwrap().join("backups/mcp");
+    c.nucleo.inventario_resumo().unwrap();
+    assert!(!pasta.exists(), "leitura não copia");
+    for _ in 0..2 {
+        c.nucleo
+            .sugerir(&[proposta(
+                "registro",
+                &c.mercado.to_string(),
+                "categoria",
+                json!("Mercado"),
+            )])
+            .unwrap();
+    }
+    let copias: Vec<_> = std::fs::read_dir(&pasta)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(copias.len(), 1, "{copias:?}");
+    assert!(copias[0].starts_with("inventario-"));
+}
