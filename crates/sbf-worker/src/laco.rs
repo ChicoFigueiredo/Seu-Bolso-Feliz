@@ -238,6 +238,34 @@ pub trait Analista {
     fn analisar(&mut self) -> Result<ResumoDosPontos, Falha>;
 }
 
+/// O que uma volta de OCR fez. Só contagens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoOcr {
+    /// Imagens com texto lido e gravado.
+    pub lidas: usize,
+    /// Imagens que o OCR leu e não tinham texto.
+    pub sem_texto: usize,
+    /// Imagens que não puderam ser lidas.
+    pub falhas: usize,
+    /// Sobraram imagens novas para a próxima volta.
+    pub pendentes: bool,
+    /// Não há tesseract neste sistema (não é falha: nada foi feito).
+    pub indisponivel: bool,
+}
+
+/// Lê o texto das imagens novas do inventário (o real é `sbf_ocr::ler_imagens_novas`,
+/// montado no `sbf`).
+pub trait LeitorDeImagens {
+    /// Lê um lote (poucas imagens por volta, para o vigia não ficar parado).
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn ler_novas(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoOcr, Falha>;
+}
+
+/// De quanto em quanto tempo o OCR procura imagens novas, em segundos (se o lote anterior
+/// deixou imagens, a próxima volta já roda).
+pub const INTERVALO_DO_OCR: u64 = 60;
 /// De quanto em quanto tempo o índice é atualizado, em segundos.
 pub const INTERVALO_DO_INDICE: u64 = 30 * 60;
 /// De quanto em quanto tempo os pontos de atenção são analisados, em segundos.
@@ -253,6 +281,7 @@ pub struct Worker {
     triador: Option<Box<dyn Triador>>,
     indexador: Option<Box<dyn Indexador>>,
     analista: Option<Box<dyn Analista>>,
+    leitor: Option<Box<dyn LeitorDeImagens>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
     pub estado: EstadoDoWorker,
@@ -266,6 +295,7 @@ pub struct Worker {
     proxima_triagem: u64,
     proximo_indice: u64,
     proximos_pontos: u64,
+    proximo_ocr: u64,
     gravado_em: u64,
     sujo: bool,
 }
@@ -322,6 +352,7 @@ impl Worker {
             triador,
             indexador: None,
             analista: None,
+            leitor: None,
             registro,
             estado,
             vigia,
@@ -335,6 +366,7 @@ impl Worker {
             proxima_triagem: agora_,
             proximo_indice: agora_,
             proximos_pontos: agora_,
+            proximo_ocr: agora_,
             gravado_em: 0,
             sujo: true,
         };
@@ -362,6 +394,13 @@ impl Worker {
     #[must_use]
     pub fn com_indice(mut self, indexador: Box<dyn Indexador>) -> Self {
         self.indexador = Some(indexador);
+        self
+    }
+
+    /// Liga o OCR das imagens novas (ADR-016 do desktop: só lê, nunca envia).
+    #[must_use]
+    pub fn com_ocr(mut self, leitor: Box<dyn LeitorDeImagens>) -> Self {
+        self.leitor = Some(leitor);
         self
     }
 
@@ -549,6 +588,10 @@ impl Worker {
             self.proxima_triagem = agora_ + self.config.triagem.intervalo_minutos.max(1) * 60;
             self.passo_da_triagem(cancelar, agora_);
         }
+        if agora_ >= self.proximo_ocr && !cancelar.load(Ordering::Relaxed) {
+            self.proximo_ocr = agora_ + INTERVALO_DO_OCR;
+            self.passo_do_ocr(cancelar, agora_);
+        }
         if agora_ >= self.proximo_indice && !cancelar.load(Ordering::Relaxed) {
             self.proximo_indice = agora_ + INTERVALO_DO_INDICE;
             self.passo_do_indice(cancelar);
@@ -560,6 +603,29 @@ impl Worker {
         if self.sujo || agora_.saturating_sub(self.gravado_em) >= 10 {
             self.gravar_estado();
         }
+    }
+
+    fn passo_do_ocr(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut l) = self.leitor.take() else {
+            return;
+        };
+        match l.ler_novas(cancelar) {
+            Ok(r) => {
+                if r.lidas + r.sem_texto + r.falhas > 0 {
+                    let _ = self.registro.registrar(&Evento::Ocr {
+                        lidas: r.lidas,
+                        sem_texto: r.sem_texto,
+                        falhas: r.falhas,
+                    });
+                }
+                if r.pendentes && !r.indisponivel {
+                    // Sobrou imagem: a próxima volta já lê o lote seguinte.
+                    self.proximo_ocr = agora_;
+                }
+            }
+            Err(f) => self.falhou("ocr", f),
+        }
+        self.leitor = Some(l);
     }
 
     fn passo_do_indice(&mut self, cancelar: &AtomicBool) {

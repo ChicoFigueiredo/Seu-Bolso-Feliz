@@ -116,6 +116,15 @@ pub enum Evento<'a> {
         /// Trechos que saíram.
         removidos: usize,
     },
+    /// OCR das imagens novas (só contagens: nem nome nem texto da imagem).
+    Ocr {
+        /// Imagens com texto lido.
+        lidas: usize,
+        /// Imagens sem texto.
+        sem_texto: usize,
+        /// Imagens que não puderam ser lidas.
+        falhas: usize,
+    },
     /// Análise dos pontos de atenção (spec 10).
     Pontos {
         /// Pontos novos.
@@ -176,6 +185,11 @@ impl fmt::Display for Evento<'_> {
                 f,
                 "indice embutidos={embutidos} mantidos={mantidos} removidos={removidos}"
             ),
+            Self::Ocr {
+                lidas,
+                sem_texto,
+                falhas,
+            } => write!(f, "ocr lidas={lidas} sem_texto={sem_texto} falhas={falhas}"),
             Self::Pontos {
                 novos,
                 reabertos,

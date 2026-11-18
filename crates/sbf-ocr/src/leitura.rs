@@ -177,11 +177,9 @@ fn preparar_em_png(bytes: &[u8]) -> Result<Vec<u8>, FalhaDoOcr> {
 pub fn preparar(imagem: &DynamicImage) -> GrayImage {
     let mut cinza = imagem.to_luma8();
     let pixels = u64::from(cinza.width()) * u64::from(cinza.height());
-    if pixels > 0 {
-        let soma: u64 = cinza.pixels().map(|p| u64::from(p.0[0])).sum();
-        if soma / pixels < BRILHO_ESCURO {
-            imageops::invert(&mut cinza);
-        }
+    let soma: u64 = cinza.pixels().map(|p| u64::from(p.0[0])).sum();
+    if soma.checked_div(pixels).is_some_and(|m| m < BRILHO_ESCURO) {
+        imageops::invert(&mut cinza);
     }
     if cinza.width().max(cinza.height()) < AMPLIAR_ATE {
         cinza = imageops::resize(

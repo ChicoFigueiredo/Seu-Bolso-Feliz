@@ -137,3 +137,191 @@ fn sem_tesseract_nada_e_gravado_e_o_desfecho_e_indisponivel() {
         "sem tesseract não se grava nada: tenta de novo depois"
     );
 }
+
+// ---------------------------------------------------------------- imagens novas do inventário
+
+use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
+
+use sbf_ocr::ler_imagens_novas;
+
+struct Acervo {
+    pasta: tempfile::TempDir,
+}
+
+impl Acervo {
+    fn novo() -> Self {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let mut inv = Inventario::abrir(pasta.path().join("inventario.sqlite")).expect("abrir");
+        inv.migrar(pasta.path().join("copia.sqlite"))
+            .expect("migrar");
+        Self { pasta }
+    }
+
+    fn conexao(&self) -> rusqlite::Connection {
+        rusqlite::Connection::open(self.pasta.path().join("inventario.sqlite")).expect("conexao")
+    }
+
+    /// Um achado com a imagem no acervo do cofre.
+    fn achado(&self, hash: &str, ext: &str, tamanho: i64, bytes: &[u8]) {
+        let relativo = format!("acervo/ab/{hash}.{ext}");
+        let destino = self.pasta.path().join(&relativo);
+        std::fs::create_dir_all(destino.parent().expect("pai")).expect("pasta");
+        std::fs::write(&destino, bytes).expect("escrever");
+        self.conexao()
+            .execute(
+                "INSERT INTO achado (content_hash, file_size_bytes, extensao, camada, caminho_acervo)
+                 VALUES (?1, ?2, ?3, 'A', ?4)",
+                rusqlite::params![hash, tamanho, ext, relativo],
+            )
+            .expect("achado");
+    }
+}
+
+fn png() -> Vec<u8> {
+    std::fs::read(fixture()).expect("fixture")
+}
+
+#[test]
+fn o_lote_le_so_imagens_novas_pequenas_e_grava_ocr_tesseract() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    a.achado("nova", "png", 100, &png());
+    a.achado("pdf", "pdf", 100, b"%PDF-1.4");
+    a.achado(
+        "enorme",
+        "png",
+        i64::try_from(LIMITE_DA_IMAGEM).expect("i64") + 1,
+        &png(),
+    );
+    a.achado("com-texto", "png", 100, &png());
+    a.conexao()
+        .execute(
+            "INSERT INTO texto (content_hash, metodo, conteudo) VALUES ('com-texto', 'ocr-por', 'x')",
+            [],
+        )
+        .expect("texto");
+    let c = a.conexao();
+
+    let r = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        10,
+        &mut HashSet::new(),
+        &AtomicBool::new(false),
+    )
+    .expect("lote");
+
+    assert_eq!((r.lidas, r.sem_texto, r.falhas), (1, 0, 0));
+    assert!(!r.indisponivel);
+    let (metodo, conteudo): (String, String) = c
+        .query_row(
+            "SELECT metodo, conteudo FROM texto WHERE content_hash = 'nova'",
+            [],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .expect("texto");
+    assert_eq!(metodo, "ocr-tesseract");
+    assert!(conteudo.contains("Valor pago"));
+    // O pdf e a imagem enorme ficaram sem texto.
+    let n: i64 = c
+        .query_row("SELECT COUNT(*) FROM texto", [], |l| l.get(0))
+        .expect("contar");
+    assert_eq!(n, 2);
+}
+
+#[test]
+fn o_lote_respeita_o_tamanho_e_diz_quantas_faltam() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    for h in ["i1", "i2", "i3"] {
+        a.achado(h, "png", 100, &png());
+    }
+    let c = a.conexao();
+    let r = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        2,
+        &mut HashSet::new(),
+        &AtomicBool::new(false),
+    )
+    .expect("lote");
+    assert_eq!(r.lidas, 2);
+    assert_eq!(r.pendentes, 1);
+}
+
+#[test]
+fn imagem_que_falha_nao_e_tentada_de_novo_na_mesma_execucao() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    a.achado("quebrada", "png", 100, b"isto nao e um png");
+    let c = a.conexao();
+    let mut falharam = HashSet::new();
+
+    let r1 = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        10,
+        &mut falharam,
+        &AtomicBool::new(false),
+    )
+    .expect("lote");
+    let r2 = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        10,
+        &mut falharam,
+        &AtomicBool::new(false),
+    )
+    .expect("lote");
+
+    assert_eq!((r1.lidas, r1.falhas), (0, 1));
+    assert_eq!((r2.lidas, r2.falhas, r2.pendentes), (0, 0, 0));
+}
+
+#[test]
+fn sem_tesseract_o_lote_e_indisponivel_e_nao_toca_no_banco() {
+    let a = Acervo::novo();
+    a.achado("nova", "png", 100, &png());
+    let c = a.conexao();
+    let ocr = Ocr::com_programa(PathBuf::from("/nao/existe/tesseract"));
+
+    let r = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        10,
+        &mut HashSet::new(),
+        &AtomicBool::new(false),
+    )
+    .expect("lote");
+
+    assert!(r.indisponivel);
+    assert_eq!((r.lidas, r.sem_texto, r.falhas), (0, 0, 0));
+    let n: i64 = c
+        .query_row("SELECT COUNT(*) FROM texto", [], |l| l.get(0))
+        .expect("contar");
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn o_lote_para_quando_cancelado() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    a.achado("i1", "png", 100, &png());
+    let c = a.conexao();
+    let r = ler_imagens_novas(
+        &c,
+        a.pasta.path(),
+        &ocr,
+        10,
+        &mut HashSet::new(),
+        &AtomicBool::new(true),
+    )
+    .expect("lote");
+    assert_eq!(r.lidas, 0);
+}

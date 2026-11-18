@@ -25,6 +25,7 @@ mod entrada;
 mod estacao;
 mod inventario;
 mod mcp;
+mod ocr;
 mod planejamento;
 mod rag;
 mod reconhecer;

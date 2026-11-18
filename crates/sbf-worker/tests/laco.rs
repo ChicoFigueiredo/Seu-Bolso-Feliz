@@ -11,8 +11,9 @@ use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
-    Analista, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador, ResumoDaNuvem,
-    ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDosPontos, Triador, Worker,
+    Analista, ColetorDeMensageiros, ColetorDeNuvem, Dados, Indexador, LeitorDeImagens,
+    ResumoDaNuvem, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoIndice, ResumoDoOcr,
+    ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -428,4 +429,68 @@ fn indice_sem_modelo_baixado_nao_e_falha() {
     w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
     assert_eq!(i.get(), 1);
     assert_eq!(w.estado.falhas, 0);
+}
+
+// -- OCR das imagens novas ---------------------------------------------------------------------
+
+/// Devolve os resumos na ordem, e o último para sempre.
+struct LeitorFalso(Rc<Cell<u32>>, Vec<ResumoDoOcr>);
+impl LeitorDeImagens for LeitorFalso {
+    fn ler_novas(&mut self, _: &AtomicBool) -> Result<ResumoDoOcr, Falha> {
+        let n = self.0.get() as usize;
+        self.0.set(self.0.get() + 1);
+        Ok(self.1[n.min(self.1.len() - 1)])
+    }
+}
+
+#[test]
+fn ocr_roda_a_cada_minuto_e_logo_de_novo_se_sobrou_imagem() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let resumos = vec![
+        ResumoDoOcr {
+            lidas: 2,
+            sem_texto: 1,
+            falhas: 0,
+            pendentes: true,
+            indisponivel: false,
+        },
+        ResumoDoOcr {
+            lidas: 1,
+            ..ResumoDoOcr::default()
+        },
+    ];
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_ocr(Box::new(LeitorFalso(n.clone(), resumos)));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "a primeira volta já roda");
+    w.passo(t0 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2, "sobrou imagem: roda de novo na volta seguinte");
+    w.passo(t0 + 2, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2, "não sobrou: espera o minuto");
+    w.passo(t0 + 62, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 3);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("ocr lidas=2 sem_texto=1 falhas=0"), "{log}");
+}
+
+#[test]
+fn ocr_indisponivel_ou_sem_nada_novo_nao_escreve_no_log_nem_conta_falha() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let indisponivel = ResumoDoOcr {
+        indisponivel: true,
+        ..ResumoDoOcr::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_ocr(Box::new(LeitorFalso(n.clone(), vec![indisponivel])));
+    w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
+    assert_eq!(n.get(), 1);
+    assert_eq!(w.estado.falhas, 0);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(!log.contains("ocr "), "{log}");
 }
