@@ -64,7 +64,8 @@
       "total_centavos"
     ],
     "script_le_texto": true,
-    "propor": []
+    "propor": [],
+    "texto_de_ocr": true
   },
   "exemplos": [
     {

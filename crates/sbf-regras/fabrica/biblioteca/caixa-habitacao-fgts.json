@@ -52,7 +52,8 @@
     "obrigatorios": [
       "valor_utilizado_centavos"
     ],
-    "propor": []
+    "propor": [],
+    "texto_de_ocr": true
   },
   "exemplos": [
     {

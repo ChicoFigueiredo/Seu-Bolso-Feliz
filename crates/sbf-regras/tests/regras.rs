@@ -1028,7 +1028,8 @@ fn fabrica_e_idempotente_e_o_contracheque_pede_o_leitor() {
     c.semear_fabrica().unwrap();
     c.semear_fabrica().unwrap();
     let regras = c.regras().unwrap();
-    assert_eq!(regras.len(), 2);
+    // Contracheque e pix-na-descricao, mais as 16 da biblioteca.
+    assert_eq!(regras.len(), 18);
     assert_eq!(
         c.versoes("contracheque").unwrap().len(),
         2,
