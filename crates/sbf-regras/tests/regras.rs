@@ -1735,6 +1735,8 @@ fn a_chave_de_idempotencia_nao_depende_do_documento_nem_do_nome() {
     let a = motor.ler(&registro_pix("pluggy:a", Some("A"), Some(DOC_FICTICIO)));
     let b = motor.ler(&registro_pix("pluggy:a", None, None));
     assert_eq!(reconhecido(&a).chave, reconhecido(&b).chave);
+}
+
 // ---------------------------------------------------------------- D15: o MCP decide
 
 #[test]
