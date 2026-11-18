@@ -1,0 +1,137 @@
+{
+  "regra": "comprovante-pix-c6",
+  "nome": "Comprovante Pix · C6 Bank",
+  "motivo": "regra de fábrica: comprovante de Pix emitido pelo C6 Bank; propõe provar o débito",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "comprovante-pix-c6",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bc6\\b)"
+        },
+        {
+          "contem": "pix"
+        },
+        {
+          "contem": "comprovante"
+        }
+      ],
+      "nenhum": [
+        {
+          "contem": "pagamento minimo"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:valor)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "data": {
+        "regex": "(?i)(?:(?:data|realizad\\S+\\s+em|efetivad\\S+\\s+em))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "favorecido": {
+        "regex": "(?im)^[ \\t]*(?:para|favorecido|destinat\\S*|recebedor)[ \\t]*:?[ \\t]*\\n?[ \\t]*([^\\n]{3,80})$",
+        "formato": "texto"
+      },
+      "documento_favorecido": {
+        "regex": "(?i)(?:cpf\\s*/\\s*cnpj|cpf|cnpj)[ \\t]*:?[ \\t]*([\\d.*\\-/]{11,18})",
+        "formato": "texto"
+      },
+      "instituicao": {
+        "regex": "(?im)^[ \\t]*institui\\S*[ \\t]*:?[ \\t]*([^\\n]{3,60})$",
+        "formato": "texto"
+      },
+      "autenticacao": {
+        "regex": "(?i)autentica\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9.\\-]{8,64})",
+        "formato": "texto"
+      },
+      "id_transacao": {
+        "regex": "(?i)id\\s+(?:da\\s+)?transa\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9]{20,40})",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "provar_registro": {
+          "janela_dias": 2
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "Pix enviado com destinatário na linha de baixo",
+      "texto": "C6 Bank\nComprovante de Pix\nPix enviado com sucesso\nValor R$ 80,50\nData da transação 11/11/2026\nDestinatário\nFulano de Tal\nCPF ***.000.000-**\nInstituição: Banco Exemplo S.A.\nID da transação E00000000202611111500QWERT98765\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-c6",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 8050
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-11"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Fulano de Tal"
+          },
+          "instituicao": {
+            "tipo": "texto",
+            "valor": "Banco Exemplo S.A."
+          },
+          "id_transacao": {
+            "tipo": "texto",
+            "valor": "E00000000202611111500QWERT98765"
+          }
+        }
+      }
+    },
+    {
+      "nome": "Pix com data realizado em",
+      "texto": "C6 BANK\nComprovante Pix\nValor: R$ 3.400,00\nRealizado em 02/12/2026\nPara: Beltrano de Tal\nAutenticação: ZZ99YY88XX77WW66\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-c6",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 340000
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-02"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Beltrano de Tal"
+          },
+          "autenticacao": {
+            "tipo": "texto",
+            "valor": "ZZ99YY88XX77WW66"
+          }
+        }
+      }
+    },
+    {
+      "nome": "comprovante da CAIXA não é do C6",
+      "texto": "CAIXA\nComprovante de Pix\nPix enviado\nValor: R$ 250,00\nData: 10/11/2026 14:32\nPara: Fulano de Tal\nCPF/CNPJ: ***.000.000-**\nInstituição: Banco Exemplo S.A.\nID da transação: E00000000202611101432ABCDE12345\nAutenticação: 1A2B3C4D5E6F7A8B\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

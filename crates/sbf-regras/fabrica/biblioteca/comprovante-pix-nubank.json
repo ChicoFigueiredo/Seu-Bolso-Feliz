@@ -1,0 +1,145 @@
+{
+  "regra": "comprovante-pix-nubank",
+  "nome": "Comprovante Pix · Nubank",
+  "motivo": "regra de fábrica: comprovante de transferência Pix do Nubank (data por extenso lida pelo script); propõe provar o débito",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "comprovante-pix-nubank",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "pix"
+        },
+        {
+          "contem": "comprovante"
+        }
+      ],
+      "algum": [
+        {
+          "contem": "nubank"
+        },
+        {
+          "contem": "nu pagamentos"
+        }
+      ],
+      "nenhum": [
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bcaixa\\b)"
+        },
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bc6\\b)"
+        },
+        {
+          "contem": "pagamento minimo"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:valor)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "data": {
+        "regex": "(?i)(?:(?:data|realizad\\S+\\s+em|efetivad\\S+\\s+em))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "favorecido": {
+        "regex": "(?i)destino[ \\t]*\\n[ \\t]*nome[ \\t]*:?[ \\t]*([^\\n]{3,80})",
+        "formato": "texto"
+      },
+      "documento_favorecido": {
+        "regex": "(?i)(?:cpf\\s*/\\s*cnpj|cpf|cnpj)[ \\t]*:?[ \\t]*([\\d.*\\-/]{11,18})",
+        "formato": "texto"
+      },
+      "instituicao": {
+        "regex": "(?im)^[ \\t]*institui\\S*[ \\t]*:?[ \\t]*([^\\n]{3,60})$",
+        "formato": "texto"
+      },
+      "autenticacao": {
+        "regex": "(?i)autentica\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9.\\-]{8,64})",
+        "formato": "texto"
+      },
+      "id_transacao": {
+        "regex": "(?i)id\\s+(?:da\\s+)?transa\\S*[ \\t]*:?[ \\t]*\\n?[ \\t]*([A-Za-z0-9]{20,40})",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "script_le_texto": true,
+    "propor": [
+      {
+        "provar_registro": {
+          "janela_dias": 2
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "transferência Pix com data por extenso",
+      "texto": "Nubank\nComprovante de transferência\n12 NOV 2026 - 14:32:10\nValor R$ 120,00\nTipo de transferência Pix\nDestino\nNome Fulano de Tal\nCPF ***.000.000-**\nInstituição Banco Exemplo S.A.\nAgência 0000 Conta 00000-0\nOrigem\nNome Beltrano de Tal\nInstituição NU PAGAMENTOS S.A.\nID da transação E00000000202611121432NUBAN00001\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-nubank",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 12000
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-12"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Fulano de Tal"
+          },
+          "instituicao": {
+            "tipo": "texto",
+            "valor": "Banco Exemplo S.A."
+          },
+          "id_transacao": {
+            "tipo": "texto",
+            "valor": "E00000000202611121432NUBAN00001"
+          }
+        }
+      }
+    },
+    {
+      "nome": "data numérica",
+      "texto": "Nu Pagamentos S.A.\nComprovante Pix\nValor R$ 45,90\nData 30/11/2026\nDestino\nNome Fulano de Tal\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "comprovante-pix-nubank",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 4590
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-30"
+          },
+          "favorecido": {
+            "tipo": "texto",
+            "valor": "Fulano de Tal"
+          }
+        }
+      }
+    },
+    {
+      "nome": "Pix do C6 para uma conta Nubank não é do Nubank",
+      "texto": "C6 Bank\nComprovante de Pix\nValor R$ 80,00\nData 11/11/2026\nDestino\nNome Fulano de Tal\nInstituição NU PAGAMENTOS S.A.\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}
