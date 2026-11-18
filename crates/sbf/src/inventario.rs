@@ -118,6 +118,22 @@ impl AppDoInventario {
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }
                 }
+                // As regras de reconhecimento (spec 13): `<cofre>/regras.sqlite`, com as de
+                // fábrica semeadas e os scripts no processo filho `sbf script --servir`.
+                match sbf_regras::catalogo::Catalogo::abrir(&self.pasta.join("regras.sqlite")) {
+                    Ok(mut c) => {
+                        if let Err(e) = c.semear_fabrica() {
+                            eprintln!("sbf: as regras de fábrica não entraram ({e})");
+                        }
+                        janela
+                            .regras
+                            .ligar(sbf_janela::regras::FonteDasRegras::nova(
+                                std::sync::Arc::new(std::sync::Mutex::new(c)),
+                                crate::script::executor_de_script().ok(),
+                            ));
+                    }
+                    Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
+                }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());
                 // Só lê o estado: não pede senha. Se o keyring travar, a barra mostra "—".

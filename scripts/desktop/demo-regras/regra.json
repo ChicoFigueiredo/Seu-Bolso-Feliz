@@ -1,0 +1,17 @@
+{
+  "regra": "comprovante-pix-banco-exemplo",
+  "nome": "Comprovante Pix · Banco Exemplo",
+  "definicao": {
+    "tipo_documental": "comprovante-pix",
+    "detectar": {
+      "todos": [{ "contem": "banco exemplo" }, { "contem": "comprovante pix" }]
+    },
+    "extrair": {
+      "valor_centavos": { "regex": "Valor:\\s*R\\$\\s*([\\d.,]+)", "formato": "centavos" },
+      "data": { "regex": "Data:\\s*(\\d{2}/\\d{2}/\\d{4})", "formato": "data" },
+      "favorecido": { "regex": "Favorecido:\\s*(.+)", "formato": "texto" }
+    },
+    "obrigatorios": ["valor_centavos"],
+    "propor": [{ "provar_registro": { "janela_dias": 2 } }]
+  }
+}

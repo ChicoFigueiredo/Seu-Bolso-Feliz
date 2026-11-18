@@ -14,11 +14,17 @@ publish = false
 bancada-armazem = { path = "../bancada/crates/bancada-armazem" }
 bancada-segredos = { path = "../bancada/crates/bancada-segredos" }
 sbf-inventario = { path = "crates/sbf-inventario" }
+sbf-regras = { path = "crates/sbf-regras" }
+sbf-script = { path = "crates/sbf-script" }
 
 rusqlite = { version = "0.41", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+regex = "1"
+sha2 = "0.10"
+# Luau compilado junto (C++), para os scripts das regras de reconhecimento (ADR-021).
+mlua = { version = "0.12", features = ["luau", "serialize"] }
 zeroize = { version = "1.9", features = ["derive"] }
 
 egui = "0.36"

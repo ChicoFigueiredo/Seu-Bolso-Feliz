@@ -168,6 +168,8 @@ pub struct Janela {
     pub triagem: crate::triagem::EstadoDaTriagem,
     /// Conexões › Roteiros (spec 10, C1).
     pub roteiros: crate::roteiros::Roteiros,
+    /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
+    pub regras: crate::regras_ui::Regras,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -290,6 +292,7 @@ impl Janela {
             erro_do_dialogo: None,
             triagem: crate::triagem::EstadoDaTriagem::default(),
             roteiros: crate::roteiros::Roteiros::default(),
+            regras: crate::regras_ui::Regras::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -1116,6 +1119,7 @@ impl Janela {
                 }
             }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
+            Destino::AreaFutura(crate::regras_ui::ROTA) => self.regras.area(ui),
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
             }

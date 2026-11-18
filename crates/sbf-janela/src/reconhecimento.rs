@@ -26,6 +26,10 @@ use sbf_reconhecimento::{
     Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Reconhecido, Resultado, Situacao,
     Sugestao,
 };
+use sbf_regras::{Reconhecimento as ReconhecimentoDaRegra, Retorno};
+
+use crate::reconhecimento_regras::{Criacao, Teste, valor_do_texto};
+use crate::regras::FonteDasRegras;
 
 use crate::controle_ui::mensagem_de_erro;
 use crate::janela::{Janela, Mensagem};
@@ -63,6 +67,17 @@ pub struct Cartao {
     /// A marcação de eventuais que a pessoa deixou em cada sugestão de rubricas (índice da
     /// sugestão): `true` = só deste mês. Quem não mexeu não aparece: vale a inicial.
     pub marcacoes: BTreeMap<usize, Vec<bool>>,
+    /// Os nomes das regras que aparecem no resultado (id → nome), lidos do catálogo quando o
+    /// reconhecimento termina.
+    pub nomes_das_regras: BTreeMap<String, String>,
+    /// "Corrigir campos" está ligado: os valores da regra viram caixas de texto.
+    pub corrigindo: bool,
+    /// O que o usuário digitou em cada campo (campo → texto). Vazio até ele corrigir.
+    pub edicao: BTreeMap<String, String>,
+    /// O Rastro do reconhecimento está aberto no cartão.
+    pub rastro_aberto: bool,
+    /// Um aviso discreto quando a decisão não pôde ser gravada na regra (a ação em si valeu).
+    pub aviso_de_retorno: Option<String>,
 }
 
 impl Cartao {
@@ -81,6 +96,58 @@ impl Cartao {
             automaticas: Vec::new(),
             erro_de_sugestao: None,
             marcacoes: BTreeMap::new(),
+            nomes_das_regras: BTreeMap::new(),
+            corrigindo: false,
+            edicao: BTreeMap::new(),
+            rastro_aberto: false,
+            aviso_de_retorno: None,
+        }
+    }
+
+    /// A regra que reconheceu o documento (id e versão), se foi uma regra.
+    pub fn regra_reconhecida(&self) -> Option<(String, u32)> {
+        match &self.resultado()?.reconhecido {
+            Reconhecido::PelaRegra { reconhecimento } => {
+                Some((reconhecimento.regra.clone(), reconhecimento.versao))
+            }
+            _ => None,
+        }
+    }
+
+    fn reconhecimento_da_regra(&self) -> Option<&ReconhecimentoDaRegra> {
+        match &self.resultado()?.reconhecido {
+            Reconhecido::PelaRegra { reconhecimento } => Some(reconhecimento),
+            _ => None,
+        }
+    }
+
+    /// Os campos que o usuário mudou em relação ao que a regra leu (nomes técnicos). Um texto
+    /// que não dá para ler como valor também conta: ele discorda da regra.
+    pub fn corrigidos(&self) -> Vec<String> {
+        let Some(r) = self.reconhecimento_da_regra() else {
+            return Vec::new();
+        };
+        self.edicao
+            .iter()
+            .filter(|(nome, texto)| match r.campos.get(*nome) {
+                Some(c) => valor_do_texto(nome, Some(&c.valor), texto).as_ref() != Some(&c.valor),
+                None => !texto.trim().is_empty(),
+            })
+            .map(|(nome, _)| nome.clone())
+            .collect()
+    }
+
+    /// O tipo documental e os campos lidos (texto do valor), para o formulário de criar regra.
+    pub fn campos_para_a_criacao(&self) -> (String, BTreeMap<String, String>) {
+        match self.reconhecimento_da_regra() {
+            Some(r) => (
+                r.tipo_documental.clone(),
+                r.campos
+                    .iter()
+                    .map(|(n, c)| (n.clone(), c.valor.to_string()))
+                    .collect(),
+            ),
+            None => (String::new(), BTreeMap::new()),
         }
     }
 
@@ -187,6 +254,10 @@ pub struct Reconhecimento {
     /// Rola a lista de cartões até este ponto no próximo quadro (as capturas usam, para
     /// mostrar as rubricas); a interface consome uma vez.
     pub rolar_para: Option<f32>,
+    /// O diálogo "Testar com este documento" (spec 13).
+    pub teste: Option<Teste>,
+    /// O formulário "Criar regra a partir daqui" (spec 13, D7).
+    pub criacao: Option<Criacao>,
 }
 
 impl Reconhecimento {
@@ -304,6 +375,7 @@ impl Janela {
                 self.reconhecimento.execucao = None;
             }
             if chegou {
+                self.guardar_nomes_das_regras(indice);
                 self.aplicar_automaticas(indice);
             }
         }
@@ -393,12 +465,47 @@ impl Janela {
     }
 
     /// Ignorar uma sugestão: some o botão, nada muda no planejamento.
+    /// Se a sugestão vem de uma regra, o descarte é registrado como `Rejeitado` (D4).
     pub fn ignorar_sugestao(&mut self, cartao: usize, sugestao: usize) {
+        let fonte = self.regras.fonte().cloned();
         if let Some(c) = self.reconhecimento.cartoes.get_mut(cartao)
             && !c.ignoradas.contains(&sugestao)
             && !c.confirmadas.contains(&sugestao)
         {
             c.ignoradas.push(sugestao);
+            let da_regra = c
+                .resultado()
+                .and_then(|r| r.sugestoes.get(sugestao))
+                .and_then(|s| s.da_regra().map(|(_, chave)| chave.to_owned()));
+            if let Some(chave) = da_regra {
+                registrar(fonte.as_ref(), c, &chave, Retorno::Rejeitado);
+            }
+        }
+    }
+
+    /// Lê do catálogo os nomes das regras que o resultado do cartão cita.
+    fn guardar_nomes_das_regras(&mut self, cartao: usize) {
+        let Some(fonte) = self.regras.fonte().cloned() else {
+            return;
+        };
+        let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
+            return;
+        };
+        if let Ok(nomes) = fonte.nomes() {
+            c.nomes_das_regras = nomes;
+        }
+    }
+
+    /// Liga ou desliga o "Corrigir campos" do cartão; ao ligar, as caixas começam com o que a
+    /// regra leu.
+    pub fn alternar_correcao(&mut self, cartao: usize) {
+        let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
+            return;
+        };
+        c.corrigindo = !c.corrigindo;
+        if c.corrigindo && c.edicao.is_empty() {
+            let (_, campos) = c.campos_para_a_criacao();
+            c.edicao = campos;
         }
     }
 
@@ -445,15 +552,15 @@ impl Janela {
             return;
         };
         let sha = resultado.sha256.clone();
-        let automaticas: Vec<(usize, Conciliacao)> = resultado
+        // `conciliacao_automatica` cobre o salário (`tres-provas`) e as regras consolidadas
+        // (`<id>@<versão>`), cada uma com o nome do autor.
+        let automaticas: Vec<(usize, Conciliacao, String)> = resultado
             .sugestoes
             .iter()
             .enumerate()
-            .filter_map(|(i, s)| match s {
-                Sugestao::Conciliar { conciliacao, .. } if s.e_automatica() => {
-                    Some((i, conciliacao.clone()))
-                }
-                _ => None,
+            .filter_map(|(i, s)| {
+                s.conciliacao_automatica()
+                    .map(|(c, regra)| (i, c.clone(), regra))
             })
             .collect();
         if automaticas.is_empty() {
@@ -465,7 +572,7 @@ impl Janela {
         let plan = pl.0.as_mut();
         let mut aviso = None;
         let mut feitas = 0usize;
-        for (i, conciliacao) in automaticas {
+        for (i, conciliacao, regra) in automaticas {
             // O usuário já disse "não" a este par: a regra não o refaz.
             if plan
                 .conciliacao_desfeita(&conciliacao.ocorrencia, &conciliacao.movimento)
@@ -490,9 +597,7 @@ impl Janela {
                     Alteracao::Conciliar {
                         conciliacao: confirmada.clone(),
                     },
-                    Autor::Regra {
-                        regra: "tres-provas".to_owned(),
-                    },
+                    Autor::Regra { regra },
                 );
                 if let Err(e) = r {
                     c.erro_de_sugestao = Some((i, mensagem_de_erro(&e)));
@@ -520,21 +625,27 @@ impl Janela {
     }
 
     /// Desfaz a conciliação que a regra fez sozinha: exclusão lógica, com histórico. A sugestão
-    /// volta ao cartão para ser confirmada à mão, e a regra não a refaz.
+    /// volta ao cartão para ser confirmada à mão, e a regra não a refaz. Quando a conciliação
+    /// veio de uma regra de reconhecimento, o Desfazer é registrado como `Desfeito` (D4).
     pub fn desfazer_automatica(&mut self, cartao: usize, sugestao: usize) {
+        let fonte = self.regras.fonte().cloned();
         let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
             return;
         };
         if !c.automaticas.contains(&sugestao) {
             return;
         }
-        let Some(Sugestao::Conciliar { conciliacao, .. }) = c
+        let Some(sug) = c
             .resultado()
             .and_then(|r| r.sugestoes.get(sugestao))
             .cloned()
         else {
             return;
         };
+        let Some((conciliacao, _)) = sug.conciliacao_automatica() else {
+            return;
+        };
+        let conciliacao = conciliacao.clone();
         let Some(pl) = self.planejamento.as_mut() else {
             return;
         };
@@ -550,6 +661,9 @@ impl Janela {
             Ok(_) => {
                 c.confirmadas.retain(|i| *i != sugestao);
                 c.automaticas.retain(|i| *i != sugestao);
+                if let Some((_, chave)) = sug.da_regra() {
+                    registrar_desfeito(fonte.as_ref(), c, chave);
+                }
                 self.controle.mensagem = Some((
                     "Conciliação desfeita. Ela volta a ser uma sugestão.".to_owned(),
                     false,
@@ -565,6 +679,7 @@ impl Janela {
     /// por vez, cada uma com a versão do recorrente lida logo antes.
     pub fn confirmar_sugestao(&mut self, cartao: usize, sugestao: usize) {
         let ligador = self.ligador_de_salario();
+        let fonte = self.regras.fonte().cloned();
         let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
             return;
         };
@@ -659,6 +774,16 @@ impl Janela {
         match resultado_final {
             Ok(()) => {
                 c.confirmadas.push(sugestao);
+                // Uma sugestão de regra: aceitar (ou aceitar depois de corrigir) é o retorno
+                // que alimenta a consolidação (D4).
+                if let Some((_, chave)) = s.da_regra() {
+                    let retorno = if c.corrigidos().is_empty() {
+                        Retorno::Aceito
+                    } else {
+                        Retorno::Corrigido
+                    };
+                    registrar(fonte.as_ref(), c, chave, retorno);
+                }
                 self.controle.mensagem = Some((
                     aviso.map_or_else(|| format!("Feito: {}.", s.rotulo()), str::to_owned),
                     false,
@@ -666,6 +791,24 @@ impl Janela {
             }
             Err(e) => c.erro_de_sugestao = Some((sugestao, e)),
         }
+    }
+}
+
+/// Grava o retorno do usuário na regra. A decisão do cartão já valeu; se o catálogo não
+/// aceita (banco travado), o cartão avisa discretamente.
+fn registrar(fonte: Option<&FonteDasRegras>, c: &mut Cartao, chave: &str, retorno: Retorno) {
+    let Some(fonte) = fonte else { return };
+    if fonte.registrar_retorno(chave, retorno).is_err() {
+        c.aviso_de_retorno =
+            Some("Não deu para registrar sua decisão na regra de reconhecimento.".to_owned());
+    }
+}
+
+fn registrar_desfeito(fonte: Option<&FonteDasRegras>, c: &mut Cartao, chave: &str) {
+    let Some(fonte) = fonte else { return };
+    if fonte.registrar_desfeito(chave).is_err() {
+        c.aviso_de_retorno =
+            Some("Não deu para registrar sua decisão na regra de reconhecimento.".to_owned());
     }
 }
 

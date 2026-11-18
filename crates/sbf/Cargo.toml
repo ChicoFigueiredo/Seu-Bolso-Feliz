@@ -43,7 +43,11 @@ sbf-pontos = { path = "../sbf-pontos" }
 sbf-livro = { path = "../sbf-livro" }
 sbf-planilha = { path = "../sbf-planilha" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
+sbf-regras = { workspace = true }
+sbf-script = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
+sha2 = { workspace = true }
+serde = { workspace = true }
 ctrlc = { version = "3", features = ["termination"] }
 zeroize = { workspace = true }
 rusqlite = { workspace = true }

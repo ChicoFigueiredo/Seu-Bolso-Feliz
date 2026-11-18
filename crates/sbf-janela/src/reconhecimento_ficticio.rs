@@ -2,15 +2,24 @@
 //! (o mesmo de `sbf-planilha/tests`) com sugestões montadas contra o Salário do
 //! planejamento fictício. Nada aqui lê arquivo, cofre ou rede.
 
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-use sbf_planejamento::{Centavos, Conciliacao, Data, IdOcorrencia, TipoDeDocumento};
+use sbf_planejamento::{
+    Centavos, Competencia, Conciliacao, Data, IdOcorrencia, MovimentoDoExtrato, TipoDeDocumento,
+};
 use sbf_planilha::contracheque;
 use sbf_reconhecimento::descontos::propor_descontos;
+use sbf_reconhecimento::regras::entrada_do_documento;
 use sbf_reconhecimento::{
-    ErroDoReconhecimento, PROVAS_POSSIVEIS, ReconhecedorFicticio, Reconhecido, Resultado, Sugestao,
-    UsoDeRubricas, ocorrencia_do_mes,
+    Andamento, ErroDoReconhecimento, PROVAS_POSSIVEIS, Reconhecedor, ReconhecedorFicticio,
+    Reconhecido, Resultado, Sugestao, UsoDeRubricas, ocorrencia_do_mes,
 };
+use sbf_regras::motor::Motor;
+use sbf_regras::{Canal, Decisao};
+
+use crate::regras::{FonteDasRegras, PIX_AGENDADO_TEXTO};
 
 use crate::controle::competencia_texto;
 use crate::janela::Janela;
@@ -114,6 +123,8 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                 },
                 sugestoes,
                 avisos,
+                entrada: None,
+                leitura: None,
             })
         }
         Err(_) => Err(ErroDoReconhecimento::Arquivo(
@@ -123,7 +134,150 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
     ReconhecedorFicticio::novo(resposta)
 }
 
-/// Liga o reconhecedor fictício na janela da demonstração.
+/// O nome (qualquer arquivo com "pix" no nome) que a demonstração reconhece pela regra do
+/// Pix, com a sugestão de provar o débito.
+pub const NOME_DO_PIX: &str = "comprovante-pix-2026-11.pdf";
+
+/// O nome (com "agendado" no nome) cujo comprovante duas regras leem diferente.
+pub const NOME_DO_AMBIGUO: &str = "comprovante-pix-agendado.pdf";
+
+/// Um comprovante de Pix inventado, que a regra do Pix (versão 2) do catálogo fictício lê.
+pub const TEXTO_DO_PIX: &str = "Banco Exemplo\nComprovante de Pix\nValor: R$ 187,50\nData: 12/11/2026\nPara: Fulano de Tal\nAutenticação: D7K2-9QX1-EXEMPLO";
+
+/// Lê um texto com o motor das regras vigentes do catálogo fictício, registra a execução e a
+/// proposta (como o reconhecedor real faz) e monta o [`Resultado`] do cartão. Dados
+/// inventados; nada sai do processo.
+fn resultado_pelo_motor(fonte: &FonteDasRegras, nome: &str, texto: &str) -> Option<Resultado> {
+    let mut catalogo = fonte.catalogo.lock().ok()?;
+    let motor = Motor::das_vigentes(&catalogo, fonte.executor.clone()).ok()?;
+    let sha = crate::demonstracao::hash_do_nome(nome);
+    let entrada = entrada_do_documento(
+        &sha,
+        nome,
+        "application/pdf",
+        Some(texto),
+        Canal::Arrastado,
+        None,
+    );
+    let leitura = motor.ler(&entrada);
+    catalogo.registrar_execucao(&leitura).ok()?;
+    let (reconhecido, sugestoes) = match leitura.decisao.clone() {
+        Decisao::Reconhecido(rec) => {
+            catalogo.registrar_proposta(&rec, &entrada.id).ok()?;
+            let sugestoes = sugestoes_do_pix(&rec);
+            (
+                Reconhecido::PelaRegra {
+                    reconhecimento: rec,
+                },
+                sugestoes,
+            )
+        }
+        Decisao::Ambiguo { candidatas, motivo } => {
+            (Reconhecido::Ambiguo { candidatas, motivo }, Vec::new())
+        }
+        Decisao::Nenhuma => return None,
+    };
+    Some(Resultado {
+        sha256: sha,
+        nome: nome.to_owned(),
+        ja_existia: false,
+        texto: sbf_reconhecimento::EstadoDoTexto::Extraido,
+        reconhecido,
+        sugestoes,
+        avisos: Vec::new(),
+        entrada: Some(entrada),
+        leitura: Some(leitura),
+    })
+}
+
+/// A proposta `ProvarRegistro` da regra do Pix vira a sugestão: o comprovante prova um débito
+/// que já está no extrato fictício e liga-se à ocorrência da energia de novembro.
+fn sugestoes_do_pix(rec: &sbf_regras::Reconhecimento) -> Vec<Sugestao> {
+    if !rec
+        .propostas
+        .iter()
+        .any(|p| matches!(p, sbf_regras::Proposta::ProvarRegistro { .. }))
+    {
+        return Vec::new();
+    }
+    let data = Data {
+        ano: 2026,
+        mes: 11,
+        dia: 12,
+    };
+    vec![Sugestao::ProvarRegistro {
+        rotulo: "Este comprovante prova o débito de 12/11 · R$ 187,50".to_owned(),
+        movimento: MovimentoDoExtrato {
+            movimento: "pluggy:txn_pix_ficticio".to_owned(),
+            data,
+            valor: Centavos(-18_750),
+            conta_do_extrato: "Conta Corrente Exemplo".to_owned(),
+            descricao: "PIX ENVIADO FULANO DE TAL".to_owned(),
+            tipo: "debito".to_owned(),
+        },
+        alvo: Some(ocorrencia_do_mes(
+            "rec_energia",
+            Competencia { ano: 2026, mes: 11 },
+        )),
+        tipo: TipoDeDocumento::Comprovante,
+        regra: (rec.regra.clone(), rec.versao),
+        chave: rec.chave.clone(),
+        provas: 2,
+        automatica: false,
+    }]
+}
+
+/// O reconhecedor da demonstração: o contracheque de sempre, e, com o catálogo de regras
+/// fictício ligado, o comprovante de Pix reconhecido pela regra (nome com "pix") e o caso
+/// ambíguo (nome com "agendado").
+#[derive(Debug)]
+pub struct ReconhecedorDeDemonstracao {
+    contracheque: ReconhecedorFicticio,
+    pix: Option<ReconhecedorFicticio>,
+    ambiguo: Option<ReconhecedorFicticio>,
+}
+
+impl Reconhecedor for ReconhecedorDeDemonstracao {
+    fn reconhecer(
+        &self,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        let nome = caminho
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let escolhido = if nome.contains("agendado") {
+            self.ambiguo.as_ref()
+        } else if nome.contains("pix") {
+            self.pix.as_ref()
+        } else {
+            None
+        };
+        escolhido
+            .unwrap_or(&self.contracheque)
+            .reconhecer(caminho, andamento, cancelar)
+    }
+}
+
+/// O reconhecedor da demonstração, com o catálogo fictício de regras quando há.
+pub fn reconhecedor_de_demonstracao(fonte: Option<&FonteDasRegras>) -> ReconhecedorDeDemonstracao {
+    let pelo_motor = |nome: &str, texto: &str| {
+        fonte
+            .and_then(|f| resultado_pelo_motor(f, nome, texto))
+            .map(|r| ReconhecedorFicticio::novo(Ok(r)))
+    };
+    ReconhecedorDeDemonstracao {
+        contracheque: reconhecedor_do_contracheque(),
+        pix: pelo_motor(NOME_DO_PIX, TEXTO_DO_PIX),
+        ambiguo: pelo_motor(NOME_DO_AMBIGUO, PIX_AGENDADO_TEXTO),
+    }
+}
+
+/// Liga o reconhecedor fictício na janela da demonstração. Ligue o catálogo de regras
+/// (`janela.regras.ligar`) antes, para a demonstração ter o Pix e o caso ambíguo.
 pub fn ligar_na_demonstracao(janela: &mut Janela) {
-    janela.ligar_reconhecedor(Arc::new(reconhecedor_do_contracheque()));
+    let fonte = janela.regras.fonte().cloned();
+    janela.ligar_reconhecedor(Arc::new(reconhecedor_de_demonstracao(fonte.as_ref())));
 }

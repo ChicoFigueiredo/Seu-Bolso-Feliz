@@ -108,6 +108,15 @@ pub fn rodar(args: &[String]) -> ExitCode {
         }
         None => nucleo,
     };
+    // As regras de reconhecimento (spec 13): consultar, testar, simular e propor rascunho.
+    // O MCP nunca ativa (D14); os scripts rodam no processo filho `sbf script --servir`.
+    let nucleo = match crate::script::executor_de_script() {
+        Ok(executor) => nucleo.com_regras(Path::new(pasta).join("regras.sqlite"), executor),
+        Err(_) => {
+            eprintln!("sbf mcp: sem executor de scripts (regras de reconhecimento desligadas)");
+            nucleo
+        }
+    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

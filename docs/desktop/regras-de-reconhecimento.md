@@ -1,0 +1,346 @@
+# Regras de reconhecimento: como criar uma sem recompilar o sbf
+
+Este guia é para o dono do cofre. Ele ensina a criar, testar e ativar uma **regra de
+reconhecimento** (termo do `CONTEXT.md`): a instrução que diz como reconhecer um tipo de
+documento ou registro, quais campos tirar dele e o que propor ao usuário. A regra é dado
+versionado no `regras.sqlite` do cofre. Mudá-la não exige compilar nada.
+
+Exemplo de tipo que se cadastra assim: um comprovante de Pix de um banco fictício,
+"Comprovante Pix · Banco Exemplo".
+
+## 1. O ciclo de uma regra
+
+| Estado          | O que faz                                                                                     | Quem leva a ele                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Rascunho**    | Nunca roda na caixa de entrada. Só serve para teste e simulação.                              | Qualquer um que salva (dono, IA, correção)                                                 |
+| **Ativa**       | Reconhece e **propõe**. Nada vira conciliação sem o clique do usuário.                        | Só o usuário (janela ou terminal interativo)                                               |
+| **Consolidada** | Como a ativa, e concilia sozinha quando as três provas batem exatamente. Sempre com Desfazer. | O sbf sugere depois de **5 propostas aceitas seguidas**, sem correção; só o usuário aprova |
+| **Desativada**  | Saiu de cena e fica no histórico.                                                             | Desativar, ou a substituição por uma versão nova ativada                                   |
+
+Regras do ciclo:
+
+- Uma versão **nunca muda depois de salva**. Corrigir é salvar outra versão.
+- Só uma versão por regra fica ativa ou consolidada.
+- Uma versão nova **nasce rascunho**, mesmo quando veio da IA. Para entrar em vigor, precisa
+  ser ativada pelo usuário.
+- Ativar só funciona se **todos os exemplos passam**. Um exemplo que falha bloqueia a ativação.
+- Uma rejeição, um Desfazer ou uma versão nova devolve a regra consolidada para ativa.
+- **Rollback**: `sbf regras ... reverter <regra>` reativa a versão anterior, sem apagar nada.
+  Ele não roda os exemplos de novo, porque a versão já esteve em vigor.
+
+Quem pode mudar o estado: só o usuário, na janela do sbf ou num terminal interativo que
+confirmou. O MCP e a IA nunca ativam, consolidam, desativam nem revertem (ADR-021, D14).
+
+## 2. A definição (formato JSON)
+
+Uma regra é um arquivo JSON com três campos: `regra` (o id), `nome` (para mostrar) e
+`definicao` (o formato declarativo). O id usa só minúsculas, dígitos e hífen.
+
+```json
+{
+  "regra": "comprovante-pix-banco-exemplo",
+  "nome": "Comprovante Pix · Banco Exemplo",
+  "definicao": { "...": "..." }
+}
+```
+
+Esse arquivo é o que `sbf regras ... importar` lê. O MCP (`propor_regra`) recebe a `definicao`
+sozinha, com `regra`, `nome` e `motivo` como campos separados. Dentro de `definicao`, os
+campos são:
+
+| Campo               | Tipo          | Padrão          | O que faz                                                                           |
+| ------------------- | ------------- | --------------- | ----------------------------------------------------------------------------------- |
+| `versao_do_esquema` | número        | 1               | Sempre `1` por enquanto. Outro valor é recusado.                                    |
+| `tipo_documental`   | texto         | obrigatório     | O tipo que a regra reconhece (ex.: `comprovante-pix-banco-exemplo`).                |
+| `aplica_a`          | lista         | `["documento"]` | Tipos de entrada: `documento`, `registro` ou `mensagem`.                            |
+| `prioridade`        | inteiro       | 0               | Vence a de maior prioridade entre as que casam.                                     |
+| `detectar`          | objeto        | obrigatório     | As condições de reconhecimento: `todos`, `algum`, `nenhum` (ver abaixo).            |
+| `extrair`           | mapa          | `{}`            | Campo a campo: nome → extração (ver abaixo).                                        |
+| `obrigatorios`      | lista         | `[]`            | Campos que precisam aparecer para a regra reconhecer. Senão, a regra não se aplica. |
+| `leitor`            | texto ou nulo | nulo            | Um leitor nativo do sbf que roda antes do script (hoje: `contracheque`).            |
+| `parametros`        | lista         | `[]`            | Nomes dos parâmetros versionados que o script recebe (ex.: `irrf`).                 |
+| `script_le_texto`   | booleano      | falso           | Se `true`, o script recebe o texto do documento.                                    |
+| `propor`            | lista         | `[]`            | As propostas que a regra faz (ver abaixo).                                          |
+
+### 2.1 Condições de `detectar`
+
+Uma condição casa quando: **todas** de `todos` são verdadeiras, **ao menos uma** de `algum`
+é verdadeira (se a lista não estiver vazia) e **nenhuma** de `nenhum` é verdadeira. Precisa
+haver ao menos uma condição em `todos` ou em `algum`.
+
+| Forma                           | Exemplo                            | Casa quando                                                                                                   |
+| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `{"contem": "trecho"}`          | `{"contem": "comprovante pix"}`    | O texto normalizado (minúsculas, sem acento, espaços juntos) contém o trecho.                                 |
+| `{"regex": "..."}`              | `{"regex": "Chave:\\s*\\S+"}`      | Uma expressão regular casa o texto original.                                                                  |
+| `{"mime": ["application/pdf"]}` | `{"mime": ["image/*"]}`            | O tipo real do conteúdo é um destes (pela assinatura, não pela extensão).                                     |
+| `{"canal": ["pluggy"]}`         | `{"canal": ["gmail", "telegram"]}` | O canal da origem é um destes: `arrastado`, `pasta`, `cofre`, `gmail`, `telegram`, `pluggy`, `mcp`, `manual`. |
+| `{"descricao": "..."}`          | `{"descricao": "PIX ENVIADO"}`     | Regex sobre a descrição que a origem já trouxe (ex.: a transação da Pluggy).                                  |
+| `{"nome": "..."}`               | `{"nome": "^comprovante_"}`        | Regex sobre o nome do arquivo.                                                                                |
+
+### 2.2 Extração (`extrair`)
+
+Cada campo tem uma regex, um grupo (padrão `1`: o primeiro parêntese), um formato e uma fonte:
+
+```json
+"valor_centavos": { "regex": "Valor:\\s*R\\$\\s*([\\d.,]+)", "formato": "centavos" }
+```
+
+| `formato`     | O que vira                                                   |
+| ------------- | ------------------------------------------------------------ |
+| `texto`       | O trecho como veio.                                          |
+| `centavos`    | Dinheiro em centavos inteiros (`R$ 1.234,56` vira `123456`). |
+| `data`        | `AAAA-MM-DD`, a partir de `DD/MM/AAAA` e similares.          |
+| `competencia` | `AAAA-MM`.                                                   |
+| `inteiro`     | Número inteiro.                                              |
+| `minusculas`  | Texto em minúsculas (para constantes como `pix`).            |
+
+`fonte` é `texto` (padrão: o texto do documento) ou `descricao` (a descrição que a origem já
+trouxe, como a da Pluggy). Dinheiro é sempre em centavos; nunca use ponto flutuante.
+
+Os nomes dos campos que o sbf conhece com significado próprio são `valor_centavos`, `data`,
+`vencimento`, `conta`, `contrato`, `autenticacao` e `cartao`. Se duas regras empatadas
+discordam num deles, o sbf não escolhe sozinho: a entrada vai para revisão.
+
+### 2.3 Propostas (`propor`)
+
+A regra **propõe**; ela não grava. Cada proposta é uma destas formas:
+
+| Forma                                                                    | Use para                                                                                                    |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `{"provar_registro": {"janela_dias": 2}}`                                | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo. |
+| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}` | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                         |
+| `"pagar_fatura"`                                                         | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).  |
+
+Essas propostas usam os campos `valor_centavos`, `data` (ou `vencimento`, na fatura), `conta`
+e `cartao`. Sem o campo necessário, a proposta não sai e a regra diz o que falta.
+
+### 2.4 Exemplo completo: Comprovante Pix · Banco Exemplo (fictício)
+
+Arquivo `comprovante-pix-banco-exemplo.json`:
+
+```json
+{
+  "regra": "comprovante-pix-banco-exemplo",
+  "nome": "Comprovante Pix · Banco Exemplo",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "comprovante-pix-banco-exemplo",
+    "aplica_a": ["documento"],
+    "prioridade": 0,
+    "detectar": {
+      "todos": [{ "contem": "comprovante pix" }, { "contem": "banco exemplo" }]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "Valor:\\s*R\\$\\s*([\\d.,]+)",
+        "formato": "centavos"
+      },
+      "data": {
+        "regex": "Data:\\s*(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "autenticacao": {
+        "regex": "Autentica\\S+:\\s*(\\S+)",
+        "formato": "texto"
+      }
+    },
+    "obrigatorios": ["valor_centavos"],
+    "propor": [{ "provar_registro": { "janela_dias": 2 } }]
+  }
+}
+```
+
+Um texto de exemplo que essa regra reconhece (dados fictícios), salvo como `comprovante.txt`:
+
+```text
+Comprovante Pix
+Banco Exemplo
+Valor: R$ 150,00
+Data: 10/11/2026
+Autenticação: ABC123XYZ
+```
+
+Ela extrai `valor_centavos = 15000`, `data = 2026-11-10` e `autenticacao = ABC123XYZ`, e
+propõe provar um registro com até 2 dias de folga em volta da data.
+
+## 3. Exemplos: o teste que libera a ativação
+
+Cada regra tem exemplos. Um exemplo diz o que o motor deve fazer com um documento de
+texto: reconhecer com certos campos, ou não se aplicar. A regra só ativa se todos passam.
+
+- O arquivo do exemplo é um `.txt` com o texto já extraído. PDF ainda não é lido por este
+  comando.
+- O resultado esperado é um JSON (o formato de `Esperado`):
+
+```json
+{
+  "esperado": "reconhece",
+  "tipo_documental": "comprovante-pix-banco-exemplo",
+  "campos": { "valor_centavos": { "tipo": "centavos", "valor": 15000 } }
+}
+```
+
+ou, para um texto que a regra **não** deve reconhecer:
+
+```json
+{ "esperado": "nao_se_aplica" }
+```
+
+Na conferência, campos a mais no resultado não reprovam; só os listados no esperado são
+comparados.
+
+## 4. Scripts (Luau)
+
+Um **script** (termo do `CONTEXT.md`) é um trecho curto em Luau, anexado a uma regra, para
+calcular ou transformar campos que a parte declarativa não alcança. Ele só lê o que recebe e
+devolve uma proposta. Nunca grava, paga, concilia nem acessa arquivo, rede ou banco.
+
+**O que entra.** O script define a função global `transformar(entrada, parametros, ajuda)`:
+
+- `entrada`: tabela somente leitura com `tipo_documental`, `canal` e `campos` (os campos já
+  extraídos: centavos e inteiros como números; datas e competências como texto `AAAA-MM-DD`
+  e `AAAA-MM`; booleanos). `texto` só existe quando `script_le_texto` é `true`.
+- `parametros`: tabela somente leitura com os parâmetros versionados listados em
+  `parametros`, cada um na versão vigente na competência da entrada (`parametros.irrf`).
+- `ajuda`: funções puras do host: `ajuda.mul_div_arred(a, b, c)` (a·b/c em inteiros,
+  arredondado metade para longe do zero), `ajuda.centavos("1.234,56")`,
+  `ajuda.data("06/10/2026")` e `ajuda.normalizar(texto)`.
+
+**O que volta.** Uma tabela com:
+
+- `corresponde` (booleano, obrigatório);
+- `tipo_documental` (texto, opcional);
+- `campos` (nome → valor). Nomes que terminam em `_centavos` têm de ser inteiros e viram
+  centavos; nomes que começam por `data` ou `vencimento` viram data (`AAAA-MM-DD`); inteiros
+  viram inteiro; o resto vira texto;
+- `revisar` (booleano), `motivos` e `evidencias` (listas de texto).
+
+Qualquer outra forma de retorno é erro, e a entrada vai para revisão sem travar a fila.
+
+**O que não existe.** `io`, `os`, `package`, `require`, `debug`, `load`/`loadstring`,
+`dofile`/`loadfile`, `getfenv`/`setfenv`, `collectgarbage`, `math.random` e relógio. Não há
+rede nem acesso ao banco. Os limites (memória, tempo, número de instruções, tamanho da
+entrada e da saída) são aplicados por execução. O script roda num processo filho.
+
+Exemplo mínimo (fictício):
+
+```lua
+function transformar(entrada, parametros, ajuda)
+  local valor = entrada.campos.valor_centavos
+  if valor == nil then
+    return { corresponde = false }
+  end
+  return {
+    corresponde = true,
+    campos = { taxa_centavos = ajuda.mul_div_arred(valor, 15, 1000) },
+    evidencias = { "taxa-fixa-15-por-mil" },
+  }
+end
+```
+
+Um script se confere antes de salvar (`importar --script` e `propor_regra`): sintaxe e a
+existência de `transformar`. Ativar exige a verificação de novo.
+
+## 5. Parâmetros versionados: o exemplo do IRRF 2026
+
+Uma tabela oficial (faixas, alíquotas, dedução) não cabe no script. Ela vira um **parâmetro
+versionado**, vigente por competência e imutável depois de gravado. Cada versão tem:
+
+- `nome` (ex.: `irrf`), `versao` (o sbf numera);
+- `vigencia_inicio` e `vigencia_fim` (`AAAA-MM`; sem fim, a vigência é aberta);
+- `valor` (o JSON da tabela);
+- `fonte` (de onde veio: a norma ou a URL oficial), para a conferência.
+
+Um script que pede `"irrf"` na lista `parametros` recebe a versão que vale na competência do
+documento. Uma correção de tabela é uma **versão nova do parâmetro**, não uma edição.
+
+O arquivo abaixo tem valores **fictícios**, só para mostrar o formato. Os valores reais vêm
+da tabela oficial de 2026, copiada e conferida na fonte antes de gravar:
+
+```json
+{
+  "faixas": [
+    { "teto_cents": 100000, "aliquota_ppm": 0, "parcela_deduzir_cents": 0 },
+    { "teto_cents": 200000, "aliquota_ppm": 75000, "parcela_deduzir_cents": 15000 }
+  ]
+}
+```
+
+```text
+sbf regras --inventario <cofre> parametro irrf 2026-01 irrf-2026.json \
+  --fonte "<url oficial da tabela>"
+```
+
+O IRRF é só **conferência**: o script calcula a estimativa e mostra um alerta quando ela
+diverge do imposto retido no contracheque. Nunca sobrescreve a rubrica do documento.
+
+## 6. Comandos de terminal
+
+Todos rodam como `sbf regras --inventario <cofre> <subcomando>`. O catálogo é
+`<cofre>/regras.sqlite`.
+
+| Subcomando                                                                                     | O que faz                                                        |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `listar`                                                                                       | As regras, o que está em vigor e as sugestões de consolidação.   |
+| `mostrar <regra>`                                                                              | Versões, exemplos e histórico de estado.                         |
+| `importar <arquivo.json> [--script <arquivo.luau>] [--motivo <texto>]`                         | Cria um **rascunho**. Nunca ativa.                               |
+| `exemplo <regra> <arquivo.txt> (--nao-se-aplica \| --esperado <arquivo.json>) [--nome <nome>]` | Grava um exemplo de teste.                                       |
+| `testar <regra> <versao>`                                                                      | Roda os exemplos. Sai com código 1 se algum falha.               |
+| `simular <regra> <versao> <arquivo.txt>...`                                                    | Mostra o que mudaria se a versão entrasse em vigor. Só leitura.  |
+| `ativar <regra> <versao>`                                                                      | Ativa. **Só num terminal interativo**, com confirmação digitada. |
+| `consolidar <regra> <versao>`                                                                  | Consolida. Idem.                                                 |
+| `desativar <regra>`                                                                            | Desativa a versão em vigor. Idem.                                |
+| `reverter <regra>`                                                                             | Volta à versão anterior. Idem.                                   |
+| `parametro <nome> <AAAA-MM> <arquivo.json> --fonte <url> [--ate AAAA-MM]`                      | Grava um parâmetro versionado. Idem, com confirmação.            |
+
+Os comandos que mudam o que o sbf reconhece (`ativar`, `consolidar`, `desativar`, `reverter`,
+`parametro`) não rodam sem terminal interativo. Pedem que você digite exatamente o que o
+comando mostra (`regra@versao`, ou só `regra`). Não há opção nem variável de ambiente que
+pule essa confirmação.
+
+Sequência típica para um tipo novo:
+
+```text
+sbf regras --inventario <cofre> importar comprovante-pix-banco-exemplo.json --motivo "layout do comprovante"
+sbf regras --inventario <cofre> exemplo comprovante-pix-banco-exemplo comprovante.txt --esperado esperado.json --nome "comprovante de 10/11"
+sbf regras --inventario <cofre> testar comprovante-pix-banco-exemplo 1
+sbf regras --inventario <cofre> simular comprovante-pix-banco-exemplo 1 comprovante.txt
+sbf regras --inventario <cofre> ativar comprovante-pix-banco-exemplo 1
+```
+
+## 7. Ferramentas do MCP
+
+O servidor `sbf mcp` expõe cinco ferramentas para o Claude. Elas aparecem quando o cofre tem
+`regras.sqlite`. Só `propor_regra` escreve, e só cria **rascunho** com autor `Ia`.
+
+| Ferramenta       | Parâmetros                                                      | O que faz                                                                                                                   |
+| ---------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `listar_regras`  | nenhum                                                          | Resumo de cada regra (id, nome, tipo, versão em vigor, estado, execuções, taxa de acerto) e as sugestões de consolidação.   |
+| `explicar_regra` | `regra`                                                         | Versões (estado, autor, motivo), definição e script da versão em vigor e da última, e exemplos (nome e resultado esperado). |
+| `testar_regra`   | `regra`, `versao`                                               | Roda os exemplos da versão; diz para cada um se passou e o que divergiu.                                                    |
+| `simular_regra`  | `regra` + `versao`, **ou** `definicao` (+ `script`); `entradas` | Mostra o que mudaria em relação às regras em vigor. Não grava nada.                                                         |
+| `propor_regra`   | `regra`, `nome`, `definicao`, `script` (opcional), `motivo`     | **Propõe**: salva um rascunho com autor `Ia`. Propor não ativa. A versão em vigor continua a mesma.                         |
+
+A resposta de `propor_regra` diz: "rascunho criado; ativar é só na janela (área Regras de
+reconhecimento)". Se o conteúdo for igual ao da última versão, nada novo é criado e a
+resposta diz qual versão já existe.
+
+O servidor não tem ferramenta para ativar, consolidar, desativar ou reverter.
+
+## 8. Onde ativar
+
+A área **Regras de reconhecimento** da janela do sbf é a forma pensada para o dia a dia:
+lista das regras, página de cada uma com editor, exemplos, diff da simulação e versões com
+rollback. No Reconhecimento, "Testar com este documento" roda a regra no documento aberto, e
+"Criar regra a partir daqui" monta um rascunho a partir de uma correção, sem IA. Enquanto essa
+área não estiver entregue na sua versão, use o terminal (seção 6); o MCP só propõe.
+
+## 9. Cuidados
+
+- Nenhum documento real, CPF, conta ou número de cartão entra em exemplo, fixture, regra
+  publicada no repositório ou log. Use dados fictícios.
+- Texto de documento pode conter instruções em linguagem natural (um PDF ou e-mail mal
+  intencionado). Nada do que o documento diz vira código ou instrução: só o que a regra
+  declara é executado.
+- Cálculo tributário depende de tabela válida por competência e de revisão técnica. Um
+  alerta de divergência é a saída certa, não uma correção automática da rubrica.

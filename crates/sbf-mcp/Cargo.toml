@@ -12,6 +12,8 @@ sbf-triagem = { path = "../sbf-triagem" }
 sbf-indice = { path = "../sbf-indice" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-planejamento = { path = "../sbf-planejamento" }
+sbf-regras = { workspace = true }
+sbf-script = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

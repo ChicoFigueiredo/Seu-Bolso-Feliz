@@ -45,6 +45,7 @@ pub struct Nucleo {
     livro: Option<PathBuf>,
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
+    regras: Option<crate::regras::Regras>,
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -231,6 +232,7 @@ impl Nucleo {
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
             semelhantes: Semelhantes(None),
             plano: None,
+            regras: None,
         })
     }
 
@@ -257,6 +259,41 @@ impl Nucleo {
             hoje: None,
         });
         self
+    }
+
+    /// Liga as ferramentas de regras de reconhecimento sobre `caminho` (o `regras.sqlite`
+    /// do cofre). `executor` roda os scripts (o processo filho do próprio `sbf`, ver
+    /// [`crate::regras::executor_do_processo`]). Chame depois de `com_busca`, para herdar o
+    /// nível do cliente.
+    #[must_use]
+    pub fn com_regras(
+        mut self,
+        caminho: PathBuf,
+        executor: Arc<dyn sbf_regras::script::ExecutorDeScript>,
+    ) -> Self {
+        self.regras = Some(crate::regras::Regras::novo(
+            caminho,
+            self.banco.clone(),
+            executor,
+            self.nivel(),
+        ));
+        self
+    }
+
+    /// Há regras de reconhecimento ligadas?
+    #[must_use]
+    pub fn tem_regras(&self) -> bool {
+        self.regras.is_some()
+    }
+
+    /// As ferramentas de regras.
+    ///
+    /// # Errors
+    /// Regras não ligadas.
+    pub fn regras(&self) -> Result<&crate::regras::Regras, String> {
+        self.regras.as_ref().ok_or_else(|| {
+            "as regras de reconhecimento não estão ligadas (falta <cofre>/regras.sqlite)".to_owned()
+        })
     }
 
     /// Fixa o "hoje" do planejamento (para testes).
@@ -636,7 +673,7 @@ impl Nucleo {
 
     /// O nível de confiança deste cliente MCP: o da busca por semelhança, se ligada; senão o
     /// padrão, mascarado (um destinatário novo nasce mascarado).
-    fn nivel(&self) -> sbf_ia::NivelDeConfianca {
+    pub(crate) fn nivel(&self) -> sbf_ia::NivelDeConfianca {
         self.semelhantes
             .0
             .as_ref()

@@ -1,0 +1,103 @@
+# CI do desktop Rust (spec 13, AC-LUA-12).
+#
+# O workspace depende por caminho de um repositório irmão PRIVADO
+# (`../bancada/crates/...`). O checkout só aceita `path` dentro do workspace do
+# runner, então o SBF vai para `sbf/` e a bancada para `bancada/`, lado a lado.
+# A bancada é baixada com o secret BANCADA_DEPLOY_KEY: a chave privada de uma
+# deploy key SÓ DE LEITURA cadastrada no repositório bancada (vale só para ele).
+# Sem o secret, o job avisa e pula o cargo, sem falhar.
+name: Rust
+
+on:
+  push:
+    branches: [main, develop, "feat/**", "fix/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  HUSKY: "0"
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, testes, build)
+    runs-on: ubuntu-latest
+    env:
+      BANCADA_DEPLOY_KEY: ${{ secrets.BANCADA_DEPLOY_KEY }}
+    steps:
+      - name: Verificar a chave da bancada
+        id: token
+        run: |
+          if [ -n "$BANCADA_DEPLOY_KEY" ]; then
+            echo "tem=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tem=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secret BANCADA_DEPLOY_KEY ausente: passos de cargo pulados."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.tem == 'true'
+        with:
+          path: sbf
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.tem == 'true'
+        with:
+          repository: ChicoFigueiredo/bancada
+          ssh-key: ${{ secrets.BANCADA_DEPLOY_KEY }}
+          path: bancada
+
+      - name: Dependências de sistema
+        if: steps.token.outputs.tem == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev \
+            poppler-utils qpdf ffmpeg strace rclone
+
+      # Alguns testes Rust chamam o bun como processo externo.
+      - uses: oven-sh/setup-bun@v2
+        if: steps.token.outputs.tem == 'true'
+        with:
+          bun-version: 1.3.11
+
+      - name: Instalar dependências do Bun
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: bun install --frozen-lockfile
+
+      # Lê sbf/rust-toolchain.toml (canal 1.98 com rustfmt e clippy).
+      - name: Instalar o toolchain Rust
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.token.outputs.tem == 'true'
+        with:
+          workspaces: sbf
+
+      - name: Formatação (rustfmt)
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Testes
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: cargo test --workspace
+
+      - name: Build release
+        if: steps.token.outputs.tem == 'true'
+        working-directory: sbf
+        run: cargo build --release -p sbf

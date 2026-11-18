@@ -104,6 +104,11 @@ fn lento(pasta: &Path, ferramenta: &str) -> PathBuf {
     caminho
 }
 
+/// Senha fictícia só dos testes sob `strace`. Eles rodam em paralelo com o vigia de argv, e
+/// o preparo do PDF cifrado chama o `qpdf` com a senha nos argumentos: com a mesma senha, o
+/// vigia flagraria o preparo de outro teste (corrida vista na CI em 2026-11-18).
+const SENHA_DO_STRACE: &str = "senha-ficticia-Strace-17";
+
 #[test]
 fn a_senha_nao_aparece_em_argv_nem_ambiente_de_nenhum_processo() {
     let pasta = pasta();
@@ -166,9 +171,9 @@ fn interno_abre_sob_strace() {
     };
     let pdf = PdfProtegido::ler(Path::new(&alvo)).expect("ler");
     let desfecho = if std::env::var_os("SBF_PDF_QPDF").is_some() {
-        sbf_pdf::extrair_pelo_qpdf(Path::new(&alvo), &candidata(SENHA_PROPRIA), &ferramentas)
+        sbf_pdf::extrair_pelo_qpdf(Path::new(&alvo), &candidata(SENHA_DO_STRACE), &ferramentas)
     } else {
-        pdf.tentar(&candidata(SENHA_PROPRIA), &ferramentas)
+        pdf.tentar(&candidata(SENHA_DO_STRACE), &ferramentas)
     };
     assert!(matches!(desfecho, Desfecho::Aberto(_)), "{desfecho:?}");
 }
@@ -217,7 +222,7 @@ fn nenhum_arquivo_e_criado_na_abertura() {
         pasta.path(),
         "fatura",
         &pdf_ficticio(),
-        SENHA_PROPRIA,
+        SENHA_DO_STRACE,
         Cifra::Aes256,
     );
     let original = std::fs::read(&caminho).expect("ler");
