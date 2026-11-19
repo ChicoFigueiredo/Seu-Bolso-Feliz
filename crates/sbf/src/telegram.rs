@@ -34,6 +34,7 @@ use sbf_telegram::credenciais::Credenciais;
 use sbf_telegram::datas::desde_iso;
 use sbf_telegram::estado::{ARQUIVO_DO_ESTADO, Estado};
 use sbf_telegram::modelo::Conversa;
+use sbf_telegram::numero::{mascarar_numero, normalizar_numero};
 use sbf_telegram::painel::Painel;
 use sbf_telegram::{Erro, FonteTelegram as _, Resultado, sessao};
 use sbf_worker::laco::{ColetorDeTelegram, Dados, ResumoDoTelegram};
@@ -415,7 +416,12 @@ impl sbf_janela::conexoes_ui::ColetaDoTelegram for ColetaDaJanela {
 // O terminal
 // ---------------------------------------------------------------------------------------
 
-struct NoTerminal;
+/// As perguntas do login no terminal. `enviado` guarda o número normalizado que foi pedido
+/// ao Telegram, para confirmar (mascarado) depois que o código foi enviado.
+#[derive(Default)]
+struct NoTerminal {
+    enviado: Option<String>,
+}
 
 fn ler_linha(pergunta: &str) -> Resultado<String> {
     eprint!("{pergunta}");
@@ -436,10 +442,16 @@ fn eco(ligado: bool) {
 
 impl Perguntas for NoTerminal {
     fn numero(&mut self) -> Resultado<String> {
-        ler_linha("Número do Telegram, com código do país (ex.: +55...): ")
+        let digitado = ler_linha("Número do Telegram (DDD + número; o +55 é colocado sozinho): ")?;
+        let normalizado = normalizar_numero(&digitado);
+        self.enviado = Some(normalizado.clone());
+        Ok(digitado)
     }
 
     fn codigo(&mut self) -> Resultado<Zeroizing<String>> {
+        if let Some(n) = &self.enviado {
+            eprintln!("Número enviado ao Telegram: {}", mascarar_numero(n));
+        }
         eprintln!("O Telegram mandou um código para o app (não por SMS).");
         ler_linha("Código: ").map(Zeroizing::new)
     }
@@ -461,7 +473,7 @@ fn entrar() -> Resultado<()> {
     let credenciais = Credenciais::do_ambiente(Some(&ch))?;
     let existente = sessao::ler(&ch)?;
     let mut cliente = ClienteReal::novo(&credenciais, existente)?;
-    let entrou = cliente.entrar(&mut NoTerminal)?;
+    let entrou = cliente.entrar(&mut NoTerminal::default())?;
     sessao::guardar(&ch, cliente.sessao())?;
     // O worker, sem `.env`, acha as credenciais aqui.
     credenciais.guardar(&ch)?;
