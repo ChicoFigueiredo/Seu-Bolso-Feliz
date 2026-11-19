@@ -21,12 +21,14 @@ use zeroize::Zeroizing;
 use crate::credenciais::Credenciais;
 use crate::fonte::{FonteTelegram, vale_baixar};
 use crate::modelo::{Avanco, Conversa, Midia, Pedido, Tipo};
+use crate::numero::normalizar_numero;
 use crate::sessao::SessaoMtproto;
 use crate::{Erro, Resultado};
 
 /// O que o login pergunta ao usuário (no terminal, `sbf telegram entrar`).
 pub trait Perguntas {
-    /// O número, no formato internacional (`+55...`).
+    /// O número como o usuário digitou (DDD e número; o `+55` é completado por
+    /// [`normalizar_numero`] em [`ClienteReal::entrar`]).
     ///
     /// # Errors
     /// Falha ao ler a resposta.
@@ -153,7 +155,7 @@ impl ClienteReal {
         if self.esta_autorizado()? {
             return Ok(Entrou::JaEstava);
         }
-        let numero = Zeroizing::new(perguntas.numero()?);
+        let numero = Zeroizing::new(normalizar_numero(&perguntas.numero()?));
         let client = self.client.clone();
         let hash = self.credenciais.api_hash.clone();
         let token = self.executar({
@@ -161,7 +163,7 @@ impl ClienteReal {
             let numero = numero.clone();
             async move {
                 client
-                    .request_login_code(numero.trim(), hash.as_str())
+                    .request_login_code(numero.as_str(), hash.as_str())
                     .await
                     .map_err(|e| Erro::Login(de_invocacao(&e).to_string()))
             }

@@ -11,6 +11,7 @@
 //! | [`credenciais`] | `TELEGRAM_API_ID` e `TELEGRAM_API_HASH` do ambiente ou do `.env` |
 //! | [`painel`] | o que a janela mostra, lido sem rede |
 //! | [`datas`] | `AAAA-MM-DD` para segundos unix |
+//! | [`numero`] | o número do login no formato internacional (`+55...`) |
 //! | [`cliente`] | a fonte real, sobre `grammers-client`, e o login |
 
 mod arquivos;
@@ -23,6 +24,7 @@ pub mod erro;
 pub mod estado;
 pub mod fonte;
 pub mod modelo;
+pub mod numero;
 pub mod painel;
 pub mod sessao;
 
