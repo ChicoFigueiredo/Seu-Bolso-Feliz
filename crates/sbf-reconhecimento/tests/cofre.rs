@@ -24,6 +24,8 @@ use zeroize::Zeroizing;
 const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
 const CONTRACHEQUE_2026: &str =
     include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
+const CONTRACHEQUE_2026_11: &str =
+    include_str!("../../sbf-planilha/tests/contracheque-2026-11-ficticio.txt");
 const CPF: &str = "52998224725";
 
 struct Segredos;
@@ -518,6 +520,31 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
             .composicao(&id, Competencia { ano: 2026, mes: 10 })
             .expect("c")
             .is_none()
+    );
+}
+
+#[test]
+fn contracheque_no_layout_de_novembro_de_2026_sai_como_contracheque() {
+    let c = cenario();
+    c.planejamento_com_salario(800_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026_11.as_bytes());
+    let falso = ia_de_boleto();
+
+    let (r, _) = c.rodar(&c.reconhecedor(Some(falso.clone())), &arquivo);
+    let r = ok(r);
+
+    match &r.reconhecido {
+        Reconhecido::Contracheque { contracheque, .. } => {
+            assert_eq!(contracheque.pagamento, Competencia { ano: 2026, mes: 11 });
+            assert_eq!(contracheque.liquido, Some(Centavos(800_000)));
+            assert!(contracheque.conferido);
+        }
+        outro => panic!("{outro:?}"),
+    }
+    assert_eq!(
+        falso.chamadas(),
+        0,
+        "a IA só entra quando o local não reconhece"
     );
 }
 
