@@ -52,6 +52,16 @@ pub const TIPOS_DE_ENTRADA: [TipoDeEntrada; 3] = [
     TipoDeEntrada::Mensagem,
 ];
 
+/// O estado de um padrão como a tela nova o diz ("padrão" é masculino).
+pub fn rotulo_do_estado_do_padrao(e: Estado) -> &'static str {
+    match e {
+        Estado::Rascunho => "Rascunho",
+        Estado::Ativa => "Ativo",
+        Estado::Consolidada => "Consolidado",
+        Estado::Desativada => "Desativado",
+    }
+}
+
 fn rotulo_do_estado(e: Estado) -> &'static str {
     crate::regras::rotulo_do_estado(e)
 }
@@ -86,14 +96,20 @@ pub struct PadraoDaLista {
 }
 
 impl PadraoDaLista {
-    /// Monta a linha de um padrão a partir de suas versões (da primeira à última). `None` sem
-    /// versões.
-    pub fn montar(id: &str, nome: &str, versoes: &[VersaoDeRegra]) -> Option<Self> {
-        let representante = versoes
+    /// A versão que representa o padrão: a em vigor (ativa ou consolidada) mais nova; sem ela,
+    /// a última.
+    pub fn representante(versoes: &[VersaoDeRegra]) -> Option<&VersaoDeRegra> {
+        versoes
             .iter()
             .filter(|v| vigente(v.estado))
             .max_by_key(|v| v.versao)
-            .or_else(|| versoes.iter().max_by_key(|v| v.versao))?;
+            .or_else(|| versoes.iter().max_by_key(|v| v.versao))
+    }
+
+    /// Monta a linha de um padrão a partir de suas versões (da primeira à última). `None` sem
+    /// versões.
+    pub fn montar(id: &str, nome: &str, versoes: &[VersaoDeRegra]) -> Option<Self> {
+        let representante = Self::representante(versoes)?;
         let tem_rascunho_aberto = representante.estado != Estado::Rascunho
             && versoes
                 .iter()
@@ -161,6 +177,15 @@ pub fn condicoes_em_texto(d: &Definicao) -> Vec<String> {
 // ---------------------------------------------------------------------------------------
 // Filtros
 // ---------------------------------------------------------------------------------------
+
+/// As duas vistas da área Padrões: a lista (com a tabela de sempre) e o mapa em árvore.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbaDosPadroes {
+    #[default]
+    Lista,
+    Mapa,
+}
 
 /// "Casam com o documento selecionado" (D5): os dois modos e o desligado.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -834,7 +859,7 @@ mod testes {
             .detectar
             .todos
             .push(Condicao::Contem("banco exemplo".into()));
-        let a = vec![
+        let a = [
             linha(
                 "pix-geral",
                 Estado::Ativa,
@@ -886,7 +911,7 @@ mod testes {
 
     #[test]
     fn o_mapa_aponta_o_empate_so_entre_padroes_em_vigor_do_mesmo_tipo_de_entrada() {
-        let a = vec![
+        let a = [
             linha("a", Estado::Ativa, definicao("t1", "x", 0)),
             linha("b", Estado::Consolidada, definicao("t2", "y", 0)),
             linha("c", Estado::Rascunho, definicao("t3", "z", 0)),

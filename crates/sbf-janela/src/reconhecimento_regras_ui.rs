@@ -13,6 +13,9 @@ use crate::componentes;
 use crate::controle::{data_texto, reais};
 use crate::icones;
 use crate::navegacao::{self, Destino};
+use crate::padroes_visiveis::{
+    Desfecho, Papel, PesosDasVersoes, PorQue, montar_por_que, rotulo_do_tipo_de_entrada,
+};
 use crate::reconhecimento_regras::{
     CAMPOS_USUAIS, LinhaDeCampo, descrever_de_onde, rotulo_do_campo, valor_do_texto,
 };
@@ -31,13 +34,17 @@ pub(crate) struct ExtrasDaRegra<'a> {
     /// Nenhum padrão reconheceu o documento: "Criar regra a partir daqui" vira o caminho
     /// principal (em destaque).
     pub sem_padrao: bool,
+    /// A prioridade e a especificidade das versões que a leitura cita ("Por que este padrão?").
+    pub pesos: &'a PesosDasVersoes,
 }
 
-/// O que o cartão deixa o desenho mudar: a correção dos campos e o Rastro aberto.
+/// O que o cartão deixa o desenho mudar: a correção dos campos, o Rastro e o "Por que este
+/// padrão?" abertos.
 pub(crate) struct EdicaoDoCartao<'a> {
     pub corrigindo: &'a mut bool,
     pub edicao: &'a mut BTreeMap<String, String>,
     pub rastro_aberto: &'a mut bool,
+    pub por_que_aberto: &'a mut bool,
 }
 
 impl ExtrasDaRegra<'_> {
@@ -441,6 +448,197 @@ pub(crate) fn acoes_da_regra(
             pedidos.push(Pedido::AbrirCriacao(indice));
         }
     });
+}
+
+// ---------------------------------------------------------------------------------------
+// "Por que este padrão?" (spec 15, D6)
+// ---------------------------------------------------------------------------------------
+
+fn plural(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+/// O campo em que as candidatas de um Ambíguo discordam, como a pessoa lê.
+fn campo_que_diverge(campo: &str) -> String {
+    if campo == "tipo_documental" {
+        "o tipo documental".to_owned()
+    } else {
+        format!("o campo {}", rotulo_do_campo(campo).to_lowercase())
+    }
+}
+
+/// A seção recolhível "Por que este padrão?": o tipo da entrada, quantos padrões se aplicam,
+/// os que casaram (com prioridade e especificidade), o vencedor e o motivo, ou o Ambíguo com o
+/// campo em que discordam. Tudo sai do que o motor devolveu na [`Leitura`].
+pub(crate) fn por_que(
+    ui: &mut Ui,
+    p: &Paleta,
+    indice: usize,
+    extras: &ExtrasDaRegra<'_>,
+    aberto: &mut bool,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let Some(leitura) = extras.leitura else {
+        return;
+    };
+    let q = montar_por_que(leitura, extras.entrada, extras.pesos);
+    let resposta = egui::CollapsingHeader::new(
+        RichText::new("Por que este padrão?")
+            .size(12.0)
+            .color(p.tinta_suave),
+    )
+    .id_salt(("por-que-este-padrao", indice))
+    .open(Some(*aberto))
+    .show(ui, |ui| corpo_do_por_que(ui, p, &q, extras, pedidos));
+    if resposta.header_response.clicked() {
+        *aberto = !*aberto;
+    }
+}
+
+fn corpo_do_por_que(
+    ui: &mut Ui,
+    p: &Paleta,
+    q: &PorQue,
+    extras: &ExtrasDaRegra<'_>,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let tipo = q
+        .tipo_da_entrada
+        .map_or("documento", rotulo_do_tipo_de_entrada);
+    let mime = q
+        .mime
+        .as_deref()
+        .map(|m| format!(" ({m})"))
+        .unwrap_or_default();
+    pequeno(ui, format!("Entrada: {tipo}{mime}"), p.tinta);
+    if q.aplicam == 0 {
+        pequeno(
+            ui,
+            "Nenhum padrão se aplica a este tipo de entrada.",
+            p.tinta_suave,
+        );
+    } else {
+        pequeno(
+            ui,
+            format!(
+                "{} a este tipo de entrada; {} {}.",
+                plural(q.aplicam, "padrão se aplica", "padrões se aplicam"),
+                q.casaram.len(),
+                if q.casaram.len() == 1 {
+                    "casou"
+                } else {
+                    "casaram"
+                }
+            ),
+            p.tinta_suave,
+        );
+    }
+    for c in &q.casaram {
+        ui.horizontal_wrapped(|ui| {
+            match c.papel {
+                Papel::Venceu => componentes::selo(ui, "venceu", p.sucesso_sutil, p.sucesso),
+                Papel::Discorda => componentes::selo(ui, "discorda", p.aviso_sutil, p.aviso),
+                Papel::NaoPrevaleceu => {
+                    componentes::selo(ui, "não prevaleceu", p.superficie_3, p.tinta_suave)
+                }
+            };
+            if ui
+                .link(RichText::new(extras.nome_da(&c.regra)).size(12.0))
+                .on_hover_text("Abrir o padrão na área Regras de reconhecimento")
+                .clicked()
+            {
+                pedidos.push(Pedido::AbrirRegra(c.regra.clone()));
+            }
+            let pesos = c.peso.map_or_else(String::new, |w| {
+                format!(
+                    " · prioridade {} · especificidade {}",
+                    w.prioridade, w.especificidade
+                )
+            });
+            pequeno(ui, format!("versão {}{pesos}", c.versao), p.tinta_suave);
+            if let Some(nota) = &c.nota {
+                pequeno(ui, nota, p.tinta_desabilitada);
+            }
+        });
+    }
+    for f in &q.falharam {
+        pequeno(
+            ui,
+            format!(
+                "{} · versão {} detectou o documento e falhou ({})",
+                extras.nome_da(&f.regra),
+                f.versao,
+                f.categoria
+            ),
+            p.aviso,
+        );
+    }
+    ui.add_space(2.0);
+    match &q.desfecho {
+        Desfecho::Venceu {
+            regra,
+            versao,
+            motivo,
+        } => {
+            ui.label(
+                RichText::new(format!(
+                    "Venceu: {} · versão {versao}.",
+                    extras.nome_da(regra)
+                ))
+                .size(12.0)
+                .strong(),
+            );
+            let por = match (motivo, q.casaram.len()) {
+                (Some(m), _) => Some(m.clone()),
+                (None, 1) => Some("foi o único padrão que casou.".to_owned()),
+                (None, _) => None,
+            };
+            if let Some(m) = por {
+                pequeno(ui, format!("Motivo: {m}"), p.tinta_suave);
+            }
+        }
+        Desfecho::Ambiguo {
+            motivo,
+            divergencia,
+        } => {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(icones::icone_cor("warning", 14.0, p.aviso));
+                let onde = divergencia.as_ref().map_or_else(
+                    || "em prioridade, especificidade e resultado".to_owned(),
+                    |d| format!("em {}", campo_que_diverge(&d.campo)),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Ambíguo: {} empataram em prioridade e especificidade e discordam {onde}. Nada foi aplicado.",
+                        plural(
+                            q.casaram
+                                .iter()
+                                .filter(|c| c.papel == Papel::Discorda)
+                                .count(),
+                            "padrão",
+                            "padrões"
+                        )
+                    ))
+                    .size(12.0)
+                    .strong()
+                    .color(p.aviso),
+                );
+            });
+            if let Some(d) = divergencia {
+                for (regra, versao, valor) in &d.valores {
+                    pequeno(
+                        ui,
+                        format!("{} · versão {versao} lê {valor}", extras.nome_da(regra)),
+                        p.tinta_suave,
+                    );
+                }
+            }
+            pequeno(ui, motivo, p.tinta_desabilitada);
+        }
+        Desfecho::NenhumCasou => {
+            pequeno(ui, "Nenhum padrão casou com este documento.", p.tinta_suave);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------

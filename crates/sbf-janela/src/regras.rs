@@ -7,7 +7,7 @@
 //! `janela.regras.ligar(FonteDasRegras::nova(Arc::new(Mutex::new(Catalogo::abrir(cofre/regras.sqlite)?)), Some(executor)))`.
 //! A demonstração e os testes usam [`FonteDasRegras::ficticia`], em memória.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
@@ -24,9 +24,11 @@ use sbf_regras::script::ExecutorDeScript;
 use sbf_regras::simulacao::{Diferencas, simular};
 use sbf_regras::{
     Autor, Canal, Decisao, Dicas, Entrada, ErroDasRegras, Estado, IdDaRegra, Leitura, Origem, Quem,
-    Retorno, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    ResultadoDaExecucao, Retorno, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
 };
 use sha2::{Digest, Sha256};
+
+use crate::padroes_visiveis::{PadraoDaLista, PadroesQueJaCasaram, PesoDaVersao, PesosDasVersoes};
 
 /// As entradas recentes que a simulação também lê (o integrador entrega do inventário).
 pub type EntradasRecentes = Arc<dyn Fn() -> Vec<Entrada> + Send + Sync>;
@@ -39,12 +41,17 @@ pub struct FonteDasRegras {
     /// editor avisa que o script não foi verificado e a ativação de regra com script bloqueia.
     pub executor: Option<Arc<dyn ExecutorDeScript>>,
     pub recentes: Option<EntradasRecentes>,
+    /// Quem diz quais padrões **já casaram** com um documento (a tabela `execucao`): o ponto
+    /// de extensão do filtro "já casaram" (spec 15, D5). A Frente A (marcação) entrega a
+    /// consulta; sem ela o filtro mostra que não está disponível.
+    pub ja_casaram: Option<PadroesQueJaCasaram>,
 }
 
 impl std::fmt::Debug for FonteDasRegras {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FonteDasRegras")
             .field("executor", &self.executor.is_some())
+            .field("ja_casaram", &self.ja_casaram.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -127,12 +134,21 @@ impl FonteDasRegras {
             catalogo,
             executor,
             recentes: None,
+            ja_casaram: None,
         }
     }
 
     #[must_use]
     pub fn com_recentes(mut self, recentes: EntradasRecentes) -> Self {
         self.recentes = Some(recentes);
+        self
+    }
+
+    /// Liga a consulta "já casaram" (veja [`PadroesQueJaCasaram`]): dado o `Entrada::id` de um
+    /// documento, os padrões que casaram com ele em algum momento.
+    #[must_use]
+    pub fn com_ja_casaram(mut self, consulta: PadroesQueJaCasaram) -> Self {
+        self.ja_casaram = Some(consulta);
         self
     }
 
@@ -154,6 +170,69 @@ impl FonteDasRegras {
     /// O texto do erro do catálogo.
     pub fn resumos(&self) -> Result<Vec<ResumoDaRegra>, String> {
         self.catalogo()?.regras().map_err(erro)
+    }
+
+    /// Os padrões como a lista com filtros e o mapa os enxergam (spec 15): uma linha por padrão,
+    /// pela versão em vigor ou, sem ela, a última.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn padroes(&self) -> Result<Vec<PadraoDaLista>, String> {
+        let c = self.catalogo()?;
+        let mut saida = Vec::new();
+        for r in c.regras().map_err(erro)? {
+            let versoes = c.versoes(&r.id).map_err(erro)?;
+            saida.extend(PadraoDaLista::montar(&r.id, &r.nome, &versoes));
+        }
+        Ok(saida)
+    }
+
+    /// **Casam agora** (spec 15, D5): os padrões cuja versão representante o motor reconhece
+    /// neste documento, lendo só o texto que a entrada já traz. Não grava nada. Um padrão que
+    /// não se aplica ao tipo da entrada nunca casa.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn casam_agora(&self, entrada: &Entrada) -> Result<BTreeSet<IdDaRegra>, String> {
+        let c = self.catalogo()?;
+        let mut versoes = Vec::new();
+        for r in c.regras().map_err(erro)? {
+            let todas = c.versoes(&r.id).map_err(erro)?;
+            versoes.extend(PadraoDaLista::representante(&todas).cloned());
+        }
+        let motor = Motor::novo(versoes, c.parametros().map_err(erro)?, None);
+        Ok(motor
+            .ler_com(entrada, self.executor_ref())
+            .execucoes
+            .into_iter()
+            .filter(|e| e.resultado == ResultadoDaExecucao::Reconhecido)
+            .map(|e| e.regra)
+            .collect())
+    }
+
+    /// **Já casaram** (spec 15, D5): `None` quando a consulta não está ligada
+    /// ([`FonteDasRegras::com_ja_casaram`]).
+    pub fn ja_casaram(&self, entrada_id: &str) -> Option<Result<BTreeSet<IdDaRegra>, String>> {
+        self.ja_casaram.as_ref().map(|f| f(entrada_id))
+    }
+
+    /// A prioridade e a especificidade de cada `(padrão, versão)` pedida (o "Por que este
+    /// padrão?" junta aos resultados do motor). Versão que não existe fica de fora.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn pesos_das_versoes(
+        &self,
+        versoes: &[(IdDaRegra, u32)],
+    ) -> Result<PesosDasVersoes, String> {
+        let c = self.catalogo()?;
+        let mut saida = PesosDasVersoes::new();
+        for (regra, versao) in versoes {
+            if let Ok(v) = c.versao(regra, *versao) {
+                saida.insert((regra.clone(), *versao), PesoDaVersao::da(&v.definicao));
+            }
+        }
+        Ok(saida)
     }
 
     /// As regras com versão ativa que acertaram o bastante seguidas (D4): `(regra, versão)`.
@@ -778,6 +857,35 @@ fn definicao_da_fatura() -> Definicao {
     d
 }
 
+/// Um recibo em foto de uma padaria que não existe: exige o tipo real da imagem (a demonstração
+/// dos filtros de tipo de entrada e de MIME; não casa com nenhum documento da demonstração).
+fn definicao_do_recibo_em_foto() -> Definicao {
+    let mut d = Definicao::simples("recibo-de-padaria", "padaria exemplo");
+    d.detectar
+        .todos
+        .push(Condicao::Mime(vec!["image/*".to_owned()]));
+    d.texto_de_ocr = true;
+    d
+}
+
+/// Um registro da Pluggy ("PIX RECEBIDO ..."): a demonstração de um padrão de registro.
+fn definicao_do_pix_recebido_em_registro() -> Definicao {
+    let mut d = Definicao::simples("pix-recebido", "pix recebido");
+    d.aplica_a = vec![TipoDeEntrada::Registro];
+    d.detectar = sbf_regras::definicao::Detectar {
+        todos: vec![Condicao::Descricao("(?i)pix recebido".to_owned())],
+        ..Default::default()
+    };
+    d
+}
+
+/// Um aviso por mensagem que a pessoa desligou: a demonstração do estado desativado.
+fn definicao_do_aviso_de_vencimento() -> Definicao {
+    let mut d = Definicao::simples("aviso-de-vencimento", "vence amanha");
+    d.aplica_a = vec![TipoDeEntrada::Mensagem];
+    d
+}
+
 fn definicao_da_energia() -> Definicao {
     let mut d = Definicao::simples("conta-de-energia", "conta de energia eletrica");
     d.detectar
@@ -954,6 +1062,38 @@ fn povoar_demonstracao(
     )?;
     c.ativar(AGENDADO, a1.versao, &Quem::Usuario, executor.as_deref())?;
 
+    // Três padrões de outros tipos de entrada, para os filtros e o mapa terem o que mostrar:
+    // um recibo em foto (documento, só imagem), um registro da Pluggy e um aviso por mensagem
+    // que o usuário desligou.
+    const RECIBO: &str = "recibo-de-foto-padaria-exemplo";
+    let r1 = c.salvar_rascunho(nova(
+        RECIBO,
+        "Recibo em foto · Padaria Exemplo",
+        definicao_do_recibo_em_foto(),
+        Autor::Usuario,
+        "regra fictícia para a demonstração do filtro de tipo real",
+    ))?;
+    c.ativar(RECIBO, r1.versao, &Quem::Usuario, executor.as_deref())?;
+    const REGISTRO: &str = "pix-recebido-registro-exemplo";
+    let g1 = c.salvar_rascunho(nova(
+        REGISTRO,
+        "Pix recebido · registro do banco",
+        definicao_do_pix_recebido_em_registro(),
+        Autor::Usuario,
+        "regra fictícia para a demonstração de um padrão de registro",
+    ))?;
+    c.ativar(REGISTRO, g1.versao, &Quem::Usuario, executor.as_deref())?;
+    const AVISO: &str = "aviso-de-vencimento-mensagem-exemplo";
+    let m1 = c.salvar_rascunho(nova(
+        AVISO,
+        "Aviso de vencimento · mensagem",
+        definicao_do_aviso_de_vencimento(),
+        Autor::Usuario,
+        "regra fictícia para a demonstração de um padrão desativado",
+    ))?;
+    c.ativar(AVISO, m1.versao, &Quem::Usuario, executor.as_deref())?;
+    c.desativar(AVISO, &Quem::Usuario)?;
+
     // A fatura: rascunho cujo exemplo espera o valor errado.
     const FATURA: &str = "fatura-cartao-banco-exemplo";
     c.salvar_rascunho(nova(
@@ -1029,6 +1169,94 @@ mod testes {
         assert_eq!(resumo(&f, PIX).versao_em_vigor, Some(2));
         assert_eq!(resumo(&f, FATURA).estado, None);
         assert_eq!(resumo(&f, ENERGIA).estado, Some(Estado::Consolidada));
+    }
+
+    #[test]
+    fn a_demonstracao_tem_padroes_dos_tres_tipos_de_entrada_e_os_quatro_estados() {
+        let f = fonte();
+        let p = f.padroes().expect("padrões");
+        let por = |id: &str| p.iter().find(|x| x.id == id).expect("padrão").clone();
+        assert_eq!(por(PIX).estado, Estado::Ativa);
+        assert_eq!(por(ENERGIA).estado, Estado::Consolidada);
+        assert_eq!(por(FATURA).estado, Estado::Rascunho);
+        let aviso = por("aviso-de-vencimento-mensagem-exemplo");
+        assert_eq!(aviso.estado, Estado::Desativada);
+        assert_eq!(aviso.aplica_a, [TipoDeEntrada::Mensagem]);
+        assert_eq!(
+            por("pix-recebido-registro-exemplo").aplica_a,
+            [TipoDeEntrada::Registro]
+        );
+        assert_eq!(
+            por("recibo-de-foto-padaria-exemplo").mimes,
+            ["image/*".to_owned()]
+        );
+    }
+
+    #[test]
+    fn casam_agora_roda_o_motor_sobre_o_texto_e_inclui_o_rascunho() {
+        let f = fonte();
+        let casam = f
+            .casam_agora(&entrada_de_texto(PIX_AGENDADO_TEXTO))
+            .expect("casam");
+        // O Pix e o Pix agendado leem o comprovante agendado (a demonstração do ambíguo).
+        assert_eq!(
+            casam.iter().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "comprovante-pix-banco-exemplo",
+                "pix-agendado-banco-exemplo"
+            ]
+        );
+        let casam = f
+            .casam_agora(&entrada_de_texto(ENERGIA_TEXTO))
+            .expect("casam");
+        assert_eq!(casam.iter().collect::<Vec<_>>(), [ENERGIA]);
+        // Sem texto, nada casa.
+        let mut sem_texto = entrada_de_texto("");
+        sem_texto.texto = None;
+        assert!(f.casam_agora(&sem_texto).expect("casam").is_empty());
+        // Um registro não é lido pelos padrões de documento.
+        let mut registro = entrada_de_texto(PIX_AGENDADO_TEXTO);
+        registro.tipo = TipoDeEntrada::Registro;
+        assert!(f.casam_agora(&registro).expect("casam").is_empty());
+    }
+
+    #[test]
+    fn casam_agora_nao_grava_nada() {
+        let f = fonte();
+        let antes = f.resumos().expect("lista");
+        f.casam_agora(&entrada_de_texto(PIX_AGENDADO_TEXTO))
+            .expect("casam");
+        assert_eq!(f.resumos().expect("lista"), antes);
+    }
+
+    #[test]
+    fn ja_casaram_so_existe_com_a_consulta_ligada() {
+        let f = fonte();
+        assert!(f.ja_casaram("sha-x").is_none());
+        let com = f.clone().com_ja_casaram(Arc::new(|id: &str| {
+            Ok(if id == "sha-x" {
+                BTreeSet::from([PIX.to_owned()])
+            } else {
+                BTreeSet::new()
+            })
+        }));
+        assert_eq!(
+            com.ja_casaram("sha-x"),
+            Some(Ok(BTreeSet::from([PIX.to_owned()])))
+        );
+        assert_eq!(com.ja_casaram("outro"), Some(Ok(BTreeSet::new())));
+    }
+
+    #[test]
+    fn os_pesos_vem_da_definicao_da_versao() {
+        let f = fonte();
+        let pesos = f
+            .pesos_das_versoes(&[(PIX.to_owned(), 2), (PIX.to_owned(), 99)])
+            .expect("pesos");
+        assert_eq!(pesos.len(), 1);
+        let peso = pesos[&(PIX.to_owned(), 2)];
+        assert_eq!(peso.prioridade, 0);
+        assert_eq!(peso.especificidade, 2);
     }
 
     #[test]
