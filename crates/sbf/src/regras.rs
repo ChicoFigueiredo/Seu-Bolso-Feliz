@@ -323,14 +323,14 @@ fn listar(a: &mut Ambiente) -> Result<(), Falha> {
     let c = abrir_catalogo(a.cofre)?;
     let regras = c.regras()?;
     if regras.is_empty() {
-        w(a.saida, "Nenhuma regra no catálogo.");
+        w(a.saida, "Nenhum padrão no catálogo.");
         return Ok(());
     }
     w(
         a.saida,
         &format!(
             "{:<34} {:<30} {:>6} {:<12} {:>7} {:>9} {:>7}",
-            "regra", "tipo", "vigor", "estado", "versões", "execuções", "acerto"
+            "padrão", "tipo", "vigor", "estado", "versões", "execuções", "acerto"
         ),
     );
     for r in &regras {
@@ -370,14 +370,14 @@ fn listar(a: &mut Ambiente) -> Result<(), Falha> {
 
 fn mostrar(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     let [regra] = resto else {
-        return Err(uso("uso: mostrar <regra>"));
+        return Err(uso("uso: mostrar <padrão>"));
     };
     let c = abrir_catalogo(a.cofre)?;
     let versoes = c.versoes(regra)?;
     if versoes.is_empty() {
-        return Err(op(format!("regra `{regra}` não encontrada")));
+        return Err(op(format!("padrão `{regra}` não encontrada")));
     }
-    w(a.saida, &format!("Regra {regra}"));
+    w(a.saida, &format!("Padrão {regra}"));
     for v in &versoes {
         w(
             a.saida,
@@ -447,7 +447,7 @@ fn importar(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     };
     let json = ler_texto(Path::new(arquivo))?;
     let def: ArquivoDeRegra = serde_json::from_str(&json)
-        .map_err(|e| op(format!("o JSON da regra não é válido: {e}")))?;
+        .map_err(|e| op(format!("o JSON do padrão não é válido: {e}")))?;
     let script = match o.valores.get("--script") {
         Some(p) => Some(ler_texto(Path::new(p))?),
         None => None,
@@ -501,7 +501,7 @@ fn exemplo(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     let o = opcoes(resto, &["--esperado", "--nome"], &["--nao-se-aplica"])?;
     let [regra, arquivo] = o.soltos.as_slice() else {
         return Err(uso(
-            "uso: exemplo <regra> <arquivo.txt> (--nao-se-aplica | --esperado <arquivo.json>) [--nome <nome>]",
+            "uso: exemplo <padrão> <arquivo.txt> (--nao-se-aplica | --esperado <arquivo.json>) [--nome <nome>]",
         ));
     };
     let nao_se_aplica = !o.sinais.is_empty();
@@ -526,7 +526,7 @@ fn exemplo(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
 
 fn testar(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     let [regra, versao] = resto else {
-        return Err(uso("uso: testar <regra> <versao>"));
+        return Err(uso("uso: testar <padrão> <versao>"));
     };
     let versao = versao_de(versao)?;
     let c = abrir_catalogo(a.cofre)?;
@@ -564,7 +564,7 @@ fn testar(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
 
 fn resumo_texto(r: &ResumoDaDecisao) -> String {
     match r {
-        ResumoDaDecisao::Nenhuma => "nenhuma regra".to_owned(),
+        ResumoDaDecisao::Nenhuma => "nenhum padrão".to_owned(),
         ResumoDaDecisao::Ambiguo { regras } => format!("ambíguo entre {}", regras.join(", ")),
         ResumoDaDecisao::Reconhecido {
             regra,
@@ -599,7 +599,7 @@ fn valor_texto(v: &sbf_regras::Valor) -> String {
 
 fn simular_versao(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     let [regra, versao, arquivos @ ..] = resto else {
-        return Err(uso("uso: simular <regra> <versao> <arquivo.txt>..."));
+        return Err(uso("uso: simular <padrão> <versao> <arquivo.txt>..."));
     };
     if arquivos.is_empty() {
         return Err(uso("simular pede ao menos um arquivo"));
@@ -651,8 +651,8 @@ fn mudar_estado(a: &mut Ambiente, acao: &str, resto: &[String]) -> Result<(), Fa
     let (regra, versao) = match (precisa_versao, resto) {
         (true, [r, v]) => (r.clone(), Some(versao_de(v)?)),
         (false, [r]) => (r.clone(), None),
-        (true, _) => return Err(uso(format!("uso: {acao} <regra> <versao>"))),
-        (false, _) => return Err(uso(format!("uso: {acao} <regra>"))),
+        (true, _) => return Err(uso(format!("uso: {acao} <padrão> <versao>"))),
+        (false, _) => return Err(uso(format!("uso: {acao} <padrão>"))),
     };
     // O terminal vem primeiro: sem ele nem o catálogo é aberto.
     if !a.terminal {
@@ -674,7 +674,7 @@ fn mudar_estado(a: &mut Ambiente, acao: &str, resto: &[String]) -> Result<(), Fa
         None => {
             let versoes = c.versoes(&regra)?;
             if versoes.is_empty() {
-                return Err(op(format!("regra `{regra}` não encontrada")));
+                return Err(op(format!("padrão `{regra}` não encontrada")));
             }
             format!("{acao} `{regra}`")
         }

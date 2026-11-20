@@ -762,7 +762,7 @@ impl AppCasca for AppSbf {
                 };
                 v.push(ItemNavegacao::novo(
                     crate::regras_ui::ROTA,
-                    "Regras de reconhecimento",
+                    "Padrões de reconhecimento",
                     "rule",
                 ));
                 v
