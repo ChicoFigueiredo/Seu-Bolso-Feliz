@@ -714,6 +714,23 @@ impl Catalogo {
         Ok(v)
     }
 
+    /// Troca o rótulo de quem criou a versão na linha de criação do histórico de estado
+    /// (`assistente (qwen3-coder:30b)`). A coluna `autor` da versão é imutável e continua
+    /// `ia`; o rótulo mais fino fica no histórico, que a tela de versões já mostra.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn rotular_autoria(&mut self, regra: &str, versao: u32, rotulo: &str) -> Resultado<()> {
+        self.conn
+            .execute(
+                "UPDATE historico_de_estado SET quem = ?3
+                 WHERE regra = ?1 AND versao = ?2 AND de IS NULL AND para = 'rascunho'",
+                params![regra, versao, rotulo],
+            )
+            .map_err(banco)?;
+        Ok(())
+    }
+
     /// Todas as versões de uma regra, da primeira à última.
     ///
     /// # Errors
