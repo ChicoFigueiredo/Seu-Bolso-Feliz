@@ -243,7 +243,7 @@ fn ac_lua_02_regra_especifica_vence_a_geral_e_nao_mexe_em_tipo_antigo() {
     assert!(
         r.motivos
             .iter()
-            .any(|m| m.contains("mais específica: 2 condições contra 1")),
+            .any(|m| m.contains("mais específico: 2 condições contra 1")),
         "{:?}",
         r.motivos
     );
@@ -279,7 +279,7 @@ fn prioridade_maior_vence_com_motivo() {
     assert!(
         r.motivos
             .iter()
-            .any(|m| m == "prioridade 10 > 0 da regra b-especifica")
+            .any(|m| m == "prioridade 10 > 0 do padrão b-especifica")
     );
 }
 

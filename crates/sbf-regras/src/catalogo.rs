@@ -440,7 +440,8 @@ CREATE TABLE proposta (
 ///   chaveado pelo checksum: versão nova ou alterada começa do zero, as outras seguem.
 /// - O índice por entrada serve à consulta em lote da janela.
 /// - Recupera o âmbar do que já estava gravado: um empate deixou o motivo
-///   `regras empatadas ... discordam em ...` nas execuções das candidatas.
+///   `regras empatadas ... discordam em ...` (texto antigo) ou `padrões empatados ... discordam
+///   em ...` nas execuções das candidatas.
 const ESQUEMA_2: &str = "
 CREATE INDEX IF NOT EXISTS execucao_por_entrada ON execucao (entrada, regra);
 CREATE TABLE IF NOT EXISTS decisao_da_entrada (
@@ -459,7 +460,8 @@ CREATE TABLE IF NOT EXISTS passada_de_fundo (
 );
 INSERT OR IGNORE INTO decisao_da_entrada (entrada, ambiguo, em)
 SELECT entrada, 1, MAX(em) FROM execucao
- WHERE resultado = 'reconhecido' AND motivo LIKE 'regras empatadas%discordam em%'
+ WHERE resultado = 'reconhecido'
+   AND (motivo LIKE 'regras empatadas%discordam em%' OR motivo LIKE 'padrões empatados%discordam em%')
  GROUP BY entrada;
 ";
 

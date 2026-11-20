@@ -499,7 +499,7 @@ pub struct PorQue {
 
 /// Os começos dos motivos que o motor escreve no vencedor para dizer por que prevaleceu.
 const COMECOS_DO_MOTIVO_DO_VENCEDOR: [&str; 3] =
-    ["prioridade ", "mais específica", "empate de prioridade"];
+    ["prioridade ", "mais específic", "empate de prioridade"];
 
 /// Monta o rastro "Por que este padrão?" da leitura do motor. `entrada` dá o tipo e o MIME;
 /// `pesos` dá a prioridade e a especificidade de cada versão citada (quem não tiver aparece
@@ -1018,14 +1018,14 @@ mod testes {
         assert_eq!(q.casaram[1].papel, Papel::NaoPrevaleceu);
         assert_eq!(
             q.casaram[1].nota.as_deref(),
-            Some("não prevaleceu: venceu a regra geral")
+            Some("não prevaleceu: venceu o padrão geral")
         );
         match &q.desfecho {
             Desfecho::Venceu { regra, motivo, .. } => {
                 assert_eq!(regra, "geral");
                 assert_eq!(
                     motivo.as_deref(),
-                    Some("prioridade 10 > 0 da regra especifica")
+                    Some("prioridade 10 > 0 do padrão especifica")
                 );
             }
             outro => panic!("{outro:?}"),
@@ -1058,7 +1058,7 @@ mod testes {
                 assert!(
                     motivo
                         .as_deref()
-                        .is_some_and(|m| m.starts_with("mais específica"))
+                        .is_some_and(|m| m.starts_with("mais específico"))
                 );
             }
             outro => panic!("{outro:?}"),

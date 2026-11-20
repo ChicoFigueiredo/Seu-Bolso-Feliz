@@ -557,7 +557,7 @@ impl Regras {
         });
         texto_pequeno(
             ui,
-            "Como o sbf reconhece cada tipo de documento. Um padrão só propõe; consolidada, concilia sozinha quando as três provas batem.",
+            "Como o sbf reconhece cada tipo de documento. Um padrão só propõe; consolidado, concilia sozinho quando as três provas batem.",
         );
         self.mostrar_mensagem(ui);
         ui.add_space(8.0);
@@ -1600,7 +1600,7 @@ fn secao_de_exemplos(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
         if p.exemplos.is_empty() {
             texto_pequeno(
                 ui,
-                "Sem exemplos. Um padrão sem exemplos ativa sem nada que a proteja: cole um texto abaixo.",
+                "Sem exemplos. Um padrão sem exemplos ativa sem nada que o proteja: cole um texto abaixo.",
             );
         }
         for ex in &p.exemplos {
