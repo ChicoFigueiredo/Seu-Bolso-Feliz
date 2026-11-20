@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use sbf_coleta::pastas::{registrar_arrastado, sha256_do_arquivo};
 use sbf_ia::{Controle, Fila, Provedor, Registro};
+use sbf_inventario::caixa_de_entrada::{self as fila_do_cofre, Estado as EstadoDaFila, Origem};
 use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
 use sbf_ocr::{DesfechoDoOcr, FalhaDoOcr, Ocr};
@@ -88,6 +89,9 @@ pub struct ReconhecedorDoCofre {
     ocr: Ocr,
     /// As regras de reconhecimento (spec 13); `None` é o caminho de sempre.
     pub(crate) regras: Option<Ligadas>,
+    /// A origem com que cada arquivo reconhecido entra na Caixa de entrada; `None` não
+    /// registra nada na fila (a releitura da janela, os testes sem fila).
+    fila: Option<Origem>,
 }
 
 impl std::fmt::Debug for ReconhecedorDoCofre {
@@ -118,7 +122,17 @@ impl ReconhecedorDoCofre {
             ferramentas: Ferramentas::default(),
             ocr: Ocr::do_sistema(),
             regras: None,
+            fila: None,
         }
+    }
+
+    /// Registra cada arquivo reconhecido na Caixa de entrada com esta origem (Telegram,
+    /// Gmail, pasta, arrastado, linha de comando…). Sem esta chamada, e sem canal de origem
+    /// em [`ReconhecedorDoCofre::reconhecer_de`], nada entra na fila.
+    #[must_use]
+    pub fn com_fila(mut self, origem: Origem) -> Self {
+        self.fila = Some(origem);
+        self
     }
 
     /// Liga o motor de regras de reconhecimento (spec 13, ADR-021) ao passo de leitura local:
@@ -263,6 +277,102 @@ impl ReconhecedorDoCofre {
         andamento: &mut dyn FnMut(Andamento),
         cancelar: &AtomicBool,
     ) -> Result<Resultado, ErroDoReconhecimento> {
+        let da_fila = self.fila.or_else(|| {
+            origem
+                .as_ref()
+                .and_then(|(canal, _)| crate::fila::origem_do_canal(*canal))
+        });
+        let mut visto: Option<(String, String)> = None;
+        let r = self.executar(origem, caminho, andamento, cancelar, da_fila, &mut visto);
+        // O reconhecimento parou depois de saber qual era o conteúdo: a fila não fica com
+        // o "Processando" para sempre.
+        if let (Err(e), Some(origem), Some((sha, nome))) = (&r, da_fila, visto) {
+            let motivo = match e {
+                ErroDoReconhecimento::Cancelado => "o reconhecimento foi interrompido",
+                _ => "o reconhecimento falhou; reconheça de novo",
+            };
+            if let Ok(conn) = abrir_escrita(&self.cofre.join("inventario.sqlite")) {
+                let _ = fila_do_cofre::registrar(
+                    &conn,
+                    &fila_do_cofre::Registro {
+                        content_hash: sha,
+                        nome,
+                        origem,
+                        tipo: None,
+                        resumo: Some(motivo.to_owned()),
+                        estado: EstadoDaFila::NaoReconhecido,
+                    },
+                );
+            }
+        }
+        r
+    }
+
+    /// Reconhece de novo um conteúdo que o inventário já tem, sem o arquivo na mão: lê a cópia
+    /// do acervo (ou, sem ela, uma origem local que ainda exista) e roda as mesmas etapas. O
+    /// texto já guardado vale (não extrai de novo), então é rápido; é assim que a Caixa de
+    /// entrada recalcula as sugestões e que "Reconhecer de novo" reaproveita as regras novas.
+    ///
+    /// # Errors
+    /// [`ErroDoReconhecimento::Arquivo`] quando o conteúdo não tem arquivo para ler.
+    pub fn reconhecer_conteudo(
+        &self,
+        sha256: &str,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        let caminho = self.arquivo_do_conteudo(sha256)?;
+        self.reconhecer(&caminho, andamento, cancelar)
+    }
+
+    /// O arquivo que guarda o conteúdo: a cópia do acervo ou uma origem local que existe.
+    ///
+    /// # Errors
+    /// Sem arquivo, ou o banco não abre.
+    pub fn arquivo_do_conteudo(&self, sha256: &str) -> Result<PathBuf, ErroDoReconhecimento> {
+        let conn = Connection::open_with_flags(
+            self.cofre.join("inventario.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(banco)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))
+            .map_err(banco)?;
+        if let Some(rel) = fila_do_cofre::caminho_no_acervo(&conn, sha256).map_err(banco)? {
+            let p = self.cofre.join(rel);
+            if p.is_file() {
+                return Ok(p);
+            }
+        }
+        let mut q = conn
+            .prepare(
+                "SELECT local_filepath FROM origem
+                  WHERE content_hash = ?1 AND local_filepath IS NOT NULL
+                  ORDER BY id DESC",
+            )
+            .map_err(banco)?;
+        let caminhos = q
+            .query_map([sha256], |l| l.get::<_, String>(0))
+            .map_err(banco)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(banco)?;
+        caminhos
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|p| p.is_file())
+            .ok_or_else(|| {
+                ErroDoReconhecimento::Arquivo("o arquivo não está mais no cofre".to_owned())
+            })
+    }
+
+    fn executar(
+        &self,
+        origem: Option<(sbf_regras::Canal, String)>,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+        da_fila: Option<Origem>,
+        visto: &mut Option<(String, String)>,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
         let meta = std::fs::metadata(caminho).map_err(|e| do_arquivo(&e))?;
         if !meta.is_file() {
             return Err(ErroDoReconhecimento::Arquivo(
@@ -301,6 +411,10 @@ impl ReconhecedorDoCofre {
             Ok((conn, Situacao::Feita))
         })?;
         estado.sem_achado = !estado.ja_existia && estado.dentro_do_cofre;
+        if let Some(o) = da_fila {
+            *visto = Some((estado.sha256.clone(), nome.clone()));
+            let _ = fila_do_cofre::marcar_processando(&conn, &estado.sha256, &nome, o);
+        }
 
         // 2. Registrar.
         etapa(andamento, cancelar, Etapa::Registrar, || {
@@ -390,7 +504,7 @@ impl ReconhecedorDoCofre {
             Ok(((), situacao))
         })?;
 
-        Ok(Resultado {
+        let mut resultado = Resultado {
             sha256: estado.sha256,
             nome,
             ja_existia: estado.ja_existia,
@@ -400,7 +514,20 @@ impl ReconhecedorDoCofre {
             avisos: estado.avisos,
             entrada: estado.entrada,
             leitura: estado.leitura,
-        })
+        };
+        if let Some(o) = da_fila {
+            // Duas origens fora a fonte `arrastado` (que o próprio reconhecimento cria ao
+            // copiar um arquivo solto): o mesmo conteúdo já foi achado em outro lugar.
+            let repetido =
+                fila_do_cofre::origens_de_fora(&conn, &resultado.sha256).is_ok_and(|n| n >= 2);
+            let registro = crate::fila::registro_do_resultado(&resultado, o, repetido);
+            if fila_do_cofre::registrar(&conn, &registro).is_err() {
+                resultado
+                    .avisos
+                    .push("não consegui registrar o arquivo na Caixa de entrada".to_owned());
+            }
+        }
+        Ok(resultado)
     }
 }
 
@@ -1078,7 +1205,7 @@ fn sugestoes_abertas(
     Ok(linhas)
 }
 
-fn rotulo_do_tipo(tipo: &str) -> &'static str {
+pub(crate) fn rotulo_do_tipo(tipo: &str) -> &'static str {
     match tipo {
         "fatura" => "Fatura",
         "boleto" => "Boleto",

@@ -380,6 +380,7 @@ fn migrar_com_andamento_avisa_cada_etapa_antes_de_comecar() {
             "Adocao",
             "Migracao2",
             "Migracao3",
+            "Migracao4",
             "Conferencia"
         ]
     );

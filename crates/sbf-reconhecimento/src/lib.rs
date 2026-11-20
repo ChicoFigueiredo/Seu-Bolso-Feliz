@@ -27,6 +27,7 @@
 pub mod cofre;
 pub mod descontos;
 pub mod favorecido;
+pub mod fila;
 pub mod regras;
 pub mod salario;
 
