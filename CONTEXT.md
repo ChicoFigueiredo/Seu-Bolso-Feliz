@@ -226,8 +226,16 @@ imagem ou o texto, pequeno num canto ou grande na página do item. Nunca muda o 
 _Avoid_: preview, thumbnail, visualizador
 
 **Caixa de entrada**:
-A fila única de documentos recebidos e ainda não resolvidos, independente de origem.
+A fila única de documentos recebidos e ainda não resolvidos, independente de origem. Lista os
+que o reconhecimento **reconheceu** (Pronto, Precisa revisar, Possível duplicidade); é onde se
+decidem as sugestões de ligação ao planejamento. O que ele não reconheceu vai para A triar.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
+
+**Sem padrão de reconhecimento**:
+O documento novo que nenhuma regra nem leitor casou (estados Não reconhecido e Protegido por
+senha). Fica na seção de mesmo nome de A triar, onde se cria a regra a partir do cartão e se
+reconhece de novo; se passar a casar, sai de A triar e entra na Caixa de entrada.
+_Avoid_: não classificado, órfão, unmatched
 
 **Estados do documento** (os únicos que o usuário vê): Pronto, Precisa revisar,
 Possível duplicidade, Protegido por senha, Não reconhecido, Processando. Os estados
