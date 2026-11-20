@@ -59,7 +59,7 @@ describe("aplicarSchema", () => {
   it("inv02 recusa banco numa versão do Rust que não conhece", () => {
     const db = bancoTemporario();
     db.exec(`PRAGMA user_version = ${VERSAO_RUST_CONHECIDA + 1}`);
-    expect(() => aplicarSchema(db)).toThrow(/versão de esquema 3/);
+    expect(() => aplicarSchema(db)).toThrow(/versão de esquema 5/);
     expect(objetos(db)).toEqual([]);
     db.close();
   });

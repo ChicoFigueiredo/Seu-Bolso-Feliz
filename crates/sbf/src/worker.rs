@@ -408,25 +408,6 @@ pub fn rodar(args: &[String]) -> ExitCode {
     }
 }
 
-#[cfg(test)]
-mod testes {
-    use super::*;
-
-    #[test]
-    fn valor_da_flag() {
-        let a: Vec<String> = ["rodar", "--inventario", "/c"].map(String::from).to_vec();
-        assert_eq!(valor(&a, "--inventario"), Some("/c"));
-        assert_eq!(valor(&a, "--x"), None);
-    }
-
-    #[test]
-    fn sem_cofre_ou_subcomando_desconhecido_e_uso_2() {
-        assert_eq!(rodar(&["rodar".to_owned()]), ExitCode::from(2),);
-        assert_eq!(rodar(&["voar".to_owned()]), ExitCode::from(2));
-        assert_eq!(rodar(&[]), ExitCode::from(2));
-    }
-}
-
 /// O reconhecimento dos arquivos novos das pastas vigiadas: o `ReconhecedorDoCofre` com as
 /// regras, sem IA, com a origem `pasta` (Caixa de entrada). Monta uma vez, na primeira
 /// chegada, porque abrir o chaveiro e as regras custa e a maioria dos passos não tem arquivo.
@@ -463,5 +444,24 @@ impl sbf_worker::laco::ReconhecedorDePastas for ReconhecimentoDasPastas {
                 sbf_reconhecimento::ErroDoReconhecimento::Arquivo(_) => Falha::Disco,
                 sbf_reconhecimento::ErroDoReconhecimento::Cancelado => Falha::Outra,
             })
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn valor_da_flag() {
+        let a: Vec<String> = ["rodar", "--inventario", "/c"].map(String::from).to_vec();
+        assert_eq!(valor(&a, "--inventario"), Some("/c"));
+        assert_eq!(valor(&a, "--x"), None);
+    }
+
+    #[test]
+    fn sem_cofre_ou_subcomando_desconhecido_e_uso_2() {
+        assert_eq!(rodar(&["rodar".to_owned()]), ExitCode::from(2),);
+        assert_eq!(rodar(&["voar".to_owned()]), ExitCode::from(2));
+        assert_eq!(rodar(&[]), ExitCode::from(2));
     }
 }
