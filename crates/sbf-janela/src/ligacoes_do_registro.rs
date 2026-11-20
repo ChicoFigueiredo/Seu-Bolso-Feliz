@@ -184,7 +184,7 @@ pub fn bloco(ui: &mut Ui, l: &LigacoesDoRegistro, pedidos: &mut Vec<Pedido>) {
             });
         }
         ui.add_space(4.0);
-        componentes::rotulo_de_secao(ui, "Reconhecido pela regra");
+        componentes::rotulo_de_secao(ui, "Reconhecido pelo padrão");
         match &l.regra {
             Some(r) => {
                 ui.horizontal_wrapped(|ui| {
@@ -200,7 +200,7 @@ pub fn bloco(ui: &mut Ui, l: &LigacoesDoRegistro, pedidos: &mut Vec<Pedido>) {
             }
             None => {
                 ui.label(
-                    RichText::new("Nenhuma regra vigente reconhece este registro.")
+                    RichText::new("Nenhum padrão vigente reconhece este registro.")
                         .color(p.tinta_suave),
                 );
             }

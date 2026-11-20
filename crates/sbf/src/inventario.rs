@@ -125,7 +125,7 @@ impl AppDoInventario {
                 match sbf_regras::catalogo::Catalogo::abrir(&self.pasta.join("regras.sqlite")) {
                     Ok(mut c) => {
                         if let Err(e) = c.semear_fabrica() {
-                            eprintln!("sbf: as regras de fábrica não entraram ({e})");
+                            eprintln!("sbf: os padrões de fábrica não entraram ({e})");
                         }
                         let catalogo = std::sync::Arc::new(std::sync::Mutex::new(c));
                         let para_ja_casaram = std::sync::Arc::clone(&catalogo);
@@ -145,7 +145,7 @@ impl AppDoInventario {
                             )),
                         );
                     }
-                    Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
+                    Err(e) => eprintln!("sbf: o catálogo de padrões não abriu ({e})"),
                 }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());

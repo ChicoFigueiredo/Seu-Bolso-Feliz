@@ -2090,7 +2090,7 @@ impl Janela {
             A::Retomar => servico.retomar().map(|()| "Rodada retomada.".to_owned()),
             A::ApagarRegra(id) => servico
                 .apagar_regra_do_agente(id)
-                .map(|()| "Regra apagada. Ela só volta com 3 confirmações novas suas.".to_owned()),
+                .map(|()| "Padrão apagado. Ela só volta com 3 confirmações novas suas.".to_owned()),
             A::Aceitar(ids) => servico.aceitar(&ids, comandos).map(|r| {
                 self.decisoes_da_sessao.extend(&r.decisoes);
                 let mut texto = format!(
@@ -2288,7 +2288,7 @@ impl Janela {
                 };
                 controle.mensagem = Some(match (padrao, pelas_regras) {
                     (Err(e), _) => (mensagem_de_erro(&e), true),
-                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelas regras: {e}"), true),
+                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelos padrões: {e}"), true),
                     (Ok(n), Ok(m)) => match n + m {
                         0 => ("Nenhuma sugestão nova.".to_owned(), false),
                         1 => ("1 sugestão nova.".to_owned(), false),
@@ -3331,7 +3331,7 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                     estrategia: estrategia.to_owned(),
                 },
                 alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],
-                motivo: Some("regra criada à mão (Ferramentas › Regras de senha)".to_owned()),
+                motivo: Some("padrão criado à mão (Ferramentas › Regras de senha)".to_owned()),
             }))
         }
         Dialogo::NovoLote { nome } => {
@@ -3461,7 +3461,7 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
             partes.push("decidido por você".to_owned())
         }
         Some(sbf_inventario::consulta::Quem::Automatico(r)) if r.is_empty() => {
-            partes.push("decidido pelas regras".to_owned());
+            partes.push("decidido pelos padrões".to_owned());
         }
         Some(q) => partes.push(format!("decidido por {}", q.rotulo())),
         None => {}
@@ -3571,7 +3571,7 @@ fn buscar_pelas_regras(
     let mut catalogo = fonte
         .catalogo
         .lock()
-        .map_err(|_| "o catálogo de regras está ocupado".to_owned())?;
+        .map_err(|_| "o catálogo de padrões está ocupado".to_owned())?;
     sbf_reconhecimento::favorecido::buscar(
         plan,
         &mut catalogo,

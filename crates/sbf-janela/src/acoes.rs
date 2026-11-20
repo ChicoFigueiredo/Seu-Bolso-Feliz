@@ -539,7 +539,7 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
         None,
         B::Inicio,
         "Filtros",
-        "Só o que você ou as regras decidiram",
+        "Só o que você ou os padrões decidiram",
     ),
     definir_acao(
         I::QuemTodos,
@@ -564,12 +564,12 @@ pub const ACOES: &[DefinicaoDeAcao] = &[
     definir_acao(
         I::QuemRegras,
         "inicio.quem.regras",
-        "Regras",
+        "Padrões",
         "smart_toy",
         None,
         B::Inicio,
         "Filtros",
-        "Só o que as regras decidiram",
+        "Só o que os padrões decidiram",
     ),
     definir_acao(
         I::Documento,

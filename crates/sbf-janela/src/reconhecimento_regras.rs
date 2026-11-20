@@ -64,10 +64,10 @@ pub fn descrever_de_onde(de: &DeOnde, texto: Option<&str>) -> String {
         DeOnde::Leitor { leitor } => format!("leitor {leitor}"),
         DeOnde::Script { a_partir_de } => {
             if a_partir_de.is_empty() {
-                "script da regra".to_owned()
+                "script do padrão".to_owned()
             } else {
                 format!(
-                    "script da regra, a partir de {}",
+                    "script do padrão, a partir de {}",
                     a_partir_de
                         .iter()
                         .map(|n| rotulo_do_campo(n))
@@ -324,7 +324,7 @@ impl Criacao {
     pub fn correcao(&self) -> Result<Correcao, String> {
         let nome = self.nome.trim();
         if nome.is_empty() {
-            return Err("dê um nome à regra".to_owned());
+            return Err("dê um nome ao padrão".to_owned());
         }
         let tipo = self.tipo_documental.trim();
         if tipo.is_empty() {
@@ -348,7 +348,7 @@ impl Criacao {
             campos.insert(n.to_owned(), v);
         }
         if campos.is_empty() {
-            return Err("preencha pelo menos um campo que a regra deve ler".to_owned());
+            return Err("preencha pelo menos um campo que o padrão deve ler".to_owned());
         }
         Ok(Correcao {
             regra: None,
@@ -402,7 +402,7 @@ impl Janela {
     /// Abre "Testar com este documento" para o cartão `cartao`.
     pub fn abrir_teste(&mut self, cartao: usize) {
         let Some(fonte) = self.fonte_das_regras() else {
-            self.mensagem_das_regras(true, "O catálogo de regras não está ligado a esta janela.");
+            self.mensagem_das_regras(true, "O catálogo de padrões não está ligado a esta janela.");
             return;
         };
         let Some(c) = self.reconhecimento.cartoes.get(cartao) else {
@@ -472,7 +472,7 @@ impl Janela {
                     (
                         false,
                         format!(
-                            "Exemplo «{}» guardado na regra {}.",
+                            "Exemplo «{}» guardado no padrão {}.",
                             t.nome_do_exemplo.trim(),
                             o.nome
                         ),
@@ -491,7 +491,7 @@ impl Janela {
     /// o que o usuário corrigiu no cartão.
     pub fn abrir_criacao(&mut self, cartao: usize) {
         if self.regras.fonte().is_none() {
-            self.mensagem_das_regras(true, "O catálogo de regras não está ligado a esta janela.");
+            self.mensagem_das_regras(true, "O catálogo de padrões não está ligado a esta janela.");
             return;
         }
         let Some(c) = self.reconhecimento.cartoes.get(cartao) else {
@@ -685,7 +685,7 @@ mod testes {
                 },
                 None
             ),
-            "script da regra, a partir de Valor, Data"
+            "script do padrão, a partir de Valor, Data"
         );
     }
 }
@@ -794,7 +794,7 @@ mod testes_do_painel {
             reconhecimento: rec,
         } = &r.reconhecido
         else {
-            panic!("devia vir pela regra: {:?}", r.reconhecido);
+            panic!("devia vir pelo padrão: {:?}", r.reconhecido);
         };
         assert_eq!(rec.regra, PIX);
         assert_eq!(rec.tipo_documental, "comprovante-pix");
@@ -1412,7 +1412,7 @@ mod testes_do_painel {
     fn o_rotulo_da_regra_traz_nome_e_versao() {
         assert_eq!(
             crate::reconhecimento_regras_ui::rotulo_da_regra("Contracheque", 3),
-            "Regra Contracheque · versão 3"
+            "Padrão Contracheque · versão 3"
         );
     }
 
@@ -1449,7 +1449,7 @@ mod testes_do_painel {
         }
         let textos = textos_pintados(&ctx, &mut j);
         assert!(
-            contem(&textos, "Regra Contracheque · versão 3"),
+            contem(&textos, "Padrão Contracheque · versão 3"),
             "{textos:?}"
         );
         assert!(contem(&textos, "IRRF conferido ✓ · tabela irrf-teste"));
@@ -1461,7 +1461,7 @@ mod testes_do_painel {
         };
         r.leitura = None;
         let textos = textos_pintados(&ctx, &mut j);
-        assert!(!contem(&textos, "Regra Contracheque"));
+        assert!(!contem(&textos, "Padrão Contracheque"));
         assert!(!contem(&textos, "IRRF conferido"));
     }
 
@@ -1479,7 +1479,7 @@ mod testes_do_painel {
         reconhecimento.exibir = vec!["linha curta do script".to_owned()];
         let textos = textos_pintados(&ctx, &mut j);
         assert!(contem(&textos, "linha curta do script"), "{textos:?}");
-        assert!(contem(&textos, "Reconhecido pela regra"));
+        assert!(contem(&textos, "Reconhecido pelo padrão"));
         assert!(contem(&textos, "· versão"));
     }
 
