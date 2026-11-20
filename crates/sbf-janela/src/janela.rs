@@ -354,6 +354,9 @@ impl Janela {
             casca: self.casca_guardada.clone(),
             largura_da_lateral: self.largura_da_lateral,
             janela: self.estado_da_janela,
+            conexoes: crate::preferencias_da_janela::PreferenciasDeConexoes {
+                aba: self.conexoes.aba_guardada().to_owned(),
+            },
         }
     }
 
@@ -383,6 +386,7 @@ impl Janela {
         self.casca_guardada = lidas.casca.clone();
         self.largura_da_lateral = lidas.largura_valida();
         self.estado_da_janela = lidas.janela;
+        self.conexoes.definir_aba(&lidas.conexoes.aba);
         lidas
     }
 
