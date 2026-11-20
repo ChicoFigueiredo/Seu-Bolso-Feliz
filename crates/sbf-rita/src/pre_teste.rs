@@ -8,15 +8,14 @@
 
 use std::sync::Arc;
 
-use regex::Regex;
 use sbf_regras::catalogo::{Catalogo, VersaoDeRegra};
-use sbf_regras::definicao::{Condicao, Definicao, normalizar};
 use sbf_regras::motor::Motor;
 use sbf_regras::simulacao::{ResumoDaDecisao, simular};
 use sbf_regras::{Decisao, Entrada, Leitura, ResultadoDaExecucao};
 use serde::{Deserialize, Serialize};
 
 use crate::contexto::Contexto;
+use crate::diagnostico::diagnosticar;
 use crate::texto::cortar;
 
 /// Quantos documentos parecidos o pré-teste examina, no máximo.
@@ -43,8 +42,15 @@ pub struct NoItem {
     pub decisao: DecisaoNoItem,
     /// `nome = valor` dos campos tirados (só quando casa).
     pub campos: Vec<(String, String)>,
-    /// Por que não casou ou falhou (curto).
+    /// Por que não casou ou falhou (curto): a condição ou o campo, o trecho que falta e as
+    /// linhas do texto que se parecem.
     pub diagnostico: Vec<String>,
+    /// Quantas condições de `detectar` não se cumprem.
+    #[serde(default)]
+    pub condicoes_falhando: usize,
+    /// Os campos declarados (`extrair`, `obrigatorios`) que não saíram do item.
+    #[serde(default)]
+    pub faltam: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +116,12 @@ impl PreTeste {
                 .map(|(n, v)| format!("{n} = {v}"))
                 .collect::<Vec<_>>()
                 .join("; ");
-            format!("Este item: casa. {campos}")
+            let falhas = if self.item.diagnostico.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", self.item.diagnostico.join(" "))
+            };
+            format!("Este item: casa. {campos}{falhas}")
         } else {
             format!("Este item: não casa. {}", self.item.diagnostico.join(" "))
         });
@@ -169,9 +180,14 @@ impl PreTeste {
         l
     }
 
-    /// O resultado para o modelo: JSON compacto, sem texto de documento, só o que ele precisa
-    /// para decidir o próximo passo.
+    /// O resultado para o modelo: JSON compacto, só o que ele precisa para decidir o próximo
+    /// passo.
     pub fn para_o_modelo(&self) -> String {
+        self.para_o_modelo_json().to_string()
+    }
+
+    /// O mesmo resultado, como valor JSON (quem chama pode acrescentar chaves).
+    pub fn para_o_modelo_json(&self) -> serde_json::Value {
         let mut v = serde_json::json!({
             "regra": self.regra,
             "versao": self.versao,
@@ -201,7 +217,7 @@ impl PreTeste {
         if !self.passou {
             v["motivo"] = serde_json::json!(self.motivo);
         }
-        v.to_string()
+        v
     }
 }
 
@@ -219,56 +235,7 @@ fn casou(l: &Leitura, regra: &str, versao: u32) -> bool {
     })
 }
 
-/// Por que o rascunho não casou ou falhou: confere, no texto, cada condição de `todos` e cada
-/// campo obrigatório. Curto e sem trecho do documento.
-fn diagnosticar(def: &Definicao, texto: &str) -> Vec<String> {
-    let mut d = Vec::new();
-    let normalizado = normalizar(texto);
-    for (i, c) in def.detectar.todos.iter().enumerate() {
-        let ok = match c {
-            Condicao::Contem(t) => Some(normalizado.contains(&normalizar(t))),
-            Condicao::Regex(p) => Regex::new(p).ok().map(|r| r.is_match(texto)),
-            _ => None,
-        };
-        if ok == Some(false) {
-            d.push(format!("a condição todos[{i}] não se cumpre neste texto."));
-        }
-    }
-    if !def.detectar.algum.is_empty() {
-        let alguma = def.detectar.algum.iter().any(|c| match c {
-            Condicao::Contem(t) => normalizado.contains(&normalizar(t)),
-            Condicao::Regex(p) => Regex::new(p).is_ok_and(|r| r.is_match(texto)),
-            _ => true,
-        });
-        if !alguma {
-            d.push("nenhuma condição de `algum` se cumpre neste texto.".to_owned());
-        }
-    }
-    for c in &def.detectar.nenhum {
-        let presente = match c {
-            Condicao::Contem(t) => normalizado.contains(&normalizar(t)),
-            Condicao::Regex(p) => Regex::new(p).is_ok_and(|r| r.is_match(texto)),
-            _ => false,
-        };
-        if presente {
-            d.push("uma condição de `nenhum` aparece no texto.".to_owned());
-        }
-    }
-    for nome in &def.obrigatorios {
-        if let Some(e) = def.extrair.get(nome)
-            && let Ok(r) = Regex::new(&e.regex)
-            && !r.is_match(texto)
-        {
-            d.push(format!(
-                "o campo obrigatório `{nome}`: o regex não acha nada neste texto."
-            ));
-        }
-    }
-    d.truncate(4);
-    d
-}
-
-fn no_item(leitura: &Leitura, alvo: &VersaoDeRegra, texto: &str) -> NoItem {
+fn no_item(leitura: &Leitura, alvo: &VersaoDeRegra, item: &Entrada, pedido: &str) -> NoItem {
     let (regra, versao) = (alvo.regra.as_str(), alvo.versao);
     let casa = casou(leitura, regra, versao);
     let decisao = match &leitura.decisao {
@@ -309,16 +276,19 @@ fn no_item(leitura: &Leitura, alvo: &VersaoDeRegra, texto: &str) -> NoItem {
         } else {
             diagnostico.push("o tipo de entrada do item não está em `aplica_a`.".to_owned());
         }
-        diagnostico.extend(diagnosticar(&alvo.definicao, texto));
-        if diagnostico.is_empty() {
-            diagnostico.push("as condições `detectar` não se cumprem.".to_owned());
-        }
+    }
+    let d = diagnosticar(&alvo.definicao, item, pedido);
+    diagnostico.extend(d.linhas);
+    if !casa && diagnostico.is_empty() {
+        diagnostico.push("as condições `detectar` não se cumprem.".to_owned());
     }
     NoItem {
         casa,
         decisao,
         campos,
         diagnostico,
+        condicoes_falhando: d.condicoes_falhando,
+        faltam: d.faltam,
     }
 }
 
@@ -335,6 +305,22 @@ pub fn pre_testar(
     let alvo = catalogo
         .versao(regra, versao)
         .map_err(|_| format!("não achei a versão {versao} do padrão `{regra}`"))?;
+    pre_testar_versao(ctx, catalogo, &alvo, "")
+}
+
+/// O mesmo pré-teste sobre uma versão que pode nem estar gravada (um ensaio: nada é escrito).
+/// `pedido` é o texto do usuário; as palavras dele ajudam o diagnóstico a achar as linhas
+/// candidatas.
+///
+/// # Errors
+/// O catálogo não abre ou não lê (texto curto, sem conteúdo).
+pub fn pre_testar_versao(
+    ctx: &Contexto,
+    catalogo: &Catalogo,
+    alvo: &VersaoDeRegra,
+    pedido: &str,
+) -> Result<PreTeste, String> {
+    let (regra, versao) = (alvo.regra.as_str(), alvo.versao);
     let exec = Some(Arc::clone(&ctx.executor));
     let vigentes = catalogo
         .vigentes()
@@ -350,11 +336,11 @@ pub fn pre_testar(
 
     let item = &ctx.tela.item;
     let leitura_do_item = candidato.ler(item);
-    let no_item = no_item(&leitura_do_item, &alvo, item.texto.as_deref().unwrap_or(""));
+    let no_item = no_item(&leitura_do_item, alvo, item, pedido);
 
     // Exemplos da regra (a versão sozinha, como o editor roda).
     let relatorio = catalogo
-        .testar(regra, versao, Some(ctx.executor.as_ref()))
+        .testar_versao(alvo, Some(ctx.executor.as_ref()))
         .map_err(|_| "falha ao rodar os exemplos".to_owned())?;
     let falharam: Vec<String> = relatorio.falhas();
     let exemplos = DosExemplos {
@@ -428,6 +414,14 @@ pub fn pre_testar(
         (false, "o rascunho empata com outro padrão neste item; acrescente uma condição que separe os dois".to_owned())
     } else if let DecisaoNoItem::Outra(r) = &no_item.decisao {
         (false, format!("o padrão `{r}` vence neste item"))
+    } else if !no_item.faltam.is_empty() {
+        (
+            false,
+            format!(
+                "o item casa, mas estes campos têm problema (não saíram, saíram pela metade ou o pedido pede que entrem em `detectar`): {}",
+                no_item.faltam.join(", ")
+            ),
+        )
     } else if !exemplos.falharam.is_empty() {
         (false, "há exemplos que falham".to_owned())
     } else {

@@ -5,15 +5,19 @@
 //! com texto fixo, venha de onde vier (laço próprio ou servidor MCP do `claude -p`). Uma
 //! ferramenta fora da lista também é recusada (e conta).
 
+use std::cmp::Reverse;
+
+use regex::RegexBuilder;
 use sbf_mcp::backup::{Backups, Qual};
-use sbf_regras::catalogo::{Catalogo, NovaVersao};
-use sbf_regras::definicao::{Condicao, Definicao};
+use sbf_regras::catalogo::{Catalogo, NovaVersao, VersaoDeRegra};
+use sbf_regras::definicao::{Condicao, Definicao, Formato, normalizar};
 use sbf_regras::{Autor, Estado};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::contexto::Contexto;
-use crate::pre_teste::{PreTeste, pre_testar};
+use crate::diagnostico::linhas_parecidas;
+use crate::pre_teste::{PreTeste, pre_testar, pre_testar_versao};
 use crate::texto::cortar;
 
 /// O teto de chamadas de ferramenta por pedido (D11).
@@ -27,13 +31,23 @@ const SEPARADOR_DO_MOTIVO: &str = " · ";
 const MAX_SCRIPT_NA_LEITURA: usize = 1500;
 const MAX_PADROES_NA_LISTA: usize = 20;
 const MAX_TITULOS: usize = 30;
+const MAX_CASAMENTOS: usize = 5;
+const LIMITE_DO_REGEX: usize = 1 << 20;
+
+/// Por que `propor_padrao` não gravou nem ensaiou.
+enum Falha {
+    Erro(String),
+    /// Definição idêntica a uma tentativa anterior: recusada sem rodar.
+    Repetida(String),
+}
 
 /// Os nomes das ferramentas de Rita, na ordem em que aparecem para o modelo.
-pub const FERRAMENTAS: [&str; 7] = [
+pub const FERRAMENTAS: [&str; 8] = [
     "ver_item",
     "rastro_do_item",
     "listar_padroes",
     "ver_padrao",
+    "testar_regex",
     "propor_padrao",
     "pre_testar",
     "titulos_da_lista",
@@ -64,6 +78,120 @@ pub struct RascunhoCriado {
     #[serde(default)]
     pub neste_pedido: bool,
     pub pre_teste: PreTeste,
+}
+
+/// Uma definição que Rita ensaiou neste pedido (`propor_padrao` ou `pre_testar` com a definição
+/// inline). Não vira versão no catálogo: só a que passa é gravada, ou, no fim do pedido sem
+/// nenhuma que passe, a melhor delas (uma só).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tentativa {
+    /// A ordem no pedido, a partir de 1.
+    pub numero: usize,
+    pub regra: String,
+    pub nome: String,
+    pub definicao: Definicao,
+    pub script: Option<String>,
+    /// A definição normalizada: duas tentativas com a mesma chave são a mesma.
+    pub chave: String,
+    pub pre_teste: PreTeste,
+}
+
+impl Tentativa {
+    /// O quanto a tentativa avançou: passou > casa o item > menos condições falhando > menos
+    /// campos faltando.
+    fn progresso(&self) -> (bool, bool, Reverse<usize>, Reverse<usize>) {
+        (
+            self.pre_teste.passou,
+            self.pre_teste.item.casa,
+            Reverse(self.pre_teste.item.condicoes_falhando),
+            Reverse(self.pre_teste.item.faltam.len()),
+        )
+    }
+}
+
+/// A definição como chave de comparação: os `contem` normalizados e as listas em ordem
+/// canônica, mais o script.
+fn chave_da_definicao(def: &Definicao, script: Option<&str>) -> String {
+    let mut d = def.clone();
+    for lista in [
+        &mut d.detectar.todos,
+        &mut d.detectar.algum,
+        &mut d.detectar.nenhum,
+    ] {
+        for c in lista.iter_mut() {
+            if let Condicao::Contem(t) = c {
+                *t = normalizar(t);
+            }
+        }
+        lista.sort_by_cached_key(|c| serde_json::to_string(c).unwrap_or_default());
+    }
+    d.obrigatorios.sort();
+    format!(
+        "{}\u{0}{}",
+        serde_json::to_string(&d).unwrap_or_default(),
+        script.map_or("", str::trim)
+    )
+}
+
+/// `\\\\s` (barra dupla antes de uma classe) quase sempre é escape a mais do modelo: o regex
+/// literal que casaria uma barra seguida de `s` não existe em documento. Devolve o regex com
+/// uma barra só, se isso o muda e ele ainda compila.
+fn sem_barras_duplas(regex: &str) -> Option<String> {
+    static DUPLA: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\\\\([sdwSDWbB$.])").unwrap_or_else(|_| unreachable!())
+    });
+    if !DUPLA.is_match(regex) {
+        return None;
+    }
+    let novo = DUPLA
+        .replace_all(regex, |c: &regex::Captures<'_>| format!("\\{}", &c[1]))
+        .into_owned();
+    RegexBuilder::new(&novo)
+        .size_limit(LIMITE_DO_REGEX)
+        .dfa_size_limit(LIMITE_DO_REGEX)
+        .build()
+        .ok()
+        .map(|_| novo)
+}
+
+/// Conserta as barras duplas dos regexes da definição e devolve um aviso por regex mexido.
+fn consertar_barras(def: &mut Definicao) -> Vec<String> {
+    let mut avisos = Vec::new();
+    let mut aviso = |onde: String| {
+        avisos.push(format!(
+            "o regex {onde} veio com barra invertida dupla (`\\\\s`): usei uma só (`\\s`); mande a barra uma vez só"
+        ));
+    };
+    for (nome, e) in &mut def.extrair {
+        if let Some(novo) = sem_barras_duplas(&e.regex) {
+            e.regex = novo;
+            aviso(format!("do campo `{nome}`"));
+        }
+    }
+    for (i, c) in def.detectar.todos.iter_mut().enumerate() {
+        if let Condicao::Regex(p) = c
+            && let Some(novo) = sem_barras_duplas(p)
+        {
+            *p = novo;
+            aviso(format!("da condição todos[{i}]"));
+        }
+    }
+    avisos
+}
+
+/// Um id de padrão a partir do tipo documental (quando o modelo ensaia sem dar `regra`).
+fn id_do_tipo(tipo: &str) -> String {
+    let id: String = tipo
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let id = id.trim_matches('-').to_owned();
+    if id.is_empty() {
+        "padrao".to_owned()
+    } else {
+        id
+    }
 }
 
 /// O `motivo` da versão: o pedido de agora; num refinamento (a conversa já tinha um pedido), o
@@ -120,8 +248,17 @@ pub fn definicoes() -> Vec<sbf_ia::DefinicaoDeFerramenta> {
             }, "required": ["regra"]}),
         ),
         def(
+            "testar_regex",
+            "Roda um regex no texto do item e devolve até 5 casamentos, cada um com a linha onde está e o valor do grupo. Use antes de `propor_padrao` para acertar o regex de um campo; é barato.",
+            json!({"type": "object", "properties": {
+                "regex": {"type": "string", "description": "O regex (sintaxe Rust), com a barra invertida uma vez só: \\d, \\s."},
+                "grupo": {"type": "integer", "description": "Grupo de captura que vale (padrão: 1, ou 0 se o regex não tem grupo)."},
+                "formato": {"type": "string", "enum": ["texto", "centavos", "data", "competencia", "inteiro", "minusculas"], "description": "Opcional: mostra também o valor depois do formato."}
+            }, "required": ["regex"]}),
+        ),
+        def(
             "propor_padrao",
-            "Grava um RASCUNHO de padrão (nunca ativa) e já devolve o pré-teste dele. Se `passou` vier false, corrija e chame de novo com o mesmo `regra`.",
+            "Testa a definição (pré-teste) e SÓ GRAVA o rascunho de padrão se ele passar. Se `passou` vier false, NADA foi gravado: corrija o que o `diagnostico` aponta e chame de novo com o mesmo `regra`. Definição idêntica a uma tentativa anterior é recusada. Nunca ativa.",
             json!({"type": "object", "properties": {
                 "regra": {"type": "string", "description": "Id: minúsculas, dígitos e hífen."},
                 "nome": {"type": "string", "description": "Nome para mostrar (até 120 caracteres)."},
@@ -131,11 +268,13 @@ pub fn definicoes() -> Vec<sbf_ia::DefinicaoDeFerramenta> {
         ),
         def(
             "pre_testar",
-            "Pré-testa uma versão já gravada: o item, os exemplos e os documentos parecidos do cofre. Só leitura.",
+            "Pré-testa e NÃO grava: ou uma versão já gravada (`regra` e `versao`), ou uma `definicao` inline (ensaio). Mostra o item, os exemplos e os documentos parecidos do cofre. Só leitura.",
             json!({"type": "object", "properties": {
                 "regra": {"type": "string"},
-                "versao": {"type": "integer"}
-            }, "required": ["regra", "versao"]}),
+                "versao": {"type": "integer", "description": "Com `regra`: a versão gravada a pré-testar."},
+                "definicao": {"type": "object", "description": "Alternativa a `versao`: a definição a ensaiar, no mesmo formato de `propor_padrao`."},
+                "nome": {"type": "string"}
+            }}),
         ),
         def(
             "titulos_da_lista",
@@ -153,6 +292,9 @@ pub struct EstadoDaSessao {
     pub estourou: bool,
     pub chamadas: Vec<ChamadaFeita>,
     pub rascunhos: Vec<RascunhoCriado>,
+    /// Tudo o que foi ensaiado neste pedido (grave ou não).
+    #[serde(default)]
+    pub tentativas: Vec<Tentativa>,
 }
 
 impl EstadoDaSessao {
@@ -186,6 +328,13 @@ pub struct Sessao {
     estourou: bool,
     pub chamadas: Vec<ChamadaFeita>,
     pub rascunhos: Vec<RascunhoCriado>,
+    pub tentativas: Vec<Tentativa>,
+    /// `encerrar` já rodou.
+    encerrada: bool,
+    /// Uma gravação falhou neste pedido: `encerrar` não tenta de novo por conta própria.
+    gravacao_falhou: bool,
+    /// Avisos da chamada em curso (entram na saída dela como `avisos`).
+    avisos: Vec<String>,
 }
 
 impl std::fmt::Debug for Sessao {
@@ -211,6 +360,10 @@ impl Sessao {
             estourou: false,
             chamadas: Vec::new(),
             rascunhos: Vec::new(),
+            tentativas: Vec::new(),
+            encerrada: false,
+            gravacao_falhou: false,
+            avisos: Vec::new(),
         }
     }
 
@@ -260,7 +413,44 @@ impl Sessao {
             estourou: self.estourou(),
             chamadas: self.chamadas.clone(),
             rascunhos: self.rascunhos.clone(),
+            tentativas: self.tentativas.clone(),
         }
+    }
+
+    /// Retoma o placar de uma sessão que rodou em outro processo (o servidor MCP do `claude -p`
+    /// grava o estado; o processo pai o relê para [`Self::encerrar`]).
+    pub fn restaurar(&mut self, e: EstadoDaSessao) {
+        self.usadas = e.usadas;
+        self.estourou = e.estourou;
+        self.chamadas = e.chamadas;
+        self.rascunhos = e.rascunhos;
+        self.tentativas = e.tentativas;
+    }
+
+    /// A melhor das tentativas que não viraram versão (a que passou, senão a que mais avançou;
+    /// no empate, a mais recente).
+    pub fn melhor_tentativa(&self) -> Option<&Tentativa> {
+        self.tentativas.iter().max_by_key(|t| t.progresso())
+    }
+
+    /// O fim do pedido (o modelo parou ou o teto estourou). Se nenhum rascunho foi gravado
+    /// neste pedido, grava **uma** versão de rascunho com a melhor tentativa, que quase sempre
+    /// não passou: quem chama diz isso ao usuário. Roda uma vez só.
+    ///
+    /// # Errors
+    /// O texto de por que a versão não foi gravada.
+    pub fn encerrar(&mut self) -> Result<(), String> {
+        if std::mem::replace(&mut self.encerrada, true) {
+            return Ok(());
+        }
+        if self.gravacao_falhou || self.rascunhos.iter().any(|r| r.neste_pedido) {
+            return Ok(());
+        }
+        let Some(t) = self.melhor_tentativa().cloned() else {
+            return Ok(());
+        };
+        self.gravar(&t.regra, &t.nome, t.definicao, t.script)
+            .map(|_| ())
     }
 
     /// Executa uma chamada. Conta no teto; acima dele, recusa. Nunca entra em pânico.
@@ -276,12 +466,14 @@ impl Sessao {
             return msg;
         }
         self.usadas += 1;
+        self.avisos.clear();
         let (saida, recusada) = match nome {
             "ver_item" => (self.ver_item(argumentos), false),
             "rastro_do_item" => (self.rastro_do_item(), false),
             "listar_padroes" => (self.listar_padroes(argumentos), false),
             "ver_padrao" => (self.ver_padrao(argumentos), false),
-            "propor_padrao" => (self.propor_padrao(argumentos), false),
+            "testar_regex" => (self.testar_regex(argumentos), false),
+            "propor_padrao" => self.propor_padrao(argumentos),
             "pre_testar" => (self.pre_testar(argumentos), false),
             "titulos_da_lista" => (self.titulos_da_lista(), false),
             outra => (
@@ -293,8 +485,24 @@ impl Sessao {
                 true,
             ),
         };
+        let saida = self.com_avisos(saida);
         self.registrar(numero, nome, argumentos, &saida, recusada);
         saida
+    }
+
+    /// Acrescenta `avisos` à saída (JSON) da chamada, se houve algum.
+    fn com_avisos(&mut self, saida: String) -> String {
+        if self.avisos.is_empty() {
+            return saida;
+        }
+        let avisos = std::mem::take(&mut self.avisos);
+        match serde_json::from_str::<Value>(&saida) {
+            Ok(Value::Object(mut o)) => {
+                o.insert("avisos".to_owned(), json!(avisos));
+                Value::Object(o).to_string()
+            }
+            _ => saida,
+        }
     }
 
     fn registrar(&mut self, numero: usize, nome: &str, args: &Value, saida: &str, recusada: bool) {
@@ -435,103 +643,331 @@ impl Sessao {
         .to_string()
     }
 
+    // ---- testar_regex ----
+
+    fn testar_regex(&mut self, a: &Value) -> String {
+        let Some(padrao) = a.get("regex").and_then(Value::as_str) else {
+            return erro("falta `regex`");
+        };
+        let conserto = sem_barras_duplas(padrao);
+        if conserto.is_some() {
+            self.avisos.push(
+                "o regex veio com barra invertida dupla (`\\\\s`): testei com uma só (`\\s`); mande a barra uma vez só".to_owned(),
+            );
+        }
+        let padrao = conserto.as_deref().unwrap_or(padrao);
+        let Some(texto) = self
+            .ctx
+            .tela
+            .item
+            .texto
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+        else {
+            return erro("este item não tem texto guardado");
+        };
+        let r = match RegexBuilder::new(padrao)
+            .size_limit(LIMITE_DO_REGEX)
+            .dfa_size_limit(LIMITE_DO_REGEX)
+            .build()
+        {
+            Ok(r) => r,
+            Err(e) => return erro(format!("regex inválido: {}", cortar(&e.to_string(), 160))),
+        };
+        let grupos = r.captures_len() - 1;
+        let grupo = match a.get("grupo").and_then(Value::as_u64) {
+            Some(g) => usize::try_from(g).unwrap_or(usize::MAX),
+            None => usize::from(grupos > 0),
+        };
+        if grupo > grupos {
+            return erro(format!(
+                "o regex tem {grupos} grupo(s) de captura e você pediu o grupo {grupo}"
+            ));
+        }
+        let formato = match a.get("formato").and_then(Value::as_str) {
+            Some(f) => match serde_json::from_value::<Formato>(json!(f)) {
+                Ok(f) => Some(f),
+                Err(_) => {
+                    return erro(
+                        "formato desconhecido: use texto, centavos, data, competencia, inteiro ou minusculas",
+                    );
+                }
+            },
+            None => None,
+        };
+        let momento = self.ctx.tela.item.momento.as_deref();
+        let mut total = 0_usize;
+        let mut itens = Vec::new();
+        for caps in r.captures_iter(texto) {
+            total += 1;
+            if itens.len() >= MAX_CASAMENTOS {
+                continue;
+            }
+            let Some(m) = caps.get(grupo) else { continue };
+            let inicio = texto[..m.start()].rfind('\n').map_or(0, |i| i + 1);
+            let fim = texto[m.start()..]
+                .find('\n')
+                .map_or(texto.len(), |i| m.start() + i);
+            let mut item = json!({
+                "linha": cortar(texto[inicio..fim].trim(), 90),
+                "captura": cortar(m.as_str(), 60),
+            });
+            if let Some(f) = formato {
+                match f.aplicar_em(m.as_str().trim(), momento) {
+                    Some(v) => item["valor"] = json!(v.to_string()),
+                    None => {
+                        item["valor"] = Value::Null;
+                        item["motivo"] = json!(cortar(
+                            &f.motivo_da_falha("campo", m.as_str(), momento),
+                            200
+                        ));
+                    }
+                }
+            }
+            itens.push(item);
+        }
+        let mut saida = json!({"casamentos": total, "mostrados": itens.len(), "itens": itens});
+        if total == 0 {
+            let palavras: String = padrao
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+                .collect();
+            let perto = linhas_parecidas(texto, &palavras, 3);
+            saida["dica"] = json!(if perto.is_empty() {
+                "o regex não casa com nada no texto: confira a grafia, use \\s* entre as palavras e não dependa de letras que o OCR troca".to_owned()
+            } else {
+                format!(
+                    "o regex não casa com nada no texto. Linhas com palavras dele: {}",
+                    perto
+                        .iter()
+                        .map(|l| format!("«{l}»"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            });
+        }
+        saida.to_string()
+    }
+
     // ---- propor_padrao / pre_testar ----
 
-    fn propor_padrao(&mut self, a: &Value) -> String {
+    fn propor_padrao(&mut self, a: &Value) -> (String, bool) {
         match self.propor(a) {
-            Ok(s) | Err(s) => s,
+            Ok(s) => (s, false),
+            Err(Falha::Erro(m)) => (erro(m), false),
+            Err(Falha::Repetida(m)) => (erro(m), true),
         }
     }
 
-    fn propor(&mut self, a: &Value) -> Result<String, String> {
-        let texto = |chave: &str, max: usize| -> Result<String, String> {
-            let t = a
-                .get(chave)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .ok_or_else(|| erro(format!("falta `{chave}`")))?;
-            if t.chars().count() > max {
-                return Err(erro(format!("`{chave}` passa de {max} caracteres")));
-            }
-            Ok(t.to_owned())
-        };
-        let regra = texto("regra", 80)?;
-        let nome = texto("nome", MAX_NOME)?;
-        let def_json = a
-            .get("definicao")
-            .ok_or_else(|| erro("falta `definicao`"))?;
+    /// O texto de um argumento, aparado e dentro do limite.
+    fn texto_do_argumento(a: &Value, chave: &str, max: usize) -> Result<String, String> {
+        let t = a
+            .get(chave)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| format!("falta `{chave}`"))?;
+        if t.chars().count() > max {
+            return Err(format!("`{chave}` passa de {max} caracteres"));
+        }
+        Ok(t.to_owned())
+    }
+
+    /// A definição (e o script, se veio) dos argumentos, validada. Nada é gravado.
+    fn ler_definicao(&mut self, a: &Value) -> Result<(Definicao, Option<String>), String> {
+        let def_json = a.get("definicao").ok_or("falta `definicao`")?;
         // Alguns modelos mandam o objeto como texto.
         let def_json = match def_json {
             Value::String(s) => serde_json::from_str::<Value>(s)
-                .map_err(|_| erro("`definicao` precisa ser um objeto JSON"))?,
+                .map_err(|_| "`definicao` precisa ser um objeto JSON".to_owned())?,
             outro => outro.clone(),
         };
-        let definicao: Definicao = serde_json::from_value(def_json).map_err(|e| {
-            erro(format!(
-                "definição inválida: {}",
-                cortar(&e.to_string(), 240)
-            ))
-        })?;
+        let mut definicao: Definicao = serde_json::from_value(def_json)
+            .map_err(|e| format!("definição inválida: {}", cortar(&e.to_string(), 240)))?;
+        self.avisos.extend(consertar_barras(&mut definicao));
         definicao
             .validar()
-            .map_err(|e| erro(cortar(&e.to_string(), 240)))?;
+            .map_err(|e| cortar(&e.to_string(), 240))?;
         let script = a
             .get("script")
             .and_then(Value::as_str)
             .map(str::to_owned)
             .filter(|s| !s.trim().is_empty());
         if let Some(fonte) = &script {
-            self.ctx.executor.verificar(fonte).map_err(|e| {
-                erro(format!(
-                    "o script não compila: {}",
-                    cortar(&e.to_string(), 200)
-                ))
-            })?;
+            self.ctx
+                .executor
+                .verificar(fonte)
+                .map_err(|e| format!("o script não compila: {}", cortar(&e.to_string(), 200)))?;
         }
-        let caminho = self.ctx.catalogo_caminho();
-        if !caminho.is_file() {
-            return Err(erro("não achei o catálogo de padrões do cofre"));
+        Ok((definicao, script))
+    }
+
+    /// Ensaia a definição sobre o item, sem gravar nada, e guarda a tentativa. Uma definição
+    /// idêntica a uma tentativa anterior que não passou é recusada sem rodar.
+    fn ensaiar(
+        &mut self,
+        regra: &str,
+        nome: &str,
+        definicao: &Definicao,
+        script: Option<&str>,
+    ) -> Result<(usize, PreTeste), Falha> {
+        let chave = chave_da_definicao(definicao, script);
+        if let Some(antes) = self
+            .tentativas
+            .iter()
+            .find(|t| t.chave == chave && !t.pre_teste.passou)
+        {
+            let disse = if antes.pre_teste.item.diagnostico.is_empty() {
+                antes.pre_teste.motivo.clone()
+            } else {
+                antes.pre_teste.item.diagnostico.join(" ")
+            };
+            let mude = if antes.pre_teste.item.faltam.is_empty() {
+                "as condições de `detectar` que o diagnóstico aponta".to_owned()
+            } else {
+                format!(
+                    "o regex ou o formato de {}",
+                    antes.pre_teste.item.faltam.join(", ")
+                )
+            };
+            return Err(Falha::Repetida(format!(
+                "definição idêntica à tentativa {}; o pré-teste dela disse: {}; mude {mude} (ou use `testar_regex`) antes de tentar de novo",
+                antes.numero,
+                cortar(&disse, 400)
+            )));
         }
-        // Rede de segurança antes da primeira escrita da sessão (a mesma do MCP).
-        self.backups.registrar(Qual::Regras, caminho.clone());
-        self.backups.antes_de_escrever(Qual::Regras).map_err(erro)?;
-        let mut c = Catalogo::abrir(&caminho).map_err(|_| erro("falha ao abrir os padrões"))?;
+        let c = self.catalogo().map_err(Falha::Erro)?;
         let existente = c
             .regras()
-            .map_err(|_| erro("falha ao ler os padrões"))?
+            .map_err(|_| Falha::Erro("falha ao ler os padrões".to_owned()))?
             .into_iter()
             .find(|r| r.id == regra);
         if let Some(r) = &existente
             && (r.nome != nome || r.tipo_documental != definicao.tipo_documental)
         {
-            return Err(erro(
-                "o padrão já existe com outro nome ou tipo documental: use o mesmo, ou outro id",
+            return Err(Falha::Erro(
+                "o padrão já existe com outro nome ou tipo documental: use o mesmo, ou outro id"
+                    .to_owned(),
             ));
         }
-        let antes = c.versoes(&regra).map(|v| v.len()).unwrap_or(0);
+        let proxima = c
+            .versoes(regra)
+            .map(|v| u32::try_from(v.len()).unwrap_or(u32::MAX).saturating_add(1))
+            .unwrap_or(1);
+        let avulsa = VersaoDeRegra::avulsa(
+            NovaVersao {
+                regra: regra.to_owned(),
+                nome: nome.to_owned(),
+                definicao: definicao.clone(),
+                script: script.map(str::to_owned),
+                autor: Autor::Ia,
+                motivo: self.pedido.clone(),
+            },
+            proxima,
+            Estado::Rascunho,
+        )
+        .map_err(|e| Falha::Erro(cortar(&e.to_string(), 200)))?;
+        let pre = pre_testar_versao(&self.ctx, &c, &avulsa, &self.pedido).map_err(Falha::Erro)?;
+        let numero = self.tentativas.len() + 1;
+        self.tentativas.push(Tentativa {
+            numero,
+            regra: regra.to_owned(),
+            nome: nome.to_owned(),
+            definicao: definicao.clone(),
+            script: script.map(str::to_owned),
+            chave,
+            pre_teste: pre.clone(),
+        });
+        Ok((numero, pre))
+    }
+
+    /// A saída de um ensaio que não gravou nada.
+    fn saida_do_ensaio(numero: usize, pre: &PreTeste, passou_por_propor: bool) -> String {
+        let mut v = pre.para_o_modelo_json();
+        if let Some(o) = v.as_object_mut() {
+            o.remove("versao");
+            o.insert("gravado".to_owned(), json!(false));
+            o.insert("tentativa".to_owned(), json!(numero));
+            o.insert(
+                "aviso".to_owned(),
+                json!(if pre.passou && !passou_por_propor {
+                    "passou, mas NADA foi gravado (foi só um ensaio): chame `propor_padrao` com esta mesma definição para gravar o rascunho"
+                } else {
+                    "NADA foi gravado: este foi só um ensaio. Corrija o que o `diagnostico` aponta e chame `propor_padrao` de novo; uma definição idêntica é recusada"
+                }),
+            );
+        }
+        v.to_string()
+    }
+
+    fn propor(&mut self, a: &Value) -> Result<String, Falha> {
+        let regra = Self::texto_do_argumento(a, "regra", 80).map_err(Falha::Erro)?;
+        let nome = Self::texto_do_argumento(a, "nome", MAX_NOME).map_err(Falha::Erro)?;
+        let (definicao, script) = self.ler_definicao(a).map_err(Falha::Erro)?;
+        let (numero, pre) = self.ensaiar(&regra, &nome, &definicao, script.as_deref())?;
+        if !pre.passou {
+            return Ok(Self::saida_do_ensaio(numero, &pre, true));
+        }
+        self.gravar(&regra, &nome, definicao, script).map_err(|e| {
+            self.gravacao_falhou = true;
+            Falha::Erro(e)
+        })
+    }
+
+    /// Grava a versão-rascunho (com o backup antes da primeira escrita e o rótulo de autoria),
+    /// pré-testa a versão gravada e a põe no placar. Devolve a saída para o modelo.
+    fn gravar(
+        &mut self,
+        regra: &str,
+        nome: &str,
+        definicao: Definicao,
+        script: Option<String>,
+    ) -> Result<String, String> {
+        let caminho = self.ctx.catalogo_caminho();
+        if !caminho.is_file() {
+            return Err("não achei o catálogo de padrões do cofre".to_owned());
+        }
+        // Rede de segurança antes da primeira escrita da sessão (a mesma do MCP).
+        self.backups.registrar(Qual::Regras, caminho.clone());
+        self.backups.antes_de_escrever(Qual::Regras)?;
+        let mut c =
+            Catalogo::abrir(&caminho).map_err(|_| "falha ao abrir os padrões".to_owned())?;
+        let existente = c
+            .regras()
+            .map_err(|_| "falha ao ler os padrões".to_owned())?
+            .into_iter()
+            .find(|r| r.id == regra);
+        if let Some(r) = &existente
+            && (r.nome != nome || r.tipo_documental != definicao.tipo_documental)
+        {
+            return Err(
+                "o padrão já existe com outro nome ou tipo documental: use o mesmo, ou outro id"
+                    .to_owned(),
+            );
+        }
+        let antes = c.versoes(regra).map(|v| v.len()).unwrap_or(0);
         let versao = c
             .salvar_rascunho(NovaVersao {
-                regra: regra.clone(),
-                nome: nome.clone(),
+                regra: regra.to_owned(),
+                nome: nome.to_owned(),
                 definicao,
                 script,
                 autor: Autor::Ia,
                 motivo: self.pedido.clone(),
             })
-            .map_err(|e| erro(cortar(&e.to_string(), 200)))?;
-        let criou = c.versoes(&regra).map(|v| v.len()).unwrap_or(0) > antes;
+            .map_err(|e| cortar(&e.to_string(), 200))?;
+        let criou = c.versoes(regra).map(|v| v.len()).unwrap_or(0) > antes;
         if criou {
             // O rótulo do autor não é "se der": sem ele o rascunho fica sem dono visível. O erro
             // sobe para o modelo e para a tela.
-            self.rotular(&mut c, &regra, versao.versao)?;
+            self.rotular(&mut c, regra, versao.versao)?;
         }
-        let pre = pre_testar(&self.ctx, &c, &regra, versao.versao).map_err(erro)?;
+        let pre = pre_testar_versao(&self.ctx, &c, &versao, &self.pedido)?;
         let saida = pre.para_o_modelo();
         self.guardar(RascunhoCriado {
-            regra,
+            regra: regra.to_owned(),
             versao: versao.versao,
-            nome,
+            nome: nome.to_owned(),
             criou,
             neste_pedido: true,
             pre_teste: pre,
@@ -544,10 +980,10 @@ impl Sessao {
     fn rotular(&self, c: &mut Catalogo, regra: &str, versao: u32) -> Result<(), String> {
         let rotulo = format!("assistente ({})", self.modelo);
         let falha = || {
-            erro(format!(
+            format!(
                 "o rascunho `{}` v{versao} foi gravado, mas o rótulo de autoria não: confira o histórico dele antes de usar",
                 cortar(regra, 60)
-            ))
+            )
         };
         c.rotular_autoria(regra, versao, &rotulo)
             .map_err(|_| falha())?;
@@ -577,8 +1013,14 @@ impl Sessao {
     }
 
     fn pre_testar(&mut self, a: &Value) -> String {
+        if a.get("definicao").is_some_and(|d| !d.is_null()) {
+            return match self.ensaio_inline(a) {
+                Ok(s) => s,
+                Err(Falha::Erro(m) | Falha::Repetida(m)) => erro(m),
+            };
+        }
         let Some(regra) = a.get("regra").and_then(Value::as_str) else {
-            return erro("falta `regra`");
+            return erro("falta `regra` e `versao` (ou `definicao` para um ensaio)");
         };
         let Some(versao) = a
             .get("versao")
@@ -611,6 +1053,17 @@ impl Sessao {
             }
             Err(e) => erro(e),
         }
+    }
+
+    /// `pre_testar` com a definição inline: um ensaio, sem gravar.
+    fn ensaio_inline(&mut self, a: &Value) -> Result<String, Falha> {
+        let (definicao, script) = self.ler_definicao(a).map_err(Falha::Erro)?;
+        let regra = Self::texto_do_argumento(a, "regra", 80)
+            .unwrap_or_else(|_| id_do_tipo(&definicao.tipo_documental));
+        let nome = Self::texto_do_argumento(a, "nome", MAX_NOME)
+            .unwrap_or_else(|_| cortar(&definicao.tipo_documental, MAX_NOME));
+        let (numero, pre) = self.ensaiar(&regra, &nome, &definicao, script.as_deref())?;
+        Ok(Self::saida_do_ensaio(numero, &pre, false))
     }
 
     // ---- titulos_da_lista ----
