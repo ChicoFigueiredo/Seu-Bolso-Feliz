@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -12,8 +12,9 @@ use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
     Analista, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram, Dados,
-    Indexador, LeitorDeImagens, ResumoDaNuvem, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoGmail,
-    ResumoDoIndice, ResumoDoOcr, ResumoDoTelegram, ResumoDosPontos, Triador, Worker,
+    Indexador, LeitorDeImagens, ReconhecedorDePastas, ResumoDaNuvem, ResumoDaTriagem,
+    ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice, ResumoDoOcr, ResumoDoTelegram,
+    ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -619,4 +620,39 @@ fn telegram_minutos_tem_padrao_15_e_zero_desliga() {
         .com_telegram(Box::new(TelegramFalso(n.clone())));
     w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
     assert_eq!(n.get(), 0);
+}
+
+struct ReconhecedorFalso(Rc<RefCell<Vec<String>>>);
+impl ReconhecedorDePastas for ReconhecedorFalso {
+    fn reconhecer(&mut self, caminho: &std::path::Path, _: &AtomicBool) -> Result<(), Falha> {
+        let nome = caminho.file_name().unwrap().to_string_lossy().into_owned();
+        self.0.borrow_mut().push(nome);
+        Ok(())
+    }
+}
+
+#[test]
+fn so_o_arquivo_que_o_vigia_acabou_de_indexar_passa_pelo_reconhecimento() {
+    let c = cenario();
+    std::fs::write(c.raiz.join("antigo.pdf"), "boleto ficticio antigo").unwrap();
+    let vistos = Rc::new(RefCell::new(Vec::new()));
+    let mut w = Worker::novo(c.dados.clone(), config(&c), None, None)
+        .unwrap()
+        .com_reconhecimento_das_pastas(Box::new(ReconhecedorFalso(vistos.clone())));
+    let nao = AtomicBool::new(false);
+    // A reconciliação inicial acha o arquivo antigo, mas não o reconhece (não enfileira o
+    // acervo inteiro).
+    w.passo(agora(), Duration::from_millis(10), &nao);
+    assert_eq!(origens(&c), 1);
+    assert!(vistos.borrow().is_empty());
+    // O que chega depois, pelo vigia, passa pelo reconhecimento.
+    std::fs::write(c.raiz.join("novo.pdf"), "boleto ficticio novo").unwrap();
+    for _ in 0..40 {
+        w.passo(agora(), Duration::from_millis(100), &nao);
+        if !vistos.borrow().is_empty() {
+            break;
+        }
+    }
+    assert_eq!(vistos.borrow().as_slice(), ["novo.pdf"]);
+    w.encerrar();
 }

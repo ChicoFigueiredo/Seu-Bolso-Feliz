@@ -164,7 +164,10 @@ impl AppDoInventario {
                 let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
                     .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
                 if let Ok(r) = reconhecedor {
-                    janela.ligar_reconhecedor(std::sync::Arc::new(r));
+                    // Arrastar também cai na Caixa de entrada.
+                    janela.ligar_reconhecedor(std::sync::Arc::new(
+                        r.com_fila(sbf_inventario::caixa_de_entrada::Origem::Arrastado),
+                    ));
                 }
                 janela.ferramentas = Some(f);
                 // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
