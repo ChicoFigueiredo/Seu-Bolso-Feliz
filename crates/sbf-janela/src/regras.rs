@@ -156,6 +156,28 @@ impl FonteDasRegras {
         self.catalogo()?.regras().map_err(erro)
     }
 
+    /// A marca de cada documento pedido (padrões que casaram e se a última decisão foi
+    /// Ambíguo), numa consulta em lote. `entradas` são os sha256 dos achados. Só entram no
+    /// mapa as entradas com alguma marca.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn marcas(
+        &self,
+        entradas: &[String],
+    ) -> Result<BTreeMap<String, sbf_regras::marcacao::Marca>, String> {
+        self.catalogo()?.marcas(entradas).map_err(erro)
+    }
+
+    /// Grava a execução e a decisão de uma leitura (como o reconhecimento faz). Serve aos
+    /// testes e à demonstração, que precisam de documentos já reconhecidos.
+    ///
+    /// # Errors
+    /// O texto do erro do catálogo.
+    pub fn registrar_leitura(&self, leitura: &sbf_regras::Leitura) -> Result<(), String> {
+        self.catalogo()?.registrar_execucao(leitura).map_err(erro)
+    }
+
     /// As regras com versão ativa que acertaram o bastante seguidas (D4): `(regra, versão)`.
     ///
     /// # Errors

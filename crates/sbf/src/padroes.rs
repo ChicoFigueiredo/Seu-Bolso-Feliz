@@ -371,7 +371,7 @@ mod testes {
         assert_eq!(marca(&c, "doc2"), CorDaMarca::Ambar);
         // A versão antiga não foi refeita.
         let cat = Catalogo::abrir(&c.dados.cofre.join(ARQUIVO_DAS_REGRAS)).expect("catálogo");
-        assert_eq!(cat.ponto_da_passada(&a).expect("ponto") > 0, true);
+        assert!(cat.ponto_da_passada(&a).expect("ponto") > 0);
         assert_eq!(p.lote(&nao()).expect("lote").lidos, 0);
     }
 
