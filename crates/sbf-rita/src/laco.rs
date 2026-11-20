@@ -126,6 +126,11 @@ impl Rita {
         &self.ctx
     }
 
+    /// A tela mudou (área, filtro, lista) sem o item mudar: o próximo pedido vê a nova.
+    pub fn trocar_tela(&mut self, tela: crate::contexto::DadosDaTela) {
+        self.ctx.tela = tela;
+    }
+
     /// Quantas mensagens a conversa tem (a janela mostra "nova conversa" quando zera).
     pub fn mensagens(&self) -> usize {
         self.mensagens.len()

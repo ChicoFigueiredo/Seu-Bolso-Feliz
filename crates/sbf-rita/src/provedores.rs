@@ -294,6 +294,58 @@ impl GuardaDeProvedores for GuardaEmMemoria {
     }
 }
 
+/// Uma guarda com a configuração em memória: o painel pergunta a cada quadro e o Chaveiro
+/// (D-Bus, arquivo cifrado) só é lido na primeira vez e depois de uma gravação. As chaves
+/// passam direto.
+pub struct ComCache {
+    por_baixo: Arc<dyn GuardaDeProvedores>,
+    config: Mutex<Option<ConfiguracaoDeRita>>,
+}
+
+impl std::fmt::Debug for ComCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComCache").finish_non_exhaustive()
+    }
+}
+
+impl ComCache {
+    pub fn nova(por_baixo: Arc<dyn GuardaDeProvedores>) -> Self {
+        Self {
+            por_baixo,
+            config: Mutex::new(None),
+        }
+    }
+}
+
+impl GuardaDeProvedores for ComCache {
+    fn ler(&self) -> ConfiguracaoDeRita {
+        let mut c = self.config.lock().unwrap_or_else(PoisonError::into_inner);
+        c.get_or_insert_with(|| self.por_baixo.ler()).clone()
+    }
+
+    fn gravar(&self, c: &ConfiguracaoDeRita) -> Result<(), String> {
+        self.por_baixo.gravar(c)?;
+        *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(c.clone());
+        Ok(())
+    }
+
+    fn chave(&self, id: &str) -> Option<Segredo> {
+        self.por_baixo.chave(id)
+    }
+
+    fn final_da_chave(&self, id: &str) -> Option<String> {
+        self.por_baixo.final_da_chave(id)
+    }
+
+    fn guardar_chave(&self, id: &str, chave: Segredo) -> Result<(), String> {
+        self.por_baixo.guardar_chave(id, chave)
+    }
+
+    fn apagar_chave(&self, id: &str) -> Result<(), String> {
+        self.por_baixo.apagar_chave(id)
+    }
+}
+
 /// Um provedor pronto para usar.
 pub enum ProvedorDaRita {
     /// Rita roda o laço e o provedor responde um passo por vez.
@@ -420,6 +472,20 @@ mod testes {
         assert_eq!(g.final_da_chave("x").as_deref(), Some("7890"));
         g.apagar_chave("x").expect("apagar");
         assert!(g.chave("x").is_none());
+    }
+
+    #[test]
+    fn o_cache_so_le_de_baixo_uma_vez_e_atualiza_ao_gravar() {
+        let baixo = Arc::new(GuardaEmMemoria::default());
+        let cache = ComCache::nova(baixo.clone());
+        assert_eq!(cache.ler().provedores.len(), 2);
+        let mut c = ConfiguracaoDeRita::inicial();
+        c.provedores.pop();
+        baixo.gravar(&c).expect("gravar por baixo");
+        // Mudou por baixo, mas o cache ainda tem a leitura de antes.
+        assert_eq!(cache.ler().provedores.len(), 2);
+        cache.gravar(&c).expect("gravar");
+        assert_eq!(cache.ler().provedores.len(), 1);
     }
 
     #[test]
