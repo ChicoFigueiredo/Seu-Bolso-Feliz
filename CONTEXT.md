@@ -106,7 +106,7 @@ _Avoid_: template, tipo de compromisso (tipo é natureza ou grupo)
 **Cálculo** (de um compromisso):
 O script que, a partir dos parâmetros do modelo e dos valores do compromisso, dá o previsto
 de um mês (a diária vezes as sextas-feiras do mês). Um ajuste digitado num mês ("6 diárias")
-vale só para aquele mês e fica no rastro. Diferente da regra de reconhecimento: o cálculo
+vale só para aquele mês e fica no rastro. Diferente do padrão de reconhecimento: o cálculo
 diz quanto deve ser; a regra reconhece o que aconteceu.
 _Avoid_: fórmula, regra de cálculo, script de compromisso
 
@@ -238,8 +238,8 @@ cada lugar onde o conteúdo foi achado, e um documento tem várias.
 _Avoid_: origem (para este sentido), fonte, source
 
 **Sem padrão de reconhecimento**:
-O documento novo que nenhuma regra nem leitor casou (estados Não reconhecido e Protegido por
-senha). Fica na seção de mesmo nome de A triar, onde se cria a regra a partir do cartão e se
+O documento novo que nenhum padrão de reconhecimento nem leitor casou (estados Não reconhecido e Protegido por
+senha). Fica na seção de mesmo nome de A triar, onde se cria o padrão a partir do cartão e se
 reconhece de novo; se passar a casar, sai de A triar e entra na Caixa de entrada.
 _Avoid_: não classificado, órfão, unmatched
 
@@ -287,24 +287,45 @@ _Avoid_: reconciliation, match, dedup
 
 ## Reconhecimento
 
-**Regra de reconhecimento**:
+**Padrão de reconhecimento**:
 Instrução versionada que diz como reconhecer um tipo de documento ou registro, quais
 campos tirar dele e o que propor. Muda sem recompilar o sbf e só vale depois que o
 usuário ativa a versão. Uma versão nova recomeça como **ativa** (só propõe); depois de 5
 propostas aceitas seguidas, sem correção, o sbf sugere torná-la **consolidada**, e só o
-usuário aprova. Uma regra consolidada concilia sozinha, mas apenas com as três provas
-exatas e sempre com Desfazer; uma rejeição, um Desfazer ou uma versão nova a devolve a
-ativa. Nasce de três jeitos: escrita no editor, rascunho montado a partir de uma correção
-na caixa de entrada, ou proposta pela IA — e nenhum desses a ativa.
-_Avoid_: padrão, plugin, template, parser, alerta (alerta avisa; regra de reconhecimento
-reconhece)
+usuário aprova. Um padrão consolidado concilia sozinho, mas apenas com as três provas
+exatas e sempre com Desfazer; uma rejeição, um Desfazer ou uma versão nova o devolve ao
+estado ativo. Nasce de três jeitos: escrito no editor, rascunho montado a partir de uma correção
+na caixa de entrada, ou proposto pela IA ou pelo assistente — e nenhum desses o ativa.
+_Avoid_: regra de reconhecimento (nome antigo, até 2026-11-20), plugin, template, parser,
+alerta (alerta avisa; padrão de reconhecimento reconhece)
 
 **Script**:
-Trecho curto em Lua anexado a uma regra de reconhecimento para calcular ou transformar
+Trecho curto em Lua anexado a um padrão de reconhecimento para calcular ou transformar
 campos — conferir o IRRF de um contracheque, montar a competência de uma rubrica. Só lê o
 que recebe e devolve uma proposta; nunca grava, paga, concilia nem acessa arquivo, rede ou
 banco.
 _Avoid_: plugin, extensão, roteiro (roteiro é o caminho de um site), macro
+
+**Rita**:
+O assistente de IA da janela, num painel ao lado do item selecionado. Lê só o que está na
+tela, responde sobre isso e, por enquanto, só mexe em padrões de reconhecimento: cria o
+rascunho, faz o pré-teste e explica por que um padrão venceu. Quem ativa é o usuário. Pode
+rodar numa IA local ou em qualquer provedor escolhido no Chaveiro. Diferente da triagem por
+IA, que roda em lote e só sugere classificação.
+_Avoid_: agente, chat, copiloto, bot
+
+**Pré-teste**:
+O ensaio de um padrão de reconhecimento antes de ativá-lo: roda sobre o documento em mãos,
+sobre os exemplos e sobre os documentos do cofre com o mesmo tipo de arquivo, só com o texto
+já guardado. Mostra quantos casariam, com quais padrões empataria e os campos tirados. Não
+grava nada.
+_Avoid_: dry-run, ensaio
+
+**Casou** (marca do documento):
+Um documento casou com um padrão quando o padrão o reconheceu em algum momento, mesmo que
+depois tenha sido desativado. Na lista: verde claro se algum padrão casou, âmbar se mais de
+um casou e discordam (Ambíguo), sem cor se nenhum casou.
+_Avoid_: match, bateu
 
 ## Inventário
 
