@@ -27,7 +27,7 @@ use sbf_triagem::agente::{Agente, rodar_ciclo_com};
 use sbf_triagem::rodada::Progresso;
 use sbf_worker::estado::{EstadoDoWorker, agora, texto_da_barra};
 use sbf_worker::laco::{
-    ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
+    ArquivoNovo, ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
     ResumoDeMensageiros, Triador, Worker, carregar_config,
 };
 use sbf_worker::registro::Falha;
@@ -409,7 +409,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
 }
 
 /// O reconhecimento dos arquivos novos das pastas vigiadas: o `ReconhecedorDoCofre` com as
-/// regras, sem IA, com a origem `pasta` (Caixa de entrada). Monta uma vez, na primeira
+/// regras, sem IA, com o canal da pasta (Caixa de entrada). Monta uma vez, na primeira
 /// chegada, porque abrir o chaveiro e as regras custa e a maioria dos passos não tem arquivo.
 struct ReconhecimentoDasPastas {
     dados: Dados,
@@ -426,18 +426,38 @@ impl ReconhecimentoDasPastas {
 }
 
 impl sbf_worker::laco::ReconhecedorDePastas for ReconhecimentoDasPastas {
-    fn reconhecer(&mut self, caminho: &Path, cancelar: &AtomicBool) -> Result<(), Falha> {
-        use sbf_reconhecimento::Reconhecedor as _;
+    fn reconhecer(&mut self, a: &ArquivoNovo, cancelar: &AtomicBool) -> Result<(), Falha> {
+        use sbf_inventario::caixa_de_entrada::{Canal, Chegada};
         if self.reconhecedor.is_none() {
             let chaveiro = sbf_chaveiro::Chaveiro::abrir_na_pasta_padrao().ok();
             let r = crate::reconhecer::montar(&self.dados.cofre, chaveiro, false)
                 .map_err(|_| Falha::Externo)?;
-            self.reconhecedor = Some(r.com_fila(sbf_inventario::caixa_de_entrada::Origem::Pasta));
+            self.reconhecedor = Some(r);
         }
         let Some(r) = self.reconhecedor.as_ref() else {
             return Err(Falha::Outra);
         };
-        r.reconhecer(caminho, &mut |_| {}, cancelar)
+        // A pasta do celular tem a fonte `celular` no `worker.json`; as outras são pastas.
+        let chegada = Chegada {
+            canal: Canal::da_fonte_da_pasta(&a.fonte),
+            reabrir: false,
+        };
+        let nome = a
+            .caminho
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // O original sumiu desde que foi indexado: a cópia do acervo ainda serve; sem ela, a
+        // Caixa de entrada guarda a falha (Precisa revisar), e o achado não é tentado de novo.
+        let caminho = if a.caminho.is_file() {
+            a.caminho.clone()
+        } else if let Ok(c) = r.arquivo_do_conteudo(&a.sha256) {
+            c
+        } else {
+            r.registrar_falha_da_leitura(chegada, &a.sha256, &nome);
+            return Err(Falha::Disco);
+        };
+        r.reconhecer_chegada(chegada, &caminho, &mut |_| {}, cancelar)
             .map(|_| ())
             .map_err(|e| match e {
                 sbf_reconhecimento::ErroDoReconhecimento::Banco(_) => Falha::Banco,

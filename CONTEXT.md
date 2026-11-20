@@ -231,6 +231,12 @@ que o reconhecimento **reconheceu** (Pronto, Precisa revisar, Possível duplicid
 decidem as sugestões de ligação ao planejamento. O que ele não reconheceu vai para A triar.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
 
+**Canal** (da Caixa de entrada):
+Por onde o documento chegou **da primeira vez** (Telegram, Gmail, Celular, Pasta, Arrastado,
+linha de comando). Um só por documento, na lista "Chegou por". Não é a **Origem**: Origem é
+cada lugar onde o conteúdo foi achado, e um documento tem várias.
+_Avoid_: origem (para este sentido), fonte, source
+
 **Sem padrão de reconhecimento**:
 O documento novo que nenhuma regra nem leitor casou (estados Não reconhecido e Protegido por
 senha). Fica na seção de mesmo nome de A triar, onde se cria a regra a partir do cartão e se

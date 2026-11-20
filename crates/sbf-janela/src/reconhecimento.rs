@@ -297,7 +297,7 @@ impl Janela {
             return;
         }
         // O dock volta para os cartões do arrastar.
-        self.largar_o_foco_da_fila();
+        self.largar_o_foco_da_caixa_de_entrada();
         let mut pastas = 0usize;
         let mut aceitos = 0usize;
         for caminho in caminhos {

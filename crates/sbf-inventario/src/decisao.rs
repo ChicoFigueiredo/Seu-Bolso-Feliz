@@ -507,6 +507,7 @@ fn campo_estatico(texto: &str) -> ResultadoDeComando<&'static str> {
         CRIADO,
         ITEM,
         APROVADO_EM,
+        CAIXA_ENTRADA,
     ]
     .into_iter()
     .find(|c| *c == texto)

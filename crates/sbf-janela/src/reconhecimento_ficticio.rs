@@ -282,7 +282,7 @@ pub fn reconhecedor_de_demonstracao(fonte: Option<&FonteDasRegras>) -> Reconhece
 pub fn ligar_na_demonstracao(janela: &mut Janela) {
     let fonte = janela.regras.fonte().cloned();
     let reconhecedor = Arc::new(reconhecedor_de_demonstracao(fonte.as_ref()));
-    janela.ligar_fila(Arc::new(fila_de_demonstracao(&*reconhecedor)));
+    janela.ligar_caixa_de_entrada(Arc::new(caixa_de_entrada_de_demonstracao(&*reconhecedor)));
     janela.ligar_reconhecedor(reconhecedor);
 }
 
@@ -297,46 +297,48 @@ pub const NOME_DO_RECIBO_SEM_PADRAO: &str = "foto-recibo-oficina.jpg";
 
 /// A Caixa de entrada fictícia da demonstração: o contracheque (Telegram), o comprovante de
 /// Pix (Gmail), o caso ambíguo (pasta) e uma foto sem padrão (celular).
-pub fn fila_de_demonstracao(r: &dyn Reconhecedor) -> crate::caixa_de_entrada::FilaFicticia {
-    use crate::caixa_de_entrada::{FilaFicticia, entrada_ficticia};
-    use sbf_inventario::caixa_de_entrada::{Estado, Origem};
-    let mut fila = FilaFicticia::nova();
+pub fn caixa_de_entrada_de_demonstracao(
+    r: &dyn Reconhecedor,
+) -> crate::caixa_de_entrada::CaixaDeEntradaFicticia {
+    use crate::caixa_de_entrada::{CaixaDeEntradaFicticia, entrada_ficticia};
+    use sbf_inventario::caixa_de_entrada::{Canal as CanalDaCaixa, Estado};
+    let mut caixa = CaixaDeEntradaFicticia::nova();
     let linhas = [
         (
             NOME_DO_CONTRACHEQUE,
             "2026-11-20T12:10:00.000Z",
-            Origem::Telegram,
+            CanalDaCaixa::Telegram,
             Estado::Pronto,
         ),
         (
             NOME_DO_PIX,
             "2026-11-20T09:42:00.000Z",
-            Origem::Gmail,
+            CanalDaCaixa::Gmail,
             Estado::Pronto,
         ),
         (
             NOME_DO_AMBIGUO,
             "2026-11-19T21:03:00.000Z",
-            Origem::Pasta,
+            CanalDaCaixa::Pasta,
             Estado::PrecisaRevisar,
         ),
     ];
-    for (nome, chegou, origem, estado) in linhas {
+    for (nome, chegou, canal, estado) in linhas {
         // Sem o catálogo de regras o Pix e o ambíguo caem no contracheque: não entram.
         let res = resultado_de(r, nome)
             .filter(|res| res.sha256 == crate::demonstracao::hash_do_nome(nome));
         if let Some(res) = res {
-            let (tipo, resumo) = sbf_reconhecimento::fila::tipo_e_resumo(&res);
+            let (tipo, resumo) = sbf_reconhecimento::caixa_de_entrada::tipo_e_resumo(&res);
             let e = entrada_ficticia(
                 &res.sha256,
                 nome,
                 chegou,
-                origem,
+                canal,
                 tipo.as_deref(),
                 &resumo.unwrap_or_default(),
                 estado,
             );
-            fila = fila.com(e, res);
+            caixa = caixa.com(e, res);
         }
     }
     let sha = crate::demonstracao::hash_do_nome(NOME_DO_RECIBO_SEM_PADRAO);
@@ -365,10 +367,10 @@ pub fn fila_de_demonstracao(r: &dyn Reconhecedor) -> crate::caixa_de_entrada::Fi
         &sha,
         NOME_DO_RECIBO_SEM_PADRAO,
         "2026-11-20T10:30:00.000Z",
-        Origem::Celular,
+        CanalDaCaixa::Celular,
         None,
         "nenhum leitor local reconheceu o documento",
         Estado::NaoReconhecido,
     );
-    fila.com(e, res)
+    caixa.com(e, res)
 }

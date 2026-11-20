@@ -30,6 +30,7 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 use sbf_coleta::pastas::{self, Contadores, Opcoes, Varredor, Vigia};
+use sbf_inventario::caixa_de_entrada;
 
 use crate::config::{Config, hora_local};
 use crate::estado::{EstadoDoWorker, UltimaColeta, agora};
@@ -247,17 +248,32 @@ pub trait Triador {
     fn ciclo(&mut self, lote: usize, cancelar: &AtomicBool) -> Result<ResumoDaTriagem, Falha>;
 }
 
+/// Um arquivo novo de uma pasta vigiada, a reconhecer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArquivoNovo {
+    /// O sha256 do conteúdo (já indexado no inventário).
+    pub sha256: String,
+    pub caminho: PathBuf,
+    /// A fonte da pasta no `worker.json` (`celular` é o espelho do celular).
+    pub fonte: String,
+}
+
 /// O reconhecimento de um arquivo que chegou numa pasta vigiada (o real é o
-/// `ReconhecedorDoCofre` com a origem `pasta`, montado no `sbf`): o resultado entra na Caixa
-/// de entrada. Só o vigia chama (arquivo que acabou de aparecer); a reconciliação, que
-/// repassa a pasta inteira, não: ela não pode enfileirar milhares de achados antigos.
+/// `ReconhecedorDoCofre` com o canal da pasta, montado no `sbf`): o resultado entra na Caixa
+/// de entrada. Quem chama: o vigia (arquivo que acabou de aparecer) e a reconciliação, **só
+/// para os achados novos que ela indexou e que ainda não têm linha na Caixa de entrada**
+/// (o que chegou com o vigia parado). Nunca o acervo antigo.
 pub trait ReconhecedorDePastas {
     /// Reconhece um arquivo novo.
     ///
     /// # Errors
     /// A categoria da falha.
-    fn reconhecer(&mut self, caminho: &Path, cancelar: &AtomicBool) -> Result<(), Falha>;
+    fn reconhecer(&mut self, arquivo: &ArquivoNovo, cancelar: &AtomicBool) -> Result<(), Falha>;
 }
+
+/// Quantos achados novos a reconciliação reconhece por pasta e por volta (o resto fica para a
+/// próxima: o laço não pode ficar preso num lote grande).
+const LOTE_DE_PENDENTES: u32 = 50;
 
 /// O que uma atualização do índice local fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -497,7 +513,11 @@ impl Worker {
 
     fn banco(&mut self) -> Resultado<&Connection> {
         if self.conn.is_none() {
-            self.conn = Some(banco::abrir(&self.dados.banco)?);
+            let conn = banco::abrir(&self.dados.banco)?;
+            // A Caixa de entrada existe desde aqui: só o que for achado depois passa pelo
+            // reconhecimento da reconciliação (o acervo antigo não).
+            caixa_de_entrada::garantir_tabela(&conn)?;
+            self.conn = Some(conn);
         }
         self.conn.as_ref().ok_or(crate::Erro::Configuracao)
     }
@@ -547,7 +567,7 @@ impl Worker {
             }
         }
         for (fonte, (raiz, arquivos)) in por_fonte {
-            let mut novos_arquivos: Vec<PathBuf> = Vec::new();
+            let mut novos_arquivos: Vec<ArquivoNovo> = Vec::new();
             let resultado = (|| -> Resultado<Contadores> {
                 let varredura = self.varredura_do_vigia(&fonte, &raiz)?;
                 let cofre = self.dados.cofre.clone();
@@ -556,8 +576,14 @@ impl Worker {
                 for a in &arquivos {
                     let destino =
                         pastas::indexar_arquivo(conn, &cofre, &fonte, varredura, a, &mut c)?;
-                    if destino == pastas::Destino::Novo {
-                        novos_arquivos.push(a.clone());
+                    if destino == pastas::Destino::Novo
+                        && let Some(sha256) = caixa_de_entrada::sha_da_origem_local(conn, a)?
+                    {
+                        novos_arquivos.push(ArquivoNovo {
+                            sha256,
+                            caminho: a.clone(),
+                            fonte: fonte.clone(),
+                        });
                     }
                 }
                 Ok(c)
@@ -570,26 +596,55 @@ impl Worker {
                         avisados: arquivos.len(),
                     });
                     self.coletou("pastas", c.novos, agora_);
-                    self.reconhecer_os_novos(&novos_arquivos);
+                    self.reconhecer_os_novos(&novos_arquivos, &AtomicBool::new(false));
                 }
                 Err(_) => self.falhou("vigia", Falha::Banco),
             }
         }
     }
 
-    /// Os arquivos que o vigia acabou de indexar passam pelo reconhecimento (e entram na
-    /// Caixa de entrada). Uma falha de um arquivo não para os outros.
-    fn reconhecer_os_novos(&mut self, arquivos: &[PathBuf]) {
+    /// Os arquivos novos passam pelo reconhecimento (e entram na Caixa de entrada). Uma
+    /// falha de um arquivo não para os outros.
+    fn reconhecer_os_novos(&mut self, arquivos: &[ArquivoNovo], cancelar: &AtomicBool) {
         let Some(mut r) = self.reconhecedor_de_pastas.take() else {
             return;
         };
-        let nao_cancelar = AtomicBool::new(false);
         for a in arquivos {
-            if let Err(f) = r.reconhecer(a, &nao_cancelar) {
+            if cancelar.load(Ordering::Relaxed) {
+                break;
+            }
+            if let Err(f) = r.reconhecer(a, cancelar) {
                 self.falhou("reconhecimento", f);
             }
         }
         self.reconhecedor_de_pastas = Some(r);
+    }
+
+    /// Os achados novos que a reconciliação indexou e que ainda não têm linha na Caixa de
+    /// entrada (o vigia estava parado quando eles chegaram).
+    fn reconhecer_os_pendentes(&mut self, fonte: &str, cancelar: &AtomicBool) {
+        if self.reconhecedor_de_pastas.is_none() {
+            return;
+        }
+        let pendentes = match self.banco().and_then(|c| {
+            Ok(caixa_de_entrada::pendentes_de_reconhecer(
+                c,
+                fonte,
+                LOTE_DE_PENDENTES,
+            )?)
+        }) {
+            Ok(p) => p,
+            Err(_) => return self.falhou("reconhecimento", Falha::Banco),
+        };
+        let arquivos: Vec<ArquivoNovo> = pendentes
+            .into_iter()
+            .map(|p| ArquivoNovo {
+                sha256: p.sha256,
+                caminho: PathBuf::from(p.caminho),
+                fonte: fonte.to_owned(),
+            })
+            .collect();
+        self.reconhecer_os_novos(&arquivos, cancelar);
     }
 
     fn coletou(&mut self, origem: &str, novos: u64, agora_: u64) {
@@ -636,6 +691,7 @@ impl Worker {
                         erros: c.erros,
                     });
                     self.coletou("pastas", c.novos, agora_);
+                    self.reconhecer_os_pendentes(&p.fonte, cancelar);
                 }
                 Err(_) => self.falhou("reconciliacao", Falha::Banco),
             }

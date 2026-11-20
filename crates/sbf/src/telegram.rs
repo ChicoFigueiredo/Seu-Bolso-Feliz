@@ -135,7 +135,7 @@ pub fn coletar_agora(
     let mut reconhecedor = ReconhecedorDoSbf {
         r: ReconhecedorDoCofre::novo(cofre, segredos, None)
             .com_regras(crate::script::executor_de_script().ok())
-            .com_fila(sbf_inventario::caixa_de_entrada::Origem::Telegram),
+            .com_caixa_de_entrada(sbf_inventario::caixa_de_entrada::Canal::Telegram, false),
         cancelar: AtomicBool::new(false),
     };
     let arquivo_do_estado = pasta.join(ARQUIVO_DO_ESTADO);
