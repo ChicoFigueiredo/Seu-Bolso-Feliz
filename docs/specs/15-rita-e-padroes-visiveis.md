@@ -82,8 +82,9 @@ Esta spec traz quatro coisas:
   - `rastro_do_item`: as execuções e o porquê.
   - `listar_padroes`: filtrável, só nome, tipo, estado e condições.
   - `ver_padrao`
-  - `propor_padrao`: grava um **rascunho** pelo caminho que `propor_regra` já usa (autor `assistente (<modelo>)`, motivo = o pedido).
-  - `pre_testar` (D15)
+  - `testar_regex`: roda um regex (e, se pedido, um formato) no texto do item e devolve até 5 casamentos com a linha onde estão; barato, conta no teto como qualquer ferramenta. Barra invertida dupla (`\\s`) é consertada para uma só, com aviso.
+  - `propor_padrao`: pré-testa a definição e **só grava** o **rascunho** (pelo caminho que `propor_regra` já usa; autor `assistente (<modelo>)`, motivo = o pedido) se o pré-teste passar. Tentativa que não passa não vira versão: fica na sessão com o diagnóstico. Se o pedido termina (teto ou o modelo para) sem nenhuma que passe, grava **uma** versão de rascunho com a melhor tentativa (casa o item > menos condições falhando > menos campos faltando) e diz que não passou. Definição idêntica (normalizada) a uma tentativa anterior que não passou é recusada sem rodar ("idêntica à tentativa N; o pré-teste dela disse: ..."), e a recusa conta no teto.
+  - `pre_testar` (D15): ou uma versão gravada, ou uma `definicao` inline (ensaio, sem gravar).
   - `titulos_da_lista`: só quando o usuário pediu.
   - Nenhuma ferramenta ativa, consolida, reverte, vincula, concilia ou escreve fora do `regras.sqlite`.
 - **Segurança:**
@@ -95,6 +96,8 @@ Esta spec traz quatro coisas:
   - **Endereços:** `http://` só em `localhost`, `127.0.0.1` ou `[::1]` (host exato, a mesma leitura estrita na configuração e na conexão); OpenRouter e Anthropic têm endereço fixo (`openrouter.ai`, `api.anthropic.com`) e a configuração não o troca. A chave do OpenRouter é a de Opções → IA (`ia:openrouter`), sem segunda entrada (uma `ia:rita/openrouter` antiga é migrada).
   - Chaves só no Chaveiro, nunca em log nem em erro. A aba IA não lê o Chaveiro a cada quadro, e o provedor é montado na thread do pedido.
 - **Orçamento (D11):** quem impõe o teto de 8 chamadas é o laço, não o modelo. Estourou, Rita responde com o melhor rascunho até ali e diz que parou.
+- **Diagnóstico do pré-teste:** diz o que falta, não só que falta. Condição `contem` que não se cumpre: o trecho literal ausente e até 3 linhas do texto que se parecem (ou "remova esta condição"). Campo cujo regex não acha nada: até 3 linhas candidatas (nome do campo, formato esperado, palavras do pedido) e, para um número, o regex que o casa inteiro. Regex que pega só parte de um número, e identificador que o pedido diz que "determina" mas não está em `detectar`, também reprovam. O item é o exemplo: todo campo declarado tem de sair dele para o pré-teste passar.
+- **Mês sem ano:** os formatos `data` e `competencia` aceitam "25 de Novembro", "Novembro", "novembro de 2026" e "nov/2026". Sem ano, o ano sai do `momento` da entrada (o mais próximo: momento 2026-11-20 e "Novembro" dão 2026-11; momento 2026-01-05 e "Dezembro" dão 2025-12). Sem `momento`, o campo fica sem valor e o motivo diz por quê.
 - **CLI para calibrar** (sem janela): `sbf rita --documento <sha|caminho> "pedido"` imprime cada chamada de ferramenta, o rascunho, o pré-teste, os tokens e o tempo. É assim que o coordenador calibra com o modelo local sobre um documento real, só lendo, e com backup antes de gravar rascunho.
 - **Janela:** o painel "Rita" (dock, destacável) mostra:
   - o campo de pedido e as respostas;
