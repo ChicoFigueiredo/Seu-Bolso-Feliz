@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::JoinHandle;
 
+use crate::padroes_visiveis::PesosDasVersoes;
 use sbf_planejamento::{
     Alteracao, AlvoDoDocumento, Autor, Conciliacao, Planejamento, TipoDeDocumento,
 };
@@ -76,6 +77,11 @@ pub struct Cartao {
     pub edicao: BTreeMap<String, String>,
     /// O Rastro do reconhecimento está aberto no cartão.
     pub rastro_aberto: bool,
+    /// A seção "Por que este padrão?" está aberta no cartão.
+    pub por_que_aberto: bool,
+    /// A prioridade e a especificidade de cada versão que a leitura do motor cita, lidas do
+    /// catálogo quando o reconhecimento termina (o "Por que este padrão?" as mostra).
+    pub pesos_das_regras: PesosDasVersoes,
     /// Um aviso discreto quando a decisão não pôde ser gravada na regra (a ação em si valeu).
     pub aviso_de_retorno: Option<String>,
 }
@@ -100,6 +106,8 @@ impl Cartao {
             corrigindo: false,
             edicao: BTreeMap::new(),
             rastro_aberto: false,
+            por_que_aberto: false,
+            pesos_das_regras: PesosDasVersoes::new(),
             aviso_de_retorno: None,
         }
     }
@@ -499,6 +507,19 @@ impl Janela {
         };
         if let Ok(nomes) = fonte.nomes() {
             c.nomes_das_regras = nomes;
+        }
+        let citadas: Vec<(String, u32)> = c
+            .resultado()
+            .and_then(|r| r.leitura.as_ref())
+            .map(|l| {
+                l.execucoes
+                    .iter()
+                    .map(|e| (e.regra.clone(), e.versao))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Ok(pesos) = fonte.pesos_das_versoes(&citadas) {
+            c.pesos_das_regras = pesos;
         }
     }
 

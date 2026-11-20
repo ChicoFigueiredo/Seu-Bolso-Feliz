@@ -364,6 +364,37 @@ impl Criacao {
 // ---------------------------------------------------------------------------------------
 
 impl Janela {
+    /// O documento contra o qual a área Padrões confere "casam com o documento" (spec 15, D5):
+    /// o cartão da linha escolhida da Caixa de entrada ou, sem ele, o cartão mais recente do
+    /// Reconhecimento que guarda a entrada lida pelo motor.
+    pub(crate) fn documento_de_referencia_dos_padroes(
+        &self,
+    ) -> Option<crate::regras_ui::DocumentoDeReferencia> {
+        let da_caixa = self
+            .caixa_de_entrada
+            .selecionada
+            .is_some()
+            .then_some(self.reconhecimento.da_caixa)
+            .flatten();
+        let indices = da_caixa
+            .into_iter()
+            .chain((0..self.reconhecimento.cartoes.len()).rev());
+        for i in indices {
+            let Some(c) = self.reconhecimento.cartoes.get(i) else {
+                continue;
+            };
+            if let Some(r) = c.resultado()
+                && let Some(entrada) = &r.entrada
+            {
+                return Some(crate::regras_ui::DocumentoDeReferencia {
+                    rotulo: c.nome.clone(),
+                    entrada: entrada.clone(),
+                });
+            }
+        }
+        None
+    }
+
     fn fonte_das_regras(&self) -> Option<FonteDasRegras> {
         self.regras.fonte().cloned()
     }
@@ -1327,6 +1358,11 @@ mod testes_do_painel {
 
     /// Todo o texto que o quadro pintou.
     fn textos_pintados(ctx: &egui::Context, j: &mut Janela) -> Vec<String> {
+        textos_numa_tela_de(ctx, j, 1400.0)
+    }
+
+    /// Como [`textos_pintados`], numa tela mais alta (o que passa do fim da tela não é pintado).
+    fn textos_numa_tela_de(ctx: &egui::Context, j: &mut Janela, altura: f32) -> Vec<String> {
         fn colher(forma: &egui::Shape, fora: &mut Vec<String>) {
             match forma {
                 egui::Shape::Text(t) => fora.push(t.galley.text().to_owned()),
@@ -1337,7 +1373,7 @@ mod testes_do_painel {
         let entrada = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(1000.0, 1400.0),
+                egui::vec2(1000.0, altura),
             )),
             ..egui::RawInput::default()
         };
@@ -1479,5 +1515,95 @@ mod testes_do_painel {
         assert_eq!(v[0].estado, Estado::Rascunho);
         assert_eq!(v[0].definicao.tipo_documental, "boleto");
         assert_eq!(v[0].definicao.detectar.todos.len(), 1);
+    }
+
+    // ---- "Por que este padrão?" (spec 15, D6) ----
+
+    #[test]
+    fn por_que_este_padrao_mostra_o_vencedor_e_o_ambiguo_numa_secao_recolhivel() {
+        let ctx = ctx_pronto();
+        // Sem a animação de abrir, o corpo da seção aparece inteiro no primeiro quadro.
+        ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        let (mut j, _) = janela();
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let _b = soltar(&mut j, NOME_DO_AMBIGUO);
+        // Recolhida: só o título.
+        let textos = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        assert!(contem(&textos, "Por que este padrão?"), "{textos:?}");
+        assert!(!contem(&textos, "Venceu:"), "{textos:?}");
+        j.reconhecimento.cartoes[0].por_que_aberto = true;
+        j.reconhecimento.cartoes[1].por_que_aberto = true;
+        let _ = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        let textos = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        assert!(
+            contem(&textos, "Entrada: documento (application/pdf)"),
+            "{textos:?}"
+        );
+        assert!(
+            contem(
+                &textos,
+                "Venceu: Comprovante Pix · Banco Exemplo · versão 2."
+            ),
+            "{textos:?}"
+        );
+        assert!(
+            contem(&textos, "foi o único padrão que casou"),
+            "{textos:?}"
+        );
+        // O ambíguo: os dois padrões, o campo em que discordam e o que cada um lê.
+        assert!(
+            contem(&textos, "Ambíguo: 2 padrões empataram"),
+            "{textos:?}"
+        );
+        assert!(
+            contem(&textos, "discordam em o tipo documental"),
+            "{textos:?}"
+        );
+        assert!(contem(&textos, "lê comprovante-pix"), "{textos:?}");
+        assert!(contem(&textos, "lê pix-agendado"), "{textos:?}");
+        assert!(
+            contem(&textos, "prioridade 0 · especificidade 2"),
+            "{textos:?}"
+        );
+    }
+
+    #[test]
+    fn os_pesos_do_cartao_vem_do_catalogo() {
+        let (mut j, _) = janela();
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let c = &j.reconhecimento.cartoes[0];
+        let peso = c.pesos_das_regras.get(&(PIX.to_owned(), 2)).expect("peso");
+        assert_eq!((peso.prioridade, peso.especificidade), (0, 2));
+    }
+
+    #[test]
+    fn o_documento_de_referencia_e_o_do_cartao_mais_recente_com_a_entrada() {
+        let (mut j, _) = janela();
+        assert!(j.documento_de_referencia_dos_padroes().is_none());
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let _b = soltar(&mut j, NOME_DO_AMBIGUO);
+        let d = j.documento_de_referencia_dos_padroes().expect("documento");
+        assert_eq!(d.rotulo, NOME_DO_AMBIGUO);
+        assert!(d.entrada.texto.is_some());
+        // O filtro "casam agora" da área Padrões confere contra ele.
+        j.regras.definir_documento(Some(d));
+        j.regras
+            .definir_filtro(crate::padroes_visiveis::FiltroDePadroes {
+                casam: crate::padroes_visiveis::CasamComODocumento::Agora,
+                ..Default::default()
+            });
+        let ids: Vec<String> = j
+            .regras
+            .padroes_filtrados()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "comprovante-pix-banco-exemplo",
+                "pix-agendado-banco-exemplo"
+            ]
+        );
     }
 }
