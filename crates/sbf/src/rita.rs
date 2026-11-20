@@ -20,7 +20,7 @@ use sbf_ia::{
     ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, ErroDeIa,
     MODELO_LOCAL_PADRAO, NaturezaDoCusto,
 };
-use sbf_rita::cofre::{achar_pelo_prefixo, nome_e_mime, texto_guardado};
+use sbf_rita::cofre::{achar_pelo_prefixo, momento_do_documento, nome_e_mime, texto_guardado};
 use sbf_rita::{
     ClaudeDeRita, Contexto, DadosDaTela, Evento, GuardaDeProvedores, ProvedorDaRita, Relatorio,
     Rita, entrada_de_documento,
@@ -149,12 +149,16 @@ fn entrada_do_documento(cofre: &Path, doc: &str) -> Result<sbf_regras::Entrada, 
             return Err("este arquivo não tem texto guardado no inventário (rode `sbf reconhecer` antes) e não é .txt".to_owned());
         };
         let (nome_inv, mime_inv) = nome_e_mime(cofre, &sha).unwrap_or((None, None));
-        return Ok(entrada_de_documento(
+        let mut e = entrada_de_documento(
             &sha,
             nome.as_deref().or(nome_inv.as_deref()),
             mime_inv.as_deref().or(Some(mime)),
             Some(&texto),
-        ));
+        );
+        // O inventário primeiro; o arquivo solto que ele não conhece vale pela data no disco.
+        e.momento = momento_do_documento(cofre, &sha)
+            .or_else(|| meta.modified().ok().map(sbf_coleta::pastas::iso_de));
+        return Ok(e);
     }
     let prefixo = doc.to_ascii_lowercase();
     if prefixo.len() < 6 || !prefixo.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -174,12 +178,9 @@ fn entrada_do_documento(cofre: &Path, doc: &str) -> Result<sbf_regras::Entrada, 
         return Err("este achado não tem texto guardado (rode `sbf reconhecer` antes)".to_owned());
     };
     let (nome, mime) = nome_e_mime(cofre, sha).unwrap_or((None, None));
-    Ok(entrada_de_documento(
-        sha,
-        nome.as_deref(),
-        mime.as_deref(),
-        Some(&texto),
-    ))
+    let mut e = entrada_de_documento(sha, nome.as_deref(), mime.as_deref(), Some(&texto));
+    e.momento = momento_do_documento(cofre, sha);
+    Ok(e)
 }
 
 fn escolher_provedor(l: &Linha) -> Result<ProvedorDaRita, String> {

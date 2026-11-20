@@ -158,6 +158,7 @@ fn resultado_pelo_motor(fonte: &FonteDasRegras, nome: &str, texto: &str) -> Opti
         Some(texto),
         Canal::Arrastado,
         None,
+        None,
     );
     let leitura = motor.ler(&entrada);
     catalogo.registrar_execucao(&leitura).ok()?;
@@ -348,6 +349,7 @@ pub fn caixa_de_entrada_de_demonstracao(
         "image/jpeg",
         Some("RECIBO OFICINA EXEMPLO servico 12/11/2026 R$ 320,00"),
         Canal::Arrastado,
+        None,
         None,
     );
     let res = Resultado {
