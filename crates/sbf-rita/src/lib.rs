@@ -19,6 +19,7 @@ pub mod pre_teste;
 pub mod prompt;
 pub mod provedores;
 pub mod registro;
+pub(crate) mod texto;
 
 pub use claude::ClaudeDeRita;
 pub use cofre::{FonteDeSimilares, SimilaresDoCofre, SimilaresFixos};

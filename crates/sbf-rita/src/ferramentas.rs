@@ -6,7 +6,7 @@
 //! ferramenta fora da lista também é recusada (e conta).
 
 use sbf_mcp::backup::{Backups, Qual};
-use sbf_regras::catalogo::{Catalogo, NovaVersao, VersaoDeRegra};
+use sbf_regras::catalogo::{Catalogo, NovaVersao};
 use sbf_regras::definicao::{Condicao, Definicao};
 use sbf_regras::{Autor, Estado};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use crate::contexto::Contexto;
 use crate::pre_teste::{PreTeste, pre_testar};
+use crate::texto::cortar;
 
 /// O teto de chamadas de ferramenta por pedido (D11).
 pub const MAXIMO_DE_CHAMADAS: usize = 8;
@@ -57,15 +58,6 @@ pub struct RascunhoCriado {
     /// `false`: já existia uma versão igual (nada novo foi gravado).
     pub criou: bool,
     pub pre_teste: PreTeste,
-}
-
-fn cortar(t: &str, max: usize) -> String {
-    if t.chars().count() <= max {
-        return t.to_owned();
-    }
-    let mut s: String = t.chars().take(max).collect();
-    s.push('…');
-    s
 }
 
 fn erro(m: impl AsRef<str>) -> String {
@@ -663,9 +655,4 @@ fn condicoes_curtas(d: &Definicao) -> String {
         ));
     }
     cortar(&partes.join(" e "), 160)
-}
-
-/// O alvo para os testes e a tela: a versão como o catálogo a guardou.
-pub fn versao_do_catalogo(c: &Catalogo, regra: &str, versao: u32) -> Option<VersaoDeRegra> {
-    c.versao(regra, versao).ok()
 }
