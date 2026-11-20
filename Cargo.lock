@@ -5984,6 +5984,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbf-rita"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "rmcp",
+ "rusqlite",
+ "sbf-chaveiro",
+ "sbf-ia",
+ "sbf-inventario",
+ "sbf-mcp",
+ "sbf-regras",
+ "sbf-script",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "sbf-roteiros"
 version = "0.1.0"
 dependencies = [
