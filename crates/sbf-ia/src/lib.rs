@@ -26,7 +26,9 @@ pub use chat_completions::{
     ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, ENDERECO_DO_OPENROUTER,
     MODELO_LOCAL_PADRAO,
 };
-pub use claude_cli::{ClaudeCli, SaidaDoClaudeComFerramentas, ServidorMcp};
+pub use claude_cli::{
+    ClaudeCli, SaidaDoClaudeComFerramentas, ServidorMcp, resolver_claude, resolver_claude_em,
+};
 pub use conversa::{
     ChamadaDeFerramenta, DefinicaoDeFerramenta, Mensagem, NaturezaDoCusto, PedidoDeConversa,
     ProvedorDeConversa, RespostaDeConversa,

@@ -497,8 +497,7 @@ pub fn construir(
             )?)))
         }
         TipoDeProvedor::ClaudeCli => {
-            let cli = ClaudeCli::do_sistema()
-                .or_else(claude_do_usuario)
+            let cli = ClaudeCli::do_ambiente()
                 .ok_or_else(|| ErroDeIa::Indisponivel("o `claude` não foi encontrado".to_owned()))?
                 .com_modelos(p.modelo.clone(), p.modelo.clone())
                 .com_prazo(std::time::Duration::from_secs(600));
@@ -509,13 +508,6 @@ pub fn construir(
             )))
         }
     }
-}
-
-/// `~/.local/bin/claude`, onde o instalador oficial o põe.
-fn claude_do_usuario() -> Option<ClaudeCli> {
-    let casa = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
-    let caminho = casa.join(".local/bin/claude");
-    caminho.is_file().then(|| ClaudeCli::novo(caminho))
 }
 
 #[cfg(test)]

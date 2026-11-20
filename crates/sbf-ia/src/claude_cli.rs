@@ -52,6 +52,34 @@ pub struct ClaudeCli {
     pasta_base: Option<PathBuf>,
 }
 
+/// O `claude` por um caminho absoluto de confiança: primeiro `~/.local/bin` (a instalação
+/// padrão), depois cada pasta absoluta do `PATH` do usuário, depois as pastas do sistema.
+/// É a única busca do binário `claude`: a triagem, Rita e a CLI a usam.
+pub fn resolver_claude() -> Option<PathBuf> {
+    let casa = std::env::var_os("HOME").map(PathBuf::from);
+    let path = std::env::var_os("PATH");
+    resolver_claude_em(casa.as_deref(), path.as_deref())
+}
+
+/// O miolo testável de [`resolver_claude`].
+pub fn resolver_claude_em(casa: Option<&Path>, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let mut candidatos: Vec<PathBuf> = Vec::new();
+    if let Some(casa) = casa.filter(|c| c.is_absolute()) {
+        candidatos.push(casa.join(".local/bin/claude"));
+    }
+    if let Some(path) = path {
+        candidatos.extend(
+            std::env::split_paths(path)
+                .filter(|p| p.is_absolute())
+                .map(|p| p.join("claude")),
+        );
+    }
+    if let Some(sistema) = sbf_processo::localizar("claude") {
+        candidatos.push(sistema);
+    }
+    candidatos.into_iter().find(|c| sbf_processo::confiavel(c))
+}
+
 impl ClaudeCli {
     /// `caminho` é o binário `claude` (absoluto, em pasta que ninguém mais grava). Modelos
     /// pelos apelidos do Claude Code: `haiku` (rápido) e `sonnet` (forte).
@@ -64,6 +92,12 @@ impl ClaudeCli {
             espera_do_limite: ESPERA_PADRAO_DO_LIMITE,
             pasta_base: None,
         }
+    }
+
+    /// O `claude` pelo caminho de confiança que [`resolver_claude`] acha (a instalação do
+    /// usuário em `~/.local/bin`, o `PATH` e as pastas do sistema). É a busca única do app.
+    pub fn do_ambiente() -> Option<Self> {
+        resolver_claude().map(Self::novo)
     }
 
     /// Procura `claude` nas pastas do sistema (nunca pelo `PATH` do usuário). Quem instalou

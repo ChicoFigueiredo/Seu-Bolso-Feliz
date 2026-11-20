@@ -200,13 +200,7 @@ fn escolher_provedor(l: &Linha) -> Result<ProvedorDaRita, String> {
             Ok(ProvedorDaRita::Conversa(Arc::new(p)))
         }
         "claude" | "claude-cli" => {
-            let cli = sbf_ia::ClaudeCli::do_sistema()
-                .or_else(|| {
-                    std::env::var_os("HOME")
-                        .map(|h| PathBuf::from(h).join(".local/bin/claude"))
-                        .filter(|p| p.is_file())
-                        .map(sbf_ia::ClaudeCli::novo)
-                })
+            let cli = sbf_ia::ClaudeCli::do_ambiente()
                 .ok_or_else(|| "o `claude` não foi encontrado".to_owned())?;
             let modelo = l.modelo.clone().unwrap_or_else(|| "sonnet".to_owned());
             let cli = cli

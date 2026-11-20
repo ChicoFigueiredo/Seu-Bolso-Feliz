@@ -17,6 +17,7 @@ use sbf_regras::{Decisao, Entrada, Leitura, ResultadoDaExecucao};
 use serde::{Deserialize, Serialize};
 
 use crate::contexto::Contexto;
+use crate::texto::cortar;
 
 /// Quantos documentos parecidos o pré-teste examina, no máximo.
 pub const MAXIMO_DE_PARECIDOS: usize = 150;
@@ -202,15 +203,6 @@ impl PreTeste {
         }
         v.to_string()
     }
-}
-
-fn cortar(t: &str, max: usize) -> String {
-    if t.chars().count() <= max {
-        return t.to_owned();
-    }
-    let mut s: String = t.chars().take(max).collect();
-    s.push('…');
-    s
 }
 
 /// O título de uma entrada para listas: o nome do arquivo, ou `documento <8 do hash>`.
