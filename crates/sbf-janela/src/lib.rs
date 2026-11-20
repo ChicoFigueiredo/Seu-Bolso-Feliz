@@ -43,6 +43,7 @@ pub mod mudancas;
 pub mod navegacao;
 pub mod nuvens;
 pub mod opcoes_do_worker;
+pub mod padroes_visiveis;
 pub mod pagina;
 pub mod painel;
 pub mod planejamento_ficticio;
