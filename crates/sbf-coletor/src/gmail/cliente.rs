@@ -158,6 +158,16 @@ impl ClienteGmail {
         })
     }
 
+    /// O e-mail da conta autorizada (`users/me/profile`).
+    pub async fn email_da_conta(&self) -> Result<String, ErroDeColeta> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct P {
+            email_address: String,
+        }
+        Ok(self.pedir::<P>("/profile", &[]).await?.email_address)
+    }
+
     pub async fn listar_rotulos(&self) -> Result<Vec<Rotulo>, ErroDeColeta> {
         #[derive(Deserialize)]
         struct R {

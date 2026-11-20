@@ -13,10 +13,47 @@ use sha2::{Digest as _, Sha256};
 
 use crate::erro::{Erro, Resultado};
 
-/// A fonte do Gmail no inventário.
+/// A fonte da primeira conta (a legada, id `gmail`) no inventário.
 pub const FONTE: &str = "gmail";
-/// A pasta, relativa ao cofre, onde os anexos baixados ficam.
+/// A pasta, relativa ao cofre, onde os anexos da conta legada ficam.
 pub const PASTA_DE_ENTRADA: &str = "entrada/gmail";
+/// O id da conta legada (a que já existia antes de haver várias): ela mantém a fonte `gmail`,
+/// a pasta `entrada/gmail/` e as chaves de origem `gmail:<mensagem>:<parte>`, para o que já
+/// está no inventário continuar valendo e não ser baixado de novo.
+pub const ID_LEGADO: &str = "gmail";
+
+/// Onde uma conta de e-mail grava: a fonte do inventário, a pasta de entrada e o prefixo das
+/// chaves de origem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Destino {
+    /// `fonte.id` no inventário.
+    pub fonte: String,
+    /// A pasta relativa ao cofre.
+    pub pasta: String,
+    /// O prefixo da chave de origem (`<prefixo>:<mensagem>:<parte>`).
+    pub prefixo: String,
+}
+
+impl Destino {
+    /// O destino da conta `id`: a legada (`gmail`) como sempre foi; as outras em
+    /// `entrada/email/<id>/`, fonte `email:<id>`.
+    #[must_use]
+    pub fn da_conta(id: &str) -> Self {
+        if id == ID_LEGADO {
+            Self {
+                fonte: FONTE.to_owned(),
+                pasta: PASTA_DE_ENTRADA.to_owned(),
+                prefixo: "gmail".to_owned(),
+            }
+        } else {
+            Self {
+                fonte: format!("email:{id}"),
+                pasta: format!("entrada/email/{id}"),
+                prefixo: format!("email:{id}"),
+            }
+        }
+    }
+}
 const RESPONSAVEL: &str = "sbf-gmail@1";
 
 /// De que mensagem vem o que está sendo gravado.
@@ -61,6 +98,13 @@ pub struct Gravado {
 pub struct Gravador {
     conn: Connection,
     cofre: PathBuf,
+    destino: Destino,
+}
+
+/// O começo do escopo das varreduras de um rótulo: `label:"nome" `.
+#[must_use]
+pub fn prefixo_do_rotulo(nome: &str) -> String {
+    format!("label:\"{}\" ", nome.replace('"', ""))
 }
 
 /// O sha256 em hexadecimal.
@@ -89,7 +133,7 @@ impl Gravador {
     ///
     /// # Errors
     /// [`Erro::Banco`] se não abre.
-    pub fn abrir(cofre: &Path) -> Resultado<Self> {
+    pub fn abrir(cofre: &Path, destino: &Destino) -> Resultado<Self> {
         let banco = cofre.join("inventario.sqlite");
         if !banco.is_file() {
             return Err(Erro::Banco(
@@ -102,31 +146,52 @@ impl Gravador {
         conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
         conn.execute(
             "INSERT OR IGNORE INTO fonte (id, tipo, descricao, escopo)
-             VALUES (?1, 'email', 'Gmail (anexos e avisos por e-mail)', 'dentro')",
-            [FONTE],
+             VALUES (?1, 'email', ?2, 'dentro')",
+            params![
+                destino.fonte,
+                format!("E-mail {} (anexos e avisos)", destino.fonte)
+            ],
         )?;
         Ok(Self {
             conn,
             cofre: cofre.to_path_buf(),
+            destino: destino.clone(),
         })
     }
 
     /// O checkpoint: o `internalDate` (ms) da última mensagem processada em ordem, na última
-    /// varredura que o guardou.
+    /// varredura que o guardou **para este rótulo** (`Some(nome)`: as de escopo
+    /// `label:"nome" ...`) ou para as coletas sem rótulo (`None`).
     ///
     /// # Errors
     /// [`Erro::Banco`].
-    pub fn cursor(&self) -> Resultado<Option<i64>> {
-        let texto: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT cursor FROM varredura
-                  WHERE fonte_id = ?1 AND cursor IS NOT NULL
-                  ORDER BY id DESC LIMIT 1",
-                [FONTE],
-                |l| l.get(0),
-            )
-            .optional()?;
+    pub fn cursor(&self, rotulo: Option<&str>) -> Resultado<Option<i64>> {
+        let texto: Option<String> = match rotulo {
+            Some(nome) => {
+                let prefixo = prefixo_do_rotulo(nome);
+                self.conn
+                    .query_row(
+                        "SELECT cursor FROM varredura
+                          WHERE fonte_id = ?1 AND cursor IS NOT NULL
+                            AND substr(escopo, 1, length(?2)) = ?2
+                          ORDER BY id DESC LIMIT 1",
+                        params![self.destino.fonte, prefixo],
+                        |l| l.get(0),
+                    )
+                    .optional()?
+            }
+            None => self
+                .conn
+                .query_row(
+                    "SELECT cursor FROM varredura
+                      WHERE fonte_id = ?1 AND cursor IS NOT NULL
+                        AND substr(escopo, 1, 7) <> 'label:\"'
+                      ORDER BY id DESC LIMIT 1",
+                    [&self.destino.fonte],
+                    |l| l.get(0),
+                )
+                .optional()?,
+        };
         Ok(texto.and_then(|t| t.parse().ok()))
     }
 
@@ -138,7 +203,7 @@ impl Gravador {
         Ok(self.conn.query_row(
             "INSERT INTO varredura (fonte_id, etapa, escopo, responsavel)
              VALUES (?1, 'E2', ?2, ?3) RETURNING id",
-            params![FONTE, consulta, RESPONSAVEL],
+            params![self.destino.fonte, consulta, RESPONSAVEL],
             |l| l.get(0),
         )?)
     }
@@ -192,7 +257,13 @@ impl Gravador {
             .is_some())
     }
 
-    /// Grava o arquivo em `entrada/gmail/` (se o conteúdo é novo), o achado e a origem.
+    /// O destino desta conta.
+    #[must_use]
+    pub fn destino(&self) -> &Destino {
+        &self.destino
+    }
+
+    /// Grava o arquivo na pasta de entrada da conta (se o conteúdo é novo), o achado e a origem.
     ///
     /// # Errors
     /// [`Erro::Disco`] ou [`Erro::Banco`]; o arquivo recém-criado é apagado se o banco recusa.
@@ -248,7 +319,7 @@ impl Gravador {
                      VALUES (?1, ?2, ?3, 'gmail', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         hash,
-                        FONTE,
+                        self.destino.fonte,
                         varredura,
                         a.chave,
                         a.nome,
@@ -297,7 +368,7 @@ impl Gravador {
         } else {
             seguro.chars().take(120).collect()
         };
-        let relativo = format!("{PASTA_DE_ENTRADA}/{}-{seguro}", &hash[..12]);
+        let relativo = format!("{}/{}-{seguro}", self.destino.pasta, &hash[..12]);
         let destino = self.cofre.join(&relativo);
         let pasta = destino.parent().unwrap_or(&self.cofre);
         std::fs::create_dir_all(pasta)?;

@@ -11,6 +11,12 @@ publish.workspace = true
 sbf-coletor = { path = "../sbf-coletor" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
 sbf-regras = { workspace = true }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+zeroize = { workspace = true }
+serde = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -23,8 +29,7 @@ tokio = { version = "1", features = ["rt", "time", "net"] }
 tempfile = { workspace = true }
 sbf-inventario = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
-zeroize = { workspace = true }
-base64 = "0.22"
+bancada-segredos = { workspace = true, features = ["testes"] }
 
 [lints]
 workspace = true
