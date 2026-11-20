@@ -159,6 +159,16 @@ pub enum Evento<'a> {
         /// A categoria.
         falha: Falha,
     },
+    /// Um passo falhou numa conta específica (e-mail: uma conta com autorização vencida não
+    /// para as outras).
+    FalhouConta {
+        /// O passo.
+        passo: &'static str,
+        /// A categoria.
+        falha: Falha,
+        /// O id da conta (`gmail-2`), nunca o e-mail.
+        conta: &'a str,
+    },
 }
 
 impl fmt::Display for Evento<'_> {
@@ -223,6 +233,11 @@ impl fmt::Display for Evento<'_> {
                 "pontos novos={novos} reabertos={reabertos} fechados={fechados}"
             ),
             Self::Falhou { passo, falha } => write!(f, "falhou passo={passo} causa={falha}"),
+            Self::FalhouConta {
+                passo,
+                falha,
+                conta,
+            } => write!(f, "falhou passo={passo} causa={falha} conta={conta}"),
         }
     }
 }
@@ -354,6 +369,17 @@ mod testes {
         let t = std::fs::read_to_string(&caminho).unwrap();
         assert!(t.contains("vigia fonte=disco:p avisados=3 novos=2"), "{t}");
         assert!(t.contains("falhou passo=nuvem causa=externo"), "{t}");
+        r.registrar(&Evento::FalhouConta {
+            passo: "gmail",
+            falha: Falha::Autorizacao,
+            conta: "gmail-2",
+        })
+        .unwrap();
+        let t = std::fs::read_to_string(&caminho).unwrap();
+        assert!(
+            t.contains("falhou passo=gmail causa=autorizacao conta=gmail-2"),
+            "{t}"
+        );
         assert!(!t.contains('/'), "nenhum caminho: {t}");
     }
 }
