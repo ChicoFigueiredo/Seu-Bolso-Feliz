@@ -4,7 +4,8 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -653,4 +654,62 @@ fn telegram_minutos_tem_padrao_15_e_zero_desliga() {
         .com_telegram(Box::new(TelegramFalso(n.clone())));
     w.passo(agora(), Duration::from_millis(1), &AtomicBool::new(false));
     assert_eq!(n.get(), 0);
+}
+
+// -- O estado aparece logo e não envelhece num passo longo --------------------------------------
+
+/// Um OCR que demora (faz de varredura inicial longa) e avisa quando terminou.
+struct LeitorLento(Arc<AtomicBool>, Duration);
+impl LeitorDeImagens for LeitorLento {
+    fn ler_novas(&mut self, _: &AtomicBool) -> Result<ResumoDoOcr, Falha> {
+        std::thread::sleep(self.1);
+        self.0.store(true, Ordering::Relaxed);
+        Ok(ResumoDoOcr::default())
+    }
+}
+
+#[test]
+fn rodar_grava_o_estado_logo_e_o_renova_durante_um_passo_longo() {
+    let c = cenario();
+    // Um estado velho de outro processo, como o que ficou depois do reinício do serviço.
+    let velho = EstadoDoWorker {
+        pid: 1,
+        ..EstadoDoWorker::default()
+    };
+    std::fs::write(c.dados.estado(), serde_json::to_vec(&velho).unwrap()).unwrap();
+
+    let terminou = Arc::new(AtomicBool::new(false));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_ocr(Box::new(LeitorLento(
+            terminou.clone(),
+            Duration::from_millis(3500),
+        )))
+        .com_batimento(1);
+    let cancelar = AtomicBool::new(false);
+    let estado = c.dados.estado();
+    let mut vistos = std::collections::BTreeSet::new();
+    let mut primeiro_pid = None;
+    std::thread::scope(|s| {
+        let observador = s.spawn(|| {
+            let t0 = std::time::Instant::now();
+            while !terminou.load(Ordering::Relaxed) && t0.elapsed() < Duration::from_secs(15) {
+                if let Some(e) = EstadoDoWorker::ler(&estado)
+                    && e.pid == std::process::id()
+                {
+                    primeiro_pid.get_or_insert(e.pid);
+                    vistos.insert(e.atualizado_em);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            cancelar.store(true, Ordering::Relaxed);
+        });
+        w.rodar(&cancelar);
+        observador.join().unwrap();
+    });
+    assert_eq!(primeiro_pid, Some(std::process::id()), "pid novo logo");
+    assert!(
+        vistos.len() >= 3,
+        "o estado renovou durante o passo longo: {vistos:?}"
+    );
 }

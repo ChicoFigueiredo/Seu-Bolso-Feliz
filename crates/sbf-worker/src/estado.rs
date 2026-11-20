@@ -69,8 +69,14 @@ pub struct EstadoDoWorker {
 /// Falha de disco.
 pub fn escrever_atomico(caminho: &Path, bytes: &[u8]) -> Resultado<()> {
     use std::io::Write as _;
+    // Único por processo e por escrita: o batimento escreve de outra thread.
+    static SEQUENCIA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut tmp = caminho.as_os_str().to_owned();
-    tmp.push(format!(".tmp{}", std::process::id()));
+    tmp.push(format!(
+        ".tmp{}-{}",
+        std::process::id(),
+        SEQUENCIA.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let tmp = std::path::PathBuf::from(tmp);
     {
         let mut o = std::fs::OpenOptions::new();
