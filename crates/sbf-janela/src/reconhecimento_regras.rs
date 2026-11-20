@@ -943,6 +943,7 @@ mod testes_do_painel {
             Some(texto),
             Canal::Arrastado,
             None,
+            None,
         );
         let (rec, leitura) = {
             let mut c = f.catalogo.lock().expect("t");

@@ -58,12 +58,17 @@ fn ler(
         let mime: Option<String> = l.get(1)?;
         let texto: String = l.get(2)?;
         let nome: String = l.get(3)?;
-        Ok(entrada_de_documento(
+        let mut e = entrada_de_documento(
             &sha,
             (!nome.is_empty()).then_some(nome.as_str()),
             mime.as_deref(),
             Some(&texto),
-        ))
+        );
+        // Os parecidos mostram ao modelo como as datas de cada um se completam.
+        e.momento = sbf_inventario::texto::momento_do_achado(conn, &sha)
+            .ok()
+            .flatten();
+        Ok(e)
     })?
     .collect()
 }
@@ -103,6 +108,15 @@ pub fn texto_guardado(cofre: &Path, sha256: &str) -> Option<String> {
         .flatten()
         .map(|t| t.conteudo)
         .filter(|t| !t.trim().is_empty())
+}
+
+/// O momento de um achado (a menor data de origem; sem ela, quando o sbf o indexou): é o que
+/// as regras usam para completar datas sem ano (spec 15).
+pub fn momento_do_documento(cofre: &Path, sha256: &str) -> Option<String> {
+    let conn = abrir(&cofre.join(ARQUIVO_DO_INVENTARIO))?;
+    sbf_inventario::texto::momento_do_achado(&conn, sha256)
+        .ok()
+        .flatten()
 }
 
 /// Nome e MIME de um achado: o primeiro nome de origem e o `mime_type`.

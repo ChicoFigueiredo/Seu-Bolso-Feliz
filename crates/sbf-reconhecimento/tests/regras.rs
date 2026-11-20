@@ -205,8 +205,15 @@ impl Cenario {
         let motor = Motor::das_vigentes(&c, None).expect("motor");
         for i in 0..5 {
             let id = format!("{:064x}", 1000 + i);
-            let e =
-                entrada_do_documento(&id, "x.txt", "text/plain", Some(texto), Canal::Pasta, None);
+            let e = entrada_do_documento(
+                &id,
+                "x.txt",
+                "text/plain",
+                Some(texto),
+                Canal::Pasta,
+                None,
+                None,
+            );
             let Decisao::Reconhecido(rec) = motor.ler(&e).decisao else {
                 panic!("a regra devia reconhecer");
             };
@@ -513,6 +520,7 @@ fn ac_lua_09_telegram_e_pasta_com_o_mesmo_sha_dao_a_mesma_chave() {
             Some(COMPROVANTE),
             canal,
             Some(id),
+            None,
         );
         match motor.ler(&e).decisao {
             Decisao::Reconhecido(rec) => *rec,
@@ -1012,4 +1020,55 @@ fn a_entrada_leva_o_mime_pela_assinatura_e_o_canal_do_cofre() {
     assert_eq!(e.origem.canal, Canal::Cofre);
     assert_eq!(e.mime.as_deref(), Some("text/plain"));
     assert_eq!(e.nome.as_deref(), Some("anotacao.txt"));
+}
+
+const CONTA_DE_AGUA: &str =
+    "Conta de Agua Exemplo\nContrato 998877-6\nVencimento em 25 de Novembro\nValor R$ 89,90\n";
+
+fn regra_da_conta_de_agua() -> NovaVersao {
+    let mut d = Definicao::simples("conta-agua-exemplo", "conta de agua exemplo");
+    d.extrair.insert(
+        "competencia".into(),
+        extracao(
+            r"Vencimento em (\d{1,2} de [A-Za-zç]+)",
+            Formato::Competencia,
+        ),
+    );
+    d.obrigatorios.push("competencia".into());
+    nova("conta-agua-exemplo", d)
+}
+
+/// Spec 15: a competência sem ano ("Vencimento em 25 de Novembro") sai do `momento` do
+/// documento, que o reconhecimento tira do inventário (a menor data de origem).
+#[test]
+fn competencia_sem_ano_usa_o_momento_do_inventario() {
+    let c = cenario();
+    c.instalar(regra_da_conta_de_agua());
+    let r = c.com_regras();
+    let arrastado = c.solto("conta-agua.txt", CONTA_DE_AGUA);
+
+    // A primeira leitura registra o achado e a origem; a data do arquivo passa a ser a do
+    // inventário (a de 18/11, mais antiga que a do arquivo recém-escrito).
+    let primeira = c.rodar(&r, &arrastado);
+    c.conexao()
+        .execute(
+            "UPDATE origem SET local_mtime = '2026-11-18T12:00:00.000Z' WHERE content_hash = ?1",
+            [&primeira.sha256],
+        )
+        .expect("data da origem");
+
+    let segunda = c.rodar(&r, &arrastado);
+    let entrada = segunda.entrada.as_ref().expect("entrada");
+    assert_eq!(
+        entrada.momento.as_deref(),
+        Some("2026-11-18T12:00:00.000Z"),
+        "o momento é a menor data de origem"
+    );
+    let Reconhecido::PelaRegra { reconhecimento } = &segunda.reconhecido else {
+        panic!("a regra devia reconhecer: {:?}", segunda.reconhecido);
+    };
+    assert_eq!(
+        reconhecimento.campos["competencia"].valor,
+        Valor::Competencia("2026-11".into())
+    );
 }

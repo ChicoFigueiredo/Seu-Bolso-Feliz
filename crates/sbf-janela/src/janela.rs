@@ -1350,12 +1350,14 @@ impl Janela {
                 let texto = leitor.texto(&foco).ok().and_then(|t| (*t).clone());
                 let (nome, mime) =
                     sbf_rita::cofre::nome_e_mime(&cofre, &foco.chave).unwrap_or_default();
-                sbf_rita::entrada_de_documento(
+                let mut e = sbf_rita::entrada_de_documento(
                     &foco.chave,
                     nome.as_deref().or(Some(rotulo.as_str())),
                     mime.as_deref(),
                     texto.as_deref(),
-                )
+                );
+                e.momento = sbf_rita::cofre::momento_do_documento(&cofre, &foco.chave);
+                e
             }
             Tipo::Registro => sbf_rita::entrada_de_registro(&foco.chave, &rotulo),
             _ => return None,
