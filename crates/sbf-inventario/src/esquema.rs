@@ -15,3 +15,6 @@ pub const MIGRACAO_2_DECISOES_E_LOTES: &str = include_str!("../sql/0002-decisoes
 
 /// Migração 3: a triagem por IA (spec 09): sugestões, rodadas, o que saiu e o cache.
 pub const MIGRACAO_3_TRIAGEM: &str = include_str!("../sql/0003-triagem.sql");
+
+/// Migração 4: a Caixa de entrada, a fila de reconhecimento dos documentos novos.
+pub const MIGRACAO_4_CAIXA_DE_ENTRADA: &str = include_str!("../sql/0004-caixa-de-entrada.sql");

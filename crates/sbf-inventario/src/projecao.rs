@@ -13,6 +13,7 @@
 //! |---|---|
 //! | achado ou registro / `estado`, `fornecedor`, `categoria`, `tipo`, `document_type`, `data_e_valor` | objeto `{coluna: valor}` com as colunas que mudam |
 //! | achado / `duplicidade`, registro / `conciliacao` | `{"com": id, "existe": bool}` |
+//! | achado / `caixa_entrada` | `{"situacao": "aberta"\|"resolvida"\|"dispensada"}` (resolver, dispensar e reabrir na Caixa de entrada; não muda `estado` nem `decidido_por`) |
 //! | fornecedor / `recorrente` | `{"recorrente": bool}` (só o log; vira compromisso na fatia 3) |
 //! | fornecedor / `regra_senha` | `{"document_type", "estrategia", "ativa": bool ou nulo, "prioridade": número ou nulo}` (`ativa` nulo: a regra não existe; `prioridade` nula: a padrão na regra nova, a mesma na que existe) |
 //! | pendencia / `criada` | a linha da pendência, ou nulo (desfeita: a pendência fecha) |
@@ -54,6 +55,7 @@ pub mod campo {
     pub const ITEM: &str = "item";
     pub const APROVADO_EM: &str = "aprovado_em";
     pub const PROMOVIDO_EM: &str = "promovido_em";
+    pub const CAIXA_ENTRADA: &str = "caixa_entrada";
 }
 
 /// O texto que fecha uma pendência cuja sinalização foi desfeita.
@@ -199,6 +201,7 @@ pub fn ler(
                 json!({"com": com, "existe": relacao_existe(tx, alvo, campo, id, com)?}),
             ))
         }
+        (AlvoTipo::Achado, CAIXA_ENTRADA) => crate::caixa_de_entrada::forma_atual(tx, id).map(Some),
         (AlvoTipo::Pendencia, CRIADA) => ler_pendencia(tx, id),
         (AlvoTipo::Lote, CRIADO) => ler_lote(tx, id),
         (AlvoTipo::Lote, ITEM) => {
@@ -400,6 +403,9 @@ pub fn aplicar(
                 )?;
             }
         }
+        (AlvoTipo::Achado, CAIXA_ENTRADA) => {
+            crate::caixa_de_entrada::aplicar_forma(tx, id, valor, em)?;
+        }
         (AlvoTipo::Pendencia, CRIADA) => match valor {
             Some(v) if !v.is_null() => {
                 let campo_de = |c: &str| v.get(c).map(para_sql).transpose();
@@ -594,6 +600,7 @@ pub fn recalcular_decidido_por(
         .ok_or_else(|| erro_de_banco("alvo sem tabela"))?;
     let mut consulta = tx.prepare_cached(
         "SELECT id, desfaz, autor FROM decisao WHERE alvo_tipo = ?1 AND alvo_id = ?2
+          AND campo <> 'caixa_entrada'
           ORDER BY id DESC",
     )?;
     let linhas = consulta

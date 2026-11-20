@@ -68,7 +68,8 @@ impl Janela {
         if !soltos.is_empty() {
             self.soltar_arquivos(soltos, Some(ctx));
         }
-        if self.tique_do_reconhecimento(Some(ctx)) {
+        let da_caixa = self.tique_da_caixa_de_entrada(Some(ctx));
+        if self.tique_do_reconhecimento(Some(ctx)) || da_caixa {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -86,8 +87,17 @@ impl Janela {
         }
         let ocupado = self.reconhecimento.ocupado();
         let regras_ligadas = self.regras.ligada();
+        // Com uma linha da Caixa de entrada escolhida, o painel mostra só o cartão dela; sem
+        // ela, os cartões do arrastar (o da fila fica guardado, fora de vista).
+        let da_fila = self.cartao_da_caixa_de_entrada_em_foco();
+        let reservado = self.reconhecimento.da_caixa;
+        let visivel = |i: usize| match da_fila {
+            Some(f) => i == f,
+            None => Some(i) != reservado,
+        };
         let cartoes = &mut self.reconhecimento.cartoes;
-        if cartoes.is_empty() {
+        let a_mostrar = (0..cartoes.len()).filter(|i| visivel(*i)).count();
+        if a_mostrar == 0 {
             ui.add_space(6.0);
             let texto = if self.reconhecimento.ligado() {
                 "Solte um arquivo na janela para reconhecer. O original fica onde está, e nada muda no planejamento sem o seu clique."
@@ -98,11 +108,18 @@ impl Janela {
             return;
         }
         ui.horizontal(|ui| {
+            if da_fila.is_some() {
+                ui.label(
+                    RichText::new("Da Caixa de entrada")
+                        .color(p.tinta_suave)
+                        .size(12.0),
+                );
+                return;
+            }
             ui.label(
                 RichText::new(format!(
-                    "{} arquivo{}",
-                    cartoes.len(),
-                    if cartoes.len() == 1 { "" } else { "s" }
+                    "{a_mostrar} arquivo{}",
+                    if a_mostrar == 1 { "" } else { "s" }
                 ))
                 .color(p.tinta_suave)
                 .size(12.0),
@@ -123,6 +140,9 @@ impl Janela {
         }
         area.show(ui, |ui| {
             for (i, c) in cartoes.iter_mut().enumerate() {
+                if !visivel(i) {
+                    continue;
+                }
                 cartao(ui, &p, i, c, regras_ligadas, &mut pedidos);
                 ui.add_space(6.0);
             }
@@ -264,6 +284,7 @@ fn cartao(
                     leitura: r.leitura.as_ref(),
                     nomes: nomes_das_regras,
                     regras_ligadas,
+                    sem_padrao: matches!(r.reconhecido, Reconhecido::Nada { .. }),
                 };
                 let mut estado = EdicaoDoCartao {
                     corrigindo,
@@ -275,7 +296,10 @@ fn cartao(
         }
         match &c.situacao {
             SituacaoDoCartao::Pronto(r) => {
-                if let EstadoDoTexto::SemTexto(m) | EstadoDoTexto::Protegido(m) = &r.texto {
+                if let EstadoDoTexto::SemTexto(m)
+                | EstadoDoTexto::Protegido(m)
+                | EstadoDoTexto::Falhou(m) = &r.texto
+                {
                     aviso_com_triangulo(ui, p, m);
                 }
                 for a in &r.avisos {

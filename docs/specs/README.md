@@ -22,6 +22,7 @@ Substituem a pilha de ~54 documentos antigos (agora em [`../_arquivo/`](../_arqu
 | [05-dominio-financeiro](05-dominio-financeiro.md)                 | Núcleo determinístico             | ✅ testado                                                |
 | [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md) | Desktop Rust: inventário          | ⬜ proposta                                               |
 | [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | 🟢 implementada (aceite em 13-motor-regras-lua-aceite.md) |
+| [14-caixa-de-entrada](14-caixa-de-entrada.md)                     | Fila do reconhecimento local      | 🟢 implementada (aceite no próprio arquivo)               |
 
 ## Regras de manutenção (spec-driven)
 

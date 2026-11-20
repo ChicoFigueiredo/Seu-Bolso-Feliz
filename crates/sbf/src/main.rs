@@ -22,6 +22,7 @@
 //! - `sbf --versao`.
 
 mod caixa;
+mod caixa_de_entrada;
 mod canais;
 mod captura;
 mod coletor;

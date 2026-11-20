@@ -1300,7 +1300,8 @@ fn imagem_corrompida_falha_no_ocr_sem_derrubar_o_reconhecimento() {
 
     let (r, vistos) = c.rodar(&c.reconhecedor(None), &f);
 
-    assert!(matches!(ok(r).texto, EstadoDoTexto::SemTexto(_)));
+    // Leitura que falha não é "sem texto": a Caixa de entrada a manda para Precisa revisar.
+    assert!(matches!(ok(r).texto, EstadoDoTexto::Falhou(_)));
     assert!(matches!(
         situacao_de(&vistos, Etapa::ExtrairTexto),
         Situacao::Falhou(_)
