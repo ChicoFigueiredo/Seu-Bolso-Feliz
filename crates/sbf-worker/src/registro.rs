@@ -31,6 +31,9 @@ pub enum Falha {
     Externo,
     /// O provedor de IA não respondeu ou parou.
     Provedor,
+    /// A autorização de uma conta venceu ou foi revogada (Gmail `invalid_grant`): não adianta
+    /// tentar de novo até a pessoa entrar outra vez.
+    Autorizacao,
     /// Outro.
     Outra,
 }
@@ -42,6 +45,7 @@ impl fmt::Display for Falha {
             Self::Disco => "disco",
             Self::Externo => "externo",
             Self::Provedor => "provedor",
+            Self::Autorizacao => "autorizacao",
             Self::Outra => "outra",
         })
     }
@@ -82,11 +86,25 @@ pub enum Evento<'a> {
         /// Itens baixados.
         baixados: usize,
     },
+    /// Coleta do Gmail.
+    Gmail {
+        /// Mensagens lidas.
+        mensagens: usize,
+        /// Conteúdos novos no inventário.
+        novos: usize,
+    },
     /// Coleta de mensageiros.
     Mensageiros {
         /// Mensagens vistas.
         mensagens: usize,
         /// Origens novas.
+        novos: usize,
+    },
+    /// Coleta do Telegram (conversas seguidas).
+    Telegram {
+        /// Conversas consultadas.
+        conversas: usize,
+        /// Arquivos novos.
         novos: usize,
     },
     /// Roteiros agendados executados.
@@ -116,6 +134,17 @@ pub enum Evento<'a> {
         /// Trechos que saíram.
         removidos: usize,
     },
+    /// OCR das imagens novas (só contagens: nem nome nem texto da imagem).
+    Ocr {
+        /// Imagens com texto lido.
+        lidas: usize,
+        /// Imagens sem texto.
+        sem_texto: usize,
+        /// Imagens que não puderam ser lidas.
+        falhas: usize,
+        /// A causa mais comum das falhas (uma palavra: sem caminho nem conteúdo).
+        causa: Option<&'static str>,
+    },
     /// Análise dos pontos de atenção (spec 10).
     Pontos {
         /// Pontos novos.
@@ -127,10 +156,20 @@ pub enum Evento<'a> {
     },
     /// Um passo falhou.
     Falhou {
-        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `triagem`, `estado`).
+        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `telegram`, `triagem`, `estado`).
         passo: &'static str,
         /// A categoria.
         falha: Falha,
+    },
+    /// Um passo falhou numa conta específica (e-mail: uma conta com autorização vencida não
+    /// para as outras).
+    FalhouConta {
+        /// O passo.
+        passo: &'static str,
+        /// A categoria.
+        falha: Falha,
+        /// O id da conta (`gmail-2`), nunca o e-mail.
+        conta: &'a str,
     },
 }
 
@@ -152,8 +191,14 @@ impl fmt::Display for Evento<'_> {
             Self::Nuvem { listados, baixados } => {
                 write!(f, "nuvem listados={listados} baixados={baixados}")
             }
+            Self::Gmail { mensagens, novos } => {
+                write!(f, "gmail mensagens={mensagens} novos={novos}")
+            }
             Self::Mensageiros { mensagens, novos } => {
                 write!(f, "mensageiros mensagens={mensagens} novos={novos}")
+            }
+            Self::Telegram { conversas, novos } => {
+                write!(f, "telegram conversas={conversas} novos={novos}")
             }
             Self::Roteiros {
                 executados,
@@ -176,6 +221,18 @@ impl fmt::Display for Evento<'_> {
                 f,
                 "indice embutidos={embutidos} mantidos={mantidos} removidos={removidos}"
             ),
+            Self::Ocr {
+                lidas,
+                sem_texto,
+                falhas,
+                causa,
+            } => {
+                write!(f, "ocr lidas={lidas} sem_texto={sem_texto} falhas={falhas}")?;
+                match causa {
+                    Some(c) => write!(f, " causa={c}"),
+                    None => Ok(()),
+                }
+            }
             Self::Pontos {
                 novos,
                 reabertos,
@@ -185,6 +242,11 @@ impl fmt::Display for Evento<'_> {
                 "pontos novos={novos} reabertos={reabertos} fechados={fechados}"
             ),
             Self::Falhou { passo, falha } => write!(f, "falhou passo={passo} causa={falha}"),
+            Self::FalhouConta {
+                passo,
+                falha,
+                conta,
+            } => write!(f, "falhou passo={passo} causa={falha} conta={conta}"),
         }
     }
 }
@@ -316,6 +378,17 @@ mod testes {
         let t = std::fs::read_to_string(&caminho).unwrap();
         assert!(t.contains("vigia fonte=disco:p avisados=3 novos=2"), "{t}");
         assert!(t.contains("falhou passo=nuvem causa=externo"), "{t}");
+        r.registrar(&Evento::FalhouConta {
+            passo: "gmail",
+            falha: Falha::Autorizacao,
+            conta: "gmail-2",
+        })
+        .unwrap();
+        let t = std::fs::read_to_string(&caminho).unwrap();
+        assert!(
+            t.contains("falhou passo=gmail causa=autorizacao conta=gmail-2"),
+            "{t}"
+        );
         assert!(!t.contains('/'), "nenhum caminho: {t}");
     }
 }

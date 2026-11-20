@@ -160,6 +160,34 @@ impl Regras {
         p.selecionar(&f, versao);
     }
 
+    /// O catálogo mudou por fora (o MCP escreveu): relê a lista e a regra aberta, sem perder o
+    /// que se digitou, a versão escolhida nem a simulação. A rolagem fica com o egui.
+    pub fn recarregar_de_fora(&mut self) {
+        if self.fonte.is_none() {
+            return;
+        }
+        self.recarregar_lista();
+        let Some(velho) = self.pagina.take() else {
+            return;
+        };
+        let (regra, versao) = (velho.regra.clone(), velho.selecionada);
+        match self.carregar_pagina(&regra, Some(versao)) {
+            Some(mut novo) => {
+                novo.editor = velho.editor;
+                novo.novo = velho.novo;
+                novo.confirmando_ativar = velho.confirmando_ativar;
+                novo.confirmando_consolidar = velho.confirmando_consolidar;
+                if novo.selecionada == velho.selecionada {
+                    novo.simulacao = velho.simulacao;
+                    novo.relatorio = velho.relatorio;
+                }
+                self.pagina = Some(novo);
+            }
+            // A regra sumiu do catálogo: volta para a lista.
+            None => self.pagina = None,
+        }
+    }
+
     fn recarregar_lista(&mut self) {
         let Some(f) = &self.fonte else { return };
         self.lista = Some(f.resumos());

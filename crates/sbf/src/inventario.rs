@@ -108,13 +108,15 @@ impl AppDoInventario {
                 let arquivo_do_plano = self.pasta.join("planejamento.sqlite");
                 if arquivo_do_plano.exists() {
                     match sbf_planejamento::Banco::abrir(&arquivo_do_plano) {
-                        Ok(banco) => janela.ligar_planejamento(Box::new(
-                            sbf_planejamento::PlanejamentoSqlite::novo(
-                                banco,
-                                crate::mcp::saldos_do_cofre(&self.pasta),
-                            )
-                            .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
-                        )),
+                        Ok(banco) => {
+                            janela.ligar_planejamento(Box::new(crate::script::com_calculo(
+                                sbf_planejamento::PlanejamentoSqlite::novo(
+                                    banco,
+                                    crate::mcp::saldos_do_cofre(&self.pasta),
+                                )
+                                .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
+                            )))
+                        }
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }
                 }
@@ -162,14 +164,40 @@ impl AppDoInventario {
                 let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
                     .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
                 if let Ok(r) = reconhecedor {
-                    janela.ligar_reconhecedor(std::sync::Arc::new(r));
+                    // Arrastar também cai na Caixa de entrada (e, sendo ação do usuário,
+                    // reabre o que ele já tinha resolvido).
+                    janela.ligar_reconhecedor(std::sync::Arc::new(r.com_caixa_de_entrada(
+                        sbf_inventario::caixa_de_entrada::Canal::Arrastado,
+                        true,
+                    )));
                 }
+                // A Caixa de entrada do próprio cofre.
+                janela.ligar_caixa_de_entrada(std::sync::Arc::new(
+                    crate::caixa_de_entrada::CaixaDeEntradaDoCofre::nova(
+                        self.pasta.clone(),
+                        f.chaveiro.clone(),
+                    ),
+                ));
                 janela.ferramentas = Some(f);
+                // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
+                // `inventario.sqlite`: a janela percebe e relê o que mostra.
+                janela.vigiar_cofre(&self.pasta);
                 // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
                 // usuário. Nada roda até você clicar em Executar ou em Gravar novo.
                 if let Ok(dados) = sbf_chaveiro::pasta_de_dados_do_app()
                     && sbf_chaveiro::garantir_fora_do_cofre(&dados, &self.pasta).is_ok()
                 {
+                    // Conexões › Telegram, Pluggy e pastas do worker (só estado, mais o
+                    // "Coletar agora" do Telegram).
+                    janela.conexoes.ligar(
+                        self.pasta.clone(),
+                        dados.clone(),
+                        chaveiro_dos_roteiros.clone(),
+                        std::sync::Arc::new(crate::telegram::ColetaDaJanela {
+                            cofre: self.pasta.clone(),
+                            chaveiro: chaveiro_dos_roteiros.clone(),
+                        }),
+                    );
                     janela.roteiros.ligar(
                         crate::roteiros::ambiente(&self.pasta, &dados),
                         Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {

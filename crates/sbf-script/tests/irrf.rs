@@ -134,3 +134,54 @@ fn dados_faltando_pedem_revisao_sem_inventar() {
     assert!(r.revisar && r.campos.is_empty());
     assert_eq!(r.motivos, ["falta o rendimento tributável para o redutor"]);
 }
+
+#[test]
+fn exibir_diz_em_uma_linha_o_que_a_conferencia_concluiu() {
+    let com = |retido: i64| {
+        rodar(
+            json!({"base_irrf_centavos": 600_000, "irrf_retido_centavos": retido,
+                     "rendimento_tributavel_centavos": 600_000}),
+        )
+        .expect("roda")
+    };
+    // Conferido: retido = estimado (56.152).
+    assert_eq!(
+        com(56_152).exibir,
+        ["IRRF conferido ✓ · tabela irrf-2026-01"]
+    );
+    // Um centavo para cima ou para baixo é arredondamento da folha.
+    for retido in [56_151, 56_153] {
+        assert_eq!(
+            com(retido).exibir,
+            ["IRRF conferido ✓ (1 centavo de arredondamento) · tabela irrf-2026-01"],
+            "{retido}"
+        );
+    }
+    // Divergente: só o aviso curto (os valores vêm do Rust).
+    assert_eq!(
+        com(60_000).exibir,
+        ["⚠ IRRF diverge da tabela irrf-2026-01"]
+    );
+    assert_eq!(com(0).exibir, ["⚠ IRRF diverge da tabela irrf-2026-01"]);
+}
+
+#[test]
+fn exibir_quando_nao_deu_para_conferir_traz_o_motivo() {
+    let r = rodar(json!({"irrf_retido_centavos": 100})).expect("roda");
+    assert_eq!(
+        r.exibir,
+        ["IRRF não conferido: falta a base do IRRF no contracheque"]
+    );
+    let r = rodar(json!({"base_irrf_centavos": 500_000, "irrf_retido_centavos": 0})).expect("roda");
+    assert_eq!(
+        r.exibir,
+        ["IRRF não conferido: falta o rendimento tributável para o redutor"]
+    );
+    let r =
+        rodar(json!({"base_irrf_centavos": 600_000, "rendimento_tributavel_centavos": 600_000}))
+            .expect("roda");
+    assert_eq!(
+        r.exibir,
+        ["IRRF não conferido: falta o IRRF retido para conferir"]
+    );
+}

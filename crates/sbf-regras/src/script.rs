@@ -24,12 +24,23 @@
 //! `campos` (nome → valor; nomes terminados em `_centavos` têm de ser inteiros e viram
 //! centavos, outros inteiros viram inteiro, texto `AAAA-MM-DD` em nomes que começam por
 //! `data` ou `vencimento` vira data, o resto vira texto); `revisar` (booleano);
-//! `motivos` e `evidencias` (listas de texto). Qualquer outra coisa é
-//! [`ErroDoScript::Retorno`].
+//! `motivos` e `evidencias` (listas de texto); `exibir` (lista de textos, opcional): linhas
+//! curtas que o script quer mostrar no cartão do Reconhecimento, no máximo
+//! [`MAX_LINHAS_EXIBIR`] linhas de [`MAX_CARACTERES_EXIBIR`] caracteres, só texto (fora
+//! disso é [`ErroDoScript::Retorno`]). Ausente vale lista vazia, então scripts antigos
+//! seguem válidos. `exibir` é só para a tela: não entra na chave de idempotência, não vai
+//! para a tabela `execucao` nem para a proposta gravada (pode conter texto do documento).
+//! Qualquer outra coisa é [`ErroDoScript::Retorno`].
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+
+/// Quantas linhas de `exibir` um script pode devolver.
+pub const MAX_LINHAS_EXIBIR: usize = 5;
+
+/// Quantos caracteres cabem em cada linha de `exibir`.
+pub const MAX_CARACTERES_EXIBIR: usize = 160;
 
 /// Os limites de uma execução. O executor encerra o script (e, no processo filho, o próprio
 /// processo) quando um deles estoura; o motor registra o erro e segue para a próxima
@@ -81,7 +92,56 @@ pub struct RespostaDoScript {
     pub revisar: bool,
     pub motivos: Vec<String>,
     pub evidencias: Vec<String>,
+    /// Linhas curtas para o cartão do Reconhecimento (ver o módulo). Ausente = vazia.
+    #[serde(default)]
+    pub exibir: Vec<String>,
 }
+
+/// Quantos caracteres cabem na `explicacao` de um Cálculo.
+pub const MAX_CARACTERES_EXPLICACAO: usize = 200;
+
+/// Um mês a calcular, dentro de um [`PedidoDeCalculo`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDeCalculo {
+    /// `AAAA-MM`.
+    pub competencia: String,
+    /// Os valores vigentes dos parâmetros do modelo nessa competência (nome → valor).
+    pub parametros: serde_json::Value,
+    /// A quantidade que o usuário digitou só para este mês, se houver.
+    #[serde(default)]
+    pub quantidade_ajustada: Option<i64>,
+}
+
+/// Um pedido de Cálculo em lote (spec do Modelo de compromisso): um script e vários meses.
+///
+/// O script define a função global `calcular(entrada, ajuda)`, com `entrada.competencia`
+/// (`"AAAA-MM"`), `entrada.parametros` (tabela) e `entrada.quantidade_ajustada` (número ou
+/// nil), e devolve `{valor_centavos, quantidade?, explicacao}`. Cada mês roda numa VM nova.
+/// `ajuda` é a mesma das regras mais `dias_da_semana_no_mes(ano, mes, dia_semana)`
+/// (1 = segunda ... 7 = domingo), `nome_do_dia_da_semana(dia_semana)` e `reais(centavos)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PedidoDeCalculo {
+    /// O fonte Luau aprovado (nunca bytecode).
+    pub fonte: String,
+    /// O checksum da versão do Cálculo.
+    pub checksum: String,
+    pub itens: Vec<ItemDeCalculo>,
+    /// Os limites **de cada mês**; o prazo do lote é a soma deles.
+    pub limites: Limites,
+}
+
+/// O previsto de um mês, como o script devolveu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespostaDeCalculo {
+    pub valor_centavos: i64,
+    /// Quantas unidades o cálculo usou (as sextas do mês, as diárias).
+    pub quantidade: Option<i64>,
+    /// Texto curto para o Detalhe ("diária R$ 210,00 × 5 sextas").
+    pub explicacao: String,
+}
+
+/// O resultado de um mês: o script de um mês pode falhar sem derrubar os outros.
+pub type ResultadoDeCalculo = Result<RespostaDeCalculo, ErroDoScript>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "erro", content = "detalhe", rename_all = "snake_case")]
@@ -90,6 +150,8 @@ pub enum ErroDoScript {
     Sintaxe(String),
     #[error("o script não define a função transformar")]
     SemTransformar,
+    #[error("o script não define a função calcular")]
+    SemCalcular,
     #[error("passou do tempo")]
     Tempo,
     #[error("passou do limite de memória")]
@@ -115,6 +177,7 @@ impl ErroDoScript {
         match self {
             Self::Sintaxe(_) => "sintaxe",
             Self::SemTransformar => "sem_transformar",
+            Self::SemCalcular => "sem_calcular",
             Self::Tempo => "tempo",
             Self::Memoria => "memoria",
             Self::Instrucoes => "instrucoes",
@@ -140,6 +203,30 @@ pub trait ExecutorDeScript: Send + Sync + std::fmt::Debug {
     /// # Errors
     /// [`ErroDoScript::Sintaxe`] ou [`ErroDoScript::SemTransformar`].
     fn verificar(&self, fonte: &str) -> Result<(), ErroDoScript>;
+
+    /// Executa `calcular` para cada mês do pedido, na ordem (uma VM nova por mês). Um mês
+    /// que falha vira `Err` na sua posição; o `Err` de fora é o lote inteiro que não rodou.
+    /// O padrão recusa: quem não calcula não sabe.
+    ///
+    /// # Errors
+    /// [`ErroDoScript`] do lote (processo, tamanho do pedido); os de cada mês vêm dentro.
+    fn calcular(&self, pedido: &PedidoDeCalculo) -> Result<Vec<ResultadoDeCalculo>, ErroDoScript> {
+        let _ = pedido;
+        Err(ErroDoScript::Processo(
+            "este executor não faz cálculos".to_owned(),
+        ))
+    }
+
+    /// Só compila e confere que `calcular` existe, sem rodar. O padrão recusa.
+    ///
+    /// # Errors
+    /// [`ErroDoScript::Sintaxe`] ou [`ErroDoScript::SemCalcular`].
+    fn verificar_calculo(&self, fonte: &str) -> Result<(), ErroDoScript> {
+        let _ = fonte;
+        Err(ErroDoScript::Processo(
+            "este executor não faz cálculos".to_owned(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------------------

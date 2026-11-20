@@ -12,6 +12,7 @@
 //! regra; é o desempate da precedência depois da `prioridade`.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ fn esquema_padrao() -> u32 {
 
 fn aplica_padrao() -> Vec<TipoDeEntrada> {
     vec![TipoDeEntrada::Documento]
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn grupo_padrao() -> usize {
@@ -61,6 +66,12 @@ pub struct Definicao {
     /// O script recebe o texto do documento (padrão: não).
     #[serde(default)]
     pub script_le_texto: bool,
+    /// O texto do documento vem de OCR (imagem): antes de detectar e extrair, o motor o
+    /// passa por [`normalizar_ocr`] (espaços juntos, `O`/`l` consertados dentro de números,
+    /// `RS`/`R§` lidos como `R$`). Falso por padrão, e **não entra no JSON quando é falso**,
+    /// para não mudar o checksum das versões que já existem.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub texto_de_ocr: bool,
     #[serde(default)]
     pub propor: Vec<ModeloDeProposta>,
 }
@@ -83,6 +94,7 @@ impl Definicao {
             leitor: None,
             parametros: Vec::new(),
             script_le_texto: false,
+            texto_de_ocr: false,
             propor: Vec::new(),
         }
     }
@@ -197,7 +209,48 @@ fn compilar_condicoes(condicoes: &[Condicao]) -> Result<Vec<CondicaoCompilada>, 
                 Condicao::Canal(c) => CondicaoCompilada::Canal(c.clone()),
                 Condicao::Descricao(p) => CondicaoCompilada::Descricao(regex(p)?),
                 Condicao::Nome(p) => CondicaoCompilada::Nome(regex(p)?),
+                Condicao::ContraparteDoc(docs) => {
+                    CondicaoCompilada::ContraparteDoc(documentos_validos(docs)?)
+                }
+                Condicao::Contraparte(p) => CondicaoCompilada::Contraparte(
+                    RegexBuilder::new(p)
+                        .case_insensitive(true)
+                        .size_limit(LIMITE_DO_REGEX)
+                        .dfa_size_limit(LIMITE_DO_REGEX)
+                        .build()
+                        .map_err(|m| {
+                            ErroDasRegras::Definicao(format!("regex inválido em `{p}`: {m}"))
+                        })?,
+                ),
             })
+        })
+        .collect()
+}
+
+/// Os dígitos de um documento (CPF/CNPJ), sem a pontuação.
+pub fn so_os_digitos(documento: &str) -> String {
+    documento.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// Confere a lista de `contraparte_doc`: ao menos um, cada um com 11 (CPF) ou 14 (CNPJ)
+/// dígitos. Devolve só os dígitos.
+fn documentos_validos(docs: &[String]) -> Result<Vec<String>, ErroDasRegras> {
+    if docs.is_empty() {
+        return Err(ErroDasRegras::Definicao(
+            "contraparte_doc precisa de ao menos um documento".to_owned(),
+        ));
+    }
+    docs.iter()
+        .map(|d| {
+            let digitos = so_os_digitos(d);
+            if matches!(digitos.len(), 11 | 14) {
+                Ok(digitos)
+            } else {
+                // Sem repetir o documento na mensagem: é dado pessoal.
+                Err(ErroDasRegras::Definicao(
+                    "contraparte_doc: cada documento tem 11 (CPF) ou 14 (CNPJ) dígitos".to_owned(),
+                ))
+            }
         })
         .collect()
 }
@@ -232,6 +285,12 @@ pub enum Condicao {
     Descricao(String),
     /// Regex sobre o nome do arquivo.
     Nome(String),
+    /// O CPF/CNPJ da contraparte do registro (`dicas.contraparte_doc`) é igual a algum destes.
+    /// Só os dígitos contam: `000.000.000-00` e `00000000000` são o mesmo documento.
+    ContraparteDoc(Vec<String>),
+    /// Regex sobre o nome da contraparte (`dicas.contraparte`) **normalizado** (minúsculas,
+    /// sem acento, espaços juntos), sem diferenciar maiúsculas do padrão.
+    Contraparte(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +316,11 @@ pub enum FonteDaExtracao {
     Texto,
     /// `dicas.descricao`.
     Descricao,
+    /// `dicas.contraparte`: o nome do favorecido do registro.
+    Contraparte,
+    /// `dicas.contraparte_doc`: o CPF/CNPJ do favorecido. Só vale para o motor; o documento
+    /// nunca é gravado na execução nem na proposta.
+    ContraparteDoc,
 }
 
 /// Como extrair um campo.
@@ -348,6 +412,9 @@ enum CondicaoCompilada {
     Canal(Vec<Canal>),
     Descricao(Regex),
     Nome(Regex),
+    /// Só dígitos.
+    ContraparteDoc(Vec<String>),
+    Contraparte(Regex),
 }
 
 impl CondicaoCompilada {
@@ -369,6 +436,18 @@ impl CondicaoCompilada {
                 .as_deref()
                 .is_some_and(|d| r.is_match(d)),
             Self::Nome(r) => entrada.nome.as_deref().is_some_and(|n| r.is_match(n)),
+            Self::ContraparteDoc(docs) => entrada
+                .dicas
+                .contraparte_doc
+                .as_deref()
+                .map(so_os_digitos)
+                .is_some_and(|d| !d.is_empty() && docs.contains(&d)),
+            Self::Contraparte(r) => entrada
+                .dicas
+                .contraparte
+                .as_deref()
+                .map(normalizar)
+                .is_some_and(|n| r.is_match(&n)),
         }
     }
 }
@@ -406,9 +485,18 @@ impl Compilada {
         let mut campos = BTreeMap::new();
         let mut motivos = Vec::new();
         for e in &self.extracoes {
-            let (texto, descricao) = match e.fonte {
-                FonteDaExtracao::Texto => (entrada.texto.as_deref(), false),
-                FonteDaExtracao::Descricao => (entrada.dicas.descricao.as_deref(), true),
+            let (texto, dica) = match e.fonte {
+                FonteDaExtracao::Texto => (entrada.texto.as_deref(), None),
+                FonteDaExtracao::Descricao => {
+                    (entrada.dicas.descricao.as_deref(), Some("descricao"))
+                }
+                FonteDaExtracao::Contraparte => {
+                    (entrada.dicas.contraparte.as_deref(), Some("contraparte"))
+                }
+                FonteDaExtracao::ContraparteDoc => (
+                    entrada.dicas.contraparte_doc.as_deref(),
+                    Some("contraparte_doc"),
+                ),
             };
             let Some(texto) = texto else { continue };
             let Some(caps) = e.regex.captures(texto) else {
@@ -425,12 +513,11 @@ impl Compilada {
             let recorte = &texto[inicio..fim];
             match e.formato.aplicar(recorte) {
                 Some(valor) => {
-                    let de_onde = if descricao {
-                        DeOnde::Dica {
-                            nome: "descricao".to_owned(),
-                        }
-                    } else {
-                        DeOnde::Trecho { inicio, fim }
+                    let de_onde = match dica {
+                        Some(nome) => DeOnde::Dica {
+                            nome: nome.to_owned(),
+                        },
+                        None => DeOnde::Trecho { inicio, fim },
                     };
                     campos.insert(e.nome.clone(), Campo { valor, de_onde });
                 }
@@ -489,6 +576,51 @@ pub fn normalizar(texto: &str) -> String {
         }
     }
     saida.trim_end().to_owned()
+}
+
+/// O texto de um OCR com o ruído mais comum desfeito, para a regra que pede
+/// `"texto_de_ocr": true`:
+///
+/// - espaços e tabs seguidos viram um espaço, e o fim de cada linha é aparado (as quebras
+///   de linha ficam, porque os regexes das regras as usam);
+/// - `RS` e `R§` viram `R$` quando vêm antes de um valor com vírgula e dois decimais
+///   (`RS 1.234,56`; o `RS` de Rio Grande do Sul, antes de um CEP, fica);
+/// - dentro de um **número** (um token só de dígitos, `.`, `,`, `/`, `:`, `-`, `O` e `l`,
+///   com ao menos um dígito de verdade), `O` vira `0` e `l` vira `1`. Palavra, ou token com
+///   outras letras (`Pol1`, `BOL2`), não é tocada.
+///
+/// Idempotente. Só `O` e `l` são trocados; o resto do texto passa como veio.
+pub fn normalizar_ocr(texto: &str) -> String {
+    static ESPACOS: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[ \t\u{00A0}]+"));
+    static FIM_DE_LINHA: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"(?m) +(\r?\n|$)"));
+    static MOEDA: LazyLock<Regex> =
+        LazyLock::new(|| regex_fixo(r"\bR[S§](\s*)([0-9Ol.]+,[0-9Ol]{2})\b"));
+    static TOKEN: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[\p{L}\p{N}.,/:\-]+"));
+    let juntos = ESPACOS.replace_all(texto, " ");
+    let aparado = FIM_DE_LINHA.replace_all(&juntos, "$1");
+    let moeda = MOEDA.replace_all(&aparado, "R$$${1}${2}");
+    TOKEN
+        .replace_all(&moeda, |c: &regex::Captures<'_>| {
+            let t = &c[0];
+            let so_de_numero = t.chars().all(|ch| {
+                ch.is_ascii_digit() || matches!(ch, 'O' | 'l' | '.' | ',' | '/' | ':' | '-')
+            });
+            if so_de_numero && t.chars().any(|ch| ch.is_ascii_digit()) {
+                t.replace('O', "0").replace('l', "1")
+            } else {
+                t.to_owned()
+            }
+        })
+        .into_owned()
+}
+
+fn regex_fixo(padrao: &str) -> Regex {
+    // Os padrões são constantes deste arquivo e compilam (os testes de `normalizar_ocr`
+    // exercitam os quatro). Se um dia não compilar, o regex que não casa nada deixa o
+    // texto como veio.
+    RegexBuilder::new(padrao)
+        .build()
+        .unwrap_or_else(|_| Regex::new(r"[^\s\S]").unwrap_or_else(|_| unreachable!()))
 }
 
 /// Dinheiro em centavos. Padrão brasileiro primeiro:

@@ -1,0 +1,24 @@
+Sist. Arq.      Tam. Usado Disp. Uso% Montado em
+/dev/nvme1n1p2  1,9T  1,8T     0 100% /
+/dev/nvme0n1p3  469G  372G   73G  84% /mnt/d
+8,0G	/home/chico/.cache/sbf-target/bancada
+4,0K	/home/chico/.cache/sbf-target/clippy1.txt
+1,5G	/home/chico/.cache/sbf-target/docker
+48G	/home/chico/.cache/sbf-target/exibir
+61G	/home/chico/.cache/sbf-target/favorecido
+51G	/home/chico/.cache/sbf-target/historico
+49G	/home/chico/.cache/sbf-target/mcp-total
+4,5G	/home/chico/.cache/sbf-target/modelo
+50G	/home/chico/.cache/sbf-target/movimento
+90G	/home/chico/.cache/sbf-target/principal
+152K	/home/chico/.cache/sbf-target/regras-out.txt
+8,0K	/home/chico/.cache/sbf-target/roteiros-build.log
+16K	/home/chico/.cache/sbf-target/roteiros-clippy.log
+2,6G	/home/chico/.cache/ms-playwright
+3,3G	/home/chico/.cache/huggingface
+4,0G	/home/chico/.cache/uv
+30G	/home/chico/.cache/claude-tmp
+66G	/home/chico/.cache/chess-studio-target-agentes
+79G	/home/chico/.cache/chess-studio-target
+99G	/home/chico/.cache/chess-studio-target-main
+361G	/home/chico/.cache/sbf-target

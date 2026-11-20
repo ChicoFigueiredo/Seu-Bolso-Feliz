@@ -26,11 +26,14 @@
 //!   e devolve o diff.
 //! - `rascunho`: monta, sem IA, uma versão-rascunho a partir de uma correção do usuário.
 //! - `fabrica`: as regras que vêm com o sbf (D10).
+//! - `biblioteca`: a biblioteca de regras de fábrica para documentos financeiros brasileiros comuns
+//!   (arquivos em `fabrica/biblioteca/`), todas em rascunho.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod biblioteca;
 pub mod catalogo;
 pub mod definicao;
 pub mod fabrica;
@@ -127,6 +130,14 @@ pub struct Dicas {
     pub data: Option<String>,
     /// A descrição do registro no banco ("PIX ENVIADO FULANO").
     pub descricao: Option<String>,
+    /// O nome do favorecido (ou de quem pagou) que o banco informa à parte da descrição.
+    /// Na CAIXA a descrição é só "PIX ENVIADO": o favorecido só aparece aqui.
+    #[serde(default)]
+    pub contraparte: Option<String>,
+    /// O CPF/CNPJ da contraparte, às vezes formatado. Dado pessoal: casa condições e pode
+    /// ser extraído, mas **nunca** é gravado em `execucao` nem na proposta.
+    #[serde(default)]
+    pub contraparte_doc: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -231,14 +242,18 @@ pub enum Autor {
 }
 
 /// Quem pede uma ação no catálogo. Ativar, consolidar, desativar e reverter exigem
-/// [`Quem::Usuario`] (D14); o catálogo recusa os outros com [`ErroDasRegras::NaoPermitido`].
+/// [`Quem::Usuario`] ou [`Quem::Mcp`] (D14, substituída em parte pela D15); o catálogo recusa
+/// os outros com [`ErroDasRegras::NaoPermitido`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Quem {
     /// O usuário, na janela ou num terminal interativo que confirmou.
     Usuario,
-    /// A IA, pelo MCP.
+    /// Uma IA sem a decisão do dono (rascunhos, sugestões): nunca ativa nada.
     Ia,
+    /// O servidor MCP, com controle total (D15): ativa, desativa, reverte e consolida, com
+    /// `mcp` no histórico de estado. Os exemplos que falham (D12) bloqueiam do mesmo jeito.
+    Mcp,
     /// O próprio sbf (semear a fábrica, rebaixar uma consolidada depois de um Desfazer).
     Sistema,
 }
@@ -295,6 +310,11 @@ pub struct Reconhecimento {
     pub motivos: Vec<String>,
     /// Rótulos das evidências usadas (`rubrica_irrf`, `tabela:irrf-2026-01`).
     pub evidencias: Vec<String>,
+    /// Linhas curtas que o script quer mostrar no cartão do Reconhecimento. **Só para a
+    /// tela**: não entra na chave de idempotência, não vai para a tabela `execucao` nem para
+    /// a proposta gravada, porque pode conter texto do documento.
+    #[serde(default)]
+    pub exibir: Vec<String>,
     pub propostas: Vec<Proposta>,
     /// Chave de idempotência: sha256 de (entrada.id, regra, versão, checksum, checksums dos
     /// parâmetros usados). Reprocessar não duplica proposta (AC-LUA-04, AC-LUA-09).

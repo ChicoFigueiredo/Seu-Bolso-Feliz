@@ -97,6 +97,19 @@ Uma movimentação futura já conhecida — vence em uma data, com um valor prev
 confirmado.
 _Avoid_: conta a pagar, obrigação, pendência
 
+**Modelo de compromisso**:
+O molde que vários compromissos compartilham: declara os parâmetros (a diária, o dia da
+semana) e o cálculo que transforma esses parâmetros no previsto de cada mês. Cada compromisso
+que usa o modelo preenche os próprios valores, com vigência. Ex.: "Diarista por dia da semana".
+_Avoid_: template, tipo de compromisso (tipo é natureza ou grupo)
+
+**Cálculo** (de um compromisso):
+O script que, a partir dos parâmetros do modelo e dos valores do compromisso, dá o previsto
+de um mês (a diária vezes as sextas-feiras do mês). Um ajuste digitado num mês ("6 diárias")
+vale só para aquele mês e fica no rastro. Diferente da regra de reconhecimento: o cálculo
+diz quanto deve ser; a regra reconhece o que aconteceu.
+_Avoid_: fórmula, regra de cálculo, script de compromisso
+
 **Recorrente**:
 Algo que se repete em intervalo previsível: assinatura, conta de consumo, parcelamento,
 receita fixa.
@@ -213,8 +226,22 @@ imagem ou o texto, pequeno num canto ou grande na página do item. Nunca muda o 
 _Avoid_: preview, thumbnail, visualizador
 
 **Caixa de entrada**:
-A fila única de documentos recebidos e ainda não resolvidos, independente de origem.
+A fila única de documentos recebidos e ainda não resolvidos, independente de origem. Lista os
+que o reconhecimento **reconheceu** (Pronto, Precisa revisar, Possível duplicidade); é onde se
+decidem as sugestões de ligação ao planejamento. O que ele não reconheceu vai para A triar.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
+
+**Canal** (da Caixa de entrada):
+Por onde o documento chegou **da primeira vez** (Telegram, Gmail, Celular, Pasta, Arrastado,
+linha de comando). Um só por documento, na lista "Chegou por". Não é a **Origem**: Origem é
+cada lugar onde o conteúdo foi achado, e um documento tem várias.
+_Avoid_: origem (para este sentido), fonte, source
+
+**Sem padrão de reconhecimento**:
+O documento novo que nenhuma regra nem leitor casou (estados Não reconhecido e Protegido por
+senha). Fica na seção de mesmo nome de A triar, onde se cria a regra a partir do cartão e se
+reconhece de novo; se passar a casar, sai de A triar e entra na Caixa de entrada.
+_Avoid_: não classificado, órfão, unmatched
 
 **Estados do documento** (os únicos que o usuário vê): Pronto, Precisa revisar,
 Possível duplicidade, Protegido por senha, Não reconhecido, Processando. Os estados
@@ -364,6 +391,16 @@ de falhas. Um lugar varrido uma vez só, como um disco do inventário, também �
 conexão, só que sem agenda.
 _Avoid_: integração, provider, adapter, serviço, vigia, fonte (como nome de um item;
 "fonte em massa" continua valendo como descrição)
+
+**Conta de e-mail**:
+Uma Conexão do tipo E-mail: uma caixa (hoje Gmail; Outlook em breve) autorizada só para
+leitura. Cada conta tem id estável, apelido, o e-mail da conta (depois do login), os
+**rótulos** que a pessoa segue e o próprio checkpoint por rótulo; pode haver várias. A
+configuração (sem segredo) fica em `email.json`; o refresh token e as credenciais do
+aplicativo ficam no Chaveiro (`email/<id>/...` e `email/<tipo>/app/...`). Autorização
+vencida (`invalid_grant`) é um estado da conta, não uma falha de coleta: a coleta para até
+a pessoa entrar de novo.
+_Avoid_: caixa postal, inbox, carteira (para os segredos)
 
 **Roteiro**:
 O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.

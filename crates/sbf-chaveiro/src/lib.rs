@@ -31,14 +31,16 @@
 mod arquivo_antigo;
 mod chaveiro;
 mod cpf;
+mod env;
 mod erro;
 mod fonte;
 mod pasta;
 
 pub use chaveiro::{
-    CHAVE_DO_CPF, Chaveiro, OfertaDeApagar, PREFIXO_DE_ESTACAO, PREFIXO_DE_SENHA, PREFIXO_DE_SITE,
-    ResumoDaImportacao, SERVICO,
+    CHAVE_DO_CPF, Chaveiro, OfertaDeApagar, PREFIXO_DE_CONEXAO, PREFIXO_DE_ESTACAO,
+    PREFIXO_DE_SENHA, PREFIXO_DE_SITE, ResumoDaImportacao, SERVICO,
 };
+pub use env::valor_do_env;
 pub use erro::ErroDoChaveiro;
 pub use pasta::{
     SUBPASTA_DO_CHAVEIRO, Sistema, garantir_fora_do_cofre, pasta_de_dados_de,

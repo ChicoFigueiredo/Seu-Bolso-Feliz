@@ -1,6 +1,7 @@
 //! O modo `sbf mcp --inventario <pasta-do-cofre> [--livro <livro-caixa.sqlite>]`: o servidor
 //! MCP local por stdio (ADR-012, ADR-015 item 4). O stdout é só do protocolo; mensagens vão
-//! para o stderr. O livro-caixa vem do cache local da estação, se existir (só leitura).
+//! para o stderr. O livro-caixa vem do cache local da estação, se existir (só leitura). Desde a
+//! D15 o servidor aplica direto (com backup antes da primeira escrita de cada banco).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -28,10 +29,10 @@ fn livro_da_estacao() -> Option<PathBuf> {
 fn abrir_planejamento(arquivo: &Path) -> Result<Box<dyn sbf_planejamento::Planejamento>, String> {
     let banco = sbf_planejamento::Banco::abrir(arquivo).map_err(|e| e.to_string())?;
     let cofre = arquivo.parent().unwrap_or(Path::new("."));
-    Ok(Box::new(
+    Ok(Box::new(crate::script::com_calculo(
         sbf_planejamento::PlanejamentoSqlite::novo(banco, saldos_do_cofre(cofre))
             .com_movimentos(movimentos_do_cofre(cofre)),
-    ))
+    )))
 }
 
 /// O extrato da Pluggy guardado no inventário do cofre: de onde o planejamento tira os
@@ -97,6 +98,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
         .or_else(|| Some(Path::new(pasta).join("planejamento.sqlite")).filter(|p| p.is_file()));
     let nucleo = match planejamento {
         Some(arquivo) if arquivo.is_file() => {
+            let nucleo = nucleo.com_arquivo_do_planejamento(&arquivo);
             nucleo.com_planejamento(std::sync::Arc::new(move || abrir_planejamento(&arquivo)))
         }
         Some(arquivo) => {
@@ -108,8 +110,9 @@ pub fn rodar(args: &[String]) -> ExitCode {
         }
         None => nucleo,
     };
-    // As regras de reconhecimento (spec 13): consultar, testar, simular e propor rascunho.
-    // O MCP nunca ativa (D14); os scripts rodam no processo filho `sbf script --servir`.
+    // As regras de reconhecimento (spec 13): consultar, testar, simular, propor rascunho e,
+    // desde a D15, ativar, desativar, reverter e consolidar (autor mcp). Os scripts rodam no
+    // processo filho `sbf script --servir`.
     let nucleo = match crate::script::executor_de_script() {
         Ok(executor) => nucleo.com_regras(Path::new(pasta).join("regras.sqlite"), executor),
         Err(_) => {
@@ -117,6 +120,32 @@ pub fn rodar(args: &[String]) -> ExitCode {
             nucleo
         }
     };
+    // `gmail_coletar` (D15): coleta as contas de e-mail conectadas para o cofre e passa pelas
+    // regras. Sempre registrada: as contas são lidas a cada chamada (um login feito depois da
+    // largada vale), e sem conta a resposta é "nenhuma conta de e-mail conectada".
+    let nucleo = {
+        let cofre = PathBuf::from(pasta);
+        nucleo.com_gmail(std::sync::Arc::new(move |p| {
+            let opcoes = sbf_gmail::OpcoesDaColeta {
+                consulta: p.consulta.clone(),
+                desde: p.desde.clone(),
+                limite: p.limite,
+                ..sbf_gmail::OpcoesDaColeta::default()
+            };
+            crate::gmail::coletar_do_cofre(
+                &cofre,
+                &opcoes,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .map(|r| crate::gmail::resumo_em_json(&r))
+            .map_err(|e| e.to_string())
+        }))
+    };
+    // O Telegram da conta do usuário (só leitura): conversas, seguir e coletar. A sessão e as
+    // credenciais ficam no chaveiro; nada é aberto até a primeira chamada.
+    let nucleo = nucleo.com_telegram(std::sync::Arc::new(crate::telegram::PonteReal {
+        cofre: Path::new(pasta).to_path_buf(),
+    }));
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 6;
+pub const VERSAO_DO_ESQUEMA: u32 = 8;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -230,6 +230,94 @@ const MIGRACOES: &[&str] = &[
     ALTER TABLE conciliacoes ADD COLUMN autor TEXT;
     ALTER TABLE conciliacoes ADD COLUMN sem_automatico INTEGER NOT NULL DEFAULT 0;
     ",
+    // 7: Desfazer (D15). `inversas` guarda, por linha do histórico, a alteração que a desfaz;
+    // `desfeitos` liga a linha desfeita à linha do Desfazer. Desfazer um cancelamento deixa a
+    // linha marcada (`desfeito`), sem DELETE. Tudo só cresce.
+    "
+    ALTER TABLE cancelamentos ADD COLUMN desfeito INTEGER NOT NULL DEFAULT 0;
+
+    CREATE TABLE inversas (
+        historico_id TEXT PRIMARY KEY,
+        inversa      TEXT NOT NULL
+    );
+
+    CREATE TABLE desfeitos (
+        original_id  TEXT PRIMARY KEY,
+        desfazedor_id TEXT NOT NULL UNIQUE,
+        quando       TEXT NOT NULL
+    );
+
+    CREATE TRIGGER inversas_sem_update BEFORE UPDATE ON inversas
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER inversas_sem_delete BEFORE DELETE ON inversas
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER desfeitos_sem_update BEFORE UPDATE ON desfeitos
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    CREATE TRIGGER desfeitos_sem_delete BEFORE DELETE ON desfeitos
+    BEGIN SELECT RAISE(ABORT, 'o histórico só cresce'); END;
+    ",
+    // 8: Modelo de compromisso e Cálculo. `calculos` guarda as versões imutáveis do script
+    // (só `desfeita` muda, ao desfazer a criação); `ligacoes_de_modelo` liga um compromisso a
+    // um modelo, preso a uma versão do Cálculo; `valores_de_parametro` guarda cada valor com
+    // vigência (`desde`). Sem DELETE: desfazer deixa a linha marcada.
+    "
+    CREATE TABLE modelos (
+        id         TEXT PRIMARY KEY,
+        nome       TEXT NOT NULL,
+        parametros TEXT NOT NULL,
+        quando     TEXT NOT NULL,
+        autor      TEXT NOT NULL,
+        desfeito   INTEGER NOT NULL DEFAULT 0,
+        fabrica    INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX modelos_nome_vivo ON modelos (nome) WHERE desfeito = 0;
+
+    CREATE TABLE calculos (
+        id        TEXT PRIMARY KEY,
+        modelo_id TEXT NOT NULL REFERENCES modelos(id),
+        versao    INTEGER NOT NULL,
+        fonte     TEXT NOT NULL,
+        checksum  TEXT NOT NULL,
+        quando    TEXT NOT NULL,
+        autor     TEXT NOT NULL,
+        desfeita  INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (modelo_id, versao)
+    );
+
+    CREATE TABLE ligacoes_de_modelo (
+        recorrente_id TEXT PRIMARY KEY REFERENCES recorrentes(id),
+        modelo_id     TEXT NOT NULL REFERENCES modelos(id),
+        calculo_id    TEXT NOT NULL REFERENCES calculos(id),
+        quando        TEXT NOT NULL,
+        autor         TEXT NOT NULL,
+        desligada     INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE valores_de_parametro (
+        id            TEXT PRIMARY KEY,
+        recorrente_id TEXT NOT NULL REFERENCES recorrentes(id),
+        parametro     TEXT NOT NULL,
+        desde         TEXT NOT NULL,
+        valor         TEXT NOT NULL,
+        quando        TEXT NOT NULL,
+        autor         TEXT NOT NULL,
+        desfeito      INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (recorrente_id, parametro, desde)
+    );
+
+    CREATE TRIGGER calculos_imutaveis BEFORE UPDATE ON calculos
+    WHEN NEW.fonte IS NOT OLD.fonte OR NEW.checksum IS NOT OLD.checksum
+      OR NEW.versao IS NOT OLD.versao OR NEW.modelo_id IS NOT OLD.modelo_id
+    BEGIN SELECT RAISE(ABORT, 'o cálculo é imutável: crie uma versão nova'); END;
+    CREATE TRIGGER modelos_sem_delete BEFORE DELETE ON modelos
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    CREATE TRIGGER calculos_sem_delete BEFORE DELETE ON calculos
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    CREATE TRIGGER ligacoes_de_modelo_sem_delete BEFORE DELETE ON ligacoes_de_modelo
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    CREATE TRIGGER valores_de_parametro_sem_delete BEFORE DELETE ON valores_de_parametro
+    BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    ",
 ];
 
 impl From<rusqlite::Error> for ErroDoPlanejamento {
@@ -295,6 +383,7 @@ impl Banco {
         conexao.pragma_update(None, "synchronous", "NORMAL")?;
         let mut banco = Banco { conexao };
         banco.migrar()?;
+        crate::modelo::semear_fabrica(&banco.conexao)?;
         Ok(banco)
     }
 
@@ -375,9 +464,27 @@ pub(crate) struct Dados {
     pub inicio: Option<Data>,
     /// Os compromissos cujo valor segue uma rubrica (veja [`ler_rubricas_seguidas`]).
     pub seguidas: HashMap<String, Vec<Seguida>>,
+    /// Os compromissos ligados a um Modelo de compromisso (por id do compromisso).
+    pub modelos: HashMap<String, crate::modelo::LigacaoLida>,
 }
 
 impl Dados {
+    /// O que a projeção de `id` recebe de fora: as rubricas seguidas e o Cálculo.
+    pub fn apoio_de<'a>(
+        &'a self,
+        id: &str,
+        calculados: &'a HashMap<Competencia, crate::modelo::Calculado>,
+    ) -> crate::projecao::Apoio<'a> {
+        crate::projecao::Apoio {
+            seguidas: self.seguidas_de(id),
+            calculados: Some(calculados),
+        }
+    }
+
+    pub fn ligacao_de(&self, id: &str) -> Option<&crate::modelo::LigacaoLida> {
+        self.modelos.get(id)
+    }
+
     pub fn seguidas_de(&self, id: &str) -> &[Seguida] {
         self.seguidas.get(id).map_or(&[], Vec::as_slice)
     }
@@ -522,7 +629,7 @@ fn ler_cancelamentos(
 ) -> Resultado<HashMap<String, Cancelamento>> {
     let mut stmt = conexao.prepare(
         "SELECT recorrente_id, desde, motivo, comprovado FROM cancelamentos
-         WHERE (?1 IS NULL OR recorrente_id = ?1)",
+         WHERE desfeito = 0 AND (?1 IS NULL OR recorrente_id = ?1)",
     )?;
     let brutas = stmt
         .query_map(params![so_o], |l| {
@@ -696,6 +803,7 @@ pub(crate) fn carregar_dados(conexao: &Connection) -> Resultado<Dados> {
         grupos: ler_grupos(conexao)?,
         inicio: ler_inicio(conexao)?,
         seguidas: ler_rubricas_seguidas(conexao)?,
+        modelos: crate::modelo::ler_ligacoes(conexao, None)?,
     })
 }
 

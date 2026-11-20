@@ -42,6 +42,8 @@ impl Extrato {
             conta_do_extrato: conta.to_owned(),
             descricao: descricao.to_owned(),
             tipo: if valor > 0 { "credito" } else { "debito" }.to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         });
     }
 }
@@ -689,6 +691,61 @@ fn sem_extrato_nada_e_sugerido() {
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 0);
     assert!(s.pares_de_conta_sugeridos().expect("pares").is_empty());
     assert!(s.contas_do_extrato().expect("contas").is_empty());
+}
+
+#[test]
+fn conciliacoes_do_movimento_dizem_a_que_ocorrencia_ele_esta_ligado() {
+    let extrato = Extrato::default();
+    extrato.por("pluggy:txn_s", 20, 822_600, "BANCO · 1", "SALARIO EMPRESA");
+    let mut s = servico(&extrato);
+    let id = criar(
+        &mut s,
+        "Salário",
+        Natureza::Entrada,
+        20,
+        Some(845_000),
+        Some("CX-0001"),
+    );
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:txn_s")
+            .expect("vazio")
+            .is_empty()
+    );
+    s.aplicar(
+        Alteracao::Conciliar {
+            conciliacao: Conciliacao {
+                ocorrencia: ocorrencia(&id),
+                movimento: "pluggy:txn_s".into(),
+                valor: Centavos(822_600),
+                data: dia(20),
+                confirmada: true,
+            },
+        },
+        Autor::Usuario,
+    )
+    .expect("confirmar");
+    let v = s.conciliacoes_do_movimento("pluggy:txn_s").expect("lista");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].ocorrencia, ocorrencia(&id));
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:outro")
+            .expect("vazio")
+            .is_empty()
+    );
+    // Desfeita, deixa de ligar.
+    s.aplicar(
+        Alteracao::Desconciliar {
+            ocorrencia: ocorrencia(&id),
+            movimento: "pluggy:txn_s".into(),
+        },
+        Autor::Usuario,
+    )
+    .expect("desfazer");
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:txn_s")
+            .expect("vazio")
+            .is_empty()
+    );
 }
 
 #[test]

@@ -12,6 +12,7 @@ use crate::componentes;
 use crate::controle::{AcaoDoControle, data_texto, reais};
 use crate::controle_ui::PedidoDoControle;
 use crate::icones;
+use crate::ligacoes_do_registro::PedidoDeLigacao;
 use crate::navegacao::Pedido;
 use crate::tema;
 
@@ -49,6 +50,11 @@ pub struct VmDeMovimentos {
     /// extrato ainda o tem.
     pub confirmadas: Vec<MovimentoVm>,
     pub sugestao: Option<MovimentoVm>,
+    /// Todos os débitos sugeridos quando o banco informa o favorecido (um Pix pode ser
+    /// pago em vários): o Confirmar concilia todos, um por débito. Vazio sem favorecido.
+    pub sugeridas: Vec<MovimentoVm>,
+    /// "Pix para Fulana de Tal · 2 débitos somam o previsto", ou o aviso da soma.
+    pub rotulo_da_sugestao: Option<String>,
     pub candidatos: Vec<MovimentoCandidato>,
     /// Desconto em folha: não passa pelo extrato, e a seção só mostra a baixa pelo contracheque.
     pub de_folha: bool,
@@ -191,7 +197,52 @@ pub fn montar(e: &EntradaDosMovimentos<'_>) -> VmDeMovimentos {
             },
         });
     }
+    agrupar_sugestoes(e, &mut vm);
     vm
+}
+
+/// Quando as sugestões pendentes trazem o favorecido do banco (`contraparte`), mostra todas
+/// juntas com o rótulo do que a soma faz. O Confirmar da seção concilia todas.
+fn agrupar_sugestoes(e: &EntradaDosMovimentos<'_>, vm: &mut VmDeMovimentos) {
+    let pendentes: Vec<&ConciliacaoComMovimento> = e
+        .gravadas
+        .iter()
+        .filter(|g| {
+            !g.conciliacao.confirmada && !g.conciliacao.movimento.starts_with("contracheque:")
+        })
+        .collect();
+    let favorecido = |g: &ConciliacaoComMovimento| {
+        g.movimento
+            .as_ref()
+            .and_then(|m| m.contraparte.as_deref())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned)
+    };
+    if pendentes.is_empty() || pendentes.iter().any(|g| favorecido(g).is_none()) {
+        return;
+    }
+    let soma: i64 = pendentes.iter().map(|g| g.conciliacao.valor.0).sum();
+    vm.rotulo_da_sugestao = Some(sbf_reconhecimento::favorecido::rotulo_da_sugestao(
+        pendentes.first().and_then(|g| favorecido(g)).as_deref(),
+        pendentes.len(),
+        soma,
+        e.previsto.map(|p| p.0.abs()),
+    ));
+    vm.sugeridas = pendentes
+        .iter()
+        .map(|g| MovimentoVm {
+            id: Some(g.conciliacao.movimento.clone()),
+            data: Some(g.conciliacao.data),
+            valor: g.conciliacao.valor,
+            conta: g.movimento.as_ref().map(|m| m.conta_do_extrato.clone()),
+            descricao: g.movimento.as_ref().map(|m| m.descricao.clone()),
+            diferenca: None,
+            tres_provas: false,
+            automatica: false,
+            pelo_contracheque: None,
+        })
+        .collect();
 }
 
 /// O contracheque mais recente (pela data do documento) entre os vinculados.
@@ -255,6 +306,21 @@ fn pequeno(ui: &mut Ui, t: impl Into<String>) {
     ui.label(RichText::new(t.into()).size(11.5).color(p.tinta_suave));
 }
 
+/// "Ignorar": a sugestão some e a regra (se foi ela) não a repete.
+fn botao_de_ignorar(ui: &mut Ui, ocorrencia: &IdOcorrencia, pedidos: &mut Vec<Pedido>) {
+    if ui
+        .button("Ignorar")
+        .on_hover_text(
+            "Descarta a sugestão; uma regra de reconhecimento registra que foi rejeitada",
+        )
+        .clicked()
+    {
+        pedidos.push(Pedido::Controle(PedidoDoControle::IgnorarSugestao {
+            ocorrencia: ocorrencia.clone(),
+        }));
+    }
+}
+
 fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
     let p = tema::paleta(ui.ctx());
     ui.horizontal_wrapped(|ui| {
@@ -298,6 +364,63 @@ fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
             };
             ui.label(RichText::new(texto).size(12.0).color(p.aviso));
         });
+    }
+}
+
+/// O id do movimento quando ele vem do extrato da Pluggy (a baixa pelo contracheque não tem
+/// registro no inventário).
+pub fn movimento_do_registro(m: &MovimentoVm) -> Option<&str> {
+    m.id.as_deref()
+        .filter(|id| !id.starts_with("contracheque:") && !id.trim().is_empty())
+}
+
+/// Faz do que `conteudo` desenha um cartão clicável: o clique abre o registro da Pluggy de
+/// onde veio o movimento, e Ctrl+clique (ou o botão do meio) o abre num painel flutuante.
+/// O que tem botão dentro (Desfazer) fica fora do `conteudo`, para o botão receber o clique.
+fn cartao_clicavel(
+    ui: &mut Ui,
+    m: &MovimentoVm,
+    pedidos: &mut Vec<Pedido>,
+    conteudo: impl FnOnce(&mut Ui),
+) {
+    let resposta = ui.scope(conteudo).response;
+    let Some(movimento) = movimento_do_registro(m) else {
+        return;
+    };
+    let p = tema::paleta(ui.ctx());
+    let mut dica =
+        "Abre o registro da Pluggy deste movimento. Ctrl+clique abre ao lado.".to_owned();
+    if m.tres_provas {
+        dica.push_str("\n\nO contracheque vinculado, o valor e a conta do extrato conferem.");
+    }
+    let clique = ui
+        .interact(
+            resposta.rect,
+            resposta.id.with("abrir-registro"),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(dica);
+    if clique.hovered() {
+        ui.painter().rect_stroke(
+            resposta.rect.expand(2.0),
+            egui::CornerRadius::same(4),
+            Stroke::new(1.0, p.destaque_borda),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let flutuante = if clique.clicked() {
+        Some(componentes::ctrl(ui))
+    } else if clique.middle_clicked() {
+        Some(true)
+    } else {
+        None
+    };
+    if let Some(flutuante) = flutuante {
+        pedidos.push(Pedido::Ligacao(PedidoDeLigacao::Registro {
+            movimento: movimento.to_owned(),
+            flutuante,
+        }));
     }
 }
 
@@ -367,13 +490,15 @@ pub fn secao(
     ui.add_space(2.0);
     for m in &vm.confirmadas {
         moldura(ui, p.superficie_2, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
-                if m.automatica {
-                    componentes::selo(ui, "automática", p.info_sutil, p.info);
-                }
+            cartao_clicavel(ui, m, pedidos, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
+                    if m.automatica {
+                        componentes::selo(ui, "automática", p.info_sutil, p.info);
+                    }
+                });
+                linha_do_movimento(ui, m);
             });
-            linha_do_movimento(ui, m);
             if m.automatica {
                 ui.horizontal_wrapped(|ui| {
                     pequeno(ui, "Conciliado automaticamente · as três provas batem.");
@@ -392,7 +517,40 @@ pub fn secao(
             }
         });
     }
-    if let Some(s) = &vm.sugestao {
+    if !vm.sugeridas.is_empty() {
+        moldura(ui, p.info_sutil, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                componentes::selo(ui, "Sugestão", p.superficie_3, p.info);
+                if let Some(r) = &vm.rotulo_da_sugestao {
+                    ui.label(RichText::new(r).strong());
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                let n = vm.sugeridas.len();
+                if ui
+                    .button(format!(
+                        "{}  {}",
+                        icones::texto("task_alt"),
+                        if n == 1 {
+                            "Confirmar".to_owned()
+                        } else {
+                            format!("Confirmar os {n}")
+                        }
+                    ))
+                    .on_hover_text("Confirma uma conciliação por débito, todas nesta ocorrência")
+                    .clicked()
+                {
+                    pedidos.push(Pedido::Controle(PedidoDoControle::Acao(
+                        AcaoDoControle::ConfirmarConciliacao,
+                    )));
+                }
+                botao_de_ignorar(ui, ocorrencia, pedidos);
+            });
+            for m in &vm.sugeridas {
+                cartao_clicavel(ui, m, pedidos, |ui| linha_do_movimento(ui, m));
+            }
+        });
+    } else if let Some(s) = &vm.sugestao {
         moldura(ui, p.info_sutil, |ui| {
             ui.horizontal_wrapped(|ui| {
                 componentes::selo(ui, "Sugestão", p.superficie_3, p.info);
@@ -405,11 +563,12 @@ pub fn secao(
                         AcaoDoControle::ConfirmarConciliacao,
                     )));
                 }
+                botao_de_ignorar(ui, ocorrencia, pedidos);
             });
-            linha_do_movimento(ui, s);
+            cartao_clicavel(ui, s, pedidos, |ui| linha_do_movimento(ui, s));
         });
     }
-    if vm.confirmadas.is_empty() && vm.sugestao.is_none() {
+    if vm.confirmadas.is_empty() && vm.sugestao.is_none() && vm.sugeridas.is_empty() {
         pequeno(ui, "Nenhum movimento do extrato ligado a esta ocorrência.");
         ui.add_space(4.0);
     }
@@ -498,6 +657,35 @@ mod testes {
     use super::*;
     use sbf_planejamento::{AlvoDoDocumento, Autor, MovimentoDoExtrato, Rubrica, TipoDeRubrica};
 
+    fn vm_com_id(id: Option<&str>) -> MovimentoVm {
+        MovimentoVm {
+            id: id.map(Into::into),
+            data: None,
+            valor: Centavos(100),
+            conta: None,
+            descricao: None,
+            diferenca: None,
+            tres_provas: false,
+            automatica: false,
+            pelo_contracheque: None,
+        }
+    }
+
+    #[test]
+    fn so_o_movimento_da_pluggy_abre_registro() {
+        assert_eq!(
+            movimento_do_registro(&vm_com_id(Some("pluggy:txn_a"))),
+            Some("pluggy:txn_a")
+        );
+        // A baixa pelo contracheque e o valor sem movimento conhecido não têm registro.
+        assert_eq!(
+            movimento_do_registro(&vm_com_id(Some("contracheque:abc:1"))),
+            None
+        );
+        assert_eq!(movimento_do_registro(&vm_com_id(None)), None);
+        assert_eq!(movimento_do_registro(&vm_com_id(Some("  "))), None);
+    }
+
     fn candidato(id: &str, valor: i64, mesma_conta: bool, dif: i64) -> MovimentoCandidato {
         MovimentoCandidato {
             movimento: MovimentoDoExtrato {
@@ -507,6 +695,8 @@ mod testes {
                 conta_do_extrato: "BANCO EXEMPLO · 000000-1".into(),
                 descricao: "SALARIO EMPRESA EXEMPLO".into(),
                 tipo: "credito".into(),
+                contraparte: None,
+                contraparte_doc: None,
             },
             bate_assinatura: true,
             mesma_conta,
@@ -784,5 +974,78 @@ mod testes {
             previsto: Some(Centavos(129_999)),
         });
         assert_eq!(vm.confirmadas[0].diferenca, None);
+    }
+
+    fn pix_sugerido(
+        movimento: &str,
+        valor: i64,
+        favorecido: Option<&str>,
+    ) -> ConciliacaoComMovimento {
+        let mut g = gravada(movimento, valor, false, false);
+        g.movimento = Some(MovimentoDoExtrato {
+            movimento: movimento.into(),
+            data: Data::nova(2026, 11, 5).unwrap(),
+            valor: Centavos(-valor),
+            conta_do_extrato: "BANCO EXEMPLO · 000000-1".into(),
+            descricao: "PIX ENVIADO".into(),
+            tipo: "debito".into(),
+            contraparte: favorecido.map(str::to_owned),
+            contraparte_doc: Some("000.000.000-00".into()),
+        });
+        g
+    }
+
+    #[test]
+    fn varios_debitos_sugeridos_do_mesmo_favorecido_viram_um_grupo_com_rotulo() {
+        let gravadas = [
+            pix_sugerido("pluggy:txn_1", 15_000, Some("Fulana de Tal")),
+            pix_sugerido("pluggy:txn_2", 15_000, Some("Fulana de Tal")),
+        ];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas,
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(30_000)),
+        });
+        assert_eq!(vm.sugeridas.len(), 2);
+        assert_eq!(
+            vm.rotulo_da_sugestao.as_deref(),
+            Some("Pix para Fulana de Tal \u{b7} 2 d\u{e9}bitos somam o previsto")
+        );
+        assert_eq!(vm.sugeridas[0].descricao.as_deref(), Some("PIX ENVIADO"));
+        // Soma que não bate: o aviso entra no rótulo.
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas[..1],
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(30_000)),
+        });
+        assert!(
+            vm.rotulo_da_sugestao
+                .as_deref()
+                .is_some_and(|r| r.contains("\u{26a0} soma R$ 150,00 difere do previsto R$ 300,00"))
+        );
+    }
+
+    #[test]
+    fn sem_favorecido_do_banco_a_sugestao_segue_a_de_sempre() {
+        let gravadas = [pix_sugerido("pluggy:txn_1", 15_000, None)];
+        let vm = montar(&EntradaDosMovimentos {
+            conciliado: None,
+            gravadas: &gravadas,
+            sugestao: Some(&gravadas[0].conciliacao),
+            candidatos: &[],
+            composicao: None,
+            contracheques: &[],
+            previsto: Some(Centavos(15_000)),
+        });
+        assert!(vm.sugeridas.is_empty() && vm.rotulo_da_sugestao.is_none());
+        assert!(vm.sugestao.is_some());
     }
 }

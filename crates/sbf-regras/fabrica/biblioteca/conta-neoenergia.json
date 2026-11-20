@@ -1,0 +1,122 @@
+{
+  "regra": "conta-neoenergia",
+  "nome": "Conta de energia · Neoenergia",
+  "motivo": "regra de fábrica: conta de energia da Neoenergia; propõe conciliar com o compromisso Luz",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "conta-neoenergia",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "neoenergia"
+        },
+        {
+          "contem": "vencimento"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:(?:total\\s+a\\s+pagar|valor\\s+a\\s+pagar|valor\\s+total|total\\s+da\\s+fatura|valor\\s+da\\s+fatura))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "data": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "codigo_cliente": {
+        "regex": "(?i)(?:c\\S{0,2}digo\\s+do\\s+cliente|n\\S{0,2}mero\\s+do\\s+cliente|unidade\\s+consumidora|instala\\S{1,3}o)[^\\d\\n]{0,15}(\\d[\\d.\\-/]{2,20}\\d)",
+        "formato": "texto"
+      },
+      "competencia": {
+        "regex": "(?i)(?:m\\S*s\\s+de\\s+refer\\S+|refer\\S+ncia)[^\\d\\n]{0,20}(\\d{2}/\\d{4})",
+        "formato": "competencia"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "propor": [
+      {
+        "conciliar_ocorrencia": {
+          "janela_dias": 5,
+          "compromisso": "Luz"
+        }
+      }
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "conta com código do cliente e referência",
+      "texto": "Neoenergia Brasília\nConta de energia elétrica\nCódigo do cliente: 0000000-0\nUnidade consumidora 00000000\nMês de referência: 11/2026\nVencimento: 10/12/2026\nTotal a pagar R$ 187,45\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-neoenergia",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 18745
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-10"
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-10"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "0000000-0"
+          },
+          "competencia": {
+            "tipo": "competencia",
+            "valor": "2026-11"
+          }
+        }
+      }
+    },
+    {
+      "nome": "caixa alta e valores na linha de baixo",
+      "texto": "NEOENERGIA\nCONTA DE ENERGIA\nUNIDADE CONSUMIDORA 12345678\nREFERÊNCIA 01/2027\nVENCIMENTO\n15/02/2027\nVALOR A PAGAR\nR$ 1.002,30\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "conta-neoenergia",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 100230
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2027-02-15"
+          },
+          "codigo_cliente": {
+            "tipo": "texto",
+            "valor": "12345678"
+          },
+          "competencia": {
+            "tipo": "competencia",
+            "valor": "2027-01"
+          }
+        }
+      }
+    },
+    {
+      "nome": "conta de outra empresa",
+      "texto": "Companhia Exemplo de Água\nVencimento 10/12/2026\nTotal a pagar R$ 90,00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

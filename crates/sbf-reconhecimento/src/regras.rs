@@ -37,7 +37,7 @@ use sbf_regras::{
 };
 
 use crate::cofre::{Estado, ReconhecedorDoCofre, ler_contracheque};
-use crate::{PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
+use crate::{ErroDoReconhecimento, PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
 
 /// O catálogo das regras, na pasta do cofre.
 pub const ARQUIVO_DAS_REGRAS: &str = "regras.sqlite";
@@ -130,6 +130,8 @@ pub fn entrada_do_registro(m: &MovimentoDoExtrato) -> Entrada {
             valor_centavos: Some(m.valor.0),
             data: Some(m.data.to_string()),
             descricao: (!m.descricao.trim().is_empty()).then(|| m.descricao.clone()),
+            contraparte: m.contraparte.clone().filter(|c| !c.trim().is_empty()),
+            contraparte_doc: m.contraparte_doc.clone().filter(|c| !c.trim().is_empty()),
         },
         momento: Some(m.data.to_string()),
     }
@@ -292,6 +294,29 @@ pub fn aviso_do_irrf(rec: &Reconhecimento) -> Option<String> {
 // O passo "Leitores locais" com o motor
 // ---------------------------------------------------------------------------------------
 
+/// A pasta, dentro do cofre, onde a coleta do Telegram deixa as mídias (`sbf telegram coletar`).
+pub const PASTA_DO_TELEGRAM: &str = "entrada/telegram";
+
+/// O canal de um arquivo: o que chegou pela coleta do Telegram (em `entrada/telegram/`) é
+/// `Telegram`; o resto do cofre é `Cofre`; fora dele, `Arrastado`.
+pub(crate) fn canal_do_arquivo(cofre: &Path, caminho: &Path, dentro_do_cofre: bool) -> Canal {
+    if !dentro_do_cofre {
+        return Canal::Arrastado;
+    }
+    let da_pasta = match (
+        caminho.canonicalize(),
+        cofre.join(PASTA_DO_TELEGRAM).canonicalize(),
+    ) {
+        (Ok(a), Ok(t)) => a.starts_with(t),
+        _ => false,
+    };
+    if da_pasta {
+        Canal::Telegram
+    } else {
+        Canal::Cofre
+    }
+}
+
 /// Roda o motor no passo de leitura local. `None` quando as regras não estão ligadas, o
 /// catálogo não abre ou nenhuma regra se aplica: aí vale o caminho de sempre (AC-LUA-14).
 pub(crate) fn ler_com_regras(
@@ -304,10 +329,12 @@ pub(crate) fn ler_com_regras(
     catalogo.semear_fabrica().ok()?;
     let motor = Motor::das_vigentes(&catalogo, ligadas.executor.clone()).ok()?;
 
-    let canal = if estado.dentro_do_cofre {
-        Canal::Cofre
-    } else {
-        Canal::Arrastado
+    let (canal, id_externo) = match &estado.origem {
+        Some((canal, id)) => (*canal, Some(id.as_str())),
+        None => (
+            canal_do_arquivo(&reconhecedor.cofre, caminho, estado.dentro_do_cofre),
+            None,
+        ),
     };
     let nome = caminho
         .file_name()
@@ -319,7 +346,7 @@ pub(crate) fn ler_com_regras(
         mime_do_arquivo(caminho),
         estado.conteudo.as_deref(),
         canal,
-        None,
+        id_externo,
     );
     let mut leitura = motor.ler(&entrada);
 
@@ -378,6 +405,97 @@ pub(crate) fn ler_com_regras(
     estado.entrada = Some(entrada);
     estado.leitura = Some(leitura);
     situacao
+}
+
+/// Uma mensagem sem arquivo (o corpo de um e-mail, um texto do Telegram) que chegou por um
+/// canal e vai passar pelas regras.
+#[derive(Debug, Clone, Copy)]
+pub struct MensagemRecebida<'a> {
+    pub canal: Canal,
+    /// A identidade estável da entrada (`gmail:<id da mensagem>`).
+    pub id: &'a str,
+    /// O id no canal (o id da mensagem), que a regra vê em `Entrada.origem`.
+    pub id_externo: &'a str,
+    /// O assunto e o corpo, como vieram.
+    pub texto: &'a str,
+    /// Quando chegou, ISO 8601, se o canal diz.
+    pub momento: Option<&'a str>,
+    /// `AAAA-MM-DD`, se o canal diz.
+    pub data: Option<&'a str>,
+}
+
+impl ReconhecedorDoCofre {
+    /// Passa uma mensagem pelas regras de reconhecimento (entrada tipo `Mensagem`). Grava só o
+    /// rastro das regras (execução e propostas abertas); nada vai para o planejamento e a
+    /// mensagem em si não é gravada aqui (quem a entrega guarda no inventário, se quiser).
+    ///
+    /// Sem `com_regras`, ou com o catálogo fechado, devolve [`Reconhecido::Nada`].
+    ///
+    /// # Errors
+    /// Nenhum hoje: falhas do catálogo viram [`Reconhecido::Nada`] com o motivo genérico.
+    pub fn reconhecer_mensagem(
+        &self,
+        m: &MensagemRecebida<'_>,
+    ) -> Result<Reconhecido, ErroDoReconhecimento> {
+        let nada = |motivo: &str| {
+            Ok(Reconhecido::Nada {
+                motivo: motivo.to_owned(),
+            })
+        };
+        let Some(ligadas) = self.regras.as_ref() else {
+            return nada("as regras de reconhecimento não estão ligadas");
+        };
+        let Ok(mut catalogo) = Catalogo::abrir(&self.cofre.join(ARQUIVO_DAS_REGRAS)) else {
+            return nada("não deu para abrir o catálogo de regras");
+        };
+        if catalogo.semear_fabrica().is_err() {
+            return nada("não deu para preparar o catálogo de regras");
+        }
+        let Ok(motor) = Motor::das_vigentes(&catalogo, ligadas.executor.clone()) else {
+            return nada("não deu para montar o motor de regras");
+        };
+        let entrada = Entrada {
+            versao_do_esquema: VERSAO_DO_ESQUEMA,
+            id: m.id.to_owned(),
+            tipo: TipoDeEntrada::Mensagem,
+            origem: Origem {
+                canal: m.canal,
+                id_externo: Some(m.id_externo.to_owned()),
+            },
+            sha256: None,
+            mime: None,
+            nome: None,
+            texto: Some(m.texto.to_owned()),
+            dicas: Dicas {
+                data: m.data.map(str::to_owned),
+                ..Dicas::default()
+            },
+            momento: m.momento.map(str::to_owned),
+        };
+        let leitura = motor.ler(&entrada);
+        let reconhecido = match leitura.decisao.clone() {
+            Decisao::Reconhecido(rec) => Reconhecido::PelaRegra {
+                reconhecimento: rec,
+            },
+            Decisao::Ambiguo { candidatas, motivo } => Reconhecido::Ambiguo { candidatas, motivo },
+            Decisao::Nenhuma => Reconhecido::Nada {
+                motivo: "nenhuma regra reconheceu a mensagem".to_owned(),
+            },
+        };
+        let gravou = catalogo.registrar_execucao(&leitura).is_ok();
+        let propostas_ok = match &reconhecido {
+            Reconhecido::PelaRegra { reconhecimento } if !reconhecimento.propostas.is_empty() => {
+                catalogo
+                    .registrar_proposta(reconhecimento, &entrada.id)
+                    .is_ok()
+            }
+            _ => true,
+        };
+        if !(gravou && propostas_ok) {
+            return nada("não consegui gravar o rastro das regras de reconhecimento");
+        }
+        Ok(reconhecido)
+    }
 }
 
 fn mime_do_arquivo(caminho: &Path) -> &'static str {
@@ -823,4 +941,29 @@ fn pagar_fatura(
         automatica: automatica(ctx, provas, desfeita),
         provas,
     })))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod testes_do_canal {
+    use super::*;
+
+    #[test]
+    fn o_que_veio_do_telegram_tem_canal_telegram() {
+        let d = tempfile::tempdir().unwrap();
+        let cofre = d.path();
+        let do_telegram = cofre.join("entrada/telegram/Casa-1/10-boleto.pdf");
+        let do_acervo = cofre.join("acervo/ab/abcdef.pdf");
+        for a in [&do_telegram, &do_acervo] {
+            std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+            std::fs::write(a, b"%PDF").unwrap();
+        }
+        assert_eq!(canal_do_arquivo(cofre, &do_telegram, true), Canal::Telegram);
+        assert_eq!(canal_do_arquivo(cofre, &do_acervo, true), Canal::Cofre);
+        // Fora do cofre é sempre arrastado, mesmo com nome de pasta parecido.
+        assert_eq!(
+            canal_do_arquivo(cofre, &do_telegram, false),
+            Canal::Arrastado
+        );
+    }
 }

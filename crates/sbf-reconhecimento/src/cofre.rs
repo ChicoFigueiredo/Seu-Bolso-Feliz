@@ -16,8 +16,10 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use sbf_coleta::pastas::{registrar_arrastado, sha256_do_arquivo};
 use sbf_ia::{Controle, Fila, Provedor, Registro};
+use sbf_inventario::caixa_de_entrada::{self as caixa, Canal, Chegada, Estado as EstadoDaCaixa};
 use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
+use sbf_ocr::{DesfechoDoOcr, FalhaDoOcr, Ocr};
 use sbf_pdf::texto::{LIMITE_DO_TEXTO, cortar_como_o_js, impressao_canonica};
 use sbf_pdf::{Desfecho, Ferramentas, FonteDeSegredos, OpcoesDaRodada, PdfProtegido};
 use sbf_planejamento::{
@@ -83,8 +85,35 @@ pub struct ReconhecedorDoCofre {
     segredos: Segredos,
     ia: Ia,
     ferramentas: Ferramentas,
+    /// O tesseract das imagens (PNG, JPG, WEBP).
+    ocr: Ocr,
     /// As regras de reconhecimento (spec 13); `None` é o caminho de sempre.
     pub(crate) regras: Option<Ligadas>,
+    /// Como o reconhecimento mexe na Caixa de entrada; `None` não toca nela (o cartão que a
+    /// janela recalcula, os testes sem caixa).
+    na_caixa: Option<NaCaixa>,
+    /// Só lê o texto que o inventário já guarda; sem ele não extrai (nem OCR, nem senha):
+    /// o cartão da Caixa de entrada roda na thread da interface.
+    so_texto_guardado: bool,
+}
+
+/// Como o reconhecimento registra o arquivo na Caixa de entrada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NaCaixa {
+    /// Chegou agora: cria a linha (ou atualiza a que existe), com o canal e a regra de
+    /// reabertura da [`Chegada`].
+    Registrar(Chegada),
+    /// "Reconhecer de novo": só atualiza a linha que já existe, sem reabrir o que o usuário
+    /// decidiu e sem criar linha.
+    Atualizar,
+}
+
+/// O conteúdo de que o reconhecimento já sabe o sha256 (para a falha não deixar a linha da
+/// Caixa de entrada em Processando).
+#[derive(Debug, Clone)]
+struct ConteudoVisto {
+    sha256: String,
+    nome: String,
 }
 
 impl std::fmt::Debug for ReconhecedorDoCofre {
@@ -113,8 +142,38 @@ impl ReconhecedorDoCofre {
             segredos,
             ia: provedor.map_or(Ia::Nenhuma, Ia::Provedor),
             ferramentas: Ferramentas::default(),
+            ocr: Ocr::do_sistema(),
             regras: None,
+            na_caixa: None,
+            so_texto_guardado: false,
         }
+    }
+
+    /// Registra cada arquivo reconhecido na Caixa de entrada, chegado por este canal.
+    /// `reabrir`: o que o usuário já tinha resolvido ou dispensado volta a abrir (só uma ação
+    /// dele, como `sbf reconhecer`, pede isso). Sem esta chamada, e sem canal em
+    /// [`ReconhecedorDoCofre::reconhecer_de`], nada entra na Caixa de entrada.
+    #[must_use]
+    pub fn com_caixa_de_entrada(mut self, canal: Canal, reabrir: bool) -> Self {
+        self.na_caixa = Some(NaCaixa::Registrar(Chegada { canal, reabrir }));
+        self
+    }
+
+    /// "Reconhecer de novo": cada reconhecimento só atualiza a linha que a Caixa de entrada já
+    /// tem (tipo, resumo, estado), sem criá-la e sem reabrir o que o usuário decidiu.
+    #[must_use]
+    pub fn atualizando_a_caixa_de_entrada(mut self) -> Self {
+        self.na_caixa = Some(NaCaixa::Atualizar);
+        self
+    }
+
+    /// Só usa o texto que o inventário já guarda: sem ele, o arquivo fica "sem texto
+    /// guardado" e nada é extraído (nem OCR, nem a rodada de senhas). Serve ao que roda na
+    /// thread da interface.
+    #[must_use]
+    pub fn so_com_texto_guardado(mut self) -> Self {
+        self.so_texto_guardado = true;
+        self
     }
 
     /// Liga o motor de regras de reconhecimento (spec 13, ADR-021) ao passo de leitura local:
@@ -138,6 +197,13 @@ impl ReconhecedorDoCofre {
     #[must_use]
     pub fn com_motor_de_ia(mut self, motor: MotorDeIa) -> Self {
         self.ia = Ia::Motor(motor);
+        self
+    }
+
+    /// O tesseract das imagens (Opções; os testes). O padrão é o do sistema.
+    #[must_use]
+    pub fn com_ocr(mut self, ocr: Ocr) -> Self {
+        self.ocr = ocr;
         self
     }
 
@@ -185,6 +251,9 @@ pub(crate) struct Estado {
     pub(crate) regra: Option<sbf_regras::Reconhecimento>,
     pub(crate) entrada: Option<sbf_regras::Entrada>,
     pub(crate) leitura: Option<sbf_regras::Leitura>,
+    /// O canal de onde o arquivo veio e o id dele no canal (`Canal::Gmail` e o id da
+    /// mensagem). `None`: solto na janela ou já no cofre, como sempre.
+    pub(crate) origem: Option<(sbf_regras::Canal, String)>,
 }
 
 type Saida<T> = Result<(T, Situacao), ErroDoReconhecimento>;
@@ -228,6 +297,161 @@ impl Reconhecedor for ReconhecedorDoCofre {
         andamento: &mut dyn FnMut(Andamento),
         cancelar: &AtomicBool,
     ) -> Result<Resultado, ErroDoReconhecimento> {
+        self.reconhecer_de(None, caminho, andamento, cancelar)
+    }
+}
+
+impl ReconhecedorDoCofre {
+    /// Como [`Reconhecedor::reconhecer`], mas dizendo de que canal o arquivo veio (o Gmail, por
+    /// exemplo) e o id dele no canal: é o que as regras de reconhecimento veem em
+    /// `Entrada.origem`. `None` é o comportamento de sempre (solto na janela ou já no cofre).
+    ///
+    /// Um arquivo de dentro do cofre só segue as etapas de texto se o inventário já o
+    /// conhece: quem entrega por um canal registra o achado antes de chamar.
+    ///
+    /// # Errors
+    /// [`ErroDoReconhecimento`], como no trait.
+    pub fn reconhecer_de(
+        &self,
+        origem: Option<(sbf_regras::Canal, String)>,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        let na_caixa = self.na_caixa.or_else(|| {
+            origem
+                .as_ref()
+                .and_then(|(canal, _)| crate::caixa_de_entrada::canal_da_caixa(*canal))
+                .map(|canal| {
+                    NaCaixa::Registrar(Chegada {
+                        canal,
+                        reabrir: false,
+                    })
+                })
+        });
+        self.reconhecer_registrando(origem, caminho, andamento, cancelar, na_caixa)
+    }
+
+    /// Como [`ReconhecedorDoCofre::reconhecer`], registrando o arquivo na Caixa de entrada
+    /// com a `chegada` dada (o canal varia por arquivo: a pasta do celular e as outras).
+    ///
+    /// # Errors
+    /// [`ErroDoReconhecimento`], como no trait.
+    pub fn reconhecer_chegada(
+        &self,
+        chegada: Chegada,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        self.reconhecer_registrando(
+            None,
+            caminho,
+            andamento,
+            cancelar,
+            Some(NaCaixa::Registrar(chegada)),
+        )
+    }
+
+    /// A leitura de um conteúdo falhou antes de o reconhecimento saber o que ele é (o arquivo
+    /// sumiu, não abriu): a Caixa de entrada guarda isso como "Precisa revisar", com o pedido
+    /// de reconhecer de novo, em vez de deixá-lo cair em "sem padrão de reconhecimento" ou
+    /// sumir.
+    pub fn registrar_falha_da_leitura(&self, chegada: Chegada, sha256: &str, nome: &str) {
+        if let Ok(conn) = abrir_escrita(&self.cofre.join("inventario.sqlite")) {
+            let visto = ConteudoVisto {
+                sha256: sha256.to_owned(),
+                nome: nome.to_owned(),
+            };
+            registrar_falha(&conn, NaCaixa::Registrar(chegada), &visto);
+        }
+    }
+
+    fn reconhecer_registrando(
+        &self,
+        origem: Option<(sbf_regras::Canal, String)>,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+        na_caixa: Option<NaCaixa>,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        let mut visto: Option<ConteudoVisto> = None;
+        let r = self.executar(origem, caminho, andamento, cancelar, na_caixa, &mut visto);
+        // O reconhecimento parou depois de saber qual era o conteúdo: a Caixa de entrada não
+        // fica com o "Processando" para sempre, e a falha vai para "Precisa revisar".
+        if let (Err(_), Some(na_caixa), Some(visto)) = (&r, na_caixa, &visto)
+            && let Ok(conn) = abrir_escrita(&self.cofre.join("inventario.sqlite"))
+        {
+            registrar_falha(&conn, na_caixa, visto);
+        }
+        r
+    }
+
+    /// Reconhece de novo um conteúdo que o inventário já tem, sem o arquivo na mão: lê a cópia
+    /// do acervo (ou, sem ela, uma origem local que ainda exista) e roda as mesmas etapas. O
+    /// texto já guardado vale (não extrai de novo), então é rápido; é assim que a Caixa de
+    /// entrada recalcula as sugestões e que "Reconhecer de novo" reaproveita as regras novas.
+    ///
+    /// # Errors
+    /// [`ErroDoReconhecimento::Arquivo`] quando o conteúdo não tem arquivo para ler.
+    pub fn reconhecer_conteudo(
+        &self,
+        sha256: &str,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
+        let caminho = self.arquivo_do_conteudo(sha256)?;
+        self.reconhecer(&caminho, andamento, cancelar)
+    }
+
+    /// O arquivo que guarda o conteúdo: a cópia do acervo ou uma origem local que existe.
+    ///
+    /// # Errors
+    /// Sem arquivo, ou o banco não abre.
+    pub fn arquivo_do_conteudo(&self, sha256: &str) -> Result<PathBuf, ErroDoReconhecimento> {
+        let conn = Connection::open_with_flags(
+            self.cofre.join("inventario.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(banco)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))
+            .map_err(banco)?;
+        if let Some(rel) = caixa::caminho_no_acervo(&conn, sha256).map_err(banco)? {
+            let p = self.cofre.join(rel);
+            if p.is_file() {
+                return Ok(p);
+            }
+        }
+        let mut q = conn
+            .prepare(
+                "SELECT local_filepath FROM origem
+                  WHERE content_hash = ?1 AND local_filepath IS NOT NULL
+                  ORDER BY id DESC",
+            )
+            .map_err(banco)?;
+        let caminhos = q
+            .query_map([sha256], |l| l.get::<_, String>(0))
+            .map_err(banco)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(banco)?;
+        caminhos
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|p| p.is_file())
+            .ok_or_else(|| {
+                ErroDoReconhecimento::Arquivo("o arquivo não está mais no cofre".to_owned())
+            })
+    }
+
+    fn executar(
+        &self,
+        origem: Option<(sbf_regras::Canal, String)>,
+        caminho: &Path,
+        andamento: &mut dyn FnMut(Andamento),
+        cancelar: &AtomicBool,
+        na_caixa: Option<NaCaixa>,
+        visto: &mut Option<ConteudoVisto>,
+    ) -> Result<Resultado, ErroDoReconhecimento> {
         let meta = std::fs::metadata(caminho).map_err(|e| do_arquivo(&e))?;
         if !meta.is_file() {
             return Err(ErroDoReconhecimento::Arquivo(
@@ -254,6 +478,7 @@ impl Reconhecedor for ReconhecedorDoCofre {
             regra: None,
             entrada: None,
             leitura: None,
+            origem,
         };
 
         // 1. Conferir.
@@ -265,6 +490,15 @@ impl Reconhecedor for ReconhecedorDoCofre {
             Ok((conn, Situacao::Feita))
         })?;
         estado.sem_achado = !estado.ja_existia && estado.dentro_do_cofre;
+        if let Some(na_caixa) = na_caixa {
+            *visto = Some(ConteudoVisto {
+                sha256: estado.sha256.clone(),
+                nome: nome.clone(),
+            });
+            if let NaCaixa::Registrar(c) = na_caixa {
+                let _ = caixa::marcar_processando(&conn, &estado.sha256, &nome, c.canal);
+            }
+        }
 
         // 2. Registrar.
         etapa(andamento, cancelar, Etapa::Registrar, || {
@@ -354,7 +588,7 @@ impl Reconhecedor for ReconhecedorDoCofre {
             Ok(((), situacao))
         })?;
 
-        Ok(Resultado {
+        let mut resultado = Resultado {
             sha256: estado.sha256,
             nome,
             ja_existia: estado.ja_existia,
@@ -364,8 +598,39 @@ impl Reconhecedor for ReconhecedorDoCofre {
             avisos: estado.avisos,
             entrada: estado.entrada,
             leitura: estado.leitura,
-        })
+        };
+        if let Some(na_caixa) = na_caixa {
+            // Duas origens fora a fonte `arrastado` (que o próprio reconhecimento cria ao
+            // copiar um arquivo solto): o mesmo conteúdo já foi achado em outro lugar.
+            let repetido = caixa::origens_de_fora(&conn, &resultado.sha256).is_ok_and(|n| n >= 2);
+            let leitura = crate::caixa_de_entrada::leitura_do_resultado(&resultado, repetido);
+            let gravou = match na_caixa {
+                NaCaixa::Registrar(chegada) => caixa::registrar(&conn, &leitura, &chegada).is_ok(),
+                NaCaixa::Atualizar => caixa::atualizar(&conn, &leitura).is_ok(),
+            };
+            if !gravou {
+                resultado
+                    .avisos
+                    .push("não consegui registrar o arquivo na Caixa de entrada".to_owned());
+            }
+        }
+        Ok(resultado)
     }
+}
+
+/// Grava a falha da leitura como "Precisa revisar" (fora de "sem padrão de reconhecimento").
+fn registrar_falha(conn: &Connection, na_caixa: NaCaixa, visto: &ConteudoVisto) {
+    let leitura = caixa::Leitura {
+        content_hash: visto.sha256.clone(),
+        nome: visto.nome.clone(),
+        tipo: None,
+        resumo: Some(crate::caixa_de_entrada::RESUMO_LEITURA_FALHOU.to_owned()),
+        estado: EstadoDaCaixa::PrecisaRevisar,
+    };
+    let _ = match na_caixa {
+        NaCaixa::Registrar(chegada) => caixa::registrar(conn, &leitura, &chegada).is_ok(),
+        NaCaixa::Atualizar => caixa::atualizar(conn, &leitura).is_ok(),
+    };
 }
 
 fn abrir_escrita(caminho: &Path) -> Result<Connection, ErroDoReconhecimento> {
@@ -405,6 +670,16 @@ fn esta_dentro(arquivo: &Path, cofre: &Path) -> bool {
     }
 }
 
+/// Sem texto: se a etapa falhou, o texto é "a leitura falhou" (a Caixa de entrada pede
+/// revisão); se só não havia o que ler (imagem sem OCR, formato sem leitor), é "sem texto".
+fn texto_sem_conteudo(motivo: &str, situacao: &Situacao) -> EstadoDoTexto {
+    if matches!(situacao, Situacao::Falhou(_)) {
+        EstadoDoTexto::Falhou(motivo.to_owned())
+    } else {
+        EstadoDoTexto::SemTexto(motivo.to_owned())
+    }
+}
+
 fn extensao(caminho: &Path) -> String {
     caminho
         .extension()
@@ -436,9 +711,21 @@ impl ReconhecedorDoCofre {
                 Situacao::Pulada("o inventário já tinha o texto".to_owned()),
             ));
         }
+        if self.so_texto_guardado {
+            let motivo = "sem texto guardado: use Reconhecer de novo para extrair".to_owned();
+            return Ok((
+                EstadoDoTexto::SemTexto(motivo.clone()),
+                None,
+                Situacao::Pulada(motivo),
+            ));
+        }
         match extensao(caminho).as_str() {
             "pdf" => self.extrair_do_pdf(conn, caminho, sha),
-            "txt" => extrair_do_txt(conn, caminho, sha),
+            // O XML de NF-e é texto: as regras casam pelo conteúdo dele.
+            "txt" | "xml" => extrair_do_txt(conn, caminho, sha),
+            e if sbf_ocr::EXTENSOES_DE_IMAGEM.contains(&e) => {
+                self.extrair_da_imagem(conn, caminho, sha)
+            }
             _ => {
                 let motivo = "ainda sem leitor de texto para este formato".to_owned();
                 Ok((
@@ -450,6 +737,47 @@ impl ReconhecedorDoCofre {
         }
     }
 
+    /// Imagem (print de app, foto de comprovante): OCR com o tesseract, gravado em `texto`
+    /// com o método `ocr-tesseract`. Sem tesseract não é erro e nada é gravado.
+    fn extrair_da_imagem(
+        &self,
+        conn: &Connection,
+        caminho: &Path,
+        sha: &str,
+    ) -> Result<(EstadoDoTexto, Option<String>, Situacao), ErroDoReconhecimento> {
+        let sem = |motivo: &str, situacao: Situacao| {
+            Ok((texto_sem_conteudo(motivo, &situacao), None, situacao))
+        };
+        match sbf_ocr::ocr_do_achado(conn, sha, caminho, &self.ocr).map_err(banco)? {
+            DesfechoDoOcr::Lido(t) => Ok((EstadoDoTexto::Extraido, Some(t), Situacao::Feita)),
+            DesfechoDoOcr::JaHavia(t) => Ok((
+                EstadoDoTexto::JaHavia,
+                (!t.trim().is_empty()).then_some(t),
+                Situacao::Pulada("o inventário já tinha o texto".to_owned()),
+            )),
+            DesfechoDoOcr::Indisponivel => {
+                let m = "OCR indisponível";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::SemTexto => {
+                let m = "o OCR não achou texto na imagem";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::Falhou(FalhaDoOcr::ImagemGrande) => {
+                let m = "a imagem passa do limite do OCR (15 MiB)";
+                sem(m, Situacao::Pulada(m.to_owned()))
+            }
+            DesfechoDoOcr::Falhou(_) => {
+                let m = "o OCR não leu a imagem";
+                sem(m, Situacao::Falhou(m.to_owned()))
+            }
+            _ => {
+                let m = "o OCR não deu resultado";
+                sem(m, Situacao::Falhou(m.to_owned()))
+            }
+        }
+    }
+
     fn extrair_do_pdf(
         &self,
         conn: &Connection,
@@ -457,7 +785,7 @@ impl ReconhecedorDoCofre {
         sha: &str,
     ) -> Result<(EstadoDoTexto, Option<String>, Situacao), ErroDoReconhecimento> {
         let sem = |motivo: &str, situacao: Situacao| {
-            Ok((EstadoDoTexto::SemTexto(motivo.to_owned()), None, situacao))
+            Ok((texto_sem_conteudo(motivo, &situacao), None, situacao))
         };
         let pdf = match PdfProtegido::ler(caminho) {
             Ok(p) => p,
@@ -997,7 +1325,7 @@ fn sugestoes_abertas(
     Ok(linhas)
 }
 
-fn rotulo_do_tipo(tipo: &str) -> &'static str {
+pub(crate) fn rotulo_do_tipo(tipo: &str) -> &'static str {
     match tipo {
         "fatura" => "Fatura",
         "boleto" => "Boleto",

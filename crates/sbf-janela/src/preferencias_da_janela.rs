@@ -60,6 +60,14 @@ impl Default for PreferenciasDoControle {
     }
 }
 
+/// O que a área Conexões lembra: a última aba aberta.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PreferenciasDeConexoes {
+    /// A chave da aba (`telegram`, `email`, `pluggy`, `pastas`); vazio vale Telegram.
+    #[serde(default)]
+    pub aba: String,
+}
+
 /// Menor e maior tamanho (em pontos) que se aceita de um arquivo guardado.
 pub const TAMANHO_MINIMO: [f32; 2] = [960.0, 600.0];
 pub const TAMANHO_MAXIMO: [f32; 2] = [16_000.0, 16_000.0];
@@ -170,6 +178,9 @@ pub struct PreferenciasDaJanela {
     /// A janela do sistema: maximizada, tamanho e posição.
     #[serde(default)]
     pub janela: EstadoDaJanela,
+    /// A área Conexões: a última aba.
+    #[serde(default)]
+    pub conexoes: PreferenciasDeConexoes,
 }
 
 /// Onde moram as preferências da janela: na pasta de dados do app, nunca dentro do cofre.
@@ -385,6 +396,9 @@ mod testes {
                 maximizada: true,
                 tamanho: Some([1400.0, 900.0]),
                 posicao: Some([120.0, 40.0]),
+            },
+            conexoes: PreferenciasDeConexoes {
+                aba: "email".into(),
             },
         }
     }

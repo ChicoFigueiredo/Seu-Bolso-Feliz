@@ -46,6 +46,32 @@ pub struct Nucleo {
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
+    gmail: ColetaDoGmail,
+    telegram: Option<crate::telegram::Ponte>,
+    backups: crate::backup::Backups,
+}
+
+/// O que `gmail_coletar` recebe.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ParamsDeColetaDoGmail {
+    pub consulta: Option<String>,
+    pub desde: Option<String>,
+    pub limite: Option<usize>,
+}
+
+/// A coleta do Gmail que o `sbf` injeta (o MCP não conhece o cliente do Gmail nem o
+/// reconhecimento): recebe os parâmetros e devolve o resumo em JSON.
+pub type ColetorDoGmail = dyn Fn(&ParamsDeColetaDoGmail) -> Result<Value, String> + Send + Sync;
+
+#[derive(Clone, Default)]
+struct ColetaDoGmail(Option<Arc<ColetorDoGmail>>);
+
+impl std::fmt::Debug for ColetaDoGmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColetaDoGmail")
+            .field("ligada", &self.0.is_some())
+            .finish()
+    }
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -227,13 +253,51 @@ impl Nucleo {
         abrir_leitura(banco)
             .and_then(|c| c.query_row("SELECT COUNT(*) FROM sqlite_master", [], |_| Ok(())))
             .map_err(|e| format!("não deu para abrir o inventário: {e}"))?;
+        let cofre = banco.parent().unwrap_or_else(|| Path::new("."));
+        let backups = crate::backup::Backups::novo(cofre);
+        backups.registrar(crate::backup::Qual::Inventario, banco.to_path_buf());
         Ok(Self {
             banco: banco.to_path_buf(),
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
             semelhantes: Semelhantes(None),
             plano: None,
             regras: None,
+            gmail: ColetaDoGmail::default(),
+            telegram: None,
+            backups,
         })
+    }
+
+    /// Liga `gmail_coletar`. `coletor` roda a coleta do Gmail no cofre (anexos para
+    /// `entrada/gmail/` e reconhecimento com as regras).
+    #[must_use]
+    pub fn com_gmail(mut self, coletor: Arc<ColetorDoGmail>) -> Self {
+        self.gmail = ColetaDoGmail(Some(coletor));
+        self
+    }
+
+    /// Há coleta do Gmail ligada?
+    #[must_use]
+    pub fn tem_gmail(&self) -> bool {
+        self.gmail.0.is_some()
+    }
+
+    /// `gmail_coletar` (D15: aplica direto): coleta agora. Há backup do inventário e das
+    /// regras antes da primeira escrita da sessão; se falha, a coleta é recusada.
+    ///
+    /// # Errors
+    /// Gmail não ligado, backup que falhou ou a falha da coleta (sem conteúdo de e-mail).
+    pub fn gmail_coletar(&self, p: &ParamsDeColetaDoGmail) -> Resultado {
+        let coletor = self
+            .gmail
+            .0
+            .as_ref()
+            .ok_or_else(|| "a coleta do Gmail não está ligada".to_owned())?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Regras)?;
+        coletor(p)
     }
 
     /// Liga `buscar_semelhantes` ao índice local. `nivel` é o nível de confiança deste
@@ -257,8 +321,35 @@ impl Nucleo {
             banco: self.banco.clone(),
             nivel: self.nivel(),
             hoje: None,
+            backups: self.backups.clone(),
         });
         self
+    }
+
+    /// Diz onde está o `planejamento.sqlite` que a fábrica abre, para o backup da primeira
+    /// escrita da sessão e para `fazer_backup`. Sem isso o planejamento não é copiado.
+    #[must_use]
+    pub fn com_arquivo_do_planejamento(self, arquivo: &Path) -> Self {
+        self.backups
+            .registrar(crate::backup::Qual::Planejamento, arquivo.to_path_buf());
+        self
+    }
+
+    /// Troca o guarda de backups (os testes fixam o relógio). Chame antes de `com_planejamento`
+    /// e `com_regras`.
+    #[must_use]
+    pub fn com_backups(mut self, backups: crate::backup::Backups) -> Self {
+        backups.registrar(crate::backup::Qual::Inventario, self.banco.clone());
+        self.backups = backups;
+        self
+    }
+
+    /// `fazer_backup`: copia, agora, todos os bancos do cofre (API de backup do SQLite).
+    ///
+    /// # Errors
+    /// Qualquer banco que não deu para copiar.
+    pub fn fazer_backup(&self) -> Resultado {
+        self.backups.fazer_todos()
     }
 
     /// Liga as ferramentas de regras de reconhecimento sobre `caminho` (o `regras.sqlite`
@@ -271,13 +362,36 @@ impl Nucleo {
         caminho: PathBuf,
         executor: Arc<dyn sbf_regras::script::ExecutorDeScript>,
     ) -> Self {
-        self.regras = Some(crate::regras::Regras::novo(
-            caminho,
-            self.banco.clone(),
-            executor,
-            self.nivel(),
-        ));
+        self.backups
+            .registrar(crate::backup::Qual::Regras, caminho.clone());
+        self.regras = Some(
+            crate::regras::Regras::novo(caminho, self.banco.clone(), executor, self.nivel())
+                .com_backups(self.backups.clone()),
+        );
         self
+    }
+
+    /// Liga as ferramentas do Telegram (a ponte é do `sbf`; o MCP não fala MTProto).
+    #[must_use]
+    pub fn com_telegram(mut self, ponte: Arc<dyn crate::telegram::PonteDoTelegram>) -> Self {
+        self.telegram = Some(crate::telegram::Ponte(ponte));
+        self
+    }
+
+    /// Há Telegram ligado?
+    #[must_use]
+    pub fn tem_telegram(&self) -> bool {
+        self.telegram.is_some()
+    }
+
+    /// A ponte do Telegram.
+    ///
+    /// # Errors
+    /// Telegram não ligado.
+    pub fn telegram(&self) -> Result<&crate::telegram::Ponte, String> {
+        self.telegram
+            .as_ref()
+            .ok_or_else(|| "o Telegram não está ligado a este servidor".to_owned())
     }
 
     /// Há regras de reconhecimento ligadas?
@@ -1002,6 +1116,8 @@ impl Nucleo {
                 "no máximo {MAXIMO_DE_SUGESTOES} sugestões por chamada"
             ));
         }
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
         let leitura = self.leitura()?;
         if !tem_triagem(&leitura) {
             return Err("o inventário ainda não tem a triagem (abra o app e migre)".to_owned());

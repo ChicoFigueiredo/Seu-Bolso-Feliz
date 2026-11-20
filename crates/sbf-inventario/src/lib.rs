@@ -45,6 +45,9 @@ pub mod protegidos;
 // O texto extraído de um achado e o `canonical_fingerprint`.
 pub mod texto;
 
+// A Caixa de entrada: a fila de reconhecimento dos documentos novos.
+pub mod caixa_de_entrada;
+
 // Manutenção pela linha de comando.
 pub mod manutencao;
 

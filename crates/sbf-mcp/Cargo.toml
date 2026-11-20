@@ -1,6 +1,6 @@
 [package]
 name = "sbf-mcp"
-description = "Servidor MCP local (stdio) do SBF: o Claude consulta o inventário e o livro-caixa e propõe sugestões para a triagem. Nunca grava decisão."
+description = "Servidor MCP local (stdio) do SBF: o Claude consulta, aplica (com autor mcp, backup e Desfazer) e propõe sugestões para a triagem do usuário."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

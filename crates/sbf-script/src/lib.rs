@@ -14,7 +14,9 @@ mod filho;
 mod no_processo;
 mod protocolo;
 
-pub use ajuda::{centavos, data, mul_div_arred, normalizar};
+pub use ajuda::{
+    centavos, data, dias_da_semana_no_mes, mul_div_arred, nome_do_dia_da_semana, normalizar, reais,
+};
 pub use endurecer::{Estado, RelatorioDeEndurecimento, endurecer};
 pub use filho::ExecutorFilho;
 pub use no_processo::ExecutorNoProcesso;

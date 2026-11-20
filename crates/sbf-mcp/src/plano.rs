@@ -1,6 +1,7 @@
-//! As ferramentas do controle mensal (spec 11, AC-30). Falam só com o trait
-//! [`Planejamento`]: leem, simulam e **propõem**. Nunca chamam `aplicar`,
-//! `confirmar_proposta` ou `recusar_proposta`; quem decide é a janela do SBF.
+//! As ferramentas do controle mensal (spec 11, AC-30; D15 da spec 13). Falam só com o trait
+//! [`Planejamento`]: leem, simulam, **propõem** e, desde a D15, **aplicam direto**, com autor
+//! `Mcp` no histórico e Desfazer (`desfazer`). Antes da primeira escrita da sessão o banco é
+//! copiado (ver [`crate::backup`]); se o backup falha, a escrita é recusada.
 //!
 //! Cada chamada abre uma instância nova do serviço (pela [`Fabrica`]), roda, passa o texto
 //! livre pelo nível de confiança do cliente e grava uma linha em `saida_ia` (destinatário
@@ -13,12 +14,15 @@ use std::sync::Arc;
 use rmcp::schemars;
 use sbf_ia::NivelDeConfianca;
 use sbf_planejamento::{
-    Alteracao, Centavos, Certeza, Ciclo, Competencia, Conciliacao, Data, DiaDeCorte,
+    Alteracao, Autor, Centavos, Certeza, Ciclo, Competencia, Conciliacao, Data, DiaDeCorte,
     ErroDoPlanejamento, Escopo, Excecao, Filtro, Fonte, Frequencia, HORIZONTE_MESES, IdOcorrencia,
-    MudancaDeVersao, Natureza, NovoRecorrente, Periodo, Planejamento, Prazo, Sentido, Versao,
+    MudancaDeVersao, Natureza, NovoRecorrente, ParametroDeModelo, Periodo, Planejamento, Prazo,
+    Sentido, TipoDeParametro, ValorDeParametro, ValorDoParametro, Versao,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+
+use crate::backup::{Backups, Qual};
 
 /// Abre uma instância do serviço de planejamento (uma por chamada).
 pub type Fabrica = dyn Fn() -> Result<Box<dyn Planejamento>, String> + Send + Sync;
@@ -40,9 +44,38 @@ pub const ORIGEM: &str = "mcp";
 /// O que o Claude lê depois de propor.
 pub const AVISO_DE_PROPOSTA: &str = "proposta pendente: confirme na janela do SBF";
 
-/// Os nomes das ferramentas do controle mensal.
-pub const FERRAMENTAS: [&str; 14] = [
+/// As ferramentas que **aplicam** (D15). Todas passam pelo backup da primeira escrita e
+/// gravam no histórico com autor `Mcp`.
+pub const FERRAMENTAS_DE_ESCRITA: [&str; 16] = [
+    "aplicar_alteracao",
+    "criar_compromisso",
+    "pausar",
+    "retomar",
+    "cancelar",
+    "excecao",
+    "excluir_logicamente",
+    "conciliar",
+    "desconciliar",
+    "aplicar_proposta",
+    "recusar_proposta",
+    "desfazer",
+    "criar_modelo",
+    "aplicar_modelo",
+    "definir_parametro",
+    "ajustar_quantidade",
+];
+
+/// O aviso que o Claude lê depois de aplicar.
+pub const AVISO_DE_APLICACAO: &str =
+    "aplicado agora, sem confirmação na janela; para voltar atrás use a ferramenta desfazer";
+
+/// Quantos movimentos uma conciliação aceita de uma vez.
+pub const MAXIMO_DE_MOVIMENTOS: usize = 20;
+
+/// Os nomes das ferramentas do controle mensal que leem, simulam e propõem.
+pub const FERRAMENTAS: [&str; 15] = [
     "listar_compromissos",
+    "listar_modelos",
     "resumo_de_caixa",
     "projetar_compromissos",
     "obter_compromisso",
@@ -248,6 +281,192 @@ pub struct PedidoDeExcecao {
     pub data: Option<String>,
 }
 
+/// Aplica uma alteração agora (D15). Dá para trocar o nome (`nome`), mudar o que vale
+/// (valor, certeza, conta...) ou as duas coisas.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAplicacao {
+    /// O id do recorrente (veja obter_compromisso).
+    pub recorrente: String,
+    /// O novo nome do compromisso (renomear vale para o compromisso inteiro, não por mês).
+    pub nome: Option<String>,
+    /// so_este_mes (só o valor, só nesta competência) ou daqui_em_diante (versão nova).
+    /// Obrigatório se mudar valor, certeza, conta, centro, fornecedor, categoria ou nota.
+    pub escopo: Option<String>,
+    /// AAAA-MM: o mês (so_este_mes) ou o primeiro mês da versão nova (daqui_em_diante).
+    pub competencia: Option<String>,
+    /// Novo valor em centavos, maior ou igual a zero.
+    pub valor_centavos: Option<i64>,
+    /// true: passa a "sem valor" (a conferir). Só em daqui_em_diante.
+    pub sem_valor: Option<bool>,
+    /// confirmado ou estimado. Só em daqui_em_diante.
+    pub certeza: Option<String>,
+    pub conta: Option<String>,
+    pub centro: Option<String>,
+    pub fornecedor: Option<String>,
+    pub categoria: Option<String>,
+    pub nota: Option<String>,
+    /// Campos a limpar: conta, centro, fornecedor, categoria, nota. Só em daqui_em_diante.
+    pub limpar: Option<Vec<String>>,
+}
+
+impl PedidoDeAplicacao {
+    fn muda_algo_da_versao(&self) -> bool {
+        self.valor_centavos.is_some()
+            || self.sem_valor == Some(true)
+            || self.certeza.is_some()
+            || self.conta.is_some()
+            || self.centro.is_some()
+            || self.fornecedor.is_some()
+            || self.categoria.is_some()
+            || self.nota.is_some()
+            || self.limpar.as_ref().is_some_and(|l| !l.is_empty())
+    }
+
+    fn como_alteracao(&self) -> Result<PedidoDeAlteracao, String> {
+        Ok(PedidoDeAlteracao {
+            recorrente: self.recorrente.clone(),
+            escopo: self
+                .escopo
+                .clone()
+                .ok_or("diga o escopo: so_este_mes ou daqui_em_diante")?,
+            competencia: self
+                .competencia
+                .clone()
+                .ok_or("diga a competencia (AAAA-MM) da mudança")?,
+            valor_centavos: self.valor_centavos,
+            sem_valor: self.sem_valor,
+            certeza: self.certeza.clone(),
+            conta: self.conta.clone(),
+            centro: self.centro.clone(),
+            fornecedor: self.fornecedor.clone(),
+            categoria: self.categoria.clone(),
+            nota: self.nota.clone(),
+            limpar: self.limpar.clone(),
+        })
+    }
+}
+
+/// Um movimento do extrato a ligar a uma ocorrência.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MovimentoParaConciliar {
+    /// O id do movimento (`pluggy:txn_<id>` ou id da movimentação).
+    pub movimento: String,
+    /// O valor do movimento, em centavos.
+    pub valor_centavos: i64,
+    /// AAAA-MM-DD do movimento.
+    pub data: String,
+}
+
+/// Concilia (e CONFIRMA) uma ocorrência com um ou vários movimentos.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeConciliar {
+    /// "rec:AAAA-MM" ou "rec:AAAA-MM:pN".
+    pub id_ocorrencia: String,
+    /// De 1 a 20 movimentos (um pagamento dividido em vários débitos, por exemplo).
+    pub movimentos: Vec<MovimentoParaConciliar>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeDesconciliar {
+    /// "rec:AAAA-MM" ou "rec:AAAA-MM:pN".
+    pub id_ocorrencia: String,
+    /// O id do movimento a soltar da ocorrência.
+    pub movimento: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAplicarProposta {
+    /// O id da proposta pendente (veja listar_propostas).
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeRecusaDeProposta {
+    /// O id da proposta pendente.
+    pub id: String,
+    /// Por que (obrigatório).
+    pub motivo: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeDesfazer {
+    /// O id da alteração (o `alteracao_id` que a ferramenta devolveu, ou o do histórico em
+    /// obter_compromisso). Sem ele, desfaz a última alteração feita pelo MCP que ainda não
+    /// foi desfeita. Só se desfaz o que o MCP fez.
+    pub alteracao_id: Option<String>,
+}
+
+/// Um parâmetro que o modelo declara.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ParametroDeclarado {
+    /// Minúsculas sem acento, dígitos e `_` (ex.: diaria, dia_da_semana). É a chave em
+    /// `entrada.parametros` do script.
+    pub nome: String,
+    /// centavos, dia_da_semana, inteiro ou texto.
+    pub tipo: String,
+}
+
+/// Cria um Modelo de compromisso: o molde que vários compromissos compartilham.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeCriarModelo {
+    /// O nome do modelo (único).
+    pub nome: String,
+    /// De 1 a 20 parâmetros.
+    pub parametros: Vec<ParametroDeclarado>,
+    /// O Cálculo, em Luau: define `calcular(entrada, ajuda)` e devolve
+    /// `{valor_centavos, quantidade?, explicacao}`. `entrada.competencia` é "AAAA-MM",
+    /// `entrada.parametros` tem os valores vigentes, `entrada.quantidade_ajustada` é um número
+    /// ou nil. `ajuda.dias_da_semana_no_mes(ano, mes, dia_semana)` (1 = segunda ... 7 =
+    /// domingo), `ajuda.nome_do_dia_da_semana(n)`, `ajuda.reais(centavos)`,
+    /// `ajuda.mul_div_arred(a, b, c)`. Sem io, os, relógio nem aleatório.
+    pub calculo: String,
+}
+
+/// O valor de um parâmetro, com vigência.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ValorEntrada {
+    /// O nome do parâmetro (veja listar_modelos).
+    pub parametro: String,
+    /// AAAA-MM: vale desta competência em diante, até o próximo valor.
+    pub desde: String,
+    /// centavos e inteiro: número. dia_da_semana: 1 (segunda) a 7 (domingo) ou o nome
+    /// ("sexta"). texto: texto.
+    pub valor: Value,
+}
+
+/// Liga um compromisso a um modelo e preenche os valores dos parâmetros.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAplicarModelo {
+    /// O id do compromisso (recorrente).
+    pub recorrente: String,
+    /// O id ou o nome do modelo (veja listar_modelos).
+    pub modelo: String,
+    /// Os valores iniciais (cada um com a vigência `desde`). Pode ficar vazio ao religar.
+    #[serde(default)]
+    pub valores: Vec<ValorEntrada>,
+}
+
+/// Um valor de parâmetro com vigência num compromisso que já usa um modelo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeDefinirParametro {
+    /// O id do compromisso (recorrente).
+    pub recorrente: String,
+    pub parametro: String,
+    /// AAAA-MM: vale desta competência em diante.
+    pub desde: String,
+    /// Veja `aplicar_modelo`.
+    pub valor: Value,
+}
+
+/// A quantidade (as diárias) de UM mês só; o resto segue o cálculo.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeAjustarQuantidade {
+    /// "rec:AAAA-MM" (o mês a ajustar).
+    pub id_ocorrencia: String,
+    /// De 0 a 1000.
+    pub quantidade: i64,
+}
+
 /// Qualquer alteração, para `simular_mudanca`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "tipo", rename_all = "snake_case")]
@@ -395,6 +614,95 @@ fn versao_base(p: &dyn Planejamento, id: &str) -> Result<i64, String> {
             Err("não encontrei esse compromisso (confira o id com obter_compromisso)".to_owned())
         }
     }
+}
+
+fn tipo_de_parametro(t: &str) -> Result<TipoDeParametro, String> {
+    match t.trim() {
+        "centavos" => Ok(TipoDeParametro::Centavos),
+        "dia_da_semana" => Ok(TipoDeParametro::DiaDaSemana),
+        "inteiro" => Ok(TipoDeParametro::Inteiro),
+        "texto" => Ok(TipoDeParametro::Texto),
+        _ => Err("tipo deve ser centavos, dia_da_semana, inteiro ou texto".to_owned()),
+    }
+}
+
+/// "sexta", "Sexta-feira", "sábado"... → 1 a 7 (ISO).
+fn dia_da_semana_por_nome(t: &str) -> Option<i64> {
+    let t = t.trim().to_lowercase().replace("-feira", "");
+    let t: String = t
+        .chars()
+        .map(|c| match c {
+            'ç' => 'c',
+            'á' | 'à' | 'ã' | 'â' => 'a',
+            'é' | 'ê' => 'e',
+            'í' => 'i',
+            'ó' | 'ô' | 'õ' => 'o',
+            'ú' => 'u',
+            outro => outro,
+        })
+        .collect();
+    Some(match t.as_str() {
+        "segunda" => 1,
+        "terca" => 2,
+        "quarta" => 3,
+        "quinta" => 4,
+        "sexta" => 5,
+        "sabado" => 6,
+        "domingo" => 7,
+        _ => return None,
+    })
+}
+
+fn valor_de_parametro(
+    parametros: &[ParametroDeModelo],
+    nome: &str,
+    desde: &str,
+    v: &Value,
+) -> Result<ValorDeParametro, String> {
+    let nome = texto(nome, "parametro", MAX_NOME)?;
+    let tipo = parametros
+        .iter()
+        .find(|p| p.nome == nome)
+        .map(|p| p.tipo)
+        .ok_or_else(|| {
+            format!(
+                "o modelo não tem o parâmetro {nome} (os dele: {})",
+                parametros
+                    .iter()
+                    .map(|p| p.nome.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+    let invalido = || format!("o valor de {nome} não bate com o tipo do parâmetro");
+    let valor = match (tipo, v) {
+        (TipoDeParametro::Texto, Value::String(t)) => {
+            ValorDoParametro::Texto(texto(t, "valor", MAX_NOME)?)
+        }
+        (TipoDeParametro::DiaDaSemana, Value::String(t)) => ValorDoParametro::Inteiro(
+            dia_da_semana_por_nome(t).ok_or("dia da semana desconhecido (use 1 a 7 ou o nome)")?,
+        ),
+        (
+            TipoDeParametro::Centavos | TipoDeParametro::DiaDaSemana | TipoDeParametro::Inteiro,
+            n,
+        ) if n.is_i64() => ValorDoParametro::Inteiro(n.as_i64().ok_or_else(invalido)?),
+        _ => return Err(invalido()),
+    };
+    Ok(ValorDeParametro {
+        parametro: nome,
+        desde: competencia(desde, "desde")?,
+        valor,
+    })
+}
+
+/// O modelo pelo id ou pelo nome.
+fn achar_modelo(p: &dyn Planejamento, t: &str) -> Result<sbf_planejamento::Modelo, String> {
+    let t = texto(t, "modelo", MAX_NOME)?;
+    p.modelos()
+        .map_err(pt)?
+        .into_iter()
+        .find(|m| m.id == t || m.nome.eq_ignore_ascii_case(&t))
+        .ok_or_else(|| "não encontrei esse modelo (veja listar_modelos)".to_owned())
 }
 
 fn montar_novo(p: &PedidoNovoCompromisso) -> Result<Alteracao, String> {
@@ -655,6 +963,24 @@ fn montar(pl: &dyn Planejamento, e: &EntradaDeAlteracao) -> Result<Alteracao, St
     }
 }
 
+/// Um compromisso novo com o mesmo nome e grupo de um que já existe é quase sempre uma
+/// chamada repetida: recusa (não há chave de idempotência nas ferramentas que aplicam).
+fn recusar_duplicado(p: &dyn Planejamento, novo: &PedidoNovoCompromisso) -> Result<(), String> {
+    let nome = novo.nome.trim().to_lowercase();
+    let grupo = novo.grupo.trim().to_lowercase();
+    let existe =
+        p.recorrentes(false).map_err(pt)?.iter().any(|r| {
+            r.nome.trim().to_lowercase() == nome && r.grupo.trim().to_lowercase() == grupo
+        });
+    if existe {
+        return Err(
+            "já existe um compromisso com esse nome e grupo: altere o existente (aplicar_alteracao) ou use outro nome"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------
 // Saída: nível de confiança e formato
 // ---------------------------------------------------------------------------------------
@@ -753,6 +1079,7 @@ pub struct Plano {
     pub(crate) banco: PathBuf,
     pub(crate) nivel: NivelDeConfianca,
     pub(crate) hoje: Option<Data>,
+    pub(crate) backups: Backups,
 }
 
 impl fmt::Debug for Plano {
@@ -780,6 +1107,17 @@ impl Plano {
         } as u64;
         self.registrar(ferramenta, bytes)?;
         r
+    }
+
+    /// Como [`Plano::executar`], para o que escreve no planejamento: antes da primeira escrita
+    /// da sessão o banco é copiado, e se o backup falha a escrita é recusada.
+    fn escrever(
+        &self,
+        ferramenta: &str,
+        f: impl FnOnce(&mut dyn Planejamento, Data) -> Resultado,
+    ) -> Resultado {
+        self.backups.antes_de_escrever(Qual::Planejamento)?;
+        self.executar(ferramenta, f)
     }
 
     fn registrar(&self, ferramenta: &str, bytes: u64) -> Result<(), String> {
@@ -986,7 +1324,7 @@ impl Plano {
     /// # Errors
     /// Argumento inválido, chave inválida ou falha do serviço.
     pub fn propor(&self, ferramenta: &str, chave: &str, e: &EntradaDeAlteracao) -> Resultado {
-        self.executar(ferramenta, |p, hoje| {
+        self.escrever(ferramenta, |p, hoje| {
             let chave = texto(chave, "chave", MAX_CHAVE)?;
             let alt = montar(p, e)?;
             let sim = p.simular(&alt, hoje).map_err(pt)?;
@@ -1008,6 +1346,392 @@ impl Plano {
                 );
             }
             Ok(v)
+        })
+    }
+
+    // ---------------------------------------------------------------------------------
+    // D15: o MCP aplica direto
+    // ---------------------------------------------------------------------------------
+
+    /// Aplica **uma** alteração agora, com autor `Mcp`, e monta a resposta com a simulação, o
+    /// recibo e o jeito de desfazer.
+    fn aplicar_uma(
+        p: &mut dyn Planejamento,
+        hoje: Data,
+        alt: Alteracao,
+    ) -> Result<(sbf_planejamento::Recibo, Value), String> {
+        let sim = p.simular(&alt, hoje).map_err(pt)?;
+        let recibo = p.aplicar(alt, Autor::Mcp).map_err(pt)?;
+        Ok((recibo, simulacao_json(&sim)))
+    }
+
+    fn resposta_de_aplicacao(recibo: &sbf_planejamento::Recibo, simulacao: Value) -> Value {
+        json!({
+            "aplicado": true,
+            "mensagem": AVISO_DE_APLICACAO,
+            "alteracao_id": recibo.alteracao_id,
+            "alvo": recibo.alvo,
+            "versao_nova": recibo.versao_nova,
+            "quando": recibo.quando,
+            "autor": "mcp",
+            "simulacao": simulacao,
+            "desfazer": { "ferramenta": "desfazer", "alteracao_id": recibo.alteracao_id },
+            "valores": "em centavos",
+        })
+    }
+
+    /// Aplica uma mudança de uma só alteração (compromisso novo, pausa, retomada,
+    /// cancelamento, exclusão lógica, exceção, mudança de versão). Sem chave de idempotência:
+    /// a alteração já vale, e repetir uma chamada repete o efeito (use `desfazer`).
+    ///
+    /// # Errors
+    /// Argumento inválido, backup que falhou ou falha do serviço.
+    pub fn aplicar(&self, ferramenta: &str, e: &EntradaDeAlteracao) -> Resultado {
+        self.escrever(ferramenta, |p, hoje| {
+            if let EntradaDeAlteracao::Compromisso(novo) = e {
+                recusar_duplicado(p, novo)?;
+            }
+            let alt = montar(p, e)?;
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `aplicar_alteracao`: renomeia e/ou muda o que vale (valor só neste mês ou daqui em
+    /// diante, conta, centro, fornecedor, categoria, nota, certeza).
+    ///
+    /// # Errors
+    /// Pedido vazio ou inválido, backup que falhou ou falha do serviço.
+    pub fn aplicar_alteracao(&self, a: &PedidoDeAplicacao) -> Resultado {
+        self.escrever("aplicar_alteracao", |p, hoje| {
+            let rec = id_do_recorrente(&a.recorrente)?;
+            let novo_nome = texto_opcional(&a.nome, "nome", MAX_NOME)?;
+            let versao = a.muda_algo_da_versao();
+            if novo_nome.is_none() && !versao {
+                return Err("diga o que mudar (nome, valor_centavos, certeza, conta...)".to_owned());
+            }
+            // Valida tudo antes de gravar qualquer coisa.
+            let edicao = if versao {
+                Some(montar_alteracao(p, &a.como_alteracao()?)?)
+            } else {
+                None
+            };
+            let mut alteracoes = Vec::new();
+            let mut simulacao = Value::Null;
+            if let Some(alt) = edicao {
+                let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+                simulacao = sim;
+                alteracoes.push(recibo);
+            }
+            if let Some(nome) = novo_nome {
+                let alt = Alteracao::Renomear {
+                    versao_base: versao_base(p, &rec)?,
+                    recorrente: rec,
+                    nome,
+                };
+                let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+                if simulacao.is_null() {
+                    simulacao = sim;
+                }
+                alteracoes.push(recibo);
+            }
+            let ultimo = alteracoes
+                .last()
+                .ok_or("nada foi aplicado")?
+                .clone();
+            let mut v = Self::resposta_de_aplicacao(&ultimo, simulacao);
+            v["alteracoes"] = json!(
+                alteracoes
+                    .iter()
+                    .map(|r| json!({ "alteracao_id": r.alteracao_id }))
+                    .collect::<Vec<_>>()
+            );
+            if alteracoes.len() > 1 {
+                v["desfazer"] = json!({
+                    "ferramenta": "desfazer",
+                    "observacao": "foram duas alterações (valor e nome): chame desfazer duas vezes, a última primeiro",
+                });
+            }
+            Ok(v)
+        })
+    }
+
+    /// `conciliar`: liga a ocorrência a um ou vários movimentos, confirmados.
+    ///
+    /// # Errors
+    /// Argumento inválido, backup que falhou ou falha do serviço (o que já tinha sido ligado
+    /// é desfeito).
+    pub fn conciliar(&self, a: &PedidoDeConciliar) -> Resultado {
+        self.escrever("conciliar", |p, _| {
+            let ocorrencia = id_de_ocorrencia(&a.id_ocorrencia)?;
+            if a.movimentos.is_empty() || a.movimentos.len() > MAXIMO_DE_MOVIMENTOS {
+                return Err(format!(
+                    "diga de 1 a {MAXIMO_DE_MOVIMENTOS} movimentos (recebi {})",
+                    a.movimentos.len()
+                ));
+            }
+            let mut alts = Vec::new();
+            for m in &a.movimentos {
+                let movimento = texto(&m.movimento, "movimento", MAX_NOME)?;
+                if alts.iter().any(|x: &Conciliacao| x.movimento == movimento) {
+                    return Err(format!("o movimento {movimento} veio duas vezes"));
+                }
+                alts.push(Conciliacao {
+                    ocorrencia: ocorrencia.clone(),
+                    movimento,
+                    valor: centavos(m.valor_centavos, "valor_centavos")?,
+                    data: data(&m.data, "data")?,
+                    confirmada: true,
+                });
+            }
+            let mut feitos: Vec<(String, String)> = Vec::new();
+            for c in alts {
+                let movimento = c.movimento.clone();
+                match p.aplicar(Alteracao::Conciliar { conciliacao: c }, Autor::Mcp) {
+                    Ok(r) => feitos.push((movimento, r.alteracao_id)),
+                    Err(e) => {
+                        // Tudo ou nada: o que já foi ligado volta atrás.
+                        for (_, id) in feitos.iter().rev() {
+                            let _ = p.desfazer(id, Autor::Mcp);
+                        }
+                        return Err(pt(e));
+                    }
+                }
+            }
+            Ok(json!({
+                "aplicado": true,
+                "mensagem": AVISO_DE_APLICACAO,
+                "ocorrencia": ocorrencia.to_string(),
+                "conciliacoes": feitos
+                    .iter()
+                    .map(|(m, id)| json!({ "movimento": m, "alteracao_id": id }))
+                    .collect::<Vec<_>>(),
+                "autor": "mcp",
+                "desfazer": {
+                    "ferramenta": "desfazer",
+                    "observacao": "uma chamada por movimento (o último primeiro), ou use desconciliar",
+                },
+            }))
+        })
+    }
+
+    /// `desconciliar`: solta um movimento da ocorrência (exclusão lógica, com histórico).
+    ///
+    /// # Errors
+    /// Argumento inválido, conciliação inexistente, backup que falhou ou falha do serviço.
+    pub fn desconciliar(&self, a: &PedidoDeDesconciliar) -> Resultado {
+        self.escrever("desconciliar", |p, hoje| {
+            let alt = Alteracao::Desconciliar {
+                ocorrencia: id_de_ocorrencia(&a.id_ocorrencia)?,
+                movimento: texto(&a.movimento, "movimento", MAX_NOME)?,
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `aplicar_proposta`: confirma uma proposta pendente **como MCP** (autor `Mcp` no
+    /// histórico). A versão de base é revalidada, como na janela.
+    ///
+    /// # Errors
+    /// Proposta inexistente, já decidida ou expirada, versão velha, backup que falhou.
+    pub fn aplicar_proposta(&self, a: &PedidoDeAplicarProposta) -> Resultado {
+        self.escrever("aplicar_proposta", |p, _| {
+            let id = texto(&a.id, "id", MAX_CHAVE)?;
+            let recibo = p.confirmar_proposta_como(&id, Autor::Mcp).map_err(pt)?;
+            let mut v = Self::resposta_de_aplicacao(&recibo, Value::Null);
+            v["proposta"] = json!({ "id": id, "estado": "confirmada" });
+            Ok(v)
+        })
+    }
+
+    /// `recusar_proposta`: recusa uma proposta pendente, com motivo.
+    ///
+    /// # Errors
+    /// Proposta inexistente ou já decidida, motivo vazio, backup que falhou.
+    pub fn recusar_proposta(&self, a: &PedidoDeRecusaDeProposta) -> Resultado {
+        self.escrever("recusar_proposta", |p, _| {
+            let id = texto(&a.id, "id", MAX_CHAVE)?;
+            let motivo = texto(&a.motivo, "motivo", MAX_MOTIVO)?;
+            p.recusar_proposta(&id, &motivo).map_err(pt)?;
+            Ok(json!({ "recusada": true, "proposta": { "id": id, "estado": "recusada" } }))
+        })
+    }
+
+    /// `listar_modelos`: os modelos de compromisso, com os parâmetros, o Cálculo e quem usa.
+    ///
+    /// # Errors
+    /// Falha do serviço.
+    pub fn listar_modelos(&self) -> Resultado {
+        self.executar("listar_modelos", |p, _| {
+            let ligacoes = p.ligacoes_de_modelo().map_err(pt)?;
+            let modelos: Vec<Value> = p
+                .modelos()
+                .map_err(pt)?
+                .into_iter()
+                .map(|m| {
+                    let usado_por: Vec<Value> = ligacoes
+                        .iter()
+                        .filter(|l| l.modelo_id == m.id)
+                        .map(|l| {
+                            let nome = p.recorrente(&l.recorrente).ok().flatten().map(|r| r.nome);
+                            json!({
+                                "recorrente": l.recorrente,
+                                "nome": nome,
+                                "versao_do_calculo": l.versao_do_calculo,
+                                "valores": l.valores.iter().map(|v| json!({
+                                    "parametro": v.parametro,
+                                    "desde": v.desde.to_string(),
+                                    "valor": v.valor,
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+                    json!({
+                        "id": m.id,
+                        "nome": m.nome,
+                        "de_fabrica": m.de_fabrica,
+                        "parametros": m.parametros,
+                        "versao_do_calculo": m.versao_do_calculo,
+                        "checksum": m.checksum,
+                        "calculo": m.calculo,
+                        "usado_por": usado_por,
+                    })
+                })
+                .collect();
+            Ok(json!({ "modelos": modelos, "valores": "em centavos" }))
+        })
+    }
+
+    /// `criar_modelo`: cria o modelo e a versão 1 do Cálculo (o script é conferido antes).
+    ///
+    /// # Errors
+    /// Argumento inválido, script que não compila ou não define `calcular`, backup que falhou.
+    pub fn criar_modelo(&self, a: &PedidoDeCriarModelo) -> Resultado {
+        self.escrever("criar_modelo", |p, hoje| {
+            let nome = texto(&a.nome, "nome", MAX_NOME)?;
+            let parametros = a
+                .parametros
+                .iter()
+                .map(|x| {
+                    Ok(ParametroDeModelo {
+                        nome: texto(&x.nome, "nome do parâmetro", MAX_NOME)?,
+                        tipo: tipo_de_parametro(&x.tipo)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let alt = Alteracao::CriarModelo {
+                nome,
+                parametros,
+                calculo: a.calculo.clone(),
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            let mut v = Self::resposta_de_aplicacao(&recibo, sim);
+            v["modelo"] = json!({ "id": recibo.alvo });
+            Ok(v)
+        })
+    }
+
+    /// `aplicar_modelo`: liga o compromisso ao modelo e grava os valores, com vigência.
+    ///
+    /// # Errors
+    /// Modelo ou compromisso inexistente, valor de tipo errado, backup que falhou.
+    pub fn aplicar_modelo(&self, a: &PedidoDeAplicarModelo) -> Resultado {
+        self.escrever("aplicar_modelo", |p, hoje| {
+            let rec = id_do_recorrente(&a.recorrente)?;
+            let modelo = achar_modelo(p, &a.modelo)?;
+            let valores = a
+                .valores
+                .iter()
+                .map(|v| valor_de_parametro(&modelo.parametros, &v.parametro, &v.desde, &v.valor))
+                .collect::<Result<Vec<_>, String>>()?;
+            let alt = Alteracao::AplicarModelo {
+                versao_base: versao_base(p, &rec)?,
+                recorrente: rec,
+                modelo: modelo.id,
+                valores,
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `definir_parametro`: um valor de parâmetro com vigência.
+    ///
+    /// # Errors
+    /// Compromisso sem modelo, parâmetro desconhecido, valor de tipo errado, backup que falhou.
+    pub fn definir_parametro(&self, a: &PedidoDeDefinirParametro) -> Resultado {
+        self.escrever("definir_parametro", |p, hoje| {
+            let rec = id_do_recorrente(&a.recorrente)?;
+            let ligacao = p
+                .ligacao_de_modelo(&rec)
+                .map_err(pt)?
+                .ok_or("o compromisso não usa um modelo (veja aplicar_modelo)")?;
+            let valor = valor_de_parametro(&ligacao.parametros, &a.parametro, &a.desde, &a.valor)?;
+            let alt = Alteracao::DefinirParametro {
+                versao_base: versao_base(p, &rec)?,
+                recorrente: rec,
+                valor,
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `ajustar_quantidade`: a quantidade de um mês só (exceção daquele mês).
+    ///
+    /// # Errors
+    /// Compromisso sem modelo, quantidade fora de 0 a 1000, backup que falhou.
+    pub fn ajustar_quantidade(&self, a: &PedidoDeAjustarQuantidade) -> Resultado {
+        self.escrever("ajustar_quantidade", |p, hoje| {
+            let ocorrencia = id_de_ocorrencia(&a.id_ocorrencia)?;
+            let alt = Alteracao::Excecao {
+                ocorrencia,
+                excecao: Excecao::QuantidadeSoDesteMes {
+                    quantidade: a.quantidade,
+                },
+            };
+            let (recibo, sim) = Self::aplicar_uma(p, hoje, alt)?;
+            Ok(Self::resposta_de_aplicacao(&recibo, sim))
+        })
+    }
+
+    /// `desfazer`: volta atrás a última alteração do MCP (ou a de `alteracao_id`, que tem de
+    /// ser do MCP). O Desfazer tem histórico próprio, com autor `Mcp`.
+    ///
+    /// # Errors
+    /// Nada a desfazer, alteração de outro autor, já desfeita, sem inverso, backup que falhou.
+    pub fn desfazer(&self, a: &PedidoDeDesfazer) -> Resultado {
+        self.escrever("desfazer", |p, _| {
+            let alvo = match a.alteracao_id.as_deref().map(str::trim) {
+                Some(id) if !id.is_empty() => {
+                    let entrada = p
+                        .entrada_do_historico(id)
+                        .map_err(pt)?
+                        .ok_or_else(|| format!("não achei a alteração {id} no histórico"))?;
+                    if entrada.autor != Autor::Mcp {
+                        return Err(
+                            "só se desfaz o que o MCP fez; o resto é do usuário, na janela"
+                                .to_owned(),
+                        );
+                    }
+                    entrada
+                }
+                _ => p
+                    .ultima_desfazivel(&Autor::Mcp)
+                    .map_err(pt)?
+                    .ok_or("não há nada do MCP para desfazer")?,
+            };
+            let recibo = p.desfazer(&alvo.id, Autor::Mcp).map_err(pt)?;
+            Ok(json!({
+                "desfeito": true,
+                "mensagem": "desfeito; o Desfazer ficou no histórico com autor mcp",
+                "alteracao_desfeita": { "id": alvo.id, "resumo": alvo.resumo },
+                "alteracao_id": recibo.alteracao_id,
+                "alvo": recibo.alvo,
+                "versao_nova": recibo.versao_nova,
+                "autor": "mcp",
+            }))
         })
     }
 }

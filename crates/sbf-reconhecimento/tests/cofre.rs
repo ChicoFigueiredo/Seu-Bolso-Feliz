@@ -24,6 +24,8 @@ use zeroize::Zeroizing;
 const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
 const CONTRACHEQUE_2026: &str =
     include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
+const CONTRACHEQUE_2026_11: &str =
+    include_str!("../../sbf-planilha/tests/contracheque-2026-11-ficticio.txt");
 const CPF: &str = "52998224725";
 
 struct Segredos;
@@ -447,7 +449,7 @@ fn pdf_sem_texto_grava_o_marcador_e_nao_vai_para_a_ia() {
 #[test]
 fn formato_sem_leitor_diz_o_motivo() {
     let c = cenario();
-    let f = c.solto("foto.jpg", b"nao e uma foto de verdade");
+    let f = c.solto("foto.heic", b"nao e uma foto de verdade");
 
     let r = ok(c.rodar(&c.reconhecedor(None), &f).0);
 
@@ -518,6 +520,31 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
             .composicao(&id, Competencia { ano: 2026, mes: 10 })
             .expect("c")
             .is_none()
+    );
+}
+
+#[test]
+fn contracheque_no_layout_de_novembro_de_2026_sai_como_contracheque() {
+    let c = cenario();
+    c.planejamento_com_salario(800_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026_11.as_bytes());
+    let falso = ia_de_boleto();
+
+    let (r, _) = c.rodar(&c.reconhecedor(Some(falso.clone())), &arquivo);
+    let r = ok(r);
+
+    match &r.reconhecido {
+        Reconhecido::Contracheque { contracheque, .. } => {
+            assert_eq!(contracheque.pagamento, Competencia { ano: 2026, mes: 11 });
+            assert_eq!(contracheque.liquido, Some(Centavos(800_000)));
+            assert!(contracheque.conferido);
+        }
+        outro => panic!("{outro:?}"),
+    }
+    assert_eq!(
+        falso.chamadas(),
+        0,
+        "a IA só entra quando o local não reconhece"
     );
 }
 
@@ -1175,4 +1202,109 @@ fn contracheque_de_2026_gera_o_registro_salario_uma_vez_so() {
         1
     );
     assert!(c.contar("SELECT COUNT(*) FROM sub_registro WHERE tipo = 'rubrica'") > 0);
+}
+
+// ---------------------------------------------------------------- imagens (OCR)
+
+/// Um print fictício de app em tela escura: "Comprovante de pagamento ... Valor pago
+/// R$ 1.234,56".
+const IMAGEM_ESCURA: &[u8] = include_bytes!("../../sbf-ocr/tests/fixtures/comprovante-escuro.png");
+
+fn tem_tesseract() -> bool {
+    let ok = sbf_ocr::Ocr::do_sistema().disponivel();
+    if !ok {
+        eprintln!("sem tesseract neste sistema: teste pulado");
+    }
+    ok
+}
+
+#[test]
+fn imagem_passa_pelo_ocr_e_grava_o_texto_com_o_metodo_ocr_tesseract() {
+    if !tem_tesseract() {
+        return;
+    }
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+
+    let (r, vistos) = c.rodar(&c.reconhecedor(None), &imagem);
+    let r = ok(r);
+
+    assert_eq!(r.texto, EstadoDoTexto::Extraido);
+    assert_eq!(situacao_de(&vistos, Etapa::ExtrairTexto), Situacao::Feita);
+    let (metodo, conteudo): (String, String) = c
+        .conexao()
+        .query_row("SELECT metodo, conteudo FROM texto", [], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
+        .expect("texto");
+    assert_eq!(metodo, "ocr-tesseract");
+    assert!(conteudo.contains("Valor pago"), "{conteudo}");
+    assert!(conteudo.contains("1.234,56"), "{conteudo}");
+}
+
+#[test]
+fn imagem_sem_tesseract_fica_sem_texto_e_nao_e_erro() {
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+    let r = c
+        .reconhecedor(None)
+        .com_ocr(sbf_ocr::Ocr::com_programa("/nao/existe/tesseract".into()));
+
+    let (resultado, vistos) = c.rodar(&r, &imagem);
+    let resultado = ok(resultado);
+
+    assert_eq!(
+        resultado.texto,
+        EstadoDoTexto::SemTexto("OCR indisponível".to_owned())
+    );
+    assert!(matches!(
+        situacao_de(&vistos, Etapa::ExtrairTexto),
+        Situacao::Pulada(_)
+    ));
+    // Nada gravado: com o tesseract instalado depois, o OCR roda.
+    assert_eq!(c.contar("SELECT COUNT(*) FROM texto"), 0);
+}
+
+#[test]
+fn imagem_com_texto_ja_no_inventario_reaproveita_sem_rodar_o_ocr() {
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+    let hash = sbf_coleta::pastas::sha256_do_arquivo(&imagem).expect("hash");
+    let conn = c.conexao();
+    conn.execute(
+        "INSERT INTO achado (content_hash, file_size_bytes, camada) VALUES (?1, 10, 'A')",
+        [&hash],
+    )
+    .expect("achado");
+    conn.execute(
+        "INSERT INTO texto (content_hash, metodo, conteudo) VALUES (?1, 'ocr-tesseract', 'texto do worker')",
+        [&hash],
+    )
+    .expect("texto");
+    let r = c
+        .reconhecedor(None)
+        .com_ocr(sbf_ocr::Ocr::com_programa("/nao/existe/tesseract".into()));
+
+    let r = ok(c.rodar(&r, &imagem).0);
+
+    assert_eq!(r.texto, EstadoDoTexto::JaHavia);
+}
+
+#[test]
+fn imagem_corrompida_falha_no_ocr_sem_derrubar_o_reconhecimento() {
+    if !tem_tesseract() {
+        return;
+    }
+    let c = cenario();
+    let f = c.solto("foto.jpg", b"nao e uma foto de verdade");
+
+    let (r, vistos) = c.rodar(&c.reconhecedor(None), &f);
+
+    // Leitura que falha não é "sem texto": a Caixa de entrada a manda para Precisa revisar.
+    assert!(matches!(ok(r).texto, EstadoDoTexto::Falhou(_)));
+    assert!(matches!(
+        situacao_de(&vistos, Etapa::ExtrairTexto),
+        Situacao::Falhou(_)
+    ));
+    assert_eq!(c.contar("SELECT COUNT(*) FROM texto"), 0);
 }

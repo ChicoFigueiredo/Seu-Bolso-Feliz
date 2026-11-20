@@ -166,6 +166,7 @@ mod testes {
             versao: "v".to_owned(),
             prazo_desconhecido: false,
             sugestao_de_conciliacao: false,
+            calculo: None,
         }
     }
 

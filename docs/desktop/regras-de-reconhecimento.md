@@ -28,8 +28,10 @@ Regras do ciclo:
 - **Rollback**: `sbf regras ... reverter <regra>` reativa a versão anterior, sem apagar nada.
   Ele não roda os exemplos de novo, porque a versão já esteve em vigor.
 
-Quem pode mudar o estado: só o usuário, na janela do sbf ou num terminal interativo que
-confirmou. O MCP e a IA nunca ativam, consolidam, desativam nem revertem (ADR-021, D14).
+Quem pode mudar o estado: o usuário, na janela do sbf ou num terminal interativo que
+confirmou, e o MCP (D15, 2026-11-18: controle total, com `mcp` no histórico de estado). Os
+exemplos que falham bloqueiam a ativação para todos. Uma IA sem essa decisão (`Quem::Ia`)
+segue sem ativar, consolidar, desativar nem reverter (ADR-021).
 
 ## 2. A definição (formato JSON)
 
@@ -60,6 +62,7 @@ campos são:
 | `leitor`            | texto ou nulo | nulo            | Um leitor nativo do sbf que roda antes do script (hoje: `contracheque`).            |
 | `parametros`        | lista         | `[]`            | Nomes dos parâmetros versionados que o script recebe (ex.: `irrf`).                 |
 | `script_le_texto`   | booleano      | falso           | Se `true`, o script recebe o texto do documento.                                    |
+| `texto_de_ocr`      | booleano      | falso           | Se `true`, o texto vem de OCR (imagem) e é limpo do ruído antes de ler (ver 2.6).   |
 | `propor`            | lista         | `[]`            | As propostas que a regra faz (ver abaixo).                                          |
 
 ### 2.1 Condições de `detectar`
@@ -68,14 +71,16 @@ Uma condição casa quando: **todas** de `todos` são verdadeiras, **ao menos um
 é verdadeira (se a lista não estiver vazia) e **nenhuma** de `nenhum` é verdadeira. Precisa
 haver ao menos uma condição em `todos` ou em `algum`.
 
-| Forma                           | Exemplo                            | Casa quando                                                                                                   |
-| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `{"contem": "trecho"}`          | `{"contem": "comprovante pix"}`    | O texto normalizado (minúsculas, sem acento, espaços juntos) contém o trecho.                                 |
-| `{"regex": "..."}`              | `{"regex": "Chave:\\s*\\S+"}`      | Uma expressão regular casa o texto original.                                                                  |
-| `{"mime": ["application/pdf"]}` | `{"mime": ["image/*"]}`            | O tipo real do conteúdo é um destes (pela assinatura, não pela extensão).                                     |
-| `{"canal": ["pluggy"]}`         | `{"canal": ["gmail", "telegram"]}` | O canal da origem é um destes: `arrastado`, `pasta`, `cofre`, `gmail`, `telegram`, `pluggy`, `mcp`, `manual`. |
-| `{"descricao": "..."}`          | `{"descricao": "PIX ENVIADO"}`     | Regex sobre a descrição que a origem já trouxe (ex.: a transação da Pluggy).                                  |
-| `{"nome": "..."}`               | `{"nome": "^comprovante_"}`        | Regex sobre o nome do arquivo.                                                                                |
+| Forma                           | Exemplo                                   | Casa quando                                                                                                    |
+| ------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `{"contem": "trecho"}`          | `{"contem": "comprovante pix"}`           | O texto normalizado (minúsculas, sem acento, espaços juntos) contém o trecho.                                  |
+| `{"regex": "..."}`              | `{"regex": "Chave:\\s*\\S+"}`             | Uma expressão regular casa o texto original.                                                                   |
+| `{"mime": ["application/pdf"]}` | `{"mime": ["image/*"]}`                   | O tipo real do conteúdo é um destes (pela assinatura, não pela extensão).                                      |
+| `{"canal": ["pluggy"]}`         | `{"canal": ["gmail", "telegram"]}`        | O canal da origem é um destes: `arrastado`, `pasta`, `cofre`, `gmail`, `telegram`, `pluggy`, `mcp`, `manual`.  |
+| `{"descricao": "..."}`          | `{"descricao": "PIX ENVIADO"}`            | Regex sobre a descrição que a origem já trouxe (ex.: a transação da Pluggy).                                   |
+| `{"nome": "..."}`               | `{"nome": "^comprovante_"}`               | Regex sobre o nome do arquivo.                                                                                 |
+| `{"contraparte_doc": [...]}`    | `{"contraparte_doc": ["000.000.000-00"]}` | O CPF/CNPJ do favorecido do registro é igual a algum da lista. Só os dígitos contam (ver 2.5).                 |
+| `{"contraparte": "..."}`        | `{"contraparte": "^fulana de tal$"}`      | Regex sobre o nome do favorecido do registro, **normalizado** (minúsculas, sem acento), sem diferenciar caixa. |
 
 ### 2.2 Extração (`extrair`)
 
@@ -94,8 +99,10 @@ Cada campo tem uma regex, um grupo (padrão `1`: o primeiro parêntese), um form
 | `inteiro`     | Número inteiro.                                              |
 | `minusculas`  | Texto em minúsculas (para constantes como `pix`).            |
 
-`fonte` é `texto` (padrão: o texto do documento) ou `descricao` (a descrição que a origem já
-trouxe, como a da Pluggy). Dinheiro é sempre em centavos; nunca use ponto flutuante.
+`fonte` é `texto` (padrão: o texto do documento), `descricao` (a descrição que a origem já
+trouxe, como a da Pluggy), `contraparte` (o nome do favorecido do registro) ou
+`contraparte_doc` (o CPF/CNPJ dele). O campo extraído de uma `contraparte_doc` nunca fica
+gravado na proposta (ver 2.5). Dinheiro é sempre em centavos; nunca use ponto flutuante.
 
 Os nomes dos campos que o sbf conhece com significado próprio são `valor_centavos`, `data`,
 `vencimento`, `conta`, `contrato`, `autenticacao` e `cartao`. Se duas regras empatadas
@@ -163,6 +170,88 @@ Autenticação: ABC123XYZ
 Ela extrai `valor_centavos = 15000`, `data = 2026-11-10` e `autenticacao = ABC123XYZ`, e
 propõe provar um registro com até 2 dias de folga em volta da data.
 
+### 2.5 O favorecido de um Pix: o exemplo da diarista (fictício)
+
+Na CAIXA a descrição de um Pix é só "PIX ENVIADO". O favorecido vem em colunas à parte do
+registro da Pluggy no inventário: `contraparte` (o nome) e `contraparte_doc` (o CPF/CNPJ, às
+vezes formatado). Uma regra com `aplica_a: ["registro"]` reconhece o favorecido por elas e
+propõe conciliar o compromisso mensal que ele recebe. A ocorrência do compromisso nomeado em
+`compromisso` ("Diarista") junta os débitos que a regra reconhece:
+
+- **Janela**: a competência inteira da ocorrência, mais a folga `janela_dias` (no máximo 60)
+  em volta do vencimento.
+- **Um débito** com o valor previsto: sugestão de um. **Vários** que somam o previsto (todos,
+  ou o menor subconjunto de até 6): sugestão combinada, "Pix para Fulana de Tal · 2 débitos
+  somam o previsto". Senão, todos os reconhecidos, com o aviso "⚠ soma R$ X difere do
+  previsto R$ Y".
+- Débito já conciliado a outra ocorrência, ou de uma proposta que você já decidiu, não entra.
+- **Confirmar** grava uma conciliação por débito, todas na mesma ocorrência, e o "Conciliado"
+  soma; cada proposta recebe `Aceito`. **Ignorar** desfaz as sugestões e registra `Rejeitado`.
+  Nada muda sem o clique. Só uma regra **consolidada**, com soma exata e a conta certa (as
+  três provas), concilia sozinha, com Desfazer.
+- As sugestões aparecem no Controle mensal (selo "conciliar?" e a seção Movimentos do
+  Detalhe) depois de "Buscar no extrato", e o MCP `listar_compromissos` mostra
+  `sugestao_de_conciliacao: true`. Regra em rascunho nunca sugere.
+
+Arquivo `pix-da-diarista.json` (documento fictício):
+
+```json
+{
+  "regra": "pix-da-diarista",
+  "nome": "Pix · Diarista",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "pix-da-diarista",
+    "aplica_a": ["registro"],
+    "detectar": {
+      "todos": [{ "contraparte_doc": ["000.000.000-00"] }]
+    },
+    "extrair": {
+      "favorecido": {
+        "regex": "(.+)",
+        "formato": "texto",
+        "fonte": "contraparte"
+      }
+    },
+    "propor": [{ "conciliar_ocorrencia": { "janela_dias": 5, "compromisso": "Diarista" } }]
+  }
+}
+```
+
+Cuidados com o documento: a comparação ignora a pontuação dos dois lados (`000.000.000-00`
+casa `00000000000`) e cada documento da lista precisa ter 11 (CPF) ou 14 (CNPJ) dígitos. O
+documento nunca vai para a tabela `execucao` nem para a proposta gravada (o catálogo tira o
+campo cuja origem é `contraparte_doc`) e nunca vai a log. O script só recebe os campos já
+extraídos: se a regra não extrai o documento, o script não o vê.
+
+### 2.6 Texto de imagem (OCR): `"texto_de_ocr": true`
+
+Prints de app e fotos de comprovante (PNG, JPG, JPEG, WEBP, até 15 MiB) passam pelo OCR do
+`tesseract` (idioma `por`) quando o sbf extrai o texto, tanto ao reconhecer um arquivo solto
+quanto no worker, que lê as imagens novas do inventário. O texto fica em `texto` com o método
+`ocr-tesseract`. Sem o `tesseract` instalado a imagem fica "sem texto (OCR indisponível)": não é
+erro, nada é gravado, e o OCR roda quando ele for instalado.
+
+Texto de OCR vem com ruído, e uma regra que lê imagem pode pedir a limpeza:
+
+```json
+"definicao": { "texto_de_ocr": true, "...": "..." }
+```
+
+Com a opção ligada, o motor passa o texto por esta normalização **antes** de detectar, extrair
+e entregar ao script (quem não liga continua lendo o texto como saiu do extrator):
+
+| O que o OCR erra                                  | O que a normalização faz                                                                                                                                                                                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Espaços e tabs repetidos, espaço no fim da linha  | Junta em um espaço e apara o fim de cada linha (as quebras de linha ficam).                                                                                                                                                                                                           |
+| `O` (letra) e `l` (L minúsculo) no meio de número | `O` vira `0` e `l` vira `1`, **só dentro de um número**: um token só de dígitos, `.`, `,`, `/`, `:`, `-`, `O` e `l`, com ao menos um dígito de verdade (`2O26` vira `2026`, `l.234,5O` vira `1.234,50`). Palavras e tokens com outras letras (`Pol1`, `Olá`, `BOL2`) não são tocados. |
+| `RS` ou `R§` no lugar de `R$`                     | Vira `R$` quando vem antes de um valor com vírgula e dois decimais (`RS 1.234,56`). O `RS` de Rio Grande do Sul antes de um CEP fica.                                                                                                                                                 |
+
+A normalização é idempotente e só vale para a regra que pede. A opção **não aparece no JSON
+quando é falsa**, então as regras que já existem mantêm o mesmo checksum. As posições dos campos
+extraídos (`de_onde`) valem para o texto já limpo, não para o que o tesseract devolveu. Escreva o
+regex da regra pensando no texto limpo: `Valor:\s*R\$\s*([\d.,]+)` lê `Valor:  RS 1.234,5O`.
+
 ## 3. Exemplos: o teste que libera a ativação
 
 Cada regra tem exemplos. Um exemplo diz o que o motor deve fazer com um documento de
@@ -213,7 +302,13 @@ devolve uma proposta. Nunca grava, paga, concilia nem acessa arquivo, rede ou ba
 - `campos` (nome → valor). Nomes que terminam em `_centavos` têm de ser inteiros e viram
   centavos; nomes que começam por `data` ou `vencimento` viram data (`AAAA-MM-DD`); inteiros
   viram inteiro; o resto vira texto;
-- `revisar` (booleano), `motivos` e `evidencias` (listas de texto).
+- `revisar` (booleano), `motivos` e `evidencias` (listas de texto);
+- `exibir` (lista de textos, opcional): linhas curtas que o script quer mostrar no cartão do
+  Reconhecimento, abaixo da linha "Regra <nome> · versão N". No máximo 5 linhas, cada uma
+  com até 160 caracteres, só texto; fora disso é retorno inválido. Ausente vale lista vazia,
+  então scripts antigos seguem válidos. É só para a tela: não entra na chave de
+  idempotência, não vai para a tabela `execucao` nem para a proposta gravada, porque pode
+  conter texto do documento. Linhas que começam por `⚠` saem na cor de aviso.
 
 Qualquer outra forma de retorno é erro, e a entrada vai para revisão sem travar a fila.
 
@@ -272,7 +367,12 @@ sbf regras --inventario <cofre> parametro irrf 2026-01 irrf-2026.json \
 ```
 
 O IRRF é só **conferência**: o script calcula a estimativa e mostra um alerta quando ela
-diverge do imposto retido no contracheque. Nunca sobrescreve a rubrica do documento.
+diverge do imposto retido no contracheque. Nunca sobrescreve a rubrica do documento. No
+cartão do contracheque ele diz o que concluiu numa linha (`exibir`): "IRRF conferido ✓ ·
+tabela <versão>", a mesma com "(1 centavo de arredondamento)", "⚠ IRRF diverge da tabela
+<versão>" (o aviso com os valores continua vindo do sbf) ou "IRRF não conferido: <motivo>".
+Como o script de fábrica mudou, o sbf grava uma versão nova (rascunho) da regra
+`contracheque` ao abrir; quem ativa é você.
 
 ## 6. Comandos de terminal
 
@@ -333,7 +433,7 @@ A área **Regras de reconhecimento** da janela do sbf é a forma pensada para o 
 lista das regras, página de cada uma com editor, exemplos, diff da simulação e versões com
 rollback. No Reconhecimento, "Testar com este documento" roda a regra no documento aberto, e
 "Criar regra a partir daqui" monta um rascunho a partir de uma correção, sem IA. Enquanto essa
-área não estiver entregue na sua versão, use o terminal (seção 6); o MCP só propõe.
+área não estiver entregue na sua versão, use o terminal (seção 6). O MCP propõe rascunhos (`propor_regra`) e também ativa, desativa, reverte e consolida (`ativar_regra`, `desativar_regra`, `reverter_regra`, `consolidar_regra`); `reverter_regra` volta atrás.
 
 ## 9. Cuidados
 
@@ -344,3 +444,28 @@ rollback. No Reconhecimento, "Testar com este documento" roda a regra no documen
   declara é executado.
 - Cálculo tributário depende de tabela válida por competência e de revisão técnica. Um
   alerta de divergência é a saída certa, não uma correção automática da rubrica.
+
+## 10. A biblioteca de fábrica
+
+O sbf traz 16 regras prontas para documentos financeiros brasileiros comuns, todas em
+**rascunho** (nenhuma reconhece nada até você ativar). Os arquivos ficam em
+`crates/sbf-regras/fabrica/biblioteca/` (`<id>.json`, com a definição e os exemplos
+fictícios, e `<id>.luau` quando há script; `_comum.luau` é colado antes de cada script).
+`sbf regras ... listar` mostra todas depois da primeira abertura do cofre.
+
+| Regra                                       | Tipo documental                         | Propõe                                              |
+| ------------------------------------------- | --------------------------------------- | --------------------------------------------------- |
+| `caixa-habitacao-comprovante-prestacao`     | `comprovante-prestacao-caixa-habitacao` | conciliar "Prestação Casa"                          |
+| `caixa-habitacao-prestacoes-pagas`          | `prestacoes-pagas-caixa-habitacao`      | nada (resumo por mês)                               |
+| `caixa-habitacao-fgts`                      | `uso-do-fgts-caixa-habitacao`           | nada (resumo)                                       |
+| `comprovante-pix-caixa` / `-c6` / `-nubank` | `comprovante-pix-<banco>`               | provar o registro                                   |
+| `boleto` (geral, prioridade 0)              | `boleto`                                | nada (valida a linha digitável)                     |
+| `fatura-cartao-c6` / `-caixa` / `-nubank`   | `fatura-cartao-<banco>`                 | pagar a fatura                                      |
+| `conta-neoenergia` / `-vivo` / `-canaa`     | `conta-<fornecedor>`                    | conciliar "Luz" / "Celular Vivo" / "Internet Canaã" |
+| `recibo-uber`                               | `recibo-uber`                           | nada (valor em reais)                               |
+| `invoice-anthropic` / `invoice-openai`      | `invoice-<empresa>`                     | nada (guarda `moeda` e `valor_usd_centavos`)        |
+
+Regras de banco ou fornecedor têm prioridade 10 e vencem o `boleto` geral (a fatura e a conta
+trazem a linha digitável do boleto de pagamento); a de FGTS tem 20. Os Pix de banco só casam
+quando a marca do banco aparece nas 3 primeiras linhas do texto (o logotipo do emissor), para
+não confundir o banco de destino com o de origem. Dólar nunca vai em `valor_centavos`.

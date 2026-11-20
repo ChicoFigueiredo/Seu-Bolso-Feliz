@@ -1003,11 +1003,12 @@ pub fn abrir_varredura_do_vigia(conn: &Connection, fonte: &str, raiz: &Path) -> 
 
 /// O vigia de pastas: `notify` avisa, o worker indexa.
 pub struct Vigia {
-    // Mantido vivo: soltá-lo para de vigiar.
-    _vigia: notify::RecommendedWatcher,
+    // Soltá-lo encerra a thread que mantém o observador vivo (e para de vigiar).
+    _parar: std::sync::mpsc::Sender<()>,
     rx: Receiver<notify::Result<notify::Event>>,
-    /// Raízes que de fato estão sendo vigiadas.
+    /// Raízes que existem e estão sendo vigiadas (a instalação dos avisos é em segundo plano).
     pub vigiadas: Vec<PathBuf>,
+    pronto: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for Vigia {
@@ -1021,23 +1022,54 @@ impl std::fmt::Debug for Vigia {
 impl Vigia {
     /// Começa a vigiar `raizes` (recursivo). Raiz que não existe é pulada.
     ///
+    /// Volta na hora: o `notify` registra um aviso por subpasta, e numa árvore grande em disco
+    /// lento (NTFS montado) isso leva minutos; feito aqui, o worker não saía da largada. Quem
+    /// precisa dos avisos instalados (os testes) usa [`Vigia::aguardar_pronto`]; o que cair
+    /// antes disso o worker acha na reconciliação.
+    ///
     /// # Errors
     /// Falha do `notify` ao criar o observador.
     pub fn iniciar(raizes: &[PathBuf]) -> notify::Result<Self> {
         use notify::Watcher as _;
+        use std::sync::atomic::Ordering;
         let (tx, rx) = channel();
         let mut vigia = notify::recommended_watcher(tx)?;
-        let mut vigiadas = Vec::new();
-        for raiz in raizes {
-            if raiz.is_dir() && vigia.watch(raiz, notify::RecursiveMode::Recursive).is_ok() {
-                vigiadas.push(raiz.clone());
+        let vigiadas: Vec<PathBuf> = raizes.iter().filter(|r| r.is_dir()).cloned().collect();
+        let (parar, ouvir) = std::sync::mpsc::channel::<()>();
+        let pronto = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (alvos, feito) = (vigiadas.clone(), std::sync::Arc::clone(&pronto));
+        std::thread::spawn(move || {
+            for raiz in &alvos {
+                if matches!(
+                    ouvir.try_recv(),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected)
+                ) {
+                    return;
+                }
+                let _ = vigia.watch(raiz, notify::RecursiveMode::Recursive);
             }
-        }
+            feito.store(true, Ordering::Relaxed);
+            // Mantém o observador vivo até soltarem o `Vigia` (o `Sender` cai).
+            let _ = ouvir.recv();
+        });
         Ok(Self {
-            _vigia: vigia,
+            _parar: parar,
             rx,
             vigiadas,
+            pronto,
         })
+    }
+
+    /// Espera até `prazo` os avisos de todas as raízes estarem instalados. `true` se estão.
+    pub fn aguardar_pronto(&self, prazo: Duration) -> bool {
+        let fim = std::time::Instant::now() + prazo;
+        while !self.pronto.load(std::sync::atomic::Ordering::Relaxed) {
+            if std::time::Instant::now() >= fim {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
     }
 
     /// Espera até `prazo` por mudanças e devolve os arquivos (sem repetir) que foram criados

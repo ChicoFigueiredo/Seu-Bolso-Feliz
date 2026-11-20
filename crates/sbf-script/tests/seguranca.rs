@@ -404,3 +404,53 @@ fn determinismo_cem_execucoes() {
         assert_eq!(ex.executar(&p).expect("n"), primeira);
     }
 }
+
+// ---- `exibir`: linhas curtas para o cartão do Reconhecimento ----
+
+#[test]
+fn exibir_chega_na_resposta_e_ausente_vale_vazio() {
+    let r = rodar(
+        r#"function transformar() return {corresponde = true, exibir = {"primeira", "segunda"}} end"#,
+    )
+    .expect("roda");
+    assert_eq!(r.exibir, ["primeira", "segunda"]);
+    let sem = rodar("function transformar() return {corresponde = true} end").expect("roda");
+    assert!(sem.exibir.is_empty());
+}
+
+#[test]
+fn exibir_aceita_o_limite_exato() {
+    let r = rodar(
+        r#"function transformar()
+  local linha = string.rep("é", 160)
+  return {corresponde = true, exibir = {linha, linha, linha, linha, linha}}
+end"#,
+    )
+    .expect("cinco linhas de 160 caracteres cabem");
+    assert_eq!(r.exibir.len(), 5);
+    assert!(r.exibir.iter().all(|l| l.chars().count() == 160));
+}
+
+#[test]
+fn exibir_fora_do_limite_ou_que_nao_e_texto_e_retorno_invalido() {
+    let casos = [
+        // seis linhas
+        r#"return {corresponde = true, exibir = {"a", "b", "c", "d", "e", "f"}}"#,
+        // uma linha com 161 caracteres (conta caracteres, não bytes)
+        r#"return {corresponde = true, exibir = {string.rep("é", 161)}}"#,
+        // não é texto
+        r"return {corresponde = true, exibir = {1}}",
+        r"return {corresponde = true, exibir = {true}}",
+        r"return {corresponde = true, exibir = {{}}}",
+        // não é lista
+        r#"return {corresponde = true, exibir = "solto"}"#,
+        r#"return {corresponde = true, exibir = {a = "x"}}"#,
+    ];
+    for corpo in casos {
+        let fonte = format!("function transformar() {corpo} end");
+        match rodar(&fonte) {
+            Err(ErroDoScript::Retorno(_)) => {}
+            outro => panic!("{corpo}: esperava Retorno, veio {outro:?}"),
+        }
+    }
+}

@@ -896,6 +896,8 @@ impl PlanejamentoFicticio {
                 Excecao::Dispensar { .. } => dispensada = true,
                 Excecao::ValorSoDesteMes { valor } => previsto = Some(*valor),
                 Excecao::PagoInformado { valor, .. } => pago_informado = Some(*valor),
+                // O conjunto fictício não tem modelos: não há cálculo a ajustar.
+                Excecao::QuantidadeSoDesteMes { .. } => {}
             }
         }
         let confirmadas: Vec<Centavos> = self
@@ -960,6 +962,7 @@ impl PlanejamentoFicticio {
             versao: v.id.clone(),
             prazo_desconhecido: matches!(r.prazo, Prazo::Desconhecido),
             sugestao_de_conciliacao: sugestao,
+            calculo: None,
         })
     }
 
@@ -1520,6 +1523,15 @@ impl Planejamento for PlanejamentoFicticio {
     ) -> Resultado<Vec<sbf_planejamento::ConciliacaoComMovimento>> {
         Ok(self.conciliacoes_da_ocorrencia_impl(ocorrencia))
     }
+
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<Conciliacao>> {
+        Ok(self
+            .conciliacoes
+            .iter()
+            .filter(|c| c.movimento == movimento)
+            .cloned()
+            .collect())
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {
@@ -1531,6 +1543,7 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::Excluir { recorrente, .. }
         | Alteracao::Restaurar { recorrente, .. }
         | Alteracao::Arquivar { recorrente, .. }
+        | Alteracao::Renomear { recorrente, .. }
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
@@ -1541,8 +1554,12 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::DefinirComposicao { .. }
         | Alteracao::VincularDocumento { .. }
         | Alteracao::DesvincularDocumento { .. }
-        | Alteracao::MapearConta { .. } => None,
-        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
+        | Alteracao::MapearConta { .. }
+        | Alteracao::CriarModelo { .. }
+        | Alteracao::NovaVersaoDoCalculo { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. }
+        | Alteracao::AplicarModelo { recorrente, .. }
+        | Alteracao::DefinirParametro { recorrente, .. } => Some(recorrente.clone()),
     }
 }
 
@@ -1788,6 +1805,11 @@ impl PlanejamentoFicticio {
                     .iter()
                     .position(|r| r.id == rec)
                     .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(rec.clone()))?;
+                if matches!(excecao, Excecao::QuantidadeSoDesteMes { .. }) {
+                    return Err(ErroDoPlanejamento::Invalida(
+                        "o conjunto fictício não tem modelos de compromisso".into(),
+                    ));
+                }
                 self.substituir_excecao(ocorrencia.clone(), excecao.clone(), autor.clone());
                 self.recorrentes[i].versao_do_registro += 1;
                 let texto = match excecao {
@@ -1795,6 +1817,7 @@ impl PlanejamentoFicticio {
                     Excecao::Dispensar { .. } => "Dispensou",
                     Excecao::ValorSoDesteMes { .. } => "Mudou o valor só deste mês de",
                     Excecao::PagoInformado { .. } => "Informou pagamento de",
+                    Excecao::QuantidadeSoDesteMes { .. } => "Ajustou a quantidade de",
                 };
                 Ok(self.registrar(
                     autor,
@@ -1891,6 +1914,17 @@ impl PlanejamentoFicticio {
                     "Tirou do arquivo."
                 };
                 Ok(self.registrar(autor, &recorrente, t.into(), &alt))
+            }
+            Alteracao::Renomear {
+                recorrente,
+                nome,
+                versao_base,
+            } => {
+                let i = self.conferir_base(&recorrente, versao_base)?;
+                let r = &mut self.recorrentes[i];
+                r.nome = nome.trim().to_owned();
+                r.versao_do_registro += 1;
+                Ok(self.registrar(autor, &recorrente, "Renomeou.".into(), &alt))
             }
             Alteracao::Mover {
                 recorrente,
@@ -2011,6 +2045,12 @@ impl PlanejamentoFicticio {
                 assinatura,
                 versao_base,
             } => self.definir_assinatura(recorrente, assinatura, versao_base, autor, &alt),
+            Alteracao::CriarModelo { .. }
+            | Alteracao::NovaVersaoDoCalculo { .. }
+            | Alteracao::AplicarModelo { .. }
+            | Alteracao::DefinirParametro { .. } => Err(ErroDoPlanejamento::Invalida(
+                "o conjunto fictício não tem modelos de compromisso".into(),
+            )),
         }
     }
 

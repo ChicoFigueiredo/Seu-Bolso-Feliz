@@ -1,0 +1,130 @@
+{
+  "regra": "fatura-cartao-nubank",
+  "nome": "Fatura de cartão · Nubank",
+  "motivo": "regra de fábrica: fatura do cartão Nubank (vencimento por extenso lido pelo script); propõe pagar a fatura",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "fatura-cartao-nubank",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "contem": "fatura"
+        },
+        {
+          "contem": "pagamento minimo"
+        }
+      ],
+      "algum": [
+        {
+          "contem": "nubank"
+        },
+        {
+          "contem": "nu pagamentos"
+        }
+      ],
+      "nenhum": [
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bcaixa\\b)"
+        },
+        {
+          "regex": "(?i)\\A(?:[^\\n]*\\n){0,2}[^\\n]*(?:\\bc6\\b)"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?i)(?:(?:total\\s+da\\s+fatura|valor\\s+da\\s+fatura|total\\s+a\\s+pagar))[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "vencimento": {
+        "regex": "(?i)(?:vencimento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "pagamento_minimo_centavos": {
+        "regex": "(?i)(?:pagamento\\s+m\\S*nimo)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "fechamento": {
+        "regex": "(?i)(?:fechamento)[^\\d\\n]{0,25}(?:\\n[^\\d\\n]{0,25})?(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      },
+      "cartao": {
+        "regex": "(?i)final\\s+(\\d{4})",
+        "formato": "texto"
+      },
+      "bandeira": {
+        "regex": "(?i)\\b(mastercard|visa|elo)\\b",
+        "formato": "minusculas"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "vencimento"
+    ],
+    "script_le_texto": true,
+    "propor": [
+      "pagar_fatura"
+    ]
+  },
+  "exemplos": [
+    {
+      "nome": "vencimento por extenso",
+      "texto": "Nubank\nOlá, Fulano de Tal.\nEsta é a sua fatura de novembro.\nData de vencimento: 15 DEZ 2026\nTotal da fatura R$ 2.345,67\nPagamento mínimo R$ 351,85\nCartão final 0000\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "fatura-cartao-nubank",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 234567
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2026-12-15"
+          },
+          "pagamento_minimo_centavos": {
+            "tipo": "centavos",
+            "valor": 35185
+          },
+          "cartao": {
+            "tipo": "texto",
+            "valor": "0000"
+          }
+        }
+      }
+    },
+    {
+      "nome": "vencimento numérico e valor da fatura",
+      "texto": "Nu Pagamentos S.A.\nFatura\nVencimento 10/01/2027\nValor da fatura R$ 410,00\nPagamento mínimo R$ 61,50\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "fatura-cartao-nubank",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 41000
+          },
+          "vencimento": {
+            "tipo": "data",
+            "valor": "2027-01-10"
+          },
+          "pagamento_minimo_centavos": {
+            "tipo": "centavos",
+            "valor": 6150
+          }
+        }
+      }
+    },
+    {
+      "nome": "comprovante de Pix do Nubank não é fatura",
+      "texto": "Nubank\nComprovante de transferência\n12 NOV 2026 - 14:32:10\nValor R$ 120,00\nTipo de transferência Pix\nDestino\nNome Fulano de Tal\nCPF ***.000.000-**\nInstituição Banco Exemplo S.A.\nAgência 0000 Conta 00000-0\nOrigem\nNome Beltrano de Tal\nInstituição NU PAGAMENTOS S.A.\nID da transação E00000000202611121432NUBAN00001\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

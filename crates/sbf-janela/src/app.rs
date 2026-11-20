@@ -673,6 +673,7 @@ impl AppCasca for AppSbf {
             let mut j = self.janela.borrow_mut();
             j.contagens(self.consulta.as_ref())
         };
+        let caixa_de_entrada = self.janela.borrow_mut().contagens_da_caixa_de_entrada();
         let futura = |id: &str| {
             areas::area_futura(id).map(|a| {
                 ItemNavegacao::novo(a.id, a.rotulo, a.icone)
@@ -749,7 +750,15 @@ impl AppCasca for AppSbf {
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", {
                 // As Regras de reconhecimento (spec 13) já funcionam: sem selo de fatia.
-                let mut v = futuras(&["caixa"]);
+                // A Caixa de entrada funciona quando está ligada ao reconhecimento: sem
+                // etiqueta de fatia e com o contador dos não resolvidos.
+                let mut v = match caixa_de_entrada {
+                    Some(c) => vec![
+                        ItemNavegacao::novo("caixa", "Caixa de entrada", "inbox")
+                            .contagem(c.reconhecidos.max(0) as u64),
+                    ],
+                    None => futuras(&["caixa"]),
+                };
                 v.push(ItemNavegacao::novo(
                     crate::regras_ui::ROTA,
                     "Regras de reconhecimento",
@@ -759,8 +768,10 @@ impl AppCasca for AppSbf {
             }),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
             GrupoNavegacao::novo("Fontes", {
-                // Roteiros (spec 10, C1) já funcionam: o item não leva o selo de fatia.
-                let mut v = futuras(&["conexoes", "alertas"]);
+                // Conexões (Telegram, Pluggy, pastas) e Roteiros (spec 10, C1) já funcionam: os
+                // itens não levam o selo de fatia.
+                let mut v = vec![ItemNavegacao::novo("conexoes", "Conexões", "hub")];
+                v.extend(futuras(&["alertas"]));
                 v.push(ItemNavegacao::novo("roteiros", "Roteiros", "route"));
                 v
             }),
