@@ -238,9 +238,9 @@ fn consertos_tolerantes(def: &mut Value) -> Vec<String> {
                 });
             }
             outro @ Value::String(_) => {
-                if let Some(novo) = conserta(outro) {
-                    *outro = novo;
-                }
+                // Um texto no lugar da lista: a lista de um elemento.
+                let unico = conserta(outro).unwrap_or_else(|| outro.clone());
+                *outro = json!([unico]);
             }
             _ => {}
         }
@@ -763,6 +763,22 @@ impl Sessao {
         else {
             return erro("este item não tem texto guardado");
         };
+        // Item de imagem: o esqueleto traz `texto_de_ocr`, e o motor lê o texto já normalizado
+        // (O/l dentro de números, `RS` como `R$`); o teste vê o mesmo texto.
+        let de_ocr = self
+            .ctx
+            .tela
+            .item
+            .mime
+            .as_deref()
+            .is_some_and(|m| m.starts_with("image/"));
+        let normalizado;
+        let texto = if de_ocr {
+            normalizado = sbf_regras::definicao::normalizar_ocr(texto);
+            normalizado.as_str()
+        } else {
+            texto
+        };
         let r = match RegexBuilder::new(padrao)
             .size_limit(LIMITE_DO_REGEX)
             .dfa_size_limit(LIMITE_DO_REGEX)
@@ -824,6 +840,11 @@ impl Sessao {
             itens.push(item);
         }
         let mut saida = json!({"casamentos": total, "mostrados": itens.len(), "itens": itens});
+        if de_ocr {
+            saida["texto"] = json!(
+                "item de imagem: testado no texto normalizado como OCR (o mesmo de `texto_de_ocr`)"
+            );
+        }
         if total == 0 {
             let palavras: String = padrao
                 .chars()

@@ -532,11 +532,12 @@ fn definicao_mandada_como_texto_com_escapes_invalidos_e_reparada() {
 
 /// A linha `definicao: {...}` do bloco do esqueleto no primeiro prompt.
 fn definicao_do_esqueleto(prompt: &str) -> Value {
+    // Vai como texto (as barras uma vez só, como nas instruções): a ferramenta repara os escapes.
     let linha = prompt
         .lines()
         .find_map(|l| l.strip_prefix("definicao: "))
         .expect("o primeiro prompt traz o esqueleto");
-    serde_json::from_str(linha).expect("a definição do esqueleto é JSON")
+    Value::String(linha.to_owned())
 }
 
 #[test]
