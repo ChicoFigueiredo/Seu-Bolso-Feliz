@@ -12,9 +12,11 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rusqlite::Connection;
 use sbf_coletor::gmail::cliente::{PaginaDeMensagens, ReferenciaDeMensagem};
 use sbf_coletor::gmail::mensagem::MensagemDoGmail;
+use sbf_gmail::contas::coletar_conta;
+use sbf_gmail::{Conta, Rotulo};
 use sbf_gmail::{
     Desfecho, Erro, FonteDeGmail, OpcoesDaColeta, Reconhecimento, ReconhecimentoDoCofre, Resultado,
-    SituacaoDaConexao, coletar, estado_do_gmail,
+    SituacaoDaConexao, coletar, estado_da_conta,
 };
 use sbf_inventario::banco::Inventario;
 use sbf_pdf::{ErroDeFonte, FonteDeSegredos};
@@ -41,6 +43,8 @@ struct Msg {
     assunto: &'static str,
     corpo: &'static str,
     anexos: Vec<(&'static str, &'static str, &'static str, Vec<u8>, bool)>,
+    /// Os ids de rótulo em que a mensagem está.
+    rotulos: Vec<&'static str>,
 }
 
 fn msg(id: &'static str, ms: i64, assunto: &'static str) -> Msg {
@@ -50,10 +54,15 @@ fn msg(id: &'static str, ms: i64, assunto: &'static str) -> Msg {
         assunto,
         corpo: "",
         anexos: Vec::new(),
+        rotulos: Vec::new(),
     }
 }
 
 impl Msg {
+    fn no_rotulo(mut self, id: &'static str) -> Self {
+        self.rotulos.push(id);
+        self
+    }
     fn corpo(mut self, c: &'static str) -> Self {
         self.corpo = c;
         self
@@ -110,6 +119,11 @@ impl Msg {
 struct Falsa {
     mensagens: Vec<Msg>,
     consultas: RefCell<Vec<String>>,
+    /// Os rótulos (ids) pedidos em cada listagem.
+    rotulos_pedidos: RefCell<Vec<Option<String>>>,
+    rotulos_da_conta: Vec<Rotulo>,
+    /// A listagem falha como o Google (`invalid_grant`).
+    vencida: bool,
     anexos_baixados: Cell<usize>,
     mensagens_lidas: Cell<usize>,
 }
@@ -124,8 +138,26 @@ impl Falsa {
 }
 
 impl FonteDeGmail for Falsa {
-    fn listar(&self, consulta: &str, _pagina: Option<&str>) -> Resultado<PaginaDeMensagens> {
+    fn rotulos(&self) -> Resultado<Vec<Rotulo>> {
+        if self.vencida {
+            return Err(Erro::Autorizacao);
+        }
+        Ok(self.rotulos_da_conta.clone())
+    }
+
+    fn listar(
+        &self,
+        rotulo: Option<&str>,
+        consulta: &str,
+        _pagina: Option<&str>,
+    ) -> Resultado<PaginaDeMensagens> {
+        if self.vencida {
+            return Err(Erro::Autorizacao);
+        }
         self.consultas.borrow_mut().push(consulta.to_owned());
+        self.rotulos_pedidos
+            .borrow_mut()
+            .push(rotulo.map(str::to_owned));
         // O Gmail devolve do mais novo para o mais velho.
         // `after:<segundos>`, como o Gmail: só as mensagens depois do instante.
         let depois: i64 = consulta
@@ -137,6 +169,7 @@ impl FonteDeGmail for Falsa {
             .mensagens
             .iter()
             .filter(|m| m.ms / 1000 > depois)
+            .filter(|m| rotulo.is_none_or(|r| m.rotulos.contains(&r)))
             .collect();
         ordenadas.sort_by_key(|m| std::cmp::Reverse(m.ms));
         Ok(PaginaDeMensagens {
@@ -439,6 +472,7 @@ fn desde_e_consulta_do_usuario_ignoram_o_checkpoint() {
         consulta: Some("from:cobranca@exemplo.test".to_owned()),
         desde: Some("2026-10-01".to_owned()),
         limite: None,
+        ..OpcoesDaColeta::default()
     };
     c.coletar(&f, &r, &o).unwrap();
 
@@ -522,7 +556,8 @@ fn o_limite_deixa_as_mais_novas_para_a_proxima_coleta() {
 #[test]
 fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     let c = cenario();
-    let antes = estado_do_gmail(&c.cofre);
+    let conta = Conta::legada();
+    let antes = estado_da_conta(Some(&c.cofre), &conta, None);
     assert_eq!(antes.origens, 0);
     assert!(antes.ultima_coleta.is_none());
 
@@ -535,7 +570,7 @@ fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     c.coletar(&f, &Registrador::default(), &OpcoesDaColeta::default())
         .unwrap();
 
-    let depois = estado_do_gmail(&c.cofre);
+    let depois = estado_da_conta(Some(&c.cofre), &conta, None);
     assert_eq!(depois.origens, 1);
     assert_eq!(depois.documentos, 1);
     assert!(depois.ultima_coleta.is_some());
@@ -543,8 +578,219 @@ fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     if depois.faltando.is_empty() {
         assert_eq!(depois.situacao, SituacaoDaConexao::Coletada);
     } else {
-        assert_eq!(depois.situacao, SituacaoDaConexao::SemCredenciais);
+        assert_eq!(depois.situacao, SituacaoDaConexao::NaoConectada);
     }
+    // Outra conta tem a sua própria fonte: não enxerga o que a legada coletou.
+    let outra = Conta::nova("gmail-2", sbf_gmail::TipoDeEmail::Gmail);
+    assert_eq!(estado_da_conta(Some(&c.cofre), &outra, None).origens, 0);
+    // O Outlook ainda não conecta.
+    let outlook = Conta::nova("outlook", sbf_gmail::TipoDeEmail::Outlook);
+    assert_eq!(
+        estado_da_conta(Some(&c.cofre), &outlook, None).situacao,
+        SituacaoDaConexao::EmBreve
+    );
+}
+
+fn rotulo(id: &str, nome: &str) -> Rotulo {
+    Rotulo {
+        id: id.to_owned(),
+        nome: nome.to_owned(),
+    }
+}
+
+fn conta_seguindo(id: &str, rotulos: &[&str]) -> Conta {
+    Conta {
+        rotulos: Some(rotulos.iter().map(|r| (*r).to_owned()).collect()),
+        ..Conta::nova(id, sbf_gmail::TipoDeEmail::Gmail)
+    }
+}
+
+fn por_conta(
+    c: &Cenario,
+    conta: &Conta,
+    f: &Falsa,
+    o: &OpcoesDaColeta,
+) -> Resultado<sbf_gmail::ResumoDaColeta> {
+    coletar_conta(
+        &c.cofre,
+        conta,
+        f,
+        &Registrador::default(),
+        o,
+        None,
+        &AtomicBool::new(false),
+    )
+}
+
+#[test]
+fn coleta_por_rotulo_filtra_pela_api_e_tem_checkpoint_por_rotulo() {
+    let c = cenario();
+    let f = Falsa {
+        rotulos_da_conta: vec![
+            rotulo("Label_1", "Comprovantes"),
+            rotulo("Label_2", "Viagens"),
+        ],
+        ..Falsa::com(vec![
+            msg("c1", T0, "Pix")
+                .anexo("1", "pix.pdf", "application/pdf", PDF)
+                .no_rotulo("Label_1"),
+            msg("v1", T0 + 1000, "Hotel")
+                .anexo("1", "hotel.pdf", "application/pdf", b"%PDF hotel")
+                .no_rotulo("Label_2"),
+            msg("x1", T0 + 2000, "Fora").anexo("1", "fora.pdf", "application/pdf", b"%PDF fora"),
+        ])
+    };
+    // Sem escolha, vale o padrão Comprovantes: só o que está no rótulo.
+    let conta = Conta::legada();
+    let r = por_conta(&c, &conta, &f, &OpcoesDaColeta::default()).unwrap();
+    assert_eq!(r.mensagens, 1);
+    assert_eq!(
+        f.rotulos_pedidos.borrow().as_slice(),
+        [Some("Label_1".to_owned())]
+    );
+    let q = f.consultas.borrow()[0].clone();
+    assert!(
+        q.starts_with("has:attachment ") && q.ends_with("newer_than:90d"),
+        "{q}"
+    );
+    assert!(
+        r.consulta
+            .starts_with("label:\"Comprovantes\" has:attachment"),
+        "{}",
+        r.consulta
+    );
+
+    // Seguindo os dois, cada rótulo com o seu checkpoint: Comprovantes já foi, Viagens é novo.
+    f.consultas.borrow_mut().clear();
+    f.rotulos_pedidos.borrow_mut().clear();
+    let conta = Conta {
+        consulta_extra: "from:hotel".to_owned(),
+        ..conta_seguindo("gmail", &["Comprovantes", "viagens"])
+    };
+    let r = por_conta(&c, &conta, &f, &OpcoesDaColeta::default()).unwrap();
+    assert_eq!(r.mensagens, 2, "c1 relida de folga, v1 nova");
+    assert_eq!(r.documentos_novos, 1, "só a de Viagens é nova");
+    let q = f.consultas.borrow().clone();
+    assert!(
+        q[0].contains("from:hotel") && q[0].ends_with(&format!("after:{}", T0 / 1000 - 3600)),
+        "{q:?}"
+    );
+    assert!(
+        q[1].ends_with("newer_than:90d"),
+        "viagens ainda sem checkpoint: {q:?}"
+    );
+    assert_eq!(
+        c.contar("SELECT count(*) FROM origem WHERE fonte_id = 'gmail'"),
+        2
+    );
+}
+
+#[test]
+fn consulta_avulsa_do_cli_nao_vira_a_consulta_da_conta() {
+    let c = cenario();
+    let f = Falsa {
+        rotulos_da_conta: vec![rotulo("Label_1", "Comprovantes")],
+        ..Falsa::com(vec![
+            msg("m1", T0, "Boleto")
+                .anexo("1", "b.pdf", "application/pdf", PDF)
+                .no_rotulo("Label_1"),
+        ])
+    };
+    let teste = OpcoesDaColeta {
+        consulta: Some("has:attachment newer_than:1d".to_owned()),
+        ..OpcoesDaColeta::default()
+    };
+    por_conta(&c, &Conta::legada(), &f, &teste).unwrap();
+    assert_eq!(f.rotulos_pedidos.borrow().as_slice(), [None]);
+    // A coleta normal depois usa o rótulo, com a janela do rótulo (o checkpoint da avulsa não
+    // vale para ele).
+    f.consultas.borrow_mut().clear();
+    por_conta(&c, &Conta::legada(), &f, &OpcoesDaColeta::default()).unwrap();
+    assert!(f.consultas.borrow()[0].ends_with("newer_than:90d"));
+}
+
+#[test]
+fn contas_diferentes_gravam_em_pastas_e_fontes_separadas() {
+    let c = cenario();
+    let um = Falsa::com(vec![msg("m1", T0, "Um").anexo(
+        "1",
+        "um.pdf",
+        "application/pdf",
+        b"%PDF um",
+    )]);
+    let dois = Falsa::com(vec![msg("m1", T0, "Dois").anexo(
+        "1",
+        "dois.pdf",
+        "application/pdf",
+        b"%PDF dois",
+    )]);
+    let sem_rotulo = |id: &str| conta_seguindo(id, &[]);
+    // Rótulo vazio coleta nada; por isso usa a consulta avulsa para encher cada conta.
+    let avulsa = OpcoesDaColeta {
+        consulta: Some("has:attachment".to_owned()),
+        ..OpcoesDaColeta::default()
+    };
+    por_conta(&c, &sem_rotulo("gmail"), &um, &avulsa).unwrap();
+    por_conta(&c, &sem_rotulo("gmail-2"), &dois, &avulsa).unwrap();
+    // O mesmo id de mensagem em duas contas não se confunde.
+    assert_eq!(
+        c.contar("SELECT count(*) FROM origem WHERE fonte_id = 'gmail'"),
+        1
+    );
+    assert_eq!(
+        c.contar("SELECT count(*) FROM origem WHERE fonte_id = 'email:gmail-2'"),
+        1
+    );
+    assert_eq!(
+        c.contar("SELECT count(*) FROM origem WHERE origin_key = 'email:gmail-2:m1:1'"),
+        1
+    );
+    assert_eq!(
+        c.contar("SELECT count(*) FROM origem WHERE origin_key = 'gmail:m1:1'"),
+        1
+    );
+    assert!(c.cofre.join("entrada/gmail").is_dir());
+    assert!(c.cofre.join("entrada/email/gmail-2").is_dir());
+}
+
+#[test]
+fn rotulo_que_a_conta_nao_tem_mais_e_contado_e_lista_vazia_nao_coleta() {
+    let c = cenario();
+    let f = Falsa {
+        rotulos_da_conta: vec![rotulo("Label_1", "Comprovantes")],
+        ..Falsa::default()
+    };
+    let r = por_conta(
+        &c,
+        &conta_seguindo("gmail", &["Sumiu"]),
+        &f,
+        &OpcoesDaColeta::default(),
+    )
+    .unwrap();
+    assert_eq!(r.rotulos_ausentes, 1);
+    assert!(f.consultas.borrow().is_empty());
+    let r = por_conta(
+        &c,
+        &conta_seguindo("gmail", &[]),
+        &f,
+        &OpcoesDaColeta::default(),
+    )
+    .unwrap();
+    assert_eq!(r.mensagens, 0);
+    assert!(f.consultas.borrow().is_empty());
+}
+
+#[test]
+fn autorizacao_vencida_interrompe_a_conta_com_a_causa_certa() {
+    let c = cenario();
+    let f = Falsa {
+        vencida: true,
+        ..Falsa::default()
+    };
+    assert_eq!(
+        por_conta(&c, &Conta::legada(), &f, &OpcoesDaColeta::default()).unwrap_err(),
+        Erro::Autorizacao
+    );
 }
 
 // ---------------------------------------------------------------- com o reconhecedor de verdade
