@@ -138,10 +138,10 @@ pub fn cores_do_estado(ui: &Ui, rotulo: &str) -> (Color32, Color32, &'static str
     } else if r.starts_with("sem valor")
         || r.starts_with("não alocada")
         || r.starts_with("precisa revisar")
+        || r.starts_with("possível duplicidade")
+        || r.starts_with("protegido por senha")
         || r == "fechada"
     {
-        (p.aviso_sutil, p.aviso, "warning")
-    } else if r.starts_with("possível duplicidade") || r.starts_with("protegido por senha") {
         (p.aviso_sutil, p.aviso, "warning")
     } else if r.starts_with("não reconhecido") {
         (p.perigo_sutil, p.perigo, "help")
