@@ -104,6 +104,41 @@ fn rita_com_o_ollama_real_cria_um_rascunho_que_passa() {
     );
 }
 
+/// Imprime, com `SBF_RITA_ESPIAR=1`, o que a ferramenta devolveu e o que o modelo mandou: serve
+/// para ver por que uma tentativa falhou.
+struct Espiao<P>(P);
+
+impl<P: sbf_ia::ProvedorDeConversa> sbf_ia::ProvedorDeConversa for Espiao<P> {
+    fn nome(&self) -> String {
+        self.0.nome()
+    }
+    fn modelo(&self) -> String {
+        self.0.modelo()
+    }
+    fn natureza_do_custo(&self) -> sbf_ia::NaturezaDoCusto {
+        self.0.natureza_do_custo()
+    }
+    fn conversar(
+        &self,
+        pedido: &sbf_ia::PedidoDeConversa,
+        cancelar: &AtomicBool,
+    ) -> sbf_ia::ResultadoDeIa<sbf_ia::RespostaDeConversa> {
+        let espiar = std::env::var_os("SBF_RITA_ESPIAR").is_some();
+        if espiar
+            && let Some(sbf_ia::Mensagem::Ferramenta { conteudo, .. }) = pedido.mensagens.last()
+        {
+            eprintln!("<<< ferramenta devolveu: {conteudo}");
+        }
+        let r = self.0.conversar(pedido, cancelar)?;
+        if espiar {
+            for c in &r.chamadas {
+                eprintln!(">>> modelo chamou {}: {}", c.nome, c.argumentos);
+            }
+        }
+        Ok(r)
+    }
+}
+
 const PRINT: &str = include_str!("fixtures/print-prestacao-habitacao-ficticio.txt");
 const PEDIDO_DO_PRINT: &str = "Isto é um comprovante de prestação da habitação CAIXA. O que determina é o título (Prestação atual) e o número do contrato. A data de vencimento determina a competência. Cria o padrão.";
 
@@ -140,7 +175,7 @@ fn rita_com_o_ollama_real_calibra_no_print_da_prestacao_da_habitacao() {
     let t0 = std::time::Instant::now();
     let r = rita
         .pedir(
-            &provedor,
+            &Espiao(provedor),
             PEDIDO_DO_PRINT,
             &parar,
             &RegistroFalso::novo(),
