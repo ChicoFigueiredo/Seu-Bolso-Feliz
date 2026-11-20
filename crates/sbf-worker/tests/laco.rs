@@ -416,6 +416,13 @@ impl ColetorDeGmail for GmailVencido {
     fn pode_tentar_de_novo(&mut self) -> bool {
         self.liberado.get()
     }
+    fn contas_vencidas(&mut self) -> Vec<String> {
+        if self.liberado.get() {
+            Vec::new()
+        } else {
+            vec!["gmail".to_owned()]
+        }
+    }
 }
 
 #[test]
@@ -433,10 +440,11 @@ fn gmail_com_autorizacao_vencida_nao_martela_ate_o_proximo_login() {
     let t0 = agora();
     w.passo(t0, Duration::from_millis(1), &nao);
     assert_eq!(chamadas.get(), 1);
-    assert!(w.estado.gmail_autorizacao_vencida);
+    assert_eq!(w.estado.gmail_contas_vencidas, 1);
     assert_eq!(w.estado.falhas, 1);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("causa=autorizacao"), "{log}");
+    assert!(log.contains("causa=autorizacao conta=gmail"), "{log}");
     assert!(!log.contains("causa=externo"), "{log}");
 
     // Horas depois, com a autorização ainda vencida: nenhuma chamada nova, nenhuma falha nova.
@@ -445,14 +453,52 @@ fn gmail_com_autorizacao_vencida_nao_martela_ate_o_proximo_login() {
     }
     assert_eq!(chamadas.get(), 1, "não martela o Google");
     assert_eq!(w.estado.falhas, 1);
-    assert!(w.estado.gmail_autorizacao_vencida);
+    assert_eq!(w.estado.gmail_contas_vencidas, 1);
 
     // A pessoa entra: a próxima volta (no máximo um minuto depois) coleta e limpa o aviso.
     liberado.set(true);
     w.passo(t0 + 601 * 60, Duration::from_millis(1), &nao);
     assert_eq!(chamadas.get(), 2);
-    assert!(!w.estado.gmail_autorizacao_vencida);
+    assert_eq!(w.estado.gmail_contas_vencidas, 0);
     assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().origem, "gmail");
+}
+
+/// Duas contas: a `gmail-2` está vencida, a outra coleta normalmente.
+struct GmailMisto(Rc<Cell<u32>>);
+impl ColetorDeGmail for GmailMisto {
+    fn coletar(&mut self, _: &AtomicBool) -> Result<ResumoDoGmail, Falha> {
+        self.0.set(self.0.get() + 1);
+        Ok(ResumoDoGmail {
+            mensagens: 2,
+            novos: 1,
+        })
+    }
+    fn contas_vencidas(&mut self) -> Vec<String> {
+        vec!["gmail-2".to_owned()]
+    }
+}
+
+#[test]
+fn uma_conta_vencida_e_registrada_uma_vez_e_as_outras_seguem_coletando() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailMisto(n.clone())));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    w.passo(t0 + 31 * 60, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2, "o worker não suspende: a outra conta continua");
+    assert_eq!(w.estado.gmail_contas_vencidas, 1);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert_eq!(
+        log.matches("falhou passo=gmail causa=autorizacao conta=gmail-2")
+            .count(),
+        1,
+        "registrada ao vencer, não a cada coleta: {log}"
+    );
+    assert!(log.contains("gmail mensagens=2 novos=1"), "{log}");
 }
 
 struct RoteirosFalsos(Rc<Cell<u32>>);

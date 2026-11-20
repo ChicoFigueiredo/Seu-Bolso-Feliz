@@ -58,9 +58,10 @@ pub struct EstadoDoWorker {
     pub nuvem_ligada: bool,
     /// A coleta de mensageiros está ligada?
     pub mensageiros_ligados: bool,
-    /// A autorização do Gmail venceu (`invalid_grant`): o worker parou de tentar até a pessoa
-    /// entrar de novo (`sbf gmail entrar` ou Conexões › Gmail).
-    pub gmail_autorizacao_vencida: bool,
+    /// Quantas contas de e-mail estão com a autorização vencida (`invalid_grant`): o worker não
+    /// tenta essas até a pessoa entrar de novo (`sbf email entrar` ou Conexões › E-mail); as
+    /// outras contas seguem coletando.
+    pub gmail_contas_vencidas: u32,
     /// Falhas desde que subiu.
     pub falhas: u32,
 }
@@ -152,10 +153,10 @@ pub fn texto_da_barra(estado: Option<&EstadoDoWorker>, agora: u64) -> String {
     } else {
         String::new()
     };
-    let gmail = if e.gmail_autorizacao_vencida {
-        " · Gmail: autorização vencida"
-    } else {
-        ""
+    let gmail = match e.gmail_contas_vencidas {
+        0 => String::new(),
+        1 => " · E-mail: 1 conta com autorização vencida".to_owned(),
+        n => format!(" · E-mail: {n} contas com autorização vencida"),
     };
     format!("Worker: rodando · {coleta}{fila}{gmail}")
 }
@@ -196,15 +197,25 @@ mod testes {
     }
 
     #[test]
-    fn a_barra_avisa_quando_a_autorizacao_do_gmail_venceu() {
+    fn a_barra_avisa_quando_a_autorizacao_de_contas_de_email_venceu() {
         let agora_ = agora();
         let e = EstadoDoWorker {
             pid: std::process::id(),
             atualizado_em: agora_,
-            gmail_autorizacao_vencida: true,
+            gmail_contas_vencidas: 1,
             ..EstadoDoWorker::default()
         };
-        assert!(texto_da_barra(Some(&e), agora_).ends_with("Gmail: autorização vencida"));
+        assert!(
+            texto_da_barra(Some(&e), agora_).ends_with("E-mail: 1 conta com autorização vencida")
+        );
+        let dois = EstadoDoWorker {
+            gmail_contas_vencidas: 2,
+            ..e
+        };
+        assert!(
+            texto_da_barra(Some(&dois), agora_)
+                .ends_with("E-mail: 2 contas com autorização vencida")
+        );
     }
 
     #[test]

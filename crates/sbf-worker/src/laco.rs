@@ -169,6 +169,12 @@ pub trait ColetorDeGmail {
     fn pode_tentar_de_novo(&mut self) -> bool {
         true
     }
+
+    /// Os ids das contas com a autorização vencida agora (lê só o chaveiro; sem rede). O worker
+    /// registra cada uma ao vencer, mostra a contagem na barra e segue com as outras contas.
+    fn contas_vencidas(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// O que uma coleta do Telegram fez.
@@ -342,8 +348,10 @@ pub struct Worker {
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
     proxima_gmail: u64,
-    /// O Gmail devolveu `Autorizacao`: não coleta até `pode_tentar_de_novo`.
+    /// Todas as contas de e-mail venceram (`Autorizacao`): não coleta até `pode_tentar_de_novo`.
     gmail_suspenso: bool,
+    /// As contas de e-mail com autorização vencida já registradas no log.
+    gmail_vencidas: std::collections::HashSet<String>,
     proxima_telegram: u64,
     proxima_roteiros: u64,
     proxima_triagem: u64,
@@ -420,6 +428,7 @@ impl Worker {
             proxima_mensageiros: agora_,
             proxima_gmail: agora_,
             gmail_suspenso: false,
+            gmail_vencidas: std::collections::HashSet::new(),
             proxima_telegram: agora_,
             proxima_roteiros: agora_,
             proxima_triagem: agora_,
@@ -804,10 +813,6 @@ impl Worker {
         self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
         match g.coletar(cancelar) {
             Ok(r) => {
-                if self.estado.gmail_autorizacao_vencida {
-                    self.estado.gmail_autorizacao_vencida = false;
-                    self.sujo = true;
-                }
                 let _ = self.registro.registrar(&Evento::Gmail {
                     mensagens: r.mensagens,
                     novos: r.novos,
@@ -816,14 +821,33 @@ impl Worker {
             }
             Err(f) => {
                 if f == Falha::Autorizacao {
-                    // Não martela o Google: suspende até a pessoa entrar de novo.
+                    // Todas as contas venceram: não martela o Google, suspende até a pessoa
+                    // entrar de novo.
                     self.gmail_suspenso = true;
-                    self.estado.gmail_autorizacao_vencida = true;
                     self.proxima_gmail = agora_ + Self::ESPERA_DA_SUSPENSAO_S;
                 }
                 self.falhou("gmail", f);
             }
         }
+        // Cada conta com a autorização vencida é registrada uma vez (quando vence); as outras
+        // contas seguem coletando normalmente.
+        let vencidas = g.contas_vencidas();
+        for id in vencidas
+            .iter()
+            .filter(|i| !self.gmail_vencidas.contains(*i))
+        {
+            let _ = self.registro.registrar(&Evento::FalhouConta {
+                passo: "gmail",
+                falha: Falha::Autorizacao,
+                conta: id,
+            });
+        }
+        let n = u32::try_from(vencidas.len()).unwrap_or(u32::MAX);
+        if n != self.estado.gmail_contas_vencidas {
+            self.estado.gmail_contas_vencidas = n;
+            self.sujo = true;
+        }
+        self.gmail_vencidas = vencidas.into_iter().collect();
         self.gmail = Some(g);
     }
 
