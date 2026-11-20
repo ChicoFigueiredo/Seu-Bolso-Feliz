@@ -77,6 +77,8 @@ struct Linha {
     mime: Option<String>,
     nome: Option<String>,
     origem: Option<String>,
+    /// O momento do achado (a mesma regra de `sbf_inventario::texto::momento_do_achado`).
+    momento: Option<String>,
 }
 
 fn canal_da_origem(tipo: Option<&str>) -> Canal {
@@ -93,7 +95,10 @@ fn ler_linhas(inv: &Connection, depois_de: i64, n: usize) -> rusqlite::Result<Ve
                 (SELECT o.filename FROM origem o WHERE o.content_hash = t.content_hash
                   ORDER BY o.id DESC LIMIT 1),
                 (SELECT o.origin_type FROM origem o WHERE o.content_hash = t.content_hash
-                  ORDER BY o.id LIMIT 1)
+                  ORDER BY o.id LIMIT 1),
+                COALESCE((SELECT min(o.local_mtime) FROM origem o
+                           WHERE o.content_hash = t.content_hash AND o.local_mtime <> ''),
+                         a.primeiro_visto_em)
            FROM texto t JOIN achado a ON a.content_hash = t.content_hash
           WHERE t.rowid > ?1 AND trim(t.conteudo) <> ''
           ORDER BY t.rowid LIMIT ?2",
@@ -107,6 +112,7 @@ fn ler_linhas(inv: &Connection, depois_de: i64, n: usize) -> rusqlite::Result<Ve
             mime: r.get(3)?,
             nome: r.get(4)?,
             origem: r.get(5)?,
+            momento: r.get(6)?,
         })
     })?
     .collect()
@@ -146,6 +152,7 @@ impl Lote<'_> {
             Some(&l.texto),
             canal_da_origem(l.origem.as_deref()),
             None,
+            l.momento.as_deref(),
         );
         let pendentes: Vec<usize> = (0..self.vigentes.len())
             .filter(|&i| self.pontos[i] < l.ordem)
