@@ -18,6 +18,9 @@
 //! 8. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
 //!    só se o modelo já foi baixado pela janela (o worker nunca baixa modelo);
 //! 9. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
+//! 10. **Passada de padrões** (spec 15, D4): lê os documentos que já têm texto guardado com os
+//!     padrões de reconhecimento vigentes, só para marcar as listas (grava a execução, nunca
+//!     decisão, proposta nem Caixa de entrada). Lotes pequenos com pausa, com retomada.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -348,6 +351,41 @@ pub trait LeitorDeImagens {
     fn ler_novas(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoOcr, Falha>;
 }
 
+/// O que um lote da passada de padrões fez. Só contagens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDaPassada {
+    /// Documentos lidos neste lote.
+    pub lidos: usize,
+    /// Leituras feitas até agora nas versões vigentes (o `N` de `padroes: N de M`).
+    pub feitos: u64,
+    /// Documentos com texto vezes versões vigentes (o `M`).
+    pub total: u64,
+}
+
+/// A passada de fundo dos padrões de reconhecimento sobre os documentos com texto guardado
+/// (a real é montada no `sbf`, sobre o `sbf-regras`). Nunca extrai texto, não usa OCR nem IA
+/// e só grava a execução: o ponto de parada fica no `regras.sqlite`, então um reinício do
+/// worker retoma de onde parou, e uma versão ativada ou alterada repete só ela.
+pub trait PassadaDePadroes {
+    /// Lê um lote pequeno. `lidos == 0` quer dizer que não há mais nada a ler agora.
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn lote(&mut self, cancelar: &AtomicBool) -> Result<ResumoDaPassada, Falha>;
+}
+
+/// De quanto em quanto tempo a passada de padrões procura trabalho novo (texto novo, versão
+/// nova), em segundos, quando o último lote não achou nada.
+pub const INTERVALO_DOS_PADROES: u64 = 60;
+/// A pausa entre dois lotes da passada enquanto há o que ler, em segundos (lotes de até 200
+/// documentos ou 3 s, depois 1 s de pausa): o worker e a tela
+/// nunca ficam presos a ela.
+pub const PAUSA_DOS_PADROES: u64 = 1;
+/// Quanto a passada espera depois de uma falha (nunca gira em cima do mesmo erro).
+pub const RECUO_DOS_PADROES: u64 = 5 * 60;
+/// De quanto em quanto tempo, em segundos, o progresso vai para o log durante a passada.
+const LOG_DOS_PADROES: u64 = 60;
+
 /// De quanto em quanto tempo o OCR procura imagens novas, em segundos (se o lote anterior
 /// deixou imagens, a próxima volta já roda).
 pub const INTERVALO_DO_OCR: u64 = 60;
@@ -377,6 +415,7 @@ pub struct Worker {
     indexador: Option<Box<dyn Indexador>>,
     analista: Option<Box<dyn Analista>>,
     leitor: Option<Box<dyn LeitorDeImagens>>,
+    passada: Option<Box<dyn PassadaDePadroes>>,
     reconhecedor_de_pastas: Option<Box<dyn ReconhecedorDePastas>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
@@ -398,6 +437,11 @@ pub struct Worker {
     proximo_indice: u64,
     proximos_pontos: u64,
     proximo_ocr: u64,
+    proximos_padroes: u64,
+    /// Quando o progresso da passada foi ao log pela última vez.
+    padroes_logado_em: u64,
+    /// Houve lote com leitura desde o último registro no log.
+    padroes_sem_registrar: Option<ResumoDaPassada>,
     gravado_em: u64,
     sujo: bool,
     /// Quando o arquivo de estado foi escrito pela última vez (o laço ou o batimento).
@@ -462,6 +506,7 @@ impl Worker {
             indexador: None,
             analista: None,
             leitor: None,
+            passada: None,
             reconhecedor_de_pastas: None,
             registro,
             estado,
@@ -481,6 +526,9 @@ impl Worker {
             proximo_indice: agora_,
             proximos_pontos: agora_,
             proximo_ocr: agora_,
+            proximos_padroes: agora_,
+            padroes_logado_em: 0,
+            padroes_sem_registrar: None,
             gravado_em: 0,
             sujo: true,
             pulso: Arc::new(AtomicU64::new(0)),
@@ -531,6 +579,13 @@ impl Worker {
     #[must_use]
     pub fn com_ocr(mut self, leitor: Box<dyn LeitorDeImagens>) -> Self {
         self.leitor = Some(leitor);
+        self
+    }
+
+    /// Liga a passada de fundo dos padrões de reconhecimento (spec 15, D4).
+    #[must_use]
+    pub fn com_passada_de_padroes(mut self, passada: Box<dyn PassadaDePadroes>) -> Self {
+        self.passada = Some(passada);
         self
     }
 
@@ -805,6 +860,9 @@ impl Worker {
             self.proximo_ocr = agora_ + INTERVALO_DO_OCR;
             self.passo_do_ocr(cancelar, agora_);
         }
+        if agora_ >= self.proximos_padroes && !cancelar.load(Ordering::Relaxed) {
+            self.passo_dos_padroes(cancelar, agora_);
+        }
         if agora_ >= self.proximo_indice && !cancelar.load(Ordering::Relaxed) {
             self.proximo_indice = agora_ + INTERVALO_DO_INDICE;
             self.passo_do_indice(cancelar);
@@ -845,6 +903,43 @@ impl Worker {
             Err(f) => self.falhou("ocr", f),
         }
         self.leitor = Some(l);
+    }
+
+    fn passo_dos_padroes(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut p) = self.passada.take() else {
+            self.proximos_padroes = agora_ + INTERVALO_DOS_PADROES;
+            return;
+        };
+        match p.lote(cancelar) {
+            Ok(r) if r.lidos > 0 => {
+                // Ainda há o que ler: o próximo lote vem depois de uma pausa, nunca já.
+                self.proximos_padroes = agora_ + PAUSA_DOS_PADROES;
+                self.padroes_sem_registrar = Some(r);
+                if agora_.saturating_sub(self.padroes_logado_em) >= LOG_DOS_PADROES {
+                    self.registrar_padroes(agora_);
+                }
+            }
+            Ok(_) => {
+                self.proximos_padroes = agora_ + INTERVALO_DOS_PADROES;
+                // Acabou o trabalho: o último progresso vai ao log.
+                self.registrar_padroes(agora_);
+            }
+            Err(f) => {
+                self.proximos_padroes = agora_ + RECUO_DOS_PADROES;
+                self.falhou("padroes", f);
+            }
+        }
+        self.passada = Some(p);
+    }
+
+    fn registrar_padroes(&mut self, agora_: u64) {
+        if let Some(r) = self.padroes_sem_registrar.take() {
+            let _ = self.registro.registrar(&Evento::Padroes {
+                feitos: r.feitos,
+                total: r.total,
+            });
+            self.padroes_logado_em = agora_;
+        }
     }
 
     fn passo_do_indice(&mut self, cancelar: &AtomicBool) {

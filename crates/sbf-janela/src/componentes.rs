@@ -199,7 +199,7 @@ pub fn estado_compacto(ui: &mut Ui, rotulo: &str, quem: Option<&sbf_inventario::
         .response;
     let quem_icone = match quem {
         Some(sbf_inventario::consulta::Quem::Usuario) => Some(("person", "você")),
-        Some(sbf_inventario::consulta::Quem::Automatico(_)) => Some(("smart_toy", "regras")),
+        Some(sbf_inventario::consulta::Quem::Automatico(_)) => Some(("smart_toy", "padrões")),
         None => None,
     };
     let r2 = quem_icone.map(|(i, _)| ui.label(icones::icone_cor(i, 14.0, p.tinta_suave)));

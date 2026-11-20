@@ -111,6 +111,7 @@ pub fn id_do_painel(p: PainelDoDock) -> &'static str {
         PainelDoDock::Historico => "historico",
         PainelDoDock::Previa => "previa",
         PainelDoDock::Reconhecimento => "reconhecimento",
+        PainelDoDock::Rita => "rita",
     }
 }
 
@@ -761,7 +762,7 @@ impl AppCasca for AppSbf {
                 };
                 v.push(ItemNavegacao::novo(
                     crate::regras_ui::ROTA,
-                    "Regras de reconhecimento",
+                    "Padrões de reconhecimento",
                     "rule",
                 ));
                 v
@@ -909,6 +910,7 @@ impl AppCasca for AppSbf {
                 janela.dialogos_ui(&ctx, consulta.as_ref());
                 janela.ferramentas_ui(&ctx);
                 janela.previas_ui(&ctx, consulta.as_ref());
+                janela.rita_flutuante_ui(&ctx, consulta.as_ref());
             }
             Local::Flutuante(id) => {
                 let vista = vistas_flutuantes.entry(id).or_default();
@@ -940,6 +942,7 @@ impl AppCasca for AppSbf {
                         | PainelDoDock::Texto
                         | PainelDoDock::Historico
                         | PainelDoDock::Reconhecimento
+                        | PainelDoDock::Rita
                 ) {
                     d = d.escondido();
                 }

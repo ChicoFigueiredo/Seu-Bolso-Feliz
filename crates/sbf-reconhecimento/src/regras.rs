@@ -87,6 +87,7 @@ pub fn entrada_do_documento(
     texto: Option<&str>,
     canal: Canal,
     id_externo: Option<&str>,
+    momento: Option<&str>,
 ) -> Entrada {
     Entrada {
         versao_do_esquema: VERSAO_DO_ESQUEMA,
@@ -101,8 +102,27 @@ pub fn entrada_do_documento(
         nome: Some(nome.to_owned()),
         texto: texto.map(str::to_owned),
         dicas: Dicas::default(),
-        momento: None,
+        momento: momento.map(str::to_owned),
     }
+}
+
+/// O momento de um arquivo que o motor vai ler (spec 15): o do inventário (a menor data de
+/// origem, ou quando foi indexado) e, para o arquivo que ainda não tem achado, a data dele no
+/// disco. ISO 8601.
+pub(crate) fn momento_do_arquivo(
+    conn: &rusqlite::Connection,
+    sha256: &str,
+    caminho: &Path,
+) -> Option<String> {
+    sbf_inventario::texto::momento_do_achado(conn, sha256)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            std::fs::metadata(caminho)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(sbf_coleta::pastas::iso_de)
+        })
 }
 
 /// A entrada de um registro da Pluggy (D13): id `pluggy:<id>`, tipo Registro, e as dicas
@@ -321,6 +341,7 @@ pub(crate) fn canal_do_arquivo(cofre: &Path, caminho: &Path, dentro_do_cofre: bo
 /// catálogo não abre ou nenhuma regra se aplica: aí vale o caminho de sempre (AC-LUA-14).
 pub(crate) fn ler_com_regras(
     reconhecedor: &ReconhecedorDoCofre,
+    conn: &rusqlite::Connection,
     estado: &mut Estado,
     caminho: &Path,
 ) -> Option<Situacao> {
@@ -347,6 +368,7 @@ pub(crate) fn ler_com_regras(
         estado.conteudo.as_deref(),
         canal,
         id_externo,
+        momento_do_arquivo(conn, &estado.sha256, caminho).as_deref(),
     );
     let mut leitura = motor.ler(&entrada);
 

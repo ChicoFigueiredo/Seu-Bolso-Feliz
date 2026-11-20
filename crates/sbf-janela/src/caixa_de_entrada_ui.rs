@@ -25,6 +25,12 @@ fn o_que_e(e: &Entrada) -> String {
     }
 }
 
+/// Quais linhas aparecem (pelo filtro de cor) e a marcação para pintar, quando ligada.
+struct Marcas<'a> {
+    guarda: std::sync::MutexGuard<'a, crate::marcacao::Marcacao>,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn tabela(
     ui: &mut Ui,
     id: &str,
@@ -34,6 +40,30 @@ fn tabela(
     altura: Option<f32>,
 ) {
     let p = tema::paleta(ui.ctx());
+    // A marcação (verde, âmbar) é opcional: sem catálogo de padrões ligado, a tabela é a de
+    // sempre, sem coluna nem filtro.
+    let compartilhada = crate::marcacao::do_contexto(ui.ctx());
+    let mut marcas = compartilhada
+        .as_ref()
+        .and_then(|m| m.lock().ok())
+        .map(|guarda| Marcas { guarda });
+    let mut visiveis: Vec<&Entrada> = entradas.iter().collect();
+    if let Some(m) = marcas.as_mut() {
+        crate::marcacao::faixa_do_filtro(ui, &mut m.guarda, id);
+        let ids: Vec<&str> = entradas.iter().map(|e| e.content_hash.as_str()).collect();
+        let passam = m.guarda.passam(id, &ids);
+        visiveis = entradas
+            .iter()
+            .zip(passam)
+            .filter_map(|(e, ok)| ok.then_some(e))
+            .collect();
+        if visiveis.is_empty() {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Nenhum documento desta cor.").color(p.tinta_suave));
+            return;
+        }
+    }
+    let com_marcas = marcas.is_some();
     let mut construtor = TableBuilder::new(ui)
         .id_salt(id)
         .striped(false)
@@ -46,52 +76,86 @@ fn tabela(
         .column(Column::initial(220.0).at_least(80.0).clip(true))
         .column(Column::remainder().at_least(120.0).clip(true))
         .column(Column::initial(170.0).at_least(110.0).clip(true));
+    if com_marcas {
+        construtor = construtor.column(Column::initial(96.0).at_least(80.0).clip(true));
+    }
     if let Some(h) = altura {
         construtor = construtor.max_scroll_height(h).min_scrolled_height(60.0);
     }
     construtor
         .header(24.0, |mut c| {
-            for t in ["Chegada", "Chegou por", "Arquivo", "Reconhecido", "Estado"] {
+            let mut titulos = vec!["Chegada", "Chegou por", "Arquivo", "Reconhecido", "Estado"];
+            if com_marcas {
+                titulos.push("Padrões");
+            }
+            for t in titulos {
                 c.col(|ui| {
                     ui.label(RichText::new(t).strong().size(12.5).color(p.tinta_suave));
                 });
             }
         })
         .body(|corpo| {
-            corpo.rows(26.0, entradas.len(), |mut linha| {
-                let e = &entradas[linha.index()];
-                linha.set_selected(selecionada == Some(e.content_hash.as_str()));
+            corpo.rows(26.0, visiveis.len(), |mut linha| {
+                let e = visiveis[linha.index()];
+                let esta = selecionada == Some(e.content_hash.as_str());
+                linha.set_selected(esta);
                 let fechada = e.situacao != Situacao::Aberta;
                 let cor = if fechada { p.tinta_suave } else { p.tinta };
+                let marca = marcas
+                    .as_mut()
+                    .map(|m| m.guarda.marca(&e.content_hash))
+                    .unwrap_or_default();
+                let da_cor = marca.cor();
                 linha.col(|ui| {
+                    crate::marcacao::pintar_celula(ui, da_cor, esta, true);
                     ui.label(RichText::new(chegada_em_texto(&e.chegou_em)).color(cor));
                 });
                 linha.col(|ui| {
+                    crate::marcacao::pintar_celula(ui, da_cor, esta, false);
                     ui.label(RichText::new(e.canal.rotulo()).color(cor));
                 });
                 linha.col(|ui| {
+                    crate::marcacao::pintar_celula(ui, da_cor, esta, false);
                     ui.add(egui::Label::new(RichText::new(&e.nome).color(cor)).truncate())
                         .on_hover_text(&e.nome);
                 });
                 linha.col(|ui| {
+                    crate::marcacao::pintar_celula(ui, da_cor, esta, false);
                     let texto = o_que_e(e);
                     ui.add(egui::Label::new(RichText::new(&texto).color(cor)).truncate())
                         .on_hover_text(texto);
                 });
-                linha.col(|ui| match e.situacao {
-                    Situacao::Aberta => componentes::estado_compacto(ui, e.estado.rotulo(), None),
-                    Situacao::Resolvida => {
-                        ui.label(RichText::new("Resolvido").color(p.sucesso));
-                    }
-                    Situacao::Dispensada => {
-                        ui.label(RichText::new("Dispensado").color(p.tinta_suave));
+                linha.col(|ui| {
+                    crate::marcacao::pintar_celula(ui, da_cor, esta, false);
+                    match e.situacao {
+                        Situacao::Aberta => {
+                            componentes::estado_compacto(ui, e.estado.rotulo(), None);
+                        }
+                        Situacao::Resolvida => {
+                            ui.label(RichText::new("Resolvido").color(p.sucesso));
+                        }
+                        Situacao::Dispensada => {
+                            ui.label(RichText::new("Dispensado").color(p.tinta_suave));
+                        }
                     }
                 });
+                if com_marcas {
+                    linha.col(|ui| {
+                        crate::marcacao::pintar_celula(ui, da_cor, esta, false);
+                        crate::marcacao::selo_de_padroes(ui, marca);
+                    });
+                }
                 if linha.response().clicked() {
                     pendentes.push(PedidoDaCaixaDeEntrada::Selecionar(e.content_hash.clone()));
                 }
             });
         });
+    // Uma consulta em lote para o que as linhas desenhadas pediram (e outro quadro para pintar).
+    if let Some(m) = marcas.as_mut()
+        && m.guarda.resolver()
+    {
+        ui.ctx().request_repaint();
+    }
 }
 
 /// A faixa de ações da linha escolhida: Resolver, Dispensar, Reconhecer de novo.

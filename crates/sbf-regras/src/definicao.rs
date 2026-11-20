@@ -511,7 +511,7 @@ impl Compilada {
                 continue;
             }
             let recorte = &texto[inicio..fim];
-            match e.formato.aplicar(recorte) {
+            match e.formato.aplicar_em(recorte, entrada.momento.as_deref()) {
                 Some(valor) => {
                     let de_onde = match dica {
                         Some(nome) => DeOnde::Dica {
@@ -521,9 +521,10 @@ impl Compilada {
                     };
                     campos.insert(e.nome.clone(), Campo { valor, de_onde });
                 }
-                None => motivos.push(format!(
-                    "campo `{}` achado mas fora do formato {:?}",
-                    e.nome, e.formato
+                None => motivos.push(e.formato.motivo_da_falha(
+                    &e.nome,
+                    recorte,
+                    entrada.momento.as_deref(),
                 )),
             }
         }
@@ -532,8 +533,16 @@ impl Compilada {
 }
 
 impl Formato {
-    /// Converte o trecho bruto; `None` se não tem o formato.
+    /// Converte o trecho bruto; `None` se não tem o formato. Sem o `momento` do item (veja
+    /// [`Formato::aplicar_em`]), um mês sem ano não vira data nem competência.
     pub fn aplicar(self, bruto: &str) -> Option<Valor> {
+        self.aplicar_em(bruto, None)
+    }
+
+    /// Como [`Formato::aplicar`], completando o ano que falta (`25 de Novembro`, `Novembro`)
+    /// pelo `momento` do item (ISO 8601; só a data conta): vale o ano que deixa o mês, ou a
+    /// data, mais perto do momento.
+    pub fn aplicar_em(self, bruto: &str, momento: Option<&str>) -> Option<Valor> {
         match self {
             Self::Texto => {
                 let t = bruto.trim();
@@ -544,10 +553,39 @@ impl Formato {
                 (!t.is_empty()).then(|| Valor::Texto(t.to_lowercase()))
             }
             Self::Centavos => parse_centavos(bruto).map(Valor::Centavos),
-            Self::Data => parse_data(bruto).map(Valor::Data),
-            Self::Competencia => parse_competencia(bruto).map(Valor::Competencia),
+            Self::Data => parse_data(bruto)
+                .or_else(|| data_por_extenso(bruto, momento))
+                .map(Valor::Data),
+            Self::Competencia => parse_competencia(bruto)
+                .or_else(|| competencia_por_extenso(bruto, momento))
+                .map(Valor::Competencia),
             Self::Inteiro => parse_inteiro(bruto).map(Valor::Inteiro),
         }
+    }
+
+    /// Por que o trecho achado pelo regex não virou valor (para o motivo da leitura e para o
+    /// diagnóstico de Rita). O trecho é cortado.
+    pub fn motivo_da_falha(self, campo: &str, bruto: &str, momento: Option<&str>) -> String {
+        let trecho: String = bruto.trim().chars().take(40).collect();
+        if matches!(self, Self::Data | Self::Competencia)
+            && let Some(m) = so_o_mes(bruto)
+            && m.ano.is_none()
+        {
+            let porque = if momento.and_then(data_do_momento).is_none() {
+                "e o item não tem `momento` (data da mensagem ou do arquivo) para completar o ano"
+            } else {
+                "e o `momento` do item não ajuda"
+            };
+            return format!(
+                "campo `{campo}`: «{trecho}» está sem ano {porque}; capture um trecho com o ano (ex.: `10/2026`)"
+            );
+        }
+        if self == Self::Data && so_o_mes(bruto).is_some_and(|m| m.dia.is_none()) {
+            return format!(
+                "campo `{campo}`: «{trecho}» não tem o dia; o formato `data` pede dia, mês e ano"
+            );
+        }
+        format!("campo `{campo}` achado mas fora do formato {self:?} (trecho «{trecho}»)")
     }
 }
 
@@ -753,6 +791,119 @@ pub fn parse_competencia(bruto: &str) -> Option<String> {
         .then(|| format!("{ano:04}-{mes:02}"))
 }
 
+const MESES: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "marco",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+
+/// O número do mês (1 a 12) de `janeiro`, `Março`, `mar`... (sem diferenciar maiúsculas nem
+/// acentos). A abreviação é a de três letras.
+fn mes_por_nome(palavra: &str) -> Option<u32> {
+    let p = normalizar(palavra);
+    MESES
+        .iter()
+        .position(|m| *m == p || (p.len() == 3 && m.starts_with(p.as_str())))
+        .and_then(|i| u32::try_from(i + 1).ok())
+}
+
+/// Um mês escrito por extenso, com o dia e o ano quando o trecho os traz.
+struct MesPorExtenso {
+    dia: Option<u32>,
+    mes: u32,
+    ano: Option<i32>,
+}
+
+/// Lê `25 de Novembro`, `25 de novembro de 2026`, `Novembro`, `novembro de 2026`, `nov/2026`
+/// e `25 nov`. Qualquer outra coisa (palavra a mais, número solto) é `None`.
+fn so_o_mes(bruto: &str) -> Option<MesPorExtenso> {
+    let normal = normalizar(bruto);
+    let partes: Vec<&str> = normal.split(' ').filter(|p| *p != "de").collect();
+    let (dia, resto) = match partes.first() {
+        Some(p) if p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit()) => {
+            (Some(p.parse::<u32>().ok()?), &partes[1..])
+        }
+        _ => (None, &partes[..]),
+    };
+    let (nome, ano) = match resto {
+        [m] => (*m, None),
+        [m, a] if a.len() == 4 && a.bytes().all(|b| b.is_ascii_digit()) => {
+            (*m, Some(a.parse::<i32>().ok()?))
+        }
+        _ => return None,
+    };
+    Some(MesPorExtenso {
+        dia,
+        mes: mes_por_nome(nome)?,
+        ano,
+    })
+}
+
+/// Os dias desde 1970-01-01 (calendário gregoriano; para comparar datas).
+fn dias_civis(ano: i32, mes: u32, dia: u32) -> i64 {
+    let a = i64::from(ano) - i64::from(mes <= 2);
+    let era = a.div_euclid(400);
+    let ano_da_era = a - era * 400;
+    let m = i64::from(mes);
+    let d_do_ano = (153 * ((m + 9) % 12) + 2) / 5 + i64::from(dia) - 1;
+    let d_da_era = ano_da_era * 365 + ano_da_era / 4 - ano_da_era / 100 + d_do_ano;
+    era * 146_097 + d_da_era - 719_468
+}
+
+/// `(ano, mês, dia)` do começo de um `momento` ISO 8601 (`2026-11-20`, `2026-11-20T10:00:00Z`).
+fn data_do_momento(momento: &str) -> Option<(i32, u32, u32)> {
+    let d = parse_data(momento.trim().get(..10)?)?;
+    let mut it = d.split('-');
+    Some((
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    ))
+}
+
+/// `AAAA-MM-DD` de `25 de Novembro` (e `25 de Novembro de 2026`). Sem ano, o do `momento`
+/// que deixa a data mais perto dele; sem `momento` e sem ano, `None`.
+fn data_por_extenso(bruto: &str, momento: Option<&str>) -> Option<String> {
+    let m = so_o_mes(bruto)?;
+    let dia = m.dia?;
+    let valida = |ano: i32| {
+        (dia >= 1 && dia <= dias_no_mes(ano, m.mes))
+            .then(|| format!("{ano:04}-{:02}-{dia:02}", m.mes))
+    };
+    if let Some(a) = m.ano {
+        return valida(a);
+    }
+    let (ay, am, ad) = data_do_momento(momento?)?;
+    let alvo = dias_civis(ay, am, ad);
+    (ay - 1..=ay + 1)
+        .filter(|a| dia <= dias_no_mes(*a, m.mes))
+        .min_by_key(|a| (dias_civis(*a, m.mes, dia) - alvo).abs())
+        .and_then(valida)
+}
+
+/// `AAAA-MM` de `Novembro`, `25 de Novembro`, `novembro de 2026`. Sem ano, o do `momento` que
+/// deixa o mês mais perto dele; sem `momento` e sem ano, `None`.
+fn competencia_por_extenso(bruto: &str, momento: Option<&str>) -> Option<String> {
+    let m = so_o_mes(bruto)?;
+    if let Some(a) = m.ano {
+        return Some(format!("{a:04}-{:02}", m.mes));
+    }
+    let (ay, am, _) = data_do_momento(momento?)?;
+    let alvo = i64::from(ay) * 12 + i64::from(am) - 1;
+    let ano = (ay - 1..=ay + 1)
+        .min_by_key(|a| (i64::from(*a) * 12 + i64::from(m.mes) - 1 - alvo).abs())?;
+    Some(format!("{ano:04}-{:02}", m.mes))
+}
+
 /// Inteiro com sinal; pontos são milhar (`1.234` = 1234).
 pub fn parse_inteiro(bruto: &str) -> Option<i64> {
     let s = bruto.trim();
@@ -811,6 +962,90 @@ mod testes {
         assert_eq!(parse_competencia("13/2026"), None);
         assert_eq!(parse_inteiro("-1.234"), Some(-1234));
         assert_eq!(parse_inteiro("12x"), None);
+    }
+
+    #[test]
+    fn data_e_competencia_por_extenso_com_ano() {
+        let f = |fmt: Formato, t: &str| {
+            fmt.aplicar_em(t, None).map(|v| match v {
+                Valor::Data(d) | Valor::Competencia(d) => d,
+                outro => outro.to_string(),
+            })
+        };
+        assert_eq!(
+            f(Formato::Data, "25 de Novembro de 2026").as_deref(),
+            Some("2026-11-25")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "novembro de 2026").as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "Março/2027").as_deref(),
+            Some("2027-03")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "nov/2026").as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(f(Formato::Data, "31 de abril de 2026"), None);
+        assert_eq!(
+            f(Formato::Data, "novembro de 2026"),
+            None,
+            "data pede o dia"
+        );
+    }
+
+    #[test]
+    fn mes_sem_ano_usa_o_mes_mais_proximo_do_momento() {
+        let f = |fmt: Formato, t: &str, m: Option<&str>| {
+            fmt.aplicar_em(t, m).map(|v| match v {
+                Valor::Data(d) | Valor::Competencia(d) => d,
+                outro => outro.to_string(),
+            })
+        };
+        let c = Formato::Competencia;
+        assert_eq!(
+            f(c, "Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(c, "Dezembro", Some("2026-01-05")).as_deref(),
+            Some("2025-12")
+        );
+        assert_eq!(
+            f(c, "janeiro", Some("2026-12-30T10:00:00-03:00")).as_deref(),
+            Some("2027-01")
+        );
+        assert_eq!(
+            f(c, "25 de Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(Formato::Data, "25 de Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11-25")
+        );
+        assert_eq!(
+            f(Formato::Data, "28 de dezembro", Some("2026-01-05")).as_deref(),
+            Some("2025-12-28")
+        );
+        // 29 de fevereiro: só o ano bissexto serve.
+        assert_eq!(
+            f(Formato::Data, "29 de fevereiro", Some("2027-03-01")).as_deref(),
+            Some("2028-02-29")
+        );
+        assert_eq!(f(c, "Novembro", None), None, "sem momento não há ano");
+        assert_eq!(f(c, "Novembro", Some("lixo")), None);
+    }
+
+    #[test]
+    fn o_motivo_da_falha_diz_por_que_o_mes_sem_ano_nao_saiu() {
+        let m = Formato::Competencia.motivo_da_falha("competencia", "25 de Novembro", None);
+        assert!(m.contains("sem ano"), "{m}");
+        assert!(m.contains("momento"), "{m}");
+        let m = Formato::Centavos.motivo_da_falha("valor", "abc", None);
+        assert!(m.contains("valor"), "{m}");
+        assert!(m.contains("achado mas fora do formato"), "{m}");
     }
 
     #[test]

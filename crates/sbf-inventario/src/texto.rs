@@ -105,3 +105,24 @@ pub fn registrar_texto(
     gravar_texto(&tx, content_hash, metodo, conteudo, impressao)?;
     tx.commit()
 }
+
+/// O momento de um achado, para as regras completarem datas sem ano (spec 15): a **menor**
+/// `origem.local_mtime` (a data do arquivo, ou a da mensagem no Telegram) entre as origens do
+/// achado; sem nenhuma, o `achado.primeiro_visto_em`; sem achado, `None`. ISO 8601 (`…Z`).
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn momento_do_achado(conexao: &Connection, sha256: &str) -> rusqlite::Result<Option<String>> {
+    conexao
+        .query_row(
+            "SELECT COALESCE(
+                 (SELECT min(o.local_mtime) FROM origem o
+                   WHERE o.content_hash = a.content_hash AND o.local_mtime <> ''),
+                 a.primeiro_visto_em)
+               FROM achado a WHERE a.content_hash = ?1",
+            [sha256],
+            |l| l.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+}

@@ -67,10 +67,18 @@ pub enum AbaDeConexoes {
     Pluggy,
     /// As pastas do worker.
     Pastas,
+    /// Os provedores de IA de Rita (spec 15).
+    Ia,
 }
 
 impl AbaDeConexoes {
-    const TODAS: [Self; 4] = [Self::Telegram, Self::Email, Self::Pluggy, Self::Pastas];
+    const TODAS: [Self; 5] = [
+        Self::Telegram,
+        Self::Email,
+        Self::Pluggy,
+        Self::Pastas,
+        Self::Ia,
+    ];
 
     /// O nome guardado nas preferências.
     #[must_use]
@@ -80,6 +88,7 @@ impl AbaDeConexoes {
             Self::Email => "email",
             Self::Pluggy => "pluggy",
             Self::Pastas => "pastas",
+            Self::Ia => "ia",
         }
     }
 
@@ -91,6 +100,7 @@ impl AbaDeConexoes {
             Self::Email => "E-mail",
             Self::Pluggy => "Pluggy e bancos",
             Self::Pastas => "Pastas vigiadas",
+            Self::Ia => "IA",
         }
     }
 
@@ -161,6 +171,8 @@ pub struct Conexoes {
     aba: AbaDeConexoes,
     /// A aba E-mail.
     pub email: EmailUi,
+    /// A aba IA: os provedores de Rita.
+    pub ia: crate::ia_ui::IaUi,
     escolhida: Option<Conversa>,
     pluggy: Vec<LinhaDeFonte>,
     pastas: Vec<LinhaDeFonte>,
@@ -412,6 +424,7 @@ impl Conexoes {
                         &self.pastas,
                         "O worker não vigia nenhuma pasta (Opções › Worker).",
                     ),
+                    AbaDeConexoes::Ia => self.ia.desenhar(ui),
                 }
             });
     }
@@ -451,6 +464,7 @@ impl Conexoes {
                     PontoDeEstado::Ok
                 }
             }
+            AbaDeConexoes::Ia => self.ia.ponto(),
         }
     }
 

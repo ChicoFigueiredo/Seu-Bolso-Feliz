@@ -1,0 +1,30 @@
+[package]
+name = "sbf-rita"
+description = "Rita, a assistente de IA dos padroes de reconhecimento: laco do agente com teto de chamadas, ferramentas so de padroes, pre-teste e provedores (spec 15)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sbf-ia = { path = "../sbf-ia" }
+sbf-regras = { workspace = true }
+sbf-inventario = { workspace = true }
+sbf-mcp = { path = "../sbf-mcp" }
+sbf-chaveiro = { path = "../sbf-chaveiro" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+regex = { workspace = true }
+# O servidor MCP restrito às ferramentas de Rita, para o `claude -p` (mesma versao do sbf-mcp).
+rmcp = { version = "3.10", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sbf-script = { workspace = true }
+bancada-segredos = { workspace = true, features = ["testes"] }
+
+[lints]
+workspace = true

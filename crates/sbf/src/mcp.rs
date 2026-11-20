@@ -51,7 +51,47 @@ pub fn saldos_do_cofre(cofre: &Path) -> Box<dyn sbf_planejamento::FonteDeSaldos>
     }
 }
 
+/// `sbf mcp --rita --contexto <arquivo>`: o servidor MCP restrito às ferramentas de Rita, que o
+/// `claude -p` sobe como filho (`sbf-rita`). Sem `--inventario`: o cofre vem no contexto.
+fn rodar_rita(args: &[String]) -> ExitCode {
+    let [flag, arquivo] = args else {
+        eprintln!("sbf mcp --rita: uso: sbf mcp --rita --contexto <arquivo>");
+        return ExitCode::from(2);
+    };
+    if flag != "--contexto" {
+        eprintln!("sbf mcp --rita: uso: sbf mcp --rita --contexto <arquivo>");
+        return ExitCode::from(2);
+    }
+    let executor = match crate::script::executor_de_script() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("sbf mcp --rita: sem executor de scripts: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("sbf mcp --rita: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(sbf_rita::mcp::servir_stdio(Path::new(arquivo), executor)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("sbf mcp --rita: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 pub fn rodar(args: &[String]) -> ExitCode {
+    if args.first().map(String::as_str) == Some("--rita") {
+        return rodar_rita(&args[1..]);
+    }
     let mut pasta: Option<&String> = None;
     let mut livro: Option<PathBuf> = None;
     let mut planejamento: Option<PathBuf> = None;
@@ -116,7 +156,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
     let nucleo = match crate::script::executor_de_script() {
         Ok(executor) => nucleo.com_regras(Path::new(pasta).join("regras.sqlite"), executor),
         Err(_) => {
-            eprintln!("sbf mcp: sem executor de scripts (regras de reconhecimento desligadas)");
+            eprintln!("sbf mcp: sem executor de scripts (padrões de reconhecimento desligados)");
             nucleo
         }
     };

@@ -431,8 +431,42 @@ CREATE TABLE proposta (
 );
 ";
 
+/// A marcação das listas e a passada de fundo (spec 15, D3 e D4). Tudo com `IF NOT EXISTS`.
+///
+/// - `decisao_da_entrada`: a última decisão do conjunto de padrões sobre a entrada ser
+///   Ambíguo. A tabela `execucao` sozinha não distingue o âmbar: as candidatas de um empate
+///   e as de uma decisão clara têm o mesmo `resultado` (`reconhecido`), e o motivo é texto.
+/// - `passada_de_fundo`: o ponto de parada (rowid de `texto` no inventário) de cada versão,
+///   chaveado pelo checksum: versão nova ou alterada começa do zero, as outras seguem.
+/// - O índice por entrada serve à consulta em lote da janela.
+/// - Recupera o âmbar do que já estava gravado: um empate deixou o motivo
+///   `regras empatadas ... discordam em ...` (texto antigo) ou `padrões empatados ... discordam
+///   em ...` nas execuções das candidatas.
+const ESQUEMA_2: &str = "
+CREATE INDEX IF NOT EXISTS execucao_por_entrada ON execucao (entrada, regra);
+CREATE TABLE IF NOT EXISTS decisao_da_entrada (
+    entrada TEXT PRIMARY KEY,
+    ambiguo INTEGER NOT NULL,
+    em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS passada_de_fundo (
+    regra TEXT NOT NULL,
+    versao INTEGER NOT NULL,
+    checksum TEXT NOT NULL,
+    ponto INTEGER NOT NULL DEFAULT 0,
+    feitos INTEGER NOT NULL DEFAULT 0,
+    atualizada_em TEXT NOT NULL,
+    PRIMARY KEY (regra, versao, checksum)
+);
+INSERT OR IGNORE INTO decisao_da_entrada (entrada, ambiguo, em)
+SELECT entrada, 1, MAX(em) FROM execucao
+ WHERE resultado = 'reconhecido'
+   AND (motivo LIKE 'regras empatadas%discordam em%' OR motivo LIKE 'padrões empatados%discordam em%')
+ GROUP BY entrada;
+";
+
 /// As migrações, em ordem; `PRAGMA user_version` guarda quantas já rodaram.
-const MIGRACOES: &[&str] = &[ESQUEMA_1];
+const MIGRACOES: &[&str] = &[ESQUEMA_1, ESQUEMA_2];
 
 const COLUNAS_DA_VERSAO: &str = "regra, versao, definicao, script, checksum, autor, motivo, \
      criada_em, estado, aceitas_seguidas, ativada_em, consolidada_em, desativada_em";
@@ -584,7 +618,7 @@ fn pelo(quem: &Quem) -> &'static str {
 /// O `regras.sqlite`.
 #[derive(Debug)]
 pub struct Catalogo {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Catalogo {
@@ -712,6 +746,23 @@ impl Catalogo {
         let v = carregar_versao(&tx, &nova.regra, versao)?;
         tx.commit().map_err(banco)?;
         Ok(v)
+    }
+
+    /// Troca o rótulo de quem criou a versão na linha de criação do histórico de estado
+    /// (`assistente (qwen3-coder:30b)`). A coluna `autor` da versão é imutável e continua
+    /// `ia`; o rótulo mais fino fica no histórico, que a tela de versões já mostra.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn rotular_autoria(&mut self, regra: &str, versao: u32, rotulo: &str) -> Resultado<()> {
+        self.conn
+            .execute(
+                "UPDATE historico_de_estado SET quem = ?3
+                 WHERE regra = ?1 AND versao = ?2 AND de IS NULL AND para = 'rascunho'",
+                params![regra, versao, rotulo],
+            )
+            .map_err(banco)?;
+        Ok(())
     }
 
     /// Todas as versões de uma regra, da primeira à última.
@@ -845,7 +896,21 @@ impl Catalogo {
         executor: Option<&dyn ExecutorDeScript>,
     ) -> Resultado<RelatorioDosExemplos> {
         let v = self.versao(regra, versao)?;
-        let motor = Motor::novo(vec![v], self.parametros()?, None);
+        self.testar_versao(&v, executor)
+    }
+
+    /// Os exemplos da regra rodados sobre uma versão que pode nem estar gravada (o ensaio de
+    /// um rascunho avulso).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn testar_versao(
+        &self,
+        v: &VersaoDeRegra,
+        executor: Option<&dyn ExecutorDeScript>,
+    ) -> Resultado<RelatorioDosExemplos> {
+        let (regra, versao) = (v.regra.as_str(), v.versao);
+        let motor = Motor::novo(vec![v.clone()], self.parametros()?, None);
         let mut resultados = Vec::new();
         for ex in self.exemplos(regra)? {
             let leitura = motor.ler_com(&ex.entrada, executor);
@@ -1050,6 +1115,21 @@ impl Catalogo {
     /// # Errors
     /// [`ErroDasRegras::Banco`].
     pub fn registrar_execucao(&mut self, leitura: &Leitura) -> Resultado<()> {
+        self.gravar_execucoes(leitura)?;
+        self.registrar_decisao(leitura)
+    }
+
+    /// Como [`Catalogo::registrar_execucao`], mas **só** a execução: não mexe na decisão da
+    /// entrada (o âmbar). É o que a passada de fundo do worker usa, lendo uma versão por vez:
+    /// uma leitura parcial não enxerga o empate com as outras versões (spec 15, D4).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn registrar_execucao_de_fundo(&mut self, leitura: &Leitura) -> Resultado<()> {
+        self.gravar_execucoes(leitura)
+    }
+
+    fn gravar_execucoes(&mut self, leitura: &Leitura) -> Resultado<()> {
         let mut chaves: BTreeMap<(String, u32), String> = BTreeMap::new();
         match &leitura.decisao {
             Decisao::Reconhecido(r) => {

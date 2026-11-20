@@ -55,6 +55,12 @@ pub struct EstadoDaTabela {
     pub ordem_pendente: Option<Option<(usize, bool)>>,
     /// O aviso "ordenando…" já apareceu: neste quadro, carrega tudo e ordena.
     pub ordenar_agora: bool,
+    /// A tabela lista achados ou documentos e a marcação (verde, âmbar) está ligada: ganha a
+    /// coluna "Padrões", o fundo das linhas e o filtro de cor (spec 15, D3). Quem chama
+    /// ([`crate::pagina::tabela_em_pedacos`]) decide a cada quadro.
+    pub marcavel: bool,
+    /// O filtro de cor desta tabela; só vale quando ela está toda carregada.
+    pub filtro_de_cor: crate::marcacao::FiltroDeCor,
     indices: Vec<usize>,
     assinatura: Option<Assinatura>,
 }
@@ -185,7 +191,40 @@ pub fn desenhar_parcial(
         return None;
     }
     let n_colunas = tabela.colunas.len().max(1);
-    let indices = estado.indices(tabela).to_vec();
+    let mut indices = estado.indices(tabela).to_vec();
+    // A marcação: o filtro de cor precisa da tabela inteira (ela é carregada por inteiro
+    // quando o filtro está ligado) e das marcas de todas as linhas, lidas em lote.
+    let marcacao = if estado.marcavel {
+        crate::marcacao::do_contexto(ui.ctx())
+    } else {
+        None
+    };
+    let mut guarda = marcacao.as_ref().and_then(|m| m.lock().ok());
+    let mut filtrando = false;
+    if let Some(g) = guarda.as_mut()
+        && estado.filtro_de_cor != crate::marcacao::FiltroDeCor::Todas
+        && carregadas >= total
+    {
+        let chaves: Vec<&str> = tabela
+            .linhas
+            .iter()
+            .filter_map(|l| l.alvo.as_ref().map(|a| a.chave.as_str()))
+            .collect();
+        g.garantir(&chaves);
+        let filtro = estado.filtro_de_cor;
+        indices.retain(|i| {
+            let cor = tabela.linhas[*i]
+                .alvo
+                .as_ref()
+                .map_or(crate::marcacao::CorDaMarca::SemCor, |a| g.cor(&a.chave));
+            filtro.aceita(cor)
+        });
+        filtrando = true;
+    }
+    let com_marcas = guarda.is_some();
+    if filtrando && indices.is_empty() {
+        ui.label(RichText::new("Nenhuma linha desta cor.").color(p.tinta_suave));
+    }
     let marcas: Vec<bool> = (0..n_colunas)
         .map(|c| coluna_do_inventario(tabela, c))
         .collect();
@@ -292,6 +331,9 @@ pub fn desenhar_parcial(
                 .max_scroll_height(h)
                 .min_scrolled_height(h.min(160.0));
         }
+        if com_marcas {
+            construtor = construtor.column(Column::initial(88.0).at_least(70.0).clip(true));
+        }
         for (i, coluna) in tabela.colunas.iter().enumerate() {
             let c = if i + 1 == n_colunas {
                 Column::remainder().at_least(60.0).clip(true)
@@ -304,6 +346,20 @@ pub fn desenhar_parcial(
         }
         construtor
             .header(26.0, |mut cabecalho| {
+                if com_marcas {
+                    cabecalho.col(|ui| {
+                        ui.label(
+                            RichText::new("Padrões")
+                                .strong()
+                                .size(12.5)
+                                .color(p.tinta_suave),
+                        )
+                        .on_hover_text(
+                            "Quantos padrões de reconhecimento casaram. A linha fica verde se algum casou, \
+                             âmbar se a última decisão foi ambígua.",
+                        );
+                    });
+                }
                 for (i, coluna) in tabela.colunas.iter().enumerate() {
                     cabecalho.col(|ui| {
                         let seta = match estado.ordem {
@@ -346,11 +402,15 @@ pub fn desenhar_parcial(
                 }
             })
             .body(|corpo| {
-                corpo.rows(ALTURA_DA_LINHA, total, |mut linha_ui| {
+                let n_linhas = if filtrando { indices.len() } else { total };
+                corpo.rows(ALTURA_DA_LINHA, n_linhas, |mut linha_ui| {
                     let pos = linha_ui.index();
                     let Some(linha) = indices.get(pos).and_then(|i| tabela.linhas.get(*i)) else {
                         // Ainda não carregada: um marcador, e o pedido do próximo pedaço.
                         falta = Some(falta.map_or(pos, |f| f.max(pos)));
+                        if com_marcas {
+                            linha_ui.col(|_| {});
+                        }
                         linha_ui.col(|ui| {
                             ui.label(
                                 RichText::new("carregando…")
@@ -365,9 +425,29 @@ pub fn desenhar_parcial(
                     };
                     let selecionada = linha.alvo.as_ref().is_some_and(|a| selecao.contem(a));
                     linha_ui.set_selected(selecionada);
+                    // Um achado ou documento: a marca vem do cache; o que falta é pedido em
+                    // lote depois da tabela.
+                    let marca = match (guarda.as_mut(), linha.alvo.as_ref()) {
+                        (Some(g), Some(a))
+                            if matches!(a.tipo, sbf_inventario::Tipo::Achado | sbf_inventario::Tipo::Documento) =>
+                        {
+                            g.marca(&a.chave)
+                        }
+                        _ => crate::marcacao::Marca::default(),
+                    };
+                    let da_cor = marca.cor();
+                    if com_marcas {
+                        linha_ui.col(|ui| {
+                            crate::marcacao::pintar_celula(ui, da_cor, selecionada, true);
+                            crate::marcacao::selo_de_padroes(ui, marca);
+                        });
+                    }
                     for (i, c) in linha.celulas.iter().enumerate().take(n_colunas) {
                         let numerica = tabela.colunas.get(i).is_some_and(|c| c.numerica);
                         linha_ui.col(|ui| {
+                            if com_marcas {
+                                crate::marcacao::pintar_celula(ui, da_cor, selecionada, false);
+                            }
                             if numerica {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     componentes::celula(ui, c, pedidos);
@@ -387,6 +467,12 @@ pub fn desenhar_parcial(
             });
     }
 
+    if let Some(g) = guarda.as_mut()
+        && g.resolver()
+    {
+        ui.ctx().request_repaint();
+    }
+    drop(guarda);
     if let Some(o) = ordem_nova {
         if total > carregadas {
             estado.ordem_pendente = Some(o);

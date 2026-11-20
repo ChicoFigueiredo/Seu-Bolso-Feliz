@@ -125,16 +125,27 @@ impl AppDoInventario {
                 match sbf_regras::catalogo::Catalogo::abrir(&self.pasta.join("regras.sqlite")) {
                     Ok(mut c) => {
                         if let Err(e) = c.semear_fabrica() {
-                            eprintln!("sbf: as regras de fábrica não entraram ({e})");
+                            eprintln!("sbf: os padrões de fábrica não entraram ({e})");
                         }
-                        janela
-                            .regras
-                            .ligar(sbf_janela::regras::FonteDasRegras::nova(
-                                std::sync::Arc::new(std::sync::Mutex::new(c)),
+                        let catalogo = std::sync::Arc::new(std::sync::Mutex::new(c));
+                        let para_ja_casaram = std::sync::Arc::clone(&catalogo);
+                        janela.regras.ligar(
+                            sbf_janela::regras::FonteDasRegras::nova(
+                                catalogo,
                                 crate::script::executor_de_script().ok(),
-                            ));
+                            )
+                            .com_ja_casaram(std::sync::Arc::new(
+                                move |entrada: &str| {
+                                    para_ja_casaram
+                                        .lock()
+                                        .map_err(|_| "o catálogo de padrões travou".to_owned())?
+                                        .padroes_que_casaram(entrada)
+                                        .map_err(|e| e.to_string())
+                                },
+                            )),
+                        );
                     }
-                    Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
+                    Err(e) => eprintln!("sbf: o catálogo de padrões não abriu ({e})"),
                 }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());
@@ -198,6 +209,25 @@ impl AppDoInventario {
                             chaveiro: chaveiro_dos_roteiros.clone(),
                         }),
                     );
+                    // Rita (spec 15): os provedores com chaves no chaveiro, a aba IA de Conexões e o
+                    // painel. Nada é chamado até o usuário pedir.
+                    if let (Some(chaveiro), Ok(executor), Ok(programa)) = (
+                        chaveiro_dos_roteiros.clone(),
+                        crate::script::executor_de_script(),
+                        std::env::current_exe(),
+                    ) {
+                        let guarda: std::sync::Arc<dyn sbf_rita::GuardaDeProvedores> =
+                            std::sync::Arc::new(sbf_rita::ComCache::nova(std::sync::Arc::new(
+                                chaveiro,
+                            )));
+                        janela.conexoes.ia.ligar(std::sync::Arc::clone(&guarda));
+                        janela.rita.ligar(sbf_janela::rita_ui::Ambiente {
+                            cofre: self.pasta.clone(),
+                            guarda,
+                            executor,
+                            programa,
+                        });
+                    }
                     janela.roteiros.ligar(
                         crate::roteiros::ambiente(&self.pasta, &dados),
                         Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {

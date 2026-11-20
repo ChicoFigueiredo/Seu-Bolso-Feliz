@@ -260,7 +260,7 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
             let campos: Vec<&str> = r.campos.keys().map(String::as_str).collect();
             es(writeln!(
                 saida,
-                "reconhecido: regra {}@{} tipo={} campos={}{}",
+                "reconhecido: padrão {}@{} tipo={} campos={}{}",
                 r.regra,
                 r.versao,
                 r.tipo_documental,
@@ -276,7 +276,7 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
         Reconhecido::Ambiguo { candidatas, motivo } => {
             es(writeln!(
                 saida,
-                "reconhecido: ambiguo entre {} regras ({motivo})",
+                "reconhecido: ambiguo entre {} padrões ({motivo})",
                 candidatas.len()
             ))?;
         }

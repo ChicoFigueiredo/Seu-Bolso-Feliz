@@ -13,6 +13,9 @@ use crate::componentes;
 use crate::controle::{data_texto, reais};
 use crate::icones;
 use crate::navegacao::{self, Destino};
+use crate::padroes_visiveis::{
+    Desfecho, Papel, PesosDasVersoes, PorQue, montar_por_que, rotulo_do_tipo_de_entrada,
+};
 use crate::reconhecimento_regras::{
     CAMPOS_USUAIS, LinhaDeCampo, descrever_de_onde, rotulo_do_campo, valor_do_texto,
 };
@@ -31,13 +34,17 @@ pub(crate) struct ExtrasDaRegra<'a> {
     /// Nenhum padrão reconheceu o documento: "Criar regra a partir daqui" vira o caminho
     /// principal (em destaque).
     pub sem_padrao: bool,
+    /// A prioridade e a especificidade das versões que a leitura cita ("Por que este padrão?").
+    pub pesos: &'a PesosDasVersoes,
 }
 
-/// O que o cartão deixa o desenho mudar: a correção dos campos e o Rastro aberto.
+/// O que o cartão deixa o desenho mudar: a correção dos campos, o Rastro e o "Por que este
+/// padrão?" abertos.
 pub(crate) struct EdicaoDoCartao<'a> {
     pub corrigindo: &'a mut bool,
     pub edicao: &'a mut BTreeMap<String, String>,
     pub rastro_aberto: &'a mut bool,
+    pub por_que_aberto: &'a mut bool,
 }
 
 impl ExtrasDaRegra<'_> {
@@ -75,7 +82,7 @@ fn selo_de_provas(ui: &mut Ui, p: &Paleta, provas: u8) {
 /// "Regra <nome> · versão N": o texto da linha discreta que aponta para a regra que
 /// reconheceu.
 pub(crate) fn rotulo_da_regra(nome: &str, versao: u32) -> String {
-    format!("Regra {nome} · versão {versao}")
+    format!("Padrão {nome} · versão {versao}")
 }
 
 /// A regra que reconheceu a entrada, segundo a leitura do motor (no contracheque, já
@@ -118,7 +125,7 @@ pub(crate) fn regra_do_contracheque(
                 .size(12.0)
                 .color(p.tinta_suave),
         )
-        .on_hover_text("Abrir a regra na área Regras de reconhecimento")
+        .on_hover_text("Abrir o padrão na área Padrões de reconhecimento")
         .clicked()
     {
         pedidos.push(Pedido::AbrirRegra(r.regra.clone()));
@@ -149,12 +156,12 @@ pub(crate) fn pela_regra(
     let texto = extras.entrada.and_then(|e| e.texto.as_deref());
     ui.horizontal(|ui| {
         ui.label(icones::icone_cor("task_alt", 16.0, p.sucesso));
-        ui.label(RichText::new("Reconhecido pela regra").strong());
+        ui.label(RichText::new("Reconhecido pelo padrão").strong());
     });
     ui.horizontal_wrapped(|ui| {
         if ui
             .link(RichText::new(extras.nome_da(&r.regra)).strong())
-            .on_hover_text("Abrir a regra na área Regras de reconhecimento")
+            .on_hover_text("Abrir o padrão na área Padrões de reconhecimento")
             .clicked()
         {
             pedidos.push(Pedido::AbrirRegra(r.regra.clone()));
@@ -218,7 +225,7 @@ pub(crate) fn pela_regra(
             if ui
                 .small_button(rotulo)
                 .on_hover_text(
-                    "Mudar um valor que a regra leu errado. Aceitar depois disso conta como correção para a regra.",
+                    "Mudar um valor que o padrão leu errado. Aceitar depois disso conta como correção para o padrão.",
                 )
                 .clicked()
             {
@@ -277,7 +284,7 @@ fn rastro(
                         pequeno(
                             ui,
                             format!(
-                                "Regra {} · versão {} {o_que}{motivo}",
+                                "Padrão {} · versão {} {o_que}{motivo}",
                                 extras.nome_da(&e.regra),
                                 e.versao
                             ),
@@ -290,9 +297,9 @@ fn rastro(
                             format!(
                                 "{sem_efeito} {} não se aplicou",
                                 if sem_efeito == 1 {
-                                    "outra regra"
+                                    "outro padrão"
                                 } else {
-                                    "outras regras"
+                                    "outros padrões"
                                 }
                             ),
                             p.tinta_desabilitada,
@@ -318,7 +325,7 @@ pub(crate) fn ambiguo(
         ui.label(icones::icone_cor("warning", 16.0, p.aviso));
         ui.label(
             RichText::new(format!(
-                "Precisa revisar · {} regras discordam",
+                "Precisa revisar · {} padrões discordam",
                 numero_por_extenso(candidatas.len())
             ))
             .strong()
@@ -328,7 +335,7 @@ pub(crate) fn ambiguo(
     pequeno(ui, motivo, p.tinta_suave);
     pequeno(
         ui,
-        "Nada foi aplicado. Ajuste a prioridade ou as condições de uma das regras, ou corrija o documento.",
+        "Nada foi aplicado. Ajuste a prioridade ou as condições de um dos padrões, ou corrija o documento.",
         p.tinta_suave,
     );
     if candidatas.is_empty() {
@@ -372,7 +379,7 @@ pub(crate) fn ambiguo(
                                 if diverge(nome) {
                                     ui.label(icones::icone_cor("warning", 14.0, p.aviso))
                                         .on_hover_text(
-                                            "As regras divergem neste campo (uma não o lê ou lê outro valor)",
+                                            "Os padrões divergem neste campo (um não o lê ou lê outro valor)",
                                         );
                                 }
                             });
@@ -385,8 +392,8 @@ pub(crate) fn ambiguo(
                         }
                         ui.add_space(2.0);
                         if ui
-                            .small_button("Abrir a regra")
-                            .on_hover_text("Abrir a regra na área Regras de reconhecimento")
+                            .small_button("Abrir o padrão")
+                            .on_hover_text("Abrir o padrão na área Padrões de reconhecimento")
                             .clicked()
                         {
                             pedidos.push(Pedido::AbrirRegra(c.regra.clone()));
@@ -422,25 +429,216 @@ pub(crate) fn acoes_da_regra(
     ui.horizontal_wrapped(|ui| {
         if ui
             .button("Testar com este documento")
-            .on_hover_text("Lê este documento com uma regra, sem gravar nada")
+            .on_hover_text("Lê este documento com um padrão, sem gravar nada")
             .clicked()
         {
             pedidos.push(Pedido::AbrirTeste(indice));
         }
         let criar = if extras.sem_padrao {
-            egui::Button::new(RichText::new("Criar regra a partir daqui").strong())
+            egui::Button::new(RichText::new("Criar padrão a partir daqui").strong())
                 .fill(tema::paleta(ui.ctx()).destaque_sutil)
         } else {
-            egui::Button::new("Criar regra a partir daqui")
+            egui::Button::new("Criar padrão a partir daqui")
         };
         if ui
             .add(criar)
-            .on_hover_text("Monta um rascunho de regra com o que você corrigir; ele só vale depois que você ativar")
+            .on_hover_text("Monta um rascunho de padrão com o que você corrigir; ele só vale depois que você ativar")
             .clicked()
         {
             pedidos.push(Pedido::AbrirCriacao(indice));
         }
     });
+}
+
+// ---------------------------------------------------------------------------------------
+// "Por que este padrão?" (spec 15, D6)
+// ---------------------------------------------------------------------------------------
+
+fn plural(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+/// O campo em que as candidatas de um Ambíguo discordam, como a pessoa lê.
+fn campo_que_diverge(campo: &str) -> String {
+    if campo == "tipo_documental" {
+        "o tipo documental".to_owned()
+    } else {
+        format!("o campo {}", rotulo_do_campo(campo).to_lowercase())
+    }
+}
+
+/// A seção recolhível "Por que este padrão?": o tipo da entrada, quantos padrões se aplicam,
+/// os que casaram (com prioridade e especificidade), o vencedor e o motivo, ou o Ambíguo com o
+/// campo em que discordam. Tudo sai do que o motor devolveu na [`Leitura`].
+pub(crate) fn por_que(
+    ui: &mut Ui,
+    p: &Paleta,
+    indice: usize,
+    extras: &ExtrasDaRegra<'_>,
+    aberto: &mut bool,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let Some(leitura) = extras.leitura else {
+        return;
+    };
+    let q = montar_por_que(leitura, extras.entrada, extras.pesos);
+    let resposta = egui::CollapsingHeader::new(
+        RichText::new("Por que este padrão?")
+            .size(12.0)
+            .color(p.tinta_suave),
+    )
+    .id_salt(("por-que-este-padrao", indice))
+    .open(Some(*aberto))
+    .show(ui, |ui| corpo_do_por_que(ui, p, &q, extras, pedidos));
+    if resposta.header_response.clicked() {
+        *aberto = !*aberto;
+    }
+}
+
+fn corpo_do_por_que(
+    ui: &mut Ui,
+    p: &Paleta,
+    q: &PorQue,
+    extras: &ExtrasDaRegra<'_>,
+    pedidos: &mut Vec<Pedido>,
+) {
+    let tipo = q
+        .tipo_da_entrada
+        .map_or("documento", rotulo_do_tipo_de_entrada);
+    let mime = q
+        .mime
+        .as_deref()
+        .map(|m| format!(" ({m})"))
+        .unwrap_or_default();
+    pequeno(ui, format!("Entrada: {tipo}{mime}"), p.tinta);
+    if q.aplicam == 0 {
+        pequeno(
+            ui,
+            "Nenhum padrão se aplica a este tipo de entrada.",
+            p.tinta_suave,
+        );
+    } else {
+        pequeno(
+            ui,
+            format!(
+                "{} a este tipo de entrada; {} {}.",
+                plural(q.aplicam, "padrão se aplica", "padrões se aplicam"),
+                q.casaram.len(),
+                if q.casaram.len() == 1 {
+                    "casou"
+                } else {
+                    "casaram"
+                }
+            ),
+            p.tinta_suave,
+        );
+    }
+    for c in &q.casaram {
+        ui.horizontal_wrapped(|ui| {
+            match c.papel {
+                Papel::Venceu => componentes::selo(ui, "venceu", p.sucesso_sutil, p.sucesso),
+                Papel::Discorda => componentes::selo(ui, "discorda", p.aviso_sutil, p.aviso),
+                Papel::NaoPrevaleceu => {
+                    componentes::selo(ui, "não prevaleceu", p.superficie_3, p.tinta_suave)
+                }
+            };
+            if ui
+                .link(RichText::new(extras.nome_da(&c.regra)).size(12.0))
+                .on_hover_text("Abrir o padrão na área Padrões de reconhecimento")
+                .clicked()
+            {
+                pedidos.push(Pedido::AbrirRegra(c.regra.clone()));
+            }
+            let pesos = c.peso.map_or_else(String::new, |w| {
+                format!(
+                    " · prioridade {} · especificidade {}",
+                    w.prioridade, w.especificidade
+                )
+            });
+            pequeno(ui, format!("versão {}{pesos}", c.versao), p.tinta_suave);
+            if let Some(nota) = &c.nota {
+                pequeno(ui, nota, p.tinta_desabilitada);
+            }
+        });
+    }
+    for f in &q.falharam {
+        pequeno(
+            ui,
+            format!(
+                "{} · versão {} detectou o documento e falhou ({})",
+                extras.nome_da(&f.regra),
+                f.versao,
+                f.categoria
+            ),
+            p.aviso,
+        );
+    }
+    ui.add_space(2.0);
+    match &q.desfecho {
+        Desfecho::Venceu {
+            regra,
+            versao,
+            motivo,
+        } => {
+            ui.label(
+                RichText::new(format!(
+                    "Venceu: {} · versão {versao}.",
+                    extras.nome_da(regra)
+                ))
+                .size(12.0)
+                .strong(),
+            );
+            let por = match (motivo, q.casaram.len()) {
+                (Some(m), _) => Some(m.clone()),
+                (None, 1) => Some("foi o único padrão que casou.".to_owned()),
+                (None, _) => None,
+            };
+            if let Some(m) = por {
+                pequeno(ui, format!("Motivo: {m}"), p.tinta_suave);
+            }
+        }
+        Desfecho::Ambiguo {
+            motivo,
+            divergencia,
+        } => {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(icones::icone_cor("warning", 14.0, p.aviso));
+                let onde = divergencia.as_ref().map_or_else(
+                    || "em prioridade, especificidade e resultado".to_owned(),
+                    |d| format!("em {}", campo_que_diverge(&d.campo)),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Ambíguo: {} empataram em prioridade e especificidade e discordam {onde}. Nada foi aplicado.",
+                        plural(
+                            q.casaram
+                                .iter()
+                                .filter(|c| c.papel == Papel::Discorda)
+                                .count(),
+                            "padrão",
+                            "padrões"
+                        )
+                    ))
+                    .size(12.0)
+                    .strong()
+                    .color(p.aviso),
+                );
+            });
+            if let Some(d) = divergencia {
+                for (regra, versao, valor) in &d.valores {
+                    pequeno(
+                        ui,
+                        format!("{} · versão {versao} lê {valor}", extras.nome_da(regra)),
+                        p.tinta_suave,
+                    );
+                }
+            }
+            pequeno(ui, motivo, p.tinta_desabilitada);
+        }
+        Desfecho::NenhumCasou => {
+            pequeno(ui, "Nenhum padrão casou com este documento.", p.tinta_suave);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -511,7 +709,7 @@ pub(crate) fn detalhe_da_sugestao(ui: &mut Ui, p: &Paleta, sug: &Sugestao, aplic
     if let Some((regra, _)) = sug.da_regra() {
         pequeno(
             ui,
-            format!("Proposta da regra {} · versão {}", regra.0, regra.1),
+            format!("Proposta do padrão {} · versão {}", regra.0, regra.1),
             p.tinta_desabilitada,
         );
     }
@@ -521,7 +719,7 @@ pub(crate) fn detalhe_da_sugestao(ui: &mut Ui, p: &Paleta, sug: &Sugestao, aplic
 pub(crate) fn texto_da_automatica(sug: &Sugestao, nomes: &BTreeMap<String, String>) -> String {
     match sug.da_regra() {
         Some(((id, _), _)) => format!(
-            "Conciliado automaticamente pela regra {} ·",
+            "Conciliado automaticamente pelo padrão {} ·",
             nomes.get(id).map_or(id.as_str(), String::as_str)
         ),
         None => "Conciliado automaticamente ·".to_owned(),
@@ -623,7 +821,7 @@ fn leitura_em_cartao(ui: &mut Ui, p: &Paleta, leitura: &Leitura, texto: Option<&
             ui.horizontal_wrapped(|ui| {
                 ui.label(icones::icone_cor("block", 16.0, p.tinta_suave));
                 ui.label(
-                    RichText::new("A regra não se aplica a este documento.").color(p.tinta_suave),
+                    RichText::new("O padrão não se aplica a este documento.").color(p.tinta_suave),
                 );
             });
             for e in &leitura.execucoes {
@@ -656,17 +854,17 @@ impl crate::janela::Janela {
             pequeno(
                 ui,
                 format!(
-                    "{} · só leitura: nada é gravado e a regra não muda.",
+                    "{} · só leitura: nada é gravado e o padrão não muda.",
                     t.documento
                 ),
                 p.tinta_suave,
             );
             ui.add_space(8.0);
             if t.opcoes.is_empty() {
-                pequeno(ui, "Ainda não há regras no catálogo.", p.tinta_suave);
+                pequeno(ui, "Ainda não há padrões no catálogo.", p.tinta_suave);
             } else {
                 ui.horizontal(|ui| {
-                    ui.label("Regra e versão");
+                    ui.label("Padrão e versão");
                     let atual = t.opcao().map_or_else(String::new, |o| {
                         format!("{} · versão {} ({})", o.nome, o.versao, rotulo_do_estado_opcao(o))
                     });
@@ -696,7 +894,7 @@ impl crate::janela::Janela {
                     Some(Err(e)) => {
                         componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
                     }
-                    None => pequeno(ui, "Escolha uma regra para ler o documento.", p.tinta_suave),
+                    None => pequeno(ui, "Escolha um padrão para ler o documento.", p.tinta_suave),
                 }
             });
             if let Some((erro, m)) = &t.mensagem {
@@ -725,7 +923,7 @@ impl crate::janela::Janela {
                 });
                 pequeno(
                     ui,
-                    "O exemplo guarda o que a regra leu agora (ou \"não se aplica\"). Ele passa a valer nos testes da regra.",
+                    "O exemplo guarda o que o padrão leu agora (ou \"não se aplica\"). Ele passa a valer nos testes do padrão.",
                     p.tinta_suave,
                 );
             } else {
@@ -765,11 +963,11 @@ impl crate::janela::Janela {
         let mut fechar = false;
         let resposta = egui::Modal::new(Id::new("reconhecimento-criacao")).show(ctx, |ui| {
             ui.set_width(620.0);
-            componentes::titulo(ui, "Criar regra a partir daqui", 17.0);
+            componentes::titulo(ui, "Criar padrão a partir daqui", 17.0);
             pequeno(
                 ui,
                 format!(
-                    "{} · o sbf monta um rascunho a partir do texto deste documento, sem IA. Ele só reconhece algo depois que você ativar a regra.",
+                    "{} · o sbf monta um rascunho a partir do texto deste documento, sem IA. Ele só reconhece algo depois que você ativar o padrão.",
                     c.documento
                 ),
                 p.tinta_suave,
@@ -794,7 +992,7 @@ impl crate::janela::Janela {
                             .num_columns(2)
                             .spacing([14.0, 5.0])
                             .show(ui, |ui| {
-                                ui.label("Nome da regra");
+                                ui.label("Nome do padrão");
                                 ui.add(
                                     TextEdit::singleline(&mut c.nome)
                                         .hint_text("Comprovante Pix · Banco Exemplo")
@@ -810,7 +1008,7 @@ impl crate::janela::Janela {
                                 ui.end_row();
                             });
                         ui.add_space(8.0);
-                        componentes::rotulo_de_secao(ui, "Campos que a regra deve ler");
+                        componentes::rotulo_de_secao(ui, "Campos que o padrão deve ler");
                         pequeno(
                             ui,
                             "Preencha o que está certo neste documento; deixe em branco o que não interessa. Valores: R$ 1.250,00, 12/10/2026, texto.",
@@ -841,12 +1039,12 @@ impl crate::janela::Janela {
                         componentes::cartao(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.label(
-                                RichText::new(format!("Regra {}", m.nova.regra)).strong(),
+                                RichText::new(format!("Padrão {}", m.nova.regra)).strong(),
                             );
                             pequeno(
                                 ui,
                                 format!(
-                                    "Autor: {} · fica em rascunho; ativar é com você, na página da regra.",
+                                    "Autor: {} · fica em rascunho; ativar é com você, na página do padrão.",
                                     rotulo_do_autor(Autor::Correcao)
                                 ),
                                 p.tinta_suave,
@@ -855,7 +1053,7 @@ impl crate::janela::Janela {
                                 &m.esperado
                             {
                                 ui.add_space(3.0);
-                                pequeno(ui, "A regra aprendeu a ler:", p.tinta_suave);
+                                pequeno(ui, "O padrão aprendeu a ler:", p.tinta_suave);
                                 let mut ordem: Vec<_> = campos.iter().collect();
                                 ordem.sort_by_key(|(n, _)| {
                                     (
@@ -891,7 +1089,7 @@ impl crate::janela::Janela {
                             ui.add_space(3.0);
                             pequeno(
                                 ui,
-                                "Salvar guarda este documento como o primeiro exemplo da regra.",
+                                "Salvar guarda este documento como o primeiro exemplo do padrão.",
                                 p.tinta_suave,
                             );
                         });
@@ -904,7 +1102,7 @@ impl crate::janela::Janela {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if c.montado.is_some() {
-                    if ui.button("Salvar rascunho e abrir a regra").clicked() {
+                    if ui.button("Salvar rascunho e abrir o padrão").clicked() {
                         salvar = true;
                     }
                     if ui.button("Voltar e editar").clicked() {

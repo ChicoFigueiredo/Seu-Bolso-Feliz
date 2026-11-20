@@ -89,7 +89,7 @@ pub fn tipo_e_resumo(r: &Resultado) -> (Option<String>, Option<String>) {
         Reconhecido::Ambiguo { candidatas, .. } => (
             None,
             Some(format!(
-                "{} regras empatadas discordam: escolha uma",
+                "{} padrões empatados discordam: escolha um",
                 candidatas.len()
             )),
         ),

@@ -234,7 +234,7 @@ impl Motor {
             reconhecimento.revisar = true;
             reconhecimento
                 .motivos
-                .push("a versão da regra não está neste motor".to_owned());
+                .push("a versão do padrão não está neste motor".to_owned());
             return reconhecimento;
         };
         let do_ocr;
@@ -252,7 +252,7 @@ impl Motor {
             Ok(None) => {
                 let mut r = copia;
                 r.motivos
-                    .push("o script disse que a regra não corresponde".to_owned());
+                    .push("o script disse que o padrão não corresponde".to_owned());
                 r.revisar = true;
                 r
             }
@@ -600,9 +600,9 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
         let mut vencedora = candidatas.remove(0).rec;
         if let Some((p1, e1, regra1, _)) = &segunda {
             let porque = if p0 > *p1 {
-                format!("prioridade {p0} > {p1} da regra {regra1}")
+                format!("prioridade {p0} > {p1} do padrão {regra1}")
             } else {
-                format!("mais específica: {e0} condições contra {e1} (regra {regra1})")
+                format!("mais específico: {e0} condições contra {e1} (padrão {regra1})")
             };
             vencedora.motivos.push(porque);
         }
@@ -611,7 +611,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
                 execucoes,
                 &c.rec.regra,
                 c.rec.versao,
-                format!("não prevaleceu: venceu a regra {}", vencedora.regra),
+                format!("não prevaleceu: venceu o padrão {}", vencedora.regra),
             );
         }
         return Decisao::Reconhecido(Box::new(vencedora));
@@ -623,7 +623,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
             .map(|c| format!("{}@{}", c.rec.regra, c.rec.versao))
             .collect();
         let motivo = format!(
-            "regras empatadas em prioridade {p0} e especificidade {e0} discordam em {discordancia}: {}",
+            "padrões empatados em prioridade {p0} e especificidade {e0} discordam em {discordancia}: {}",
             nomes.join(", ")
         );
         for c in &candidatas {
@@ -641,7 +641,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
     let mut vencedora = primeira.rec;
     vencedora.motivos.push(format!(
         "empate de prioridade {p0} e especificidade {e0} com resultados concordantes; \
-         escolhida a de menor id ({})",
+         escolhido o de menor id ({})",
         vencedora.regra
     ));
     for c in resto {
@@ -649,28 +649,44 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
             execucoes,
             &c.rec.regra,
             c.rec.versao,
-            format!("empate concordante: venceu a regra {}", vencedora.regra),
+            format!("empate concordante: venceu o padrão {}", vencedora.regra),
         );
     }
     Decisao::Reconhecido(Box::new(vencedora))
 }
 
-/// Em que as candidatas discordam (tipo ou campo crítico com valores diferentes nas duas),
-/// ou `None` se concordam.
-fn discordam(candidatas: &[Candidata]) -> Option<String> {
+/// Em que as candidatas discordam (tipo ou campo crítico com valor diferente nas duas),
+/// ou `None` se concordam. É o que decide a [`Decisao::Ambiguo`]; a janela usa o mesmo
+/// critério para dizer em que campo as candidatas de um ambíguo divergem.
+///
+/// Devolve `"tipo_documental"` ou o nome de um de [`CAMPOS_CRITICOS`].
+pub fn campo_em_que_discordam<'a>(
+    candidatas: impl IntoIterator<Item = &'a Reconhecimento>,
+) -> Option<&'static str> {
+    let candidatas: Vec<&Reconhecimento> = candidatas.into_iter().collect();
     for (i, a) in candidatas.iter().enumerate() {
         for b in &candidatas[i + 1..] {
-            if a.rec.tipo_documental != b.rec.tipo_documental {
-                return Some("tipo_documental".to_owned());
+            if a.tipo_documental != b.tipo_documental {
+                return Some("tipo_documental");
             }
             for nome in CAMPOS_CRITICOS {
-                if let (Some(x), Some(y)) = (a.rec.campos.get(nome), b.rec.campos.get(nome))
+                if let (Some(x), Some(y)) = (a.campos.get(nome), b.campos.get(nome))
                     && x.valor != y.valor
                 {
-                    return Some(format!("`{nome}`"));
+                    return Some(nome);
                 }
             }
         }
     }
     None
+}
+
+fn discordam(candidatas: &[Candidata]) -> Option<String> {
+    campo_em_que_discordam(candidatas.iter().map(|c| &c.rec)).map(|nome| {
+        if nome == "tipo_documental" {
+            nome.to_owned()
+        } else {
+            format!("`{nome}`")
+        }
+    })
 }

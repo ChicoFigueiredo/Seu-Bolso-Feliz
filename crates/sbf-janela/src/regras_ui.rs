@@ -11,17 +11,30 @@ use sbf_regras::catalogo::{
 };
 use sbf_regras::{Estado, LIMIAR_DE_CONSOLIDACAO};
 
+use std::collections::BTreeSet;
+
+use sbf_regras::{Entrada, IdDaRegra};
+
+use crate::padroes_visiveis::{
+    AbaDosPadroes, CasamComODocumento, FiltroDePadroes, PadraoDaLista, RamoDeEntrada,
+    TIPOS_DE_ENTRADA, filtrar, mimes_disponiveis, montar_mapa, rotulo_do_estado_do_padrao,
+    rotulo_do_tipo_de_entrada,
+};
+use crate::preferencias_da_janela::PreferenciasDosPadroes;
 use crate::regras::{
     FonteDasRegras, LinhaDoRastro, SimulacaoDaRegra, definicao_em_texto, rotulo_do_autor,
     rotulo_do_estado, validar_definicao,
 };
 use crate::{componentes, icones, tema};
 
+/// Marca interna: a consulta "já casaram" não está ligada.
+const NAO_LIGADO: &str = "consulta não ligada";
+
 /// O destino da área na navegação.
 pub const ROTA: &str = "regras";
 
 /// O título completo (o rótulo da lateral pode abreviar).
-pub const TITULO: &str = "Regras de reconhecimento";
+pub const TITULO: &str = "Padrões de reconhecimento";
 
 /// O que o editor guarda enquanto você digita.
 #[derive(Debug, Default, Clone)]
@@ -82,11 +95,43 @@ struct Mensagem {
     texto: String,
 }
 
+/// O documento que o usuário está olhando (a linha escolhida da Caixa de entrada ou o último
+/// cartão do Reconhecimento): contra ele o filtro "casam com o documento" confere os padrões.
+/// A janela o entrega a cada quadro por [`Regras::definir_documento`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentoDeReferencia {
+    /// O nome para mostrar ao lado do filtro.
+    pub rotulo: String,
+    /// A entrada que o motor lê (com o texto guardado, se há).
+    pub entrada: Entrada,
+}
+
+/// Os padrões que "casam com o documento" para o filtro, ou por que o filtro não age.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QuemCasa {
+    /// `None`: o filtro não age (desligado, sem documento ou sem a consulta).
+    pub conjunto: Option<BTreeSet<IdDaRegra>>,
+    /// O que dizer ao usuário quando o filtro está ligado e algo impede ou limita.
+    pub nota: Option<String>,
+}
+
 /// O estado da área. Fica em [`crate::Janela::regras`].
 #[derive(Debug, Default)]
 pub struct Regras {
     fonte: Option<FonteDasRegras>,
     lista: Option<Result<Vec<ResumoDaRegra>, String>>,
+    /// Os padrões como os filtros e o mapa os enxergam (relidos com a lista).
+    padroes: Vec<PadraoDaLista>,
+    filtro: FiltroDePadroes,
+    aba: AbaDosPadroes,
+    documento: Option<DocumentoDeReferencia>,
+    /// O que "casam agora" / "já casaram" achou para o documento: guardado até a lista ou o
+    /// documento mudarem, para não rodar o motor a cada quadro.
+    casam_guardado: Option<(
+        String,
+        CasamComODocumento,
+        Result<BTreeSet<IdDaRegra>, String>,
+    )>,
     sugestoes: Vec<(String, u32)>,
     pagina: Option<Pagina>,
     mensagem: Option<Mensagem>,
@@ -102,6 +147,123 @@ impl Regras {
         self.fonte = Some(fonte);
         self.lista = None;
         self.pagina = None;
+        self.casam_guardado = None;
+    }
+
+    // ---- filtros e mapa (spec 15, Frente B) ----
+
+    /// Os filtros de agora.
+    pub fn filtro(&self) -> &FiltroDePadroes {
+        &self.filtro
+    }
+
+    /// Troca os filtros (a tela e os testes usam).
+    pub fn definir_filtro(&mut self, filtro: FiltroDePadroes) {
+        self.filtro = filtro;
+    }
+
+    /// A vista aberta: lista ou mapa.
+    pub fn aba(&self) -> AbaDosPadroes {
+        self.aba
+    }
+
+    pub fn definir_aba(&mut self, aba: AbaDosPadroes) {
+        self.aba = aba;
+    }
+
+    /// O que a janela guarda dos filtros entre aberturas.
+    pub fn preferencias(&self) -> PreferenciasDosPadroes {
+        PreferenciasDosPadroes {
+            filtro: self.filtro.clone(),
+            aba: self.aba,
+        }
+    }
+
+    /// Restaura o que foi guardado.
+    pub fn aplicar_preferencias(&mut self, p: &PreferenciasDosPadroes) {
+        self.filtro = p.filtro.clone();
+        self.aba = p.aba;
+    }
+
+    /// Diz qual é o documento selecionado (a janela chama a cada quadro; trocar de documento
+    /// esquece o que "casam com o documento" tinha achado).
+    pub fn definir_documento(&mut self, documento: Option<DocumentoDeReferencia>) {
+        if self.documento != documento {
+            self.casam_guardado = None;
+            self.documento = documento;
+        }
+    }
+
+    /// O documento contra o qual o filtro confere, se há.
+    pub fn documento(&self) -> Option<&DocumentoDeReferencia> {
+        self.documento.as_ref()
+    }
+
+    /// Os padrões que passam pelos filtros de agora, na ordem do catálogo.
+    pub fn padroes_filtrados(&mut self) -> Vec<PadraoDaLista> {
+        if self.lista.is_none() {
+            self.recarregar_lista();
+        }
+        let quem = self.quem_casa();
+        filtrar(&self.padroes, &self.filtro, quem.conjunto.as_ref())
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// O conjunto do filtro "casam com o documento": **casam agora** roda o motor sobre o texto
+    /// guardado do documento; **já casaram** pergunta à consulta ligada em
+    /// [`FonteDasRegras::com_ja_casaram`]. Sem documento ou sem a consulta, o filtro não age e
+    /// a `nota` diz por quê.
+    pub fn quem_casa(&mut self) -> QuemCasa {
+        let modo = self.filtro.casam;
+        if modo == CasamComODocumento::Todos {
+            return QuemCasa::default();
+        }
+        let (Some(fonte), Some(doc)) = (self.fonte.clone(), self.documento.clone()) else {
+            return QuemCasa {
+                conjunto: None,
+                nota: Some(
+                    "Escolha um documento na Caixa de entrada ou solte um arquivo no Reconhecimento para usar este filtro."
+                        .to_owned(),
+                ),
+            };
+        };
+        let valido = matches!(
+            &self.casam_guardado,
+            Some((id, m, _)) if *id == doc.entrada.id && *m == modo
+        );
+        if !valido {
+            let achado = match modo {
+                CasamComODocumento::Agora => fonte.casam_agora(&doc.entrada),
+                CasamComODocumento::JaCasaram => fonte
+                    .ja_casaram(&doc.entrada.id)
+                    .unwrap_or_else(|| Err(NAO_LIGADO.to_owned())),
+                CasamComODocumento::Todos => Ok(BTreeSet::new()),
+            };
+            self.casam_guardado = Some((doc.entrada.id.clone(), modo, achado));
+        }
+        match &self.casam_guardado {
+            Some((_, _, Ok(c))) => QuemCasa {
+                conjunto: Some(c.clone()),
+                nota: (modo == CasamComODocumento::Agora
+                    && doc.entrada.texto.as_deref().is_none_or(str::is_empty))
+                .then(|| {
+                    "O documento não tem texto guardado: nenhum padrão o reconhece agora."
+                        .to_owned()
+                }),
+            },
+            Some((_, _, Err(e))) => QuemCasa {
+                conjunto: None,
+                nota: Some(if e == NAO_LIGADO {
+                    "\"Já casaram\" ainda não está disponível: falta ligar a passada de fundo que registra quem casou."
+                        .to_owned()
+                } else {
+                    format!("Não deu para consultar os padrões: {e}")
+                }),
+            },
+            None => QuemCasa::default(),
+        }
     }
 
     /// O catálogo ligado, se há (o Reconhecimento fala com ele).
@@ -191,6 +353,8 @@ impl Regras {
     fn recarregar_lista(&mut self) {
         let Some(f) = &self.fonte else { return };
         self.lista = Some(f.resumos());
+        self.padroes = f.padroes().unwrap_or_default();
+        self.casam_guardado = None;
         self.sugestoes = f.sugestoes_de_consolidacao().unwrap_or_default();
     }
 
@@ -252,7 +416,7 @@ impl Regras {
                 "rule",
                 TITULO,
                 3,
-                "O catálogo de regras (regras.sqlite) ainda não está ligado a esta janela.",
+                "O catálogo de padrões (regras.sqlite) ainda não está ligado a esta janela.",
             );
             return;
         }
@@ -288,10 +452,10 @@ impl Regras {
         let mut fechar = false;
         let resposta = egui::Modal::new(egui::Id::new("regras-nova")).show(ctx, |ui| {
             ui.set_width(520.0);
-            componentes::titulo(ui, "Nova regra", 17.0);
+            componentes::titulo(ui, "Novo padrão", 17.0);
             texto_pequeno(
                 ui,
-                "Nasce em rascunho, com uma definição mínima para você completar na página da regra. Nada é ativado.",
+                "Nasce em rascunho, com uma definição mínima para você completar na página do padrão. Nada é ativado.",
             );
             ui.add_space(8.0);
             egui::Grid::new("regras-nova-campos")
@@ -347,7 +511,7 @@ impl Regras {
                     self.abrir(&id);
                     self.avisar(
                         false,
-                        "Regra criada em rascunho. Complete a definição, teste com exemplos e só então ative.",
+                        "Padrão criado em rascunho. Complete a definição, teste com exemplos e só então ative.",
                     );
                     self.recarregar_lista();
                 }
@@ -383,8 +547,8 @@ impl Regras {
             componentes::titulo(ui, TITULO, 20.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .button("Nova regra")
-                    .on_hover_text("Cria uma regra em rascunho com uma definição mínima")
+                    .button("Novo padrão")
+                    .on_hover_text("Cria um padrão em rascunho com uma definição mínima")
                     .clicked()
                 {
                     self.nova = Some(NovaRegra::default());
@@ -393,7 +557,7 @@ impl Regras {
         });
         texto_pequeno(
             ui,
-            "Como o sbf reconhece cada tipo de documento. Uma regra só propõe; consolidada, concilia sozinha quando as três provas batem.",
+            "Como o sbf reconhece cada tipo de documento. Um padrão só propõe; consolidado, concilia sozinho quando as três provas batem.",
         );
         self.mostrar_mensagem(ui);
         ui.add_space(8.0);
@@ -417,38 +581,180 @@ impl Regras {
         if lista.is_empty() {
             texto_pequeno(
                 ui,
-                "Nenhuma regra ainda. As de fábrica entram ao abrir o cofre.",
+                "Nenhum padrão ainda. As de fábrica entram ao abrir o cofre.",
             );
         } else {
-            componentes::cartao(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                egui::Grid::new("lista-de-regras")
-                    .num_columns(6)
-                    .striped(true)
-                    .spacing([18.0, 8.0])
-                    .show(ui, |ui| {
-                        for t in [
-                            "Regra",
-                            "Tipo documental",
-                            "Em vigor",
-                            "Estado",
-                            "Execuções",
-                            "Taxa de acerto",
-                        ] {
-                            componentes::rotulo_de_secao(ui, t);
-                        }
-                        ui.end_row();
-                        for r in &lista {
-                            linha_da_lista(ui, r, &mut abrir);
+            self.barra_de_filtros(ui);
+            let filtrados = self.padroes_filtrados();
+            let ids: BTreeSet<&str> = filtrados.iter().map(|p| p.id.as_str()).collect();
+            texto_pequeno(
+                ui,
+                if self.filtro.limpo() {
+                    format!("{} padrões", filtrados.len())
+                } else {
+                    format!("{} de {} padrões", filtrados.len(), lista.len())
+                },
+            );
+            ui.add_space(4.0);
+            if filtrados.is_empty() {
+                texto_pequeno(ui, "Nenhum padrão com estes filtros.");
+            } else if self.aba == AbaDosPadroes::Mapa {
+                let refs: Vec<&PadraoDaLista> = filtrados.iter().collect();
+                mapa_em_arvore(ui, &montar_mapa(&refs), &filtrados, &mut abrir);
+            } else {
+                componentes::cartao(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    egui::Grid::new("lista-de-regras")
+                        .num_columns(6)
+                        .striped(true)
+                        .spacing([18.0, 8.0])
+                        .show(ui, |ui| {
+                            for t in [
+                                "Padrão",
+                                "Tipo documental",
+                                "Em vigor",
+                                "Estado",
+                                "Execuções",
+                                "Taxa de acerto",
+                            ] {
+                                componentes::rotulo_de_secao(ui, t);
+                            }
                             ui.end_row();
-                        }
-                    });
-            });
+                            for r in lista.iter().filter(|r| ids.contains(r.id.as_str())) {
+                                linha_da_lista(ui, r, &mut abrir);
+                                ui.end_row();
+                            }
+                        });
+                });
+            }
         }
         if let Some(regra) = abrir {
             self.abrir(&regra);
         }
+    }
+
+    /// As abas Lista | Mapa e os filtros (spec 15, D5): texto, estado, tipo de entrada, tipo
+    /// real e "casam com o documento". Combinam (E) e ficam nas preferências da janela.
+    fn barra_de_filtros(&mut self, ui: &mut Ui) {
+        let p = tema::paleta(ui.ctx());
+        ui.horizontal(|ui| {
+            for (aba, rotulo) in [(AbaDosPadroes::Lista, "Lista"), (AbaDosPadroes::Mapa, "Mapa")] {
+                if ui
+                    .selectable_label(self.aba == aba, RichText::new(rotulo).strong())
+                    .on_hover_text(match aba {
+                        AbaDosPadroes::Lista => "A tabela dos padrões",
+                        AbaDosPadroes::Mapa => {
+                            "Tipo de entrada, tipo documental e os padrões na ordem em que o motor decide"
+                        }
+                    })
+                    .clicked()
+                {
+                    self.aba = aba;
+                }
+            }
+        });
+        ui.add_space(4.0);
+        let mimes = mimes_disponiveis(&self.padroes);
+        let documento = self.documento.as_ref().map(|d| d.rotulo.clone());
+        let filtro = &mut self.filtro;
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                TextEdit::singleline(&mut filtro.texto)
+                    .hint_text("Buscar: nome, tipo documental, condição")
+                    .desired_width(260.0),
+            );
+            egui::ComboBox::from_id_salt("filtro-de-padroes-estado")
+                .selected_text(
+                    filtro
+                        .estado
+                        .map_or("Qualquer estado", rotulo_do_estado_do_padrao),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filtro.estado, None, "Qualquer estado");
+                    for e in [
+                        Estado::Rascunho,
+                        Estado::Ativa,
+                        Estado::Consolidada,
+                        Estado::Desativada,
+                    ] {
+                        ui.selectable_value(
+                            &mut filtro.estado,
+                            Some(e),
+                            rotulo_do_estado_do_padrao(e),
+                        );
+                    }
+                });
+            egui::ComboBox::from_id_salt("filtro-de-padroes-entrada")
+                .selected_text(
+                    filtro
+                        .entrada
+                        .map_or("Qualquer entrada", rotulo_do_tipo_de_entrada),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filtro.entrada, None, "Qualquer entrada");
+                    for t in TIPOS_DE_ENTRADA {
+                        ui.selectable_value(
+                            &mut filtro.entrada,
+                            Some(t),
+                            rotulo_do_tipo_de_entrada(t),
+                        );
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "O tipo de entrada a que o padrão se aplica (documento, registro ou mensagem)",
+                );
+            egui::ComboBox::from_id_salt("filtro-de-padroes-mime")
+                .selected_text(filtro.mime.as_deref().unwrap_or("Qualquer tipo real"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filtro.mime, None, "Qualquer tipo real");
+                    for m in &mimes {
+                        ui.selectable_value(&mut filtro.mime, Some(m.clone()), m);
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Padrões cuja detecção exige este tipo real do arquivo (por exemplo image/*)",
+                );
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Casam com o documento:").size(12.5).color(p.tinta_suave));
+            egui::ComboBox::from_id_salt("filtro-de-padroes-casam")
+                .selected_text(filtro.casam.rotulo())
+                .show_ui(ui, |ui| {
+                    for m in [
+                        CasamComODocumento::Todos,
+                        CasamComODocumento::Agora,
+                        CasamComODocumento::JaCasaram,
+                    ] {
+                        ui.selectable_value(&mut filtro.casam, m, m.rotulo());
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Casam agora: o motor lê o texto guardado do documento. Já casaram: quem já casou com ele alguma vez.",
+                );
+            match &documento {
+                Some(d) => {
+                    texto_pequeno(ui, format!("documento: {d}"));
+                }
+                None => {
+                    texto_pequeno(ui, "nenhum documento selecionado");
+                }
+            }
+            let ligados = filtro.ligados();
+            if ui
+                .add_enabled(ligados > 0, egui::Button::new(format!("Limpar filtros ({ligados})")))
+                .clicked()
+            {
+                *filtro = FiltroDePadroes::default();
+            }
+        });
+        if let Some(nota) = self.quem_casa().nota {
+            texto_pequeno(ui, nota);
+        }
+        ui.add_space(4.0);
     }
 
     // ---- página ----
@@ -466,7 +772,7 @@ impl Regras {
         let p = tema::paleta(ui.ctx());
 
         if ui
-            .button(format!("{}  Regras", icones::texto("arrow_back")))
+            .button(format!("{}  Padrões", icones::texto("arrow_back")))
             .clicked()
         {
             voltar = true;
@@ -495,7 +801,7 @@ impl Regras {
         if let Some(v) = pagina.sugerida {
             ui.add_space(6.0);
             let texto = format!(
-                "A regra {} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?",
+                "O padrão {} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?",
                 pagina.resumo.nome
             );
             componentes::aviso(
@@ -596,7 +902,9 @@ impl Regras {
                 self.depois_da_acao(r);
             }
             Acao::Desativar => {
-                let r = f.desativar(&regra).map(|()| "Regra desativada.".to_owned());
+                let r = f
+                    .desativar(&regra)
+                    .map(|()| "Padrão desativado.".to_owned());
                 self.depois_da_acao(r);
             }
             Acao::Reverter => {
@@ -854,12 +1162,12 @@ fn faixa_de_sugestao(ui: &mut Ui, nome: &str, regra: &str, abrir: &mut Option<St
                 ui.label(icones::icone_cor("verified", 16.0, p.destaque_tinta));
                 ui.label(
                     RichText::new(format!(
-                        "A regra {nome} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?"
+                        "O padrão {nome} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?"
                     ))
                     .color(p.destaque_tinta),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Ver a regra").clicked() {
+                    if ui.button("Ver o padrão").clicked() {
                         *abrir = Some(regra.to_owned());
                     }
                 });
@@ -874,7 +1182,7 @@ fn linha_da_lista(ui: &mut Ui, r: &ResumoDaRegra, abrir: &mut Option<String>) {
         ui.set_min_width(300.0);
         if ui
             .link(RichText::new(&r.nome).strong().size(14.0))
-            .on_hover_text("Abre a regra: versões, editor, exemplos e Rastro")
+            .on_hover_text("Abre o padrão: versões, editor, exemplos e Rastro")
             .clicked()
         {
             *abrir = Some(r.id.clone());
@@ -889,6 +1197,81 @@ fn linha_da_lista(ui: &mut Ui, r: &ResumoDaRegra, abrir: &mut Option<String>) {
     selo_do_estado(ui, r.estado);
     ui.label(r.execucoes.to_string());
     ui.label(percentual(r));
+}
+
+/// O mapa em árvore (só leitura): tipo de entrada, tipo documental e os padrões na ordem em que
+/// o motor decide (prioridade, depois especificidade). Clicar num padrão abre a página dele.
+fn mapa_em_arvore(
+    ui: &mut Ui,
+    mapa: &[RamoDeEntrada],
+    padroes: &[PadraoDaLista],
+    abrir: &mut Option<String>,
+) {
+    let p = tema::paleta(ui.ctx());
+    fn nome_de<'a>(padroes: &'a [PadraoDaLista], id: &'a str) -> &'a str {
+        padroes
+            .iter()
+            .find(|x| x.id == id)
+            .map_or(id, |x| x.nome.as_str())
+    }
+    componentes::cartao(ui, |ui| {
+        ui.set_width(ui.available_width());
+        for ramo in mapa {
+            let total: usize = ramo.documentais.iter().map(|d| d.padroes.len()).sum();
+            egui::CollapsingHeader::new(
+                RichText::new(format!(
+                    "Entrada: {} · {total} {}",
+                    rotulo_do_tipo_de_entrada(ramo.tipo),
+                    if total == 1 { "padrão" } else { "padrões" }
+                ))
+                .strong(),
+            )
+            .id_salt(("mapa-de-padroes", ramo.tipo))
+            .default_open(true)
+            .show(ui, |ui| {
+                for doc in &ramo.documentais {
+                    egui::CollapsingHeader::new(RichText::new(&doc.tipo_documental).strong().size(13.0))
+                        .id_salt(("mapa-de-padroes", ramo.tipo, &doc.tipo_documental))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for f in &doc.padroes {
+                                ui.horizontal_wrapped(|ui| {
+                                    let (fundo, cor) = cores_do_estado(ui, f.estado);
+                                    componentes::selo(ui, rotulo_do_estado_do_padrao(f.estado), fundo, cor);
+                                    if ui
+                                        .link(RichText::new(&f.nome).strong())
+                                        .on_hover_text("Abre o padrão: versões, editor, exemplos e Rastro")
+                                        .clicked()
+                                    {
+                                        *abrir = Some(f.id.clone());
+                                    }
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "v{} · prioridade {} · especificidade {}",
+                                            f.versao, f.prioridade, f.especificidade
+                                        ))
+                                        .size(12.0)
+                                        .color(p.tinta_suave),
+                                    );
+                                    if !f.empata_com.is_empty() {
+                                        let com = f
+                                            .empata_com
+                                            .iter()
+                                            .map(|i| nome_de(padroes, i))
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        componentes::selo(ui, "empate", p.aviso_sutil, p.aviso)
+                                            .on_hover_text(format!(
+                                                "Mesma prioridade e especificidade que {com}. Se casarem juntos e discordarem, o motor dá Ambíguo."
+                                            ));
+                                    }
+                                });
+                            }
+                        });
+                }
+            });
+        }
+    });
 }
 
 fn barra_de_acoes(ui: &mut Ui, p: &Pagina, acao: &mut Option<Acao>) {
@@ -925,7 +1308,7 @@ fn barra_de_acoes(ui: &mut Ui, p: &Pagina, acao: &mut Option<Acao>) {
         let motivo_do_bloqueio = if !ativavel {
             "Só um rascunho ou uma versão desativada pode ser ativada"
         } else if !falhas.is_empty() {
-            "Um exemplo falha: corrija a regra ou o exemplo antes de ativar"
+            "Um exemplo falha: corrija o padrão ou o exemplo antes de ativar"
         } else {
             "Coloca esta versão em vigor; ela só propõe"
         };
@@ -1021,7 +1404,7 @@ fn confirmacoes(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
             );
             texto_pequeno(
                 ui,
-                "Consolidada, a regra concilia sozinha só com as três provas (valor, data e conta batendo exatamente), com Desfazer. Uma rejeição, um Desfazer ou uma versão nova a devolvem a ativa.",
+                "Consolidado, o padrão concilia sozinha só com as três provas (valor, data e conta batendo exatamente), com Desfazer. Uma rejeição, um Desfazer ou uma versão nova a devolvem a ativa.",
             );
             ui.horizontal(|ui| {
                 if ui.button("Consolidar").clicked() {
@@ -1217,7 +1600,7 @@ fn secao_de_exemplos(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
         if p.exemplos.is_empty() {
             texto_pequeno(
                 ui,
-                "Sem exemplos. Uma regra sem exemplos ativa sem nada que a proteja: cole um texto abaixo.",
+                "Sem exemplos. Um padrão sem exemplos ativa sem nada que o proteja: cole um texto abaixo.",
             );
         }
         for ex in &p.exemplos {
@@ -1283,7 +1666,7 @@ fn formulario_de_exemplo(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
     ui.add_space(4.0);
     texto_pequeno(
         ui,
-        "Cole o texto de um documento (o texto fica só neste catálogo, com o exemplo). Depois diga o que a regra deve devolver.",
+        "Cole o texto de um documento (o texto fica só neste catálogo, com o exemplo). Depois diga o que o padrão deve devolver.",
     );
     ui.horizontal(|ui| {
         ui.label("Nome");
@@ -1323,7 +1706,7 @@ fn formulario_de_exemplo(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
 
 fn resumo_do_esperado(e: &Esperado) -> String {
     match e {
-        Esperado::NaoSeAplica => "espera: a regra não se aplica".to_owned(),
+        Esperado::NaoSeAplica => "espera: o padrão não se aplica".to_owned(),
         Esperado::Reconhece {
             tipo_documental,
             campos,
@@ -1382,7 +1765,7 @@ fn secao_da_simulacao(ui: &mut Ui, p: &Pagina) {
 fn descrever(r: &sbf_regras::simulacao::ResumoDaDecisao) -> String {
     use sbf_regras::simulacao::ResumoDaDecisao::{Ambiguo, Nenhuma, Reconhecido};
     match r {
-        Nenhuma => "nenhuma regra se aplica".to_owned(),
+        Nenhuma => "nenhum padrão se aplica".to_owned(),
         Ambiguo { regras } => format!("ambíguo entre {}", regras.join(", ")),
         Reconhecido {
             regra,
@@ -1417,7 +1800,7 @@ fn valor(v: &sbf_regras::Valor) -> String {
 }
 
 fn secao_do_rastro(ui: &mut Ui, p: &Pagina) {
-    componentes::rotulo_de_secao(ui, "Rastro da regra");
+    componentes::rotulo_de_secao(ui, "Rastro do padrão");
     ui.add_space(2.0);
     componentes::cartao(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1564,5 +1947,278 @@ mod testes {
         p.editor.revalidar(&f);
         assert!(p.editor.erro_da_definicao.is_some());
         assert!(!p.editor.valido());
+    }
+
+    // ---- filtros, mapa e preferências (spec 15, Frente B) ----
+
+    use sbf_regras::definicao::Definicao;
+
+    const PIX: &str = "comprovante-pix-banco-exemplo";
+    const AGENDADO: &str = "pix-agendado-banco-exemplo";
+    const ENERGIA: &str = "conta-de-energia-distribuidora-exemplo";
+    const FATURA: &str = "fatura-cartao-banco-exemplo";
+
+    fn ids(r: &mut Regras) -> Vec<String> {
+        r.padroes_filtrados().into_iter().map(|p| p.id).collect()
+    }
+
+    fn documento(texto: &str) -> DocumentoDeReferencia {
+        DocumentoDeReferencia {
+            rotulo: "comprovante.pdf".to_owned(),
+            entrada: crate::regras::entrada_de_texto(texto),
+        }
+    }
+
+    #[test]
+    fn sem_filtro_a_lista_traz_todos_os_padroes_da_demonstracao() {
+        let mut r = regras();
+        assert_eq!(ids(&mut r).len(), 7);
+    }
+
+    #[test]
+    fn os_filtros_de_texto_estado_entrada_e_mime_combinam() {
+        let mut r = regras();
+        r.definir_filtro(FiltroDePadroes {
+            texto: "pix".to_owned(),
+            ..Default::default()
+        });
+        assert_eq!(
+            ids(&mut r),
+            [PIX, AGENDADO, "pix-recebido-registro-exemplo"]
+        );
+        r.definir_filtro(FiltroDePadroes {
+            texto: "pix".to_owned(),
+            entrada: Some(sbf_regras::TipoDeEntrada::Documento),
+            ..Default::default()
+        });
+        assert_eq!(ids(&mut r), [PIX, AGENDADO]);
+        r.definir_filtro(FiltroDePadroes {
+            estado: Some(Estado::Rascunho),
+            ..Default::default()
+        });
+        assert_eq!(ids(&mut r), [FATURA]);
+        r.definir_filtro(FiltroDePadroes {
+            estado: Some(Estado::Desativada),
+            entrada: Some(sbf_regras::TipoDeEntrada::Mensagem),
+            ..Default::default()
+        });
+        assert_eq!(ids(&mut r), ["aviso-de-vencimento-mensagem-exemplo"]);
+        r.definir_filtro(FiltroDePadroes {
+            mime: Some("image/*".to_owned()),
+            ..Default::default()
+        });
+        assert_eq!(ids(&mut r), ["recibo-de-foto-padaria-exemplo"]);
+        // Combinados e sem ninguém: lista vazia.
+        r.definir_filtro(FiltroDePadroes {
+            mime: Some("image/*".to_owned()),
+            estado: Some(Estado::Consolidada),
+            ..Default::default()
+        });
+        assert!(ids(&mut r).is_empty());
+    }
+
+    #[test]
+    fn casam_agora_confere_o_motor_contra_o_documento_selecionado() {
+        let mut r = regras();
+        r.definir_filtro(FiltroDePadroes {
+            casam: CasamComODocumento::Agora,
+            ..Default::default()
+        });
+        // Sem documento o filtro não age e diz por quê.
+        let q = r.quem_casa();
+        assert!(q.conjunto.is_none());
+        assert!(q.nota.is_some_and(|n| n.contains("Escolha um documento")));
+        assert_eq!(ids(&mut r).len(), 7);
+        r.definir_documento(Some(documento(crate::regras::PIX_AGENDADO_TEXTO)));
+        assert_eq!(ids(&mut r), [PIX, AGENDADO]);
+        // Combina com o estado (E).
+        r.definir_filtro(FiltroDePadroes {
+            casam: CasamComODocumento::Agora,
+            estado: Some(Estado::Consolidada),
+            ..Default::default()
+        });
+        assert!(ids(&mut r).is_empty());
+        // Trocar de documento esquece o resultado anterior.
+        r.definir_filtro(FiltroDePadroes {
+            casam: CasamComODocumento::Agora,
+            ..Default::default()
+        });
+        let mut energia = documento(
+            "Distribuidora Exemplo de Energia\nConta de energia elétrica\nTotal a pagar: R$ 187,32\nVencimento: 20/10/2026",
+        );
+        energia.entrada.id = "outro".to_owned();
+        r.definir_documento(Some(energia));
+        assert_eq!(ids(&mut r), [ENERGIA]);
+    }
+
+    #[test]
+    fn casam_agora_inclui_rascunho_e_avisa_quando_o_documento_nao_tem_texto() {
+        let mut r = regras();
+        let f = r.fonte.clone().expect("fonte");
+        // Um rascunho novo que reconhece o comprovante também aparece (não só os em vigor).
+        let mut d = Definicao::simples("rascunho-novo", "comprovante de pix");
+        d.prioridade = 1;
+        f.criar_regra("rascunho-do-pix", "Rascunho do Pix", "rascunho-novo")
+            .expect("cria");
+        f.salvar_rascunho(
+            "rascunho-do-pix",
+            "Rascunho do Pix",
+            &definicao_em_texto(&d),
+            "",
+            "teste",
+        )
+        .expect("salva");
+        r.recarregar_lista();
+        r.definir_filtro(FiltroDePadroes {
+            casam: CasamComODocumento::Agora,
+            estado: Some(Estado::Rascunho),
+            ..Default::default()
+        });
+        r.definir_documento(Some(documento(crate::regras::PIX_AGENDADO_TEXTO)));
+        assert_eq!(ids(&mut r), ["rascunho-do-pix"]);
+        // Sem texto guardado nada casa e a nota explica.
+        let mut sem = documento("");
+        sem.entrada.texto = None;
+        r.definir_documento(Some(sem));
+        assert!(ids(&mut r).is_empty());
+        assert!(
+            r.quem_casa()
+                .nota
+                .is_some_and(|n| n.contains("sem texto") || n.contains("não tem texto"))
+        );
+    }
+
+    #[test]
+    fn ja_casaram_usa_a_consulta_ligada_e_sem_ela_o_filtro_nao_age() {
+        let mut r = regras();
+        r.definir_filtro(FiltroDePadroes {
+            casam: CasamComODocumento::JaCasaram,
+            ..Default::default()
+        });
+        r.definir_documento(Some(documento("qualquer")));
+        // Sem a consulta (Frente A): não filtra e avisa.
+        let q = r.quem_casa();
+        assert!(q.conjunto.is_none());
+        assert!(
+            q.nota
+                .is_some_and(|n| n.contains("ainda não está disponível"))
+        );
+        assert_eq!(ids(&mut r).len(), 7);
+        // Com a consulta: só quem já casou com o documento (pelo id da entrada).
+        let id_do_documento = r.documento().expect("doc").entrada.id.clone();
+        let f = r
+            .fonte
+            .clone()
+            .expect("fonte")
+            .com_ja_casaram(std::sync::Arc::new(move |id: &str| {
+                Ok(if id == id_do_documento {
+                    BTreeSet::from([ENERGIA.to_owned()])
+                } else {
+                    BTreeSet::new()
+                })
+            }));
+        r.ligar(f);
+        r.recarregar_lista();
+        assert_eq!(ids(&mut r), [ENERGIA]);
+    }
+
+    #[test]
+    fn as_preferencias_levam_filtro_e_vista_e_voltam() {
+        let mut r = regras();
+        r.definir_filtro(FiltroDePadroes {
+            texto: "pix".to_owned(),
+            estado: Some(Estado::Ativa),
+            entrada: Some(sbf_regras::TipoDeEntrada::Documento),
+            mime: Some("image/*".to_owned()),
+            casam: CasamComODocumento::Agora,
+        });
+        r.definir_aba(AbaDosPadroes::Mapa);
+        let p = r.preferencias();
+        let json = serde_json::to_string(&p).expect("json");
+        let mut outra = regras();
+        outra.aplicar_preferencias(&serde_json::from_str(&json).expect("lê"));
+        assert_eq!(outra.filtro(), r.filtro());
+        assert_eq!(outra.aba(), AbaDosPadroes::Mapa);
+    }
+
+    /// Todo o texto que o quadro da área pintou.
+    fn textos_da_area(r: &mut Regras) -> Vec<String> {
+        fn colher(forma: &egui::Shape, fora: &mut Vec<String>) {
+            match forma {
+                egui::Shape::Text(t) => fora.push(t.galley.text().to_owned()),
+                egui::Shape::Vec(v) => v.iter().for_each(|f| colher(f, fora)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        tema::instalar_fontes(&ctx);
+        tema::aplicar(&ctx, "claro");
+        let mut textos = Vec::new();
+        for _ in 0..2 {
+            let entrada = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 1600.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let mut saida = ctx.run_ui(entrada, |ui| r.area(ui));
+            saida.textures_delta.clear();
+            textos.clear();
+            for c in &saida.shapes {
+                colher(&c.shape, &mut textos);
+            }
+        }
+        textos
+    }
+
+    fn contem(textos: &[String], trecho: &str) -> bool {
+        textos.iter().any(|t| t.contains(trecho))
+    }
+
+    #[test]
+    fn a_lista_desenha_os_filtros_e_so_os_padroes_que_passam() {
+        let mut r = regras();
+        let textos = textos_da_area(&mut r);
+        assert!(contem(&textos, "Casam com o documento:"), "{textos:?}");
+        assert!(contem(&textos, "7 padrões"), "{textos:?}");
+        assert!(contem(&textos, "Fatura do cartão · Banco Exemplo"));
+        r.definir_filtro(FiltroDePadroes {
+            estado: Some(Estado::Rascunho),
+            ..Default::default()
+        });
+        let textos = textos_da_area(&mut r);
+        assert!(contem(&textos, "1 de 7 padrões"), "{textos:?}");
+        assert!(contem(&textos, "Fatura do cartão · Banco Exemplo"));
+        assert!(!contem(&textos, "Conta de energia · Distribuidora Exemplo"));
+        r.definir_filtro(FiltroDePadroes {
+            texto: "nada disso existe".to_owned(),
+            ..Default::default()
+        });
+        let textos = textos_da_area(&mut r);
+        assert!(
+            contem(&textos, "Nenhum padrão com estes filtros."),
+            "{textos:?}"
+        );
+    }
+
+    #[test]
+    fn o_mapa_desenha_entrada_tipo_documental_e_padroes_com_estado_e_empate() {
+        let mut r = regras();
+        r.definir_aba(AbaDosPadroes::Mapa);
+        let textos = textos_da_area(&mut r);
+        assert!(contem(&textos, "Entrada: documento"), "{textos:?}");
+        assert!(contem(&textos, "Entrada: registro"), "{textos:?}");
+        assert!(contem(&textos, "Entrada: mensagem"), "{textos:?}");
+        assert!(contem(&textos, "comprovante-pix"), "{textos:?}");
+        assert!(contem(&textos, "Pix agendado · Banco Exemplo"));
+        assert!(
+            contem(&textos, "v2 · prioridade 0 · especificidade 2"),
+            "{textos:?}"
+        );
+        assert!(contem(&textos, "Consolidado"));
+        assert!(contem(&textos, "Desativado"));
+        // O Pix e o Pix agendado empatam em prioridade e especificidade.
+        assert!(contem(&textos, "empate"), "{textos:?}");
     }
 }

@@ -154,6 +154,13 @@ pub enum Evento<'a> {
         /// Pontos fechados porque a evidência sumiu.
         fechados: usize,
     },
+    /// Progresso da passada de fundo dos padrões de reconhecimento (spec 15): só contagens.
+    Padroes {
+        /// Leituras feitas nas versões vigentes.
+        feitos: u64,
+        /// Documentos com texto vezes versões vigentes.
+        total: u64,
+    },
     /// Um passo falhou.
     Falhou {
         /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `telegram`, `triagem`, `estado`).
@@ -241,6 +248,7 @@ impl fmt::Display for Evento<'_> {
                 f,
                 "pontos novos={novos} reabertos={reabertos} fechados={fechados}"
             ),
+            Self::Padroes { feitos, total } => write!(f, "padroes: {feitos} de {total}"),
             Self::Falhou { passo, falha } => write!(f, "falhou passo={passo} causa={falha}"),
             Self::FalhouConta {
                 passo,

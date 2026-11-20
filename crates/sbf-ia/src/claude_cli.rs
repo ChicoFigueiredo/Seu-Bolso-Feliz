@@ -52,6 +52,34 @@ pub struct ClaudeCli {
     pasta_base: Option<PathBuf>,
 }
 
+/// O `claude` por um caminho absoluto de confiança: primeiro `~/.local/bin` (a instalação
+/// padrão), depois cada pasta absoluta do `PATH` do usuário, depois as pastas do sistema.
+/// É a única busca do binário `claude`: a triagem, Rita e a CLI a usam.
+pub fn resolver_claude() -> Option<PathBuf> {
+    let casa = std::env::var_os("HOME").map(PathBuf::from);
+    let path = std::env::var_os("PATH");
+    resolver_claude_em(casa.as_deref(), path.as_deref())
+}
+
+/// O miolo testável de [`resolver_claude`].
+pub fn resolver_claude_em(casa: Option<&Path>, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let mut candidatos: Vec<PathBuf> = Vec::new();
+    if let Some(casa) = casa.filter(|c| c.is_absolute()) {
+        candidatos.push(casa.join(".local/bin/claude"));
+    }
+    if let Some(path) = path {
+        candidatos.extend(
+            std::env::split_paths(path)
+                .filter(|p| p.is_absolute())
+                .map(|p| p.join("claude")),
+        );
+    }
+    if let Some(sistema) = sbf_processo::localizar("claude") {
+        candidatos.push(sistema);
+    }
+    candidatos.into_iter().find(|c| sbf_processo::confiavel(c))
+}
+
 impl ClaudeCli {
     /// `caminho` é o binário `claude` (absoluto, em pasta que ninguém mais grava). Modelos
     /// pelos apelidos do Claude Code: `haiku` (rápido) e `sonnet` (forte).
@@ -64,6 +92,12 @@ impl ClaudeCli {
             espera_do_limite: ESPERA_PADRAO_DO_LIMITE,
             pasta_base: None,
         }
+    }
+
+    /// O `claude` pelo caminho de confiança que [`resolver_claude`] acha (a instalação do
+    /// usuário em `~/.local/bin`, o `PATH` e as pastas do sistema). É a busca única do app.
+    pub fn do_ambiente() -> Option<Self> {
+        resolver_claude().map(Self::novo)
     }
 
     /// Procura `claude` nas pastas do sistema (nunca pelo `PATH` do usuário). Quem instalou
@@ -122,7 +156,7 @@ impl ClaudeCli {
 }
 
 /// Diretório de trabalho novo, vazio e 0700; apagado ao descartar.
-struct PastaDeTrabalho(PathBuf);
+pub(crate) struct PastaDeTrabalho(PathBuf);
 
 impl PastaDeTrabalho {
     fn criar(base: &Path) -> std::io::Result<Self> {
@@ -228,6 +262,236 @@ impl Provedor for ClaudeCli {
             self.espera_do_limite,
         )
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Conversa com ferramentas (spec 15, Rita)
+// ---------------------------------------------------------------------------------------
+
+/// O servidor MCP que o `claude` sobe como filho: o `sbf mcp --rita ...`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServidorMcp {
+    /// O programa (o próprio `sbf`).
+    pub programa: PathBuf,
+    pub argumentos: Vec<String>,
+    /// O nome do servidor no `claude` (as ferramentas viram `mcp__<nome>__<ferramenta>`).
+    pub nome: String,
+}
+
+/// O que o `claude -p` devolveu depois de rodar o próprio laço de ferramentas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaidaDoClaudeComFerramentas {
+    /// A resposta final do modelo (pode ser vazia).
+    pub texto: String,
+    pub consumo: Consumo,
+    pub modelo: String,
+    /// Quantos turnos o `claude` reportou.
+    pub turnos: u64,
+}
+
+const SISTEMA_COM_FERRAMENTAS: &str = "Você é Rita, a assistente de padrões de reconhecimento do Seu Bolso Feliz. Use somente as ferramentas do servidor MCP `rita`; as instruções vêm no pedido.";
+
+/// Os argumentos do `claude` para uma conversa com as ferramentas de `servidor`, só as de
+/// `permitidas` e no máximo `turnos` turnos. Puro, para testar sem processo.
+pub(crate) fn argumentos_com_ferramentas(
+    modelo: &str,
+    configuracao_mcp: &Path,
+    servidor: &str,
+    permitidas: &[String],
+    turnos: u32,
+) -> Vec<String> {
+    let mut a: Vec<String> = [
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        modelo,
+        "--tools",
+        "",
+        "--system-prompt",
+        SISTEMA_COM_FERRAMENTAS,
+        "--no-session-persistence",
+        "--disable-slash-commands",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "project",
+        "--max-turns",
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    a.push(turnos.to_string());
+    a.push("--mcp-config".to_owned());
+    a.push(configuracao_mcp.display().to_string());
+    a.push("--allowedTools".to_owned());
+    a.extend(permitidas.iter().map(|f| format!("mcp__{servidor}__{f}")));
+    a
+}
+
+/// A configuração MCP (JSON) de um servidor. Sem segredo nenhum.
+pub(crate) fn configuracao_mcp(servidor: &ServidorMcp) -> Value {
+    serde_json::json!({
+        "mcpServers": {
+            servidor.nome.clone(): {
+                "type": "stdio",
+                "command": servidor.programa.display().to_string(),
+                "args": servidor.argumentos,
+            }
+        }
+    })
+}
+
+impl ClaudeCli {
+    /// Uma conversa em que o `claude` roda o laço e chama as ferramentas de Rita por MCP
+    /// (`servidor`). O `prompt` (instruções e dados, com o texto do documento em bloco
+    /// delimitado) vai só pela entrada padrão. As ferramentas `permitidas` são as únicas
+    /// habilitadas; as embutidas do `claude` ficam desligadas. `turnos` limita o laço do
+    /// próprio `claude`; o teto de 8 chamadas é do servidor MCP.
+    ///
+    /// # Errors
+    /// O `claude` ausente, não autenticado, limite de uso, prazo, interrupção.
+    pub fn conversar_com_mcp(
+        &self,
+        prompt: &str,
+        servidor: &ServidorMcp,
+        permitidas: &[String],
+        turnos: u32,
+        cancelar: &std::sync::atomic::AtomicBool,
+    ) -> ResultadoDeIa<SaidaDoClaudeComFerramentas> {
+        let pasta = PastaDeTrabalho::criar(&self.base())
+            .map_err(|e| ErroDeIa::Indisponivel(format!("diretório de trabalho: {}", e.kind())))?;
+        let arquivo_mcp = pasta.0.join("mcp.json");
+        std::fs::write(
+            &arquivo_mcp,
+            serde_json::to_vec(&configuracao_mcp(servidor))
+                .map_err(|_| ErroDeIa::Outro("montar a configuração MCP".to_owned()))?,
+        )
+        .map_err(|e| ErroDeIa::Indisponivel(format!("configuração MCP: {}", e.kind())))?;
+        let argumentos = argumentos_com_ferramentas(
+            &self.modelo_forte,
+            &arquivo_mcp,
+            &servidor.nome,
+            permitidas,
+            turnos,
+        );
+        let mut c = comando(&self.caminho, &argumentos, HERDADAS).map_err(|_| {
+            ErroDeIa::Indisponivel("o `claude` não foi encontrado ou não é confiável".to_owned())
+        })?;
+        c.current_dir(&pasta.0);
+        let prazo = Instant::now() + self.prazo;
+        let mut filho = c.spawn().map_err(|e| match FalhaDeProcesso::from(e) {
+            FalhaDeProcesso::NaoEncontrado => {
+                ErroDeIa::Indisponivel("o `claude` não pôde ser executado".to_owned())
+            }
+            outra => ErroDeIa::Outro(outra.to_string()),
+        })?;
+        let escrita = filho
+            .stdin
+            .take()
+            .map(|stdin| escrever_e_fechar(stdin, Zeroizing::new(prompt.as_bytes().to_vec())));
+        let stdout = ler_com_limite(filho.stdout.take(), SAIDA_MAXIMA, 0);
+        let stderr = ler_o_fim(filho.stderr.take(), ERRO_MAXIMO);
+        let status = loop {
+            if cancelar.load(Ordering::Acquire) {
+                let _ = filho.kill();
+                let _ = filho.wait();
+                return Err(ErroDeIa::Interrompido);
+            }
+            match filho.try_wait() {
+                Ok(Some(st)) => break st,
+                Ok(None) => {}
+                Err(e) => return Err(ErroDeIa::Outro(format!("espera do `claude`: {}", e.kind()))),
+            }
+            if Instant::now() >= prazo {
+                let _ = filho.kill();
+                let _ = filho.wait();
+                return Err(ErroDeIa::Outro("o `claude` passou do prazo".to_owned()));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        if let Some(Ok(Err(e))) = escrita.map(std::thread::JoinHandle::join) {
+            return Err(ErroDeIa::Outro(format!(
+                "entrada do `claude`: {}",
+                e.kind()
+            )));
+        }
+        let lido = stdout.join().unwrap_or_default();
+        let erro = stderr.join().unwrap_or_default();
+        drop(pasta);
+        interpretar_com_ferramentas(
+            &lido.bytes,
+            &erro,
+            status.success(),
+            &self.modelo_forte,
+            self.espera_do_limite,
+        )
+    }
+}
+
+/// Lê a saída do `claude` de uma conversa com ferramentas. Pura.
+pub(crate) fn interpretar_com_ferramentas(
+    stdout: &[u8],
+    stderr: &[u8],
+    saiu_bem: bool,
+    modelo_pedido: &str,
+    espera_do_limite: u64,
+) -> ResultadoDeIa<SaidaDoClaudeComFerramentas> {
+    let erro_texto = String::from_utf8_lossy(stderr);
+    let Some(objeto) = objeto_de_resultado(stdout) else {
+        return Err(classificar_erro(
+            &erro_texto,
+            espera_do_limite,
+            "saída ilegível do `claude`",
+        ));
+    };
+    let texto = objeto.get("result").and_then(Value::as_str).unwrap_or("");
+    let subtipo = objeto.get("subtype").and_then(Value::as_str).unwrap_or("");
+    // Estourar os turnos não é falha: Rita mostra o que o servidor MCP guardou.
+    let estourou = subtipo == "error_max_turns";
+    let com_erro = !estourou
+        && (objeto.get("is_error").and_then(Value::as_bool) == Some(true)
+            || subtipo.starts_with("error")
+            || !saiu_bem);
+    if com_erro {
+        let todo = format!("{texto}\n{erro_texto}");
+        return Err(classificar_erro(
+            &todo,
+            espera_do_limite,
+            "falha do `claude`",
+        ));
+    }
+    let uso = objeto.get("usage");
+    let soma = |chaves: &[&str]| -> u64 {
+        chaves
+            .iter()
+            .filter_map(|k| uso.and_then(|u| u.get(*k)).and_then(Value::as_u64))
+            .sum()
+    };
+    let custo = objeto
+        .get("total_cost_usd")
+        .and_then(Value::as_f64)
+        .filter(|c| c.is_finite() && *c >= 0.0)
+        .map_or(0, dezmilesimos);
+    let modelo = objeto
+        .get("modelUsage")
+        .and_then(Value::as_object)
+        .and_then(|m| m.keys().next().cloned())
+        .unwrap_or_else(|| modelo_pedido.to_owned());
+    Ok(SaidaDoClaudeComFerramentas {
+        texto: texto.trim().to_owned(),
+        consumo: Consumo {
+            tokens_entrada: soma(&[
+                "input_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ]),
+            tokens_saida: soma(&["output_tokens"]),
+            custo_dezmilesimos_usd: custo,
+            nominal: true,
+        },
+        modelo,
+        turnos: objeto.get("num_turns").and_then(Value::as_u64).unwrap_or(0),
+    })
 }
 
 /// Lê a saída `--output-format json` do `claude`. Pura, para testar sem processo.
@@ -496,5 +760,60 @@ mod testes {
         assert_eq!(dezmilesimos(0.0001), 1);
         assert_eq!(dezmilesimos(0.00011), 2);
         assert_eq!(dezmilesimos(1.0), 10_000);
+    }
+
+    #[test]
+    fn argumentos_da_conversa_so_liberam_as_ferramentas_de_rita() {
+        let a = argumentos_com_ferramentas(
+            "sonnet",
+            Path::new("/x/mcp.json"),
+            "rita",
+            &["ver_item".to_owned(), "pre_testar".to_owned()],
+            9,
+        );
+        let junto = a.join(" ");
+        assert!(
+            junto.contains("--tools  --system-prompt")
+                || a.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty())
+        );
+        assert!(junto.contains("--strict-mcp-config"));
+        assert!(junto.contains("--max-turns 9"));
+        assert!(junto.contains("--mcp-config /x/mcp.json"));
+        assert!(junto.ends_with("mcp__rita__ver_item mcp__rita__pre_testar"));
+        assert!(!junto.contains("Bash"));
+    }
+
+    #[test]
+    fn a_configuracao_mcp_nao_leva_segredo_e_aponta_para_o_servidor() {
+        let v = configuracao_mcp(&ServidorMcp {
+            programa: PathBuf::from("/usr/bin/sbf"),
+            argumentos: vec!["mcp".into(), "--rita".into()],
+            nome: "rita".into(),
+        });
+        assert_eq!(v["mcpServers"]["rita"]["command"], "/usr/bin/sbf");
+        assert_eq!(v["mcpServers"]["rita"]["args"][1], "--rita");
+    }
+
+    #[test]
+    fn conversa_com_ferramentas_le_uso_e_aceita_estouro_de_turnos() {
+        let ok = json!({
+            "type":"result","subtype":"success","is_error":false,"result":"feito",
+            "total_cost_usd":0.5,"num_turns":4,
+            "usage":{"input_tokens":10,"output_tokens":2},
+            "modelUsage":{"claude-sonnet-fake":{}}
+        })
+        .to_string();
+        let r = interpretar_com_ferramentas(ok.as_bytes(), b"", true, "sonnet", 60).expect("saida");
+        assert_eq!(r.texto, "feito");
+        assert_eq!(r.turnos, 4);
+        assert!(r.consumo.nominal);
+        assert_eq!(r.modelo, "claude-sonnet-fake");
+        let estouro =
+            json!({"type":"result","subtype":"error_max_turns","is_error":false,"result":""})
+                .to_string();
+        assert!(interpretar_com_ferramentas(estouro.as_bytes(), b"", true, "s", 60).is_ok());
+        let falha = json!({"type":"result","subtype":"error_during_execution","is_error":true,"result":"x"})
+            .to_string();
+        assert!(interpretar_com_ferramentas(falha.as_bytes(), b"", false, "s", 60).is_err());
     }
 }

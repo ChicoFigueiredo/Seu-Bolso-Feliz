@@ -157,7 +157,7 @@ fn achar(texto: &str, forma: &Forma) -> Option<usize> {
 
 /// O rótulo que antecede a posição: o trecho da mesma linha, ou a linha de cima se o valor
 /// está sozinho. No máximo 40 caracteres, começando numa palavra inteira.
-fn rotulo_antes(texto: &str, pos: usize) -> Option<String> {
+pub fn rotulo_antes(texto: &str, pos: usize) -> Option<String> {
     let inicio_da_linha = texto[..pos].rfind('\n').map_or(0, |i| i + 1);
     let mut cru = texto[inicio_da_linha..pos].trim_end().to_owned();
     if let Some(r) = cru.strip_suffix("R$") {
@@ -188,7 +188,7 @@ fn rotulo_antes(texto: &str, pos: usize) -> Option<String> {
     rotulo.chars().any(char::is_alphabetic).then_some(rotulo)
 }
 
-fn rotulo_para_regex(rotulo: &str) -> String {
+pub fn rotulo_para_regex(rotulo: &str) -> String {
     rotulo
         .split_whitespace()
         .map(regex::escape)

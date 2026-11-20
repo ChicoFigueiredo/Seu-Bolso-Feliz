@@ -173,8 +173,14 @@ pub struct Janela {
     pub conexoes: crate::conexoes_ui::Conexoes,
     /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
     pub regras: crate::regras_ui::Regras,
+    /// Rita, a assistente de padrões (spec 15): painel do dock, destacável.
+    pub rita: crate::rita_ui::RitaUi,
+    /// O item que Rita recebe, guardado enquanto o foco e a área não mudam.
+    rita_item: Option<(Ref, String, Option<String>, crate::rita_ui::ItemDaTela)>,
     /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
     pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
+    /// A marcação verde/âmbar das listas de documentos (spec 15, D3).
+    pub marcacao: crate::marcacao::Compartilhada,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -308,7 +314,10 @@ impl Janela {
             roteiros: crate::roteiros::Roteiros::default(),
             conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
+            rita: crate::rita_ui::RitaUi::default(),
+            rita_item: None,
             caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada::default(),
+            marcacao: crate::marcacao::Compartilhada::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -360,6 +369,7 @@ impl Janela {
             conexoes: crate::preferencias_da_janela::PreferenciasDeConexoes {
                 aba: self.conexoes.aba_guardada().to_owned(),
             },
+            padroes: self.regras.preferencias(),
         }
     }
 
@@ -390,6 +400,7 @@ impl Janela {
         self.largura_da_lateral = lidas.largura_valida();
         self.estado_da_janela = lidas.janela;
         self.conexoes.definir_aba(&lidas.conexoes.aba);
+        self.regras.aplicar_preferencias(&lidas.padroes);
         lidas
     }
 
@@ -864,6 +875,7 @@ impl Janela {
             self.cache.limpar();
         }
         self.sondar_triagem(ui.ctx());
+        self.sincronizar_marcacao(ui.ctx());
         match vista {
             Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
             None => {
@@ -872,6 +884,15 @@ impl Janela {
                 self.centro = centro;
             }
         }
+    }
+
+    /// Liga a marcação ao catálogo de padrões (o mesmo da área Regras) e a publica no
+    /// contexto, para as tabelas a acharem. Barato: roda a cada quadro.
+    fn sincronizar_marcacao(&mut self, ctx: &egui::Context) {
+        if let Ok(mut m) = self.marcacao.lock() {
+            m.definir_fonte(self.regras.fonte());
+        }
+        crate::marcacao::publicar(ctx, &self.marcacao);
     }
 
     fn desenhar_destino_em(
@@ -1180,7 +1201,11 @@ impl Janela {
             }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
             Destino::AreaFutura("conexoes") => self.conexoes.area(ui),
-            Destino::AreaFutura(crate::regras_ui::ROTA) => self.regras.area(ui),
+            Destino::AreaFutura(crate::regras_ui::ROTA) => {
+                let documento = self.documento_de_referencia_dos_padroes();
+                self.regras.definir_documento(documento);
+                self.regras.area(ui);
+            }
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
             }
@@ -1235,6 +1260,10 @@ impl Janela {
             self.reconhecimento_ui(ui);
             return;
         }
+        if painel == PainelDoDock::Rita {
+            self.rita_do_dock_ui(ui, consulta);
+            return;
+        }
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
@@ -1283,6 +1312,141 @@ impl Janela {
             &self.decisoes_da_sessao,
             &mut self.pedidos,
         );
+    }
+
+    /// O item que Rita recebe: o documento (ou registro) em foco, com o texto guardado, a área
+    /// e os itens selecionados como lista. Guardado até o foco ou a área mudarem (nada de
+    /// consulta ao banco a cada quadro).
+    fn item_da_rita(&mut self, consulta: &dyn Consulta) -> Option<crate::rita_ui::ItemDaTela> {
+        let cofre = self.rita.cofre()?;
+        let foco = self.foco()?;
+        let area = areas::rotulo_do_destino(self.navegacao.atual());
+        // O filtro ativo da área (período, estado, tipo, conexão, pesquisa): vai a Rita em
+        // palavras. A lista visível em si não é lida (só a seleção vira títulos): ver a spec 15, D8.
+        let filtro = filtro_para_rita(&self.filtro(), &self.ciclo_atual());
+        if let Some((r, a, f, item)) = &self.rita_item
+            && *r == foco
+            && *a == area
+            && *f == filtro
+        {
+            return Some(item.clone());
+        }
+        let titulos: Vec<sbf_rita::TituloDaLista> = self
+            .centro
+            .selecao
+            .itens
+            .iter()
+            .filter(|r| **r != foco)
+            .take(30)
+            .map(|r| sbf_rita::TituloDaLista {
+                id: r.chave.clone(),
+                titulo: Leitor::novo(consulta, &mut self.cache).rotulo(r),
+            })
+            .collect();
+        let mut leitor = Leitor::novo(consulta, &mut self.cache);
+        let rotulo = leitor.rotulo(&foco);
+        let entrada = match foco.tipo {
+            Tipo::Achado | Tipo::Documento => {
+                let texto = leitor.texto(&foco).ok().and_then(|t| (*t).clone());
+                let (nome, mime) =
+                    sbf_rita::cofre::nome_e_mime(&cofre, &foco.chave).unwrap_or_default();
+                let mut e = sbf_rita::entrada_de_documento(
+                    &foco.chave,
+                    nome.as_deref().or(Some(rotulo.as_str())),
+                    mime.as_deref(),
+                    texto.as_deref(),
+                );
+                e.momento = sbf_rita::cofre::momento_do_documento(&cofre, &foco.chave);
+                e
+            }
+            Tipo::Registro => sbf_rita::entrada_de_registro(&foco.chave, &rotulo),
+            _ => return None,
+        };
+        let item = crate::rita_ui::ItemDaTela {
+            chave: foco.to_string(),
+            rotulo,
+            tela: sbf_rita::DadosDaTela {
+                cofre,
+                item: entrada,
+                area: area.clone(),
+                filtro: filtro.clone(),
+                titulos,
+            },
+        };
+        self.rita_item = Some((foco, area, filtro, item.clone()));
+        Some(item)
+    }
+
+    /// O painel Rita no dock.
+    fn rita_do_dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta) {
+        if self.rita.flutuante {
+            ui.add_space(6.0);
+            ui.label("Rita está numa janela flutuante.");
+            if ui.button("Trazer de volta para o painel").clicked() {
+                self.rita.flutuante = false;
+            }
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let acoes = self.rita.desenhar(ui, item.as_ref());
+        self.processar_acoes_da_rita(ui.ctx(), acoes);
+    }
+
+    /// Rita destacada numa janela flutuante (acompanha a seleção igual ao painel).
+    pub fn rita_flutuante_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
+        if !self.rita.flutuante {
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let mut acoes = Vec::new();
+        let mut aberta = true;
+        let p = tema::paleta(ctx);
+        egui::Window::new(RichText::new("Rita").strong())
+            .id(Id::new("rita-flutuante"))
+            .open(&mut aberta)
+            .default_size([440.0, 580.0])
+            .resizable(true)
+            .collapsible(true)
+            .frame(egui::Frame::window(&ctx.global_style()).fill(p.superficie_1))
+            .show(ctx, |ui| {
+                acoes = self.rita.desenhar(ui, item.as_ref());
+            });
+        if !aberta {
+            self.rita.flutuante = false;
+        }
+        self.processar_acoes_da_rita(ctx, acoes);
+    }
+
+    /// O que o painel Rita pediu: ativar (como usuário, pelo caminho da área Padrões) ou abrir
+    /// a regra no editor. Depois de uma gravação de Rita, a lista de padrões se relê.
+    fn processar_acoes_da_rita(&mut self, ctx: &Context, acoes: Vec<crate::rita_ui::AcaoDeRita>) {
+        use crate::rita_ui::AcaoDeRita;
+        if self.rita.tomar_gravou() {
+            self.regras.recarregar_de_fora();
+        }
+        for a in acoes {
+            match a {
+                AcaoDeRita::Ativar { regra, versao } => {
+                    let r = match self.regras.fonte() {
+                        Some(f) => f.ativar(&regra, versao),
+                        None => Err("O catálogo de padrões não está ligado.".to_owned()),
+                    };
+                    if r.is_ok() {
+                        self.regras.recarregar_de_fora();
+                    }
+                    self.rita.ativacao_feita(&regra, versao, r);
+                }
+                AcaoDeRita::AbrirNoEditor { regra } => {
+                    self.ligacao(
+                        ctx,
+                        PedidoDeLigacao::Regra {
+                            regra,
+                            flutuante: false,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     /// Os painéis flutuantes (Ctrl+clique), como janelas egui dentro da janela.
@@ -1932,7 +2096,7 @@ impl Janela {
             A::Retomar => servico.retomar().map(|()| "Rodada retomada.".to_owned()),
             A::ApagarRegra(id) => servico
                 .apagar_regra_do_agente(id)
-                .map(|()| "Regra apagada. Ela só volta com 3 confirmações novas suas.".to_owned()),
+                .map(|()| "Padrão apagado. Ela só volta com 3 confirmações novas suas.".to_owned()),
             A::Aceitar(ids) => servico.aceitar(&ids, comandos).map(|r| {
                 self.decisoes_da_sessao.extend(&r.decisoes);
                 let mut texto = format!(
@@ -2130,7 +2294,7 @@ impl Janela {
                 };
                 controle.mensagem = Some(match (padrao, pelas_regras) {
                     (Err(e), _) => (mensagem_de_erro(&e), true),
-                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelas regras: {e}"), true),
+                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelos padrões: {e}"), true),
                     (Ok(n), Ok(m)) => match n + m {
                         0 => ("Nenhuma sugestão nova.".to_owned(), false),
                         1 => ("1 sugestão nova.".to_owned(), false),
@@ -3173,7 +3337,7 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                     estrategia: estrategia.to_owned(),
                 },
                 alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],
-                motivo: Some("regra criada à mão (Ferramentas › Regras de senha)".to_owned()),
+                motivo: Some("padrão criado à mão (Ferramentas › Regras de senha)".to_owned()),
             }))
         }
         Dialogo::NovoLote { nome } => {
@@ -3303,7 +3467,7 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
             partes.push("decidido por você".to_owned())
         }
         Some(sbf_inventario::consulta::Quem::Automatico(r)) if r.is_empty() => {
-            partes.push("decidido pelas regras".to_owned());
+            partes.push("decidido pelos padrões".to_owned());
         }
         Some(q) => partes.push(format!("decidido por {}", q.rotulo())),
         None => {}
@@ -3316,6 +3480,13 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
     } else {
         format!("Filtro: {}", partes.join(" · "))
     }
+}
+
+/// O filtro ativo em palavras para Rita (sem o convite de "Sem filtros"): `None` sem filtro.
+pub fn filtro_para_rita(f: &Filtro, ciclo_atual: &str) -> Option<String> {
+    descricao_do_filtro(f, ciclo_atual)
+        .strip_prefix("Filtro: ")
+        .map(str::to_owned)
 }
 
 fn cabecalho_da_area(
@@ -3413,7 +3584,7 @@ fn buscar_pelas_regras(
     let mut catalogo = fonte
         .catalogo
         .lock()
-        .map_err(|_| "o catálogo de regras está ocupado".to_owned())?;
+        .map_err(|_| "o catálogo de padrões está ocupado".to_owned())?;
     sbf_reconhecimento::favorecido::buscar(
         plan,
         &mut catalogo,
@@ -3502,6 +3673,19 @@ mod testes {
         );
         assert!(j.pedidos.is_empty());
         assert!(matches!(&j.controle.mensagem, Some((_, true))));
+    }
+
+    #[test]
+    fn rita_recebe_o_filtro_ativo_em_palavras_e_nada_sem_filtro() {
+        assert_eq!(filtro_para_rita(&Filtro::default(), "2026-10"), None);
+        let f = Filtro {
+            texto: Some("pix".to_owned()),
+            ..Filtro::default()
+        };
+        assert_eq!(
+            filtro_para_rita(&f, "2026-10").as_deref(),
+            Some("\u{201c}pix\u{201d}")
+        );
     }
 
     #[test]
