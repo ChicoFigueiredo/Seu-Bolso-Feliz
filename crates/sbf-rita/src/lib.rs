@@ -28,7 +28,7 @@ pub use contexto::{
 };
 pub use ferramentas::{
     ChamadaFeita, EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, RascunhoCriado, Sessao,
-    definicoes,
+    definicoes, motivo_do_pedido, rastro_resumido,
 };
 pub use laco::{Evento, Parada, Relatorio, Rita};
 pub use pre_teste::{PreTeste, pre_testar};

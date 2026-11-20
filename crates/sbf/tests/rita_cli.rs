@@ -23,6 +23,8 @@ impl Ambiente {
         let pasta = tempfile::tempdir().unwrap();
         std::fs::create_dir(pasta.path().join("cofre")).unwrap();
         Catalogo::abrir(&pasta.path().join("cofre").join("regras.sqlite")).unwrap();
+        // O inventário com `saida_ia`: sem ele a CLI não envia nada (ADR-015).
+        sbf_rita::registro::inventario_minimo_para_testes(&pasta.path().join("cofre"));
         Self { pasta }
     }
 
@@ -127,6 +129,33 @@ fn rita07_o_formato_openai_cria_o_rascunho_e_a_cli_mostra_tudo() {
     );
     // O backup foi feito antes da escrita.
     assert!(a.cofre().join("backups").join("mcp").is_dir());
+    // O que saiu ficou registrado, sem conteúdo (ADR-015), mesmo sendo o provedor local.
+    let banco = rusqlite::Connection::open(a.cofre().join("inventario.sqlite")).unwrap();
+    let linha: String = banco
+        .query_row(
+            "SELECT destinatario||'|'||nivel||'|'||provedor||'|'||modelo||'|'||tokens_entrada||'|'||tokens_saida FROM saida_ia",
+            [],
+            |l| l.get(0),
+        )
+        .unwrap();
+    assert_eq!(linha, "rita|completo|local|modelo-ficticio|1234|56");
+}
+
+#[test]
+fn sem_o_registro_do_que_sai_a_cli_nao_envia_nada_e_diz_o_porque() {
+    let a = Ambiente::novo();
+    std::fs::remove_file(a.cofre().join("inventario.sqlite")).unwrap();
+    let doc = a.documento(COMPROVANTE);
+    let s = ServidorFalso::iniciar();
+    s.rota(
+        "/v1/chat/completions",
+        RespostaFalsa::json(&resposta_com_chamada()),
+    );
+    let o = a.sbf(&s, &doc, PEDIDO);
+    assert_eq!(o.status.code(), Some(1));
+    let e = String::from_utf8_lossy(&o.stderr);
+    assert!(e.contains("nada foi enviado"), "{e}");
+    assert!(s.pedidos().is_empty(), "o servidor não recebeu nada");
 }
 
 #[test]

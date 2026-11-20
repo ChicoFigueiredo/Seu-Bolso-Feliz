@@ -758,17 +758,17 @@ fn passada_de_padroes_faz_lotes_com_pausa_e_volta_ao_minuto_quando_acaba() {
     let t0 = agora();
     w.passo(t0, Duration::from_millis(1), &nao);
     assert_eq!(n.get(), 1, "a primeira volta já roda");
-    w.passo(t0 + 1, Duration::from_millis(1), &nao);
+    w.passo(t0, Duration::from_millis(1), &nao);
     assert_eq!(
         n.get(),
         1,
-        "há o que ler, mas o lote seguinte espera a pausa"
+        "há o que ler, mas o lote seguinte espera a pausa de 1 s: nunca laço quente"
     );
-    w.passo(t0 + 5, Duration::from_millis(1), &nao);
+    w.passo(t0 + 1, Duration::from_millis(1), &nao);
     assert_eq!(n.get(), 2);
-    w.passo(t0 + 10, Duration::from_millis(1), &nao);
+    w.passo(t0 + 2, Duration::from_millis(1), &nao);
     assert_eq!(n.get(), 3);
-    w.passo(t0 + 15, Duration::from_millis(1), &nao);
+    w.passo(t0 + 3, Duration::from_millis(1), &nao);
     assert_eq!(n.get(), 4, "o lote vazio acaba a passada");
     w.passo(t0 + 40, Duration::from_millis(1), &nao);
     assert_eq!(
@@ -780,7 +780,7 @@ fn passada_de_padroes_faz_lotes_com_pausa_e_volta_ao_minuto_quando_acaba() {
     assert_eq!(n.get(), 5);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("padroes: 60 de 60"), "{log}");
-    // O log não vira uma linha por lote: três lotes em 10 s, no máximo uma linha de progresso.
+    // O log não vira uma linha por lote: três lotes em poucos segundos, no máximo uma linha de progresso.
     assert_eq!(log.matches("padroes: ").count(), 2, "{log}");
     assert_eq!(w.estado.falhas, 0);
 }

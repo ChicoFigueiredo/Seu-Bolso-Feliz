@@ -130,6 +130,7 @@ fn rita08_acompanha_a_selecao_destaca_e_mostra_tokens_custo_e_confirmacao() {
 
     // Um pedido: o provedor falso cria o rascunho (que derruba o `pix-geral`).
     let falso = Arc::new(FalsoDeConversa::com_roteiro(vec![Ok(RespostaDeConversa {
+        custo_ausente: false,
         texto: None,
         chamadas: vec![ChamadaDeFerramenta {
             id: "1".into(),
@@ -163,7 +164,7 @@ fn rita08_acompanha_a_selecao_destaca_e_mostra_tokens_custo_e_confirmacao() {
     assert_eq!(k.estado, EstadoDoCartao::Aberto);
     assert_eq!(
         rita.linha_de_consumo(&item.chave).as_deref(),
-        Some("1.500 tokens de entrada · 80 de saída · local, sem custo")
+        Some("Última resposta: 1.500 tokens de entrada · 80 de saída · local, sem custo")
     );
 
     // A seleção mudou para outro item: o painel mostra a conversa dele (vazia), a primeira fica.

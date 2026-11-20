@@ -15,7 +15,10 @@ use sbf_ia::{
 use sbf_mcp::backup::Backups;
 
 use crate::contexto::Contexto;
-use crate::ferramentas::{ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes};
+use crate::ferramentas::{
+    ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes, motivo_do_pedido,
+    rastro_resumido,
+};
 use crate::prompt::{instrucoes, pedido_do_usuario, saida_de_ferramenta};
 use crate::registro::{completar, registrar_antes};
 
@@ -75,6 +78,8 @@ pub struct Rita {
     ctx: Contexto,
     mensagens: Vec<Mensagem>,
     backups: Backups,
+    /// O primeiro pedido da conversa: num refinamento, o `motivo` da versão é este + o de agora.
+    primeiro_pedido: Option<String>,
 }
 
 impl std::fmt::Debug for Rita {
@@ -119,6 +124,7 @@ impl Rita {
             ctx,
             mensagens: Vec::new(),
             backups,
+            primeiro_pedido: None,
         }
     }
 
@@ -170,11 +176,22 @@ impl Rita {
     ) -> Result<Relatorio, ErroDeIa> {
         let inicio = Instant::now();
         let modelo = provedor.modelo();
-        let mut sessao = Sessao::nova(self.ctx.clone(), pedido, &modelo, self.backups.clone());
-        if self.mensagens.is_empty() {
+        let primeiro = self.mensagens.is_empty();
+        let motivo = motivo_do_pedido(
+            self.primeiro_pedido.as_deref().filter(|_| !primeiro),
+            pedido,
+        );
+        let mut sessao = Sessao::nova(self.ctx.clone(), &motivo, &modelo, self.backups.clone());
+        if primeiro {
+            self.primeiro_pedido = Some(pedido.trim().to_owned());
+            // O rastro dos padrões do item já vai no primeiro prompt (D8): poupa uma chamada.
+            let rastro = rastro_resumido(&self.ctx);
             self.mensagens.push(Mensagem::Sistema(instrucoes()));
-            self.mensagens
-                .push(Mensagem::Usuario(pedido_do_usuario(&self.ctx.tela, pedido)));
+            self.mensagens.push(Mensagem::Usuario(pedido_do_usuario(
+                &self.ctx.tela,
+                pedido,
+                rastro.as_deref(),
+            )));
         } else {
             self.mensagens.push(Mensagem::Usuario(format!(
                 "NOVO PEDIDO DO USUÁRIO:\n{}",
@@ -184,6 +201,7 @@ impl Rita {
         let ferramentas = definicoes();
         let mut consumo = Consumo::default();
         let mut ultimo_texto = String::new();
+        let mut alguma_sem_custo = false;
         let parada = loop {
             if cancelar.load(Ordering::Acquire) {
                 break Parada::Interrompida;
@@ -207,6 +225,7 @@ impl Rita {
             };
             completar(registro, linha, resposta.consumo);
             consumo = soma(consumo, resposta.consumo);
+            alguma_sem_custo |= resposta.custo_ausente;
             observar(Evento::Consumo(consumo));
             if let Some(t) = &resposta.texto {
                 ultimo_texto.clone_from(t);
@@ -250,7 +269,7 @@ impl Rita {
             rascunhos: estado.rascunhos,
             melhor,
             consumo,
-            natureza: provedor.natureza_do_custo(),
+            natureza: NaturezaDoCusto::do_pedido(provedor.natureza_do_custo(), alguma_sem_custo),
             modelo,
             duracao: inicio.elapsed(),
         })
@@ -263,7 +282,12 @@ impl Rita {
         observar: &mut dyn FnMut(Evento<'_>),
     ) {
         for c in chamadas {
-            let saida = sessao.executar(&c.nome, &c.argumentos);
+            // D11: depois de um rascunho passar, o resto da resposta é recusado sem executar.
+            let saida = if sessao.passou() {
+                sessao.recusar_depois_de_passar(&c.nome, &c.argumentos)
+            } else {
+                sessao.executar(&c.nome, &c.argumentos)
+            };
             if let Some(feita) = sessao.chamadas.last() {
                 observar(Evento::Chamada(feita));
             }

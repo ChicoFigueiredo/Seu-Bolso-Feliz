@@ -171,7 +171,7 @@ impl Servidor {
             .map_err(|_| "sessão envenenada".to_owned())?;
         // O primeiro rascunho que passa encerra o trabalho (D11).
         let saida = if s.passou() {
-            json!({"erro": "já existe um rascunho que passou no pré-teste: pare e responda ao usuário, sem mais ferramentas"}).to_string()
+            s.recusar_depois_de_passar(nome, args)
         } else {
             s.executar(nome, args)
         };
