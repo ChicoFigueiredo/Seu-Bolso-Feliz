@@ -17,10 +17,11 @@ use sbf_gmail::config::{
     ler_rotulos_da_conta, sugestoes,
 };
 use sbf_gmail::contas::contas_efetivas;
-use sbf_gmail::credenciais::{self, Alvo};
+use sbf_gmail::credenciais;
 use sbf_gmail::{
     ClienteReal, EstadoDaConexao, FonteDeGmail as _, SituacaoDaConexao, estado_da_conta,
 };
+use zeroize::{Zeroize as _, Zeroizing};
 
 use crate::conexoes_ui::{PontoDeEstado, data_curta, ponto};
 use crate::{componentes, tema};
@@ -63,13 +64,15 @@ pub struct EmailUi {
     pub selecionada: Option<String>,
     nova: Option<NovaConta>,
     campo_id: String,
-    campo_segredo: String,
+    campo_segredo: Zeroizing<String>,
     so_desta_conta: bool,
     busca: String,
     escolhido: Option<String>,
     consulta_extra: String,
     consulta_da: Option<String>,
     login: Option<Receiver<Msg>>,
+    /// Liga para cancelar o login em andamento (libera a porta do retorno).
+    login_cancelar: std::sync::Arc<std::sync::atomic::AtomicBool>,
     url_do_login: Option<String>,
     rotulos_rx: Option<Receiver<Result<(), String>>>,
     confirmar_remocao: bool,
@@ -84,6 +87,18 @@ impl std::fmt::Debug for EmailUi {
         f.debug_struct("EmailUi")
             .field("contas", &self.contas.len())
             .finish_non_exhaustive()
+    }
+}
+
+/// Como obter o Client ID e o Client secret do aplicativo de cada tipo.
+fn ajuda_do_app(tipo: TipoDeEmail) -> &'static str {
+    match tipo {
+        TipoDeEmail::Gmail => {
+            "Cole o Client ID e o Client secret do aplicativo do Google (Google Cloud Console › APIs e serviços › Credenciais; redirecionamento http://127.0.0.1:8976/oauth2callback). Ficam só no chaveiro."
+        }
+        TipoDeEmail::Outlook => {
+            "O Outlook ainda está em breve: ele vai pedir o Application (client) ID de um aplicativo registrado no Azure Portal › App registrations."
+        }
     }
 }
 
@@ -118,13 +133,17 @@ impl EmailUi {
         self.dados.is_some()
     }
 
-    fn config(&self) -> Config {
+    fn config(&self) -> Result<Config, String> {
         if self.sem_legado {
-            self.arquivo()
-                .and_then(|a| Config::carregar(&a).ok())
-                .unwrap_or_default()
+            let Some(a) = self.arquivo() else {
+                return Ok(Config::default());
+            };
+            Config::carregar(&a).map_err(|e| e.to_string())
         } else {
+            // Com `email.json` recusado (id inválido...), nenhuma conta é usada e nada é
+            // regravado por cima: o erro vai para o aviso da aba.
             contas_efetivas(self.dados.as_deref(), self.chaveiro.as_ref())
+                .map_err(|e| e.to_string())
         }
     }
 
@@ -137,12 +156,20 @@ impl EmailUi {
         let (Some(cofre), Some(dados)) = (self.cofre.clone(), self.dados.clone()) else {
             return;
         };
-        let config = self.config();
+        let config = match self.config() {
+            Ok(c) => c,
+            Err(e) => {
+                self.contas.clear();
+                self.aviso = Some((e, true));
+                self.lido_em = Some(Instant::now());
+                return;
+            }
+        };
         self.contas = config
             .contas
             .into_iter()
             .map(|conta| LinhaDeConta {
-                estado: estado_da_conta(&cofre, &conta, self.chaveiro.as_ref()),
+                estado: estado_da_conta(Some(&cofre), &conta, self.chaveiro.as_ref()),
                 tem_app: credenciais::tem_app_no_chaveiro(self.chaveiro.as_ref(), conta.tipo),
                 rotulos_da_conta: ler_rotulos_da_conta(&dados.join(arquivo_dos_rotulos(&conta.id))),
                 conta,
@@ -194,7 +221,7 @@ impl EmailUi {
 
     fn mutar(&mut self, f: impl FnOnce(&mut Config) -> Result<(), String>) -> Result<(), String> {
         let arquivo = self.arquivo().ok_or("a aba não está ligada")?;
-        let mut config = self.config();
+        let mut config = self.config()?;
         f(&mut config)?;
         config.salvar(&arquivo).map_err(|e| e.to_string())?;
         self.recarregar();
@@ -354,11 +381,19 @@ impl EmailUi {
         }
         let (tx, rx) = channel();
         let id = id.to_owned();
+        let cancelar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.login_cancelar = std::sync::Arc::clone(&cancelar);
         std::thread::spawn(move || {
             let avisar = tx.clone();
-            let r = sbf_gmail::oauth::entrar_no_navegador(&chaveiro, &arquivo, &id, &move |url| {
-                let _ = avisar.send(Msg::Url(url.to_owned()));
-            });
+            let r = sbf_gmail::oauth::entrar_no_navegador(
+                &chaveiro,
+                &arquivo,
+                &id,
+                &move |url| {
+                    let _ = avisar.send(Msg::Url(url.to_owned()));
+                },
+                cancelar,
+            );
             let _ = tx.send(Msg::Fim(r.map_err(|e| e.to_string())));
         });
         self.login = Some(rx);
@@ -377,11 +412,7 @@ impl EmailUi {
         let chaveiro = self.chaveiro.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let alvo = Alvo {
-                id: &l.conta.id,
-                tipo: l.conta.tipo,
-            };
-            let r = ClienteReal::resolver(chaveiro.as_ref(), alvo)
+            let r = ClienteReal::resolver(chaveiro.as_ref(), l.conta.alvo())
                 .and_then(|c| c.rotulos())
                 .and_then(|r| {
                     guardar_rotulos_da_conta(&dados.join(arquivo_dos_rotulos(&l.conta.id)), &r)
@@ -593,6 +624,7 @@ impl EmailUi {
         let mut sair = false;
         let mut remover = false;
         let mut guardar = false;
+        let mut cancelar_login = false;
         let mut atualizar = false;
         let mut seguir: Option<String> = None;
         let mut deixar: Option<String> = None;
@@ -601,16 +633,22 @@ impl EmailUi {
             ui.horizontal(|ui| {
                 componentes::titulo(ui, l.conta.nome(), 16.0);
                 let (rotulo, fundo, cor) = match l.estado.situacao {
-                    SituacaoDaConexao::EmBreve => ("em breve", p.superficie_3, p.tinta_suave),
-                    SituacaoDaConexao::NaoConectada => ("não conectado", p.aviso_sutil, p.aviso),
-                    SituacaoDaConexao::AutorizacaoVencida => {
-                        ("autorização vencida", p.perigo_sutil, p.perigo)
+                    SituacaoDaConexao::EmBreve => {
+                        ("em breve".to_owned(), p.superficie_3, p.tinta_suave)
                     }
-                    SituacaoDaConexao::Pronta => ("conectado", p.info_sutil, p.info),
-                    SituacaoDaConexao::Coletada => ("coletado", p.sucesso_sutil, p.sucesso),
-                    SituacaoDaConexao::ComFalha => ("com falha", p.perigo_sutil, p.perigo),
+                    SituacaoDaConexao::NaoConectada => {
+                        ("não conectado".to_owned(), p.aviso_sutil, p.aviso)
+                    }
+                    SituacaoDaConexao::AutorizacaoVencida => {
+                        ("autorização vencida".to_owned(), p.perigo_sutil, p.perigo)
+                    }
+                    SituacaoDaConexao::Pronta => (frase_da_situacao(l), p.info_sutil, p.info),
+                    SituacaoDaConexao::Coletada => {
+                        (frase_da_situacao(l), p.sucesso_sutil, p.sucesso)
+                    }
+                    SituacaoDaConexao::ComFalha => (frase_da_situacao(l), p.perigo_sutil, p.perigo),
                 };
-                componentes::selo(ui, rotulo, fundo, cor);
+                componentes::selo(ui, &rotulo, fundo, cor);
             });
             let precisa_entrar = matches!(
                 l.estado.situacao,
@@ -620,38 +658,42 @@ impl EmailUi {
                 componentes::aviso(
                     ui,
                     "error",
-                    "A autorização do Google venceu ou foi revogada. Entre de novo para voltar a coletar.",
+                    &format!(
+                        "A autorização do {} venceu ou foi revogada. Entre de novo para voltar a coletar.",
+                        l.conta.tipo.rotulo()
+                    ),
                     p.perigo_sutil,
                     p.borda,
                     p.perigo,
                 );
             } else if l.estado.situacao == SituacaoDaConexao::NaoConectada {
-                let texto = if l.tem_app
-                    || !l.estado.faltando.is_empty() && l.estado.faltando.len() < 2
-                {
-                    "Esta conta ainda não fez o login. Use Entrar no Gmail."
+                let entrar_no = format!("Entrar no {}", l.conta.tipo.rotulo());
+                let texto = if l.tem_app {
+                    format!("Esta conta ainda não fez o login. Use {entrar_no}.")
                 } else {
-                    "Informe o Client ID e o Client secret do aplicativo (abaixo) e use Entrar no Gmail."
+                    format!(
+                        "Informe o Client ID e o Client secret do aplicativo (abaixo) e use {entrar_no}."
+                    )
                 };
+                let texto = texto.as_str();
                 componentes::aviso(ui, "help", texto, p.info_sutil, p.info_borda, p.info);
             }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let rotulo = if precisa_entrar
-                    && l.estado.situacao == SituacaoDaConexao::AutorizacaoVencida
-                {
-                    "Entrar de novo"
-                } else if l.estado.situacao == SituacaoDaConexao::NaoConectada {
-                    "Entrar no Gmail"
+                let rotulo = if l.estado.situacao == SituacaoDaConexao::NaoConectada {
+                    format!("Entrar no {}", l.conta.tipo.rotulo())
                 } else {
-                    "Entrar de novo"
+                    "Entrar de novo".to_owned()
                 };
                 if ui
                     .add_enabled(
                         !entrando && l.conta.tipo.disponivel(),
                         egui::Button::new(rotulo),
                     )
-                    .on_hover_text("Abre o navegador para você autorizar a leitura do Gmail.")
+                    .on_hover_text(format!(
+                        "Abre o navegador para você autorizar a leitura do {}.",
+                        l.conta.tipo.rotulo()
+                    ))
                     .clicked()
                 {
                     entrar = true;
@@ -681,6 +723,15 @@ impl EmailUi {
                     self.confirmar_remocao = true;
                 }
                 if entrando {
+                    if ui
+                        .button("Cancelar login")
+                        .on_hover_text(
+                            "Desiste de esperar o navegador e libera a porta do retorno.",
+                        )
+                        .clicked()
+                    {
+                        cancelar_login = true;
+                    }
                     ui.spinner();
                     ui.label(
                         RichText::new("esperando você autorizar no navegador…")
@@ -744,7 +795,10 @@ impl EmailUi {
                         self.rotulos_rx.is_none() && !precisa_entrar,
                         egui::Button::new("Atualizar rótulos"),
                     )
-                    .on_hover_text("Pergunta ao Gmail quais rótulos a conta tem agora.")
+                    .on_hover_text(format!(
+                        "Pergunta ao {} quais rótulos a conta tem agora.",
+                        l.conta.tipo.rotulo()
+                    ))
                     .clicked()
                 {
                     atualizar = true;
@@ -794,7 +848,7 @@ impl EmailUi {
                         RichText::new(if l.tem_app {
                             "O Client ID e o Client secret do aplicativo já estão no chaveiro (valores não são mostrados). Preencha só para substituir."
                         } else {
-                            "Cole o Client ID e o Client secret do aplicativo do Google (Google Cloud Console › APIs e serviços › Credenciais). Ficam só no chaveiro."
+                            ajuda_do_app(l.conta.tipo)
                         })
                         .size(12.0)
                         .color(p.tinta_suave),
@@ -810,7 +864,7 @@ impl EmailUi {
                     ui.horizontal(|ui| {
                         ui.label("Client secret");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.campo_segredo)
+                            egui::TextEdit::singleline(&mut *self.campo_segredo)
                                 .password(true)
                                 .hint_text(if l.tem_app { "••••••••" } else { "cole aqui" })
                                 .desired_width(320.0),
@@ -845,6 +899,10 @@ impl EmailUi {
         if entrar {
             self.iniciar_login(&id);
         }
+        if cancelar_login {
+            self.login_cancelar
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         if sair {
             self.aviso = Some(match self.sair(&id) {
                 Ok(()) => ("Credenciais apagadas do chaveiro.".to_owned(), false),
@@ -859,11 +917,12 @@ impl EmailUi {
             });
         }
         if guardar {
-            let (i, s) = (self.campo_id.clone(), self.campo_segredo.clone());
+            let i = self.campo_id.clone();
+            let s = self.campo_segredo.clone();
             let r = self.guardar_credenciais(&id, self.so_desta_conta, &i, &s);
             if r.is_ok() {
                 self.campo_id.clear();
-                self.campo_segredo.clear();
+                self.campo_segredo.zeroize();
             }
             self.aviso = Some(match r {
                 Ok(()) => ("Credenciais guardadas no chaveiro.".to_owned(), false),
@@ -897,6 +956,7 @@ impl EmailUi {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod testes {
     use super::*;
+    use sbf_gmail::credenciais::Alvo;
     use std::sync::Arc;
 
     use bancada_segredos::ParametrosDeDerivacao;
@@ -930,6 +990,20 @@ mod testes {
         assert_eq!(e.selecionada.as_deref(), Some("gmail-2"));
         assert!(e.adicionar_conta(TipoDeEmail::Outlook, "").is_err());
         assert_eq!(e.contas().len(), 2);
+    }
+
+    #[test]
+    fn email_json_com_id_invalido_e_recusado_e_nada_e_regravado() {
+        let (d, mut e) = ligada();
+        let arquivo = d.path().join("dados").join(ARQUIVO_DA_CONFIG);
+        let ruim = r#"{"contas":[{"id":"../..","tipo":"gmail"}]}"#;
+        std::fs::write(&arquivo, ruim).unwrap();
+        e.recarregar();
+        assert!(e.contas().is_empty());
+        let (msg, erro) = e.aviso.clone().unwrap();
+        assert!(erro && msg.contains("id inválido"), "{msg}");
+        assert!(e.adicionar_conta(TipoDeEmail::Gmail, "").is_err());
+        assert_eq!(std::fs::read_to_string(&arquivo).unwrap(), ruim);
     }
 
     #[test]

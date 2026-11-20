@@ -120,9 +120,10 @@ pub fn rodar(args: &[String]) -> ExitCode {
             nucleo
         }
     };
-    // `gmail_coletar` (D15): coleta o Gmail para o cofre e passa pelas regras. Só liga com as
-    // credenciais OAuth no ambiente do servidor MCP.
-    let nucleo = if crate::gmail::ha_contas_coletaveis() {
+    // `gmail_coletar` (D15): coleta as contas de e-mail conectadas para o cofre e passa pelas
+    // regras. Sempre registrada: as contas são lidas a cada chamada (um login feito depois da
+    // largada vale), e sem conta a resposta é "nenhuma conta de e-mail conectada".
+    let nucleo = {
         let cofre = PathBuf::from(pasta);
         nucleo.com_gmail(std::sync::Arc::new(move |p| {
             let opcoes = sbf_gmail::OpcoesDaColeta {
@@ -139,8 +140,6 @@ pub fn rodar(args: &[String]) -> ExitCode {
             .map(|r| crate::gmail::resumo_em_json(&r))
             .map_err(|e| e.to_string())
         }))
-    } else {
-        nucleo
     };
     // O Telegram da conta do usuário (só leitura): conversas, seguir e coletar. A sessão e as
     // credenciais ficam no chaveiro; nada é aberto até a primeira chamada.
