@@ -655,22 +655,38 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
     Decisao::Reconhecido(Box::new(vencedora))
 }
 
-/// Em que as candidatas discordam (tipo ou campo crítico com valores diferentes nas duas),
-/// ou `None` se concordam.
-fn discordam(candidatas: &[Candidata]) -> Option<String> {
+/// Em que as candidatas discordam (tipo ou campo crítico com valor diferente nas duas),
+/// ou `None` se concordam. É o que decide a [`Decisao::Ambiguo`]; a janela usa o mesmo
+/// critério para dizer em que campo as candidatas de um ambíguo divergem.
+///
+/// Devolve `"tipo_documental"` ou o nome de um de [`CAMPOS_CRITICOS`].
+pub fn campo_em_que_discordam<'a>(
+    candidatas: impl IntoIterator<Item = &'a Reconhecimento>,
+) -> Option<&'static str> {
+    let candidatas: Vec<&Reconhecimento> = candidatas.into_iter().collect();
     for (i, a) in candidatas.iter().enumerate() {
         for b in &candidatas[i + 1..] {
-            if a.rec.tipo_documental != b.rec.tipo_documental {
-                return Some("tipo_documental".to_owned());
+            if a.tipo_documental != b.tipo_documental {
+                return Some("tipo_documental");
             }
             for nome in CAMPOS_CRITICOS {
-                if let (Some(x), Some(y)) = (a.rec.campos.get(nome), b.rec.campos.get(nome))
+                if let (Some(x), Some(y)) = (a.campos.get(nome), b.campos.get(nome))
                     && x.valor != y.valor
                 {
-                    return Some(format!("`{nome}`"));
+                    return Some(nome);
                 }
             }
         }
     }
     None
+}
+
+fn discordam(candidatas: &[Candidata]) -> Option<String> {
+    campo_em_que_discordam(candidatas.iter().map(|c| &c.rec)).map(|nome| {
+        if nome == "tipo_documental" {
+            nome.to_owned()
+        } else {
+            format!("`{nome}`")
+        }
+    })
 }

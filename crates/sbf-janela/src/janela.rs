@@ -363,6 +363,7 @@ impl Janela {
             conexoes: crate::preferencias_da_janela::PreferenciasDeConexoes {
                 aba: self.conexoes.aba_guardada().to_owned(),
             },
+            padroes: self.regras.preferencias(),
         }
     }
 
@@ -393,6 +394,7 @@ impl Janela {
         self.largura_da_lateral = lidas.largura_valida();
         self.estado_da_janela = lidas.janela;
         self.conexoes.definir_aba(&lidas.conexoes.aba);
+        self.regras.aplicar_preferencias(&lidas.padroes);
         lidas
     }
 
@@ -1193,7 +1195,11 @@ impl Janela {
             }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
             Destino::AreaFutura("conexoes") => self.conexoes.area(ui),
-            Destino::AreaFutura(crate::regras_ui::ROTA) => self.regras.area(ui),
+            Destino::AreaFutura(crate::regras_ui::ROTA) => {
+                let documento = self.documento_de_referencia_dos_padroes();
+                self.regras.definir_documento(documento);
+                self.regras.area(ui);
+            }
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
             }
