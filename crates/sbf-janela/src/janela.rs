@@ -173,6 +173,8 @@ pub struct Janela {
     pub conexoes: crate::conexoes_ui::Conexoes,
     /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
     pub regras: crate::regras_ui::Regras,
+    /// A Caixa de entrada: a fila de reconhecimento.
+    pub fila: crate::caixa_de_entrada::EstadoDaFila,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -306,6 +308,7 @@ impl Janela {
             roteiros: crate::roteiros::Roteiros::default(),
             conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
+            fila: crate::caixa_de_entrada::EstadoDaFila::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -586,6 +589,10 @@ impl Janela {
                 .documento_em_previa
                 .as_deref()
                 .map(crate::rubricas::ref_do_documento);
+        }
+        // Uma linha da Caixa de entrada escolhida: o dock mostra o arquivo dela.
+        if let Some(r) = self.foco_da_fila() {
+            return Some(r);
         }
         self.centro
             .selecao
@@ -1060,6 +1067,9 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
+                if *area == Area::ATriar {
+                    crate::caixa_de_entrada_ui::secao_sem_padrao(ui, &mut self.fila);
+                }
                 if *area == Area::Lotes {
                     faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), caixa, pedidos);
                 }
@@ -1133,6 +1143,11 @@ impl Janela {
                         componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo)
                     }
                 }
+            }
+            // A Caixa de entrada do reconhecimento local; os rascunhos do servidor (spec 08)
+            // só aparecem quando ela não está ligada.
+            Destino::AreaFutura("caixa") if self.fila.ligada() => {
+                crate::caixa_de_entrada_ui::area(ui, &mut self.fila);
             }
             Destino::AreaFutura("caixa") if caixa.is_some() => {
                 if let Some(c) = caixa {

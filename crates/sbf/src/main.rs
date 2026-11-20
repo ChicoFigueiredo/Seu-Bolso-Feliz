@@ -27,6 +27,7 @@ mod captura;
 mod coletor;
 mod entrada;
 mod estacao;
+mod fila;
 mod gmail;
 mod inventario;
 mod mcp;

@@ -141,6 +141,12 @@ pub fn cores_do_estado(ui: &Ui, rotulo: &str) -> (Color32, Color32, &'static str
         || r == "fechada"
     {
         (p.aviso_sutil, p.aviso, "warning")
+    } else if r.starts_with("possível duplicidade") || r.starts_with("protegido por senha") {
+        (p.aviso_sutil, p.aviso, "warning")
+    } else if r.starts_with("não reconhecido") {
+        (p.perigo_sutil, p.perigo, "help")
+    } else if r.starts_with("processando") {
+        (p.info_sutil, p.info, "schedule")
     } else if r == "pausada" || r == "revogada" {
         (p.superficie_3, p.tinta_suave, "pause")
     } else {

@@ -281,5 +281,94 @@ pub fn reconhecedor_de_demonstracao(fonte: Option<&FonteDasRegras>) -> Reconhece
 /// (`janela.regras.ligar`) antes, para a demonstração ter o Pix e o caso ambíguo.
 pub fn ligar_na_demonstracao(janela: &mut Janela) {
     let fonte = janela.regras.fonte().cloned();
-    janela.ligar_reconhecedor(Arc::new(reconhecedor_de_demonstracao(fonte.as_ref())));
+    let reconhecedor = Arc::new(reconhecedor_de_demonstracao(fonte.as_ref()));
+    janela.ligar_fila(Arc::new(fila_de_demonstracao(&*reconhecedor)));
+    janela.ligar_reconhecedor(reconhecedor);
+}
+
+/// O resultado fictício de um nome de arquivo (o que o reconhecedor da demonstração devolve).
+fn resultado_de(r: &dyn Reconhecedor, nome: &str) -> Option<Resultado> {
+    r.reconhecer(Path::new(nome), &mut |_| {}, &AtomicBool::new(false))
+        .ok()
+}
+
+/// O que a demonstração diz que não tem padrão: uma foto de recibo, lida por OCR.
+pub const NOME_DO_RECIBO_SEM_PADRAO: &str = "foto-recibo-oficina.jpg";
+
+/// A Caixa de entrada fictícia da demonstração: o contracheque (Telegram), o comprovante de
+/// Pix (Gmail), o caso ambíguo (pasta) e uma foto sem padrão (celular).
+pub fn fila_de_demonstracao(r: &dyn Reconhecedor) -> crate::caixa_de_entrada::FilaFicticia {
+    use crate::caixa_de_entrada::{FilaFicticia, entrada_ficticia};
+    use sbf_inventario::caixa_de_entrada::{Estado, Origem};
+    let mut fila = FilaFicticia::nova();
+    let linhas = [
+        (
+            NOME_DO_CONTRACHEQUE,
+            "2026-11-20T12:10:00.000Z",
+            Origem::Telegram,
+            Estado::Pronto,
+        ),
+        (
+            NOME_DO_PIX,
+            "2026-11-20T09:42:00.000Z",
+            Origem::Gmail,
+            Estado::Pronto,
+        ),
+        (
+            NOME_DO_AMBIGUO,
+            "2026-11-19T21:03:00.000Z",
+            Origem::Pasta,
+            Estado::PrecisaRevisar,
+        ),
+    ];
+    for (nome, chegou, origem, estado) in linhas {
+        // Sem o catálogo de regras o Pix e o ambíguo caem no contracheque: não entram.
+        let res = resultado_de(r, nome)
+            .filter(|res| res.sha256 == crate::demonstracao::hash_do_nome(nome));
+        if let Some(res) = res {
+            let (tipo, resumo) = sbf_reconhecimento::fila::tipo_e_resumo(&res);
+            let e = entrada_ficticia(
+                &res.sha256,
+                nome,
+                chegou,
+                origem,
+                tipo.as_deref(),
+                &resumo.unwrap_or_default(),
+                estado,
+            );
+            fila = fila.com(e, res);
+        }
+    }
+    let sha = crate::demonstracao::hash_do_nome(NOME_DO_RECIBO_SEM_PADRAO);
+    let entrada = entrada_do_documento(
+        &sha,
+        NOME_DO_RECIBO_SEM_PADRAO,
+        "image/jpeg",
+        Some("RECIBO OFICINA EXEMPLO servico 12/11/2026 R$ 320,00"),
+        Canal::Arrastado,
+        None,
+    );
+    let res = Resultado {
+        sha256: sha.clone(),
+        nome: NOME_DO_RECIBO_SEM_PADRAO.to_owned(),
+        ja_existia: false,
+        texto: sbf_reconhecimento::EstadoDoTexto::Extraido,
+        reconhecido: Reconhecido::Nada {
+            motivo: "nenhum leitor local reconheceu o documento".to_owned(),
+        },
+        sugestoes: Vec::new(),
+        avisos: Vec::new(),
+        entrada: Some(entrada),
+        leitura: None,
+    };
+    let e = entrada_ficticia(
+        &sha,
+        NOME_DO_RECIBO_SEM_PADRAO,
+        "2026-11-20T10:30:00.000Z",
+        Origem::Celular,
+        None,
+        "nenhum leitor local reconheceu o documento",
+        Estado::NaoReconhecido,
+    );
+    fila.com(e, res)
 }

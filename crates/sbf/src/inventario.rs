@@ -169,6 +169,11 @@ impl AppDoInventario {
                         r.com_fila(sbf_inventario::caixa_de_entrada::Origem::Arrastado),
                     ));
                 }
+                // A Caixa de entrada: a fila de reconhecimento do próprio cofre.
+                janela.ligar_fila(std::sync::Arc::new(crate::fila::FilaDoCofre::nova(
+                    self.pasta.clone(),
+                    f.chaveiro.clone(),
+                )));
                 janela.ferramentas = Some(f);
                 // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
                 // `inventario.sqlite`: a janela percebe e relê o que mostra.

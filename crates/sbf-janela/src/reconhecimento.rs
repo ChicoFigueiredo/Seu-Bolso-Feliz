@@ -81,7 +81,7 @@ pub struct Cartao {
 }
 
 impl Cartao {
-    fn novo(caminho: PathBuf) -> Self {
+    pub(crate) fn novo(caminho: PathBuf) -> Self {
         let nome = caminho.file_name().map_or_else(
             || "arquivo".to_owned(),
             |n| n.to_string_lossy().into_owned(),
@@ -245,6 +245,9 @@ pub struct Reconhecimento {
     /// Quem liga o registro do salário ao crédito; sem ele, o das Ferramentas (se houver).
     pub ligador: Option<Arc<dyn LigadorDeSalario>>,
     pub cartoes: Vec<Cartao>,
+    /// O cartão do item da Caixa de entrada que está escolhido (um lugar só, reaproveitado a
+    /// cada troca de linha). Só aparece no painel quando a fila está em foco.
+    pub da_caixa: Option<usize>,
     fila: VecDeque<usize>,
     execucao: Option<Execucao>,
     /// Há arquivo pairando sobre a janela: a camada "Solte para reconhecer".
@@ -293,6 +296,8 @@ impl Janela {
             });
             return;
         }
+        // O dock volta para os cartões do arrastar.
+        self.largar_o_foco_da_fila();
         let mut pastas = 0usize;
         let mut aceitos = 0usize;
         for caminho in caminhos {
@@ -462,6 +467,7 @@ impl Janela {
             return;
         }
         r.cartoes.clear();
+        r.da_caixa = None;
     }
 
     /// Ignorar uma sugestão: some o botão, nada muda no planejamento.
@@ -484,7 +490,7 @@ impl Janela {
     }
 
     /// Lê do catálogo os nomes das regras que o resultado do cartão cita.
-    fn guardar_nomes_das_regras(&mut self, cartao: usize) {
+    pub(crate) fn guardar_nomes_das_regras(&mut self, cartao: usize) {
         let Some(fonte) = self.regras.fonte().cloned() else {
             return;
         };
