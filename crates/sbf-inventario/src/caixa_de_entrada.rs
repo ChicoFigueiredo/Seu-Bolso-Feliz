@@ -279,7 +279,8 @@ pub fn origens_de_fora(conn: &Connection, sha256: &str) -> rusqlite::Result<i64>
 }
 
 /// Marca o conteúdo como Processando (cria a linha se for a primeira vez; nas seguintes só
-/// troca o estado, e o tipo e o resumo anteriores seguem até o fim).
+/// troca o estado, e o tipo e o resumo anteriores seguem até o fim). Não conta como uma
+/// rodada: quem conta é [`registrar`].
 ///
 /// # Errors
 /// Falha do SQLite.
@@ -291,8 +292,8 @@ pub fn marcar_processando(
 ) -> rusqlite::Result<()> {
     garantir_tabela(conn)?;
     conn.execute(
-        "INSERT INTO caixa_entrada (content_hash, nome, origem, estado)
-         VALUES (?1, ?2, ?3, 'processando')
+        "INSERT INTO caixa_entrada (content_hash, nome, origem, estado, vezes)
+         VALUES (?1, ?2, ?3, 'processando', 0)
          ON CONFLICT(content_hash) DO UPDATE SET
            estado = 'processando',
            atualizado_em = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
