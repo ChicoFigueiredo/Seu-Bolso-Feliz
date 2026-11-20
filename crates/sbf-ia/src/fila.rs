@@ -673,7 +673,7 @@ impl<'a, I, F: Formato<I>> Execucao<'a, I, F> {
                     self.chamadas -= 1;
                     return Err(Interrupcao::Indisponivel(m));
                 }
-                Err(ErroDeIa::Outro(_)) => {
+                Err(ErroDeIa::Outro(_) | ErroDeIa::Interrompido) => {
                     self.registrar(nome, rotulo(degrau), bytes, Consumo::default())?;
                     return Ok(DeUmLote::Falhou);
                 }

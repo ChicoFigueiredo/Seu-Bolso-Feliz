@@ -47,6 +47,7 @@ sbf-planilha = { path = "../sbf-planilha" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
 sbf-ocr = { path = "../sbf-ocr" }
 sbf-regras = { workspace = true }
+sbf-rita = { path = "../sbf-rita" }
 sbf-script = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
 sha2 = { workspace = true }
@@ -62,6 +63,7 @@ winit = { version = "0.30", default-features = false, features = ["x11"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 rust_xlsxwriter = "0.90"
+bancada-rede = { path = "../../../bancada/crates/bancada-rede", features = ["testes"] }
 
 [lints]
 workspace = true
