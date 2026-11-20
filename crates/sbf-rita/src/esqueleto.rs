@@ -438,11 +438,15 @@ pub fn esqueleto_resumido(ctx: &Contexto, pedido: &str) -> Option<String> {
     .ok()?;
     let pre = pre_testar_versao(ctx, &c, &avulsa, pedido).ok()?;
     let mut linhas = vec![
-        format!("regra: {regra}"),
-        format!("nome: {}", e.nome),
+        format!("regra (id para `propor_padrao`): {regra}"),
+        format!("nome (para `propor_padrao`): {}", e.nome),
         format!(
             "definicao: {}",
-            serde_json::to_string(&e.definicao).unwrap_or_default()
+            // Com a barra invertida uma vez só, como as instruções pedem (o JSON a dobraria e o
+            // modelo a copiaria dobrada).
+            serde_json::to_string(&e.definicao)
+                .unwrap_or_default()
+                .replace("\\\\", "\\")
         ),
     ];
     linhas.push(if pre.passou {
@@ -454,7 +458,7 @@ pub fn esqueleto_resumido(ctx: &Contexto, pedido: &str) -> Option<String> {
             .collect::<Vec<_>>()
             .join("; ");
         format!(
-            "pré-teste do esqueleto: PASSOU. Casa neste item ({campos}); no cofre casam {} de {} parecidos.",
+            "pré-teste do esqueleto: PASSOU. Casa neste item ({campos}); no cofre casam {} de {} parecidos. NADA foi gravado: o esqueleto não é uma versão; chame `propor_padrao` com esta `regra`, este `nome` e esta `definicao` para gravar.",
             pre.amostra.casam, pre.amostra.examinados
         )
     } else {
