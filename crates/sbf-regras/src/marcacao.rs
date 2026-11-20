@@ -8,7 +8,7 @@
 //!   de onde parou e repetir só a versão ativada ou alterada. Nada daqui grava decisão,
 //!   proposta nem Caixa de entrada.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
 
@@ -108,6 +108,25 @@ impl Catalogo {
             }
         }
         Ok(mapa)
+    }
+
+    /// Os padrões que casaram com a entrada em algum momento (spec 15, D5, "já casaram"):
+    /// qualquer versão, mesmo desativada depois.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn padroes_que_casaram(&self, entrada: &str) -> Resultado<BTreeSet<String>> {
+        let mut st = self
+            .conn
+            .prepare_cached(
+                "SELECT DISTINCT regra FROM execucao
+                  WHERE resultado = 'reconhecido' AND entrada = ?1",
+            )
+            .map_err(banco)?;
+        let linhas = st
+            .query_map(params![entrada], |r| r.get::<_, String>(0))
+            .map_err(banco)?;
+        linhas.map(|l| l.map_err(banco)).collect()
     }
 
     /// Guarda a última decisão do conjunto de padrões sobre a entrada: Ambíguo ou não. Sem

@@ -276,6 +276,8 @@ fn cartao(
                 corrigindo,
                 edicao,
                 rastro_aberto,
+                por_que_aberto,
+                pesos_das_regras,
                 ..
             } = &mut *c;
             if let SituacaoDoCartao::Pronto(r) = situacao {
@@ -285,11 +287,13 @@ fn cartao(
                     nomes: nomes_das_regras,
                     regras_ligadas,
                     sem_padrao: matches!(r.reconhecido, Reconhecido::Nada { .. }),
+                    pesos: pesos_das_regras,
                 };
                 let mut estado = EdicaoDoCartao {
                     corrigindo,
                     edicao,
                     rastro_aberto,
+                    por_que_aberto,
                 };
                 reconhecido(ui, p, indice, &r.reconhecido, &extras, &mut estado, pedidos);
             }
@@ -495,6 +499,9 @@ fn reconhecido(
                 ui.label(RichText::new(format!("Não reconhecido: {motivo}")).color(p.tinta_suave));
             });
         }
+    }
+    if extras.regras_ligadas {
+        reconhecimento_regras_ui::por_que(ui, p, indice, extras, estado.por_que_aberto, pedidos);
     }
     reconhecimento_regras_ui::acoes_da_regra(ui, indice, extras, pedidos);
 }

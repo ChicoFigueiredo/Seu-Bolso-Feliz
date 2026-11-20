@@ -277,3 +277,21 @@ fn o_ponto_da_passada_sobrevive_a_reabrir_o_arquivo() {
     let c = Catalogo::abrir(&caminho).unwrap();
     assert_eq!(c.ponto_da_passada(&v).unwrap(), 12);
 }
+
+#[test]
+fn ja_casaram_lista_os_padroes_que_reconheceram_a_entrada_mesmo_desativados() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    let pix = ativa(&mut c, nova("pix", "comprovante pix", "comprovante pix", 1));
+    ativa(&mut c, nova("banco", "comprovante", "banco exemplo", 0));
+    ativa(&mut c, nova("boleto", "boleto", "linha digitavel", 0));
+    let motor = Motor::das_vigentes(&c, None).unwrap();
+    c.registrar_execucao(&motor.ler(&entrada("a1", COMPROVANTE)))
+        .unwrap();
+    c.desativar(&pix.regra, &Quem::Usuario).unwrap();
+    let casaram = c.padroes_que_casaram("a1").unwrap();
+    assert_eq!(
+        casaram.into_iter().collect::<Vec<_>>(),
+        vec!["banco".to_owned(), "pix".to_owned()]
+    );
+    assert!(c.padroes_que_casaram("nunca-vista").unwrap().is_empty());
+}
