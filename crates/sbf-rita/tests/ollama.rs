@@ -239,3 +239,203 @@ fn rita_com_o_ollama_real_calibra_no_print_da_prestacao_da_habitacao() {
         "{campos:?}"
     );
 }
+
+// ---- medição: variações fictícias do mesmo print ----
+
+/// Uma variação do print fictício: o texto, o `momento` do item, o pedido e o que se espera.
+struct Variacao {
+    nome: &'static str,
+    texto: String,
+    momento: Option<&'static str>,
+    pedido: &'static str,
+    /// A competência esperada (`MM/AAAA`), se o pedido pede competência e há ano.
+    competencia: Option<&'static str>,
+    /// O trecho do contrato esperado no campo `contrato`.
+    contrato: &'static str,
+}
+
+fn variacoes() -> Vec<Variacao> {
+    let sujo = PRINT
+        .replace("123456789012-3", "1234567890l2-3")
+        .replace("R$ 1.234,56", "RS 1.234,56")
+        .replace("Vencimento em", "Vencimento  em")
+        .replace("Prestação atual", "Prestação  atual");
+    vec![
+        Variacao {
+            nome: "original",
+            texto: PRINT.to_owned(),
+            momento: Some("2026-11-20"),
+            pedido: PEDIDO_DO_PRINT,
+            competencia: Some("11/2026"),
+            contrato: "123456789012",
+        },
+        Variacao {
+            nome: "momento-2025",
+            texto: PRINT.to_owned(),
+            momento: Some("2025-11-05"),
+            pedido: PEDIDO_DO_PRINT,
+            competencia: Some("11/2025"),
+            contrato: "123456789012",
+        },
+        Variacao {
+            nome: "pedido-reescrito",
+            texto: PRINT.to_owned(),
+            momento: Some("2026-11-20"),
+            pedido: "Quero um padrão para a prestação do financiamento habitacional da Caixa. Reconheça pelo \"Prestação atual\" e pelo número do contrato; o ciclo vem do vencimento. Cria.",
+            competencia: Some("11/2026"),
+            contrato: "123456789012",
+        },
+        Variacao {
+            nome: "sem-momento",
+            texto: PRINT.to_owned(),
+            momento: None,
+            pedido: "Isto é um comprovante de prestação da habitação CAIXA. O título (Prestação atual) e o número do contrato determinam o padrão. Cria o padrão.",
+            competencia: None,
+            contrato: "123456789012",
+        },
+        Variacao {
+            nome: "numero-partido",
+            texto: PRINT.replace("123456789012-3", "1234 5678 9012-3"),
+            momento: Some("2026-11-20"),
+            pedido: PEDIDO_DO_PRINT,
+            competencia: Some("11/2026"),
+            contrato: "1234",
+        },
+        Variacao {
+            nome: "ocr-sujo",
+            texto: sujo,
+            momento: Some("2026-11-20"),
+            pedido: PEDIDO_DO_PRINT,
+            competencia: Some("11/2026"),
+            contrato: "123456789012",
+        },
+    ]
+}
+
+struct Medicao {
+    chamadas: usize,
+    entrada: u64,
+    saida: u64,
+    segundos: f64,
+    passou: bool,
+    nota: String,
+}
+
+fn rodar_variacao(v: &Variacao, modelo: &str, endereco: &str) -> Medicao {
+    let d = tempfile::tempdir().expect("pasta");
+    Catalogo::abrir(&d.path().join("regras.sqlite")).expect("catálogo");
+    let mut item = entrada_de_documento(
+        &"bb".repeat(32),
+        Some("print-prestacao.png"),
+        Some("image/png"),
+        Some(&v.texto),
+    );
+    item.momento = v.momento.map(str::to_owned);
+    let ctx = Contexto::novo(
+        DadosDaTela::de_documento(d.path(), item),
+        Arc::new(sbf_script::ExecutorNoProcesso::novo()),
+    )
+    .com_similares(Arc::new(SimilaresFixos(vec![])));
+    let provedor = ChatCompletions::novo(
+        ConfiguracaoChatCompletions::local(endereco.to_owned(), modelo.to_owned()),
+        None,
+    )
+    .expect("provedor");
+    let mut rita = Rita::nova(ctx);
+    let parar = AtomicBool::new(false);
+    let t0 = std::time::Instant::now();
+    let r = rita
+        .pedir(
+            &Espiao(provedor),
+            v.pedido,
+            &parar,
+            &RegistroFalso::novo(),
+            &mut |e| {
+                if let Evento::Chamada(c) = e {
+                    eprintln!(
+                        "  [{}] {} {} -> {}",
+                        c.numero,
+                        c.nome,
+                        c.argumentos,
+                        c.resultado.chars().take(160).collect::<String>()
+                    );
+                }
+            },
+        )
+        .expect("relatório");
+    let segundos = t0.elapsed().as_secs_f64();
+    let nota;
+    let mut passou = r.melhor().is_some_and(|m| m.pre_teste.passou);
+    if let Some(m) = r.melhor().filter(|m| m.pre_teste.passou) {
+        let campos: std::collections::BTreeMap<_, _> =
+            m.pre_teste.item.campos.iter().cloned().collect();
+        let confere =
+            |nome: &str, esperado: &str| campos.get(nome).is_some_and(|v| v.contains(esperado));
+        passou = confere("contrato", v.contrato)
+            && confere("valor_centavos", "R$ 1.234,56")
+            && v.competencia.is_none_or(|c| confere("competencia", c));
+        let mut texto = format!("campos {campos:?}");
+        if let Ok(ver) = Catalogo::abrir(&d.path().join("regras.sqlite"))
+            .and_then(|c| c.versao(&m.regra, m.versao))
+        {
+            texto.push_str(&format!(
+                "; tipo {}; condições {}",
+                ver.definicao.tipo_documental,
+                serde_json::to_string(&ver.definicao.detectar).unwrap_or_default()
+            ));
+        }
+        nota = texto;
+    } else {
+        nota = format!("parada {:?}", r.parada);
+    }
+    Medicao {
+        chamadas: r.chamadas.len(),
+        entrada: r.consumo.tokens_entrada,
+        saida: r.consumo.tokens_saida,
+        segundos,
+        passou,
+        nota,
+    }
+}
+
+/// Roda cada variação `SBF_RITA_REPETICOES` vezes (padrão 1) e imprime uma linha `MEDICAO|...` por
+/// rodada. `SBF_RITA_VARIACOES=a,b` escolhe quais. Meta: todas passam, mediana de até 3 chamadas.
+#[test]
+#[ignore = "precisa do Ollama local com qwen3-coder:30b"]
+fn rita_com_o_ollama_real_mede_as_variacoes_do_print() {
+    let modelo =
+        std::env::var("SBF_RITA_MODELO").unwrap_or_else(|_| MODELO_LOCAL_PADRAO.to_owned());
+    let endereco =
+        std::env::var("SBF_RITA_ENDERECO").unwrap_or_else(|_| ENDERECO_DO_OLLAMA.to_owned());
+    let vezes: usize = std::env::var("SBF_RITA_REPETICOES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let escolhidas = std::env::var("SBF_RITA_VARIACOES").ok();
+    let mut todas_passaram = true;
+    for v in variacoes() {
+        if escolhidas
+            .as_deref()
+            .is_some_and(|e| !e.split(',').any(|n| n == v.nome))
+        {
+            continue;
+        }
+        let mut chamadas = Vec::new();
+        for n in 1..=vezes {
+            let m = rodar_variacao(&v, &modelo, &endereco);
+            eprintln!(
+                "MEDICAO|{}|{n}|{}|{}|{}|{:.0}|{}|{}",
+                v.nome, m.chamadas, m.entrada, m.saida, m.segundos, m.passou, m.nota
+            );
+            todas_passaram &= m.passou;
+            chamadas.push(m.chamadas);
+        }
+        chamadas.sort_unstable();
+        eprintln!(
+            "MEDIANA|{}|{}",
+            v.nome,
+            chamadas.get(chamadas.len() / 2).copied().unwrap_or(0)
+        );
+    }
+    assert!(todas_passaram, "alguma rodada não passou (veja MEDICAO)");
+}
