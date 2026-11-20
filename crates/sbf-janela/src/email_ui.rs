@@ -489,7 +489,7 @@ impl EmailUi {
                 componentes::selo(ui, "só leitura", p.superficie_3, p.tinta_suave);
             });
             ui.label(
-                RichText::new("Anexos (PDF, imagem, XML) e avisos por e-mail dos rótulos que você seguir vão para `entrada/` e passam pelas regras de reconhecimento. A coleta roda no worker, em `sbf email coletar` e na ferramenta `gmail_coletar` do MCP. Só lê: nunca envia, apaga nem marca como lido.")
+                RichText::new("Anexos (PDF, imagem, XML) e avisos por e-mail dos rótulos que você seguir vão para `entrada/` e passam pelos padrões de reconhecimento. A coleta roda no worker, em `sbf email coletar` e na ferramenta `gmail_coletar` do MCP. Só lê: nunca envia, apaga nem marca como lido.")
                     .size(12.0)
                     .color(p.tinta_suave),
             );

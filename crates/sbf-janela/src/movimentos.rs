@@ -311,7 +311,7 @@ fn botao_de_ignorar(ui: &mut Ui, ocorrencia: &IdOcorrencia, pedidos: &mut Vec<Pe
     if ui
         .button("Ignorar")
         .on_hover_text(
-            "Descarta a sugestão; uma regra de reconhecimento registra que foi rejeitada",
+            "Descarta a sugestão; um padrão de reconhecimento registra que foi rejeitada",
         )
         .clicked()
     {

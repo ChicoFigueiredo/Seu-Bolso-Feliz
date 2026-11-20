@@ -155,7 +155,7 @@ impl FonteDasRegras {
     fn catalogo(&self) -> Result<std::sync::MutexGuard<'_, Catalogo>, String> {
         self.catalogo
             .lock()
-            .map_err(|_| "o catálogo de regras travou; reabra a janela".to_owned())
+            .map_err(|_| "o catálogo de padrões travou; reabra a janela".to_owned())
     }
 
     fn executor_ref(&self) -> Option<&dyn ExecutorDeScript> {
@@ -716,14 +716,14 @@ impl FonteDasRegras {
             );
         }
         if nome.trim().is_empty() {
-            return Err("dê um nome à regra".to_owned());
+            return Err("dê um nome ao padrão".to_owned());
         }
         let tipo = tipo_documental.trim();
         if tipo.is_empty() {
             return Err("diga o tipo documental (comprovante-pix, fatura-de-cartao...)".to_owned());
         }
         if self.resumos()?.iter().any(|r| r.id == id) {
-            return Err(format!("já existe a regra {id}"));
+            return Err(format!("já existe o padrão {id}"));
         }
         let definicao = Definicao::simples(tipo, "troque por uma palavra do documento");
         self.salvar_rascunho(
@@ -1033,7 +1033,7 @@ fn povoar_demonstracao(
         "Conta de energia · Distribuidora Exemplo",
         definicao_da_energia(),
         Autor::Fabrica,
-        "regra de fábrica fictícia",
+        "padrão de fábrica fictício",
     ))?;
     c.salvar_exemplo(
         ENERGIA,
@@ -1071,7 +1071,7 @@ fn povoar_demonstracao(
         "Pix agendado · Banco Exemplo",
         definicao_do_pix_agendado(),
         Autor::Usuario,
-        "regra fictícia para a demonstração do caso ambíguo",
+        "padrão fictício para a demonstração do caso ambíguo",
     ))?;
     c.salvar_exemplo(
         AGENDADO,
@@ -1093,7 +1093,7 @@ fn povoar_demonstracao(
         "Recibo em foto · Padaria Exemplo",
         definicao_do_recibo_em_foto(),
         Autor::Usuario,
-        "regra fictícia para a demonstração do filtro de tipo real",
+        "padrão fictício para a demonstração do filtro de tipo real",
     ))?;
     c.ativar(RECIBO, r1.versao, &Quem::Usuario, executor.as_deref())?;
     const REGISTRO: &str = "pix-recebido-registro-exemplo";
@@ -1102,7 +1102,7 @@ fn povoar_demonstracao(
         "Pix recebido · registro do banco",
         definicao_do_pix_recebido_em_registro(),
         Autor::Usuario,
-        "regra fictícia para a demonstração de um padrão de registro",
+        "padrão fictício para a demonstração de um padrão de registro",
     ))?;
     c.ativar(REGISTRO, g1.versao, &Quem::Usuario, executor.as_deref())?;
     const AVISO: &str = "aviso-de-vencimento-mensagem-exemplo";
@@ -1111,7 +1111,7 @@ fn povoar_demonstracao(
         "Aviso de vencimento · mensagem",
         definicao_do_aviso_de_vencimento(),
         Autor::Usuario,
-        "regra fictícia para a demonstração de um padrão desativado",
+        "padrão fictício para a demonstração de um padrão desativado",
     ))?;
     c.ativar(AVISO, m1.versao, &Quem::Usuario, executor.as_deref())?;
     c.desativar(AVISO, &Quem::Usuario)?;

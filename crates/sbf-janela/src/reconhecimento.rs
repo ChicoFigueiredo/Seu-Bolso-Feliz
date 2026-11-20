@@ -827,7 +827,7 @@ fn registrar(fonte: Option<&FonteDasRegras>, c: &mut Cartao, chave: &str, retorn
     let Some(fonte) = fonte else { return };
     if fonte.registrar_retorno(chave, retorno).is_err() {
         c.aviso_de_retorno =
-            Some("Não deu para registrar sua decisão na regra de reconhecimento.".to_owned());
+            Some("Não deu para registrar sua decisão no padrão de reconhecimento.".to_owned());
     }
 }
 
@@ -835,7 +835,7 @@ fn registrar_desfeito(fonte: Option<&FonteDasRegras>, c: &mut Cartao, chave: &st
     let Some(fonte) = fonte else { return };
     if fonte.registrar_desfeito(chave).is_err() {
         c.aviso_de_retorno =
-            Some("Não deu para registrar sua decisão na regra de reconhecimento.".to_owned());
+            Some("Não deu para registrar sua decisão no padrão de reconhecimento.".to_owned());
     }
 }
 
