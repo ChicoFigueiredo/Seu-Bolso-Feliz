@@ -28,7 +28,8 @@ use sbf_regras::Canal;
 use crate::corpo::texto_do_corpo;
 use crate::erro::{Erro, Resultado};
 use crate::fonte::FonteDeGmail;
-use crate::gravador::{Arquivo, DaMensagem, Gravador};
+use crate::fonte::Rotulo;
+use crate::gravador::{Arquivo, DaMensagem, Destino, Gravador, ID_LEGADO, prefixo_do_rotulo};
 use crate::reconhecimento::{Desfecho, Reconhecimento};
 
 /// A consulta de quando o usuário não diz nada.
@@ -40,11 +41,19 @@ const PAGINAS_MAXIMAS: usize = 30;
 /// Folga do checkpoint: relê a última hora (a origem já vista é pulada sem baixar nada).
 const FOLGA_DO_CHECKPOINT_S: i64 = 3600;
 
+/// A janela da primeira coleta de um rótulo (sem checkpoint ainda).
+pub const JANELA_INICIAL_DO_ROTULO: &str = "newer_than:90d";
+
 /// O que o usuário pode ajustar.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpcoesDaColeta {
-    /// A consulta do Gmail; `None` usa [`CONSULTA_PADRAO`].
+    /// Sem `rotulo`: a consulta do Gmail (`None` usa [`CONSULTA_PADRAO`]). Com `rotulo`: termos
+    /// a mais, somados a `has:attachment`.
     pub consulta: Option<String>,
+    /// Coleta só este rótulo (a API filtra por id; o checkpoint é por rótulo).
+    pub rotulo: Option<Rotulo>,
+    /// O id da conta de e-mail; `None` é a conta legada (`gmail`).
+    pub conta: Option<String>,
     /// `AAAA-MM-DD`: coleta desde esta data e ignora o checkpoint.
     pub desde: Option<String>,
     /// Mensagens por coleta; `None` usa [`LIMITE_PADRAO`].
@@ -78,9 +87,32 @@ pub struct ResumoDaColeta {
     pub falhas: usize,
     /// Mensagens que casam com a consulta e ficaram para a próxima coleta (passou do limite).
     pub restantes: usize,
+    /// Rótulos seguidos que a conta não tem mais (nada foi coletado deles).
+    pub rotulos_ausentes: usize,
 }
 
 impl ResumoDaColeta {
+    /// Soma os contadores de outra coleta (a consulta vira a lista das duas).
+    pub fn somar(&mut self, o: &Self) {
+        if self.consulta.is_empty() {
+            self.consulta.clone_from(&o.consulta);
+        } else if !o.consulta.is_empty() {
+            self.consulta = format!("{}; {}", self.consulta, o.consulta);
+        }
+        self.mensagens += o.mensagens;
+        self.anexos_novos += o.anexos_novos;
+        self.ja_conhecidos += o.ja_conhecidos;
+        self.documentos_novos += o.documentos_novos;
+        self.duplicados += o.duplicados;
+        self.mensagens_de_texto += o.mensagens_de_texto;
+        self.reconhecidos += o.reconhecidos;
+        self.ambiguos += o.ambiguos;
+        self.sem_regra += o.sem_regra;
+        self.falhas += o.falhas;
+        self.restantes += o.restantes;
+        self.rotulos_ausentes += o.rotulos_ausentes;
+    }
+
     /// Algo entrou no inventário?
     #[must_use]
     pub fn novos(&self) -> usize {
@@ -92,33 +124,43 @@ fn iso_de_ms(ms: i64) -> Option<String> {
     DateTime::<Utc>::from_timestamp_millis(ms).map(|d| d.format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
-/// A consulta final: a do usuário (ou a padrão) mais o recorte de tempo.
-fn consulta_final(opcoes: &OpcoesDaColeta, cursor_ms: Option<i64>) -> Resultado<String> {
-    let base = opcoes
+/// A consulta final: `(escopo, consulta)`. O escopo é o que a varredura registra (começa com
+/// `label:"nome" ` nas coletas de rótulo); a consulta é o que vai à API.
+fn consulta_final(opcoes: &OpcoesDaColeta, cursor_ms: Option<i64>) -> Resultado<(String, String)> {
+    let extra = opcoes
         .consulta
         .as_deref()
         .map(str::trim)
-        .filter(|c| !c.is_empty())
-        .unwrap_or(CONSULTA_PADRAO);
-    if let Some(desde) = opcoes.desde.as_deref() {
+        .filter(|c| !c.is_empty());
+    let base = match (&opcoes.rotulo, extra) {
+        (Some(_), Some(e)) => format!("has:attachment {e}"),
+        (Some(_), None) => "has:attachment".to_owned(),
+        (None, e) => e.unwrap_or(CONSULTA_PADRAO).to_owned(),
+    };
+    let consulta = if let Some(desde) = opcoes.desde.as_deref() {
         if data_do_gmail(Some(desde)).is_none() {
             return Err(Erro::Argumento(
                 "a data de --desde precisa ser AAAA-MM-DD".to_owned(),
             ));
         }
-        return Ok(montar_consulta(&PartesDaConsulta {
-            consulta: Some(base),
+        montar_consulta(&PartesDaConsulta {
+            consulta: Some(&base),
             de: Some(desde),
             ate: None,
-        }));
-    }
-    Ok(match cursor_ms {
-        Some(ms) => {
-            let desde = (ms / 1000 - FOLGA_DO_CHECKPOINT_S).max(0);
-            format!("{base} after:{desde}")
-        }
-        None => base.to_owned(),
-    })
+        })
+    } else if let Some(ms) = cursor_ms {
+        let desde = (ms / 1000 - FOLGA_DO_CHECKPOINT_S).max(0);
+        format!("{base} after:{desde}")
+    } else if opcoes.rotulo.is_some() {
+        format!("{base} {JANELA_INICIAL_DO_ROTULO}")
+    } else {
+        base
+    };
+    let escopo = match &opcoes.rotulo {
+        Some(r) => format!("{}{consulta}", prefixo_do_rotulo(&r.nome)),
+        None => consulta.clone(),
+    };
+    Ok((escopo, consulta))
 }
 
 /// A parte `id` é uma imagem embutida no corpo (assinatura, logotipo)?
@@ -151,6 +193,7 @@ fn nome_do_corpo(assunto: &str) -> String {
 }
 
 struct Corrida<'a> {
+    prefixo: String,
     gravador: &'a Gravador,
     reconhecimento: &'a dyn Reconhecimento,
     varredura: i64,
@@ -200,7 +243,7 @@ impl Corrida<'_> {
             } else {
                 a.id_da_parte.as_str()
             };
-            let chave = format!("gmail:{}:{parte}", m.id);
+            let chave = format!("{}:{}:{parte}", self.prefixo, m.id);
             if self.gravador.origem_existe(&chave)? {
                 self.resumo.ja_conhecidos += 1;
                 continue;
@@ -234,7 +277,7 @@ impl Corrida<'_> {
     }
 
     fn corpo(&mut self, m: &MensagemDoGmail, da: &DaMensagem) -> Resultado<bool> {
-        let chave = format!("gmail:{}:corpo", m.id);
+        let chave = format!("{}:{}:corpo", self.prefixo, m.id);
         if self.gravador.origem_existe(&chave)? {
             self.resumo.ja_conhecidos += 1;
             return Ok(false);
@@ -297,10 +340,12 @@ pub fn coletar(
     opcoes: &OpcoesDaColeta,
     cancelar: &AtomicBool,
 ) -> Resultado<ResumoDaColeta> {
-    let gravador = Gravador::abrir(cofre)?;
-    let cursor = gravador.cursor()?;
-    let consulta = consulta_final(opcoes, cursor)?;
-    let varredura = gravador.abrir_varredura(&consulta)?;
+    let destino = Destino::da_conta(opcoes.conta.as_deref().unwrap_or(ID_LEGADO));
+    let gravador = Gravador::abrir(cofre, &destino)?;
+    let cursor = gravador.cursor(opcoes.rotulo.as_ref().map(|r| r.nome.as_str()))?;
+    let (escopo, consulta) = consulta_final(opcoes, cursor)?;
+    let rotulo_id = opcoes.rotulo.as_ref().map(|r| r.id.as_str());
+    let varredura = gravador.abrir_varredura(&escopo)?;
     let limite = opcoes.limite.unwrap_or(LIMITE_PADRAO).max(1);
 
     let fechar = |c: &Corrida<'_>, status: &str, cursor: Option<i64>| {
@@ -323,11 +368,12 @@ pub fn coletar(
         );
     };
     let mut corrida = Corrida {
+        prefixo: destino.prefixo.clone(),
         gravador: &gravador,
         reconhecimento,
         varredura,
         resumo: ResumoDaColeta {
-            consulta: consulta.clone(),
+            consulta: escopo.clone(),
             ..ResumoDaColeta::default()
         },
     };
@@ -340,7 +386,7 @@ pub fn coletar(
             fechar(&corrida, "interrompida", None);
             return Err(Erro::Cancelado);
         }
-        let p = match fonte.listar(&consulta, pagina.as_deref()) {
+        let p = match fonte.listar(rotulo_id, &consulta, pagina.as_deref()) {
             Ok(p) => p,
             Err(e) => {
                 fechar(&corrida, "falhou", None);

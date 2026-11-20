@@ -1,4 +1,4 @@
-//! O Gmail no desktop: os anexos de e-mail entram no cofre e passam pelas regras de
+//! O e-mail no desktop (hoje só o Gmail conecta; o Outlook está em breve), com várias contas: os anexos de e-mail entram no cofre e passam pelas regras de
 //! reconhecimento (spec 13), na mesma esteira dos arquivos soltos na janela.
 //!
 //! - [`fonte`]: o cliente do Gmail atrás de um trait ([`FonteDeGmail`]); o real reaproveita o
@@ -13,15 +13,21 @@
 //! Nada de conteúdo de e-mail vai para log nem para mensagem de erro.
 
 pub mod coletor;
+pub mod config;
+pub mod contas;
 pub mod corpo;
+pub mod credenciais;
 pub mod erro;
 pub mod estado;
 pub mod fonte;
 pub mod gravador;
+pub mod oauth;
 pub mod reconhecimento;
 
 pub use coletor::{CONSULTA_PADRAO, OpcoesDaColeta, ResumoDaColeta, coletar};
+pub use config::{Config, Conta, TipoDeEmail};
+pub use credenciais::{Alvo, Credenciais};
 pub use erro::{Erro, Resultado};
-pub use estado::{EstadoDaConexao, SituacaoDaConexao, estado_do_gmail};
-pub use fonte::{ClienteReal, FonteDeGmail};
+pub use estado::{EstadoDaConexao, SituacaoDaConexao, estado_da_conta};
+pub use fonte::{ClienteReal, FonteDeGmail, Rotulo};
 pub use reconhecimento::{Desfecho, Reconhecimento, ReconhecimentoDoCofre};

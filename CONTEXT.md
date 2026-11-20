@@ -378,6 +378,16 @@ conexão, só que sem agenda.
 _Avoid_: integração, provider, adapter, serviço, vigia, fonte (como nome de um item;
 "fonte em massa" continua valendo como descrição)
 
+**Conta de e-mail**:
+Uma Conexão do tipo E-mail: uma caixa (hoje Gmail; Outlook em breve) autorizada só para
+leitura. Cada conta tem id estável, apelido, o e-mail da conta (depois do login), os
+**rótulos** que a pessoa segue e o próprio checkpoint por rótulo; pode haver várias. A
+configuração (sem segredo) fica em `email.json`; o refresh token e as credenciais do
+aplicativo ficam no Chaveiro (`email/<id>/...` e `email/<tipo>/app/...`). Autorização
+vencida (`invalid_grant`) é um estado da conta, não uma falha de coleta: a coleta para até
+a pessoa entrar de novo.
+_Avoid_: caixa postal, inbox, carteira (para os segredos)
+
 **Roteiro**:
 O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.
 Nasce da primeira coleta, guiada por IA, e se repete sem IA até o site mudar. Um roteiro
