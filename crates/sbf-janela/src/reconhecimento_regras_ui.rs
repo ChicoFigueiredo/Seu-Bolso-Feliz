@@ -28,6 +28,9 @@ pub(crate) struct ExtrasDaRegra<'a> {
     /// id da regra → nome.
     pub nomes: &'a BTreeMap<String, String>,
     pub regras_ligadas: bool,
+    /// Nenhum padrão reconheceu o documento: "Criar regra a partir daqui" vira o caminho
+    /// principal (em destaque).
+    pub sem_padrao: bool,
 }
 
 /// O que o cartão deixa o desenho mudar: a correção dos campos e o Rastro aberto.
@@ -424,8 +427,14 @@ pub(crate) fn acoes_da_regra(
         {
             pedidos.push(Pedido::AbrirTeste(indice));
         }
+        let criar = if extras.sem_padrao {
+            egui::Button::new(RichText::new("Criar regra a partir daqui").strong())
+                .fill(tema::paleta(ui.ctx()).destaque_sutil)
+        } else {
+            egui::Button::new("Criar regra a partir daqui")
+        };
         if ui
-            .button("Criar regra a partir daqui")
+            .add(criar)
             .on_hover_text("Monta um rascunho de regra com o que você corrigir; ele só vale depois que você ativar")
             .clicked()
         {

@@ -14,6 +14,8 @@ pub mod analise_ficticia;
 pub mod app;
 pub mod areas;
 pub mod caixa;
+pub mod caixa_de_entrada;
+pub mod caixa_de_entrada_ui;
 pub mod caixa_ui;
 pub mod chaves_ia;
 pub mod componentes;
