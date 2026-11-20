@@ -36,6 +36,7 @@ pub mod janela;
 pub mod leitura;
 pub mod ligacoes_do_registro;
 pub mod livro_ficticio;
+pub mod marcacao;
 pub mod mensageiros;
 pub mod moldura;
 pub mod movimentos;

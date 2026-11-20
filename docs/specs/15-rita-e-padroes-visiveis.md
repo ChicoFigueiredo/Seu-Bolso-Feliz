@@ -41,12 +41,24 @@ Esta spec traz quatro coisas:
 
 - **A fonte é a tabela `execucao` do `regras.sqlite`.** Para um documento, `entrada` é o sha256 do arquivo (`Entrada::id`), o mesmo `content_hash` do achado. "Casou" significa que existe execução com resultado de reconhecimento, de qualquer versão, em qualquer momento. "Âmbar" significa que a última decisão registrada para a entrada foi Ambíguo.
   - Se `execucao` não distinguir isso sem ambiguidade, o implementador acrescenta à execução uma coluna ou tabela própria, com migração `IF NOT EXISTS`, e documenta aqui.
+  - **Implementado (frente A):** `execucao` basta para "casou" e "não casou": `resultado = 'reconhecido'` é casou (vale para vencedor, perdedor e candidata de empate), `erro` não conta e quem "não se aplica" nem é gravado. **Não basta para o âmbar**: as candidatas de um empate têm o mesmo `resultado` que as de uma decisão clara, e só o texto livre do `motivo` as separa. A migração 2 do `regras.sqlite` (`IF NOT EXISTS`) acrescenta:
+    - `decisao_da_entrada (entrada PK, ambiguo, em)`: a última decisão do conjunto de padrões sobre a entrada, gravada por `Catalogo::registrar_execucao` (o caminho do reconhecimento, da janela e do MCP). `Ambiguo` grava 1; reconhecido grava 0; sem nenhum padrão que case, só zera uma linha que já existia. A migração recupera o âmbar do que já estava gravado, pelo motivo `regras empatadas ... discordam em ...`.
+    - `execucao_por_entrada (entrada, regra)`: índice da consulta em lote.
+    - `passada_de_fundo (regra, versao, checksum, ponto, feitos, atualizada_em)`: o ponto de parada da passada (D4), uma linha por versão **e checksum**.
+  - A consulta é `Catalogo::marcas(&[entrada]) -> {entrada: Marca { padroes, ambiguo }}` (em pedaços de 400); o verde vem de `COUNT(DISTINCT regra)` das execuções `reconhecido` (de qualquer versão e de padrões já desativados), e o âmbar de `decisao_da_entrada.ambiguo = 1`. Âmbar vence verde.
 - **Uma consulta por lote** (`sbf_regras::Catalogo`): recebe um conjunto de entradas e devolve, para cada uma, o número de padrões distintos que casaram e se a última decisão foi ambígua. A lista pede só as linhas visíveis, para não fazer uma consulta por linha.
 - **A passada de fundo** (worker, `sbf-worker`) tem três propriedades:
   - **Retomada:** o ponto de parada fica no próprio `regras.sqlite`.
   - **Ritmo:** lotes pequenos que não seguram a tela nem o worker, para nunca virar um laço quente.
   - **Novas versões:** detecta versão ativada ou alterada pelo checksum do conjunto ativo e repete só aquela versão.
   - O log do worker mostra o progresso (`padroes: N de M`), sem conteúdo de documento.
+  - **Implementado (frente A), como a passada trabalha:**
+    - O trait `PassadaDePadroes` (`sbf-worker`) roda depois do OCR no laço; a real é `crates/sbf/src/padroes.rs`. Lê `texto` do inventário por `rowid` (o ponto é o último `rowid` lido), no máximo 25 documentos ou 3 s por lote, **uma versão vigente por lote**, e espera 5 s entre lotes com trabalho, 60 s quando acabou e 5 min depois de uma falha (nada de laço quente). Texto que chega depois (OCR) tem `rowid` maior e entra na volta seguinte.
+    - Cada leitura usa um motor só com aquela versão e grava só a execução (`registrar_execucao_de_fundo`). Se a versão casou, o conjunto inteiro lê o documento uma vez e só a decisão (o âmbar) é atualizada, porque um empate só aparece com as outras versões.
+    - Versão ativada ou alterada tem checksum novo, logo ponto 0: repete só ela. Versão desativada deixa de ser lida e mantém o que gravou. Sem `regras.sqlite` a passada não faz nada nem o cria.
+    - O documento entra com o nome da última origem, o `mime_type` do achado (pela extensão, não pela assinatura do arquivo, que seria disco) e o canal pela origem (`gmail`, `telegram`; o resto é `cofre`).
+    - O progresso `N` é a soma das leituras das versões vigentes e `M` é documentos com texto vezes versões vigentes.
+- **Na janela (frente A):** as três listas (Caixa de entrada, seção "Sem padrão de reconhecimento" de A triar e a tabela de achados e documentos das áreas) ganham a coluna "Padrões" com o selo ("1 padrão", "2 padrões"), o fundo da linha (`Paleta::marca_verde` e `marca_ambar`, uma mistura da cor de sucesso e de aviso do tema com a superfície, conferida por teste de contraste nos sete temas) e a faixa "Marcação: Todas · Verde · Âmbar · Sem cor". Linha selecionada mantém a cor da seleção e só a faixa da esquerda mostra a marca. Cada linha desenhada pede a marca a um cache (`crate::marcacao`); o que falta é lido numa consulta em lote depois da tabela, vale 10 s e é relido em lote. Com o filtro ligado a lista é carregada inteira e as marcas dela vêm em lote. O filtro vive só em memória (não vai para as preferências da janela).
 - **A passada não muda nada que o usuário vê além da cor:** nem decisão, nem proposta, nem Caixa de entrada, nem `achado.estado`.
 
 ### Filtros e árvore (D5, D6)
