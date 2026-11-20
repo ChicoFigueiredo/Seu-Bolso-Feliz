@@ -25,7 +25,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -317,6 +318,11 @@ pub const INTERVALO_DO_INDICE: u64 = 30 * 60;
 /// De quanto em quanto tempo os pontos de atenção são analisados, em segundos.
 pub const INTERVALO_DOS_PONTOS: u64 = 6 * 3600;
 
+/// De quanto em quanto tempo, em segundos, o estado é renovado mesmo com o laço preso num
+/// passo longo (a varredura inicial de uma pasta grande): bem abaixo de
+/// [`crate::estado::VALIDADE_S`].
+pub const BATIMENTO_DO_ESTADO: u64 = 10;
+
 /// O worker.
 pub struct Worker {
     dados: Dados,
@@ -348,6 +354,11 @@ pub struct Worker {
     proximo_ocr: u64,
     gravado_em: u64,
     sujo: bool,
+    /// Quando o arquivo de estado foi escrito pela última vez (o laço ou o batimento).
+    pulso: Arc<AtomicU64>,
+    /// De quanto em quanto tempo, em segundos, o batimento renova o estado se o laço está
+    /// preso num passo longo.
+    batimento_s: u64,
 }
 
 impl std::fmt::Debug for Worker {
@@ -423,6 +434,8 @@ impl Worker {
             proximo_ocr: agora_,
             gravado_em: 0,
             sujo: true,
+            pulso: Arc::new(AtomicU64::new(0)),
+            batimento_s: BATIMENTO_DO_ESTADO,
         };
         let _ = w.registro.registrar(&Evento::Iniciou {
             vigiadas: w.estado.vigiando,
@@ -867,10 +880,19 @@ impl Worker {
         self.triador = Some(t);
     }
 
+    /// Troca o intervalo do batimento do estado (o padrão é [`BATIMENTO_DO_ESTADO`]).
+    #[must_use]
+    pub fn com_batimento(mut self, segundos: u64) -> Self {
+        self.batimento_s = segundos.max(1);
+        self
+    }
+
     fn gravar_estado(&mut self) {
         match self.estado.gravar(&self.dados.estado()) {
             Ok(()) => {
                 self.gravado_em = self.estado.atualizado_em;
+                self.pulso
+                    .store(self.estado.atualizado_em, Ordering::Relaxed);
                 self.sujo = false;
             }
             Err(_) => {
@@ -884,10 +906,23 @@ impl Worker {
     }
 
     /// Roda até `cancelar` virar `true`. Cada volta dura ~1 s (o vigia faz de sono).
+    ///
+    /// O estado (pid novo, `iniciado_em`, pastas vigiadas) é gravado já na largada, e uma thread
+    /// de batimento o renova enquanto o laço estiver preso num passo longo (a varredura inicial
+    /// de uma pasta grande leva minutos): sem isto a janela mostrava "parado" com o serviço ativo.
     pub fn rodar(&mut self, cancelar: &AtomicBool) {
-        while !cancelar.load(Ordering::Relaxed) {
-            self.passo(agora(), Duration::from_secs(1), cancelar);
-        }
+        self.gravar_estado();
+        let parar = AtomicBool::new(false);
+        let caminho = self.dados.estado();
+        let pulso = Arc::clone(&self.pulso);
+        let (pid, batimento_s) = (self.estado.pid, self.batimento_s);
+        std::thread::scope(|s| {
+            s.spawn(|| batimento(&caminho, pid, &pulso, batimento_s, &parar));
+            while !cancelar.load(Ordering::Relaxed) {
+                self.passo(agora(), Duration::from_secs(1), cancelar);
+            }
+            parar.store(true, Ordering::Relaxed);
+        });
         self.encerrar();
     }
 
@@ -911,6 +946,30 @@ impl Worker {
             &self.dados.estado(),
             &serde_json::to_vec_pretty(&self.estado).unwrap_or_default(),
         );
+    }
+}
+
+/// Renova o `atualizado_em` do estado quando o laço não o escreve há `cada` segundos. Só mexe
+/// em arquivo do próprio processo (`pid`) e só quando o laço está parado, então não disputa
+/// com a escrita dele.
+fn batimento(caminho: &Path, pid: u32, pulso: &AtomicU64, cada: u64, parar: &AtomicBool) {
+    while !parar.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(100));
+        let agora_ = agora();
+        if agora_.saturating_sub(pulso.load(Ordering::Relaxed)) < cada {
+            continue;
+        }
+        if let Some(mut e) = EstadoDoWorker::ler(caminho)
+            && e.pid == pid
+            && !parar.load(Ordering::Relaxed)
+        {
+            e.atualizado_em = agora_;
+            if let Ok(b) = serde_json::to_vec_pretty(&e)
+                && crate::estado::escrever_atomico(caminho, &b).is_ok()
+            {
+                pulso.store(agora_, Ordering::Relaxed);
+            }
+        }
     }
 }
 
