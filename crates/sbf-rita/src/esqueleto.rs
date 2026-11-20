@@ -140,6 +140,21 @@ fn titulos(linhas: &[&str], pedido: &str) -> Vec<(usize, String)> {
     achados
 }
 
+/// O identificador da linha: o token longo de sempre, ou (OCR que parte o número) uma sequência de
+/// grupos de dígitos separados por espaço, de sete ou mais dígitos no total.
+fn identificador_da_linha(linha: &str) -> Option<String> {
+    static PARTIDO: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| regex_fixo(r"\b\d{2,}(?: \d{2,})+(?:-\d+)?\b"));
+    if let Some(t) = identificador_em(linha) {
+        return Some(t.to_owned());
+    }
+    PARTIDO
+        .find_iter(linha)
+        .map(|m| m.as_str())
+        .find(|t| t.chars().filter(char::is_ascii_digit).count() >= 7)
+        .map(str::to_owned)
+}
+
 /// O nome do identificador que o pedido quer (`contrato`), se houver.
 fn nome_do_identificador(pedido: &str) -> Option<&'static str> {
     let ped = normalizar(pedido);
@@ -317,22 +332,22 @@ pub fn montar(item: &Entrada, pedido: &str) -> Option<Esqueleto> {
 
     // O identificador (número do contrato...).
     if let Some(nome) = nome_do_identificador(pedido) {
-        let candidatos: Vec<&str> = linhas
+        let candidatos: Vec<(&str, String)> = linhas
             .iter()
-            .filter_map(|l| identificador_em(l).map(|_| *l))
+            .filter_map(|l| identificador_da_linha(l).map(|t| (*l, t)))
             .collect();
         let preferida = candidatos
             .iter()
-            .find(|l| normalizar(l).split(' ').any(|w| w.starts_with(nome)))
+            .find(|(l, _)| normalizar(l).split(' ').any(|w| w.starts_with(nome)))
             .or_else(|| candidatos.first())
-            .and_then(|l| identificador_em(l));
+            .map(|(_, t)| t.as_str());
         match preferida {
             Some(token) => {
                 if pede_como_condicao(pedido, nome) {
                     todos.push(Condicao::Contem(token.to_owned()));
                 }
                 match conferir(
-                    &regex_do_numero(token),
+                    &regex_do_numero(token).replace(' ', r"\s"),
                     Formato::Texto,
                     &texto,
                     momento,
@@ -570,6 +585,17 @@ mod testes {
         let rx = &e.definicao.extrair["competencia"].regex;
         assert!(rx.contains(r"\d{2}/(\d{2}/\d{4})"), "{rx}");
         assert!(e.fora.is_empty(), "{:?}", e.fora);
+    }
+
+    #[test]
+    fn numero_partido_pelo_ocr_vira_regex_com_espaco_e_condicao() {
+        let sujo = PRINT.replace("123456789012-3", "1234 5678 9012-3");
+        let e = montar(&item(&sujo, Some("2026-11-20")), PEDIDO).expect("esqueleto");
+        assert_eq!(contem(&e)[1], "1234 5678 9012-3");
+        assert_eq!(
+            e.definicao.extrair["contrato"].regex,
+            r"(\d{4}\s\d{4}\s\d{4}-\d)"
+        );
     }
 
     #[test]

@@ -357,7 +357,7 @@ fn rodar_variacao(v: &Variacao, modelo: &str, endereco: &str) -> Medicao {
                         c.numero,
                         c.nome,
                         c.argumentos,
-                        &c.resultado.chars().take(160).collect::<String>()
+                        c.resultado.chars().take(160).collect::<String>()
                     );
                 }
             },

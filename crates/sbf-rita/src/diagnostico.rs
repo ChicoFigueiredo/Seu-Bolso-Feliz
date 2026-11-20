@@ -319,14 +319,14 @@ fn regex_pronto(formato: Formato, candidatas: &[String], texto: &str, pedido: &s
         .into_iter()
         .filter(|r| !SEM_VALOR.contains(&r.as_str()))
         .collect();
-    let (quem, construir): (&str, Box<dyn Fn(Option<&str>, &str) -> Option<String>>) = match formato
-    {
-        Formato::Centavos => ("o valor", Box::new(regex_do_valor)),
-        Formato::Data | Formato::Competencia => (
-            "a data",
-            Box::new(move |a: Option<&str>, l: &str| regex_da_data(a, l, formato)),
-        ),
+    let quem = match formato {
+        Formato::Centavos => "o valor",
+        Formato::Data | Formato::Competencia => "a data",
         _ => return String::new(),
+    };
+    let construir = |anterior: Option<&str>, linha: &str| match formato {
+        Formato::Centavos => regex_do_valor(anterior, linha),
+        _ => regex_da_data(anterior, linha, formato),
     };
     let mut melhor: Option<(usize, &String, String)> = None;
     for l in candidatas {
