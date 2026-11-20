@@ -30,7 +30,7 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         rotulo: "Caixa de entrada",
         icone: "inbox",
         fatia: 3,
-        motivo: "Os rascunhos do pipeline para corrigir, aprovar ou recusar (fatia 3)",
+        motivo: "A fila dos documentos recebidos e reconhecidos; abra um inventário para ligá-la",
     },
     AreaFutura {
         id: "controle",
