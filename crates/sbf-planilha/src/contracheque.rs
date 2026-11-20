@@ -253,19 +253,35 @@ fn valor_sob_o_rotulo_quebrado(linhas: &[&str], pedaco: &str) -> Option<Centavos
 ///
 /// 1. retroativo: a competência da rubrica não é o mês do pagamento (só no layout de 2026;
 ///    no antigo a competência de uma consignação é o início do contrato);
-/// 2. o nome, sem acento, traz uma destas palavras ou expressões: PLR, PREMIO, ADIANTAMENTO,
-///    ABONO, FERIAS, CONTRIBUICAO NEGOCIAL, 13 SALARIO, GRATIFICACAO NATALINA.
+/// 2. o nome, sem acento nem maiúsculas, traz uma destas palavras ou expressões: PLR, PREMIO,
+///    ADIANTAMENTO, ABONO, FERIAS, CONTRIBUICAO NEGOCIAL, e tudo do 13º salário: NATAL,
+///    NATALINA (GRAT NATAL, GRATIFICACAO NATALINA, PROVISAO ... GRATIFICACAO DE NATAL,
+///    ADIANT GRATIFICACAO NATAL e sua reposição), 13 SALARIO, DECIMO TERCEIRO, 13A / 13O e
+///    13º / 13ª. Um "13" solto (PARCELA 13 DE 24) não conta.
+///
+/// As provisões de INSS e IR do 13º entram no total de descontos do mês, então não são
+/// informativas: são eventuais do mês, como o resto do 13º.
 ///
 /// É uma marcação inicial: a pessoa troca rubrica por rubrica antes de confirmar.
 #[must_use]
 pub fn e_eventual(rubrica: &Rubrica, pagamento: Competencia, layout_de_2026: bool) -> bool {
-    const PALAVRAS: [&str; 5] = ["plr", "premio", "adiantamento", "abono", "ferias"];
-    const EXPRESSOES: [&str; 3] = [
-        "contribuicao negocial",
-        "13 salario",
-        "gratificacao natalina",
+    const PALAVRAS: [&str; 9] = [
+        "plr",
+        "premio",
+        "adiantamento",
+        "abono",
+        "ferias",
+        "natal",
+        "natalina",
+        "13a",
+        "13o",
     ];
+    const EXPRESSOES: [&str; 3] = ["contribuicao negocial", "13 salario", "decimo terceiro"];
     if layout_de_2026 && rubrica.competencia.is_some_and(|c| c != pagamento) {
+        return true;
+    }
+    // "13º" e "13ª" viram "13" sozinho na normalização; o ordinal só se vê no texto cru.
+    if rubrica.nome.contains("13º") || rubrica.nome.contains("13ª") {
         return true;
     }
     let nome = format!(" {} ", normalizar(&rubrica.nome));
@@ -957,6 +973,68 @@ mod testes {
         }
         assert!(c.consignacoes_com_prazo().is_empty());
         assert!(c.parcelas_atuais.iter().all(Option::is_none));
+    }
+
+    const TEXTO_2026_11_13: &str = include_str!("../tests/contracheque-2026-11-13-ficticio.txt");
+
+    #[test]
+    fn as_rubricas_do_13_saem_eventuais_e_a_composicao_fixa_nao_as_inclui() {
+        let c = ler(TEXTO_2026_11_13).expect("ler");
+        assert_eq!(c.rubricas.len(), 15);
+        assert_eq!(c.bruto, Some(Centavos(1_210_000)));
+        assert_eq!(c.descontos, Some(Centavos(545_000)));
+        assert!(c.conferido, "{:?}", c.avisos);
+        assert!(c.informativas.iter().all(|i| !i), "{:?}", c.informativas);
+        let do_13 = ["2068", "3068", "4347", "4946", "4495", "4496"];
+        for (r, eventual) in c.rubricas.iter().zip(&c.eventuais) {
+            let codigo = r.codigo.as_deref().unwrap_or("");
+            assert_eq!(*eventual, do_13.contains(&codigo), "{} {}", codigo, r.nome);
+        }
+        assert!(c.tem_eventuais(&c.eventuais));
+        let comps = c.composicoes("rec_salario", "abc", &c.eventuais);
+        assert_eq!(comps.len(), 2);
+        let fixa = &comps[1];
+        assert_eq!(fixa.rubricas.len(), 9);
+        assert!(
+            fixa.rubricas
+                .iter()
+                .all(|r| !do_13.contains(&r.codigo.as_deref().unwrap_or("")))
+        );
+    }
+
+    #[test]
+    fn variacoes_do_nome_do_13_sao_eventuais() {
+        let rubrica = |nome: &str| Rubrica {
+            codigo: None,
+            nome: nome.to_owned(),
+            tipo: TipoDeRubrica::Provento,
+            valor: Centavos(100),
+            competencia: None,
+            prazo: None,
+            recorrente: None,
+        };
+        let pagamento = Competencia { ano: 2026, mes: 11 };
+        for nome in [
+            "GRAT NATAL",
+            "GRATIFICAÇÃO NATAL(INA)",
+            "gratificacao de natal",
+            "SAUDE CAIXA 13A MENSALIDADE",
+            "ADIANT 13O SALARIO",
+            "13º",
+            "ABONO 13ª PARCELA",
+            "DECIMO TERCEIRO SALARIO",
+            "Décimo Terceiro",
+        ] {
+            assert!(e_eventual(&rubrica(nome), pagamento, true), "{nome}");
+        }
+        for nome in [
+            "SALARIO PADRAO",
+            "SAUDE CAIXA - MENSALIDADE",
+            "INSS CONTRIBUICAO",
+            "PARCELA 13 DE 24",
+        ] {
+            assert!(!e_eventual(&rubrica(nome), pagamento, true), "{nome}");
+        }
     }
 
     #[test]
