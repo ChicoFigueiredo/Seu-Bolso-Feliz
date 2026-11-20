@@ -375,7 +375,7 @@ fn mostrar(a: &mut Ambiente, resto: &[String]) -> Result<(), Falha> {
     let c = abrir_catalogo(a.cofre)?;
     let versoes = c.versoes(regra)?;
     if versoes.is_empty() {
-        return Err(op(format!("padrão `{regra}` não encontrada")));
+        return Err(op(format!("padrão `{regra}` não encontrado")));
     }
     w(a.saida, &format!("Padrão {regra}"));
     for v in &versoes {
@@ -674,7 +674,7 @@ fn mudar_estado(a: &mut Ambiente, acao: &str, resto: &[String]) -> Result<(), Fa
         None => {
             let versoes = c.versoes(&regra)?;
             if versoes.is_empty() {
-                return Err(op(format!("padrão `{regra}` não encontrada")));
+                return Err(op(format!("padrão `{regra}` não encontrado")));
             }
             format!("{acao} `{regra}`")
         }
