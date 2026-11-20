@@ -37,6 +37,7 @@ pub mod biblioteca;
 pub mod catalogo;
 pub mod definicao;
 pub mod fabrica;
+pub mod marcacao;
 pub mod motor;
 pub mod rascunho;
 pub mod script;
