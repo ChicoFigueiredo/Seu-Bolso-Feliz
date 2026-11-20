@@ -97,7 +97,8 @@ pub fn rodar(args: &[String]) -> ExitCode {
     };
     let chaveiro = sbf_chaveiro::Chaveiro::abrir_na_pasta_padrao().ok();
     let reconhecedor = match montar(cofre, chaveiro, o.com_ia) {
-        Ok(r) => r,
+        // `sbf reconhecer` reprocessa o arquivo e o põe na Caixa de entrada.
+        Ok(r) => r.com_fila(sbf_inventario::caixa_de_entrada::Origem::Cli),
         Err(e) => {
             eprintln!("sbf: não deu para montar a IA: {e}");
             return ExitCode::from(1);

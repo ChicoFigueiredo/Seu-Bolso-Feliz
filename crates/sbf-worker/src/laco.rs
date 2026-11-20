@@ -247,6 +247,18 @@ pub trait Triador {
     fn ciclo(&mut self, lote: usize, cancelar: &AtomicBool) -> Result<ResumoDaTriagem, Falha>;
 }
 
+/// O reconhecimento de um arquivo que chegou numa pasta vigiada (o real é o
+/// `ReconhecedorDoCofre` com a origem `pasta`, montado no `sbf`): o resultado entra na Caixa
+/// de entrada. Só o vigia chama (arquivo que acabou de aparecer); a reconciliação, que
+/// repassa a pasta inteira, não: ela não pode enfileirar milhares de achados antigos.
+pub trait ReconhecedorDePastas {
+    /// Reconhece um arquivo novo.
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn reconhecer(&mut self, caminho: &Path, cancelar: &AtomicBool) -> Result<(), Falha>;
+}
+
 /// O que uma atualização do índice local fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDoIndice {
@@ -325,6 +337,7 @@ pub struct Worker {
     indexador: Option<Box<dyn Indexador>>,
     analista: Option<Box<dyn Analista>>,
     leitor: Option<Box<dyn LeitorDeImagens>>,
+    reconhecedor_de_pastas: Option<Box<dyn ReconhecedorDePastas>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
     pub estado: EstadoDoWorker,
@@ -400,6 +413,7 @@ impl Worker {
             indexador: None,
             analista: None,
             leitor: None,
+            reconhecedor_de_pastas: None,
             registro,
             estado,
             vigia,
@@ -467,6 +481,13 @@ impl Worker {
         self
     }
 
+    /// Liga o reconhecimento dos arquivos novos das pastas vigiadas (Caixa de entrada).
+    #[must_use]
+    pub fn com_reconhecimento_das_pastas(mut self, r: Box<dyn ReconhecedorDePastas>) -> Self {
+        self.reconhecedor_de_pastas = Some(r);
+        self
+    }
+
     /// Liga a análise dos pontos de atenção (spec 10).
     #[must_use]
     pub fn com_pontos(mut self, analista: Box<dyn Analista>) -> Self {
@@ -526,13 +547,18 @@ impl Worker {
             }
         }
         for (fonte, (raiz, arquivos)) in por_fonte {
+            let mut novos_arquivos: Vec<PathBuf> = Vec::new();
             let resultado = (|| -> Resultado<Contadores> {
                 let varredura = self.varredura_do_vigia(&fonte, &raiz)?;
                 let cofre = self.dados.cofre.clone();
                 let conn = self.banco()?;
                 let mut c = Contadores::default();
                 for a in &arquivos {
-                    pastas::indexar_arquivo(conn, &cofre, &fonte, varredura, a, &mut c)?;
+                    let destino =
+                        pastas::indexar_arquivo(conn, &cofre, &fonte, varredura, a, &mut c)?;
+                    if destino == pastas::Destino::Novo {
+                        novos_arquivos.push(a.clone());
+                    }
                 }
                 Ok(c)
             })();
@@ -544,10 +570,26 @@ impl Worker {
                         avisados: arquivos.len(),
                     });
                     self.coletou("pastas", c.novos, agora_);
+                    self.reconhecer_os_novos(&novos_arquivos);
                 }
                 Err(_) => self.falhou("vigia", Falha::Banco),
             }
         }
+    }
+
+    /// Os arquivos que o vigia acabou de indexar passam pelo reconhecimento (e entram na
+    /// Caixa de entrada). Uma falha de um arquivo não para os outros.
+    fn reconhecer_os_novos(&mut self, arquivos: &[PathBuf]) {
+        let Some(mut r) = self.reconhecedor_de_pastas.take() else {
+            return;
+        };
+        let nao_cancelar = AtomicBool::new(false);
+        for a in arquivos {
+            if let Err(f) = r.reconhecer(a, &nao_cancelar) {
+                self.falhou("reconhecimento", f);
+            }
+        }
+        self.reconhecedor_de_pastas = Some(r);
     }
 
     fn coletou(&mut self, origem: &str, novos: u64, agora_: u64) {
