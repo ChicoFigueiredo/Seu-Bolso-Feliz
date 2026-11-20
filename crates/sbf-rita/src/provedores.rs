@@ -3,7 +3,12 @@
 //! Anthropic e qualquer API compatível com OpenAI (endereço, modelo, chave).
 //!
 //! A configuração (tipo, endereço, modelo) é um texto JSON guardado como segredo `ia:rita-config`
-//! e cada chave fica em `ia:rita/<id>`: nada disso entra em arquivo do cofre, log ou erro.
+//! e cada chave fica em `ia:rita/<id>`: nada disso entra em arquivo do cofre, log ou erro. A
+//! exceção é o OpenRouter, que reutiliza a chave `ia:openrouter` de Opções → IA (uma chave só,
+//! sem segunda entrada); uma `ia:rita/openrouter` de versões anteriores é migrada para ela.
+//!
+//! OpenRouter e Anthropic têm endereço fixo (`openrouter.ai`, `api.anthropic.com`): a chave
+//! nunca vai para outro host por causa de uma configuração.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -18,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use crate::claude::ClaudeDeRita;
 
 const CHAVE_DA_CONFIGURACAO: &str = "rita-config";
+/// O id da chave do OpenRouter no Chaveiro, o mesmo de Opções → IA (`ia:openrouter`).
+pub const CHAVE_DO_OPENROUTER: &str = "openrouter";
 
 /// O tipo de um provedor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +62,15 @@ impl TipoDeProvedor {
         matches!(self, Self::Local | Self::Compativel)
     }
 
+    /// O endereço fixo do tipo (OpenRouter e Anthropic): a chave só vai para este host.
+    pub fn endereco_fixo(self) -> Option<&'static str> {
+        match self {
+            Self::OpenRouter => Some(ENDERECO_DO_OPENROUTER),
+            Self::Anthropic => Some(ENDERECO_DA_ANTHROPIC),
+            _ => None,
+        }
+    }
+
     pub const TODOS: [Self; 5] = [
         Self::Local,
         Self::ClaudeCli,
@@ -76,7 +92,17 @@ pub struct ProvedorConfigurado {
 }
 
 impl ProvedorConfigurado {
-    /// O padrão de cada tipo.
+    /// O id da chave deste provedor na [`GuardaDeProvedores`]: o OpenRouter usa sempre a chave
+    /// de Opções → IA (`openrouter`); os outros, o próprio id.
+    pub fn id_da_chave(&self) -> &str {
+        if self.tipo == TipoDeProvedor::OpenRouter {
+            CHAVE_DO_OPENROUTER
+        } else {
+            &self.id
+        }
+    }
+
+    /// Os valores de fábrica de cada tipo.
     pub fn padrao_do_tipo(tipo: TipoDeProvedor) -> Self {
         let (id, nome, endereco, modelo) = match tipo {
             TipoDeProvedor::Local => (
@@ -110,11 +136,11 @@ impl ProvedorConfigurado {
     }
 }
 
-/// A lista de provedores e o padrão.
+/// A lista de provedores e o principal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ConfiguracaoDeRita {
     pub provedores: Vec<ProvedorConfigurado>,
-    /// O id do provedor padrão.
+    /// O id do provedor principal (o que o painel usa se o usuário não trocar).
     pub padrao: Option<String>,
 }
 
@@ -135,7 +161,7 @@ impl ConfiguracaoDeRita {
         self.provedores.iter().find(|p| p.id == id)
     }
 
-    /// O provedor padrão (ou o primeiro).
+    /// O provedor principal (ou o primeiro).
     pub fn o_padrao(&self) -> Option<&ProvedorConfigurado> {
         self.padrao
             .as_deref()
@@ -158,18 +184,33 @@ impl ConfiguracaoDeRita {
             if p.modelo.trim().is_empty() {
                 return Err(format!("{}: falta o modelo", p.nome));
             }
+            if p.id == CHAVE_DO_OPENROUTER && p.tipo != TipoDeProvedor::OpenRouter {
+                return Err(format!(
+                    "{}: o identificador `{CHAVE_DO_OPENROUTER}` é do OpenRouter",
+                    p.nome
+                ));
+            }
             if p.tipo.pede_endereco() {
-                let e = p.endereco.as_deref().unwrap_or("");
-                if !(e.starts_with("https://")
-                    || e.starts_with("http://localhost")
-                    || e.starts_with("http://127.0.0.1")
-                    || e.starts_with("http://[::1]"))
-                {
-                    return Err(format!(
+                // A mesma leitura estrita com que o provedor abre a conexão: o prefixo
+                // `http://localhost` não basta (`http://localhost.exemplo.com` é outro host).
+                sbf_ia::validar_endereco(p.endereco.as_deref().unwrap_or("")).map_err(|_| {
+                    format!(
                         "{}: o endereço precisa ser https (http só em localhost)",
                         p.nome
-                    ));
-                }
+                    )
+                })?;
+            }
+            if let Some(fixo) = p.tipo.endereco_fixo()
+                && p.endereco
+                    .as_deref()
+                    .map(|e| e.trim().trim_end_matches('/'))
+                    .is_some_and(|e| !e.is_empty() && e != fixo)
+            {
+                return Err(format!(
+                    "{}: o endereço de {} é fixo ({fixo}) e não muda",
+                    p.nome,
+                    p.tipo.rotulo()
+                ));
             }
         }
         Ok(())
@@ -193,6 +234,10 @@ pub trait GuardaDeProvedores: Send + Sync {
     /// Texto para a tela (nunca o valor).
     fn gravar(&self, c: &ConfiguracaoDeRita) -> Result<(), String>;
     fn chave(&self, id: &str) -> Option<Segredo>;
+    /// Há chave guardada, **sem decifrá-la** (o Chaveiro só consulta os rótulos).
+    fn tem_chave(&self, id: &str) -> bool {
+        self.chave(id).is_some()
+    }
     /// Os 4 últimos caracteres da chave guardada (`Some("")` se curta), ou `None` sem chave.
     fn final_da_chave(&self, id: &str) -> Option<String> {
         self.chave(id).map(|c| {
@@ -212,8 +257,34 @@ pub trait GuardaDeProvedores: Send + Sync {
     fn apagar_chave(&self, id: &str) -> Result<(), String>;
 }
 
+/// O rótulo (sem o prefixo `ia:`) de uma chave de provedor: `openrouter` é a chave de Opções →
+/// IA; os outros, `rita/<id>`.
 fn chave_do_provedor(id: &str) -> String {
-    format!("rita/{id}")
+    if id == CHAVE_DO_OPENROUTER {
+        CHAVE_DO_OPENROUTER.to_owned()
+    } else {
+        format!("rita/{id}")
+    }
+}
+
+/// O rótulo antigo da chave do OpenRouter de Rita (antes de ela usar a de Opções → IA).
+const CHAVE_ANTIGA_DO_OPENROUTER: &str = "rita/openrouter";
+
+/// Migração simples: se existe `ia:rita/openrouter` e ainda não existe `ia:openrouter`, a chave
+/// passa para `ia:openrouter` e a antiga é apagada. Com as duas guardadas, não mexe em nada (a
+/// de Opções → IA vale; a antiga fica até o usuário apagar). Devolve `true` se migrou.
+pub fn migrar_chave_do_openrouter(c: &Chaveiro) -> bool {
+    if c.tem_chave_de_ia(CHAVE_DO_OPENROUTER) || !c.tem_chave_de_ia(CHAVE_ANTIGA_DO_OPENROUTER) {
+        return false;
+    }
+    let Ok(antiga) = c.chave_de_ia(CHAVE_ANTIGA_DO_OPENROUTER) else {
+        return false;
+    };
+    if c.guardar_chave_de_ia(CHAVE_DO_OPENROUTER, antiga).is_err() {
+        return false;
+    }
+    let _ = c.apagar_chave_de_ia(CHAVE_ANTIGA_DO_OPENROUTER);
+    true
 }
 
 impl GuardaDeProvedores for Chaveiro {
@@ -233,7 +304,17 @@ impl GuardaDeProvedores for Chaveiro {
     }
 
     fn chave(&self, id: &str) -> Option<Segredo> {
+        if id == CHAVE_DO_OPENROUTER {
+            migrar_chave_do_openrouter(self);
+        }
         self.chave_de_ia(&chave_do_provedor(id)).ok()
+    }
+
+    fn tem_chave(&self, id: &str) -> bool {
+        if id == CHAVE_DO_OPENROUTER {
+            migrar_chave_do_openrouter(self);
+        }
+        self.tem_chave_de_ia(&chave_do_provedor(id))
     }
 
     fn guardar_chave(&self, id: &str, chave: Segredo) -> Result<(), String> {
@@ -296,7 +377,7 @@ impl GuardaDeProvedores for GuardaEmMemoria {
 
 /// Uma guarda com a configuração em memória: o painel pergunta a cada quadro e o Chaveiro
 /// (D-Bus, arquivo cifrado) só é lido na primeira vez e depois de uma gravação. As chaves
-/// passam direto.
+/// passam direto (quem as mostra guarda o resultado, como a aba IA).
 pub struct ComCache {
     por_baixo: Arc<dyn GuardaDeProvedores>,
     config: Mutex<Option<ConfiguracaoDeRita>>,
@@ -333,6 +414,10 @@ impl GuardaDeProvedores for ComCache {
         self.por_baixo.chave(id)
     }
 
+    fn tem_chave(&self, id: &str) -> bool {
+        self.por_baixo.tem_chave(id)
+    }
+
     fn final_da_chave(&self, id: &str) -> Option<String> {
         self.por_baixo.final_da_chave(id)
     }
@@ -363,7 +448,11 @@ impl std::fmt::Debug for ProvedorDaRita {
     }
 }
 
-/// Monta o provedor `p`, lendo a chave da guarda a cada pedido.
+/// Monta o provedor `p`. **Roda na thread do pedido, nunca na da interface**: procura o
+/// `claude` no disco e consulta o Chaveiro. A chave só é lida a cada chamada de rede.
+///
+/// OpenRouter e Anthropic usam o endereço fixo (`openrouter.ai`, `api.anthropic.com`),
+/// ignorando o da configuração: a chave nunca segue para outro host.
 ///
 /// # Errors
 /// [`ErroDeIa::Indisponivel`]: endereço inválido, `claude` não encontrado, chave que falta.
@@ -385,37 +474,30 @@ pub fn construir(
             )?)))
         }
         TipoDeProvedor::OpenRouter => {
-            let mut c = ConfiguracaoChatCompletions::openrouter(p.modelo.clone());
-            if !endereco.is_empty() {
-                c.endereco = endereco;
-            }
+            let c = ConfiguracaoChatCompletions::openrouter(p.modelo.clone());
             Ok(ProvedorDaRita::Conversa(Arc::new(ChatCompletions::novo(
                 c,
-                Some(fonte(p.id.clone())),
+                Some(fonte(p.id_da_chave().to_owned())),
             )?)))
         }
         TipoDeProvedor::Compativel => {
             let c =
                 ConfiguracaoChatCompletions::compativel(p.id.clone(), endereco, p.modelo.clone());
             // Com ou sem chave: se há uma guardada, vai; se não, o endereço é de uso livre.
-            let com_chave = guarda.chave(&p.id).is_some().then(|| fonte(p.id.clone()));
+            let com_chave = guarda.tem_chave(&p.id).then(|| fonte(p.id.clone()));
             Ok(ProvedorDaRita::Conversa(Arc::new(ChatCompletions::novo(
                 c, com_chave,
             )?)))
         }
         TipoDeProvedor::Anthropic => {
-            let mut c = ConfiguracaoAnthropic::nova(p.modelo.clone());
-            if !endereco.is_empty() {
-                c.endereco = endereco;
-            }
+            let c = ConfiguracaoAnthropic::nova(p.modelo.clone());
             Ok(ProvedorDaRita::Conversa(Arc::new(Anthropic::novo(
                 c,
                 fonte(p.id.clone()),
             )?)))
         }
         TipoDeProvedor::ClaudeCli => {
-            let cli = ClaudeCli::do_sistema()
-                .or_else(claude_do_usuario)
+            let cli = ClaudeCli::do_ambiente()
                 .ok_or_else(|| ErroDeIa::Indisponivel("o `claude` não foi encontrado".to_owned()))?
                 .com_modelos(p.modelo.clone(), p.modelo.clone())
                 .com_prazo(std::time::Duration::from_secs(600));
@@ -426,13 +508,6 @@ pub fn construir(
             )))
         }
     }
-}
-
-/// `~/.local/bin/claude`, onde o instalador oficial o põe.
-fn claude_do_usuario() -> Option<ClaudeCli> {
-    let casa = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
-    let caminho = casa.join(".local/bin/claude");
-    caminho.is_file().then(|| ClaudeCli::novo(caminho))
 }
 
 #[cfg(test)]
@@ -499,5 +574,155 @@ mod testes {
         assert!(construir(&comp, &guarda, std::path::Path::new("/usr/bin/sbf")).is_ok());
         comp.endereco = Some("http://exemplo.com/v1".into());
         assert!(construir(&comp, &guarda, std::path::Path::new("/usr/bin/sbf")).is_err());
+    }
+
+    #[test]
+    fn conferir_usa_a_leitura_estrita_e_fixa_o_endereco_de_openrouter_e_anthropic() {
+        for ruim in [
+            "http://localhost.evil.com/v1",
+            "http://localhost@evil.com/v1",
+            "http://127.0.0.1.evil.com",
+        ] {
+            let mut c = ConfiguracaoDeRita::inicial();
+            c.provedores[0].endereco = Some(ruim.into());
+            assert!(c.conferir().unwrap_err().contains("https"), "{ruim}");
+        }
+        for bom in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:8080/v1",
+            "http://[::1]:11434/v1",
+        ] {
+            let mut c = ConfiguracaoDeRita::inicial();
+            c.provedores[0].endereco = Some(bom.into());
+            assert!(c.conferir().is_ok(), "{bom}");
+        }
+        for tipo in [TipoDeProvedor::OpenRouter, TipoDeProvedor::Anthropic] {
+            let mut c = ConfiguracaoDeRita::inicial();
+            let mut p = ProvedorConfigurado::padrao_do_tipo(tipo);
+            assert!(
+                {
+                    c.provedores.push(p.clone());
+                    c.conferir().is_ok()
+                },
+                "o endereço de fábrica vale"
+            );
+            c.provedores.pop();
+            p.endereco = Some("https://coletor.exemplo.com/v1".into());
+            c.provedores.push(p.clone());
+            assert!(c.conferir().unwrap_err().contains("fixo"), "{tipo:?}");
+            c.provedores.pop();
+            p.endereco = None;
+            c.provedores.push(p);
+            assert!(c.conferir().is_ok(), "sem endereço vale: o fixo é usado");
+        }
+    }
+
+    #[test]
+    fn so_o_openrouter_pode_ter_o_id_openrouter() {
+        let mut c = ConfiguracaoDeRita::inicial();
+        let mut p = ProvedorConfigurado::padrao_do_tipo(TipoDeProvedor::Compativel);
+        p.id = "openrouter".into();
+        p.endereco = Some("https://api.exemplo.com/v1".into());
+        p.modelo = "m".into();
+        c.provedores.push(p);
+        assert!(c.conferir().unwrap_err().contains("OpenRouter"));
+    }
+
+    #[test]
+    fn construir_openrouter_e_anthropic_ignoram_o_endereco_da_configuracao() {
+        let guarda: Arc<dyn GuardaDeProvedores> = Arc::new(GuardaEmMemoria::default());
+        for (tipo, fixo) in [
+            (TipoDeProvedor::OpenRouter, "https://openrouter.ai/api/v1"),
+            (TipoDeProvedor::Anthropic, "https://api.anthropic.com/v1"),
+        ] {
+            let mut p = ProvedorConfigurado::padrao_do_tipo(tipo);
+            p.endereco = Some("https://coletor.exemplo.com/v1".into());
+            let ProvedorDaRita::Conversa(c) =
+                construir(&p, &guarda, std::path::Path::new("/usr/bin/sbf")).expect("provedor")
+            else {
+                panic!("devia ser conversa");
+            };
+            assert_eq!(c.endereco(), fixo, "{tipo:?}");
+        }
+    }
+
+    fn chaveiro() -> (tempfile::TempDir, Chaveiro) {
+        let pasta = tempfile::tempdir().expect("pasta");
+        let c = Chaveiro::abrir_com_chaveiro(
+            pasta.path(),
+            Arc::new(bancada_segredos::testes::ChaveiroEmMemoria::novo()),
+            bancada_segredos::ParametrosDeDerivacao::rapidos_para_testes(),
+        )
+        .expect("chaveiro");
+        (pasta, c)
+    }
+
+    #[test]
+    fn a_chave_do_openrouter_de_rita_e_a_de_opcoes_sem_segunda_entrada() {
+        let (_pasta, c) = chaveiro();
+        let p = ProvedorConfigurado::padrao_do_tipo(TipoDeProvedor::OpenRouter);
+        assert_eq!(p.id_da_chave(), "openrouter");
+        // A chave de Opções → IA vale para Rita, sem cópia.
+        c.guardar_chave_de_ia("openrouter", Segredo::novo("sk-or-v1-ficticia-0000abcd"))
+            .expect("guardar");
+        assert!(GuardaDeProvedores::tem_chave(&c, p.id_da_chave()));
+        assert_eq!(
+            GuardaDeProvedores::final_da_chave(&c, p.id_da_chave()).as_deref(),
+            Some("abcd")
+        );
+        // Guardar pela guarda de Rita troca a mesma entrada.
+        GuardaDeProvedores::guardar_chave(
+            &c,
+            "openrouter",
+            Segredo::novo("sk-or-v1-ficticia-9999wxyz"),
+        )
+        .expect("trocar");
+        assert!(!c.tem_chave_de_ia("rita/openrouter"));
+        assert_eq!(
+            c.chave_de_ia("openrouter").expect("chave").expor(),
+            "sk-or-v1-ficticia-9999wxyz"
+        );
+        // Outro provedor com chave segue em `rita/<id>`.
+        GuardaDeProvedores::guardar_chave(&c, "anthropic", Segredo::novo("sk-ant-ficticia-1234"))
+            .expect("guardar");
+        assert!(c.tem_chave_de_ia("rita/anthropic"));
+    }
+
+    #[test]
+    fn a_chave_antiga_de_rita_migra_para_a_de_opcoes() {
+        let (_pasta, c) = chaveiro();
+        c.guardar_chave_de_ia("rita/openrouter", Segredo::novo("sk-or-v1-antiga-0000abcd"))
+            .expect("guardar");
+        assert!(!c.tem_chave_de_ia("openrouter"));
+        assert!(
+            GuardaDeProvedores::tem_chave(&c, "openrouter"),
+            "migra ao consultar"
+        );
+        assert!(!c.tem_chave_de_ia("rita/openrouter"), "a antiga some");
+        assert_eq!(
+            c.chave_de_ia("openrouter").expect("chave").expor(),
+            "sk-or-v1-antiga-0000abcd"
+        );
+        assert!(
+            !migrar_chave_do_openrouter(&c),
+            "depois de migrar não há o que migrar"
+        );
+    }
+
+    #[test]
+    fn com_as_duas_chaves_a_de_opcoes_vale_e_nada_e_apagado() {
+        let (_pasta, c) = chaveiro();
+        c.guardar_chave_de_ia("openrouter", Segredo::novo("sk-or-v1-nova-0000abcd"))
+            .expect("guardar");
+        c.guardar_chave_de_ia("rita/openrouter", Segredo::novo("sk-or-v1-velha-0000wxyz"))
+            .expect("guardar");
+        assert!(!migrar_chave_do_openrouter(&c));
+        assert_eq!(
+            GuardaDeProvedores::chave(&c, "openrouter")
+                .expect("chave")
+                .expor(),
+            "sk-or-v1-nova-0000abcd"
+        );
+        assert!(c.tem_chave_de_ia("rita/openrouter"));
     }
 }

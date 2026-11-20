@@ -18,6 +18,8 @@ pub mod mcp;
 pub mod pre_teste;
 pub mod prompt;
 pub mod provedores;
+pub mod registro;
+pub(crate) mod texto;
 
 pub use claude::ClaudeDeRita;
 pub use cofre::{FonteDeSimilares, SimilaresDoCofre, SimilaresFixos};
@@ -26,7 +28,7 @@ pub use contexto::{
 };
 pub use ferramentas::{
     ChamadaFeita, EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, RascunhoCriado, Sessao,
-    definicoes,
+    definicoes, motivo_do_pedido, rastro_resumido,
 };
 pub use laco::{Evento, Parada, Relatorio, Rita};
 pub use pre_teste::{PreTeste, pre_testar};
@@ -34,3 +36,4 @@ pub use provedores::{
     ComCache, ConfiguracaoDeRita, GuardaDeProvedores, GuardaEmMemoria, ProvedorConfigurado,
     ProvedorDaRita, TipoDeProvedor, construir,
 };
+pub use registro::{DESTINATARIO, abrir_registro};

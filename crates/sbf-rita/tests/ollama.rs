@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use sbf_ia::{
     ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, MODELO_LOCAL_PADRAO,
+    RegistroFalso,
 };
 use sbf_regras::catalogo::Catalogo;
 use sbf_rita::{Contexto, DadosDaTela, Evento, Rita, SimilaresFixos, entrada_de_documento};
@@ -68,8 +69,7 @@ fn rita_com_o_ollama_real_cria_um_rascunho_que_passa() {
         .pedir(
             &provedor,
             "o título e o número do contrato determinam o padrão; a data de vencimento determina a competência e o valor total é o valor; cria",
-            &parar,
-            None,
+            &parar, &RegistroFalso::novo(),
             &mut |e| match e {
                 Evento::Chamada(c) => eprintln!("  [{}] {} {} -> {}", c.numero, c.nome, c.argumentos, c.resultado),
                 Evento::Fala(t) => eprintln!("  Rita: {t}"),

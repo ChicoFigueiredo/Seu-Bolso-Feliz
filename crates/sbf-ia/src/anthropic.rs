@@ -202,6 +202,7 @@ pub(crate) fn interpretar(
     let saida = numero("output_tokens");
     let texto = texto.trim().to_owned();
     Ok(RespostaDeConversa {
+        custo_ausente: false,
         texto: (!texto.is_empty()).then_some(texto),
         chamadas,
         consumo: Consumo {
@@ -231,6 +232,10 @@ impl ProvedorDeConversa for Anthropic {
         NaturezaDoCusto::Real
     }
 
+    fn endereco(&self) -> String {
+        self.base.clone()
+    }
+
     fn conversar(
         &self,
         pedido: &PedidoDeConversa,
@@ -244,6 +249,10 @@ impl ProvedorDeConversa for Anthropic {
             .map_err(|_| ErroDeIa::Outro("montar o pedido".to_owned()))?;
         let http = PedidoHttp::post(format!("{}/messages", self.base))
             .aceitar("application/json")
+            // RISCO (fora do escopo desta frente: a bancada é outro repositório): o `Debug` do
+            // `PedidoHttp` da bancada imprime os cabeçalhos, inclusive este `x-api-key`. Por isso
+            // o pedido nunca é impresso, logado nem anexado a erro neste arquivo. A correção de
+            // verdade é a bancada mascarar `x-api-key` (ou ganhar autorização configurável).
             .cabecalho("x-api-key", chave.expor())
             .cabecalho("anthropic-version", VERSAO_DA_API)
             .json(bytes)

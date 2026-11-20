@@ -233,3 +233,69 @@ impl ProvedorDeConversa for FalsoDeConversa {
         }
     }
 }
+
+/// Um registro em memória (testes): guarda cada saída aberta e o consumo que a completou, e
+/// pode ser mandado falhar para provar que nada é enviado sem registro.
+#[derive(Debug, Default)]
+pub struct RegistroFalso {
+    saidas: Mutex<Vec<crate::Saida>>,
+    falha: AtomicBool,
+}
+
+impl RegistroFalso {
+    pub fn novo() -> Self {
+        Self::default()
+    }
+
+    /// Um registro que recusa gravar (o inventário não abriu).
+    pub fn que_falha() -> Self {
+        let r = Self::default();
+        r.falha.store(true, Ordering::SeqCst);
+        r
+    }
+
+    /// As saídas registradas, em ordem, já com o consumo das que foram fechadas.
+    pub fn saidas(&self) -> Vec<crate::Saida> {
+        self.saidas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl crate::Registro for RegistroFalso {
+    fn registrar_saida(&self, saida: &crate::Saida) -> ResultadoDeIa<()> {
+        crate::Registro::abrir_saida(self, saida).map(|_| ())
+    }
+
+    fn abrir_saida(&self, saida: &crate::Saida) -> ResultadoDeIa<Option<i64>> {
+        if self.falha.load(Ordering::SeqCst) {
+            return Err(ErroDeIa::Outro("registro falso recusou".to_owned()));
+        }
+        let mut v = self
+            .saidas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        v.push(saida.clone());
+        Ok(Some(i64::try_from(v.len() - 1).unwrap_or(0)))
+    }
+
+    fn fechar_saida(&self, id: i64, consumo: crate::Consumo) -> ResultadoDeIa<()> {
+        let mut v = self
+            .saidas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(s) = usize::try_from(id).ok().and_then(|i| v.get_mut(i)) {
+            s.consumo = consumo;
+        }
+        Ok(())
+    }
+
+    fn ler_cache(&self, _chave: &str) -> ResultadoDeIa<Option<serde_json::Value>> {
+        Ok(None)
+    }
+
+    fn gravar_cache(&self, _chave: &str, _json: &serde_json::Value) -> ResultadoDeIa<()> {
+        Ok(())
+    }
+}

@@ -26,18 +26,21 @@ pub use chat_completions::{
     ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, ENDERECO_DO_OPENROUTER,
     MODELO_LOCAL_PADRAO,
 };
-pub use claude_cli::{ClaudeCli, SaidaDoClaudeComFerramentas, ServidorMcp};
+pub use claude_cli::{
+    ClaudeCli, SaidaDoClaudeComFerramentas, ServidorMcp, resolver_claude, resolver_claude_em,
+};
 pub use conversa::{
     ChamadaDeFerramenta, DefinicaoDeFerramenta, Mensagem, NaturezaDoCusto, PedidoDeConversa,
     ProvedorDeConversa, RespostaDeConversa,
 };
 pub use esquema::{extrair_json, validar_esquema};
-pub use falso::{Falso, FalsoDeConversa};
+pub use falso::{Falso, FalsoDeConversa, RegistroFalso};
 pub use fila::{
     Atribuicao, ConfiguracaoDaFila, Controle, Evento, Fila, Formato, Interrupcao, LoteResolvido,
     Relatorio,
 };
 pub use openrouter::{ConfiguracaoOpenRouter, FonteDaChave, OpenRouter};
+pub use ponte_http::validar_endereco;
 pub use tempo::{agora_rfc3339, rfc3339_de};
 
 /// Quanto do conteúdo pode sair para um destinatário (ADR-015).
@@ -155,6 +158,24 @@ pub trait Provedor: Send + Sync {
 /// `saida_ia` e `cache_ia` (spec 09, `sql/0003-triagem.sql`); os testes, em memória.
 pub trait Registro: Send + Sync {
     fn registrar_saida(&self, saida: &Saida) -> ResultadoDeIa<()>;
+    /// Registra o que **vai** sair, antes do envio (ADR-015: falha fechada). Quem chama só
+    /// envia se isto der `Ok`. Devolve o id da linha, para [`Self::fechar_saida`] completar
+    /// com os tokens e o custo quando a resposta chegar. O padrão registra a linha de uma vez
+    /// (sem tokens) e não devolve id.
+    ///
+    /// # Errors
+    /// O registro não abriu ou não gravou: nada deve ser enviado.
+    fn abrir_saida(&self, saida: &Saida) -> ResultadoDeIa<Option<i64>> {
+        self.registrar_saida(saida).map(|()| None)
+    }
+    /// Completa a linha aberta por [`Self::abrir_saida`] com o consumo da resposta. A saída já
+    /// está registrada: uma falha aqui só perde os tokens, nunca autoriza nem bloqueia nada.
+    ///
+    /// # Errors
+    /// Falha do registro.
+    fn fechar_saida(&self, _id: i64, _consumo: Consumo) -> ResultadoDeIa<()> {
+        Ok(())
+    }
     fn ler_cache(&self, chave: &str) -> ResultadoDeIa<Option<serde_json::Value>>;
     fn gravar_cache(&self, chave: &str, json: &serde_json::Value) -> ResultadoDeIa<()>;
 }

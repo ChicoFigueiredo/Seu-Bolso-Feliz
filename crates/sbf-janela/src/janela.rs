@@ -176,7 +176,7 @@ pub struct Janela {
     /// Rita, a assistente de padrões (spec 15): painel do dock, destacável.
     pub rita: crate::rita_ui::RitaUi,
     /// O item que Rita recebe, guardado enquanto o foco e a área não mudam.
-    rita_item: Option<(Ref, String, crate::rita_ui::ItemDaTela)>,
+    rita_item: Option<(Ref, String, Option<String>, crate::rita_ui::ItemDaTela)>,
     /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
     pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
     /// A marcação verde/âmbar das listas de documentos (spec 15, D3).
@@ -1321,9 +1321,13 @@ impl Janela {
         let cofre = self.rita.cofre()?;
         let foco = self.foco()?;
         let area = areas::rotulo_do_destino(self.navegacao.atual());
-        if let Some((r, a, item)) = &self.rita_item
+        // O filtro ativo da área (período, estado, tipo, conexão, pesquisa): vai a Rita em
+        // palavras. A lista visível em si não é lida (só a seleção vira títulos): ver a spec 15, D8.
+        let filtro = filtro_para_rita(&self.filtro(), &self.ciclo_atual());
+        if let Some((r, a, f, item)) = &self.rita_item
             && *r == foco
             && *a == area
+            && *f == filtro
         {
             return Some(item.clone());
         }
@@ -1363,11 +1367,11 @@ impl Janela {
                 cofre,
                 item: entrada,
                 area: area.clone(),
-                filtro: None,
+                filtro: filtro.clone(),
                 titulos,
             },
         };
-        self.rita_item = Some((foco, area, item.clone()));
+        self.rita_item = Some((foco, area, filtro, item.clone()));
         Some(item)
     }
 
@@ -3476,6 +3480,13 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
     }
 }
 
+/// O filtro ativo em palavras para Rita (sem o convite de "Sem filtros"): `None` sem filtro.
+pub fn filtro_para_rita(f: &Filtro, ciclo_atual: &str) -> Option<String> {
+    descricao_do_filtro(f, ciclo_atual)
+        .strip_prefix("Filtro: ")
+        .map(str::to_owned)
+}
+
 fn cabecalho_da_area(
     ui: &mut Ui,
     area: Area,
@@ -3660,6 +3671,19 @@ mod testes {
         );
         assert!(j.pedidos.is_empty());
         assert!(matches!(&j.controle.mensagem, Some((_, true))));
+    }
+
+    #[test]
+    fn rita_recebe_o_filtro_ativo_em_palavras_e_nada_sem_filtro() {
+        assert_eq!(filtro_para_rita(&Filtro::default(), "2026-10"), None);
+        let f = Filtro {
+            texto: Some("pix".to_owned()),
+            ..Filtro::default()
+        };
+        assert_eq!(
+            filtro_para_rita(&f, "2026-10").as_deref(),
+            Some("\u{201c}pix\u{201d}")
+        );
     }
 
     #[test]

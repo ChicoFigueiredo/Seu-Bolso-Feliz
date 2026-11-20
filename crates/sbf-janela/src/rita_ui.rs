@@ -21,11 +21,11 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use egui::{RichText, ScrollArea, Ui};
-use sbf_ia::{Consumo, NaturezaDoCusto, Registro};
+use sbf_ia::{Consumo, NaturezaDoCusto};
 use sbf_regras::script::ExecutorDeScript;
 use sbf_rita::{
     ChamadaFeita, Contexto, DadosDaTela, Evento, GuardaDeProvedores, Parada, PreTeste,
-    ProvedorDaRita, Relatorio, Rita,
+    ProvedorConfigurado, ProvedorDaRita, Relatorio, Rita, TipoDeProvedor,
 };
 
 use crate::{componentes, icones, tema};
@@ -100,23 +100,110 @@ struct Conversa {
     rita: Option<Rita>,
     baloes: Vec<Balao>,
     cartao: Option<Cartao>,
-    consumo: Consumo,
+    /// Tokens e custo da resposta mais recente (ao vivo, durante o pedido) e a natureza dela.
+    ultima: Option<(Consumo, NaturezaDoCusto)>,
+    /// O total do item, somado por natureza do custo (real, nominal, local e não informado
+    /// não se misturam numa conta só).
+    totais: Vec<(NaturezaDoCusto, Consumo)>,
+    /// Quantas respostas já entraram no total.
+    respostas: usize,
     natureza: NaturezaDoCusto,
     modelo: String,
     duracao: Option<Duration>,
 }
 
 impl Conversa {
+    fn somar_ao_total(&mut self, natureza: NaturezaDoCusto, consumo: Consumo) {
+        self.respostas += 1;
+        match self.totais.iter_mut().find(|(n, _)| *n == natureza) {
+            Some((_, t)) => *t = soma(*t, consumo),
+            None => self.totais.push((natureza, consumo)),
+        }
+    }
+
     fn nova() -> Self {
         Self {
             rita: None,
             baloes: Vec::new(),
             cartao: None,
-            consumo: Consumo::default(),
+            ultima: None,
+            totais: Vec::new(),
+            respostas: 0,
             natureza: NaturezaDoCusto::Zero,
             modelo: String::new(),
             duracao: None,
         }
+    }
+}
+
+/// De onde vem o provedor do pedido: já montado (testes) ou a montar **na thread do pedido**
+/// (achar o `claude` no disco e consultar o Chaveiro não rodam na thread da interface).
+enum FonteDoProvedor {
+    Pronto(ProvedorDaRita),
+    Configurado {
+        configurado: ProvedorConfigurado,
+        guarda: Arc<dyn GuardaDeProvedores>,
+        programa: PathBuf,
+    },
+}
+
+impl FonteDoProvedor {
+    fn natureza(&self) -> NaturezaDoCusto {
+        match self {
+            Self::Pronto(ProvedorDaRita::Conversa(p)) => p.natureza_do_custo(),
+            Self::Pronto(ProvedorDaRita::Claude(_)) => NaturezaDoCusto::Nominal,
+            Self::Configurado { configurado, .. } => match configurado.tipo {
+                TipoDeProvedor::Local => NaturezaDoCusto::Zero,
+                TipoDeProvedor::ClaudeCli => NaturezaDoCusto::Nominal,
+                TipoDeProvedor::OpenRouter
+                | TipoDeProvedor::Anthropic
+                | TipoDeProvedor::Compativel => NaturezaDoCusto::Real,
+            },
+        }
+    }
+
+    fn montar(self) -> Result<ProvedorDaRita, String> {
+        match self {
+            Self::Pronto(p) => Ok(p),
+            Self::Configurado {
+                configurado,
+                guarda,
+                programa,
+            } => sbf_rita::construir(&configurado, &guarda, &programa).map_err(|e| e.to_string()),
+        }
+    }
+}
+
+/// O pedido, na thread à parte: registro aberto (sem ele nada é enviado, ADR-015), provedor
+/// montado e o laço.
+fn executar_o_pedido(
+    ambiente: &Ambiente,
+    fonte: FonteDoProvedor,
+    rita: &mut Rita,
+    tela: &DadosDaTela,
+    pedido: &str,
+    parar: &AtomicBool,
+    tx: &std::sync::mpsc::Sender<Msg>,
+) -> Result<Relatorio, String> {
+    let registro = sbf_rita::abrir_registro(&ambiente.cofre).map_err(|e| e.to_string())?;
+    let executor = Arc::clone(&ambiente.executor);
+    match fonte.montar()? {
+        ProvedorDaRita::Claude(c) => c
+            .pedir(tela, pedido, parar, &registro, executor)
+            .map_err(|e| e.to_string()),
+        ProvedorDaRita::Conversa(p) => rita
+            .pedir(p.as_ref(), pedido, parar, &registro, &mut |e| match e {
+                Evento::Chamada(c) => {
+                    let _ = tx.send(Msg::Chamada(c.clone()));
+                }
+                Evento::Fala(t) => {
+                    let _ = tx.send(Msg::Fala(t.to_owned()));
+                }
+                Evento::Consumo(c) => {
+                    let _ = tx.send(Msg::Consumo(c));
+                }
+            })
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -132,8 +219,6 @@ struct Andamento {
     rx: Receiver<Msg>,
     parar: Arc<AtomicBool>,
     inicio: Instant,
-    /// O consumo já somado nesta conversa antes do pedido (o evento traz só o do pedido).
-    consumo_antes: Consumo,
 }
 
 /// O estado do painel.
@@ -171,20 +256,39 @@ fn milhar(n: u64) -> String {
     s
 }
 
-/// A linha de tokens e custo: real, nominal (assinatura) ou zero (local).
-pub fn texto_do_consumo(c: &Consumo, natureza: NaturezaDoCusto) -> String {
+/// O custo em palavras: real (US$), nominal (assinatura), zero (local) ou não informado (o
+/// provedor cobra por token, mas não disse quanto: nunca "US$ 0").
+pub fn texto_do_custo(c: &Consumo, natureza: NaturezaDoCusto) -> String {
     let usd = c.custo_dezmilesimos_usd;
     let valor = format!("US$ {},{:04}", usd / 10_000, usd % 10_000);
-    let custo = match natureza {
+    match natureza {
         NaturezaDoCusto::Zero => "local, sem custo".to_owned(),
         NaturezaDoCusto::Nominal => format!("≈ {valor} (nominal, assinatura)"),
         NaturezaDoCusto::Real => valor,
-    };
+        NaturezaDoCusto::NaoInformado => "custo não informado pelo provedor".to_owned(),
+    }
+}
+
+fn texto_dos_tokens(c: &Consumo) -> String {
     format!(
-        "{} tokens de entrada · {} de saída · {custo}",
+        "{} tokens de entrada · {} de saída",
         milhar(c.tokens_entrada),
         milhar(c.tokens_saida)
     )
+}
+
+/// A linha de tokens e custo de uma resposta, com a natureza do custo dela.
+pub fn texto_do_consumo(c: &Consumo, natureza: NaturezaDoCusto) -> String {
+    format!("{} · {}", texto_dos_tokens(c), texto_do_custo(c, natureza))
+}
+
+/// O total do item: os tokens somados e, de cada natureza de custo, a parte dela.
+fn texto_do_total(totais: &[(NaturezaDoCusto, Consumo)]) -> String {
+    let todos = totais
+        .iter()
+        .fold(Consumo::default(), |a, (_, c)| soma(a, *c));
+    let custos: Vec<String> = totais.iter().map(|(n, c)| texto_do_custo(c, *n)).collect();
+    format!("{} · {}", texto_dos_tokens(&todos), custos.join(" + "))
 }
 
 fn soma(a: Consumo, b: Consumo) -> Consumo {
@@ -220,7 +324,7 @@ impl RitaUi {
         self.andamento.is_some()
     }
 
-    /// O provedor escolhido (o padrão da configuração, se o usuário não trocou).
+    /// O provedor escolhido (o principal da configuração, se o usuário não trocou).
     pub fn provedor_escolhido(&self) -> Option<String> {
         let a = self.ambiente.as_ref()?;
         self.escolhido
@@ -242,10 +346,20 @@ impl RitaUi {
         self.conversas.get(chave).map_or(0, |c| c.baloes.len())
     }
 
-    /// A linha de tokens e custo da conversa do item.
+    /// A linha de tokens e custo da **última resposta** do item, com a natureza dela.
     pub fn linha_de_consumo(&self, chave: &str) -> Option<String> {
+        let (consumo, natureza) = self.conversas.get(chave)?.ultima?;
+        Some(format!(
+            "Última resposta: {}",
+            texto_do_consumo(&consumo, natureza)
+        ))
+    }
+
+    /// A linha do **total do item** (as respostas de todos os pedidos da conversa), só quando
+    /// há mais de uma resposta: com uma só, o total é a última resposta.
+    pub fn linha_do_total(&self, chave: &str) -> Option<String> {
         let c = self.conversas.get(chave)?;
-        (c.consumo != Consumo::default()).then(|| texto_do_consumo(&c.consumo, c.natureza))
+        (c.respostas > 1).then(|| format!("Total do item: {}", texto_do_total(&c.totais)))
     }
 
     /// Manda o pedido. A chamada ao provedor roda numa thread à parte.
@@ -274,14 +388,25 @@ impl RitaUi {
             .por_id(&id)
             .cloned()
             .ok_or("O provedor escolhido não existe mais (Conexões, aba IA).")?;
-        let provedor =
-            sbf_rita::construir(&configurado, &a.guarda, &a.programa).map_err(|e| e.to_string())?;
-        self.iniciar_com(item, pedido, provedor);
+        // O provedor é montado na thread do pedido, não aqui.
+        self.iniciar(
+            item,
+            pedido,
+            FonteDoProvedor::Configurado {
+                configurado,
+                guarda: Arc::clone(&a.guarda),
+                programa: a.programa.clone(),
+            },
+        );
         Ok(())
     }
 
     /// Começa o pedido com um provedor já montado (a thread à parte).
     pub fn iniciar_com(&mut self, item: &ItemDaTela, pedido: &str, provedor: ProvedorDaRita) {
+        self.iniciar(item, pedido, FonteDoProvedor::Pronto(provedor));
+    }
+
+    fn iniciar(&mut self, item: &ItemDaTela, pedido: &str, fonte: FonteDoProvedor) {
         let Some(a) = self.ambiente.clone() else {
             return;
         };
@@ -294,47 +419,23 @@ impl RitaUi {
         });
         rita.trocar_tela(item.tela.clone());
         conversa.baloes.push(Balao::Usuario(pedido.to_owned()));
-        conversa.natureza = match &provedor {
-            ProvedorDaRita::Conversa(p) => p.natureza_do_custo(),
-            ProvedorDaRita::Claude(_) => NaturezaDoCusto::Nominal,
-        };
-        let consumo_antes = conversa.consumo;
+        conversa.natureza = fonte.natureza();
+        conversa.ultima = None;
         let (tx, rx) = channel();
         let parar = Arc::new(AtomicBool::new(false));
         let parar_da_thread = Arc::clone(&parar);
         let tela = item.tela.clone();
         let pedido_da_thread = pedido.to_owned();
-        let cofre = a.cofre;
         std::thread::spawn(move || {
-            let registro = sbf_inventario::sugestao::RegistroDaIa::abrir(
-                cofre.join("inventario.sqlite"),
-                None,
-            )
-            .ok();
-            let r = match provedor {
-                ProvedorDaRita::Claude(c) => c
-                    .pedir(&tela, &pedido_da_thread, &parar_da_thread)
-                    .map_err(|e| e.to_string()),
-                ProvedorDaRita::Conversa(p) => rita
-                    .pedir(
-                        p.as_ref(),
-                        &pedido_da_thread,
-                        &parar_da_thread,
-                        registro.as_ref().map(|r| r as &dyn Registro),
-                        &mut |e| match e {
-                            Evento::Chamada(c) => {
-                                let _ = tx.send(Msg::Chamada(c.clone()));
-                            }
-                            Evento::Fala(t) => {
-                                let _ = tx.send(Msg::Fala(t.to_owned()));
-                            }
-                            Evento::Consumo(c) => {
-                                let _ = tx.send(Msg::Consumo(c));
-                            }
-                        },
-                    )
-                    .map_err(|e| e.to_string()),
-            };
+            let r = executar_o_pedido(
+                &a,
+                fonte,
+                &mut rita,
+                &tela,
+                &pedido_da_thread,
+                &parar_da_thread,
+                &tx,
+            );
             let _ = tx.send(Msg::Fim(Box::new(r), Some(Box::new(rita))));
         });
         self.andamento = Some(Andamento {
@@ -342,7 +443,6 @@ impl RitaUi {
             rx,
             parar,
             inicio: Instant::now(),
-            consumo_antes,
         });
     }
 
@@ -396,15 +496,22 @@ impl RitaUi {
         match m {
             Msg::Chamada(ch) => c.baloes.push(Balao::Chamada(ch)),
             Msg::Fala(t) => c.baloes.push(Balao::Rita(t)),
-            Msg::Consumo(k) => c.consumo = soma(a.consumo_antes, k),
+            Msg::Consumo(k) => c.ultima = Some((k, c.natureza)),
             Msg::Fim(resultado, rita) => {
                 c.rita = rita.map(|r| *r);
                 c.duracao = Some(a.inicio.elapsed());
                 match *resultado {
-                    Err(e) => c.baloes.push(Balao::Aviso(e)),
+                    Err(e) => {
+                        // O que já saiu antes da falha conta no total.
+                        if let Some((k, n)) = c.ultima {
+                            c.somar_ao_total(n, k);
+                        }
+                        c.baloes.push(Balao::Aviso(e));
+                    }
                     Ok(r) => {
-                        c.consumo = soma(a.consumo_antes, r.consumo);
                         c.natureza = r.natureza;
+                        c.ultima = Some((r.consumo, r.natureza));
+                        c.somar_ao_total(r.natureza, r.consumo);
                         c.modelo.clone_from(&r.modelo);
                         // O `claude` faz as chamadas em outro processo: elas só chegam agora.
                         if r.natureza == NaturezaDoCusto::Nominal {
@@ -669,10 +776,16 @@ impl RitaUi {
                     }
                 }
             }
-            if let Some(linha) = self.linha_de_consumo(&item.chave) {
-                ui.label(RichText::new(linha).size(11.5).color(p.tinta_suave));
-            }
         });
+        for linha in [
+            self.linha_de_consumo(&item.chave),
+            self.linha_do_total(&item.chave),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            ui.label(RichText::new(linha).size(11.5).color(p.tinta_suave));
+        }
         if let Some(a) = self.andamento.as_ref().filter(|a| a.chave != item.chave) {
             let _ = a;
             ui.label(
@@ -818,6 +931,7 @@ mod testes {
 
     fn ambiente(cofre: &std::path::Path) -> Ambiente {
         Catalogo::abrir(&cofre.join("regras.sqlite")).expect("catálogo");
+        sbf_rita::registro::inventario_minimo_para_testes(cofre);
         Ambiente {
             cofre: cofre.to_path_buf(),
             guarda: Arc::new(GuardaEmMemoria::default()),
@@ -882,6 +996,36 @@ mod testes {
         );
         assert!(texto_do_consumo(&c, NaturezaDoCusto::Nominal).contains("nominal"));
         assert!(texto_do_consumo(&c, NaturezaDoCusto::Zero).ends_with("local, sem custo"));
+        let nao = texto_do_consumo(&c, NaturezaDoCusto::NaoInformado);
+        assert!(nao.ends_with("custo não informado pelo provedor"), "{nao}");
+        assert!(!nao.contains("US$"), "nunca US$ 0 quando o custo não veio");
+    }
+
+    #[test]
+    fn o_total_do_item_soma_por_natureza_e_a_ultima_resposta_fica_separada() {
+        let mut c = Conversa::nova();
+        let k = |e, s, custo| Consumo {
+            tokens_entrada: e,
+            tokens_saida: s,
+            custo_dezmilesimos_usd: custo,
+            nominal: false,
+        };
+        c.somar_ao_total(NaturezaDoCusto::Real, k(1000, 100, 120));
+        c.somar_ao_total(NaturezaDoCusto::NaoInformado, k(500, 50, 0));
+        c.somar_ao_total(NaturezaDoCusto::Real, k(200, 20, 30));
+        c.ultima = Some((k(200, 20, 30), NaturezaDoCusto::Real));
+        let mut r = RitaUi::default();
+        r.conversas.insert("i".into(), c);
+        assert_eq!(
+            r.linha_de_consumo("i").as_deref(),
+            Some("Última resposta: 200 tokens de entrada · 20 de saída · US$ 0,0030")
+        );
+        assert_eq!(
+            r.linha_do_total("i").as_deref(),
+            Some(
+                "Total do item: 1.700 tokens de entrada · 170 de saída · US$ 0,0150 + custo não informado pelo provedor"
+            )
+        );
     }
 
     #[test]
@@ -915,6 +1059,7 @@ mod testes {
             "obrigatorios": ["valor_centavos"]
         });
         let falso = Arc::new(FalsoDeConversa::com_roteiro(vec![Ok(RespostaDeConversa {
+            custo_ausente: false,
             texto: None,
             chamadas: vec![ChamadaDeFerramenta {
                 id: "1".into(),
@@ -944,7 +1089,7 @@ mod testes {
         assert!(r.baloes(&chave) >= 3);
         assert_eq!(
             r.linha_de_consumo(&chave).as_deref(),
-            Some("900 tokens de entrada · 40 de saída · local, sem custo")
+            Some("Última resposta: 900 tokens de entrada · 40 de saída · local, sem custo")
         );
         // A janela ativa e avisa o painel.
         r.ativacao_feita("pix-banco-exemplo", 1, Ok(()));
@@ -1009,6 +1154,88 @@ mod testes {
     }
 
     #[test]
+    fn sem_o_registro_do_que_sai_nada_e_enviado_e_o_painel_diz_o_porque() {
+        let d = tempfile::tempdir().expect("pasta");
+        let mut r = RitaUi::default();
+        let mut a = ambiente(d.path());
+        // O inventário some: o registro não abre.
+        std::fs::remove_file(d.path().join("inventario.sqlite")).expect("remover");
+        a.cofre = d.path().to_path_buf();
+        r.ligar(a);
+        let falso = Arc::new(FalsoDeConversa::com_roteiro(vec![]));
+        r.iniciar_com(
+            &item(d.path()),
+            "cria",
+            ProvedorDaRita::Conversa(falso.clone()),
+        );
+        esperar(&mut r);
+        assert_eq!(falso.chamadas(), 0, "o provedor não foi chamado");
+        let chave = "ab".repeat(32);
+        let avisos: Vec<_> = r
+            .conversas
+            .get(&chave)
+            .expect("conversa")
+            .baloes
+            .iter()
+            .filter_map(|b| match b {
+                Balao::Aviso(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(avisos.len(), 1);
+        assert!(avisos[0].contains("nada foi enviado"), "{avisos:?}");
+    }
+
+    /// Uma guarda cujo provedor local aponta para um endereço que o provedor recusa.
+    struct GuardaRuim;
+
+    impl GuardaDeProvedores for GuardaRuim {
+        fn ler(&self) -> sbf_rita::ConfiguracaoDeRita {
+            let mut c = sbf_rita::ConfiguracaoDeRita::inicial();
+            c.provedores[0].endereco = Some("http://localhost.exemplo.com/v1".into());
+            c
+        }
+        fn gravar(&self, _: &sbf_rita::ConfiguracaoDeRita) -> Result<(), String> {
+            Ok(())
+        }
+        fn chave(&self, _: &str) -> Option<sbf_chaveiro::Segredo> {
+            None
+        }
+        fn guardar_chave(&self, _: &str, _: sbf_chaveiro::Segredo) -> Result<(), String> {
+            Ok(())
+        }
+        fn apagar_chave(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn o_provedor_so_e_montado_na_thread_do_pedido() {
+        let d = tempfile::tempdir().expect("pasta");
+        let mut r = RitaUi::default();
+        let mut a = ambiente(d.path());
+        a.guarda = Arc::new(GuardaRuim);
+        r.ligar(a);
+        // `pedir` volta na hora, sem montar nada na thread da interface; a falha de montar
+        // (endereço recusado) chega depois, como aviso da conversa.
+        assert!(r.pedir(&item(d.path()), "cria").is_ok());
+        assert!(r.trabalhando() || r.baloes(&"ab".repeat(32)) >= 1);
+        esperar(&mut r);
+        let aviso = r
+            .conversas
+            .get(&"ab".repeat(32))
+            .expect("conversa")
+            .baloes
+            .iter()
+            .find_map(|b| match b {
+                Balao::Aviso(t) => Some(t.clone()),
+                _ => None,
+            })
+            .expect("aviso");
+        assert!(aviso.contains("https"), "{aviso}");
+    }
+
+    #[test]
     fn parar_interrompe_o_pedido() {
         let d = tempfile::tempdir().expect("pasta");
         let mut r = RitaUi::default();
@@ -1016,6 +1243,7 @@ mod testes {
         let lento = Arc::new(FalsoDeConversa::com_funcao(|_| {
             std::thread::sleep(Duration::from_millis(300));
             Ok(RespostaDeConversa {
+                custo_ausente: false,
                 texto: None,
                 chamadas: vec![ChamadaDeFerramenta {
                     id: "1".into(),
