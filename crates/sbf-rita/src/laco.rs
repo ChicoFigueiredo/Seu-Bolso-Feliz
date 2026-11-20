@@ -9,19 +9,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sbf_ia::{
-    ChamadaDeFerramenta, Consumo, ErroDeIa, Mensagem, NaturezaDoCusto, NivelDeConfianca,
-    PedidoDeConversa, ProvedorDeConversa, Registro, Saida,
+    ChamadaDeFerramenta, Consumo, ErroDeIa, Mensagem, NaturezaDoCusto, PedidoDeConversa,
+    ProvedorDeConversa, Registro,
 };
 use sbf_mcp::backup::Backups;
 
 use crate::contexto::Contexto;
 use crate::ferramentas::{ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes};
-use crate::prompt::{instrucoes, pedido_do_usuario};
+use crate::prompt::{instrucoes, pedido_do_usuario, saida_de_ferramenta};
+use crate::registro::{completar, registrar_antes};
 
 /// Limite de tokens de cada resposta do modelo.
 pub const MAX_TOKENS_DA_RESPOSTA: u32 = 3000;
-/// O destinatário em `saida_ia` (ADR-015): todos os provedores recebem o texto completo (D13).
-pub const DESTINATARIO: &str = "rita";
+pub use crate::registro::DESTINATARIO;
 
 /// Por que o laço parou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,14 +138,34 @@ impl Rita {
 
     /// Um pedido. Os pedidos seguintes continuam a conversa (refinar um rascunho).
     ///
+    /// Cada envio ao provedor grava antes a linha em `saida_ia` (`registro`, ADR-015). Se o
+    /// registro não grava, nada é enviado.
+    ///
     /// # Errors
-    /// Falha do provedor (limite, rede, chave). O que já foi gravado fica.
+    /// Falha do provedor (limite, rede, chave) ou do registro. O que já foi gravado fica.
     pub fn pedir(
         &mut self,
         provedor: &dyn ProvedorDeConversa,
         pedido: &str,
         cancelar: &AtomicBool,
-        registro: Option<&dyn Registro>,
+        registro: &dyn Registro,
+        observar: &mut dyn FnMut(Evento<'_>),
+    ) -> Result<Relatorio, ErroDeIa> {
+        let base = self.mensagens.len();
+        let r = self.pedir_sem_limpar(provedor, pedido, cancelar, registro, observar);
+        if r.is_err() {
+            // Um pedido que falhou não deixa a conversa pela metade para o próximo.
+            self.mensagens.truncate(base);
+        }
+        r
+    }
+
+    fn pedir_sem_limpar(
+        &mut self,
+        provedor: &dyn ProvedorDeConversa,
+        pedido: &str,
+        cancelar: &AtomicBool,
+        registro: &dyn Registro,
         observar: &mut dyn FnMut(Evento<'_>),
     ) -> Result<Relatorio, ErroDeIa> {
         let inicio = Instant::now();
@@ -173,23 +193,20 @@ impl Rita {
                 ferramentas: ferramentas.clone(),
                 max_tokens_saida: MAX_TOKENS_DA_RESPOSTA,
             };
+            // ADR-015: a linha de `saida_ia` vai ANTES do envio; sem ela, nada sai.
+            let linha = registrar_antes(
+                registro,
+                &provedor.nome(),
+                &provedor.modelo(),
+                bytes_do_pedido(&req),
+            )?;
             let resposta = match provedor.conversar(&req, cancelar) {
                 Ok(r) => r,
                 Err(ErroDeIa::Interrompido) => break Parada::Interrompida,
                 Err(e) => return Err(e),
             };
+            completar(registro, linha, resposta.consumo);
             consumo = soma(consumo, resposta.consumo);
-            if let Some(r) = registro {
-                let _ = r.registrar_saida(&Saida {
-                    destinatario: DESTINATARIO.to_owned(),
-                    provedor: provedor.nome(),
-                    modelo: resposta.modelo.clone(),
-                    nivel: NivelDeConfianca::Completo,
-                    bytes_enviados: bytes_do_pedido(&req),
-                    consumo: resposta.consumo,
-                    quando: sbf_ia::agora_rfc3339(),
-                });
-            }
             observar(Evento::Consumo(consumo));
             if let Some(t) = &resposta.texto {
                 ultimo_texto.clone_from(t);
@@ -253,7 +270,7 @@ impl Rita {
             self.mensagens.push(Mensagem::Ferramenta {
                 id: c.id.clone(),
                 nome: c.nome.clone(),
-                conteudo: saida,
+                conteudo: saida_de_ferramenta(&c.nome, &saida),
             });
         }
     }

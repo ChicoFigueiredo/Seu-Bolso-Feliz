@@ -38,8 +38,9 @@ uso: sbf rita [--inventario <cofre>] --documento <sha|caminho> [opções] \"pedi
   --modelo <nome>            o modelo (padrão do local: qwen3-coder:30b)
   --area <nome>              a área que a tela mostraria (padrão: Documentos)
 
-Só lê o cofre. A única escrita é um RASCUNHO em regras.sqlite, depois de um backup. Rita
-nunca ativa nada.";
+Só lê o cofre. A única escrita é um RASCUNHO em regras.sqlite, depois de um backup, e uma
+linha por envio em saida_ia (ADR-015): sem o inventário do cofre, nada é enviado. Rita nunca
+ativa nada.";
 
 const LIMITE_DO_ARQUIVO: u64 = 8 * 1024 * 1024;
 
@@ -305,6 +306,8 @@ fn executar(l: &Linha) -> Result<(), String> {
         .ok_or("falta --documento <sha|caminho>")?;
     let pedido = l.pedido.as_deref().ok_or("falta o pedido, entre aspas")?;
     let item = entrada_do_documento(&cofre, doc)?;
+    // ADR-015: sem o registro do que sai (inventário do cofre), nada é enviado a provedor algum.
+    let registro = sbf_rita::abrir_registro(&cofre).map_err(|e| e.to_string())?;
     let provedor = escolher_provedor(l)?;
     let mut tela = DadosDaTela::de_documento(&cofre, item);
     if let Some(a) = &l.area {
@@ -313,12 +316,12 @@ fn executar(l: &Linha) -> Result<(), String> {
     println!("Rita · pedido: {pedido}");
     let parar = AtomicBool::new(false);
     let relatorio = match provedor {
-        ProvedorDaRita::Claude(c) => c.pedir(&tela, pedido, &parar),
+        ProvedorDaRita::Claude(c) => c.pedir(&tela, pedido, &parar, &registro),
         ProvedorDaRita::Conversa(p) => {
             let executor = crate::script::executor_de_script()
                 .map_err(|e| format!("não deu para montar o executor de scripts: {e}"))?;
             let mut rita = Rita::nova(Contexto::novo(tela, executor));
-            rita.pedir(p.as_ref(), pedido, &parar, None, &mut |e| match e {
+            rita.pedir(p.as_ref(), pedido, &parar, &registro, &mut |e| match e {
                 Evento::Chamada(c) => imprimir_chamada(c),
                 Evento::Fala(t) => println!("  Rita: {t}"),
                 Evento::Consumo(_) => {}

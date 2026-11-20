@@ -21,11 +21,11 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use egui::{RichText, ScrollArea, Ui};
-use sbf_ia::{Consumo, NaturezaDoCusto, Registro};
+use sbf_ia::{Consumo, NaturezaDoCusto};
 use sbf_regras::script::ExecutorDeScript;
 use sbf_rita::{
     ChamadaFeita, Contexto, DadosDaTela, Evento, GuardaDeProvedores, Parada, PreTeste,
-    ProvedorDaRita, Relatorio, Rita,
+    ProvedorConfigurado, ProvedorDaRita, Relatorio, Rita, TipoDeProvedor,
 };
 
 use crate::{componentes, icones, tema};
@@ -117,6 +117,75 @@ impl Conversa {
             modelo: String::new(),
             duracao: None,
         }
+    }
+}
+
+/// De onde vem o provedor do pedido: já montado (testes) ou a montar **na thread do pedido**
+/// (achar o `claude` no disco e consultar o Chaveiro não rodam na thread da interface).
+enum FonteDoProvedor {
+    Pronto(ProvedorDaRita),
+    Configurado {
+        configurado: ProvedorConfigurado,
+        guarda: Arc<dyn GuardaDeProvedores>,
+        programa: PathBuf,
+    },
+}
+
+impl FonteDoProvedor {
+    fn natureza(&self) -> NaturezaDoCusto {
+        match self {
+            Self::Pronto(ProvedorDaRita::Conversa(p)) => p.natureza_do_custo(),
+            Self::Pronto(ProvedorDaRita::Claude(_)) => NaturezaDoCusto::Nominal,
+            Self::Configurado { configurado, .. } => match configurado.tipo {
+                TipoDeProvedor::Local => NaturezaDoCusto::Zero,
+                TipoDeProvedor::ClaudeCli => NaturezaDoCusto::Nominal,
+                TipoDeProvedor::OpenRouter | TipoDeProvedor::Anthropic => NaturezaDoCusto::Real,
+                TipoDeProvedor::Compativel => NaturezaDoCusto::Real,
+            },
+        }
+    }
+
+    fn montar(self) -> Result<ProvedorDaRita, String> {
+        match self {
+            Self::Pronto(p) => Ok(p),
+            Self::Configurado {
+                configurado,
+                guarda,
+                programa,
+            } => sbf_rita::construir(&configurado, &guarda, &programa).map_err(|e| e.to_string()),
+        }
+    }
+}
+
+/// O pedido, na thread à parte: registro aberto (sem ele nada é enviado, ADR-015), provedor
+/// montado e o laço.
+fn executar_o_pedido(
+    cofre: &std::path::Path,
+    fonte: FonteDoProvedor,
+    rita: &mut Rita,
+    tela: &DadosDaTela,
+    pedido: &str,
+    parar: &AtomicBool,
+    tx: &std::sync::mpsc::Sender<Msg>,
+) -> Result<Relatorio, String> {
+    let registro = sbf_rita::abrir_registro(cofre).map_err(|e| e.to_string())?;
+    match fonte.montar()? {
+        ProvedorDaRita::Claude(c) => c
+            .pedir(tela, pedido, parar, &registro)
+            .map_err(|e| e.to_string()),
+        ProvedorDaRita::Conversa(p) => rita
+            .pedir(p.as_ref(), pedido, parar, &registro, &mut |e| match e {
+                Evento::Chamada(c) => {
+                    let _ = tx.send(Msg::Chamada(c.clone()));
+                }
+                Evento::Fala(t) => {
+                    let _ = tx.send(Msg::Fala(t.to_owned()));
+                }
+                Evento::Consumo(c) => {
+                    let _ = tx.send(Msg::Consumo(c));
+                }
+            })
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -220,7 +289,7 @@ impl RitaUi {
         self.andamento.is_some()
     }
 
-    /// O provedor escolhido (o padrão da configuração, se o usuário não trocou).
+    /// O provedor escolhido (o principal da configuração, se o usuário não trocou).
     pub fn provedor_escolhido(&self) -> Option<String> {
         let a = self.ambiente.as_ref()?;
         self.escolhido
@@ -274,14 +343,25 @@ impl RitaUi {
             .por_id(&id)
             .cloned()
             .ok_or("O provedor escolhido não existe mais (Conexões, aba IA).")?;
-        let provedor =
-            sbf_rita::construir(&configurado, &a.guarda, &a.programa).map_err(|e| e.to_string())?;
-        self.iniciar_com(item, pedido, provedor);
+        // O provedor é montado na thread do pedido, não aqui.
+        self.iniciar(
+            item,
+            pedido,
+            FonteDoProvedor::Configurado {
+                configurado,
+                guarda: Arc::clone(&a.guarda),
+                programa: a.programa.clone(),
+            },
+        );
         Ok(())
     }
 
     /// Começa o pedido com um provedor já montado (a thread à parte).
     pub fn iniciar_com(&mut self, item: &ItemDaTela, pedido: &str, provedor: ProvedorDaRita) {
+        self.iniciar(item, pedido, FonteDoProvedor::Pronto(provedor));
+    }
+
+    fn iniciar(&mut self, item: &ItemDaTela, pedido: &str, fonte: FonteDoProvedor) {
         let Some(a) = self.ambiente.clone() else {
             return;
         };
@@ -294,10 +374,7 @@ impl RitaUi {
         });
         rita.trocar_tela(item.tela.clone());
         conversa.baloes.push(Balao::Usuario(pedido.to_owned()));
-        conversa.natureza = match &provedor {
-            ProvedorDaRita::Conversa(p) => p.natureza_do_custo(),
-            ProvedorDaRita::Claude(_) => NaturezaDoCusto::Nominal,
-        };
+        conversa.natureza = fonte.natureza();
         let consumo_antes = conversa.consumo;
         let (tx, rx) = channel();
         let parar = Arc::new(AtomicBool::new(false));
@@ -306,35 +383,15 @@ impl RitaUi {
         let pedido_da_thread = pedido.to_owned();
         let cofre = a.cofre;
         std::thread::spawn(move || {
-            let registro = sbf_inventario::sugestao::RegistroDaIa::abrir(
-                cofre.join("inventario.sqlite"),
-                None,
-            )
-            .ok();
-            let r = match provedor {
-                ProvedorDaRita::Claude(c) => c
-                    .pedir(&tela, &pedido_da_thread, &parar_da_thread)
-                    .map_err(|e| e.to_string()),
-                ProvedorDaRita::Conversa(p) => rita
-                    .pedir(
-                        p.as_ref(),
-                        &pedido_da_thread,
-                        &parar_da_thread,
-                        registro.as_ref().map(|r| r as &dyn Registro),
-                        &mut |e| match e {
-                            Evento::Chamada(c) => {
-                                let _ = tx.send(Msg::Chamada(c.clone()));
-                            }
-                            Evento::Fala(t) => {
-                                let _ = tx.send(Msg::Fala(t.to_owned()));
-                            }
-                            Evento::Consumo(c) => {
-                                let _ = tx.send(Msg::Consumo(c));
-                            }
-                        },
-                    )
-                    .map_err(|e| e.to_string()),
-            };
+            let r = executar_o_pedido(
+                &cofre,
+                fonte,
+                &mut rita,
+                &tela,
+                &pedido_da_thread,
+                &parar_da_thread,
+                &tx,
+            );
             let _ = tx.send(Msg::Fim(Box::new(r), Some(Box::new(rita))));
         });
         self.andamento = Some(Andamento {
@@ -818,6 +875,7 @@ mod testes {
 
     fn ambiente(cofre: &std::path::Path) -> Ambiente {
         Catalogo::abrir(&cofre.join("regras.sqlite")).expect("catálogo");
+        sbf_rita::registro::inventario_minimo_para_testes(cofre);
         Ambiente {
             cofre: cofre.to_path_buf(),
             guarda: Arc::new(GuardaEmMemoria::default()),
@@ -1006,6 +1064,88 @@ mod testes {
             r.cartao("i").map(|k| k.estado),
             Some(EstadoDoCartao::Descartado)
         );
+    }
+
+    #[test]
+    fn sem_o_registro_do_que_sai_nada_e_enviado_e_o_painel_diz_o_porque() {
+        let d = tempfile::tempdir().expect("pasta");
+        let mut r = RitaUi::default();
+        let mut a = ambiente(d.path());
+        // O inventário some: o registro não abre.
+        std::fs::remove_file(d.path().join("inventario.sqlite")).expect("remover");
+        a.cofre = d.path().to_path_buf();
+        r.ligar(a);
+        let falso = Arc::new(FalsoDeConversa::com_roteiro(vec![]));
+        r.iniciar_com(
+            &item(d.path()),
+            "cria",
+            ProvedorDaRita::Conversa(falso.clone()),
+        );
+        esperar(&mut r);
+        assert_eq!(falso.chamadas(), 0, "o provedor não foi chamado");
+        let chave = "ab".repeat(32);
+        let avisos: Vec<_> = r
+            .conversas
+            .get(&chave)
+            .expect("conversa")
+            .baloes
+            .iter()
+            .filter_map(|b| match b {
+                Balao::Aviso(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(avisos.len(), 1);
+        assert!(avisos[0].contains("nada foi enviado"), "{avisos:?}");
+    }
+
+    /// Uma guarda cujo provedor local aponta para um endereço que o provedor recusa.
+    struct GuardaRuim;
+
+    impl GuardaDeProvedores for GuardaRuim {
+        fn ler(&self) -> sbf_rita::ConfiguracaoDeRita {
+            let mut c = sbf_rita::ConfiguracaoDeRita::inicial();
+            c.provedores[0].endereco = Some("http://localhost.exemplo.com/v1".into());
+            c
+        }
+        fn gravar(&self, _: &sbf_rita::ConfiguracaoDeRita) -> Result<(), String> {
+            Ok(())
+        }
+        fn chave(&self, _: &str) -> Option<sbf_chaveiro::Segredo> {
+            None
+        }
+        fn guardar_chave(&self, _: &str, _: sbf_chaveiro::Segredo) -> Result<(), String> {
+            Ok(())
+        }
+        fn apagar_chave(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn o_provedor_so_e_montado_na_thread_do_pedido() {
+        let d = tempfile::tempdir().expect("pasta");
+        let mut r = RitaUi::default();
+        let mut a = ambiente(d.path());
+        a.guarda = Arc::new(GuardaRuim);
+        r.ligar(a);
+        // `pedir` volta na hora, sem montar nada na thread da interface; a falha de montar
+        // (endereço recusado) chega depois, como aviso da conversa.
+        assert!(r.pedir(&item(d.path()), "cria").is_ok());
+        assert!(r.trabalhando() || r.baloes(&"ab".repeat(32)) >= 1);
+        esperar(&mut r);
+        let aviso = r
+            .conversas
+            .get(&"ab".repeat(32))
+            .expect("conversa")
+            .baloes
+            .iter()
+            .find_map(|b| match b {
+                Balao::Aviso(t) => Some(t.clone()),
+                _ => None,
+            })
+            .expect("aviso");
+        assert!(aviso.contains("https"), "{aviso}");
     }
 
     #[test]

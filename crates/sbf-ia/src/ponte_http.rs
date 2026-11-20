@@ -84,6 +84,21 @@ pub(crate) fn ler_endereco(dado: &str) -> ResultadoDeIa<EnderecoLido> {
     ))
 }
 
+/// Confere um endereço dado pelo usuário com a mesma leitura estrita que o provedor usa para
+/// abrir a conexão: `https://`, ou `http://` só em loopback (host exatamente `localhost`,
+/// `127.0.0.1` ou `[::1]`). Quem valida a configuração chama esta função, para não aceitar
+/// um endereço que o provedor depois recusaria (ou, pior, que um prefixo enganoso deixaria
+/// passar, como `http://localhost.exemplo.com`).
+///
+/// # Errors
+/// Texto para a tela, sem o endereço.
+pub fn validar_endereco(dado: &str) -> Result<(), String> {
+    ler_endereco(dado).map(|_| ()).map_err(|e| match e {
+        ErroDeIa::Indisponivel(m) => m,
+        outro => outro.to_string(),
+    })
+}
+
 /// Abre o portão para um provedor. `com_chave`: o pedido leva `Authorization: Bearer` da fonte.
 pub(crate) fn abrir_rede(
     nome: &str,
@@ -184,6 +199,30 @@ mod testes {
             "https://",
         ] {
             assert!(ler_endereco(ruim).is_err(), "{ruim}");
+        }
+    }
+
+    #[test]
+    fn validar_endereco_e_a_mesma_leitura_estrita_do_provedor() {
+        for bom in [
+            "https://api.exemplo.com/v1",
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:8080/v1",
+            "http://[::1]:11434/v1",
+        ] {
+            assert!(validar_endereco(bom).is_ok(), "{bom}");
+        }
+        for ruim in [
+            "http://localhost.evil.com",
+            "http://localhost.evil.com/v1",
+            "http://localhost@evil.com/v1",
+            "http://localhost:11434@evil.com/v1",
+            "http://127.0.0.1.evil.com",
+            "http://evil.com/localhost",
+            "http://localhostevil.com",
+            "",
+        ] {
+            assert!(validar_endereco(ruim).is_err(), "{ruim}");
         }
     }
 }

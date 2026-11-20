@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod pre_teste;
 pub mod prompt;
 pub mod provedores;
+pub mod registro;
 
 pub use claude::ClaudeDeRita;
 pub use cofre::{FonteDeSimilares, SimilaresDoCofre, SimilaresFixos};
@@ -34,3 +35,4 @@ pub use provedores::{
     ComCache, ConfiguracaoDeRita, GuardaDeProvedores, GuardaEmMemoria, ProvedorConfigurado,
     ProvedorDaRita, TipoDeProvedor, construir,
 };
+pub use registro::{DESTINATARIO, abrir_registro};

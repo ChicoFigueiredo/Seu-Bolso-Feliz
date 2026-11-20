@@ -2,7 +2,12 @@
 //! (assinatura), OpenRouter, API da Anthropic e qualquer API compatível com OpenAI. Chaves e
 //! endereços ficam no **Chaveiro**; a tela nunca reexibe uma chave (mostra "guardada · termina
 //! em …abcd" ou "não guardada") e a chave digitada é zerada da memória logo depois de guardada.
+//!
+//! O Chaveiro (D-Bus, arquivo cifrado) **não é lido a cada quadro**: o estado de cada chave
+//! ("termina em …") é lido uma vez, quando a aba precisa dele, e relido só depois de guardar ou
+//! apagar essa chave (como `chaves_ia` faz). O OpenRouter usa a mesma chave de Opções → IA.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
@@ -26,6 +31,9 @@ pub struct IaUi {
     chaves: Vec<(String, String)>,
     novo_tipo: Option<TipoDeProvedor>,
     aviso: Option<(String, bool)>,
+    /// O estado de cada chave do Chaveiro (por id da chave): `None` sem chave; `Some(final)`
+    /// com chave (vazio se curta demais). Lido uma vez por chave, nunca a cada quadro.
+    estado_das_chaves: HashMap<String, Option<String>>,
 }
 
 impl std::fmt::Debug for IaUi {
@@ -40,6 +48,25 @@ impl IaUi {
     pub fn ligar(&mut self, guarda: Arc<dyn GuardaDeProvedores>) {
         self.guarda = Some(guarda);
         self.trabalho = None;
+        self.estado_das_chaves.clear();
+    }
+
+    /// O estado da chave `id` (a chave do provedor, não o id dele), lido do Chaveiro só na
+    /// primeira vez. A presença vem de `tem_chave` (que não decifra); só quem tem chave paga a
+    /// leitura do final, uma única vez.
+    fn estado_da_chave(&mut self, g: &Arc<dyn GuardaDeProvedores>, id: &str) -> Option<String> {
+        self.estado_das_chaves
+            .entry(id.to_owned())
+            .or_insert_with(|| {
+                g.tem_chave(id)
+                    .then(|| g.final_da_chave(id).unwrap_or_default())
+            })
+            .clone()
+    }
+
+    /// Esquece o estado da chave `id`: a próxima leitura vai ao Chaveiro.
+    fn esquecer_chave(&mut self, id: &str) {
+        self.estado_das_chaves.remove(id);
     }
 
     /// O ponto do título da aba: verde com algum provedor pronto, cinza sem provedor.
@@ -112,9 +139,10 @@ impl IaUi {
         let mut apagar_chave: Option<String> = None;
         let n = self.trabalho.as_ref().map_or(0, |t| t.provedores.len());
         for i in 0..n {
-            let Some((id, tipo, e_padrao)) = self.trabalho.as_ref().and_then(|t| {
+            let Some((id, pid, tipo, e_padrao)) = self.trabalho.as_ref().and_then(|t| {
                 let pr = t.provedores.get(i)?;
                 Some((
+                    pr.id_da_chave().to_owned(),
                     pr.id.clone(),
                     pr.tipo,
                     t.padrao.as_deref() == Some(pr.id.as_str()),
@@ -122,7 +150,11 @@ impl IaUi {
             }) else {
                 break;
             };
-            let estado_da_chave = g.final_da_chave(&id);
+            let estado_da_chave = if tipo.usa_chave() {
+                self.estado_da_chave(&g, &id)
+            } else {
+                None
+            };
             let mut digitada = std::mem::take(self.chave_digitada(&id));
             let mut marcar_padrao = false;
             let Some(trabalho) = self.trabalho.as_mut() else {
@@ -133,7 +165,7 @@ impl IaUi {
                     ui.label(RichText::new(&trabalho.provedores[i].nome).strong());
                     ui.label(RichText::new(tipo.rotulo()).size(12.0).color(p.tinta_suave));
                     if e_padrao {
-                        componentes::selo(ui, "padrão", p.destaque_sutil, p.destaque_tinta);
+                        componentes::selo(ui, "principal", p.destaque_sutil, p.destaque_tinta);
                     }
                 });
                 egui::Grid::new(("rita-provedor", i))
@@ -144,11 +176,16 @@ impl IaUi {
                         ui.label("Nome");
                         ui.text_edit_singleline(&mut pr.nome);
                         ui.end_row();
-                        if tipo.pede_endereco() || pr.endereco.is_some() {
+                        if tipo.pede_endereco() {
                             ui.label("Endereço");
                             let mut e = pr.endereco.clone().unwrap_or_default();
                             ui.add(egui::TextEdit::singleline(&mut e).desired_width(320.0));
                             pr.endereco = Some(e);
+                            ui.end_row();
+                        } else if let Some(fixo) = tipo.endereco_fixo() {
+                            // OpenRouter e Anthropic: a chave só vai para este endereço.
+                            ui.label("Endereço");
+                            ui.label(RichText::new(format!("{fixo} (fixo)")).color(p.tinta_suave));
                             ui.end_row();
                         }
                         ui.label("Modelo");
@@ -191,7 +228,7 @@ impl IaUi {
                         }
                     });
                 ui.horizontal(|ui| {
-                    if !e_padrao && ui.button("Usar como padrão").clicked() {
+                    if !e_padrao && ui.button("Usar como principal").clicked() {
                         marcar_padrao = true;
                     }
                     if ui.button("Remover").clicked() {
@@ -200,10 +237,12 @@ impl IaUi {
                 });
             });
             if marcar_padrao {
-                trabalho.padrao = Some(id.clone());
+                trabalho.padrao = Some(pid);
             }
             // Devolve o que foi digitado (ou zera, se a chave vai ser guardada agora).
-            if guardar_chave.as_deref() == Some(id.as_str()) {
+            if guardar_chave.as_deref() == Some(id.as_str()) && !digitada.trim().is_empty() {
+                // Vários provedores podem dividir a chave (OpenRouter): guarda uma vez só.
+                guardar_chave = None;
                 match g.guardar_chave(&id, Segredo::novo(digitada.trim().to_owned())) {
                     Ok(()) => {
                         self.aviso = Some(("Chave guardada no Chaveiro.".to_owned(), false));
@@ -211,6 +250,7 @@ impl IaUi {
                     Err(e) => self.aviso = Some((e, true)),
                 }
                 digitada.zeroize();
+                self.esquecer_chave(&id);
             }
             *self.chave_digitada(&id) = digitada;
             ui.add_space(6.0);
@@ -220,6 +260,7 @@ impl IaUi {
                 Ok(()) => ("Chave apagada do Chaveiro.".to_owned(), false),
                 Err(e) => (e, true),
             });
+            self.esquecer_chave(&id);
         }
         if let (Some(i), Some(t)) = (remover, self.trabalho.as_mut())
             && i < t.provedores.len()
@@ -309,5 +350,105 @@ mod testes {
         ia.salvar();
         assert_eq!(ia.aviso.as_ref().map(|a| a.1), Some(true));
         assert_eq!(guarda.ler().provedores[0].modelo, "outro-modelo");
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Uma guarda que conta as idas ao Chaveiro.
+    #[derive(Default)]
+    struct Conta {
+        dentro: GuardaEmMemoria,
+        chave: AtomicUsize,
+        tem: AtomicUsize,
+        final_da: AtomicUsize,
+    }
+
+    impl GuardaDeProvedores for Conta {
+        fn ler(&self) -> ConfiguracaoDeRita {
+            self.dentro.ler()
+        }
+        fn gravar(&self, c: &ConfiguracaoDeRita) -> Result<(), String> {
+            self.dentro.gravar(c)
+        }
+        fn chave(&self, id: &str) -> Option<Segredo> {
+            self.chave.fetch_add(1, Ordering::SeqCst);
+            self.dentro.chave(id)
+        }
+        fn tem_chave(&self, id: &str) -> bool {
+            self.tem.fetch_add(1, Ordering::SeqCst);
+            self.dentro.tem_chave(id)
+        }
+        fn final_da_chave(&self, id: &str) -> Option<String> {
+            self.final_da.fetch_add(1, Ordering::SeqCst);
+            self.dentro.final_da_chave(id)
+        }
+        fn guardar_chave(&self, id: &str, chave: Segredo) -> Result<(), String> {
+            self.dentro.guardar_chave(id, chave)
+        }
+        fn apagar_chave(&self, id: &str) -> Result<(), String> {
+            self.dentro.apagar_chave(id)
+        }
+    }
+
+    fn quadro(ctx: &egui::Context, ia: &mut IaUi) {
+        let mut saida = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| ia.desenhar(ui),
+        );
+        saida.textures_delta.clear();
+    }
+
+    #[test]
+    fn o_chaveiro_nao_e_lido_a_cada_quadro_nem_decifrado_so_para_saber_se_ha_chave() {
+        let conta = Arc::new(Conta::default());
+        conta
+            .dentro
+            .guardar_chave("anthropic", Segredo::novo("sk-ant-ficticia-0000abcd"))
+            .expect("guardar");
+        let mut ia = IaUi::default();
+        ia.ligar(conta.clone());
+        let mut c = conta.ler();
+        c.provedores.push(ProvedorConfigurado::padrao_do_tipo(
+            TipoDeProvedor::OpenRouter,
+        ));
+        c.provedores.push(ProvedorConfigurado::padrao_do_tipo(
+            TipoDeProvedor::Anthropic,
+        ));
+        ia.trabalho = Some(c);
+        let ctx = egui::Context::default();
+        crate::tema::instalar_fontes(&ctx);
+        for _ in 0..6 {
+            quadro(&ctx, &mut ia);
+        }
+        // Uma consulta de presença por chave (openrouter e anthropic) e uma leitura do final
+        // (só a que existe), em seis quadros.
+        assert_eq!(conta.tem.load(Ordering::SeqCst), 2);
+        assert_eq!(conta.final_da.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            conta.chave.load(Ordering::SeqCst),
+            0,
+            "a tela nunca pede a chave inteira"
+        );
+        // Depois de guardar ou apagar, a chave é relida uma vez.
+        ia.esquecer_chave("anthropic");
+        quadro(&ctx, &mut ia);
+        quadro(&ctx, &mut ia);
+        assert_eq!(conta.tem.load(Ordering::SeqCst), 3);
+        assert_eq!(conta.final_da.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_aba_diz_principal_e_nao_padrao_para_o_provedor_escolhido() {
+        // `padrão` é termo do glossário (padrão de reconhecimento): o provedor é "principal".
+        let fonte = include_str!("ia_ui.rs");
+        let codigo = fonte.split("#[cfg(test)]").next().expect("código");
+        assert!(codigo.contains("\"Usar como principal\""));
+        assert!(!codigo.contains("\"Usar como padrão\""));
     }
 }

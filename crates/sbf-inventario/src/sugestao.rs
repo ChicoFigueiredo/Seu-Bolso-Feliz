@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use rusqlite::{Connection, Transaction, params};
-use sbf_ia::{ErroDeIa, NivelDeConfianca, Registro, ResultadoDeIa, Saida};
+use sbf_ia::{Consumo, ErroDeIa, NivelDeConfianca, Registro, ResultadoDeIa, Saida};
 use serde_json::Value;
 
 use crate::banco::ESPERA_OCUPADO;
@@ -151,8 +151,8 @@ impl RegistroDaIa {
     }
 }
 
-impl Registro for RegistroDaIa {
-    fn registrar_saida(&self, saida: &Saida) -> ResultadoDeIa<()> {
+impl RegistroDaIa {
+    fn inserir(&self, saida: &Saida) -> ResultadoDeIa<i64> {
         let c = self.conexao()?;
         c.execute(
             "INSERT INTO saida_ia (destinatario, provedor, modelo, nivel, bytes_enviados,
@@ -170,6 +170,33 @@ impl Registro for RegistroDaIa {
                 saida.consumo.nominal,
                 saida.quando,
                 Some(self.rodada_id.load(Ordering::SeqCst)).filter(|r| *r != SEM_RODADA),
+            ],
+        )
+        .map_err(erro_de_ia)?;
+        Ok(c.last_insert_rowid())
+    }
+}
+
+impl Registro for RegistroDaIa {
+    fn registrar_saida(&self, saida: &Saida) -> ResultadoDeIa<()> {
+        self.inserir(saida).map(|_| ())
+    }
+
+    fn abrir_saida(&self, saida: &Saida) -> ResultadoDeIa<Option<i64>> {
+        self.inserir(saida).map(Some)
+    }
+
+    fn fechar_saida(&self, id: i64, consumo: Consumo) -> ResultadoDeIa<()> {
+        let c = self.conexao()?;
+        c.execute(
+            "UPDATE saida_ia SET tokens_entrada = ?2, tokens_saida = ?3,
+               custo_dezmilesimos_usd = ?4, nominal = ?5 WHERE id = ?1",
+            params![
+                id,
+                i64::try_from(consumo.tokens_entrada).unwrap_or(i64::MAX),
+                i64::try_from(consumo.tokens_saida).unwrap_or(i64::MAX),
+                i64::try_from(consumo.custo_dezmilesimos_usd).unwrap_or(i64::MAX),
+                consumo.nominal,
             ],
         )
         .map_err(erro_de_ia)?;
@@ -201,5 +228,77 @@ impl Registro for RegistroDaIa {
         )
         .map_err(erro_de_ia)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod testes_do_registro {
+    use super::*;
+
+    fn registro() -> RegistroDaIa {
+        let c = Connection::open_in_memory().expect("memória");
+        c.execute_batch(
+            "CREATE TABLE saida_ia (id INTEGER PRIMARY KEY, destinatario TEXT NOT NULL,
+               provedor TEXT NOT NULL, modelo TEXT NOT NULL, nivel TEXT NOT NULL,
+               bytes_enviados INTEGER NOT NULL, tokens_entrada INTEGER NOT NULL DEFAULT 0,
+               tokens_saida INTEGER NOT NULL DEFAULT 0,
+               custo_dezmilesimos_usd INTEGER NOT NULL DEFAULT 0,
+               nominal INTEGER NOT NULL DEFAULT 0, quando TEXT NOT NULL, rodada_id INTEGER);",
+        )
+        .expect("tabela");
+        RegistroDaIa::sobre(c, None)
+    }
+
+    fn saida() -> Saida {
+        Saida {
+            destinatario: "rita".into(),
+            provedor: "local".into(),
+            modelo: "m".into(),
+            nivel: NivelDeConfianca::Completo,
+            bytes_enviados: 42,
+            consumo: Consumo::default(),
+            quando: "2026-11-20T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn abrir_grava_antes_e_fechar_completa_a_mesma_linha() {
+        let r = registro();
+        let id = r.abrir_saida(&saida()).expect("abrir").expect("id");
+        let c = r.conexao().expect("conexão");
+        let (bytes, tokens): (i64, i64) = c
+            .query_row(
+                "SELECT bytes_enviados, tokens_entrada FROM saida_ia WHERE id = ?1",
+                [id],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .expect("linha");
+        assert_eq!((bytes, tokens), (42, 0), "a linha existe antes da resposta");
+        drop(c);
+        r.fechar_saida(
+            id,
+            Consumo {
+                tokens_entrada: 900,
+                tokens_saida: 40,
+                custo_dezmilesimos_usd: 7,
+                nominal: false,
+            },
+        )
+        .expect("fechar");
+        let c = r.conexao().expect("conexão");
+        let (n, entrada, custo): (i64, i64, i64) = c
+            .query_row(
+                "SELECT COUNT(*), MAX(tokens_entrada), MAX(custo_dezmilesimos_usd) FROM saida_ia",
+                [],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .expect("soma");
+        assert_eq!((n, entrada, custo), (1, 900, 7), "uma linha só, completada");
+    }
+
+    #[test]
+    fn sem_a_tabela_abrir_falha() {
+        let r = RegistroDaIa::sobre(Connection::open_in_memory().expect("memória"), None);
+        assert!(r.abrir_saida(&saida()).is_err());
     }
 }

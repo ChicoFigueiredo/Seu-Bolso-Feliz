@@ -89,6 +89,11 @@ pub trait ProvedorDeConversa: Send + Sync {
     /// O modelo configurado (rótulo do autor do rascunho).
     fn modelo(&self) -> String;
     fn natureza_do_custo(&self) -> NaturezaDoCusto;
+    /// Para onde vai o texto (a base do endereço do provedor), sem chave. Vazio quando não
+    /// se aplica (o `claude -p` e os falsos).
+    fn endereco(&self) -> String {
+        String::new()
+    }
     /// Um passo. `cancelar` ligado interrompe a espera e devolve
     /// [`crate::ErroDeIa::Interrompido`].
     ///
