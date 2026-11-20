@@ -23,7 +23,7 @@ use std::sync::atomic::AtomicBool;
 
 use sbf_chaveiro::Chaveiro;
 use sbf_gmail::config::{ARQUIVO_DA_CONFIG, Config, Conta, arquivo_dos_rotulos};
-use sbf_gmail::credenciais::{Alvo, Credenciais, marcar_vencida, presentes};
+use sbf_gmail::credenciais::{Credenciais, marcar_vencida, presentes};
 use sbf_gmail::{ClienteReal, Erro, OpcoesDaColeta, ReconhecimentoDoCofre, ResumoDaColeta};
 use sbf_worker::laco::{ColetorDeGmail, Dados, ResumoDoGmail};
 use sbf_worker::registro::Falha;
@@ -34,40 +34,19 @@ pub fn pasta_de_dados() -> Option<PathBuf> {
 }
 
 /// As contas de e-mail (veja `sbf_gmail::contas::contas_efetivas`).
-pub fn contas(dados: Option<&Path>, chaveiro: Option<&Chaveiro>) -> Config {
-    sbf_gmail::contas::contas_efetivas(dados, chaveiro)
+pub fn contas(dados: Option<&Path>, chaveiro: Option<&Chaveiro>) -> Result<Config, String> {
+    sbf_gmail::contas::contas_efetivas(dados, chaveiro).map_err(|e| e.to_string())
 }
 
 /// A conta é coletável (o tipo conecta e as três credenciais estão à mão)?
 fn coletavel(c: &Conta, chaveiro: Option<&Chaveiro>) -> bool {
-    c.tipo.disponivel()
-        && presentes(
-            chaveiro,
-            Alvo {
-                id: &c.id,
-                tipo: c.tipo,
-            },
-        )
+    c.tipo.disponivel() && presentes(chaveiro, c.alvo())
 }
 
 /// A conta tem credenciais e o provedor não as recusou (vale tentar)?
 fn tentavel(c: &Conta, chaveiro: Option<&Chaveiro>) -> bool {
-    let alvo = Alvo {
-        id: &c.id,
-        tipo: c.tipo,
-    };
     c.tipo.disponivel()
-        && Credenciais::do_ambiente(chaveiro, alvo).is_ok_and(|cr| !cr.vencida(chaveiro, &c.id))
-}
-
-/// Há alguma conta coletável?
-pub fn ha_contas_coletaveis() -> bool {
-    let chaveiro = Chaveiro::abrir_na_pasta_padrao().ok();
-    let dados = pasta_de_dados();
-    contas(dados.as_deref(), chaveiro.as_ref())
-        .contas
-        .iter()
-        .any(|c| coletavel(c, chaveiro.as_ref()))
+        && Credenciais::do_ambiente(chaveiro, c.alvo()).is_ok_and(|cr| !cr.vencida(chaveiro, &c.id))
 }
 
 /// Coleta uma conta: credenciais, cliente, reconhecimento do cofre. Autorização vencida
@@ -80,11 +59,7 @@ fn coletar_uma(
     opcoes: &OpcoesDaColeta,
     cancelar: &AtomicBool,
 ) -> Result<ResumoDaColeta, Erro> {
-    let alvo = Alvo {
-        id: &conta.id,
-        tipo: conta.tipo,
-    };
-    let cred = Credenciais::do_ambiente(chaveiro, alvo)?;
+    let cred = Credenciais::do_ambiente(chaveiro, conta.alvo())?;
     if cred.vencida(chaveiro, &conta.id) {
         return Err(Erro::Autorizacao);
     }
@@ -149,7 +124,13 @@ pub fn coletar_contas(
             .spawn(|| {
                 let chaveiro = Chaveiro::abrir_na_pasta_padrao().ok();
                 let dados = pasta_de_dados();
-                let config = contas(dados.as_deref(), chaveiro.as_ref());
+                let config = match contas(dados.as_deref(), chaveiro.as_ref()) {
+                    Ok(c) => c,
+                    // `email.json` recusado (id inválido...): aparece como falha, sem coletar.
+                    Err(e) => {
+                        return vec![(ARQUIVO_DA_CONFIG.to_owned(), Err(Erro::Argumento(e)))];
+                    }
+                };
                 config
                     .contas
                     .iter()
@@ -190,9 +171,7 @@ pub fn juntar(
     resultados: Vec<(String, Result<ResumoDaColeta, Erro>)>,
 ) -> Result<ResumoDaColeta, Erro> {
     if resultados.is_empty() {
-        return Err(Erro::SemCredenciais(
-            "nenhuma conta de e-mail conectada".to_owned(),
-        ));
+        return Err(Erro::SemContas);
     }
     let mut total = ResumoDaColeta::default();
     let mut algum = false;
@@ -344,9 +323,20 @@ impl ColetorDeGmail for GmailReal {
         let chaveiro = Chaveiro::abrir_na_pasta_padrao().ok();
         let dados = pasta_de_dados();
         contas(dados.as_deref(), chaveiro.as_ref())
-            .contas
-            .iter()
-            .any(|c| tentavel(c, chaveiro.as_ref()))
+            .is_ok_and(|cfg| cfg.contas.iter().any(|c| tentavel(c, chaveiro.as_ref())))
+    }
+
+    fn contas_vencidas(&mut self) -> Vec<String> {
+        let chaveiro = Chaveiro::abrir_na_pasta_padrao().ok();
+        let dados = pasta_de_dados();
+        let Ok(cfg) = contas(dados.as_deref(), chaveiro.as_ref()) else {
+            return Vec::new();
+        };
+        cfg.contas
+            .into_iter()
+            .filter(|c| coletavel(c, chaveiro.as_ref()) && !tentavel(c, chaveiro.as_ref()))
+            .map(|c| c.id)
+            .collect()
     }
 }
 
@@ -427,7 +417,7 @@ mod testes {
             ]),
             Err(Erro::Gmail(_))
         ));
-        assert!(matches!(juntar(vec![]), Err(Erro::SemCredenciais(_))));
+        assert!(matches!(juntar(vec![]), Err(Erro::SemContas)));
     }
 
     #[test]

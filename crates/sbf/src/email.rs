@@ -28,11 +28,12 @@ use sbf_chaveiro::Chaveiro;
 use sbf_gmail::config::{
     ARQUIVO_DA_CONFIG, Config, Conta, arquivo_dos_rotulos, ler_rotulos_da_conta,
 };
-use sbf_gmail::credenciais::{self, Alvo};
+use sbf_gmail::credenciais;
 use sbf_gmail::{ClienteReal, Erro, FonteDeGmail as _, SituacaoDaConexao, TipoDeEmail};
+use zeroize::Zeroizing;
 
 use crate::gmail::{
-    coletar_contas, contas, juntar, ler_opcoes_da_coleta, pasta_de_dados, resumo_em_linhas,
+    coletar_contas, contas, ler_opcoes_da_coleta, pasta_de_dados, resumo_em_linhas,
 };
 
 const USO: &str = "uso: sbf email contas | adicionar --tipo gmail|outlook [--apelido <nome>] | app [--tipo gmail] | entrar [<id>] | sair [<id>] | remover <id> | seguir <id> <rótulo> | deixar <id> <rótulo> | rotulos [<id>] | coletar [<id>] --inventario <cofre> [--consulta <q>] [--desde AAAA-MM-DD] [--limite N] | estado | importar";
@@ -90,14 +91,14 @@ fn gravar(config: &Config) -> Result<(), String> {
 }
 
 /// Lê uma linha do terminal (na saída de erro, para não sujar a saída).
-fn ler_linha(pergunta: &str) -> Result<String, String> {
+fn ler_linha(pergunta: &str) -> Result<Zeroizing<String>, String> {
     eprint!("{pergunta}");
     let _ = std::io::stderr().flush();
-    let mut linha = String::new();
+    let mut linha = Zeroizing::new(String::new());
     std::io::stdin()
         .read_line(&mut linha)
         .map_err(|e| e.kind().to_string())?;
-    Ok(linha.trim().to_owned())
+    Ok(Zeroizing::new(linha.trim().to_owned()))
 }
 
 fn eco(ligado: bool) {
@@ -139,12 +140,12 @@ fn posicionais(args: &[String]) -> Vec<&str> {
 fn cmd_contas() -> Result<(), String> {
     let chaveiro = abrir_chaveiro().ok();
     let dados = pasta_de_dados();
-    let config = contas(dados.as_deref(), chaveiro.as_ref());
+    let config = contas(dados.as_deref(), chaveiro.as_ref())?;
     if config.contas.is_empty() {
         println!("nenhuma conta de e-mail. Rode `sbf email adicionar --tipo gmail`.");
     }
     for c in &config.contas {
-        let e = sbf_gmail::estado_da_conta(Path::new("/nao/existe"), c, chaveiro.as_ref());
+        let e = sbf_gmail::estado_da_conta(None, c, chaveiro.as_ref());
         println!(
             "{}\t{}\t{}\t{}",
             c.id,
@@ -182,7 +183,7 @@ fn cmd_app(args: &[String]) -> Result<(), String> {
     let segredo = ler_linha("Client secret (não aparece): ");
     eco(true);
     eprintln!();
-    credenciais::guardar_app(&chaveiro, tipo, Some(&id), Some(&segredo?))
+    credenciais::guardar_app(&chaveiro, tipo, Some(id.as_str()), Some(segredo?.as_str()))
         .map_err(|e| e.to_string())?;
     println!("aplicativo {} guardado no chaveiro.", tipo.rotulo());
     Ok(())
@@ -191,7 +192,7 @@ fn cmd_app(args: &[String]) -> Result<(), String> {
 fn cmd_entrar(id: Option<&str>) -> Result<(), String> {
     let chaveiro = abrir_chaveiro()?;
     let dados = pasta_de_dados();
-    let config = contas(dados.as_deref(), Some(&chaveiro));
+    let config = contas(dados.as_deref(), Some(&chaveiro))?;
     let conta = escolher(&config, id)?.clone();
     let arquivo = arquivo_da_config()?;
     let email = sbf_gmail::oauth::entrar_no_navegador(&chaveiro, &arquivo, &conta.id, &|url| {
@@ -199,7 +200,10 @@ fn cmd_entrar(id: Option<&str>) -> Result<(), String> {
             "Abrindo o navegador para autorizar a leitura do {}. Se ele não abrir, acesse:\n{url}",
             conta.tipo.rotulo()
         );
-    })
+    },
+    // No terminal, Ctrl+C encerra o processo (e a porta com ele).
+    std::sync::Arc::default(),
+    )
     .map_err(|e| match e {
         Erro::SemCredenciais(_) => format!(
             "faltam o Client ID e o Client secret do aplicativo: rode `sbf email app --tipo {}` (ou preencha em Conexões › E-mail).",
@@ -214,7 +218,7 @@ fn cmd_entrar(id: Option<&str>) -> Result<(), String> {
 fn cmd_sair(id: Option<&str>, remover: bool) -> Result<(), String> {
     let chaveiro = abrir_chaveiro()?;
     let dados = pasta_de_dados();
-    let mut config = contas(dados.as_deref(), Some(&chaveiro));
+    let mut config = contas(dados.as_deref(), Some(&chaveiro))?;
     let id = escolher(&config, id)?.id.clone();
     credenciais::apagar(&chaveiro, &id).map_err(|e| e.to_string())?;
     if remover {
@@ -242,7 +246,7 @@ fn cmd_seguir(args: &[String], seguir: bool) -> Result<(), String> {
     let dados = pasta_de_dados().ok_or("não achei a pasta de dados do app")?;
     let da_conta = ler_rotulos_da_conta(&dados.join(arquivo_dos_rotulos(id)));
     let chaveiro = abrir_chaveiro().ok();
-    let mut config = contas(Some(&dados), chaveiro.as_ref());
+    let mut config = contas(Some(&dados), chaveiro.as_ref())?;
     let conta = config
         .conta_mut(id)
         .ok_or_else(|| format!("não existe a conta {id}"))?;
@@ -267,12 +271,9 @@ fn cmd_seguir(args: &[String], seguir: bool) -> Result<(), String> {
 fn cmd_rotulos(id: Option<&str>) -> Result<(), String> {
     let chaveiro = abrir_chaveiro().ok();
     let dados = pasta_de_dados().ok_or("não achei a pasta de dados do app")?;
-    let config = contas(Some(&dados), chaveiro.as_ref());
+    let config = contas(Some(&dados), chaveiro.as_ref())?;
     let conta = escolher(&config, id)?.clone();
-    let alvo = Alvo {
-        id: &conta.id,
-        tipo: conta.tipo,
-    };
+    let alvo = conta.alvo();
     let rotulos = std::thread::scope(|e| {
         e.spawn(|| ClienteReal::resolver(chaveiro.as_ref(), alvo).and_then(|c| c.rotulos()))
             .join()
@@ -358,19 +359,17 @@ fn cmd_coletar(args: &[String]) -> ExitCode {
         eprintln!("sbf email: nenhuma conta conectada. Rode `sbf email entrar`.");
         return ExitCode::from(2);
     }
-    let _ = juntar; // o resumo somado é do worker e do MCP
     saida
 }
 
 fn cmd_estado(cofre: Option<&Path>) -> Result<(), String> {
     let chaveiro = abrir_chaveiro().ok();
     let dados = pasta_de_dados();
-    let config = contas(dados.as_deref(), chaveiro.as_ref());
+    let config = contas(dados.as_deref(), chaveiro.as_ref())?;
     if config.contas.is_empty() {
         println!("nenhuma conta de e-mail.");
     }
     for c in &config.contas {
-        let cofre = cofre.unwrap_or_else(|| Path::new("/nao/existe"));
         let e = sbf_gmail::estado_da_conta(cofre, c, chaveiro.as_ref());
         println!(
             "{}: {} ({} origens, {} documentos; última coleta {})",
