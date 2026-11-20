@@ -284,6 +284,7 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
     let dados_do_gmail = dados.clone();
     let dados_do_rag = dados.clone();
     let dados_do_ocr = dados.clone();
+    let dados_dos_padroes = dados.clone();
     match Worker::novo(dados, config, Some(nuvem), Some(triador)) {
         Ok(w) => {
             let mut w = w
@@ -297,6 +298,10 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
                 )))
                 .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)))
                 .com_ocr(Box::new(crate::ocr::LeitorReal::novo(dados_do_ocr)))
+                .com_passada_de_padroes(Box::new(crate::padroes::PassadaReal::novo(
+                    dados_dos_padroes,
+                    crate::script::executor_de_script().ok(),
+                )))
                 .com_reconhecimento_das_pastas(Box::new(ReconhecimentoDasPastas::novo(
                     dados_das_pastas,
                 )));

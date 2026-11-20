@@ -13,9 +13,9 @@ use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
     Analista, ArquivoNovo, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram,
-    Dados, Indexador, LeitorDeImagens, ReconhecedorDePastas, ResumoDaNuvem, ResumoDaTriagem,
-    ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice, ResumoDoOcr, ResumoDoTelegram,
-    ResumoDosPontos, Triador, Worker,
+    Dados, Indexador, LeitorDeImagens, PassadaDePadroes, ReconhecedorDePastas, ResumoDaNuvem,
+    ResumoDaPassada, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice,
+    ResumoDoOcr, ResumoDoTelegram, ResumoDosPontos, Triador, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -719,6 +719,93 @@ fn ocr_indisponivel_ou_sem_nada_novo_nao_escreve_no_log_nem_conta_falha() {
     assert_eq!(w.estado.falhas, 0);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(!log.contains("ocr "), "{log}");
+}
+
+// -- passada de padrões --------------------------------------------------------------------------
+
+/// Devolve os resumos na ordem (falha com `None`), e o último para sempre.
+struct PassadaFalsa(Rc<Cell<u32>>, Vec<Option<ResumoDaPassada>>);
+impl PassadaDePadroes for PassadaFalsa {
+    fn lote(&mut self, _: &AtomicBool) -> Result<ResumoDaPassada, Falha> {
+        let n = self.0.get() as usize;
+        self.0.set(self.0.get() + 1);
+        self.1[n.min(self.1.len() - 1)].ok_or(Falha::Banco)
+    }
+}
+
+fn lote_de(lidos: usize, feitos: u64, total: u64) -> Option<ResumoDaPassada> {
+    Some(ResumoDaPassada {
+        lidos,
+        feitos,
+        total,
+    })
+}
+
+#[test]
+fn passada_de_padroes_faz_lotes_com_pausa_e_volta_ao_minuto_quando_acaba() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let resumos = vec![
+        lote_de(25, 25, 60),
+        lote_de(25, 50, 60),
+        lote_de(10, 60, 60),
+        lote_de(0, 60, 60),
+    ];
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_passada_de_padroes(Box::new(PassadaFalsa(n.clone(), resumos)));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "a primeira volta já roda");
+    w.passo(t0 + 1, Duration::from_millis(1), &nao);
+    assert_eq!(
+        n.get(),
+        1,
+        "há o que ler, mas o lote seguinte espera a pausa"
+    );
+    w.passo(t0 + 5, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    w.passo(t0 + 10, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 3);
+    w.passo(t0 + 15, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 4, "o lote vazio acaba a passada");
+    w.passo(t0 + 40, Duration::from_millis(1), &nao);
+    assert_eq!(
+        n.get(),
+        4,
+        "sem trabalho: só volta no intervalo de um minuto"
+    );
+    w.passo(t0 + 80, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 5);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("padroes: 60 de 60"), "{log}");
+    // O log não vira uma linha por lote: três lotes em 10 s, no máximo uma linha de progresso.
+    assert_eq!(log.matches("padroes: ").count(), 2, "{log}");
+    assert_eq!(w.estado.falhas, 0);
+}
+
+#[test]
+fn passada_de_padroes_que_falha_espera_cinco_minutos_e_conta_a_falha() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_passada_de_padroes(Box::new(PassadaFalsa(n.clone(), vec![None])));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    for s in 1..=4 {
+        w.passo(t0 + s * 2, Duration::from_millis(1), &nao);
+    }
+    assert_eq!(n.get(), 1, "não gira em cima do mesmo erro");
+    w.passo(t0 + 299, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1);
+    w.passo(t0 + 300, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2);
+    assert_eq!(w.estado.falhas, 2);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("falhou passo=padroes causa=banco"), "{log}");
 }
 
 #[test]

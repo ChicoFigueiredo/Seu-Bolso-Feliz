@@ -33,6 +33,7 @@ mod gmail;
 mod inventario;
 mod mcp;
 mod ocr;
+mod padroes;
 mod planejamento;
 mod rag;
 mod reconhecer;
