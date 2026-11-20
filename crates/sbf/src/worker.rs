@@ -296,13 +296,13 @@ fn rodar_o_laco(cofre: &Path) -> ExitCode {
                 )))
                 .com_pontos(Box::new(crate::rag::AnalistaReal::novo(dados_do_rag)))
                 .com_ocr(Box::new(crate::ocr::LeitorReal::novo(dados_do_ocr)));
-            // O Gmail só liga com as credenciais OAuth no ambiente do worker; sem elas o laço
-            // não tenta (e não registra falha a cada intervalo).
-            if sbf_gmail::fonte::credenciais_presentes() {
-                w = w.com_gmail(Box::new(crate::gmail::GmailReal {
-                    dados: dados_do_gmail,
-                }));
-            }
+            // O e-mail sempre liga: a cada intervalo o coletor olha as contas conectadas (chaveiro,
+            // ambiente ou .env) na hora, então um login feito com o worker rodando vale sem
+            // reiniciar. Sem conta conectada não é falha. Autorização vencida suspende (veja
+            // `ColetorDeGmail::pode_tentar_de_novo`).
+            w = w.com_gmail(Box::new(crate::gmail::GmailReal {
+                dados: dados_do_gmail,
+            }));
             w.rodar(&parar);
             ExitCode::SUCCESS
         }
