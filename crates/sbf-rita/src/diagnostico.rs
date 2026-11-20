@@ -54,7 +54,6 @@ fn regex_fixo(p: &str) -> Regex {
     Regex::new(p).unwrap_or_else(|_| unreachable!("regex fixo inválido"))
 }
 
-static IDENTIFICADOR: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"\d[\d.\-/]{4,}\d"));
 static DINHEIRO: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"R\$|\d,\d{2}\b"));
 static DATA_NUMERICA: LazyLock<Regex> =
     LazyLock::new(|| regex_fixo(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b\d{1,2}/\d{4}\b"));
@@ -73,6 +72,49 @@ pub struct Diagnostico {
     pub condicoes_falhando: usize,
     /// Os campos declarados (`extrair` e `obrigatorios`) que não saíram do item.
     pub faltam: Vec<String>,
+}
+
+/// O primeiro token da linha que parece um identificador: só dígitos e `.-/`, com sete ou mais
+/// dígitos, e que não é uma data.
+fn identificador_em(linha: &str) -> Option<&str> {
+    linha
+        .split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_ascii_digit()))
+        .find(|t| {
+            t.chars().filter(char::is_ascii_digit).count() >= 7
+                && t.chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '/'))
+                && !DATA_NUMERICA.is_match(t)
+        })
+}
+
+/// Um regex com um grupo que casa exatamente um número como `123456789012-3`: cada sequência de
+/// dígitos vira `\d{n}` e o resto, literal.
+fn regex_do_numero(numero: &str) -> String {
+    fn fechar(saida: &mut String, digitos: usize) {
+        match digitos {
+            0 => {}
+            1 => saida.push_str("\\d"),
+            k => saida.push_str(&format!("\\d{{{k}}}")),
+        }
+    }
+    let mut saida = String::from("(");
+    let mut digitos = 0_usize;
+    for c in numero.chars() {
+        if c.is_ascii_digit() {
+            digitos += 1;
+            continue;
+        }
+        fechar(&mut saida, digitos);
+        digitos = 0;
+        if "\\.+*?()|[]{}^$#&~".contains(c) {
+            saida.push('\\');
+        }
+        saida.push(c);
+    }
+    fechar(&mut saida, digitos);
+    saida.push(')');
+    saida
 }
 
 fn palavras(s: &str) -> Vec<String> {
@@ -151,7 +193,7 @@ fn candidatas_do_campo(nome: &str, formato: Formato, texto: &str, pedido: &str) 
         {
             p += 3;
         }
-        let tem_identificador = IDENTIFICADOR.is_match(linha) && !DATA_NUMERICA.is_match(linha);
+        let tem_identificador = identificador_em(linha).is_some();
         match formato {
             Formato::Centavos if DINHEIRO.is_match(linha) => p += 4,
             Formato::Data if DATA_NUMERICA.is_match(linha) || MES_POR_EXTENSO.is_match(&norm) => {
@@ -346,8 +388,14 @@ pub fn diagnosticar(def: &Definicao, item: &Entrada, pedido: &str) -> Diagnostic
                 let fim = if candidatas.is_empty() {
                     "Não achei no texto uma linha que pareça ter este valor: se ele não está no texto, remova o campo.".to_owned()
                 } else {
+                    let numero = candidatas
+                        .iter()
+                        .find_map(|l| identificador_em(l))
+                        .filter(|_| nome.split('_').any(|p| NOMES_DE_IDENTIFICADOR.contains(&p)))
+                        .map(|n| format!(" Para o número «{n}» serve `{}`.", regex_do_numero(n)))
+                        .unwrap_or_default();
                     format!(
-                        "Linhas candidatas (o regex não casa com nenhuma): {}. Teste a correção com `testar_regex`.",
+                        "Linhas candidatas (o regex não casa com nenhuma): {}.{numero} Teste a correção com `testar_regex`.",
                         entre_aspas(&candidatas)
                     )
                 };
@@ -367,7 +415,9 @@ pub fn diagnosticar(def: &Definicao, item: &Entrada, pedido: &str) -> Diagnostic
                         &trecho,
                         item.momento.as_deref(),
                     ));
-                } else if let Some(inteiro) = casamento
+                }
+                // O número inteiro que o regex deveria pegar (quando pegou só parte).
+                let inteiro = casamento
                     .filter(|_| {
                         e.fonte == FonteDaExtracao::Texto
                             && matches!(
@@ -375,24 +425,28 @@ pub fn diagnosticar(def: &Definicao, item: &Entrada, pedido: &str) -> Diagnostic
                                 Formato::Texto | Formato::Inteiro | Formato::Minusculas
                             )
                     })
-                    .and_then(|m| numero_cortado(&fonte, m.start(), m.end()))
-                {
+                    .and_then(|m| numero_cortado(&fonte, m.start(), m.end()));
+                if let Some(inteiro) = &inteiro {
                     d.faltam.push(nome.clone());
                     d.linhas.push(format!(
-                        "{rotulo} `{nome}`: o regex pegou só parte do número: «{}» está dentro de «{}». Capture o número inteiro (ex.: `\\d{{12}}-\\d`, ou ancore com `\\b`).",
+                        "{rotulo} `{nome}`: o regex pegou só parte do número: «{}» está dentro de «{}». Capture o número inteiro: `{}`.",
                         cortar(&trecho, 40),
-                        cortar(&inteiro, 40)
+                        cortar(inteiro, 40),
+                        regex_do_numero(inteiro)
                     ));
-                } else if determina(pedido, nome)
+                }
+                if determina(pedido, nome)
                     && NOMES_DE_IDENTIFICADOR
                         .iter()
                         .any(|n| nome.split('_').any(|p| p == *n))
-                    && !alguma_condicao_usa(def, &trecho)
+                    && !alguma_condicao_usa(def, inteiro.as_deref().unwrap_or(&trecho))
                 {
-                    d.faltam.push(nome.clone());
+                    if inteiro.is_none() {
+                        d.faltam.push(nome.clone());
+                    }
                     d.linhas.push(format!(
                         "o pedido diz que `{nome}` determina o padrão, mas nenhuma condição de `detectar` usa o valor dele: acrescente `{{\"contem\": \"{}\"}}` em `todos`.",
-                        cortar(&trecho, 40)
+                        cortar(inteiro.as_deref().unwrap_or(&trecho), 40)
                     ));
                 }
             }
@@ -500,6 +554,7 @@ mod testes {
         let l = &g.linhas[0];
         assert!(l.contains("`contrato`"), "{l}");
         assert!(l.contains("«123456789012-3»"), "{l}");
+        assert!(l.contains("serve `(\\d{12}-\\d)`"), "{l}");
         assert!(l.contains("testar_regex"), "{l}");
         assert!(!l.contains("contratado"), "{l}");
     }
