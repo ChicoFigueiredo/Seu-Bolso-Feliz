@@ -33,7 +33,9 @@ pub struct Contracheque {
     /// da parcela atual (o fim do contrato é desconhecido). `None` nas demais rubricas e em
     /// todo o layout antigo.
     pub parcelas_atuais: Vec<Option<u32>>,
-    /// `true` no layout de 2026 (mês/ano como `MM/AAAA`, coluna Prazo = parcela atual).
+    /// `true` nos layouts de 2026 (mês/ano como `MM/AAAA`, ou o de novembro com `Tp/Rub`):
+    /// a competência da rubrica é a de referência e a coluna Prazo, quando vem, é a parcela
+    /// atual.
     pub prazo_e_parcela_atual: bool,
     /// Observações da leitura, em português e sem valores ("X não entra no total de
     /// descontos do contracheque").
@@ -105,7 +107,21 @@ fn valores_da_linha(linha: &str) -> Vec<Centavos> {
 /// Código, nome, competência, prazo e valor.
 type LinhaDeRubrica = (String, String, Option<Competencia>, Option<u32>, Centavos);
 
-/// `CÓDIGO NOME... [MM/AAAA] [PRAZO] R$ VALOR`; `None` quando a linha não é uma rubrica.
+/// Um valor sem `R$` (o layout de novembro de 2026): só dígitos e pontos, com vírgula e
+/// duas casas decimais (`5.000,00`). Mais rígido que `centavos_de_texto` de propósito: sem o
+/// `R$` para ancorar, `01` ou `11/2026` não podem passar por dinheiro.
+fn valor_sem_rs(palavra: &str) -> Option<Centavos> {
+    let (inteiro, decimais) = palavra.rsplit_once(',')?;
+    let inteiro_ok = !inteiro.is_empty()
+        && inteiro.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && inteiro.starts_with(|c: char| c.is_ascii_digit());
+    (inteiro_ok && decimais.len() == 2 && decimais.chars().all(|c| c.is_ascii_digit()))
+        .then(|| centavos_de_texto(palavra))
+        .flatten()
+}
+
+/// `CÓDIGO NOME... [MM/AAAA] [PRAZO] [R$] VALOR`; `None` quando a linha não é uma rubrica.
+/// O nome vem vazio quando o layout o quebrou em duas linhas em volta desta.
 fn rubrica_da_linha(linha: &str) -> Option<LinhaDeRubrica> {
     let palavras: Vec<&str> = linha.split_whitespace().collect();
     let codigo = *palavras.first()?;
@@ -113,11 +129,14 @@ fn rubrica_da_linha(linha: &str) -> Option<LinhaDeRubrica> {
         return None;
     }
     let n = palavras.len();
-    if n < 4 || palavras[n - 2] != "R$" {
+    let (valor, fim) = if n >= 4 && palavras[n - 2] == "R$" {
+        (centavos_de_texto(palavras[n - 1])?, n - 2)
+    } else if n >= 3 {
+        (valor_sem_rs(palavras[n - 1])?, n - 1)
+    } else {
         return None;
-    }
-    let valor = centavos_de_texto(palavras[n - 1])?;
-    let meio = &palavras[1..n - 2];
+    };
+    let meio = &palavras[1..fim];
     let pos = meio.iter().position(|p| competencia_de(p).is_some());
     let (nome, competencia, prazo) = match pos {
         Some(i) => {
@@ -127,6 +146,19 @@ fn rubrica_da_linha(linha: &str) -> Option<LinhaDeRubrica> {
         None => (meio.join(" "), None, None),
     };
     Some((codigo.to_owned(), nome, competencia, prazo, valor))
+}
+
+/// A linha de continuação do nome de uma rubrica: texto solto dentro da tabela (nem outra
+/// rubrica, nem o cabeçalho, nem o início do rodapé).
+fn continuacao_do_nome(linha: Option<&&str>) -> Option<String> {
+    let l = linha?.trim();
+    let n = normalizar(l);
+    (!l.is_empty()
+        && rubrica_da_linha(l).is_none()
+        && !n.contains("discriminacao da rubrica")
+        && !n.contains("salario bruto")
+        && !n.contains("liquido creditado"))
+    .then(|| l.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
 /// Os totais de um bloco "Salário Bruto / Valor Descontos / Salário Liquido": a linha de
@@ -179,6 +211,44 @@ fn valor_do_rodape(linhas: &[&str], rotulo: &str) -> Option<Centavos> {
     None
 }
 
+/// O valor de um rótulo que o layout de novembro de 2026 quebra em duas linhas (uma acima
+/// e outra abaixo da linha dos demais rótulos), com os valores em linhas diferentes: vale o
+/// único `R$ valor` das quatro linhas seguintes cuja coluna cruza a do pedaço do rótulo.
+/// `None` quando não há esse rótulo quebrado, ou o valor não é um só.
+fn valor_sob_o_rotulo_quebrado(linhas: &[&str], pedaco: &str) -> Option<Centavos> {
+    for (j, l) in linhas.iter().enumerate() {
+        let Some(campo) = l
+            .split("  ")
+            .map(str::trim)
+            .find(|c| !c.is_empty() && normalizar(c) == pedaco)
+        else {
+            continue;
+        };
+        let inicio = l[..l.find(campo)?].chars().count();
+        let fim = inicio + campo.chars().count();
+        let mut achados = Vec::new();
+        for abaixo in linhas.iter().skip(j + 1).take(4) {
+            for (pos, _) in abaixo.match_indices("R$") {
+                let resto = &abaixo[pos..];
+                let mut palavras = resto.split_whitespace();
+                let (_, Some(texto)) = (palavras.next(), palavras.next()) else {
+                    continue;
+                };
+                let col_ini = abaixo[..pos].chars().count();
+                let col_fim = col_ini + resto[..resto.find(texto)? + texto.len()].chars().count();
+                if col_ini < fim && col_fim > inicio {
+                    achados.extend(centavos_de_texto(texto));
+                }
+            }
+        }
+        return match achados.as_slice() {
+            [unico] => Some(*unico),
+            _ => None,
+        };
+    }
+    None
+}
+
 /// Rubrica eventual: não se repete todo mês. Duas regras, só estas:
 ///
 /// 1. retroativo: a competência da rubrica não é o mês do pagamento (só no layout de 2026;
@@ -219,25 +289,43 @@ pub fn ler(texto: &str) -> Resultado<Contracheque> {
         return Err(erro("não é um demonstrativo de pagamento"));
     }
 
-    // Mês / ano de pagamento: o valor está na 1ª linha com conteúdo depois do rótulo.
+    // Mês / ano de pagamento: o valor está numa das linhas depois do rótulo, até o título
+    // "DEMONSTRATIVO DE PAGAMENTO". O layout antigo traz `OUTUBRO / 2026` e o de 2026,
+    // `MM/AAAA`, sempre na 1ª linha com conteúdo; o de novembro de 2026 traz o mês por
+    // extenso numa linha própria, com o texto de CA/SR quebrado em volta.
     let cab = linhas
         .iter()
         .position(|l| normalizar(l).contains("mes ano de pagamento"))
         .ok_or_else(|| erro("falta o mês e o ano de pagamento"))?;
-    let valor = linhas[cab + 1..]
+    let mut numerico = None;
+    let mut por_extenso = None;
+    for l in linhas[cab + 1..]
         .iter()
-        .find(|l| !l.trim().is_empty())
-        .ok_or_else(|| erro("o mês e o ano de pagamento não leem"))?;
-    let palavras: Vec<&str> = valor.split_whitespace().collect();
-    let numerico = palavras.first().and_then(|p| competencia_de(p));
-    let prazo_e_parcela_atual = numerico.is_some();
-    let pagamento = numerico
-        .or_else(|| {
-            // Layout antigo: `OUTUBRO / 2026`.
-            let i = palavras.iter().position(|x| *x == "/")?;
+        .take_while(|l| !normalizar(l).contains("demonstrativo de pagamento"))
+        .filter(|l| !l.trim().is_empty())
+        .take(6)
+    {
+        let palavras: Vec<&str> = l.split_whitespace().collect();
+        if let Some(c) = palavras.first().and_then(|p| competencia_de(p)) {
+            numerico = Some(c);
+            break;
+        }
+        // `NOVEMBRO / 2026`.
+        let extenso = palavras.iter().position(|x| *x == "/").and_then(|i| {
             let mes = mes_do_nome(palavras.get(i.checked_sub(1)?)?)?;
             Competencia::nova(palavras.get(i + 1)?.parse().ok()?, mes)
-        })
+        });
+        if extenso.is_some() {
+            por_extenso = extenso;
+            break;
+        }
+    }
+    let layout_de_novembro = linhas
+        .iter()
+        .any(|l| normalizar(l).starts_with("tp rub discriminacao"));
+    let prazo_e_parcela_atual = numerico.is_some() || layout_de_novembro;
+    let pagamento = numerico
+        .or(por_extenso)
         .ok_or_else(|| erro("o mês e o ano de pagamento não leem"))?;
 
     // As rubricas de todas as páginas; os totais de cada bloco.
@@ -260,8 +348,17 @@ pub fn ler(texto: &str) -> Resultado<Contracheque> {
         } else if n.contains("liquido creditado em") {
             credito = credito.or_else(|| credito_da_linha(l));
         } else if na_tabela
-            && let Some((codigo, nome, competencia, prazo, valor)) = rubrica_da_linha(l)
+            && let Some((codigo, mut nome, competencia, prazo, valor)) = rubrica_da_linha(l)
         {
+            // Nome quebrado em duas linhas: a de cima e a de baixo completam a descrição.
+            if nome.is_empty() {
+                let partes = [
+                    i.checked_sub(1)
+                        .and_then(|k| continuacao_do_nome(linhas.get(k))),
+                    continuacao_do_nome(linhas.get(i + 1)),
+                ];
+                nome = partes.into_iter().flatten().collect::<Vec<_>>().join(" ");
+            }
             match tipo_do_codigo(&codigo) {
                 Some(tipo) => rubricas.push(Rubrica {
                     codigo: Some(codigo),
@@ -373,7 +470,8 @@ pub fn ler(texto: &str) -> Resultado<Contracheque> {
         parcelas_atuais,
         prazo_e_parcela_atual,
         avisos,
-        base_irrf: valor_do_rodape(&linhas, "base calculo imposto renda"),
+        base_irrf: valor_do_rodape(&linhas, "base calculo imposto renda")
+            .or_else(|| valor_sob_o_rotulo_quebrado(&linhas, "base calculo imposto")),
     })
 }
 
@@ -779,6 +877,102 @@ mod testes {
         // Uma fixa vira eventual: a das fixas perde uma.
         marcacao[indice(&c, "21041", 9_500)] = true;
         assert_eq!(c.composicoes("r", "s", &marcacao)[1].rubricas.len(), antes);
+    }
+
+    const TEXTO_2026_11: &str = include_str!("../tests/contracheque-2026-11-ficticio.txt");
+
+    #[test]
+    fn le_o_layout_de_novembro_de_2026() {
+        let c = ler(TEXTO_2026_11).expect("ler");
+        assert_eq!(c.pagamento, Competencia { ano: 2026, mes: 11 });
+        assert_eq!(c.credito, Data::de_iso("2026-11-23"));
+        assert_eq!(c.nao_classificadas, 0);
+        assert_eq!(c.rubricas.len(), 11);
+        assert_eq!(c.bruto, Some(Centavos(1_210_000)));
+        assert_eq!(c.descontos, Some(Centavos(410_000)));
+        assert_eq!(c.liquido, Some(Centavos(800_000)));
+        assert!(c.conferido);
+        assert!(c.avisos.is_empty(), "{:?}", c.avisos);
+        let novembro = Some(Competencia { ano: 2026, mes: 11 });
+        let esperadas: [(&str, &str, TipoDeRubrica, i64); 11] = [
+            ("2002", "SALARIO PADRAO", TipoDeRubrica::Provento, 500_000),
+            (
+                "2005",
+                "COMPL TEMP VARIAVEL AJUSTE MERCADO",
+                TipoDeRubrica::Provento,
+                300_000,
+            ),
+            (
+                "2068",
+                "ADIANT GRATIFICACAO NATAL",
+                TipoDeRubrica::Provento,
+                400_000,
+            ),
+            (
+                "21041",
+                "AJUDA DE CUSTO TRABALHO REMOTO",
+                TipoDeRubrica::Provento,
+                10_000,
+            ),
+            (
+                "3068",
+                "REP ADIANT GRATIFICACAO NATAL",
+                TipoDeRubrica::Desconto,
+                100_000,
+            ),
+            ("4313", "INSS CONTRIBUICAO", TipoDeRubrica::Desconto, 80_000),
+            ("4325", "IMPOSTO DE RENDA", TipoDeRubrica::Desconto, 150_000),
+            (
+                "4460",
+                "SAUDE CAIXA - MENSALIDADE",
+                TipoDeRubrica::Desconto,
+                30_000,
+            ),
+            (
+                "4460",
+                "SAUDE CAIXA - MENSALIDADE",
+                TipoDeRubrica::Desconto,
+                10_000,
+            ),
+            (
+                "43355",
+                "EMPRESTIMO E-CONSIGNADO",
+                TipoDeRubrica::Desconto,
+                20_000,
+            ),
+            (
+                "43355",
+                "EMPRESTIMO E-CONSIGNADO",
+                TipoDeRubrica::Desconto,
+                20_000,
+            ),
+        ];
+        for (r, (codigo, nome, tipo, valor)) in c.rubricas.iter().zip(esperadas) {
+            assert_eq!(r.codigo.as_deref(), Some(codigo));
+            assert_eq!(r.nome, nome);
+            assert_eq!(r.tipo, tipo);
+            assert_eq!(r.valor, Centavos(valor));
+            assert_eq!(r.competencia, novembro);
+            assert_eq!(r.prazo, None);
+        }
+        assert!(c.consignacoes_com_prazo().is_empty());
+        assert!(c.parcelas_atuais.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn no_layout_de_novembro_a_base_do_irrf_vem_pela_coluna() {
+        let c = ler(TEXTO_2026_11).expect("ler");
+        assert_eq!(c.base_irrf, Some(Centavos(700_000)));
+    }
+
+    #[test]
+    fn no_layout_de_novembro_o_nome_sem_a_linha_de_baixo_fica_com_a_de_cima() {
+        // Sem a linha de baixo, o nome fica só com a de cima; o valor segue certo.
+        let t = TEXTO_2026_11.replace("           MERCADO\n", "");
+        let c = ler(&t).expect("ler");
+        assert_eq!(c.rubricas[1].nome, "COMPL TEMP VARIAVEL AJUSTE");
+        assert_eq!(c.rubricas[1].valor, Centavos(300_000));
+        assert!(c.conferido);
     }
 
     #[test]
