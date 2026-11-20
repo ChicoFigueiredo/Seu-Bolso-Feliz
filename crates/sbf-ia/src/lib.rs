@@ -10,16 +10,29 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod anthropic;
+mod chat_completions;
 mod claude_cli;
+mod conversa;
 mod esquema;
 mod falso;
 mod fila;
 mod openrouter;
+mod ponte_http;
 mod tempo;
 
-pub use claude_cli::ClaudeCli;
+pub use anthropic::{Anthropic, ConfiguracaoAnthropic, ENDERECO_DA_ANTHROPIC};
+pub use chat_completions::{
+    ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, ENDERECO_DO_OPENROUTER,
+    MODELO_LOCAL_PADRAO,
+};
+pub use claude_cli::{ClaudeCli, SaidaDoClaudeComFerramentas, ServidorMcp};
+pub use conversa::{
+    ChamadaDeFerramenta, DefinicaoDeFerramenta, Mensagem, NaturezaDoCusto, PedidoDeConversa,
+    ProvedorDeConversa, RespostaDeConversa,
+};
 pub use esquema::{extrair_json, validar_esquema};
-pub use falso::Falso;
+pub use falso::{Falso, FalsoDeConversa};
 pub use fila::{
     Atribuicao, ConfiguracaoDaFila, Controle, Evento, Fila, Formato, Interrupcao, LoteResolvido,
     Relatorio,
@@ -115,6 +128,9 @@ pub enum ErroDeIa {
     Indisponivel(String),
     #[error("falha do provedor: {0}")]
     Outro(String),
+    /// O usuário mandou parar (botão Parar de Rita).
+    #[error("interrompido")]
+    Interrompido,
 }
 
 pub type ResultadoDeIa<T> = Result<T, ErroDeIa>;
