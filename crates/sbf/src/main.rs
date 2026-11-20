@@ -18,6 +18,7 @@
 //! - `sbf reconhecer --inventario <cofre> --arquivo <caminho>`: o reconhecimento de um arquivo
 //!   solto, sem janela (ver `reconhecer.rs`);
 //! - `sbf regras --inventario <cofre> <subcomando>`: as regras de reconhecimento (`regras.rs`);
+//! - `sbf rita --documento <sha|caminho> "pedido"`: Rita pelo terminal, para calibrar (`rita.rs`);
 //! - `sbf script --servir`: o processo filho dos scripts Luau, interno (`script.rs`);
 //! - `sbf --versao`.
 
@@ -38,6 +39,7 @@ mod planejamento;
 mod rag;
 mod reconhecer;
 mod regras;
+mod rita;
 mod roteiros;
 mod script;
 mod servidor;
@@ -500,7 +502,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf gmail coletar --inventario <pasta-do-cofre> [--consulta \"<query>\"] [--desde AAAA-MM-DD] [--limite N] | sbf telegram entrar|sair|conversas|seguir|deixar|coletar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf rita --documento <sha|caminho> \"pedido\" (veja `sbf rita --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf gmail coletar --inventario <pasta-do-cofre> [--consulta \"<query>\"] [--desde AAAA-MM-DD] [--limite N] | sbf telegram entrar|sair|conversas|seguir|deixar|coletar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -559,6 +561,7 @@ fn main() -> ExitCode {
         Some("planejamento") => planejamento::rodar(&args[1..]),
         Some("reconhecer") => reconhecer::rodar(&args[1..]),
         Some("regras") => regras::rodar(&args[1..]),
+        Some("rita") => rita::rodar(&args[1..]),
         Some("script") => script::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {

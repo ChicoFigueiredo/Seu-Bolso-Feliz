@@ -173,6 +173,10 @@ pub struct Janela {
     pub conexoes: crate::conexoes_ui::Conexoes,
     /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
     pub regras: crate::regras_ui::Regras,
+    /// Rita, a assistente de padrões (spec 15): painel do dock, destacável.
+    pub rita: crate::rita_ui::RitaUi,
+    /// O item que Rita recebe, guardado enquanto o foco e a área não mudam.
+    rita_item: Option<(Ref, String, crate::rita_ui::ItemDaTela)>,
     /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
     pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
     /// A marcação verde/âmbar das listas de documentos (spec 15, D3).
@@ -310,6 +314,8 @@ impl Janela {
             roteiros: crate::roteiros::Roteiros::default(),
             conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
+            rita: crate::rita_ui::RitaUi::default(),
+            rita_item: None,
             caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada::default(),
             marcacao: crate::marcacao::Compartilhada::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
@@ -1254,6 +1260,10 @@ impl Janela {
             self.reconhecimento_ui(ui);
             return;
         }
+        if painel == PainelDoDock::Rita {
+            self.rita_do_dock_ui(ui, consulta);
+            return;
+        }
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
@@ -1302,6 +1312,135 @@ impl Janela {
             &self.decisoes_da_sessao,
             &mut self.pedidos,
         );
+    }
+
+    /// O item que Rita recebe: o documento (ou registro) em foco, com o texto guardado, a área
+    /// e os itens selecionados como lista. Guardado até o foco ou a área mudarem (nada de
+    /// consulta ao banco a cada quadro).
+    fn item_da_rita(&mut self, consulta: &dyn Consulta) -> Option<crate::rita_ui::ItemDaTela> {
+        let cofre = self.rita.cofre()?;
+        let foco = self.foco()?;
+        let area = areas::rotulo_do_destino(self.navegacao.atual());
+        if let Some((r, a, item)) = &self.rita_item
+            && *r == foco
+            && *a == area
+        {
+            return Some(item.clone());
+        }
+        let titulos: Vec<sbf_rita::TituloDaLista> = self
+            .centro
+            .selecao
+            .itens
+            .iter()
+            .filter(|r| **r != foco)
+            .take(30)
+            .map(|r| sbf_rita::TituloDaLista {
+                id: r.chave.clone(),
+                titulo: Leitor::novo(consulta, &mut self.cache).rotulo(r),
+            })
+            .collect();
+        let mut leitor = Leitor::novo(consulta, &mut self.cache);
+        let rotulo = leitor.rotulo(&foco);
+        let entrada = match foco.tipo {
+            Tipo::Achado | Tipo::Documento => {
+                let texto = leitor.texto(&foco).ok().and_then(|t| (*t).clone());
+                let (nome, mime) =
+                    sbf_rita::cofre::nome_e_mime(&cofre, &foco.chave).unwrap_or_default();
+                sbf_rita::entrada_de_documento(
+                    &foco.chave,
+                    nome.as_deref().or(Some(rotulo.as_str())),
+                    mime.as_deref(),
+                    texto.as_deref(),
+                )
+            }
+            Tipo::Registro => sbf_rita::entrada_de_registro(&foco.chave, &rotulo),
+            _ => return None,
+        };
+        let item = crate::rita_ui::ItemDaTela {
+            chave: foco.to_string(),
+            rotulo,
+            tela: sbf_rita::DadosDaTela {
+                cofre,
+                item: entrada,
+                area: area.clone(),
+                filtro: None,
+                titulos,
+            },
+        };
+        self.rita_item = Some((foco, area, item.clone()));
+        Some(item)
+    }
+
+    /// O painel Rita no dock.
+    fn rita_do_dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta) {
+        if self.rita.flutuante {
+            ui.add_space(6.0);
+            ui.label("Rita está numa janela flutuante.");
+            if ui.button("Trazer de volta para o painel").clicked() {
+                self.rita.flutuante = false;
+            }
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let acoes = self.rita.desenhar(ui, item.as_ref());
+        self.processar_acoes_da_rita(ui.ctx(), acoes);
+    }
+
+    /// Rita destacada numa janela flutuante (acompanha a seleção igual ao painel).
+    pub fn rita_flutuante_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
+        if !self.rita.flutuante {
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let mut acoes = Vec::new();
+        let mut aberta = true;
+        let p = tema::paleta(ctx);
+        egui::Window::new(RichText::new("Rita").strong())
+            .id(Id::new("rita-flutuante"))
+            .open(&mut aberta)
+            .default_size([440.0, 580.0])
+            .resizable(true)
+            .collapsible(true)
+            .frame(egui::Frame::window(&ctx.global_style()).fill(p.superficie_1))
+            .show(ctx, |ui| {
+                acoes = self.rita.desenhar(ui, item.as_ref());
+            });
+        if !aberta {
+            self.rita.flutuante = false;
+        }
+        self.processar_acoes_da_rita(ctx, acoes);
+    }
+
+    /// O que o painel Rita pediu: ativar (como usuário, pelo caminho da área Padrões) ou abrir
+    /// a regra no editor. Depois de uma gravação de Rita, a lista de padrões se relê.
+    fn processar_acoes_da_rita(&mut self, ctx: &Context, acoes: Vec<crate::rita_ui::AcaoDeRita>) {
+        use crate::rita_ui::AcaoDeRita;
+        if self.rita.tomar_gravou() {
+            self.regras.recarregar_de_fora();
+        }
+        for a in acoes {
+            match a {
+                AcaoDeRita::Ativar { regra, versao } => {
+                    let r = match self.regras.fonte() {
+                        Some(f) => f.ativar(&regra, versao),
+                        None => Err("O catálogo de padrões não está ligado.".to_owned()),
+                    };
+                    if r.is_ok() {
+                        self.regras.recarregar_de_fora();
+                    }
+                    self.rita.ativacao_feita(&regra, versao, r);
+                }
+                AcaoDeRita::AbrirNoEditor { regra } => {
+                    self.ligacao(
+                        ctx,
+                        PedidoDeLigacao::Regra {
+                            regra,
+                            flutuante: false,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     /// Os painéis flutuantes (Ctrl+clique), como janelas egui dentro da janela.
