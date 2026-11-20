@@ -614,9 +614,10 @@ pub struct AchadoPendente {
     pub caminho: String,
 }
 
-/// Os achados **novos** da fonte (vistos a partir da criação da Caixa de entrada neste banco)
-/// que ainda não têm linha nela: o que a reconciliação do worker indexou enquanto o vigia
-/// estava parado. Nunca o acervo antigo.
+/// Os achados **novos** da fonte (vistos a partir da criação da Caixa de entrada neste banco
+/// **e** com o arquivo de até um dia antes dela em diante) que ainda não têm linha nela: o que
+/// a reconciliação do worker indexou enquanto o vigia estava parado. Nunca o acervo antigo,
+/// nem o arquivo antigo que só agora foi indexado (a primeira varredura de uma pasta nova).
 ///
 /// # Errors
 /// Falha do SQLite.
@@ -632,6 +633,11 @@ pub fn pendentes_de_reconhecer(
           WHERE o.fonte_id = ?1 AND o.local_filepath IS NOT NULL
             AND a.primeiro_visto_em >=
                 (SELECT valor FROM meta WHERE chave = 'caixa_entrada_desde')
+            -- Indexado agora não é chegar agora: a primeira varredura de uma pasta nova (o
+            -- espelho do celular) indexa anos de arquivos. Só conta o arquivo cuja data é de
+            -- perto da criação da Caixa em diante (um dia de folga para relógio e sincronia).
+            AND o.local_mtime >= strftime('%Y-%m-%dT%H:%M:%fZ',
+                (SELECT valor FROM meta WHERE chave = 'caixa_entrada_desde'), '-1 day')
             AND NOT EXISTS (SELECT 1 FROM caixa_entrada c WHERE c.content_hash = a.content_hash)
           GROUP BY a.content_hash
           ORDER BY a.primeiro_visto_em
@@ -930,7 +936,7 @@ mod testes {
             [],
         )
         .expect("varredura");
-        let achado = |sha: &str, visto: &str, caminho: &str| {
+        let achado_em = |sha: &str, visto: &str, caminho: &str, mtime: &str| {
             c.execute(
                 "INSERT INTO achado (content_hash, file_size_bytes, camada, primeiro_visto_em)
                  VALUES (?1, 1, 'A', ?2)",
@@ -939,16 +945,26 @@ mod testes {
             .expect("achado");
             c.execute(
                 "INSERT INTO origem (content_hash, fonte_id, varredura_id, origin_type,
-                   origin_key, local_filepath, filename)
-                 VALUES (?1, 'disco:t', 1, 'local_file', ?1, ?2, 'x')",
-                params![sha, caminho],
+                   origin_key, local_filepath, local_mtime, filename)
+                 VALUES (?1, 'disco:t', 1, 'local_file', ?1, ?2, ?3, 'x')",
+                params![sha, caminho, mtime],
             )
             .expect("origem");
+        };
+        let achado = |sha: &str, visto: &str, caminho: &str| {
+            achado_em(sha, visto, caminho, visto);
         };
         achado("antigo", "2000-01-01T00:00:00.000Z", "/x/antigo.pdf");
         garantir_tabela(&c).expect("tabela");
         achado("novo", "2999-01-01T00:00:00.000Z", "/x/novo.pdf");
         achado("novo2", "2999-01-02T00:00:00.000Z", "/x/novo2.pdf");
+        // Indexado agora, mas o arquivo é de anos atrás (primeira varredura do celular).
+        achado_em(
+            "velho-indexado-agora",
+            "2999-01-03T00:00:00.000Z",
+            "/x/velho.jpg",
+            "2020-05-01T10:00:00.000Z",
+        );
         registrar(
             &c,
             &leitura("novo2", Estado::Pronto),
