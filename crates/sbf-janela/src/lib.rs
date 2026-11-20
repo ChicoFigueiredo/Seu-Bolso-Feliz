@@ -28,6 +28,7 @@ pub mod controle_ui;
 pub mod demonstracao;
 pub mod dinheiro;
 pub mod dock;
+pub mod email_ui;
 pub mod ferramentas;
 pub mod formato;
 pub mod icones;

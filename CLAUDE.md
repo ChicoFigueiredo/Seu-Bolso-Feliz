@@ -172,6 +172,8 @@ in Portuguese without accents (ADR-018), including mechanical ones.
 | `crates/sbf-chaveiro`, `crates/sbf-pdf`  | Keyring import of the old `cofre.enc`; protected PDFs decrypted in memory (never a decrypted copy on disk, never a password in argv).                                                                                                                                                        |
 | `crates/sbf-estante`, `crates/sbf-disco` | Drive shelf and encrypted backup via rclone; unencrypted-disk warning.                                                                                                                                                                                                                       |
 
+E-mail is a Connection type with N accounts (`sbf email contas|adicionar|app|entrar|sair|remover|seguir|deixar|rotulos|coletar|estado|importar`; `sbf gmail ...` is the same command). Account config (no secrets) is `email.json` in the app data dir; the OAuth refresh token and the app's client id/secret live in the chaveiro (`email/<id>/...`, `email/<type>/app/...`), looked up chaveiro first, then env, then `.env` (see `crates/sbf-gmail/src/credenciais.rs`). The legacy account `gmail` keeps `entrada/gmail/` and the `gmail:` origin keys; the others use `entrada/email/<id>/`. Outlook is modeled but marked "em breve".
+
 The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (private on GitHub:
 `ChicoFigueiredo/bancada`; `bancada-casca`,
 `bancada-armazem`, `bancada-segredos`), used by path (`../bancada/crates/...`), so the

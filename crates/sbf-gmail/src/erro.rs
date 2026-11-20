@@ -4,9 +4,22 @@
 /// Falha da coleta do Gmail.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Erro {
-    /// Faltam variáveis de ambiente com as credenciais OAuth (só os nomes).
-    #[error("faltam as credenciais do Gmail: {0}")]
+    /// Faltam credenciais OAuth (só os nomes das variáveis).
+    #[error("faltam as credenciais do e-mail: {0}")]
     SemCredenciais(String),
+    /// Nenhuma conta de e-mail está conectada.
+    #[error("nenhuma conta de e-mail conectada: rode `sbf email entrar` ou use Conexões › E-mail")]
+    SemContas,
+    /// O Google recusou o refresh token (`invalid_grant`: venceu ou foi revogado). Não adianta
+    /// tentar de novo até a pessoa entrar outra vez.
+    #[error("a autorização do e-mail venceu: rode `sbf email entrar` ou use Conexões › E-mail")]
+    Autorizacao,
+    /// O chaveiro recusou ler ou gravar (só a categoria, nunca o valor).
+    #[error("falha no chaveiro: {0}")]
+    Chaveiro(String),
+    /// O login pelo navegador não terminou (recusado, tempo esgotado, state errado...).
+    #[error("o login do Gmail não terminou: {0}")]
+    Login(String),
     /// O Gmail (ou a rede) respondeu com erro.
     #[error("falha ao falar com o Gmail: {0}")]
     Gmail(String),

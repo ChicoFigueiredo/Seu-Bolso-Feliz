@@ -26,7 +26,6 @@ pub fn agora() -> u64 {
 pub struct UltimaColeta {
     /// Quando (segundos unix).
     pub quando: u64,
-    /// De onde: `pastas`, `nuvem`, `gmail` ou `mensageiros`.
     /// De onde: `pastas`, `nuvem`, `mensageiros` ou `telegram`.
     pub origem: String,
     /// Quantas origens novas.
@@ -59,6 +58,10 @@ pub struct EstadoDoWorker {
     pub nuvem_ligada: bool,
     /// A coleta de mensageiros está ligada?
     pub mensageiros_ligados: bool,
+    /// Quantas contas de e-mail estão com a autorização vencida (`invalid_grant`): o worker não
+    /// tenta essas até a pessoa entrar de novo (`sbf email entrar` ou Conexões › E-mail); as
+    /// outras contas seguem coletando.
+    pub gmail_contas_vencidas: u32,
     /// Falhas desde que subiu.
     pub falhas: u32,
 }
@@ -156,7 +159,12 @@ pub fn texto_da_barra(estado: Option<&EstadoDoWorker>, agora: u64) -> String {
     } else {
         String::new()
     };
-    format!("Worker: rodando · {coleta}{fila}")
+    let gmail = match e.gmail_contas_vencidas {
+        0 => String::new(),
+        1 => " · E-mail: 1 conta com autorização vencida".to_owned(),
+        n => format!(" · E-mail: {n} contas com autorização vencida"),
+    };
+    format!("Worker: rodando · {coleta}{fila}{gmail}")
 }
 
 #[cfg(test)]
@@ -192,6 +200,28 @@ mod testes {
             };
             assert!(!morto.rodando(agora()));
         }
+    }
+
+    #[test]
+    fn a_barra_avisa_quando_a_autorizacao_de_contas_de_email_venceu() {
+        let agora_ = agora();
+        let e = EstadoDoWorker {
+            pid: std::process::id(),
+            atualizado_em: agora_,
+            gmail_contas_vencidas: 1,
+            ..EstadoDoWorker::default()
+        };
+        assert!(
+            texto_da_barra(Some(&e), agora_).ends_with("E-mail: 1 conta com autorização vencida")
+        );
+        let dois = EstadoDoWorker {
+            gmail_contas_vencidas: 2,
+            ..e
+        };
+        assert!(
+            texto_da_barra(Some(&dois), agora_)
+                .ends_with("E-mail: 2 contas com autorização vencida")
+        );
     }
 
     #[test]

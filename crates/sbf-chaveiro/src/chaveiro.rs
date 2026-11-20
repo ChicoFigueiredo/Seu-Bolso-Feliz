@@ -28,6 +28,10 @@ pub const PREFIXO_DE_IA: &str = "ia:";
 pub const PREFIXO_DE_SITE: &str = "site:";
 /// Prefixo das chaves de sessão dos mensageiros (a chave que cifra a sessão do WhatsApp).
 pub const PREFIXO_DE_MENSAGEIRO: &str = "mensageiro:";
+/// Prefixo das chaves das conexões de e-mail (refresh token, client id e secret do aplicativo):
+/// `conexao:email/<id>/refresh_token`. Fica separado de `mensageiro:` para o contrato de cada
+/// namespace valer só para o seu crate.
+pub const PREFIXO_DE_CONEXAO: &str = "conexao:";
 
 /// O que a importação trouxe, sem nenhum valor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,6 +319,48 @@ impl Chaveiro {
     /// Apaga o segredo do mensageiro (sem erro se já não havia).
     pub fn apagar_segredo_de_mensageiro(&self, nome: &str) -> Result<(), ErroDoChaveiro> {
         match self.guarda.apagar(&Self::chave_de_mensageiro(nome)?) {
+            Ok(()) | Err(bancada_segredos::ErroDeSegredo::NaoEncontrado) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // ---------------- Segredos de conexões (e-mail) ----------------
+
+    fn chave_de_conexao(nome: &str) -> Result<String, ErroDoChaveiro> {
+        if nome.is_empty()
+            || PREFIXO_DE_CONEXAO.len() + nome.len() > TAMANHO_MAXIMO_DO_ROTULO
+            || nome.chars().any(char::is_control)
+        {
+            return Err(ErroDoChaveiro::RotuloInvalido);
+        }
+        Ok(format!("{PREFIXO_DE_CONEXAO}{nome}"))
+    }
+
+    /// Guarda (ou troca) um segredo de conexão (`email/gmail/refresh_token`). Só o crate do
+    /// e-mail chama isto.
+    pub fn guardar_segredo_de_conexao(
+        &self,
+        nome: &str,
+        segredo: Segredo,
+    ) -> Result<(), ErroDoChaveiro> {
+        Ok(self
+            .guarda
+            .gravar(&Self::chave_de_conexao(nome)?, segredo)?)
+    }
+
+    /// O segredo da conexão, em claro. Só o crate do e-mail chama isto.
+    pub fn segredo_de_conexao(&self, nome: &str) -> Result<Segredo, ErroDoChaveiro> {
+        Ok(self.guarda.ler(&Self::chave_de_conexao(nome)?)?)
+    }
+
+    /// Há segredo guardado para a conexão (sem ler o valor).
+    pub fn tem_segredo_de_conexao(&self, nome: &str) -> bool {
+        Self::chave_de_conexao(nome).is_ok_and(|c| self.guarda.rotulos().contains(&c))
+    }
+
+    /// Apaga o segredo da conexão (sem erro se já não havia).
+    pub fn apagar_segredo_de_conexao(&self, nome: &str) -> Result<(), ErroDoChaveiro> {
+        match self.guarda.apagar(&Self::chave_de_conexao(nome)?) {
             Ok(()) | Err(bancada_segredos::ErroDeSegredo::NaoEncontrado) => Ok(()),
             Err(e) => Err(e.into()),
         }

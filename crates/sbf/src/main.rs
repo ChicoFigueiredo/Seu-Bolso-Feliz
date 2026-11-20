@@ -26,6 +26,7 @@ mod caixa_de_entrada;
 mod canais;
 mod captura;
 mod coletor;
+mod email;
 mod entrada;
 mod estacao;
 mod gmail;
@@ -550,7 +551,7 @@ fn main() -> ExitCode {
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("worker") => worker::rodar(&args[1..]),
-        Some("gmail") => gmail::rodar(&args[1..]),
+        Some("gmail") | Some("email") => email::rodar(&args[1..]),
         Some("telegram") => telegram::rodar(&args[1..]),
         Some("canais") => canais::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
