@@ -13,6 +13,7 @@ pub mod claude;
 pub mod cofre;
 pub mod contexto;
 pub mod diagnostico;
+pub mod esqueleto;
 pub mod ferramentas;
 pub mod laco;
 pub mod mcp;
@@ -27,6 +28,7 @@ pub use cofre::{FonteDeSimilares, SimilaresDoCofre, SimilaresFixos};
 pub use contexto::{
     Contexto, DadosDaTela, TituloDaLista, entrada_de_documento, entrada_de_registro,
 };
+pub use esqueleto::{Esqueleto, esqueleto_resumido};
 pub use ferramentas::{
     ChamadaFeita, EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, RascunhoCriado, Sessao,
     Tentativa, definicoes, motivo_do_pedido, rastro_resumido,

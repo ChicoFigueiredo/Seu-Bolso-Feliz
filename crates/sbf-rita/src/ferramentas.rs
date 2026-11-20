@@ -202,6 +202,80 @@ fn reparar_escapes(json: &str) -> String {
     saida
 }
 
+/// Os valores de `aplica_a` que existem.
+const APLICA_A: [&str; 3] = ["documento", "registro", "mensagem"];
+
+/// Consertos óbvios do que os modelos mandam, com um aviso por conserto (nada ambíguo):
+/// - `aplica_a` com um valor que não existe (o modelo pôs o tipo do documento: `contrato`) vira
+///   `documento`;
+/// - condição `{"texto": X}` (só essa chave, valor texto) vira `{"contem": X}`.
+fn consertos_tolerantes(def: &mut Value) -> Vec<String> {
+    let mut avisos = Vec::new();
+    if let Some(aplica) = def.get_mut("aplica_a") {
+        let mut conserta = |v: &Value| -> Option<Value> {
+            let t = v.as_str()?;
+            if APLICA_A.contains(&t) {
+                return None;
+            }
+            avisos.push(format!(
+                "`aplica_a` com `{}` não existe (só documento, registro ou mensagem): usei `documento`",
+                cortar(t, 40)
+            ));
+            Some(json!("documento"))
+        };
+        match aplica {
+            Value::Array(itens) => {
+                for i in itens.iter_mut() {
+                    if let Some(novo) = conserta(i) {
+                        *i = novo;
+                    }
+                }
+                let mut vistos = Vec::new();
+                itens.retain(|i| {
+                    let nova = !vistos.contains(i);
+                    vistos.push(i.clone());
+                    nova
+                });
+            }
+            outro @ Value::String(_) => {
+                // Um texto no lugar da lista: a lista de um elemento.
+                let unico = conserta(outro).unwrap_or_else(|| outro.clone());
+                *outro = json!([unico]);
+            }
+            _ => {}
+        }
+    }
+    for lista in ["todos", "algum", "nenhum"] {
+        let Some(Value::Array(condicoes)) = def.pointer_mut(&format!("/detectar/{lista}")) else {
+            continue;
+        };
+        for (i, c) in condicoes.iter_mut().enumerate() {
+            let Some(o) = c.as_object() else { continue };
+            if o.len() == 1
+                && let Some(t) = o.get("texto").filter(|t| t.is_string())
+            {
+                avisos.push(format!(
+                    "a condição {lista}[{i}] `{{\"texto\": ...}}` não existe: usei `{{\"contem\": ...}}`"
+                ));
+                *c = json!({"contem": t});
+            }
+        }
+    }
+    avisos
+}
+
+/// O erro de uma definição que não tem o esquema: a causa, um exemplo mínimo válido e as
+/// variantes aceitas, para o modelo acertar na chamada seguinte em vez de explorar.
+fn erro_de_esquema(causa: &str) -> String {
+    format!(
+        "definição inválida: {}. Exemplo mínimo válido: {EXEMPLO_MINIMO}. Variantes aceitas: `aplica_a` = documento | registro | mensagem; condição (UMA chave por objeto, em `detectar.todos`/`algum`/`nenhum`) = contem | regex | mime | canal | descricao | nome | contraparte_doc | contraparte; `formato` = texto | centavos | data | competencia | inteiro | minusculas; `fonte` = texto | descricao | contraparte | contraparte_doc.",
+        cortar(causa, 240)
+    )
+}
+
+/// Uma definição mínima válida: detectar, extrair e obrigatórios.
+const EXEMPLO_MINIMO: &str = r#"{"tipo_documental":"comprovante-exemplo","aplica_a":["documento"],"detectar":{"todos":[{"contem":"trecho do texto"}]},"extrair":{"contrato":{"regex":"Contrato\s*([\d-]+)","formato":"texto"}},"obrigatorios":["contrato"]}"#;
+
 /// Um id de padrão a partir do tipo documental (quando o modelo ensaia sem dar `regra`).
 fn id_do_tipo(tipo: &str) -> String {
     let id: String = tipo
@@ -272,7 +346,7 @@ pub fn definicoes() -> Vec<sbf_ia::DefinicaoDeFerramenta> {
         ),
         def(
             "testar_regex",
-            "Roda um regex no texto do item e devolve até 5 casamentos, cada um com a linha onde está e o valor do grupo. Use antes de `propor_padrao` para acertar o regex de um campo; é barato.",
+            "Roda um regex no texto do item e devolve até 5 casamentos, cada um com a linha onde está e o valor do grupo. Só para acertar o regex de UM campo que o diagnóstico de `propor_padrao` não resolveu: proponha primeiro, que o pré-teste já testa tudo de uma vez.",
             json!({"type": "object", "properties": {
                 "regex": {"type": "string", "description": "O regex (sintaxe Rust), com a barra invertida uma vez só: \\d, \\s."},
                 "grupo": {"type": "integer", "description": "Grupo de captura que vale (padrão: 1, ou 0 se o regex não tem grupo)."},
@@ -689,6 +763,22 @@ impl Sessao {
         else {
             return erro("este item não tem texto guardado");
         };
+        // Item de imagem: o esqueleto traz `texto_de_ocr`, e o motor lê o texto já normalizado
+        // (O/l dentro de números, `RS` como `R$`); o teste vê o mesmo texto.
+        let de_ocr = self
+            .ctx
+            .tela
+            .item
+            .mime
+            .as_deref()
+            .is_some_and(|m| m.starts_with("image/"));
+        let normalizado;
+        let texto = if de_ocr {
+            normalizado = sbf_regras::definicao::normalizar_ocr(texto);
+            normalizado.as_str()
+        } else {
+            texto
+        };
         let r = match RegexBuilder::new(padrao)
             .size_limit(LIMITE_DO_REGEX)
             .dfa_size_limit(LIMITE_DO_REGEX)
@@ -750,6 +840,11 @@ impl Sessao {
             itens.push(item);
         }
         let mut saida = json!({"casamentos": total, "mostrados": itens.len(), "itens": itens});
+        if de_ocr {
+            saida["texto"] = json!(
+                "item de imagem: testado no texto normalizado como OCR (o mesmo de `texto_de_ocr`)"
+            );
+        }
         if total == 0 {
             let palavras: String = padrao
                 .chars()
@@ -811,8 +906,10 @@ impl Sessao {
                 })?,
             outro => outro.clone(),
         };
-        let mut definicao: Definicao = serde_json::from_value(def_json)
-            .map_err(|e| format!("definição inválida: {}", cortar(&e.to_string(), 240)))?;
+        let mut def_json = def_json;
+        self.avisos.extend(consertos_tolerantes(&mut def_json));
+        let mut definicao: Definicao =
+            serde_json::from_value(def_json).map_err(|e| erro_de_esquema(&e.to_string()))?;
         self.avisos.extend(consertar_barras(&mut definicao));
         definicao
             .validar()
@@ -1111,7 +1208,7 @@ impl Sessao {
     }
 }
 
-fn catalogo_do(ctx: &Contexto) -> Result<Catalogo, String> {
+pub(crate) fn catalogo_do(ctx: &Contexto) -> Result<Catalogo, String> {
     let caminho = ctx.catalogo_caminho();
     if !caminho.is_file() {
         return Err("não achei o catálogo de padrões do cofre".to_owned());

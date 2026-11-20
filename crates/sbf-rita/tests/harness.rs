@@ -527,3 +527,180 @@ fn definicao_mandada_como_texto_com_escapes_invalidos_e_reparada() {
         "{o}"
     );
 }
+
+// ---- esqueleto sem IA no primeiro prompt ----
+
+/// A linha `definicao: {...}` do bloco do esqueleto no primeiro prompt.
+fn definicao_do_esqueleto(prompt: &str) -> Value {
+    // Vai como texto (as barras uma vez só, como nas instruções): a ferramenta repara os escapes.
+    let linha = prompt
+        .lines()
+        .find_map(|l| l.strip_prefix("definicao: "))
+        .expect("o primeiro prompt traz o esqueleto");
+    Value::String(linha.to_owned())
+}
+
+#[test]
+fn o_primeiro_prompt_traz_o_esqueleto_e_o_pre_teste_dele_e_uma_chamada_basta() {
+    let d = cofre();
+    let vistos = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let guardados = std::sync::Arc::clone(&vistos);
+    let falso = FalsoDeConversa::com_funcao(move |p| {
+        let prompt = p
+            .mensagens
+            .iter()
+            .find_map(|m| match m {
+                sbf_ia::Mensagem::Usuario(t) => Some(t.clone()),
+                _ => None,
+            })
+            .expect("pedido");
+        *guardados.lock().expect("trava") = prompt.clone();
+        resposta(vec![chamada(
+            "1",
+            "propor_padrao",
+            propor(&definicao_do_esqueleto(&prompt)),
+        )])
+    });
+    let mut rita = Rita::nova(contexto(d.path(), Some("2026-11-20")));
+    let r = rita
+        .pedir(
+            &falso,
+            PEDIDO,
+            &AtomicBool::new(false),
+            &RegistroFalso::novo(),
+            &mut |_| {},
+        )
+        .expect("relatório");
+    assert_eq!(r.parada, Parada::Passou, "{}", r.resposta);
+    assert_eq!(r.chamadas.len(), 1, "o esqueleto já passava");
+    assert_eq!(versoes(d.path()), 1);
+    let prompt = vistos.lock().expect("trava").clone();
+    assert!(prompt.contains("Esqueleto de definição, montado sem IA"));
+    assert!(
+        prompt.contains("pré-teste do esqueleto: PASSOU"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("123456789012-3"));
+    let campos: std::collections::BTreeMap<_, _> = r
+        .melhor()
+        .expect("melhor")
+        .pre_teste
+        .item
+        .campos
+        .iter()
+        .cloned()
+        .collect();
+    assert_eq!(campos["valor_centavos"], "R$ 1.234,56");
+    assert_eq!(campos["competencia"], "11/2026");
+    assert_eq!(campos["contrato"], "123456789012-3");
+}
+
+#[test]
+fn o_esqueleto_sem_momento_deixa_a_competencia_de_fora_e_o_prompt_diz_por_que() {
+    let d = cofre();
+    let r = sbf_rita::esqueleto_resumido(&contexto(d.path(), None), PEDIDO).expect("esqueleto");
+    assert!(r.contains("ficou de fora do esqueleto"), "{r}");
+    assert!(r.contains("sem ano"), "{r}");
+    assert!(!r.contains("\"competencia\":{"), "{r}");
+}
+
+#[test]
+fn o_esqueleto_de_um_texto_simples_so_com_titulo_e_valor_passa() {
+    let d = cofre();
+    // Pedido só com o título citado: o esqueleto leva o título e o valor.
+    let texto = "Prestação atual\nR$ 10,00\n";
+    let mut item = entrada_de_documento("aa", Some("a.txt"), Some("text/plain"), Some(texto));
+    item.momento = None;
+    let ctx = Contexto::novo(
+        DadosDaTela::de_documento(d.path(), item),
+        Arc::new(sbf_script::ExecutorNoProcesso::novo()),
+    )
+    .com_similares(Arc::new(SimilaresFixos(vec![])));
+    let r = sbf_rita::esqueleto_resumido(&ctx, "O título (Prestação atual) determina; cria")
+        .expect("esqueleto");
+    assert!(r.contains("PASSOU"), "{r}");
+}
+
+// ---- esquema que ensina ----
+
+#[test]
+fn definicao_invalida_devolve_a_causa_o_exemplo_e_as_variantes() {
+    let d = cofre();
+    let mut s = sessao(d.path(), Some("2026-11-20"));
+    let mut def = definicao_boa();
+    def["extrair"]["contrato"]["formato"] = json!("numero");
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    let e = o["erro"].as_str().expect("erro");
+    assert!(e.starts_with("definição inválida: "), "{e}");
+    assert!(e.contains("unknown variant `numero`"), "{e}");
+    assert!(e.contains("Exemplo mínimo válido:"), "{e}");
+    assert!(e.contains("\"detectar\":{\"todos\""), "{e}");
+    assert!(e.contains("\"obrigatorios\""), "{e}");
+    assert!(e.contains("contem | regex | mime"), "{e}");
+    assert!(e.contains("texto | centavos | data | competencia"), "{e}");
+    assert!(e.contains("documento | registro | mensagem"), "{e}");
+}
+
+#[test]
+fn aplica_a_desconhecido_vira_documento_e_condicao_texto_vira_contem_com_aviso() {
+    let d = cofre();
+    let mut s = sessao(d.path(), Some("2026-11-20"));
+    let mut def = definicao_boa();
+    def["aplica_a"] = json!(["contrato"]);
+    def["detectar"]["todos"] = json!([{"texto": "prestação atual"}, {"contem": "123456789012-3"}]);
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    assert_eq!(o["passou"], true, "{o}");
+    let avisos = o["avisos"].to_string();
+    assert!(avisos.contains("`aplica_a` com `contrato`"), "{avisos}");
+    assert!(avisos.contains("`documento`"), "{avisos}");
+    assert!(avisos.contains("todos[0]"), "{avisos}");
+    assert!(avisos.contains("contem"), "{avisos}");
+}
+
+#[test]
+fn nao_conserta_o_que_e_ambiguo() {
+    let d = cofre();
+    let mut s = sessao(d.path(), Some("2026-11-20"));
+    // Duas chaves na condição, ou uma chave desconhecida diferente de `texto`: continua erro.
+    let mut def = definicao_boa();
+    def["detectar"]["todos"] = json!([{"titulo": "prestação atual"}]);
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    assert!(
+        o["erro"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("definição inválida")),
+        "{o}"
+    );
+    let mut def = definicao_boa();
+    def["detectar"]["todos"] = json!([{"texto": "x", "contem": "prestação atual"}]);
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    assert!(o["erro"].is_string(), "{o}");
+    let mut def = definicao_boa();
+    def["aplica_a"] = json!([1]);
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    assert!(o["erro"].is_string(), "{o}");
+}
+
+// ---- diagnóstico com regex pronto ----
+
+#[test]
+fn o_diagnostico_de_data_por_extenso_e_de_valor_traz_o_regex_pronto() {
+    let d = cofre();
+    let mut s = sessao(d.path(), Some("2026-11-20"));
+    let mut def = definicao_boa();
+    def["extrair"]["competencia"]["regex"] = json!("(\\d{2}/\\d{2}/\\d{4})");
+    def["extrair"]["valor_centavos"]["regex"] = json!("Valor:\\s*([\\d.,]+)");
+    let o = saida(&s.executar("propor_padrao", &propor(&def)));
+    let diag = o["item"]["diagnostico"].to_string();
+    assert!(
+        diag.contains("Para a data «Vencimento em 25 de Novembro» serve"),
+        "{diag}"
+    );
+    assert!(
+        diag.contains("Vencimento\\\\s+em\\\\s*[:\\\\-]?\\\\s*(\\\\d{1,2}\\\\s+de"),
+        "{diag}"
+    );
+    assert!(diag.contains("Para o valor «R$ 1.234,56» serve"), "{diag}");
+    assert!(diag.contains("Prestação\\\\s+atual"), "{diag}");
+    assert!(diag.contains("`testar_regex` só se ainda falhar"), "{diag}");
+}

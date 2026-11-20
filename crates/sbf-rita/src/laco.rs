@@ -16,6 +16,7 @@ use sbf_ia::{
 use sbf_mcp::backup::Backups;
 
 use crate::contexto::Contexto;
+use crate::esqueleto::esqueleto_resumido;
 use crate::ferramentas::{
     ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes, motivo_do_pedido,
     rastro_resumido,
@@ -187,11 +188,15 @@ impl Rita {
             self.primeiro_pedido = Some(pedido.trim().to_owned());
             // O rastro dos padrões do item já vai no primeiro prompt (D8): poupa uma chamada.
             let rastro = rastro_resumido(&self.ctx);
+            // O esqueleto sem IA, já pré-testado, também vai no primeiro prompt: o modelo ajusta e
+            // propõe, em vez de explorar.
+            let esqueleto = esqueleto_resumido(&self.ctx, pedido);
             self.mensagens.push(Mensagem::Sistema(instrucoes()));
             self.mensagens.push(Mensagem::Usuario(pedido_do_usuario(
                 &self.ctx.tela,
                 pedido,
                 rastro.as_deref(),
+                esqueleto.as_deref(),
             )));
         } else {
             self.mensagens.push(Mensagem::Usuario(format!(

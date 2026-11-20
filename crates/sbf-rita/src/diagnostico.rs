@@ -76,7 +76,7 @@ pub struct Diagnostico {
 
 /// O primeiro token da linha que parece um identificador: só dígitos e `.-/`, com sete ou mais
 /// dígitos, e que não é uma data.
-fn identificador_em(linha: &str) -> Option<&str> {
+pub(crate) fn identificador_em(linha: &str) -> Option<&str> {
     linha
         .split_whitespace()
         .map(|t| t.trim_matches(|c: char| !c.is_ascii_digit()))
@@ -90,7 +90,7 @@ fn identificador_em(linha: &str) -> Option<&str> {
 
 /// Um regex com um grupo que casa exatamente um número como `123456789012-3`: cada sequência de
 /// dígitos vira `\d{n}` e o resto, literal.
-fn regex_do_numero(numero: &str) -> String {
+pub(crate) fn regex_do_numero(numero: &str) -> String {
     fn fechar(saida: &mut String, digitos: usize) {
         match digitos {
             0 => {}
@@ -115,6 +115,84 @@ fn regex_do_numero(numero: &str) -> String {
     fechar(&mut saida, digitos);
     saida.push(')');
     saida
+}
+
+static VALOR_COM_RS: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"R\$\s*(-?\d[\d.]*,\d{2})"));
+static VALOR_SEM_RS: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"(-?\d[\d.]*,\d{2})\b"));
+static DATA_POR_EXTENSO: LazyLock<Regex> = LazyLock::new(|| {
+    regex_fixo(
+        r"(?i)\b(\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro))\b",
+    )
+});
+static DATA_DIA_MES_ANO: LazyLock<Regex> =
+    LazyLock::new(|| regex_fixo(r"\b(\d{2})/(\d{2}/\d{4})\b"));
+static DATA_MES_ANO: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"\b(\d{2}/\d{4})\b"));
+
+/// O rótulo que antecede `pos` em `contexto` (a mesma linha, ou a linha de cima se o valor está
+/// sozinho), só se for utilizável num regex: poucas palavras, com letras e sem dígitos.
+fn rotulo_do_regex(contexto: &str, pos: usize) -> Option<String> {
+    let r = sbf_regras::rascunho::rotulo_antes(contexto, pos)?;
+    let letras = r.chars().filter(|c| c.is_alphabetic()).count();
+    (letras >= 4 && r.split_whitespace().count() <= 5 && !r.chars().any(|c| c.is_ascii_digit()))
+        .then(|| sbf_regras::rascunho::rotulo_para_regex(&r))
+}
+
+fn com_rotulo(rotulo: Option<String>, captura: &str) -> String {
+    match rotulo {
+        Some(r) => format!("(?i){r}\\s*[:\\-]?\\s*{captura}"),
+        None => captura.to_owned(),
+    }
+}
+
+/// Um regex pronto (com UM grupo) para o valor em dinheiro da `linha` (`R$ 1.234,56`),
+/// ancorado no rótulo da própria linha ou da `anterior` quando o valor está sozinho. `None` se
+/// a linha não tem valor.
+pub(crate) fn regex_do_valor(anterior: Option<&str>, linha: &str) -> Option<String> {
+    let contexto = match anterior {
+        Some(a) => format!("{a}\n{linha}"),
+        None => linha.to_owned(),
+    };
+    let (m, com_rs) = match VALOR_COM_RS.captures(&contexto).and_then(|c| c.get(0)) {
+        Some(m) => (m, true),
+        None => (VALOR_SEM_RS.captures(&contexto)?.get(0)?, false),
+    };
+    let captura = if com_rs {
+        r"R\$\s*(\d[\d.]*,\d{2})"
+    } else {
+        r"(\d[\d.]*,\d{2})"
+    };
+    Some(com_rotulo(rotulo_do_regex(&contexto, m.start()), captura))
+}
+
+/// Um regex pronto (com UM grupo) para a data da `linha`, no formato pedido: por extenso
+/// (`25 de Novembro`), `dd/mm/aaaa` ou `mm/aaaa`. Para `competencia` a data completa captura só
+/// o `mm/aaaa`. `None` se a linha não tem data.
+pub(crate) fn regex_da_data(
+    anterior: Option<&str>,
+    linha: &str,
+    formato: Formato,
+) -> Option<String> {
+    let contexto = match anterior {
+        Some(a) => format!("{a}\n{linha}"),
+        None => linha.to_owned(),
+    };
+    let (inicio, captura) = if let Some(m) = DATA_POR_EXTENSO.find(&contexto) {
+        (
+            m.start(),
+            r"(\d{1,2}\s+de\s+[A-Za-zç]+(?:\s+de\s+\d{4})?)".to_owned(),
+        )
+    } else if let Some(m) = DATA_DIA_MES_ANO.find(&contexto) {
+        let c = if formato == Formato::Competencia {
+            r"\d{2}/(\d{2}/\d{4})"
+        } else {
+            r"(\d{2}/\d{2}/\d{4})"
+        };
+        (m.start(), c.to_owned())
+    } else {
+        let m = DATA_MES_ANO.find(&contexto)?;
+        (m.start(), r"(\d{2}/\d{4})".to_owned())
+    };
+    Some(com_rotulo(rotulo_do_regex(&contexto, inicio), &captura))
 }
 
 fn palavras(s: &str) -> Vec<String> {
@@ -223,6 +301,51 @@ fn candidatas_do_campo(nome: &str, formato: Formato, texto: &str, pedido: &str) 
         .collect()
 }
 
+/// A linha que vem antes de `linha` no texto (para ancorar o regex no rótulo de um valor que
+/// está sozinho na linha).
+fn linha_anterior<'a>(texto: &'a str, linha: &str) -> Option<&'a str> {
+    let ls = linhas_do(texto);
+    let i = ls
+        .iter()
+        .position(|l| cortar(l, TAMANHO_DA_LINHA) == linha)?;
+    i.checked_sub(1).map(|j| ls[j])
+}
+
+/// "Para o valor «…» serve `regex`" para campos de dinheiro e de data (por extenso ou numérica):
+/// o regex pronto da candidata que tem o formato e mais combina com o pedido (palavras dela ou
+/// da linha de cima). Vazio quando não se aplica.
+fn regex_pronto(formato: Formato, candidatas: &[String], texto: &str, pedido: &str) -> String {
+    let doc_pedido: BTreeSet<String> = radicais(pedido)
+        .into_iter()
+        .filter(|r| !SEM_VALOR.contains(&r.as_str()))
+        .collect();
+    let quem = match formato {
+        Formato::Centavos => "o valor",
+        Formato::Data | Formato::Competencia => "a data",
+        _ => return String::new(),
+    };
+    let construir = |anterior: Option<&str>, linha: &str| match formato {
+        Formato::Centavos => regex_do_valor(anterior, linha),
+        _ => regex_da_data(anterior, linha, formato),
+    };
+    let mut melhor: Option<(usize, &String, String)> = None;
+    for l in candidatas {
+        let anterior = linha_anterior(texto, l);
+        let Some(r) = construir(anterior, l) else {
+            continue;
+        };
+        let comum = radicais(&format!("{} {l}", anterior.unwrap_or("")))
+            .intersection(&doc_pedido)
+            .count();
+        if melhor.as_ref().is_none_or(|(p, _, _)| comum > *p) {
+            melhor = Some((comum, l, r));
+        }
+    }
+    melhor.map_or_else(String::new, |(_, linha, r)| {
+        format!(" Para {quem} «{linha}» serve `{r}`.")
+    })
+}
+
 /// O token inteiro (dígitos, letras e `-./` em volta) quando o trecho de `ini` a `fim` é só
 /// parte de um número maior; `None` se o trecho já é o token ou não é um número.
 fn numero_cortado(texto: &str, ini: usize, fim: usize) -> Option<String> {
@@ -254,7 +377,7 @@ fn numero_cortado(texto: &str, ini: usize, fim: usize) -> Option<String> {
 }
 
 /// O pedido tem uma frase em que `campo` (ou uma palavra do nome dele) "determina" o padrão.
-fn determina(pedido: &str, campo: &str) -> bool {
+pub(crate) fn determina(pedido: &str, campo: &str) -> bool {
     pedido
         .split(['.', ';', '\n', '!', '?'])
         .map(normalizar)
@@ -394,8 +517,18 @@ pub fn diagnosticar(def: &Definicao, item: &Entrada, pedido: &str) -> Diagnostic
                         .filter(|_| nome.split('_').any(|p| NOMES_DE_IDENTIFICADOR.contains(&p)))
                         .map(|n| format!(" Para o número «{n}» serve `{}`.", regex_do_numero(n)))
                         .unwrap_or_default();
+                    let pronto = if numero.is_empty() {
+                        regex_pronto(e.formato, &candidatas, &fonte, pedido)
+                    } else {
+                        String::new()
+                    };
+                    let cauda = if numero.is_empty() && pronto.is_empty() {
+                        " Teste a correção com `testar_regex`."
+                    } else {
+                        " Se servir, use-o em `propor_padrao` (o pré-teste já testa tudo); `testar_regex` só se ainda falhar."
+                    };
                     format!(
-                        "Linhas candidatas (o regex não casa com nenhuma): {}.{numero} Teste a correção com `testar_regex`.",
+                        "Linhas candidatas (o regex não casa com nenhuma): {}.{numero}{pronto}{cauda}",
                         entre_aspas(&candidatas)
                     )
                 };
