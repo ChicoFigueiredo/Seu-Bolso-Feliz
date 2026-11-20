@@ -85,6 +85,15 @@ fn rita_com_o_ollama_real_cria_um_rascunho_que_passa() {
         r.consumo.tokens_saida
     );
     eprintln!("{}", r.resposta);
+    if let Some(m) = r.melhor() {
+        let c = Catalogo::abrir(&d.path().join("regras.sqlite")).expect("catálogo");
+        if let Ok(v) = c.versao(&m.regra, m.versao) {
+            eprintln!(
+                "definição gravada: {}",
+                serde_json::to_string(&v.definicao).unwrap_or_default()
+            );
+        }
+    }
     assert!(
         !r.rascunhos.is_empty(),
         "o modelo não criou nenhum rascunho"
