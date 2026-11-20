@@ -539,6 +539,7 @@ fn ocr_roda_a_cada_minuto_e_logo_de_novo_se_sobrou_imagem() {
             falhas: 0,
             pendentes: true,
             indisponivel: false,
+            causa: None,
         },
         ResumoDoOcr {
             lidas: 1,
@@ -560,6 +561,39 @@ fn ocr_roda_a_cada_minuto_e_logo_de_novo_se_sobrou_imagem() {
     assert_eq!(n.get(), 3);
     let log = std::fs::read_to_string(c.dados.log()).unwrap();
     assert!(log.contains("ocr lidas=2 sem_texto=1 falhas=0"), "{log}");
+}
+
+#[test]
+fn ocr_que_so_falha_nao_gira_a_cada_tique_espera_e_registra_a_causa() {
+    let c = cenario();
+    let n = Rc::new(Cell::new(0));
+    let so_falhas = ResumoDoOcr {
+        falhas: 10,
+        pendentes: true,
+        causa: Some("formato"),
+        ..ResumoDoOcr::default()
+    };
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_ocr(Box::new(LeitorFalso(n.clone(), vec![so_falhas])));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1);
+    for s in 1..=4 {
+        w.passo(t0 + s * 2, Duration::from_millis(1), &nao);
+    }
+    assert_eq!(n.get(), 1, "o lote só falhou: não repete a cada tique");
+    w.passo(t0 + 299, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 1, "ainda no recuo de 5 min");
+    w.passo(t0 + 300, Duration::from_millis(1), &nao);
+    assert_eq!(n.get(), 2, "passado o recuo, tenta de novo");
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(
+        log.contains("ocr lidas=0 sem_texto=0 falhas=10 causa=formato"),
+        "{log}"
+    );
+    assert_eq!(w.estado.falhas, 0, "falha de imagem não é falha do worker");
 }
 
 #[test]

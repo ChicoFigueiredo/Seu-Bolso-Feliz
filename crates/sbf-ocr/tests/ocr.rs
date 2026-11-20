@@ -140,10 +140,12 @@ fn sem_tesseract_nada_e_gravado_e_o_desfecho_e_indisponivel() {
 
 // ---------------------------------------------------------------- imagens novas do inventário
 
-use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 
 use sbf_ocr::ler_imagens_novas;
+
+/// Um instante qualquer (segundos desde 1970) para os testes do lote.
+const AGORA: u64 = 1_800_000_000;
 
 struct Acervo {
     pasta: tempfile::TempDir,
@@ -203,15 +205,8 @@ fn o_lote_le_so_imagens_novas_pequenas_e_grava_ocr_tesseract() {
         .expect("texto");
     let c = a.conexao();
 
-    let r = ler_imagens_novas(
-        &c,
-        a.pasta.path(),
-        &ocr,
-        10,
-        &mut HashSet::new(),
-        &AtomicBool::new(false),
-    )
-    .expect("lote");
+    let r = ler_imagens_novas(&c, a.pasta.path(), &ocr, 10, AGORA, &AtomicBool::new(false))
+        .expect("lote");
 
     assert_eq!((r.lidas, r.sem_texto, r.falhas), (1, 0, 0));
     assert!(!r.indisponivel);
@@ -239,48 +234,96 @@ fn o_lote_respeita_o_tamanho_e_diz_quantas_faltam() {
         a.achado(h, "png", 100, &png());
     }
     let c = a.conexao();
-    let r = ler_imagens_novas(
-        &c,
-        a.pasta.path(),
-        &ocr,
-        2,
-        &mut HashSet::new(),
-        &AtomicBool::new(false),
-    )
-    .expect("lote");
+    let r = ler_imagens_novas(&c, a.pasta.path(), &ocr, 2, AGORA, &AtomicBool::new(false))
+        .expect("lote");
     assert_eq!(r.lidas, 2);
     assert_eq!(r.pendentes, 1);
 }
 
 #[test]
-fn imagem_que_falha_nao_e_tentada_de_novo_na_mesma_execucao() {
+fn imagem_que_falha_nao_e_tentada_de_novo_antes_do_recuo_e_volta_depois() {
     let Some(ocr) = ocr_ou_pula() else { return };
     let a = Acervo::novo();
     a.achado("quebrada", "png", 100, b"isto nao e um png");
     let c = a.conexao();
-    let mut falharam = HashSet::new();
+    let lote = |agora: u64| {
+        ler_imagens_novas(&c, a.pasta.path(), &ocr, 10, agora, &AtomicBool::new(false))
+            .expect("lote")
+    };
 
-    let r1 = ler_imagens_novas(
+    let r1 = lote(AGORA);
+    assert_eq!((r1.lidas, r1.falhas), (0, 1));
+    assert_eq!(r1.causa, Some("formato"));
+    let r2 = lote(AGORA + 60);
+    assert_eq!((r2.lidas, r2.falhas, r2.pendentes), (0, 0, 0));
+    assert_eq!(r2.causa, None);
+    // Passada a 1ª espera (1 h), tenta de novo e falha: agora espera 6 h.
+    assert_eq!(lote(AGORA + 3_600).falhas, 1);
+    assert_eq!(lote(AGORA + 3_600 + 6 * 3_600 - 1).falhas, 0);
+    // Depois de 6 h, 24 h; a 4ª falha desiste.
+    assert_eq!(lote(AGORA + 3_600 + 6 * 3_600).falhas, 1);
+    let t3 = AGORA + 3_600 + 6 * 3_600;
+    assert_eq!(lote(t3 + 24 * 3_600 - 1).falhas, 0);
+    assert_eq!(lote(t3 + 24 * 3_600).falhas, 1);
+    assert_eq!(
+        lote(t3 + 24 * 3_600 + 400 * 24 * 3_600).falhas,
+        0,
+        "desistiu"
+    );
+    let (tentativas, causa): (i64, String) = c
+        .query_row(
+            "SELECT tentativas, causa FROM ocr_falha WHERE content_hash = 'quebrada'",
+            [],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .expect("falha registrada");
+    assert_eq!((tentativas, causa.as_str()), (4, "formato"));
+}
+
+#[test]
+fn imagem_sem_arquivo_falha_com_causa_e_tambem_recua() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    a.achado("sumiu", "png", 100, &png());
+    std::fs::remove_file(a.pasta.path().join("acervo/ab/sumiu.png")).expect("remover");
+    let c = a.conexao();
+    let r = ler_imagens_novas(&c, a.pasta.path(), &ocr, 10, AGORA, &AtomicBool::new(false))
+        .expect("lote");
+    assert_eq!((r.falhas, r.causa), (1, Some("sem_arquivo")));
+    let r = ler_imagens_novas(
         &c,
         a.pasta.path(),
         &ocr,
         10,
-        &mut falharam,
+        AGORA + 1,
         &AtomicBool::new(false),
     )
     .expect("lote");
+    assert_eq!((r.falhas, r.pendentes), (0, 0));
+}
+
+#[test]
+fn falhas_recuadas_nao_contam_como_pendentes_nem_escondem_as_boas() {
+    let Some(ocr) = ocr_ou_pula() else { return };
+    let a = Acervo::novo();
+    a.achado("ruim", "png", 100, b"lixo");
+    a.achado("boa", "png", 100, &png());
+    let c = a.conexao();
+    let r1 = ler_imagens_novas(&c, a.pasta.path(), &ocr, 1, AGORA, &AtomicBool::new(false))
+        .expect("lote");
     let r2 = ler_imagens_novas(
         &c,
         a.pasta.path(),
         &ocr,
-        10,
-        &mut falharam,
+        1,
+        AGORA + 1,
         &AtomicBool::new(false),
     )
     .expect("lote");
-
-    assert_eq!((r1.lidas, r1.falhas), (0, 1));
-    assert_eq!((r2.lidas, r2.falhas, r2.pendentes), (0, 0, 0));
+    // Uma foi lida e a outra falhou, nas duas voltas, e nada sobra.
+    assert_eq!(r1.lidas + r2.lidas, 1);
+    assert_eq!(r1.falhas + r2.falhas, 1);
+    assert_eq!(r2.pendentes, 0);
 }
 
 #[test]
@@ -290,15 +333,8 @@ fn sem_tesseract_o_lote_e_indisponivel_e_nao_toca_no_banco() {
     let c = a.conexao();
     let ocr = Ocr::com_programa(PathBuf::from("/nao/existe/tesseract"));
 
-    let r = ler_imagens_novas(
-        &c,
-        a.pasta.path(),
-        &ocr,
-        10,
-        &mut HashSet::new(),
-        &AtomicBool::new(false),
-    )
-    .expect("lote");
+    let r = ler_imagens_novas(&c, a.pasta.path(), &ocr, 10, AGORA, &AtomicBool::new(false))
+        .expect("lote");
 
     assert!(r.indisponivel);
     assert_eq!((r.lidas, r.sem_texto, r.falhas), (0, 0, 0));
@@ -314,14 +350,7 @@ fn o_lote_para_quando_cancelado() {
     let a = Acervo::novo();
     a.achado("i1", "png", 100, &png());
     let c = a.conexao();
-    let r = ler_imagens_novas(
-        &c,
-        a.pasta.path(),
-        &ocr,
-        10,
-        &mut HashSet::new(),
-        &AtomicBool::new(true),
-    )
-    .expect("lote");
+    let r = ler_imagens_novas(&c, a.pasta.path(), &ocr, 10, AGORA, &AtomicBool::new(true))
+        .expect("lote");
     assert_eq!(r.lidas, 0);
 }
