@@ -202,6 +202,7 @@ pub(crate) fn interpretar(
     let saida = numero("output_tokens");
     let texto = texto.trim().to_owned();
     Ok(RespostaDeConversa {
+        custo_ausente: false,
         texto: (!texto.is_empty()).then_some(texto),
         chamadas,
         consumo: Consumo {

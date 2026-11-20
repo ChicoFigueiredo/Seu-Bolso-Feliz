@@ -68,6 +68,9 @@ pub struct RespostaDeConversa {
     pub consumo: Consumo,
     /// O nome do modelo que respondeu.
     pub modelo: String,
+    /// O provedor cobra por token mas esta resposta não trouxe o custo (um servidor compatível
+    /// sem `usage.cost`): o custo de `consumo` é zero por falta de informação, não por ser grátis.
+    pub custo_ausente: bool,
 }
 
 /// Como o custo de um provedor é contado (spec 15, D11).
@@ -80,6 +83,21 @@ pub enum NaturezaDoCusto {
     Nominal,
     /// Roda na máquina do usuário (Ollama).
     Zero,
+    /// Cobra por token, mas o provedor não informou o custo da resposta: a tela não mostra
+    /// US$ 0, diz que não foi informado.
+    NaoInformado,
+}
+
+impl NaturezaDoCusto {
+    /// A natureza do que um pedido gastou: a do provedor, trocada por `NaoInformado` quando o
+    /// provedor cobra por token (real) e alguma resposta veio sem custo.
+    #[must_use]
+    pub fn do_pedido(provedor: Self, alguma_sem_custo: bool) -> Self {
+        match provedor {
+            Self::Real | Self::NaoInformado if alguma_sem_custo => Self::NaoInformado,
+            outra => outra,
+        }
+    }
 }
 
 /// Um provedor de conversa com ferramentas. Síncrono: o laço de Rita roda numa thread própria.
@@ -124,6 +142,15 @@ pub(crate) fn custo_por_tokens(
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn a_natureza_do_pedido_vira_nao_informado_so_para_quem_cobra() {
+        use NaturezaDoCusto::{NaoInformado, Nominal, Real, Zero};
+        assert_eq!(NaturezaDoCusto::do_pedido(Real, false), Real);
+        assert_eq!(NaturezaDoCusto::do_pedido(Real, true), NaoInformado);
+        assert_eq!(NaturezaDoCusto::do_pedido(Zero, true), Zero);
+        assert_eq!(NaturezaDoCusto::do_pedido(Nominal, true), Nominal);
+    }
 
     #[test]
     fn custo_por_tokens_arredonda_para_cima() {

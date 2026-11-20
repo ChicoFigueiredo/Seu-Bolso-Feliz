@@ -250,6 +250,7 @@ fn custo_texto(r: &Relatorio) -> String {
             usd % 10_000
         ),
         NaturezaDoCusto::Real => format!("US$ {}.{:04}", usd / 10_000, usd % 10_000),
+        NaturezaDoCusto::NaoInformado => "custo não informado pelo provedor".to_owned(),
     }
 }
 
@@ -309,11 +310,11 @@ fn executar(l: &Linha) -> Result<(), String> {
     }
     println!("Rita · pedido: {pedido}");
     let parar = AtomicBool::new(false);
+    let executor = crate::script::executor_de_script()
+        .map_err(|e| format!("não deu para montar o executor de scripts: {e}"))?;
     let relatorio = match provedor {
-        ProvedorDaRita::Claude(c) => c.pedir(&tela, pedido, &parar, &registro),
+        ProvedorDaRita::Claude(c) => c.pedir(&tela, pedido, &parar, &registro, executor),
         ProvedorDaRita::Conversa(p) => {
-            let executor = crate::script::executor_de_script()
-                .map_err(|e| format!("não deu para montar o executor de scripts: {e}"))?;
             let mut rita = Rita::nova(Contexto::novo(tela, executor));
             rita.pedir(p.as_ref(), pedido, &parar, &registro, &mut |e| match e {
                 Evento::Chamada(c) => imprimir_chamada(c),

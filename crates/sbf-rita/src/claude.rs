@@ -8,13 +8,16 @@
 //! apagados no fim; o texto do documento nunca vai a esse arquivo.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use sbf_ia::{ClaudeCli, ErroDeIa, NaturezaDoCusto, Registro, ServidorMcp};
 
-use crate::contexto::DadosDaTela;
-use crate::ferramentas::{EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS};
+use sbf_regras::script::ExecutorDeScript;
+
+use crate::contexto::{Contexto, DadosDaTela};
+use crate::ferramentas::{EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, rastro_resumido};
 use crate::laco::{Parada, Relatorio, texto_final};
 use crate::mcp::ContextoDoMcp;
 use crate::prompt::{instrucoes, pedido_do_usuario};
@@ -112,6 +115,7 @@ impl ClaudeDeRita {
         pedido: &str,
         cancelar: &AtomicBool,
         registro: &dyn Registro,
+        executor: Arc<dyn ExecutorDeScript>,
     ) -> Result<Relatorio, ErroDeIa> {
         let inicio = Instant::now();
         let pasta = PastaPrivada::criar()
@@ -141,7 +145,13 @@ impl ClaudeDeRita {
             nome: NOME_DO_SERVIDOR.to_owned(),
         };
         let permitidas: Vec<String> = FERRAMENTAS.iter().map(|f| (*f).to_owned()).collect();
-        let prompt = format!("{}\n\n{}", instrucoes(), pedido_do_usuario(tela, pedido));
+        // O rastro dos padrões do item vai no primeiro prompt (D8), como no laço próprio.
+        let rastro = rastro_resumido(&Contexto::novo(tela.clone(), executor));
+        let prompt = format!(
+            "{}\n\n{}",
+            instrucoes(),
+            pedido_do_usuario(tela, pedido, rastro.as_deref())
+        );
         let turnos = u32::try_from(MAXIMO_DE_CHAMADAS + 2).unwrap_or(10);
         let linha = registrar_antes(
             registro,
@@ -157,7 +167,7 @@ impl ClaudeDeRita {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        let parada = if lido.rascunhos.iter().any(|r| r.pre_teste.passou) {
+        let parada = if lido.passou() {
             Parada::Passou
         } else if lido.estourou {
             Parada::Limite
