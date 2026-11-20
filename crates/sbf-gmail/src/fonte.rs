@@ -83,10 +83,16 @@ pub fn eh_autorizacao_vencida(e: &ErroDeColeta) -> bool {
 #[must_use]
 pub fn do_gmail(e: ErroDeColeta) -> Erro {
     if eh_autorizacao_vencida(&e) {
-        Erro::Autorizacao
-    } else {
-        Erro::Gmail(e.to_string())
+        return Erro::Autorizacao;
     }
+    // Só a categoria (e o status HTTP): o corpo da resposta, o caminho e o texto do erro de
+    // rede nunca chegam ao aviso da janela nem ao stderr.
+    Erro::Gmail(match e {
+        ErroDeColeta::Api { status, .. } => format!("o Gmail respondeu HTTP {status}"),
+        ErroDeColeta::Rede { .. } => "falha de rede ao falar com o Gmail".to_owned(),
+        ErroDeColeta::Resposta { .. } => "resposta inesperada do Gmail".to_owned(),
+        _ => "falha na coleta do Gmail".to_owned(),
+    })
 }
 
 impl ClienteReal {
@@ -205,5 +211,23 @@ mod testes {
         ] {
             assert!(matches!(do_gmail(e), Erro::Gmail(_)));
         }
+    }
+
+    #[test]
+    fn a_mensagem_de_erro_nao_leva_corpo_caminho_nem_detalhe() {
+        let e = ErroDeColeta::Api {
+            servico: "gmail",
+            status: 403,
+            caminho: "/messages/abc123".to_owned(),
+            corpo: "corpo-sigiloso do servidor".to_owned(),
+        };
+        let m = do_gmail(e).to_string();
+        assert!(m.contains("403"));
+        assert!(!m.contains("sigiloso") && !m.contains("abc123"), "{m}");
+        let rede = ErroDeColeta::Rede {
+            servico: "gmail",
+            detalhe: "detalhe-interno".to_owned(),
+        };
+        assert!(!do_gmail(rede).to_string().contains("interno"));
     }
 }

@@ -128,11 +128,38 @@ impl Config {
     /// [`Erro::Argumento`] se o arquivo existe e não é válido.
     pub fn carregar(caminho: &Path) -> Resultado<Self> {
         match std::fs::read_to_string(caminho) {
-            Ok(t) => serde_json::from_str(&t)
-                .map_err(|_| Erro::Argumento(format!("{ARQUIVO_DA_CONFIG} inválido"))),
+            Ok(t) => {
+                let c: Self = serde_json::from_str(&t)
+                    .map_err(|_| Erro::Argumento(format!("{ARQUIVO_DA_CONFIG} inválido")))?;
+                c.validar()?;
+                Ok(c)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Confere os ids: só `[a-z0-9-]` (1 a 24), sem repetir. O id nomeia a pasta
+    /// `entrada/email/<id>` e as chaves do chaveiro, então um `../..` não pode passar.
+    ///
+    /// # Errors
+    /// [`Erro::Argumento`] com a mensagem para o usuário (sem repetir o id ruim inteiro).
+    pub fn validar(&self) -> Resultado<()> {
+        for (i, c) in self.contas.iter().enumerate() {
+            if !id_valido(&c.id) {
+                return Err(Erro::Argumento(format!(
+                    "{ARQUIVO_DA_CONFIG}: a conta nº {} tem um id inválido (use só letras minúsculas, dígitos e hífen, de 1 a 24 caracteres)",
+                    i + 1
+                )));
+            }
+            if self.contas[..i].iter().any(|o| o.id == c.id) {
+                return Err(Erro::Argumento(format!(
+                    "{ARQUIVO_DA_CONFIG}: o id {} aparece em mais de uma conta",
+                    c.id
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Como [`Self::carregar`], mas sem nenhuma conta e com as credenciais antigas (ambiente
@@ -154,6 +181,7 @@ impl Config {
     /// # Errors
     /// [`Erro::Disco`].
     pub fn salvar(&self, caminho: &Path) -> Resultado<()> {
+        self.validar()?;
         let texto = serde_json::to_vec_pretty(self).map_err(|e| Erro::Argumento(e.to_string()))?;
         escrever_atomico(caminho, &texto)
     }
@@ -190,6 +218,9 @@ impl Config {
                 .find(|id| self.conta(id).is_none())
                 .unwrap_or_else(|| base.to_owned())
         };
+        if !id_valido(&id) {
+            return Err(Erro::Argumento("id de conta inválido".to_owned()));
+        }
         let apelido = apelido.trim();
         self.contas.push(Conta {
             apelido: if apelido.is_empty() {
@@ -222,6 +253,15 @@ impl Conta {
             conta: None,
             rotulos: None,
             consulta_extra: String::new(),
+        }
+    }
+
+    /// Para procurar as credenciais da conta.
+    #[must_use]
+    pub fn alvo(&self) -> crate::credenciais::Alvo<'_> {
+        crate::credenciais::Alvo {
+            id: &self.id,
+            tipo: self.tipo,
         }
     }
 
@@ -427,6 +467,37 @@ mod testes {
         assert!(id_valido("gmail-2") && !id_valido("Gmail 2") && !id_valido(""));
         assert_eq!(TipoDeEmail::de_texto(" Gmail "), Some(TipoDeEmail::Gmail));
         assert_eq!(TipoDeEmail::de_texto("x"), None);
+    }
+
+    #[test]
+    fn id_de_conta_invalido_no_arquivo_e_recusado_com_erro_claro() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join(ARQUIVO_DA_CONFIG);
+        for id in ["../..", "a/b", "", "Gmail", "x y", "..", &"a".repeat(25)] {
+            let json = serde_json::json!({"contas": [{"id": id, "tipo": "gmail"}]});
+            std::fs::write(&a, json.to_string()).unwrap();
+            let Err(Erro::Argumento(m)) = Config::carregar(&a) else {
+                panic!("devia recusar {id:?}");
+            };
+            assert!(m.contains("id inválido"), "{m}");
+            assert!(!m.contains(".."), "a mensagem não repete o id: {m}");
+        }
+        // Repetido também é recusado; e gravar um id ruim não grava.
+        let json = serde_json::json!({"contas": [
+            {"id": "gmail", "tipo": "gmail"}, {"id": "gmail", "tipo": "gmail"}]});
+        std::fs::write(&a, json.to_string()).unwrap();
+        assert!(Config::carregar(&a).is_err());
+        let mut c = Config::default();
+        c.contas.push(Conta::nova("../..", TipoDeEmail::Gmail));
+        std::fs::remove_file(&a).unwrap();
+        assert!(c.salvar(&a).is_err());
+        assert!(!a.exists());
+        assert!(
+            Config::carregar_efetiva(&a, false)
+                .unwrap()
+                .contas
+                .is_empty()
+        );
     }
 
     #[test]

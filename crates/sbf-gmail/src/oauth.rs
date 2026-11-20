@@ -20,8 +20,12 @@ use crate::erro::{Erro, Resultado};
 
 /// A porta do retorno.
 pub const PORTA: u16 = 8976;
-/// O endereço de retorno (cadastrado no Google Console).
-pub const REDIRECT_URI: &str = "http://127.0.0.1:8976/oauth2callback";
+
+/// O endereço de retorno (cadastrado no Google Console), montado com [`PORTA`].
+#[must_use]
+pub fn redirect_uri() -> String {
+    format!("http://127.0.0.1:{PORTA}/oauth2callback")
+}
 /// O escopo: só leitura.
 pub const ESCOPO: &str = "https://www.googleapis.com/auth/gmail.readonly";
 const URL_DE_AUTORIZACAO: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -100,7 +104,7 @@ pub fn url_de_autorizacao(client_id: &str, state: &str, verificador: &str) -> St
     let mut u = Url::parse(URL_DE_AUTORIZACAO).expect("URL fixa");
     u.query_pairs_mut()
         .append_pair("client_id", client_id)
-        .append_pair("redirect_uri", REDIRECT_URI)
+        .append_pair("redirect_uri", &redirect_uri())
         .append_pair("response_type", "code")
         .append_pair("scope", ESCOPO)
         .append_pair("access_type", "offline")
@@ -119,21 +123,30 @@ fn codigo_de_erro_seguro(e: &str) -> String {
         .collect()
 }
 
-/// Lê a primeira linha da requisição de retorno (`GET /oauth2callback?code=...&state=... HTTP/1.1`)
-/// e devolve o código, recusando se o `state` não é o esperado.
-///
-/// # Errors
-/// [`Erro::Login`]: o Google recusou (`error=`), o `state` não confere, o código falta ou não
-/// é o caminho do retorno.
-pub fn ler_retorno(linha: &str, state_esperado: &str) -> Resultado<String> {
+/// O que a linha de requisição de retorno significa.
+#[derive(Debug, PartialEq, Eq)]
+enum Retorno {
+    /// O código de autorização, com o `state` certo.
+    Codigo(String),
+    /// Não é o retorno deste login (outro caminho, `state` errado ou ausente, lixo): quem
+    /// esperava continua esperando.
+    Estranho,
+    /// O Google recusou (`error=`), com o `state` certo.
+    Recusado(String),
+    /// Retorno com o `state` certo mas sem código.
+    SemCodigo,
+}
+
+fn classificar(linha: &str, state_esperado: &str) -> Retorno {
     let mut partes = linha.split_whitespace();
     let (Some("GET"), Some(alvo)) = (partes.next(), partes.next()) else {
-        return Err(Erro::Login("retorno inválido".to_owned()));
+        return Retorno::Estranho;
     };
-    let url = Url::parse(&format!("http://127.0.0.1{alvo}"))
-        .map_err(|_| Erro::Login("retorno inválido".to_owned()))?;
+    let Ok(url) = Url::parse(&format!("http://127.0.0.1{alvo}")) else {
+        return Retorno::Estranho;
+    };
     if url.path() != "/oauth2callback" {
-        return Err(Erro::Login("retorno inválido".to_owned()));
+        return Retorno::Estranho;
     }
     let mut codigo = None;
     let mut state = None;
@@ -147,19 +160,32 @@ pub fn ler_retorno(linha: &str, state_esperado: &str) -> Resultado<String> {
         }
     }
     if state.as_deref() != Some(state_esperado) {
-        return Err(Erro::Login(
-            "o retorno não é deste login (state diferente); nada foi guardado".to_owned(),
-        ));
+        return Retorno::Estranho;
     }
     if let Some(e) = erro {
-        return Err(Erro::Login(format!(
-            "o Google recusou a autorização ({})",
-            codigo_de_erro_seguro(&e)
-        )));
+        return Retorno::Recusado(codigo_de_erro_seguro(&e));
     }
-    codigo
-        .filter(|c| !c.is_empty())
-        .ok_or_else(|| Erro::Login("o retorno veio sem código".to_owned()))
+    match codigo.filter(|c| !c.is_empty()) {
+        Some(c) => Retorno::Codigo(c),
+        None => Retorno::SemCodigo,
+    }
+}
+
+/// Lê a primeira linha da requisição de retorno (`GET /oauth2callback?code=...&state=... HTTP/1.1`)
+/// e devolve o código, recusando se o `state` não é o esperado.
+///
+/// # Errors
+/// [`Erro::Login`]: o Google recusou (`error=`), o `state` não confere, o código falta ou não
+/// é o caminho do retorno.
+pub fn ler_retorno(linha: &str, state_esperado: &str) -> Resultado<String> {
+    match classificar(linha, state_esperado) {
+        Retorno::Codigo(c) => Ok(c),
+        Retorno::Estranho => Err(Erro::Login(
+            "o retorno não é deste login (state diferente); nada foi guardado".to_owned(),
+        )),
+        Retorno::Recusado(e) => Err(Erro::Login(format!("o Google recusou a autorização ({e})"))),
+        Retorno::SemCodigo => Err(Erro::Login("o retorno veio sem código".to_owned())),
+    }
 }
 
 /// O servidor local de verdade, em `127.0.0.1:8976`.
@@ -168,6 +194,7 @@ pub struct ReceptorLocal {
     /// Quanto esperar.
     pub tempo_limite: Duration,
     ouvinte: std::cell::RefCell<Option<TcpListener>>,
+    cancelar: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for ReceptorLocal {
@@ -194,7 +221,18 @@ impl ReceptorLocal {
         Self {
             tempo_limite,
             ouvinte: std::cell::RefCell::new(None),
+            cancelar: std::sync::Arc::default(),
         }
+    }
+
+    /// Com um sinal de cancelamento: quando ele liga, a espera termina e a porta é liberada.
+    #[must_use]
+    pub fn com_cancelamento(
+        mut self,
+        cancelar: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.cancelar = cancelar;
+        self
     }
 
     /// Abre a porta já (para a URL só ser aberta no navegador depois que ela atende).
@@ -235,14 +273,30 @@ impl ReceptorLocal {
                         responder(&mut fluxo, "404 Not Found", "");
                         continue;
                     }
-                    let r = ler_retorno(linha, state);
-                    match &r {
-                        Ok(_) => responder(&mut fluxo, "200 OK", PAGINA_OK),
-                        Err(_) => responder(&mut fluxo, "400 Bad Request", PAGINA_ERRO),
+                    match classificar(linha, state) {
+                        Retorno::Codigo(c) => {
+                            responder(&mut fluxo, "200 OK", PAGINA_OK);
+                            return Ok(c);
+                        }
+                        // Não é deste login: responde 400 e segue esperando o certo.
+                        Retorno::Estranho => {
+                            responder(&mut fluxo, "400 Bad Request", PAGINA_ERRO);
+                        }
+                        outro => {
+                            responder(&mut fluxo, "400 Bad Request", PAGINA_ERRO);
+                            return Err(match outro {
+                                Retorno::Recusado(e) => {
+                                    Erro::Login(format!("o Google recusou a autorização ({e})"))
+                                }
+                                _ => Erro::Login("o retorno veio sem código".to_owned()),
+                            });
+                        }
                     }
-                    return r;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if self.cancelar.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err(Erro::Login("login cancelado".to_owned()));
+                    }
                     if Instant::now() >= fim {
                         return Err(Erro::Login(
                             "o tempo para autorizar no navegador acabou".to_owned(),
@@ -312,12 +366,13 @@ impl Provedor for Google {
         verificador: &str,
     ) -> Resultado<Tokens> {
         #[derive(serde::Deserialize)]
-        struct R {
+        struct RespostaDoToken {
             access_token: Option<String>,
             refresh_token: Option<String>,
             error: Option<String>,
         }
-        let r: R = self.runtime.block_on(async {
+        let redirect_uri = redirect_uri();
+        let r: RespostaDoToken = self.runtime.block_on(async {
             let resposta = self
                 .http
                 .post(URL_DO_TOKEN)
@@ -325,7 +380,7 @@ impl Provedor for Google {
                     ("code", codigo),
                     ("client_id", client_id),
                     ("client_secret", client_secret),
-                    ("redirect_uri", REDIRECT_URI),
+                    ("redirect_uri", redirect_uri.as_str()),
                     ("grant_type", "authorization_code"),
                     ("code_verifier", verificador),
                 ])
@@ -335,7 +390,7 @@ impl Provedor for Google {
                     Erro::Login(format!("sem resposta do Google ({})", e.without_url()))
                 })?;
             resposta
-                .json::<R>()
+                .json::<RespostaDoToken>()
                 .await
                 .map_err(|_| Erro::Login("resposta inesperada do Google".to_owned()))
         })?;
@@ -357,17 +412,17 @@ impl Provedor for Google {
     fn email(&self, acesso: &str) -> Resultado<String> {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct P {
+        struct PerfilDoGmail {
             email_address: String,
         }
-        let p: P = self.runtime.block_on(async {
+        let p: PerfilDoGmail = self.runtime.block_on(async {
             self.http
                 .get(URL_DO_PERFIL)
                 .bearer_auth(acesso)
                 .send()
                 .await
                 .map_err(|e| Erro::Login(format!("sem resposta do Gmail ({})", e.without_url())))?
-                .json::<P>()
+                .json::<PerfilDoGmail>()
                 .await
                 .map_err(|_| Erro::Login("não consegui ler o perfil do Gmail".to_owned()))
         })?;
@@ -493,7 +548,8 @@ pub fn entrar_e_guardar_com(
     Ok(login.email)
 }
 
-/// O login de verdade (navegador, servidor local, Google).
+/// O login de verdade (navegador, servidor local, Google). `cancelar` ligado interrompe a
+/// espera e libera a porta.
 ///
 /// # Errors
 /// Como [`entrar_e_guardar`].
@@ -502,9 +558,10 @@ pub fn entrar_no_navegador(
     arquivo_da_config: &std::path::Path,
     id: &str,
     aviso: &dyn Fn(&str),
+    cancelar: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Resultado<String> {
     let google = Google::novo()?;
-    let receptor = ReceptorLocal::default();
+    let receptor = ReceptorLocal::default().com_cancelamento(cancelar);
     entrar_e_guardar(
         chaveiro,
         arquivo_da_config,
@@ -546,7 +603,7 @@ mod testes {
     fn a_url_leva_pkce_state_e_o_redirect_cadastrado() {
         let u = Url::parse(&url_de_autorizacao("meu-id", "estado123", "verif")).unwrap();
         let q: std::collections::HashMap<_, _> = u.query_pairs().into_owned().collect();
-        assert_eq!(q["redirect_uri"], REDIRECT_URI);
+        assert_eq!(q["redirect_uri"], redirect_uri());
         assert_eq!(q["scope"], ESCOPO);
         assert_eq!(q["access_type"], "offline");
         assert_eq!(q["prompt"], "consent");
@@ -682,18 +739,70 @@ mod testes {
         assert!(favicon.starts_with("HTTP/1.1 404"));
         assert!(certo.starts_with("HTTP/1.1 200"));
 
+        // State errado: 400 e o login continua esperando; o retorno certo depois ainda vale.
         let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
         ouvinte.set_nonblocking(true).unwrap();
         let porta = ouvinte.local_addr().unwrap().port();
         let cliente = std::thread::spawn(move || {
+            let pedir = |alvo: &str| {
+                let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
+                write!(s, "GET {alvo} HTTP/1.1\r\n\r\n").unwrap();
+                let mut r = String::new();
+                let _ = s.read_to_string(&mut r);
+                r
+            };
+            let falso = pedir("/oauth2callback?code=C&state=FALSO");
+            let certo = pedir("/oauth2callback?code=BOM&state=S");
+            (falso, certo)
+        });
+        assert_eq!(receptor.esperar_em(&ouvinte, "S").unwrap(), "BOM");
+        let (falso, certo) = cliente.join().unwrap();
+        assert!(falso.starts_with("HTTP/1.1 400"));
+        assert!(certo.starts_with("HTTP/1.1 200"));
+
+        // Só state errado: espera até o tempo acabar (não aborta antes).
+        let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
+        ouvinte.set_nonblocking(true).unwrap();
+        let porta = ouvinte.local_addr().unwrap().port();
+        std::thread::spawn(move || {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", porta)).unwrap();
             write!(s, "GET /oauth2callback?code=C&state=FALSO HTTP/1.1\r\n\r\n").unwrap();
             let mut r = String::new();
             let _ = s.read_to_string(&mut r);
-            r
         });
-        assert!(receptor.esperar_em(&ouvinte, "S").is_err());
-        assert!(cliente.join().unwrap().starts_with("HTTP/1.1 400"));
+        let curto = ReceptorLocal::com_tempo(Duration::from_millis(600));
+        let t0 = Instant::now();
+        let Err(Erro::Login(m)) = curto.esperar_em(&ouvinte, "S") else {
+            panic!("devia expirar");
+        };
+        assert!(m.contains("tempo"), "{m}");
+        assert!(t0.elapsed() >= Duration::from_millis(500));
+    }
+
+    #[test]
+    fn o_login_pode_ser_cancelado_e_libera_a_porta() {
+        let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
+        ouvinte.set_nonblocking(true).unwrap();
+        let cancelar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let receptor = ReceptorLocal::com_tempo(Duration::from_secs(30))
+            .com_cancelamento(std::sync::Arc::clone(&cancelar));
+        let c = std::sync::Arc::clone(&cancelar);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let t0 = Instant::now();
+        let Err(Erro::Login(m)) = receptor.esperar_em(&ouvinte, "S") else {
+            panic!("devia cancelar");
+        };
+        assert!(m.contains("cancelado"), "{m}");
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        let porta = ouvinte.local_addr().unwrap().port();
+        drop(ouvinte);
+        assert!(
+            TcpListener::bind(("127.0.0.1", porta)).is_ok(),
+            "a porta voltou"
+        );
     }
 
     #[test]

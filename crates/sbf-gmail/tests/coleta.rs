@@ -557,7 +557,7 @@ fn o_limite_deixa_as_mais_novas_para_a_proxima_coleta() {
 fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     let c = cenario();
     let conta = Conta::legada();
-    let antes = estado_da_conta(&c.cofre, &conta, None);
+    let antes = estado_da_conta(Some(&c.cofre), &conta, None);
     assert_eq!(antes.origens, 0);
     assert!(antes.ultima_coleta.is_none());
 
@@ -570,7 +570,7 @@ fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     c.coletar(&f, &Registrador::default(), &OpcoesDaColeta::default())
         .unwrap();
 
-    let depois = estado_da_conta(&c.cofre, &conta, None);
+    let depois = estado_da_conta(Some(&c.cofre), &conta, None);
     assert_eq!(depois.origens, 1);
     assert_eq!(depois.documentos, 1);
     assert!(depois.ultima_coleta.is_some());
@@ -582,11 +582,11 @@ fn estado_da_conexao_conta_o_que_o_inventario_sabe() {
     }
     // Outra conta tem a sua própria fonte: não enxerga o que a legada coletou.
     let outra = Conta::nova("gmail-2", sbf_gmail::TipoDeEmail::Gmail);
-    assert_eq!(estado_da_conta(&c.cofre, &outra, None).origens, 0);
+    assert_eq!(estado_da_conta(Some(&c.cofre), &outra, None).origens, 0);
     // O Outlook ainda não conecta.
     let outlook = Conta::nova("outlook", sbf_gmail::TipoDeEmail::Outlook);
     assert_eq!(
-        estado_da_conta(&c.cofre, &outlook, None).situacao,
+        estado_da_conta(Some(&c.cofre), &outlook, None).situacao,
         SituacaoDaConexao::EmBreve
     );
 }

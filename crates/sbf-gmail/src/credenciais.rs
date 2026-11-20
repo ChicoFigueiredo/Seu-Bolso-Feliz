@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use sbf_chaveiro::{Chaveiro, Segredo};
+use sbf_chaveiro::{Chaveiro, Segredo, valor_do_env};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroizing;
 
@@ -106,9 +106,9 @@ fn limpo(v: Option<String>) -> Option<String> {
 }
 
 fn ler_texto(c: &Chaveiro, nome: &str) -> Option<String> {
-    if c.tem_segredo_de_mensageiro(nome) {
+    if c.tem_segredo_de_conexao(nome) {
         limpo(
-            c.segredo_de_mensageiro(nome)
+            c.segredo_de_conexao(nome)
                 .ok()
                 .map(|s| s.expor().to_owned()),
         )
@@ -320,12 +320,12 @@ fn erro_do_chaveiro(e: &impl std::fmt::Display) -> Erro {
 }
 
 fn guardar(c: &Chaveiro, nome: &str, valor: &str) -> Resultado<()> {
-    c.guardar_segredo_de_mensageiro(nome, Segredo::novo(valor))
+    c.guardar_segredo_de_conexao(nome, Segredo::novo(valor))
         .map_err(|e| erro_do_chaveiro(&e))
 }
 
 fn apagar_nome(c: &Chaveiro, nome: &str) -> Resultado<()> {
-    c.apagar_segredo_de_mensageiro(nome)
+    c.apagar_segredo_de_conexao(nome)
         .map_err(|e| erro_do_chaveiro(&e))
 }
 
@@ -461,43 +461,6 @@ pub fn apagar(chaveiro: &Chaveiro, id: &str) -> Resultado<()> {
     Ok(())
 }
 
-/// O valor de `chave` num texto no formato `.env` (`CHAVE=valor`, `export CHAVE="valor"`,
-/// `#` comenta). Só procura a chave pedida.
-#[must_use]
-pub fn valor_do_env(texto: &str, chave: &str) -> Option<String> {
-    for linha in texto.lines() {
-        let linha = linha.trim();
-        if linha.starts_with('#') {
-            continue;
-        }
-        let linha = linha.strip_prefix("export ").unwrap_or(linha).trim_start();
-        let Some((k, v)) = linha.split_once('=') else {
-            continue;
-        };
-        if k.trim() != chave {
-            continue;
-        }
-        let v = v.trim();
-        let v = if let Some(entre) = v
-            .strip_prefix('"')
-            .and_then(|r| r.split_once('"'))
-            .map(|(a, _)| a)
-        {
-            entre
-        } else if let Some(entre) = v
-            .strip_prefix('\'')
-            .and_then(|r| r.split_once('\''))
-            .map(|(a, _)| a)
-        {
-            entre
-        } else {
-            v.split(" #").next().unwrap_or(v).trim()
-        };
-        return (!v.is_empty()).then(|| v.to_owned());
-    }
-    None
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod testes {
@@ -538,22 +501,6 @@ mod testes {
         id: "gmail-2",
         tipo: TipoDeEmail::Gmail,
     };
-
-    #[test]
-    fn le_o_formato_env_so_da_chave_pedida() {
-        let t =
-            "# c\nOUTRA=1\nGOOGLE_MAIL_CLIENT_ID=abc\nexport GMAIL_REFRESH_TOKEN=\"t k\"\nVAZIA=\n";
-        assert_eq!(
-            valor_do_env(t, "GOOGLE_MAIL_CLIENT_ID").as_deref(),
-            Some("abc")
-        );
-        assert_eq!(
-            valor_do_env(t, "GMAIL_REFRESH_TOKEN").as_deref(),
-            Some("t k")
-        );
-        assert_eq!(valor_do_env(t, "VAZIA"), None);
-        assert_eq!(valor_do_env(t, "NAO_TEM"), None);
-    }
 
     #[test]
     fn ambiente_ganha_do_env_e_falta_da_erro_so_com_nomes() {

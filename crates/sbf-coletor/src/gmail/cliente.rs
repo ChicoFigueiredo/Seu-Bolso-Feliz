@@ -162,19 +162,22 @@ impl ClienteGmail {
     pub async fn email_da_conta(&self) -> Result<String, ErroDeColeta> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct P {
+        struct PerfilDoGmail {
             email_address: String,
         }
-        Ok(self.pedir::<P>("/profile", &[]).await?.email_address)
+        Ok(self
+            .pedir::<PerfilDoGmail>("/profile", &[])
+            .await?
+            .email_address)
     }
 
     pub async fn listar_rotulos(&self) -> Result<Vec<Rotulo>, ErroDeColeta> {
         #[derive(Deserialize)]
-        struct R {
+        struct RotulosDaConta {
             #[serde(default)]
             labels: Vec<Rotulo>,
         }
-        Ok(self.pedir::<R>("/labels", &[]).await?.labels)
+        Ok(self.pedir::<RotulosDaConta>("/labels", &[]).await?.labels)
     }
 
     /// O id de um rótulo pelo nome (sem diferenciar maiúsculas).
@@ -222,11 +225,11 @@ impl ClienteGmail {
         id_do_anexo: &str,
     ) -> Result<Vec<u8>, ErroDeColeta> {
         #[derive(Deserialize)]
-        struct A {
+        struct AnexoDaApi {
             #[serde(default)]
             data: String,
         }
-        let a: A = self
+        let a: AnexoDaApi = self
             .pedir(
                 &format!("/messages/{id_da_mensagem}/attachments/{id_do_anexo}"),
                 &[],
