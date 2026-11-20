@@ -18,6 +18,7 @@ use sbf_mcp::backup::Backups;
 use sbf_regras::script::ExecutorDeScript;
 
 use crate::contexto::{Contexto, DadosDaTela};
+use crate::esqueleto::esqueleto_resumido;
 use crate::ferramentas::{
     EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, Sessao, rastro_resumido,
 };
@@ -149,11 +150,13 @@ impl ClaudeDeRita {
         };
         let permitidas: Vec<String> = FERRAMENTAS.iter().map(|f| (*f).to_owned()).collect();
         // O rastro dos padrões do item vai no primeiro prompt (D8), como no laço próprio.
-        let rastro = rastro_resumido(&Contexto::novo(tela.clone(), executor.clone()));
+        let ctx_do_pedido = Contexto::novo(tela.clone(), executor.clone());
+        let rastro = rastro_resumido(&ctx_do_pedido);
+        let esqueleto = esqueleto_resumido(&ctx_do_pedido, pedido);
         let prompt = format!(
             "{}\n\n{}",
             instrucoes(),
-            pedido_do_usuario(tela, pedido, rastro.as_deref())
+            pedido_do_usuario(tela, pedido, rastro.as_deref(), esqueleto.as_deref())
         );
         let turnos = u32::try_from(MAXIMO_DE_CHAMADAS + 2).unwrap_or(10);
         let linha = registrar_antes(
