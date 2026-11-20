@@ -396,7 +396,7 @@ fn app_de_demonstracao() -> Result<App, String> {
         sbf_script::ExecutorNoProcesso::novo(),
     ))) {
         Ok(f) => janela.regras.ligar(f),
-        Err(e) => eprintln!("sbf: as regras fictícias não abriram ({e})"),
+        Err(e) => eprintln!("sbf: os padrões fictícios não abriram ({e})"),
     }
     // O reconhecedor fictício vem depois das regras: o Pix e o caso ambíguo leem o catálogo.
     sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);

@@ -34,7 +34,7 @@ const NAO_LIGADO: &str = "consulta não ligada";
 pub const ROTA: &str = "regras";
 
 /// O título completo (o rótulo da lateral pode abreviar).
-pub const TITULO: &str = "Regras de reconhecimento";
+pub const TITULO: &str = "Padrões de reconhecimento";
 
 /// O que o editor guarda enquanto você digita.
 #[derive(Debug, Default, Clone)]
@@ -416,7 +416,7 @@ impl Regras {
                 "rule",
                 TITULO,
                 3,
-                "O catálogo de regras (regras.sqlite) ainda não está ligado a esta janela.",
+                "O catálogo de padrões (regras.sqlite) ainda não está ligado a esta janela.",
             );
             return;
         }
@@ -452,10 +452,10 @@ impl Regras {
         let mut fechar = false;
         let resposta = egui::Modal::new(egui::Id::new("regras-nova")).show(ctx, |ui| {
             ui.set_width(520.0);
-            componentes::titulo(ui, "Nova regra", 17.0);
+            componentes::titulo(ui, "Novo padrão", 17.0);
             texto_pequeno(
                 ui,
-                "Nasce em rascunho, com uma definição mínima para você completar na página da regra. Nada é ativado.",
+                "Nasce em rascunho, com uma definição mínima para você completar na página do padrão. Nada é ativado.",
             );
             ui.add_space(8.0);
             egui::Grid::new("regras-nova-campos")
@@ -511,7 +511,7 @@ impl Regras {
                     self.abrir(&id);
                     self.avisar(
                         false,
-                        "Regra criada em rascunho. Complete a definição, teste com exemplos e só então ative.",
+                        "Padrão criado em rascunho. Complete a definição, teste com exemplos e só então ative.",
                     );
                     self.recarregar_lista();
                 }
@@ -547,8 +547,8 @@ impl Regras {
             componentes::titulo(ui, TITULO, 20.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .button("Nova regra")
-                    .on_hover_text("Cria uma regra em rascunho com uma definição mínima")
+                    .button("Novo padrão")
+                    .on_hover_text("Cria um padrão em rascunho com uma definição mínima")
                     .clicked()
                 {
                     self.nova = Some(NovaRegra::default());
@@ -557,7 +557,7 @@ impl Regras {
         });
         texto_pequeno(
             ui,
-            "Como o sbf reconhece cada tipo de documento. Uma regra só propõe; consolidada, concilia sozinha quando as três provas batem.",
+            "Como o sbf reconhece cada tipo de documento. Um padrão só propõe; consolidada, concilia sozinha quando as três provas batem.",
         );
         self.mostrar_mensagem(ui);
         ui.add_space(8.0);
@@ -581,7 +581,7 @@ impl Regras {
         if lista.is_empty() {
             texto_pequeno(
                 ui,
-                "Nenhuma regra ainda. As de fábrica entram ao abrir o cofre.",
+                "Nenhum padrão ainda. As de fábrica entram ao abrir o cofre.",
             );
         } else {
             self.barra_de_filtros(ui);
@@ -611,7 +611,7 @@ impl Regras {
                         .spacing([18.0, 8.0])
                         .show(ui, |ui| {
                             for t in [
-                                "Regra",
+                                "Padrão",
                                 "Tipo documental",
                                 "Em vigor",
                                 "Estado",
@@ -772,7 +772,7 @@ impl Regras {
         let p = tema::paleta(ui.ctx());
 
         if ui
-            .button(format!("{}  Regras", icones::texto("arrow_back")))
+            .button(format!("{}  Padrões", icones::texto("arrow_back")))
             .clicked()
         {
             voltar = true;
@@ -801,7 +801,7 @@ impl Regras {
         if let Some(v) = pagina.sugerida {
             ui.add_space(6.0);
             let texto = format!(
-                "A regra {} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?",
+                "O padrão {} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?",
                 pagina.resumo.nome
             );
             componentes::aviso(
@@ -902,7 +902,9 @@ impl Regras {
                 self.depois_da_acao(r);
             }
             Acao::Desativar => {
-                let r = f.desativar(&regra).map(|()| "Regra desativada.".to_owned());
+                let r = f
+                    .desativar(&regra)
+                    .map(|()| "Padrão desativado.".to_owned());
                 self.depois_da_acao(r);
             }
             Acao::Reverter => {
@@ -1160,12 +1162,12 @@ fn faixa_de_sugestao(ui: &mut Ui, nome: &str, regra: &str, abrir: &mut Option<St
                 ui.label(icones::icone_cor("verified", 16.0, p.destaque_tinta));
                 ui.label(
                     RichText::new(format!(
-                        "A regra {nome} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?"
+                        "O padrão {nome} acertou {LIMIAR_DE_CONSOLIDACAO} seguidas. Consolidar?"
                     ))
                     .color(p.destaque_tinta),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Ver a regra").clicked() {
+                    if ui.button("Ver o padrão").clicked() {
                         *abrir = Some(regra.to_owned());
                     }
                 });
@@ -1180,7 +1182,7 @@ fn linha_da_lista(ui: &mut Ui, r: &ResumoDaRegra, abrir: &mut Option<String>) {
         ui.set_min_width(300.0);
         if ui
             .link(RichText::new(&r.nome).strong().size(14.0))
-            .on_hover_text("Abre a regra: versões, editor, exemplos e Rastro")
+            .on_hover_text("Abre o padrão: versões, editor, exemplos e Rastro")
             .clicked()
         {
             *abrir = Some(r.id.clone());
@@ -1306,7 +1308,7 @@ fn barra_de_acoes(ui: &mut Ui, p: &Pagina, acao: &mut Option<Acao>) {
         let motivo_do_bloqueio = if !ativavel {
             "Só um rascunho ou uma versão desativada pode ser ativada"
         } else if !falhas.is_empty() {
-            "Um exemplo falha: corrija a regra ou o exemplo antes de ativar"
+            "Um exemplo falha: corrija o padrão ou o exemplo antes de ativar"
         } else {
             "Coloca esta versão em vigor; ela só propõe"
         };
@@ -1402,7 +1404,7 @@ fn confirmacoes(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
             );
             texto_pequeno(
                 ui,
-                "Consolidada, a regra concilia sozinha só com as três provas (valor, data e conta batendo exatamente), com Desfazer. Uma rejeição, um Desfazer ou uma versão nova a devolvem a ativa.",
+                "Consolidado, o padrão concilia sozinha só com as três provas (valor, data e conta batendo exatamente), com Desfazer. Uma rejeição, um Desfazer ou uma versão nova a devolvem a ativa.",
             );
             ui.horizontal(|ui| {
                 if ui.button("Consolidar").clicked() {
@@ -1598,7 +1600,7 @@ fn secao_de_exemplos(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
         if p.exemplos.is_empty() {
             texto_pequeno(
                 ui,
-                "Sem exemplos. Uma regra sem exemplos ativa sem nada que a proteja: cole um texto abaixo.",
+                "Sem exemplos. Um padrão sem exemplos ativa sem nada que a proteja: cole um texto abaixo.",
             );
         }
         for ex in &p.exemplos {
@@ -1664,7 +1666,7 @@ fn formulario_de_exemplo(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
     ui.add_space(4.0);
     texto_pequeno(
         ui,
-        "Cole o texto de um documento (o texto fica só neste catálogo, com o exemplo). Depois diga o que a regra deve devolver.",
+        "Cole o texto de um documento (o texto fica só neste catálogo, com o exemplo). Depois diga o que o padrão deve devolver.",
     );
     ui.horizontal(|ui| {
         ui.label("Nome");
@@ -1704,7 +1706,7 @@ fn formulario_de_exemplo(ui: &mut Ui, p: &mut Pagina, acao: &mut Option<Acao>) {
 
 fn resumo_do_esperado(e: &Esperado) -> String {
     match e {
-        Esperado::NaoSeAplica => "espera: a regra não se aplica".to_owned(),
+        Esperado::NaoSeAplica => "espera: o padrão não se aplica".to_owned(),
         Esperado::Reconhece {
             tipo_documental,
             campos,
@@ -1763,7 +1765,7 @@ fn secao_da_simulacao(ui: &mut Ui, p: &Pagina) {
 fn descrever(r: &sbf_regras::simulacao::ResumoDaDecisao) -> String {
     use sbf_regras::simulacao::ResumoDaDecisao::{Ambiguo, Nenhuma, Reconhecido};
     match r {
-        Nenhuma => "nenhuma regra se aplica".to_owned(),
+        Nenhuma => "nenhum padrão se aplica".to_owned(),
         Ambiguo { regras } => format!("ambíguo entre {}", regras.join(", ")),
         Reconhecido {
             regra,
@@ -1798,7 +1800,7 @@ fn valor(v: &sbf_regras::Valor) -> String {
 }
 
 fn secao_do_rastro(ui: &mut Ui, p: &Pagina) {
-    componentes::rotulo_de_secao(ui, "Rastro da regra");
+    componentes::rotulo_de_secao(ui, "Rastro do padrão");
     ui.add_space(2.0);
     componentes::cartao(ui, |ui| {
         ui.set_width(ui.available_width());

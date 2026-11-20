@@ -156,7 +156,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
     let nucleo = match crate::script::executor_de_script() {
         Ok(executor) => nucleo.com_regras(Path::new(pasta).join("regras.sqlite"), executor),
         Err(_) => {
-            eprintln!("sbf mcp: sem executor de scripts (regras de reconhecimento desligadas)");
+            eprintln!("sbf mcp: sem executor de scripts (padrões de reconhecimento desligados)");
             nucleo
         }
     };
