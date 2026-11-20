@@ -732,6 +732,17 @@ pub fn tabela_em_pedacos(
     let p = tema::paleta(ui.ctx());
     let mut estado = vista.tabelas.remove(chave).unwrap_or_default();
     estado.teclado = teclado;
+    // A marcação (verde, âmbar) só nas tabelas principais das áreas, e só quando há catálogo
+    // de padrões ligado. Com o filtro de cor ligado a tabela é carregada por inteiro.
+    let marcacao = if teclado {
+        crate::marcacao::do_contexto(ui.ctx())
+    } else {
+        None
+    };
+    estado.filtro_de_cor = marcacao
+        .as_ref()
+        .and_then(|m| m.lock().ok().map(|g| g.filtro(chave)))
+        .unwrap_or_default();
     let mut minimo = 0;
     if estado.ordem_pendente.is_some() {
         if estado.ordenar_agora {
@@ -750,7 +761,27 @@ pub fn tabela_em_pedacos(
             ui.ctx().request_repaint();
         }
     }
+    if estado.filtro_de_cor != crate::marcacao::FiltroDeCor::Todas {
+        minimo = usize::MAX;
+    }
     let resultado = leitor.carregada(pedido, minimo).map(|c| {
+        estado.marcavel = marcacao.is_some()
+            && c.tabela.linhas.iter().take(16).any(|l| {
+                l.alvo.as_ref().is_some_and(|a| {
+                    matches!(
+                        a.tipo,
+                        sbf_inventario::Tipo::Achado | sbf_inventario::Tipo::Documento
+                    )
+                })
+            });
+        if estado.marcavel
+            && let Some(m) = &marcacao
+            && let Ok(mut g) = m.lock()
+            && crate::marcacao::faixa_do_filtro(ui, &mut g, chave)
+        {
+            estado.filtro_de_cor = g.filtro(chave);
+            ui.ctx().request_repaint();
+        }
         if minimo == usize::MAX {
             if let Some(o) = estado.ordem_pendente.take() {
                 estado.ordem = o;
