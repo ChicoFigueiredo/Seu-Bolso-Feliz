@@ -31,6 +31,9 @@ pub enum Falha {
     Externo,
     /// O provedor de IA não respondeu ou parou.
     Provedor,
+    /// A autorização de uma conta venceu ou foi revogada (Gmail `invalid_grant`): não adianta
+    /// tentar de novo até a pessoa entrar outra vez.
+    Autorizacao,
     /// Outro.
     Outra,
 }
@@ -42,6 +45,7 @@ impl fmt::Display for Falha {
             Self::Disco => "disco",
             Self::Externo => "externo",
             Self::Provedor => "provedor",
+            Self::Autorizacao => "autorizacao",
             Self::Outra => "outra",
         })
     }

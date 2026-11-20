@@ -396,6 +396,65 @@ fn falha_do_gmail_vira_falha_no_estado_sem_derrubar_o_laco() {
     assert!(log.contains("gmail"), "{log}");
 }
 
+/// Um Gmail cuja autorização venceu até a "pessoa" entrar de novo (`liberado`).
+struct GmailVencido {
+    chamadas: Rc<Cell<u32>>,
+    liberado: Rc<Cell<bool>>,
+}
+impl ColetorDeGmail for GmailVencido {
+    fn coletar(&mut self, _: &AtomicBool) -> Result<ResumoDoGmail, Falha> {
+        self.chamadas.set(self.chamadas.get() + 1);
+        if self.liberado.get() {
+            Ok(ResumoDoGmail {
+                mensagens: 1,
+                novos: 1,
+            })
+        } else {
+            Err(Falha::Autorizacao)
+        }
+    }
+    fn pode_tentar_de_novo(&mut self) -> bool {
+        self.liberado.get()
+    }
+}
+
+#[test]
+fn gmail_com_autorizacao_vencida_nao_martela_ate_o_proximo_login() {
+    let c = cenario();
+    let chamadas = Rc::new(Cell::new(0));
+    let liberado = Rc::new(Cell::new(false));
+    let mut w = Worker::novo(c.dados.clone(), Config::default(), None, None)
+        .unwrap()
+        .com_gmail(Box::new(GmailVencido {
+            chamadas: chamadas.clone(),
+            liberado: liberado.clone(),
+        }));
+    let nao = AtomicBool::new(false);
+    let t0 = agora();
+    w.passo(t0, Duration::from_millis(1), &nao);
+    assert_eq!(chamadas.get(), 1);
+    assert!(w.estado.gmail_autorizacao_vencida);
+    assert_eq!(w.estado.falhas, 1);
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("causa=autorizacao"), "{log}");
+    assert!(!log.contains("causa=externo"), "{log}");
+
+    // Horas depois, com a autorização ainda vencida: nenhuma chamada nova, nenhuma falha nova.
+    for minutos in [1, 2, 31, 90, 600] {
+        w.passo(t0 + minutos * 60, Duration::from_millis(1), &nao);
+    }
+    assert_eq!(chamadas.get(), 1, "não martela o Google");
+    assert_eq!(w.estado.falhas, 1);
+    assert!(w.estado.gmail_autorizacao_vencida);
+
+    // A pessoa entra: a próxima volta (no máximo um minuto depois) coleta e limpa o aviso.
+    liberado.set(true);
+    w.passo(t0 + 601 * 60, Duration::from_millis(1), &nao);
+    assert_eq!(chamadas.get(), 2);
+    assert!(!w.estado.gmail_autorizacao_vencida);
+    assert_eq!(w.estado.ultima_coleta.as_ref().unwrap().origem, "gmail");
+}
+
 struct RoteirosFalsos(Rc<Cell<u32>>);
 impl sbf_worker::laco::ColetorDeRoteiros for RoteirosFalsos {
     fn executar_devidos(
