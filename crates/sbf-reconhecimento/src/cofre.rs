@@ -541,7 +541,7 @@ impl ReconhecedorDoCofre {
 
         // 4. Leitores locais.
         etapa(andamento, cancelar, Etapa::LerLocalmente, || {
-            let situacao = self.ler_localmente(&mut estado, caminho);
+            let situacao = self.ler_localmente(&conn, &mut estado, caminho);
             if let Reconhecido::Contracheque {
                 contracheque: c, ..
             } = &estado.reconhecido
@@ -912,9 +912,9 @@ impl ReconhecedorDoCofre {
         }
     }
 
-    fn ler_localmente(&self, estado: &mut Estado, caminho: &Path) -> Situacao {
+    fn ler_localmente(&self, conn: &Connection, estado: &mut Estado, caminho: &Path) -> Situacao {
         // O motor de regras vai primeiro; sem regra que se aplique, segue o caminho de sempre.
-        if let Some(situacao) = regras::ler_com_regras(self, estado, caminho) {
+        if let Some(situacao) = regras::ler_com_regras(self, conn, estado, caminho) {
             return situacao;
         }
         let Some(conteudo) = estado.conteudo.as_deref() else {
