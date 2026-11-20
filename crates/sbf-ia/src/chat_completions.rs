@@ -270,6 +270,10 @@ impl ProvedorDeConversa for ChatCompletions {
         self.config.natureza
     }
 
+    fn endereco(&self) -> String {
+        self.base.clone()
+    }
+
     fn conversar(
         &self,
         pedido: &PedidoDeConversa,

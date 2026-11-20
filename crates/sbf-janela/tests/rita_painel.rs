@@ -95,6 +95,7 @@ fn montar(cofre: &std::path::Path) -> (RitaUi, ItemDaTela) {
         c.ativar("pix-geral", 1, &Quem::Usuario, None).unwrap();
         assert_eq!(c.vigentes().unwrap()[0].estado, Estado::Ativa);
     }
+    sbf_rita::registro::inventario_minimo_para_testes(cofre);
     let mut r = RitaUi::default();
     r.ligar(Ambiente {
         cofre: cofre.to_path_buf(),

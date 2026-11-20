@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
-use sbf_ia::{ClaudeCli, ErroDeIa, NaturezaDoCusto, ServidorMcp};
+use sbf_ia::{ClaudeCli, ErroDeIa, NaturezaDoCusto, Registro, ServidorMcp};
 
 use crate::contexto::DadosDaTela;
 use crate::ferramentas::{EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS};
 use crate::laco::{Parada, Relatorio, texto_final};
 use crate::mcp::ContextoDoMcp;
 use crate::prompt::{instrucoes, pedido_do_usuario};
+use crate::registro::{completar, registrar_antes};
 
 /// O nome do servidor MCP no `claude`.
 pub const NOME_DO_SERVIDOR: &str = "rita";
@@ -99,13 +100,18 @@ impl ClaudeDeRita {
     /// Um pedido. O `claude` não guarda conversa entre pedidos (`--no-session-persistence`):
     /// cada pedido recomeça, com o contexto da tela.
     ///
+    /// O prompt vai ao Anthropic pelo `claude`: a linha de `saida_ia` é gravada antes
+    /// (ADR-015) e, sem ela, o `claude` nem é executado. O que as ferramentas devolvem ao
+    /// `claude` é registrado pelo servidor MCP, saída por saída.
+    ///
     /// # Errors
-    /// `claude` ausente ou sem login, limite de uso, prazo, interrupção.
+    /// `claude` ausente ou sem login, limite de uso, prazo, interrupção, registro que não grava.
     pub fn pedir(
         &self,
         tela: &DadosDaTela,
         pedido: &str,
         cancelar: &AtomicBool,
+        registro: &dyn Registro,
     ) -> Result<Relatorio, ErroDeIa> {
         let inicio = Instant::now();
         let pasta = PastaPrivada::criar()
@@ -137,9 +143,16 @@ impl ClaudeDeRita {
         let permitidas: Vec<String> = FERRAMENTAS.iter().map(|f| (*f).to_owned()).collect();
         let prompt = format!("{}\n\n{}", instrucoes(), pedido_do_usuario(tela, pedido));
         let turnos = u32::try_from(MAXIMO_DE_CHAMADAS + 2).unwrap_or(10);
+        let linha = registrar_antes(
+            registro,
+            "claude-cli",
+            &self.modelo,
+            u64::try_from(prompt.len()).unwrap_or(u64::MAX),
+        )?;
         let saida =
             self.cli
                 .conversar_com_mcp(&prompt, &servidor, &permitidas, turnos, cancelar)?;
+        completar(registro, linha, saida.consumo);
         let lido: EstadoDaSessao = std::fs::read(&estado)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
