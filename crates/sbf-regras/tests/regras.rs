@@ -1916,3 +1916,29 @@ fn normalizacao_de_ocr_e_idempotente() {
     let uma = normalizar_ocr(COMPROVANTE_DE_OCR);
     assert_eq!(normalizar_ocr(&uma), uma);
 }
+
+#[test]
+fn o_campo_em_que_as_candidatas_discordam_sai_do_mesmo_criterio_do_motor() {
+    use sbf_regras::motor::campo_em_que_discordam;
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(
+        &mut c,
+        nova("regra-a", Definicao::simples("tipo-a", "comprovante pix")),
+        None,
+    );
+    ativa(
+        &mut c,
+        nova("regra-b", Definicao::simples("tipo-b", "banco exemplo")),
+        None,
+    );
+    let motor = Motor::das_vigentes(&c, None).unwrap();
+    let l = motor.ler(&entrada("x", COMPROVANTE));
+    match &l.decisao {
+        Decisao::Ambiguo { candidatas, .. } => {
+            assert_eq!(campo_em_que_discordam(candidatas), Some("tipo_documental"));
+            // Uma candidata sozinha não discorda de ninguém.
+            assert_eq!(campo_em_que_discordam(&candidatas[..1]), None);
+        }
+        outra => panic!("{outra:?}"),
+    }
+}
