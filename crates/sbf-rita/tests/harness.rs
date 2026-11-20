@@ -358,7 +358,9 @@ fn campo_cujo_regex_nao_acha_mostra_ate_tres_linhas_candidatas() {
         contrato.contains("«€ ln) 123456789012-3 é O)»"),
         "{contrato}"
     );
-    assert!(contrato.matches('«').count() <= 3, "{contrato}");
+    // Até três linhas candidatas, mais o número da sugestão de regex.
+    assert!(contrato.matches('«').count() <= 4, "{contrato}");
+    assert!(contrato.contains("serve `(\\d{12}-\\d)`"), "{contrato}");
     assert!(contrato.contains("testar_regex"), "{contrato}");
     // Com `momento` a competência sem ano sai: só o contrato falta.
     assert_eq!(diag.len(), 2, "{diag:?}");
@@ -477,11 +479,18 @@ fn regex_que_pega_so_parte_do_numero_nao_passa() {
     let mut s = sessao(d.path(), Some("2026-11-20"));
     let mut def = definicao_boa();
     def["extrair"]["contrato"]["regex"] = json!("(\\d{11}-\\d)");
+    def["detectar"]["todos"] = json!([{"contem": "prestação atual"}]);
     let o = saida(&s.executar("propor_padrao", &propor(&def)));
     assert_eq!(o["passou"], false, "{o}");
     let diag = o["item"]["diagnostico"].to_string();
     assert!(diag.contains("só parte do número"), "{diag}");
     assert!(diag.contains("123456789012-3"), "{diag}");
+    assert!(diag.contains("`(\\\\d{12}-\\\\d)`"), "{diag}");
+    // O pedido também diz que o contrato determina, e as duas falhas vêm juntas.
+    assert!(
+        diag.contains("nenhuma condição de `detectar` usa o valor dele"),
+        "{diag}"
+    );
     assert_eq!(versoes(d.path()), 0);
 }
 
@@ -499,4 +508,22 @@ fn o_numero_do_contrato_que_determina_precisa_estar_nas_condicoes() {
         "{diag}"
     );
     assert!(diag.contains("123456789012-3"), "{diag}");
+}
+
+#[test]
+fn definicao_mandada_como_texto_com_escapes_invalidos_e_reparada() {
+    let d = cofre();
+    let mut s = sessao(d.path(), Some("2026-11-20"));
+    // O que o qwen3-coder manda: o objeto como texto, com `\d` e `\s` crus.
+    let texto = r#"{"tipo_documental":"comprovante-prestacao-habitacao-caixa","detectar":{"todos":[{"contem":"prestação atual"},{"contem":"123456789012-3"}]},"extrair":{"contrato":{"regex":"(\d{12}-\d)","formato":"texto"},"valor_centavos":{"regex":"R\$\s*([\d.,]+)","formato":"centavos"},"competencia":{"regex":"Vencimento em (\d{1,2} de [A-Za-zç]+)","formato":"competencia"}},"obrigatorios":["contrato","competencia"]}"#;
+    let o = saida(&s.executar("propor_padrao", &propor(&json!(texto))));
+    assert_eq!(o["passou"], true, "{o}");
+    // E o texto que nem JSON é volta com o motivo.
+    let o = saida(&s.executar("propor_padrao", &propor(&json!("{não é json"))));
+    assert!(
+        o["erro"]
+            .as_str()
+            .is_some_and(|e| e.contains("objeto JSON") && e.contains("line 1")),
+        "{o}"
+    );
 }

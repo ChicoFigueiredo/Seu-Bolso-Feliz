@@ -179,6 +179,29 @@ fn consertar_barras(def: &mut Definicao) -> Vec<String> {
     avisos
 }
 
+/// Os modelos que mandam a definição como texto escrevem `\\d` e `\\s` dentro do JSON, que não
+/// são escapes válidos: dobra a barra que não precede um escape do JSON.
+fn reparar_escapes(json: &str) -> String {
+    let mut saida = String::with_capacity(json.len() + 8);
+    let mut chars = json.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            saida.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
+                saida.push('\\');
+                if let Some(proximo) = chars.next() {
+                    saida.push(proximo);
+                }
+            }
+            _ => saida.push_str("\\\\"),
+        }
+    }
+    saida
+}
+
 /// Um id de padrão a partir do tipo documental (quando o modelo ensaia sem dar `regra`).
 fn id_do_tipo(tipo: &str) -> String {
     let id: String = tipo
@@ -779,7 +802,13 @@ impl Sessao {
         // Alguns modelos mandam o objeto como texto.
         let def_json = match def_json {
             Value::String(s) => serde_json::from_str::<Value>(s)
-                .map_err(|_| "`definicao` precisa ser um objeto JSON".to_owned())?,
+                .or_else(|_| serde_json::from_str::<Value>(&reparar_escapes(s)))
+                .map_err(|e| {
+                    format!(
+                        "`definicao` precisa ser um objeto JSON (não um texto): {}",
+                        cortar(&e.to_string(), 120)
+                    )
+                })?,
             outro => outro.clone(),
         };
         let mut definicao: Definicao = serde_json::from_value(def_json)
