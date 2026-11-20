@@ -673,7 +673,7 @@ impl AppCasca for AppSbf {
             let mut j = self.janela.borrow_mut();
             j.contagens(self.consulta.as_ref())
         };
-        let fila = self.janela.borrow_mut().contagens_da_fila();
+        let caixa_de_entrada = self.janela.borrow_mut().contagens_da_caixa_de_entrada();
         let futura = |id: &str| {
             areas::area_futura(id).map(|a| {
                 ItemNavegacao::novo(a.id, a.rotulo, a.icone)
@@ -750,9 +750,9 @@ impl AppCasca for AppSbf {
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", {
                 // As Regras de reconhecimento (spec 13) já funcionam: sem selo de fatia.
-                // A Caixa de entrada funciona quando a fila de reconhecimento está ligada: sem
+                // A Caixa de entrada funciona quando está ligada ao reconhecimento: sem
                 // etiqueta de fatia e com o contador dos não resolvidos.
-                let mut v = match fila {
+                let mut v = match caixa_de_entrada {
                     Some(c) => vec![
                         ItemNavegacao::novo("caixa", "Caixa de entrada", "inbox")
                             .contagem(c.reconhecidos.max(0) as u64),

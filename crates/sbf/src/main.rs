@@ -22,12 +22,12 @@
 //! - `sbf --versao`.
 
 mod caixa;
+mod caixa_de_entrada;
 mod canais;
 mod captura;
 mod coletor;
 mod entrada;
 mod estacao;
-mod fila;
 mod gmail;
 mod inventario;
 mod mcp;

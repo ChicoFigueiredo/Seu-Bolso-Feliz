@@ -164,16 +164,20 @@ impl AppDoInventario {
                 let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
                     .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
                 if let Ok(r) = reconhecedor {
-                    // Arrastar também cai na Caixa de entrada.
-                    janela.ligar_reconhecedor(std::sync::Arc::new(
-                        r.com_fila(sbf_inventario::caixa_de_entrada::Origem::Arrastado),
-                    ));
+                    // Arrastar também cai na Caixa de entrada (e, sendo ação do usuário,
+                    // reabre o que ele já tinha resolvido).
+                    janela.ligar_reconhecedor(std::sync::Arc::new(r.com_caixa_de_entrada(
+                        sbf_inventario::caixa_de_entrada::Canal::Arrastado,
+                        true,
+                    )));
                 }
-                // A Caixa de entrada: a fila de reconhecimento do próprio cofre.
-                janela.ligar_fila(std::sync::Arc::new(crate::fila::FilaDoCofre::nova(
-                    self.pasta.clone(),
-                    f.chaveiro.clone(),
-                )));
+                // A Caixa de entrada do próprio cofre.
+                janela.ligar_caixa_de_entrada(std::sync::Arc::new(
+                    crate::caixa_de_entrada::CaixaDeEntradaDoCofre::nova(
+                        self.pasta.clone(),
+                        f.chaveiro.clone(),
+                    ),
+                ));
                 janela.ferramentas = Some(f);
                 // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
                 // `inventario.sqlite`: a janela percebe e relê o que mostra.

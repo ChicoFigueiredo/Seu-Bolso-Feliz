@@ -11,8 +11,8 @@ use rusqlite::Connection;
 use sbf_worker::config::{Config, ConfigDaTriagem, PastaVigiada};
 use sbf_worker::estado::{EstadoDoWorker, agora};
 use sbf_worker::laco::{
-    Analista, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram, Dados,
-    Indexador, LeitorDeImagens, ReconhecedorDePastas, ResumoDaNuvem, ResumoDaTriagem,
+    Analista, ArquivoNovo, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram,
+    Dados, Indexador, LeitorDeImagens, ReconhecedorDePastas, ResumoDaNuvem, ResumoDaTriagem,
     ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice, ResumoDoOcr, ResumoDoTelegram,
     ResumoDosPontos, Triador, Worker,
 };
@@ -622,28 +622,51 @@ fn telegram_minutos_tem_padrao_15_e_zero_desliga() {
     assert_eq!(n.get(), 0);
 }
 
-struct ReconhecedorFalso(Rc<RefCell<Vec<String>>>);
+struct ReconhecedorFalso(Rc<RefCell<Vec<(String, String)>>>);
 impl ReconhecedorDePastas for ReconhecedorFalso {
-    fn reconhecer(&mut self, caminho: &std::path::Path, _: &AtomicBool) -> Result<(), Falha> {
-        let nome = caminho.file_name().unwrap().to_string_lossy().into_owned();
-        self.0.borrow_mut().push(nome);
+    fn reconhecer(&mut self, a: &ArquivoNovo, _: &AtomicBool) -> Result<(), Falha> {
+        let nome = a
+            .caminho
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(a.sha256.len(), 64, "o hook recebe o sha256 do conteúdo");
+        self.0.borrow_mut().push((nome, a.fonte.clone()));
         Ok(())
     }
 }
 
 #[test]
-fn so_o_arquivo_que_o_vigia_acabou_de_indexar_passa_pelo_reconhecimento() {
+fn o_vigia_reconhece_o_arquivo_novo_e_a_reconciliacao_nao_o_acervo_antigo() {
+    use sbf_coleta::pastas::{Opcoes, Varredor};
     let c = cenario();
     std::fs::write(c.raiz.join("antigo.pdf"), "boleto ficticio antigo").unwrap();
+    // O acervo antigo foi indexado antes de a Caixa de entrada existir neste banco.
+    {
+        let conn = sbf_worker::banco::abrir(&c.dados.banco).unwrap();
+        let mut v = Varredor::novo(
+            &conn,
+            "disco:teste",
+            &c.raiz,
+            Opcoes {
+                cofre: c.dados.cofre.clone(),
+                ..Opcoes::default()
+            },
+        )
+        .unwrap();
+        v.varrer(&AtomicBool::new(false)).unwrap();
+        v.finalizar("concluida").unwrap();
+    }
+    assert_eq!(origens(&c), 1);
+    std::thread::sleep(Duration::from_millis(20));
     let vistos = Rc::new(RefCell::new(Vec::new()));
     let mut w = Worker::novo(c.dados.clone(), config(&c), None, None)
         .unwrap()
         .com_reconhecimento_das_pastas(Box::new(ReconhecedorFalso(vistos.clone())));
     let nao = AtomicBool::new(false);
-    // A reconciliação inicial acha o arquivo antigo, mas não o reconhece (não enfileira o
-    // acervo inteiro).
+    // A reconciliação inicial revê o arquivo antigo e não o reconhece.
     w.passo(agora(), Duration::from_millis(10), &nao);
-    assert_eq!(origens(&c), 1);
     assert!(vistos.borrow().is_empty());
     // O que chega depois, pelo vigia, passa pelo reconhecimento.
     std::fs::write(c.raiz.join("novo.pdf"), "boleto ficticio novo").unwrap();
@@ -653,6 +676,32 @@ fn so_o_arquivo_que_o_vigia_acabou_de_indexar_passa_pelo_reconhecimento() {
             break;
         }
     }
-    assert_eq!(vistos.borrow().as_slice(), ["novo.pdf"]);
+    assert_eq!(
+        vistos.borrow().as_slice(),
+        [("novo.pdf".to_owned(), "disco:teste".to_owned())]
+    );
+    w.encerrar();
+}
+
+#[test]
+fn o_arquivo_que_chegou_com_o_worker_parado_e_reconhecido_pela_reconciliacao() {
+    let c = cenario();
+    // A Caixa de entrada passa a existir; depois o arquivo chega, sem worker rodando.
+    sbf_inventario::caixa_de_entrada::garantir_tabela(
+        &sbf_worker::banco::abrir(&c.dados.banco).unwrap(),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(c.raiz.join("parado.pdf"), "boleto ficticio chegou parado").unwrap();
+    let vistos = Rc::new(RefCell::new(Vec::new()));
+    let mut w = Worker::novo(c.dados.clone(), config(&c), None, None)
+        .unwrap()
+        .com_reconhecimento_das_pastas(Box::new(ReconhecedorFalso(vistos.clone())));
+    // Um passo só: a reconciliação inicial indexa o arquivo e o reconhece.
+    w.passo(agora(), Duration::from_millis(10), &AtomicBool::new(false));
+    assert_eq!(
+        vistos.borrow().as_slice(),
+        [("parado.pdf".to_owned(), "disco:teste".to_owned())]
+    );
     w.encerrar();
 }

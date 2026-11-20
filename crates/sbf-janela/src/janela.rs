@@ -173,8 +173,8 @@ pub struct Janela {
     pub conexoes: crate::conexoes_ui::Conexoes,
     /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
     pub regras: crate::regras_ui::Regras,
-    /// A Caixa de entrada: a fila de reconhecimento.
-    pub fila: crate::caixa_de_entrada::EstadoDaFila,
+    /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
+    pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -308,7 +308,7 @@ impl Janela {
             roteiros: crate::roteiros::Roteiros::default(),
             conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
-            fila: crate::caixa_de_entrada::EstadoDaFila::default(),
+            caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -591,7 +591,7 @@ impl Janela {
                 .map(crate::rubricas::ref_do_documento);
         }
         // Uma linha da Caixa de entrada escolhida: o dock mostra o arquivo dela.
-        if let Some(r) = self.foco_da_fila() {
+        if let Some(r) = self.foco_da_caixa_de_entrada() {
             return Some(r);
         }
         self.centro
@@ -1068,7 +1068,7 @@ impl Janela {
                     &mut self.focar_pesquisa,
                 );
                 if *area == Area::ATriar {
-                    crate::caixa_de_entrada_ui::secao_sem_padrao(ui, &mut self.fila);
+                    crate::caixa_de_entrada_ui::secao_sem_padrao(ui, &mut self.caixa_de_entrada);
                 }
                 if *area == Area::Lotes {
                     faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), caixa, pedidos);
@@ -1146,8 +1146,8 @@ impl Janela {
             }
             // A Caixa de entrada do reconhecimento local; os rascunhos do servidor (spec 08)
             // só aparecem quando ela não está ligada.
-            Destino::AreaFutura("caixa") if self.fila.ligada() => {
-                crate::caixa_de_entrada_ui::area(ui, &mut self.fila);
+            Destino::AreaFutura("caixa") if self.caixa_de_entrada.ligada() => {
+                crate::caixa_de_entrada_ui::area(ui, &mut self.caixa_de_entrada);
             }
             Destino::AreaFutura("caixa") if caixa.is_some() => {
                 if let Some(c) = caixa {

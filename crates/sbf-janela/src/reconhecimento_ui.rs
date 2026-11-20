@@ -62,14 +62,14 @@ impl Janela {
             (!i.raw.hovered_files.is_empty(), soltos)
         });
         self.reconhecimento.pairando = pairando;
-        self.tique_da_fila();
         if pairando {
             camada_de_soltar(ctx);
         }
         if !soltos.is_empty() {
             self.soltar_arquivos(soltos, Some(ctx));
         }
-        if self.tique_do_reconhecimento(Some(ctx)) {
+        let da_caixa = self.tique_da_caixa_de_entrada(Some(ctx));
+        if self.tique_do_reconhecimento(Some(ctx)) || da_caixa {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -89,7 +89,7 @@ impl Janela {
         let regras_ligadas = self.regras.ligada();
         // Com uma linha da Caixa de entrada escolhida, o painel mostra só o cartão dela; sem
         // ela, os cartões do arrastar (o da fila fica guardado, fora de vista).
-        let da_fila = self.cartao_da_fila_em_foco();
+        let da_fila = self.cartao_da_caixa_de_entrada_em_foco();
         let reservado = self.reconhecimento.da_caixa;
         let visivel = |i: usize| match da_fila {
             Some(f) => i == f,
@@ -296,7 +296,10 @@ fn cartao(
         }
         match &c.situacao {
             SituacaoDoCartao::Pronto(r) => {
-                if let EstadoDoTexto::SemTexto(m) | EstadoDoTexto::Protegido(m) = &r.texto {
+                if let EstadoDoTexto::SemTexto(m)
+                | EstadoDoTexto::Protegido(m)
+                | EstadoDoTexto::Falhou(m) = &r.texto
+                {
                     aviso_com_triangulo(ui, p, m);
                 }
                 for a in &r.avisos {

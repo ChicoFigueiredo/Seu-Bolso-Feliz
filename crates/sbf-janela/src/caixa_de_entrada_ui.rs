@@ -1,13 +1,15 @@
 //! O desenho da Caixa de entrada: a área do painel da esquerda (seção Documentos) e a seção
-//! "Sem padrão de reconhecimento" de A triar. Só desenha e põe [`PedidoDaFila`]s em
-//! `fila.pendentes`; quem aplica é [`crate::Janela::tique_da_fila`]. O estado e as regras
-//! estão em [`crate::caixa_de_entrada`].
+//! "Sem padrão de reconhecimento" de A triar. Só desenha e põe [`PedidoDaCaixaDeEntrada`]s em
+//! `caixa_de_entrada.pendentes`; quem aplica é [`crate::Janela::tique_da_caixa_de_entrada`].
+//! O estado e as regras estão em [`crate::caixa_de_entrada`].
 
 use egui::{Align, Layout, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
-use sbf_inventario::caixa_de_entrada::{Entrada, Origem, Situacao};
+use sbf_inventario::caixa_de_entrada::{Canal, Entrada, Situacao};
 
-use crate::caixa_de_entrada::{Escopo, EstadoDaFila, PedidoDaFila, chegada_em_texto};
+use crate::caixa_de_entrada::{
+    Escopo, EstadoDaCaixaDeEntrada, PedidoDaCaixaDeEntrada, chegada_em_texto,
+};
 use crate::componentes;
 use crate::formato;
 use crate::tema;
@@ -28,7 +30,7 @@ fn tabela(
     id: &str,
     entradas: &[Entrada],
     selecionada: Option<&str>,
-    pendentes: &mut Vec<PedidoDaFila>,
+    pendentes: &mut Vec<PedidoDaCaixaDeEntrada>,
     altura: Option<f32>,
 ) {
     let p = tema::paleta(ui.ctx());
@@ -40,7 +42,7 @@ fn tabela(
         .cell_layout(Layout::left_to_right(Align::Center))
         .auto_shrink([false, true])
         .column(Column::initial(96.0).at_least(70.0).clip(true))
-        .column(Column::initial(96.0).at_least(60.0).clip(true))
+        .column(Column::initial(110.0).at_least(60.0).clip(true))
         .column(Column::initial(220.0).at_least(80.0).clip(true))
         .column(Column::remainder().at_least(120.0).clip(true))
         .column(Column::initial(170.0).at_least(110.0).clip(true));
@@ -49,7 +51,7 @@ fn tabela(
     }
     construtor
         .header(24.0, |mut c| {
-            for t in ["Chegada", "Origem", "Arquivo", "Reconhecido", "Estado"] {
+            for t in ["Chegada", "Chegou por", "Arquivo", "Reconhecido", "Estado"] {
                 c.col(|ui| {
                     ui.label(RichText::new(t).strong().size(12.5).color(p.tinta_suave));
                 });
@@ -65,7 +67,7 @@ fn tabela(
                     ui.label(RichText::new(chegada_em_texto(&e.chegou_em)).color(cor));
                 });
                 linha.col(|ui| {
-                    ui.label(RichText::new(e.origem.rotulo()).color(cor));
+                    ui.label(RichText::new(e.canal.rotulo()).color(cor));
                 });
                 linha.col(|ui| {
                     ui.add(egui::Label::new(RichText::new(&e.nome).color(cor)).truncate())
@@ -86,16 +88,16 @@ fn tabela(
                     }
                 });
                 if linha.response().clicked() {
-                    pendentes.push(PedidoDaFila::Selecionar(e.content_hash.clone()));
+                    pendentes.push(PedidoDaCaixaDeEntrada::Selecionar(e.content_hash.clone()));
                 }
             });
         });
 }
 
 /// A faixa de ações da linha escolhida: Resolver, Dispensar, Reconhecer de novo.
-fn acoes(ui: &mut Ui, fila: &EstadoDaFila, pendentes: &mut Vec<PedidoDaFila>) {
+fn acoes(ui: &mut Ui, caixa: &EstadoDaCaixaDeEntrada, pendentes: &mut Vec<PedidoDaCaixaDeEntrada>) {
     let p = tema::paleta(ui.ctx());
-    let Some(sha) = fila.selecionada.as_deref() else {
+    let Some(sha) = caixa.selecionada.as_deref() else {
         ui.label(
             RichText::new("Escolha uma linha para ver o cartão e a prévia no painel da direita.")
                 .size(12.0)
@@ -103,11 +105,12 @@ fn acoes(ui: &mut Ui, fila: &EstadoDaFila, pendentes: &mut Vec<PedidoDaFila>) {
         );
         return;
     };
-    let escolhida = fila
+    let escolhida = caixa
         .caixa
         .iter()
-        .chain(&fila.sem_padrao)
+        .chain(&caixa.sem_padrao)
         .find(|e| e.content_hash == sha);
+    let reconhecendo = caixa.esta_reconhecendo(sha);
     ui.horizontal_wrapped(|ui| {
         match escolhida {
             Some(e) => {
@@ -121,46 +124,70 @@ fn acoes(ui: &mut Ui, fila: &EstadoDaFila, pendentes: &mut Vec<PedidoDaFila>) {
         if aberta {
             if ui
                 .button("Resolver")
-                .on_hover_text("Você aplicou o que queria: o item sai da lista")
+                .on_hover_text("Você aplicou o que queria: o item sai da lista (entra no Rastro)")
                 .clicked()
             {
-                pendentes.push(PedidoDaFila::Resolver(sha.to_owned()));
+                pendentes.push(PedidoDaCaixaDeEntrada::Resolver(sha.to_owned()));
             }
             if ui
                 .button("Dispensar")
-                .on_hover_text("Isto não é nada para o planejamento: o item sai da lista")
+                .on_hover_text(
+                    "Isto não é nada para o planejamento: o item sai da lista (entra no Rastro)",
+                )
                 .clicked()
             {
-                pendentes.push(PedidoDaFila::Dispensar(sha.to_owned()));
+                pendentes.push(PedidoDaCaixaDeEntrada::Dispensar(sha.to_owned()));
             }
         } else if ui.button("Reabrir").clicked() {
-            pendentes.push(PedidoDaFila::Reabrir(sha.to_owned()));
+            pendentes.push(PedidoDaCaixaDeEntrada::Reabrir(sha.to_owned()));
         }
-        if ui
-            .button("Reconhecer de novo")
-            .on_hover_text("Lê o documento outra vez com as regras de agora, sem gastar IA")
-            .clicked()
-        {
-            pendentes.push(PedidoDaFila::ReconhecerDeNovo(sha.to_owned()));
+        let de_novo = ui
+            .add_enabled(
+                !caixa.reconhecendo_algum(),
+                egui::Button::new("Reconhecer de novo"),
+            )
+            .on_hover_text(
+                "Lê o documento outra vez com as regras de agora (extrai o texto que faltar), \
+                 sem IA. Não reabre o que você já decidiu.",
+            );
+        if de_novo.clicked() {
+            pendentes.push(PedidoDaCaixaDeEntrada::ReconhecerDeNovo(sha.to_owned()));
+        }
+        if reconhecendo {
+            ui.add(egui::Spinner::new().size(14.0));
+            ui.label(
+                RichText::new("Reconhecendo…")
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
         }
     });
 }
 
-fn erro(ui: &mut Ui, fila: &EstadoDaFila) {
-    if let Some(e) = &fila.erro {
+fn erro(ui: &mut Ui, caixa: &EstadoDaCaixaDeEntrada) {
+    if let Some(e) = &caixa.erro {
         let p = tema::paleta(ui.ctx());
         componentes::aviso(ui, "error", e, p.perigo_sutil, p.borda, p.perigo);
         ui.add_space(4.0);
     }
 }
 
+fn escolher_escopo(ui: &mut Ui, escopo: &mut Escopo, pendentes: &mut Vec<PedidoDaCaixaDeEntrada>) {
+    for e in [Escopo::NaoResolvidos, Escopo::Todos] {
+        if ui.selectable_label(*escopo == e, e.rotulo()).clicked() && *escopo != e {
+            *escopo = e;
+            pendentes.push(PedidoDaCaixaDeEntrada::Recarregar);
+        }
+    }
+}
+
 /// A área "Caixa de entrada".
-pub fn area(ui: &mut Ui, fila: &mut EstadoDaFila) {
+pub fn area(ui: &mut Ui, caixa: &mut EstadoDaCaixaDeEntrada) {
     let p = tema::paleta(ui.ctx());
     let mut pendentes = Vec::new();
     ui.horizontal(|ui| {
         componentes::titulo(ui, "Caixa de entrada", 20.0);
-        let n = fila.contagens.reconhecidos;
+        let n = caixa.contagens.reconhecidos;
         ui.label(
             RichText::new(format!(
                 "{} {}",
@@ -173,6 +200,15 @@ pub fn area(ui: &mut Ui, fila: &mut EstadoDaFila) {
             ))
             .color(p.tinta_suave),
         );
+        // Processando fica fora das listas e do contador: um indicador à parte.
+        if caixa.contagens.processando > 0 {
+            ui.add(egui::Spinner::new().size(13.0));
+            ui.label(
+                RichText::new(format!("{} processando", caixa.contagens.processando))
+                    .size(12.0)
+                    .color(p.tinta_suave),
+            );
+        }
     });
     ui.label(
         RichText::new(
@@ -183,46 +219,37 @@ pub fn area(ui: &mut Ui, fila: &mut EstadoDaFila) {
         .color(p.tinta_suave),
     );
     ui.add_space(6.0);
-    erro(ui, fila);
+    erro(ui, caixa);
     ui.horizontal(|ui| {
-        for escopo in [Escopo::NaoResolvidos, Escopo::Todos] {
-            if ui
-                .selectable_label(fila.escopo == escopo, escopo.rotulo())
-                .clicked()
-                && fila.escopo != escopo
-            {
-                fila.escopo = escopo;
-                pendentes.push(PedidoDaFila::Recarregar);
-            }
-        }
+        escolher_escopo(ui, &mut caixa.escopo, &mut pendentes);
         ui.separator();
-        let atual = fila.origem.map_or("Todas as origens", Origem::rotulo);
-        egui::ComboBox::from_id_salt("caixa-origem")
+        let atual = caixa.canal.map_or("Todos os canais", Canal::rotulo);
+        egui::ComboBox::from_id_salt("caixa-canal")
             .selected_text(atual)
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_value(&mut fila.origem, None, "Todas as origens")
+                    .selectable_value(&mut caixa.canal, None, "Todos os canais")
                     .changed()
                 {
-                    pendentes.push(PedidoDaFila::Recarregar);
+                    pendentes.push(PedidoDaCaixaDeEntrada::Recarregar);
                 }
-                for o in Origem::TODAS {
+                for c in Canal::TODOS {
                     if ui
-                        .selectable_value(&mut fila.origem, Some(o), o.rotulo())
+                        .selectable_value(&mut caixa.canal, Some(c), c.rotulo())
                         .changed()
                     {
-                        pendentes.push(PedidoDaFila::Recarregar);
+                        pendentes.push(PedidoDaCaixaDeEntrada::Recarregar);
                     }
                 }
             });
     });
     ui.add_space(4.0);
-    acoes(ui, fila, &mut pendentes);
+    acoes(ui, caixa, &mut pendentes);
     ui.add_space(6.0);
-    if fila.caixa.is_empty() {
+    if caixa.caixa.is_empty() {
         ui.add_space(8.0);
         ui.label(
-            RichText::new(if fila.escopo == Escopo::NaoResolvidos {
+            RichText::new(if caixa.escopo == Escopo::NaoResolvidos {
                 "Nada esperando decisão. O que o reconhecimento reconhecer, de agora em diante, aparece aqui."
             } else {
                 "Nada chegou ainda por aqui."
@@ -233,26 +260,27 @@ pub fn area(ui: &mut Ui, fila: &mut EstadoDaFila) {
         tabela(
             ui,
             "caixa-de-entrada",
-            &fila.caixa,
-            fila.selecionada.as_deref(),
+            &caixa.caixa,
+            caixa.selecionada.as_deref(),
             &mut pendentes,
             None,
         );
     }
-    fila.pendentes.extend(pendentes);
+    caixa.pendentes.extend(pendentes);
 }
 
 /// A seção "Sem padrão de reconhecimento", no topo de A triar: os novos que nenhuma regra
-/// casou (Não reconhecido e Protegido por senha), os mais recentes primeiro.
-pub fn secao_sem_padrao(ui: &mut Ui, fila: &mut EstadoDaFila) {
-    if !fila.ligada() {
+/// casou (Não reconhecido e Protegido por senha), os mais recentes primeiro. Com o mesmo
+/// filtro Não resolvidos / Todos da Caixa de entrada.
+pub fn secao_sem_padrao(ui: &mut Ui, caixa: &mut EstadoDaCaixaDeEntrada) {
+    if !caixa.ligada() {
         return;
     }
     let p = tema::paleta(ui.ctx());
     let mut pendentes = Vec::new();
-    let n = fila.contagens.sem_padrao;
+    let n = caixa.contagens.sem_padrao;
     let titulo = format!("Sem padrão de reconhecimento · {}", formato::inteiro(n));
-    let aberta = fila.secao_aberta;
+    let aberta = caixa.secao_aberta;
     let resposta = egui::CollapsingHeader::new(RichText::new(titulo).strong())
         .id_salt("a-triar-sem-padrao")
         .open(Some(aberta))
@@ -266,24 +294,27 @@ pub fn secao_sem_padrao(ui: &mut Ui, fila: &mut EstadoDaFila) {
                 .size(12.0)
                 .color(p.tinta_suave),
             );
-            erro(ui, fila);
-            if fila.sem_padrao.is_empty() {
+            erro(ui, caixa);
+            ui.horizontal(|ui| {
+                escolher_escopo(ui, &mut caixa.escopo_sem_padrao, &mut pendentes);
+            });
+            if caixa.sem_padrao.is_empty() {
                 ui.label(RichText::new("Nada sem padrão.").color(p.tinta_suave));
             } else {
-                acoes(ui, fila, &mut pendentes);
+                acoes(ui, caixa, &mut pendentes);
                 tabela(
                     ui,
                     "a-triar-sem-padrao-tabela",
-                    &fila.sem_padrao,
-                    fila.selecionada.as_deref(),
+                    &caixa.sem_padrao,
+                    caixa.selecionada.as_deref(),
                     &mut pendentes,
                     Some(190.0),
                 );
             }
         });
     if resposta.header_response.clicked() {
-        fila.secao_aberta = !aberta;
+        caixa.secao_aberta = !aberta;
     }
     ui.add_space(8.0);
-    fila.pendentes.extend(pendentes);
+    caixa.pendentes.extend(pendentes);
 }

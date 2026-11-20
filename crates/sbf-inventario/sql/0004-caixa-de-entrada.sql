@@ -9,8 +9,9 @@ CREATE TABLE IF NOT EXISTS caixa_entrada (
   -- Quando o conteúdo entrou na fila e quando o reconhecimento rodou por último.
   chegou_em     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   atualizado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  -- Por onde chegou da primeira vez.
-  origem        TEXT NOT NULL CHECK (origem IN
+  -- O canal por onde o conteúdo chegou da primeira vez (não é a Origem do glossário: um
+  -- documento tem várias origens, e esta coluna é só "chegou por").
+  canal         TEXT NOT NULL CHECK (canal IN
                   ('telegram', 'gmail', 'celular', 'pasta', 'arrastado', 'cli')),
   -- O que foi reconhecido: o tipo ("Contracheque", "Boleto") e uma linha de resumo.
   tipo          TEXT,
@@ -19,7 +20,9 @@ CREATE TABLE IF NOT EXISTS caixa_entrada (
   estado        TEXT NOT NULL CHECK (estado IN
                   ('pronto', 'precisa_revisar', 'possivel_duplicidade', 'protegido',
                    'nao_reconhecido', 'processando')),
-  -- O que o usuário decidiu: segue aberta até ele resolver ou dispensar.
+  -- O que o usuário decidiu: segue aberta até ele resolver ou dispensar. Resolver, dispensar
+  -- e reabrir são decisões do log (`decisao`, campo `caixa_entrada`) e esta coluna é a
+  -- projeção delas.
   situacao      TEXT NOT NULL DEFAULT 'aberta' CHECK (situacao IN
                   ('aberta', 'resolvida', 'dispensada')),
   resolvida_em  TEXT,
@@ -27,3 +30,8 @@ CREATE TABLE IF NOT EXISTS caixa_entrada (
   vezes         INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS caixa_entrada_fila ON caixa_entrada(situacao, estado, chegou_em);
+
+-- Desde quando a Caixa de entrada existe neste banco: só os achados vistos a partir daqui
+-- (e ainda sem linha) são reconhecidos pela reconciliação do worker; o acervo antigo não.
+INSERT OR IGNORE INTO meta (chave, valor)
+VALUES ('caixa_entrada_desde', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));

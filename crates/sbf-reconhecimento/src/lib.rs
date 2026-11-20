@@ -24,14 +24,14 @@
 //! (módulos novos neste crate); o agente da janela escreve contra [`Reconhecedor`] e
 //! [`ReconhecedorFicticio`]. Mudar um tipo público exige avisar o integrador.
 
+pub mod caixa_de_entrada;
 pub mod cofre;
 pub mod descontos;
 pub mod favorecido;
-pub mod fila;
 pub mod regras;
 pub mod salario;
 
-pub use cofre::{MotorDeIa, ReconhecedorDoCofre, Segredos};
+pub use cofre::{MotorDeIa, NaCaixa, ReconhecedorDoCofre, Segredos};
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -107,6 +107,9 @@ pub enum EstadoDoTexto {
     SemTexto(String),
     /// PDF protegido que nenhuma regra do chaveiro abriu (vira a pendência de sempre).
     Protegido(String),
+    /// A leitura falhou (o PDF não abriu, o pdftotext ou o OCR erraram): não é "sem padrão
+    /// de reconhecimento", é para reconhecer de novo.
+    Falhou(String),
 }
 
 /// O que foi reconhecido no arquivo.
