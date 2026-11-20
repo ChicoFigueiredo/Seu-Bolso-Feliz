@@ -198,6 +198,25 @@ impl AppDoInventario {
                             chaveiro: chaveiro_dos_roteiros.clone(),
                         }),
                     );
+                    // Rita (spec 15): os provedores com chaves no chaveiro, a aba IA de Conexões e o
+                    // painel. Nada é chamado até o usuário pedir.
+                    if let (Some(chaveiro), Ok(executor), Ok(programa)) = (
+                        chaveiro_dos_roteiros.clone(),
+                        crate::script::executor_de_script(),
+                        std::env::current_exe(),
+                    ) {
+                        let guarda: std::sync::Arc<dyn sbf_rita::GuardaDeProvedores> =
+                            std::sync::Arc::new(sbf_rita::ComCache::nova(std::sync::Arc::new(
+                                chaveiro,
+                            )));
+                        janela.conexoes.ia.ligar(std::sync::Arc::clone(&guarda));
+                        janela.rita.ligar(sbf_janela::rita_ui::Ambiente {
+                            cofre: self.pasta.clone(),
+                            guarda,
+                            executor,
+                            programa,
+                        });
+                    }
                     janela.roteiros.ligar(
                         crate::roteiros::ambiente(&self.pasta, &dados),
                         Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {
