@@ -1,8 +1,8 @@
 //! A cola do OCR das imagens novas: monta, sobre o `sbf-ocr`, o que o `sbf worker` usa.
 //! Só lê e grava texto no inventário; nada sai da máquina.
 
-use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sbf_ocr::{LOTE_PADRAO, Ocr, ler_imagens_novas};
 use sbf_worker::laco::{Dados, LeitorDeImagens, ResumoDoOcr};
@@ -13,8 +13,6 @@ use sbf_worker::registro::Falha;
 pub struct LeitorReal {
     dados: Dados,
     ocr: Ocr,
-    /// Imagens que falharam nesta execução (não são tentadas a cada volta).
-    falharam: HashSet<String>,
 }
 
 impl LeitorReal {
@@ -23,7 +21,6 @@ impl LeitorReal {
         Self {
             dados,
             ocr: Ocr::do_sistema(),
-            falharam: HashSet::new(),
         }
     }
 }
@@ -42,7 +39,7 @@ impl LeitorDeImagens for LeitorReal {
             &self.dados.cofre,
             &self.ocr,
             LOTE_PADRAO,
-            &mut self.falharam,
+            agora(),
             cancelar,
         )
         .map_err(|_| Falha::Banco)?;
@@ -52,6 +49,14 @@ impl LeitorDeImagens for LeitorReal {
             falhas: r.falhas,
             pendentes: r.pendentes > 0,
             indisponivel: r.indisponivel,
+            causa: r.causa,
         })
     }
+}
+
+/// Segundos desde 1970 (o recuo das imagens que falham é contado nesse relógio).
+fn agora() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }

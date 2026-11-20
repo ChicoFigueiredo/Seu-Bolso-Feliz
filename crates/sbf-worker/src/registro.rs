@@ -138,6 +138,8 @@ pub enum Evento<'a> {
         sem_texto: usize,
         /// Imagens que não puderam ser lidas.
         falhas: usize,
+        /// A causa mais comum das falhas (uma palavra: sem caminho nem conteúdo).
+        causa: Option<&'static str>,
     },
     /// Análise dos pontos de atenção (spec 10).
     Pontos {
@@ -209,7 +211,14 @@ impl fmt::Display for Evento<'_> {
                 lidas,
                 sem_texto,
                 falhas,
-            } => write!(f, "ocr lidas={lidas} sem_texto={sem_texto} falhas={falhas}"),
+                causa,
+            } => {
+                write!(f, "ocr lidas={lidas} sem_texto={sem_texto} falhas={falhas}")?;
+                match causa {
+                    Some(c) => write!(f, " causa={c}"),
+                    None => Ok(()),
+                }
+            }
             Self::Pontos {
                 novos,
                 reabertos,

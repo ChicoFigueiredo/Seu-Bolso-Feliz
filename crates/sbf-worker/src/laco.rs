@@ -292,6 +292,8 @@ pub struct ResumoDoOcr {
     pub pendentes: bool,
     /// Não há tesseract neste sistema (não é falha: nada foi feito).
     pub indisponivel: bool,
+    /// A causa mais comum das falhas da volta (uma palavra, sem caminho nem conteúdo).
+    pub causa: Option<&'static str>,
 }
 
 /// Lê o texto das imagens novas do inventário (o real é `sbf_ocr::ler_imagens_novas`,
@@ -307,6 +309,9 @@ pub trait LeitorDeImagens {
 /// De quanto em quanto tempo o OCR procura imagens novas, em segundos (se o lote anterior
 /// deixou imagens, a próxima volta já roda).
 pub const INTERVALO_DO_OCR: u64 = 60;
+/// Quanto o OCR espera quando o lote anterior não leu nada (só falhou) e ainda sobraram
+/// imagens: sem isto ele giraria a cada volta do laço em cima de um monte de imagens ruins.
+pub const INTERVALO_APOS_LOTE_SEM_LEITURA: u64 = 5 * 60;
 /// De quanto em quanto tempo o índice é atualizado, em segundos.
 pub const INTERVALO_DO_INDICE: u64 = 30 * 60;
 /// De quanto em quanto tempo os pontos de atenção são analisados, em segundos.
@@ -695,11 +700,17 @@ impl Worker {
                         lidas: r.lidas,
                         sem_texto: r.sem_texto,
                         falhas: r.falhas,
+                        causa: r.causa,
                     });
                 }
                 if r.pendentes && !r.indisponivel {
-                    // Sobrou imagem: a próxima volta já lê o lote seguinte.
-                    self.proximo_ocr = agora_;
+                    self.proximo_ocr = if r.lidas + r.sem_texto > 0 {
+                        // Sobrou imagem e o lote rendeu: a próxima volta já lê o seguinte.
+                        agora_
+                    } else {
+                        // O lote só falhou: não gira em cima das mesmas imagens ruins.
+                        agora_ + INTERVALO_APOS_LOTE_SEM_LEITURA
+                    };
                 }
             }
             Err(f) => self.falhou("ocr", f),

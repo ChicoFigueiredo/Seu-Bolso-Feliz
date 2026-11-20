@@ -25,5 +25,5 @@ pub use leitura::{
     EXTENSOES_DE_IMAGEM, FalhaDoOcr, IDIOMA_PADRAO, LIMITE_DA_IMAGEM, LIMITE_DA_SAIDA, Ocr,
     PRAZO_DO_OCR, e_imagem, preparar,
 };
-pub use lote::{LOTE_PADRAO, ResumoDoLote, ler_imagens_novas};
+pub use lote::{ESPERAS_APOS_FALHA, LOTE_PADRAO, ResumoDoLote, ler_imagens_novas};
 pub use sbf_inventario::texto::{METODO_OCR_SEM_TEXTO, METODO_OCR_TESSERACT as METODO_OCR};

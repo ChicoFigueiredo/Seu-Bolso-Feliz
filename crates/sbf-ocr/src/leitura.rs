@@ -54,6 +54,21 @@ pub enum FalhaDoOcr {
     Falhou,
 }
 
+impl FalhaDoOcr {
+    /// A causa genérica, para o log e o banco: só uma palavra, sem caminho nem conteúdo.
+    #[must_use]
+    pub const fn causa(self) -> &'static str {
+        match self {
+            Self::Indisponivel => "indisponivel",
+            Self::ImagemGrande => "imagem_grande",
+            Self::ArquivoIlegivel => "arquivo_ilegivel",
+            Self::ImagemIlegivel => "formato",
+            Self::TempoEsgotado => "prazo",
+            Self::Falhou => "tesseract",
+        }
+    }
+}
+
 /// A extensão do arquivo é de uma imagem que o OCR lê?
 #[must_use]
 pub fn e_imagem(caminho: &Path) -> bool {
