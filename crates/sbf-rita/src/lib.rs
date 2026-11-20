@@ -1,7 +1,7 @@
 //! Rita (spec 15): a assistente de IA dos padrões de reconhecimento. Sem interface gráfica.
 //!
 //! - [`contexto`]: o que Rita enxerga (o item na tela, a área, o filtro, a lista).
-//! - [`ferramentas`]: as sete ferramentas e o teto de 8 chamadas por pedido ([`Sessao`]).
+//! - [`ferramentas`]: as oito ferramentas e o teto de 8 chamadas por pedido ([`Sessao`]).
 //! - [`pre_teste`]: o ensaio de um rascunho sobre o item, os exemplos e o cofre (D15).
 //! - [`laco`]: o laço do agente sobre um [`sbf_ia::ProvedorDeConversa`].
 //! - [`prompt`]: as instruções e o bloco de dados delimitado.
@@ -12,6 +12,7 @@
 pub mod claude;
 pub mod cofre;
 pub mod contexto;
+pub mod diagnostico;
 pub mod ferramentas;
 pub mod laco;
 pub mod mcp;
@@ -28,7 +29,7 @@ pub use contexto::{
 };
 pub use ferramentas::{
     ChamadaFeita, EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, RascunhoCriado, Sessao,
-    definicoes, motivo_do_pedido, rastro_resumido,
+    Tentativa, definicoes, motivo_do_pedido, rastro_resumido,
 };
 pub use laco::{Evento, Parada, Relatorio, Rita};
 pub use pre_teste::{PreTeste, pre_testar};

@@ -103,3 +103,139 @@ fn rita_com_o_ollama_real_cria_um_rascunho_que_passa() {
         "o rascunho não passou no pré-teste"
     );
 }
+
+/// Imprime, com `SBF_RITA_ESPIAR=1`, o que a ferramenta devolveu e o que o modelo mandou: serve
+/// para ver por que uma tentativa falhou.
+struct Espiao<P>(P);
+
+impl<P: sbf_ia::ProvedorDeConversa> sbf_ia::ProvedorDeConversa for Espiao<P> {
+    fn nome(&self) -> String {
+        self.0.nome()
+    }
+    fn modelo(&self) -> String {
+        self.0.modelo()
+    }
+    fn natureza_do_custo(&self) -> sbf_ia::NaturezaDoCusto {
+        self.0.natureza_do_custo()
+    }
+    fn conversar(
+        &self,
+        pedido: &sbf_ia::PedidoDeConversa,
+        cancelar: &AtomicBool,
+    ) -> sbf_ia::ResultadoDeIa<sbf_ia::RespostaDeConversa> {
+        let espiar = std::env::var_os("SBF_RITA_ESPIAR").is_some();
+        if espiar
+            && let Some(sbf_ia::Mensagem::Ferramenta { conteudo, .. }) = pedido.mensagens.last()
+        {
+            eprintln!("<<< ferramenta devolveu: {conteudo}");
+        }
+        let r = self.0.conversar(pedido, cancelar)?;
+        if espiar {
+            for c in &r.chamadas {
+                eprintln!(">>> modelo chamou {}: {}", c.nome, c.argumentos);
+            }
+        }
+        Ok(r)
+    }
+}
+
+const PRINT: &str = include_str!("fixtures/print-prestacao-habitacao-ficticio.txt");
+const PEDIDO_DO_PRINT: &str = "Isto é um comprovante de prestação da habitação CAIXA. O que determina é o título (Prestação atual) e o número do contrato. A data de vencimento determina a competência. Cria o padrão.";
+
+/// A calibração que falhou com o `qwen3-coder:30b`: um print de app bancário (texto de OCR
+/// fictício). Meta: passar em até 5 chamadas, com detecção `prestação atual` + o número do
+/// contrato, o contrato extraído, o valor (123456 centavos) e a competência 2026-11 (o momento
+/// do item é 2026-11-20).
+#[test]
+#[ignore = "precisa do Ollama local com qwen3-coder:30b"]
+fn rita_com_o_ollama_real_calibra_no_print_da_prestacao_da_habitacao() {
+    let modelo =
+        std::env::var("SBF_RITA_MODELO").unwrap_or_else(|_| MODELO_LOCAL_PADRAO.to_owned());
+    let endereco =
+        std::env::var("SBF_RITA_ENDERECO").unwrap_or_else(|_| ENDERECO_DO_OLLAMA.to_owned());
+    let d = tempfile::tempdir().expect("pasta");
+    Catalogo::abrir(&d.path().join("regras.sqlite")).expect("catálogo");
+    let mut item = entrada_de_documento(
+        &"bb".repeat(32),
+        Some("print-prestacao.png"),
+        Some("image/png"),
+        Some(PRINT),
+    );
+    item.momento = Some("2026-11-20".to_owned());
+    let ctx = Contexto::novo(
+        DadosDaTela::de_documento(d.path(), item),
+        Arc::new(sbf_script::ExecutorNoProcesso::novo()),
+    )
+    .com_similares(Arc::new(SimilaresFixos(vec![])));
+    let provedor =
+        ChatCompletions::novo(ConfiguracaoChatCompletions::local(endereco, modelo), None)
+            .expect("provedor");
+    let mut rita = Rita::nova(ctx);
+    let parar = AtomicBool::new(false);
+    let t0 = std::time::Instant::now();
+    let r = rita
+        .pedir(
+            &Espiao(provedor),
+            PEDIDO_DO_PRINT,
+            &parar,
+            &RegistroFalso::novo(),
+            &mut |e| match e {
+                Evento::Chamada(c) => eprintln!(
+                    "  [{}] {} {} -> {}",
+                    c.numero, c.nome, c.argumentos, c.resultado
+                ),
+                Evento::Fala(t) => eprintln!("  Rita: {t}"),
+                Evento::Consumo(_) => {}
+            },
+        )
+        .expect("relatório");
+    eprintln!(
+        "parada {:?} em {:.1}s; {} chamadas; tokens {}/{}",
+        r.parada,
+        t0.elapsed().as_secs_f64(),
+        r.chamadas.len(),
+        r.consumo.tokens_entrada,
+        r.consumo.tokens_saida
+    );
+    eprintln!("{}", r.resposta);
+    let c = Catalogo::abrir(&d.path().join("regras.sqlite")).expect("catálogo");
+    let mut versoes = 0;
+    for regra in c.regras().expect("regras") {
+        for v in c.versoes(&regra.id).expect("versões") {
+            versoes += 1;
+            eprintln!(
+                "definição gravada ({} v{}): {}",
+                v.regra,
+                v.versao,
+                serde_json::to_string(&v.definicao).unwrap_or_default()
+            );
+        }
+    }
+    assert!(versoes <= 1, "no máximo uma versão por pedido: {versoes}");
+    let m = r.melhor().expect("nenhum rascunho");
+    assert!(m.pre_teste.passou, "o rascunho não passou no pré-teste");
+    assert!(
+        r.chamadas.len() <= 5,
+        "{} chamadas (a meta é até 5)",
+        r.chamadas.len()
+    );
+    let v = c.versao(&m.regra, m.versao).expect("versão");
+    let condicoes = serde_json::to_string(&v.definicao.detectar).unwrap_or_default();
+    assert!(condicoes.contains("123456789012-3"), "{condicoes}");
+    let campos: std::collections::BTreeMap<_, _> =
+        m.pre_teste.item.campos.iter().cloned().collect();
+    assert_eq!(
+        campos.get("valor_centavos").map(String::as_str),
+        Some("R$ 1.234,56")
+    );
+    assert_eq!(
+        campos.get("competencia").map(String::as_str),
+        Some("11/2026")
+    );
+    assert!(
+        campos
+            .get("contrato")
+            .is_some_and(|v| v.contains("123456789012")),
+        "{campos:?}"
+    );
+}

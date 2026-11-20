@@ -116,11 +116,11 @@ fn rita07_o_formato_openai_cria_o_rascunho_e_a_cli_mostra_tudo() {
         "assistente (modelo-ficticio)"
     );
     assert!(c.vigentes().unwrap().is_empty());
-    // O pedido ao servidor levou o texto no bloco de dados e as sete ferramentas.
+    // O pedido ao servidor levou o texto no bloco de dados e as oito ferramentas.
     let recebidos = s.pedidos();
     assert_eq!(recebidos.len(), 1, "para no primeiro que passa");
     let corpo: serde_json::Value = serde_json::from_slice(&recebidos[0].corpo).unwrap();
-    assert_eq!(corpo["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(corpo["tools"].as_array().unwrap().len(), 8);
     assert!(
         corpo["messages"][1]["content"]
             .as_str()

@@ -1,5 +1,5 @@
 //! O servidor MCP **restrito às ferramentas de Rita** (`sbf mcp --rita`), para o `claude -p`
-//! (spec 15, D12). Só as sete ferramentas de [`crate::ferramentas`]; nenhuma das outras do
+//! (spec 15, D12). Só as oito ferramentas de [`crate::ferramentas`]; nenhuma das outras do
 //! `sbf mcp`. O teto de 8 chamadas e o "pare no primeiro que passa" valem aqui também, porque
 //! quem os impõe é a [`Sessao`].
 //!
@@ -87,9 +87,23 @@ pub struct PProporPadrao {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PTestarRegex {
+    /// O regex (sintaxe Rust).
+    pub regex: String,
+    /// Grupo de captura que vale (padrão: 1, ou 0 se o regex não tem grupo).
+    pub grupo: Option<u32>,
+    /// texto, centavos, data, competencia, inteiro ou minusculas: mostra também o valor.
+    pub formato: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct PPreTestar {
-    pub regra: String,
-    pub versao: u32,
+    /// Com `versao`: o padrão gravado a pré-testar.
+    pub regra: Option<String>,
+    pub versao: Option<u32>,
+    /// Alternativa a `versao`: a definição a ensaiar (não grava).
+    pub definicao: Option<Value>,
+    pub nome: Option<String>,
 }
 
 /// O servidor. Barato de clonar.
@@ -232,7 +246,17 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Grava um RASCUNHO de padrão (nunca ativa) e já devolve o pré-teste dele. Se `passou` vier false, corrija e chame de novo com o mesmo `regra`."
+        description = "Roda um regex no texto do item e devolve até 5 casamentos, cada um com a linha onde está e o valor do grupo. Use antes de `propor_padrao` para acertar o regex de um campo; é barato."
+    )]
+    fn testar_regex(&self, Parameters(p): Parameters<PTestarRegex>) -> Result<String, String> {
+        self.chamar(
+            "testar_regex",
+            &json!({"regex": p.regex, "grupo": p.grupo, "formato": p.formato}),
+        )
+    }
+
+    #[tool(
+        description = "Testa a definição (pré-teste) e SÓ GRAVA o rascunho de padrão se ele passar. Se `passou` vier false, NADA foi gravado: corrija o que o `diagnostico` aponta e chame de novo com o mesmo `regra`. Definição idêntica a uma tentativa anterior é recusada. Nunca ativa."
     )]
     fn propor_padrao(&self, Parameters(p): Parameters<PProporPadrao>) -> Result<String, String> {
         self.chamar(
@@ -242,10 +266,13 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Pré-testa uma versão já gravada: o item, os exemplos e os documentos parecidos do cofre. Só leitura."
+        description = "Pré-testa e NÃO grava: ou uma versão já gravada (`regra` e `versao`), ou uma `definicao` inline (ensaio). Mostra o item, os exemplos e os documentos parecidos do cofre. Só leitura."
     )]
     fn pre_testar(&self, Parameters(p): Parameters<PPreTestar>) -> Result<String, String> {
-        self.chamar("pre_testar", &json!({"regra": p.regra, "versao": p.versao}))
+        self.chamar(
+            "pre_testar",
+            &json!({"regra": p.regra, "versao": p.versao, "definicao": p.definicao, "nome": p.nome}),
+        )
     }
 
     #[tool(
@@ -319,6 +346,8 @@ mod testes {
         let mut esperados: Vec<String> = FERRAMENTAS.iter().map(|f| (*f).to_owned()).collect();
         esperados.sort();
         assert_eq!(nomes, esperados);
+        assert_eq!(nomes.len(), 8);
+        assert!(nomes.iter().any(|n| n == "testar_regex"));
     }
 
     #[test]
