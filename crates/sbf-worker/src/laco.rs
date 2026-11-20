@@ -162,6 +162,13 @@ pub trait ColetorDeGmail {
     /// # Errors
     /// A categoria da falha (a mensagem não sai do coletor).
     fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoGmail, Falha>;
+
+    /// Depois de [`Falha::Autorizacao`] o worker para de chamar [`Self::coletar`] e só
+    /// pergunta isto (barato, sem rede): `true` quando a pessoa entrou de novo e vale tentar.
+    /// O padrão é `true` (sem suspensão que dependa de login).
+    fn pode_tentar_de_novo(&mut self) -> bool {
+        true
+    }
 }
 
 /// O que uma coleta do Telegram fez.
@@ -335,6 +342,8 @@ pub struct Worker {
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
     proxima_gmail: u64,
+    /// O Gmail devolveu `Autorizacao`: não coleta até `pode_tentar_de_novo`.
+    gmail_suspenso: bool,
     proxima_telegram: u64,
     proxima_roteiros: u64,
     proxima_triagem: u64,
@@ -410,6 +419,7 @@ impl Worker {
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
             proxima_gmail: agora_,
+            gmail_suspenso: false,
             proxima_telegram: agora_,
             proxima_roteiros: agora_,
             proxima_triagem: agora_,
@@ -638,7 +648,6 @@ impl Worker {
             && agora_ >= self.proxima_gmail
             && !cancelar.load(Ordering::Relaxed)
         {
-            self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
             self.passo_do_gmail(cancelar, agora_);
         }
         if self.config.telegram_minutos > 0
@@ -776,19 +785,44 @@ impl Worker {
         self.mensageiros = Some(m);
     }
 
+    /// Quanto esperar para olhar de novo se a pessoa entrou no Gmail (sem rede, só o chaveiro).
+    const ESPERA_DA_SUSPENSAO_S: u64 = 60;
+
     fn passo_do_gmail(&mut self, cancelar: &AtomicBool, agora_: u64) {
         let Some(mut g) = self.gmail.take() else {
             return;
         };
+        if self.gmail_suspenso {
+            if !g.pode_tentar_de_novo() {
+                // Continua vencido: nada de rede, só olha de novo daqui a pouco.
+                self.proxima_gmail = agora_ + Self::ESPERA_DA_SUSPENSAO_S;
+                self.gmail = Some(g);
+                return;
+            }
+            self.gmail_suspenso = false;
+        }
+        self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
         match g.coletar(cancelar) {
             Ok(r) => {
+                if self.estado.gmail_autorizacao_vencida {
+                    self.estado.gmail_autorizacao_vencida = false;
+                    self.sujo = true;
+                }
                 let _ = self.registro.registrar(&Evento::Gmail {
                     mensagens: r.mensagens,
                     novos: r.novos,
                 });
                 self.coletou("gmail", r.novos as u64, agora_);
             }
-            Err(f) => self.falhou("gmail", f),
+            Err(f) => {
+                if f == Falha::Autorizacao {
+                    // Não martela o Google: suspende até a pessoa entrar de novo.
+                    self.gmail_suspenso = true;
+                    self.estado.gmail_autorizacao_vencida = true;
+                    self.proxima_gmail = agora_ + Self::ESPERA_DA_SUSPENSAO_S;
+                }
+                self.falhou("gmail", f);
+            }
         }
         self.gmail = Some(g);
     }

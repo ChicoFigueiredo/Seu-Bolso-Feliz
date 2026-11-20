@@ -26,7 +26,6 @@ pub fn agora() -> u64 {
 pub struct UltimaColeta {
     /// Quando (segundos unix).
     pub quando: u64,
-    /// De onde: `pastas`, `nuvem`, `gmail` ou `mensageiros`.
     /// De onde: `pastas`, `nuvem`, `mensageiros` ou `telegram`.
     pub origem: String,
     /// Quantas origens novas.
@@ -59,6 +58,9 @@ pub struct EstadoDoWorker {
     pub nuvem_ligada: bool,
     /// A coleta de mensageiros está ligada?
     pub mensageiros_ligados: bool,
+    /// A autorização do Gmail venceu (`invalid_grant`): o worker parou de tentar até a pessoa
+    /// entrar de novo (`sbf gmail entrar` ou Conexões › Gmail).
+    pub gmail_autorizacao_vencida: bool,
     /// Falhas desde que subiu.
     pub falhas: u32,
 }
@@ -150,7 +152,12 @@ pub fn texto_da_barra(estado: Option<&EstadoDoWorker>, agora: u64) -> String {
     } else {
         String::new()
     };
-    format!("Worker: rodando · {coleta}{fila}")
+    let gmail = if e.gmail_autorizacao_vencida {
+        " · Gmail: autorização vencida"
+    } else {
+        ""
+    };
+    format!("Worker: rodando · {coleta}{fila}{gmail}")
 }
 
 #[cfg(test)]
@@ -186,6 +193,18 @@ mod testes {
             };
             assert!(!morto.rodando(agora()));
         }
+    }
+
+    #[test]
+    fn a_barra_avisa_quando_a_autorizacao_do_gmail_venceu() {
+        let agora_ = agora();
+        let e = EstadoDoWorker {
+            pid: std::process::id(),
+            atualizado_em: agora_,
+            gmail_autorizacao_vencida: true,
+            ..EstadoDoWorker::default()
+        };
+        assert!(texto_da_barra(Some(&e), agora_).ends_with("Gmail: autorização vencida"));
     }
 
     #[test]
