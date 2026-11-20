@@ -117,7 +117,7 @@ fn ac_lua_01_tipo_novo_por_configuracao_reconhece_apos_reload() {
     }
     // Reload: abre de novo o arquivo e monta o motor das vigentes.
     let c = Catalogo::abrir(&caminho).unwrap();
-    assert_eq!(c.versao_do_esquema().unwrap(), 1);
+    assert_eq!(c.versao_do_esquema().unwrap(), 2);
     let motor = Motor::das_vigentes(&c, None).unwrap();
     let e = entrada("doc-1", COMPROVANTE);
     let l = motor.ler(&e);

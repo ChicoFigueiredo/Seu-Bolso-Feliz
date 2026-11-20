@@ -175,6 +175,8 @@ pub struct Janela {
     pub regras: crate::regras_ui::Regras,
     /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
     pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
+    /// A marcação verde/âmbar das listas de documentos (spec 15, D3).
+    pub marcacao: crate::marcacao::Compartilhada,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -309,6 +311,7 @@ impl Janela {
             conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
             caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada::default(),
+            marcacao: crate::marcacao::Compartilhada::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -864,6 +867,7 @@ impl Janela {
             self.cache.limpar();
         }
         self.sondar_triagem(ui.ctx());
+        self.sincronizar_marcacao(ui.ctx());
         match vista {
             Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
             None => {
@@ -872,6 +876,15 @@ impl Janela {
                 self.centro = centro;
             }
         }
+    }
+
+    /// Liga a marcação ao catálogo de padrões (o mesmo da área Regras) e a publica no
+    /// contexto, para as tabelas a acharem. Barato: roda a cada quadro.
+    fn sincronizar_marcacao(&mut self, ctx: &egui::Context) {
+        if let Ok(mut m) = self.marcacao.lock() {
+            m.definir_fonte(self.regras.fonte());
+        }
+        crate::marcacao::publicar(ctx, &self.marcacao);
     }
 
     fn desenhar_destino_em(

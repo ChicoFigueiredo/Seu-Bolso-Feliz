@@ -71,6 +71,28 @@ pub struct Paleta {
     pub hero_texto: Color32,
     pub hero_sub: Color32,
     pub veu: Color32,
+    /// Fundo da linha de documento que algum padrão de reconhecimento casou (spec 15, D3).
+    /// Verde de verdade em todos os temas (o `success-subtle` de alguns é azulado e o de
+    /// outros é a cor da seleção): a cor de sucesso do tema misturada à superfície.
+    pub marca_verde: Color32,
+    /// Fundo da linha cuja última decisão foi Ambíguo.
+    pub marca_ambar: Color32,
+}
+
+/// Mistura `cor` sobre `base` com a fração `t` (0 a 1) de `cor`.
+fn misturar(base: Color32, cor: Color32, t: f32) -> Color32 {
+    let canal = |b: u8, c: u8| {
+        let (b, c) = (f32::from(b), f32::from(c));
+        // Truncar é seguro: o resultado fica entre 0 e 255.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let v = (b + (c - b) * t).round() as u8;
+        v
+    };
+    Color32::from_rgb(
+        canal(base.r(), cor.r()),
+        canal(base.g(), cor.g()),
+        canal(base.b(), cor.b()),
+    )
 }
 
 /// Um tema do `temas.json`.
@@ -255,6 +277,16 @@ pub fn paleta_do_tema(id: &str) -> Paleta {
         hero_texto: cor("hero-text", Color32::WHITE),
         hero_sub: cor("hero-sub", Color32::LIGHT_GRAY),
         veu: cor("scrim", Color32::from_black_alpha(140)),
+        marca_verde: misturar(
+            cor("surface-1", fundo),
+            cor("success", Color32::GREEN),
+            if escuro { 0.22 } else { 0.16 },
+        ),
+        marca_ambar: misturar(
+            cor("surface-1", fundo),
+            cor("warning", Color32::ORANGE),
+            if escuro { 0.24 } else { 0.18 },
+        ),
     }
 }
 
@@ -447,6 +479,51 @@ mod testes {
         let noite = paleta_do_tema("noite");
         assert!(noite.escuro);
         assert_eq!(noite.tinta, Color32::from_rgb(0xe8, 0xee, 0xe9));
+    }
+
+    /// A luminância relativa e a razão de contraste do WCAG.
+    fn contraste(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let f = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn a_marcacao_e_legivel_e_distinta_nos_sete_temas_claros_e_escuros() {
+        for t in temas() {
+            let p = paleta_do_tema(&t.id);
+            for (nome, fundo) in [("verde", p.marca_verde), ("ambar", p.marca_ambar)] {
+                assert!(
+                    contraste(p.tinta, fundo) >= 4.5,
+                    "{}: a tinta sobre o {nome} tem contraste {}",
+                    t.id,
+                    contraste(p.tinta, fundo)
+                );
+                assert!(
+                    contraste(p.tinta_suave, fundo) >= 3.0,
+                    "{}: a tinta suave sobre o {nome} tem contraste {}",
+                    t.id,
+                    contraste(p.tinta_suave, fundo)
+                );
+                // Dá para ver que a linha tem cor: difere da superfície.
+                assert_ne!(fundo, p.superficie_1, "{} {nome}", t.id);
+                assert_ne!(fundo, p.destaque_sutil, "{} {nome} some na seleção", t.id);
+            }
+            assert_ne!(p.marca_verde, p.marca_ambar, "{}", t.id);
+            // Verde é verde (o canal verde domina) e âmbar é quente (vermelho acima do azul).
+            assert!(p.marca_verde.g() > p.marca_verde.b(), "{}", t.id);
+            assert!(p.marca_ambar.r() > p.marca_ambar.b(), "{}", t.id);
+        }
     }
 
     #[test]
