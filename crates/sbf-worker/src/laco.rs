@@ -377,9 +377,10 @@ pub trait PassadaDePadroes {
 /// De quanto em quanto tempo a passada de padrões procura trabalho novo (texto novo, versão
 /// nova), em segundos, quando o último lote não achou nada.
 pub const INTERVALO_DOS_PADROES: u64 = 60;
-/// A pausa entre dois lotes da passada enquanto há o que ler, em segundos: o worker e a tela
+/// A pausa entre dois lotes da passada enquanto há o que ler, em segundos (lotes de até 200
+/// documentos ou 3 s, depois 1 s de pausa): o worker e a tela
 /// nunca ficam presos a ela.
-pub const PAUSA_DOS_PADROES: u64 = 5;
+pub const PAUSA_DOS_PADROES: u64 = 1;
 /// Quanto a passada espera depois de uma falha (nunca gira em cima do mesmo erro).
 pub const RECUO_DOS_PADROES: u64 = 5 * 60;
 /// De quanto em quanto tempo, em segundos, o progresso vai para o log durante a passada.

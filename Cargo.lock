@@ -5989,6 +5989,7 @@ dependencies = [
 name = "sbf-rita"
 version = "0.1.0"
 dependencies = [
+ "bancada-segredos",
  "regex",
  "rmcp",
  "rusqlite",

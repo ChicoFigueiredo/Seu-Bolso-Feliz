@@ -232,14 +232,19 @@ pub(crate) fn interpretar(
             .and_then(Value::as_u64)
             .unwrap_or(0)
     };
+    let informado = uso
+        .and_then(|u| u.get("cost"))
+        .and_then(Value::as_f64)
+        .filter(|c| c.is_finite() && *c >= 0.0);
     let custo = match natureza {
         NaturezaDoCusto::Zero => 0,
-        _ => uso
-            .and_then(|u| u.get("cost"))
-            .and_then(Value::as_f64)
-            .filter(|c| c.is_finite() && *c >= 0.0)
-            .map_or(0, dezmilesimos),
+        _ => informado.map_or(0, dezmilesimos),
     };
+    // Cobra por token e não disse quanto: não é "US$ 0".
+    let custo_ausente = matches!(
+        natureza,
+        NaturezaDoCusto::Real | NaturezaDoCusto::NaoInformado
+    ) && informado.is_none();
     Ok(RespostaDeConversa {
         texto,
         chamadas,
@@ -249,6 +254,7 @@ pub(crate) fn interpretar(
             custo_dezmilesimos_usd: custo,
             nominal: natureza == NaturezaDoCusto::Nominal,
         },
+        custo_ausente,
         modelo: v
             .get("model")
             .and_then(Value::as_str)
@@ -268,6 +274,10 @@ impl ProvedorDeConversa for ChatCompletions {
 
     fn natureza_do_custo(&self) -> NaturezaDoCusto {
         self.config.natureza
+    }
+
+    fn endereco(&self) -> String {
+        self.base.clone()
     }
 
     fn conversar(
@@ -376,7 +386,36 @@ mod testes {
         assert_eq!(r.chamadas[2].argumentos, json!({}));
         assert_eq!(r.consumo.tokens_entrada, 10);
         assert_eq!(r.consumo.custo_dezmilesimos_usd, 0);
+        assert!(!r.custo_ausente, "o local é grátis: nada a informar");
         assert!(r.texto.is_none());
         assert_eq!(r.modelo, "qwen");
+    }
+
+    #[test]
+    fn compativel_sem_usage_cost_diz_custo_ausente_e_com_cost_mostra_o_valor() {
+        let sem = json!({
+            "choices": [{"message": {"content": "oi"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 7}
+        });
+        let r = interpretar(&sem, "m", NaturezaDoCusto::Real).expect("resposta");
+        assert!(r.custo_ausente, "sem usage.cost não é US$ 0");
+        assert_eq!(r.consumo.tokens_entrada, 100);
+        let com = json!({
+            "choices": [{"message": {"content": "oi"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 7, "cost": 0.0123}
+        });
+        let r = interpretar(&com, "m", NaturezaDoCusto::Real).expect("resposta");
+        assert!(!r.custo_ausente);
+        assert_eq!(r.consumo.custo_dezmilesimos_usd, 123);
+        // Um custo informado de zero é zero de verdade.
+        let zero = json!({
+            "choices": [{"message": {"content": "oi"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 0}
+        });
+        assert!(
+            !interpretar(&zero, "m", NaturezaDoCusto::Real)
+                .expect("resposta")
+                .custo_ausente
+        );
     }
 }

@@ -9,19 +9,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sbf_ia::{
-    ChamadaDeFerramenta, Consumo, ErroDeIa, Mensagem, NaturezaDoCusto, NivelDeConfianca,
-    PedidoDeConversa, ProvedorDeConversa, Registro, Saida,
+    ChamadaDeFerramenta, Consumo, ErroDeIa, Mensagem, NaturezaDoCusto, PedidoDeConversa,
+    ProvedorDeConversa, Registro,
 };
 use sbf_mcp::backup::Backups;
 
 use crate::contexto::Contexto;
-use crate::ferramentas::{ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes};
-use crate::prompt::{instrucoes, pedido_do_usuario};
+use crate::ferramentas::{
+    ChamadaFeita, EstadoDaSessao, RascunhoCriado, Sessao, definicoes, motivo_do_pedido,
+    rastro_resumido,
+};
+use crate::prompt::{instrucoes, pedido_do_usuario, saida_de_ferramenta};
+use crate::registro::{completar, registrar_antes};
 
 /// Limite de tokens de cada resposta do modelo.
 pub const MAX_TOKENS_DA_RESPOSTA: u32 = 3000;
-/// O destinatário em `saida_ia` (ADR-015): todos os provedores recebem o texto completo (D13).
-pub const DESTINATARIO: &str = "rita";
+pub use crate::registro::DESTINATARIO;
 
 /// Por que o laço parou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +78,8 @@ pub struct Rita {
     ctx: Contexto,
     mensagens: Vec<Mensagem>,
     backups: Backups,
+    /// O primeiro pedido da conversa: num refinamento, o `motivo` da versão é este + o de agora.
+    primeiro_pedido: Option<String>,
 }
 
 impl std::fmt::Debug for Rita {
@@ -119,6 +124,7 @@ impl Rita {
             ctx,
             mensagens: Vec::new(),
             backups,
+            primeiro_pedido: None,
         }
     }
 
@@ -138,23 +144,54 @@ impl Rita {
 
     /// Um pedido. Os pedidos seguintes continuam a conversa (refinar um rascunho).
     ///
+    /// Cada envio ao provedor grava antes a linha em `saida_ia` (`registro`, ADR-015). Se o
+    /// registro não grava, nada é enviado.
+    ///
     /// # Errors
-    /// Falha do provedor (limite, rede, chave). O que já foi gravado fica.
+    /// Falha do provedor (limite, rede, chave) ou do registro. O que já foi gravado fica.
     pub fn pedir(
         &mut self,
         provedor: &dyn ProvedorDeConversa,
         pedido: &str,
         cancelar: &AtomicBool,
-        registro: Option<&dyn Registro>,
+        registro: &dyn Registro,
+        observar: &mut dyn FnMut(Evento<'_>),
+    ) -> Result<Relatorio, ErroDeIa> {
+        let base = self.mensagens.len();
+        let r = self.pedir_sem_limpar(provedor, pedido, cancelar, registro, observar);
+        if r.is_err() {
+            // Um pedido que falhou não deixa a conversa pela metade para o próximo.
+            self.mensagens.truncate(base);
+        }
+        r
+    }
+
+    fn pedir_sem_limpar(
+        &mut self,
+        provedor: &dyn ProvedorDeConversa,
+        pedido: &str,
+        cancelar: &AtomicBool,
+        registro: &dyn Registro,
         observar: &mut dyn FnMut(Evento<'_>),
     ) -> Result<Relatorio, ErroDeIa> {
         let inicio = Instant::now();
         let modelo = provedor.modelo();
-        let mut sessao = Sessao::nova(self.ctx.clone(), pedido, &modelo, self.backups.clone());
-        if self.mensagens.is_empty() {
+        let primeiro = self.mensagens.is_empty();
+        let motivo = motivo_do_pedido(
+            self.primeiro_pedido.as_deref().filter(|_| !primeiro),
+            pedido,
+        );
+        let mut sessao = Sessao::nova(self.ctx.clone(), &motivo, &modelo, self.backups.clone());
+        if primeiro {
+            self.primeiro_pedido = Some(pedido.trim().to_owned());
+            // O rastro dos padrões do item já vai no primeiro prompt (D8): poupa uma chamada.
+            let rastro = rastro_resumido(&self.ctx);
             self.mensagens.push(Mensagem::Sistema(instrucoes()));
-            self.mensagens
-                .push(Mensagem::Usuario(pedido_do_usuario(&self.ctx.tela, pedido)));
+            self.mensagens.push(Mensagem::Usuario(pedido_do_usuario(
+                &self.ctx.tela,
+                pedido,
+                rastro.as_deref(),
+            )));
         } else {
             self.mensagens.push(Mensagem::Usuario(format!(
                 "NOVO PEDIDO DO USUÁRIO:\n{}",
@@ -164,6 +201,7 @@ impl Rita {
         let ferramentas = definicoes();
         let mut consumo = Consumo::default();
         let mut ultimo_texto = String::new();
+        let mut alguma_sem_custo = false;
         let parada = loop {
             if cancelar.load(Ordering::Acquire) {
                 break Parada::Interrompida;
@@ -173,23 +211,21 @@ impl Rita {
                 ferramentas: ferramentas.clone(),
                 max_tokens_saida: MAX_TOKENS_DA_RESPOSTA,
             };
+            // ADR-015: a linha de `saida_ia` vai ANTES do envio; sem ela, nada sai.
+            let linha = registrar_antes(
+                registro,
+                &provedor.nome(),
+                &provedor.modelo(),
+                bytes_do_pedido(&req),
+            )?;
             let resposta = match provedor.conversar(&req, cancelar) {
                 Ok(r) => r,
                 Err(ErroDeIa::Interrompido) => break Parada::Interrompida,
                 Err(e) => return Err(e),
             };
+            completar(registro, linha, resposta.consumo);
             consumo = soma(consumo, resposta.consumo);
-            if let Some(r) = registro {
-                let _ = r.registrar_saida(&Saida {
-                    destinatario: DESTINATARIO.to_owned(),
-                    provedor: provedor.nome(),
-                    modelo: resposta.modelo.clone(),
-                    nivel: NivelDeConfianca::Completo,
-                    bytes_enviados: bytes_do_pedido(&req),
-                    consumo: resposta.consumo,
-                    quando: sbf_ia::agora_rfc3339(),
-                });
-            }
+            alguma_sem_custo |= resposta.custo_ausente;
             observar(Evento::Consumo(consumo));
             if let Some(t) = &resposta.texto {
                 ultimo_texto.clone_from(t);
@@ -233,7 +269,7 @@ impl Rita {
             rascunhos: estado.rascunhos,
             melhor,
             consumo,
-            natureza: provedor.natureza_do_custo(),
+            natureza: NaturezaDoCusto::do_pedido(provedor.natureza_do_custo(), alguma_sem_custo),
             modelo,
             duracao: inicio.elapsed(),
         })
@@ -246,14 +282,19 @@ impl Rita {
         observar: &mut dyn FnMut(Evento<'_>),
     ) {
         for c in chamadas {
-            let saida = sessao.executar(&c.nome, &c.argumentos);
+            // D11: depois de um rascunho passar, o resto da resposta é recusado sem executar.
+            let saida = if sessao.passou() {
+                sessao.recusar_depois_de_passar(&c.nome, &c.argumentos)
+            } else {
+                sessao.executar(&c.nome, &c.argumentos)
+            };
             if let Some(feita) = sessao.chamadas.last() {
                 observar(Evento::Chamada(feita));
             }
             self.mensagens.push(Mensagem::Ferramenta {
                 id: c.id.clone(),
                 nome: c.nome.clone(),
-                conteudo: saida,
+                conteudo: saida_de_ferramenta(&c.nome, &saida),
             });
         }
     }
