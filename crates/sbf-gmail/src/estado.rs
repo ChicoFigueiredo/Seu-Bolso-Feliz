@@ -9,7 +9,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use sbf_chaveiro::Chaveiro;
 
 use crate::config::{Conta, TipoDeEmail};
-use crate::credenciais::{Alvo, Credenciais, faltando};
+use crate::credenciais::{Credenciais, faltando};
 use crate::gravador::Destino;
 
 /// Em que pé está a conexão.
@@ -47,17 +47,15 @@ pub struct EstadoDaConexao {
     pub ultima_falha: Option<String>,
 }
 
-/// O estado de uma conta neste cofre. Só lê; não toca na rede.
+/// O estado de uma conta neste cofre (`None`: sem inventário, só credenciais). Só lê; não toca
+/// na rede.
 #[must_use]
 pub fn estado_da_conta(
-    cofre: &Path,
+    cofre: Option<&Path>,
     conta: &Conta,
     chaveiro: Option<&Chaveiro>,
 ) -> EstadoDaConexao {
-    let alvo = Alvo {
-        id: &conta.id,
-        tipo: conta.tipo,
-    };
+    let alvo = conta.alvo();
     let faltando: Vec<String> = if conta.tipo == TipoDeEmail::Gmail {
         faltando(chaveiro, alvo)
             .into_iter()
@@ -76,8 +74,13 @@ pub fn estado_da_conta(
         ultima_falha: None,
     };
     let fonte = Destino::da_conta(&conta.id).fonte;
-    let banco = cofre.join("inventario.sqlite");
-    if let Ok(conn) = Connection::open_with_flags(&banco, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+    // Sem cofre (só a lista de contas) não há o que ler do inventário.
+    if let Some(cofre) = cofre
+        && let Ok(conn) = Connection::open_with_flags(
+            cofre.join("inventario.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+    {
         let _ = ler(&conn, &fonte, &mut e);
     }
     let vencida = Credenciais::do_ambiente(chaveiro, alvo)

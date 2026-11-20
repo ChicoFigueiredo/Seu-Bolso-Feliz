@@ -93,17 +93,20 @@ pub fn coletar_conta(
 
 /// As contas de e-mail: as de `email.json` (na pasta de dados do app) ou, sem nenhuma gravada,
 /// a conta legada `gmail` se há credenciais antigas (chaveiro, ambiente ou `.env`).
-#[must_use]
-pub fn contas_efetivas(dados: Option<&Path>, chaveiro: Option<&Chaveiro>) -> Config {
+///
+/// # Errors
+/// [`Erro::Argumento`] se `email.json` não é válido (JSON ruim, id de conta inválido ou
+/// repetido): nada de conta é usada com um arquivo recusado.
+pub fn contas_efetivas(dados: Option<&Path>, chaveiro: Option<&Chaveiro>) -> Resultado<Config> {
     let legado = presentes(chaveiro, Alvo::legado());
     match dados {
-        Some(d) => Config::carregar_efetiva(&d.join(ARQUIVO_DA_CONFIG), legado).unwrap_or_default(),
+        Some(d) => Config::carregar_efetiva(&d.join(ARQUIVO_DA_CONFIG), legado),
         None => {
             let mut c = Config::default();
             if legado {
                 c.contas.push(Conta::legada());
             }
-            c
+            Ok(c)
         }
     }
 }
