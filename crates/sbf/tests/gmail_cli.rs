@@ -1,61 +1,122 @@
-//! `sbf gmail coletar` sem rede e sem credenciais: só o que dá para conferir sem o Gmail.
-//! As credenciais nunca vão em argumento; o teste as remove do ambiente.
+//! `sbf email` / `sbf gmail` sem rede e sem credenciais: só o que dá para conferir sem o
+//! Gmail. O teste isola o ambiente (HOME e XDG_DATA_HOME numa pasta temporária, diretório
+//! atual sem `.env`, variáveis do Gmail removidas) para nunca tocar no chaveiro nem nos dados
+//! de verdade. As credenciais nunca vão em argumento.
 
-use std::process::Command;
+use std::process::{Command, Output};
 
-fn sbf() -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_sbf"));
-    for v in [
-        "GOOGLE_MAIL_CLIENT_ID",
-        "GOOGLE_MAIL_CLIENT_SECRET",
-        "GMAIL_REFRESH_TOKEN",
-    ] {
-        c.env_remove(v);
+struct Ambiente {
+    pasta: tempfile::TempDir,
+}
+
+impl Ambiente {
+    fn novo() -> Self {
+        Self {
+            pasta: tempfile::tempdir().expect("pasta"),
+        }
     }
-    c
+
+    fn sbf(&self, args: &[&str]) -> Output {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_sbf"));
+        for v in [
+            "GOOGLE_MAIL_CLIENT_ID",
+            "GOOGLE_MAIL_CLIENT_SECRET",
+            "GMAIL_REFRESH_TOKEN",
+            "DISPLAY",
+            "WAYLAND_DISPLAY",
+        ] {
+            c.env_remove(v);
+        }
+        c.env("HOME", self.pasta.path())
+            .env("XDG_DATA_HOME", self.pasta.path().join("dados"))
+            .current_dir(self.pasta.path())
+            .args(args)
+            .output()
+            .expect("rodar o sbf")
+    }
+}
+
+fn erro(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
+fn saida(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
 }
 
 #[test]
-fn sem_credenciais_diz_quais_variaveis_faltam_e_sai_com_2() {
+fn sem_conta_conectada_a_coleta_sai_com_2_e_nao_cria_nada_no_cofre() {
+    let a = Ambiente::novo();
     let cofre = tempfile::tempdir().expect("cofre");
-    let saida = sbf()
-        .args(["gmail", "coletar", "--inventario"])
-        .arg(cofre.path())
-        .output()
-        .expect("rodar o sbf");
-    assert_eq!(saida.status.code(), Some(2));
-    let erro = String::from_utf8_lossy(&saida.stderr);
-    for nome in [
-        "GOOGLE_MAIL_CLIENT_ID",
-        "GOOGLE_MAIL_CLIENT_SECRET",
-        "GMAIL_REFRESH_TOKEN",
-    ] {
-        assert!(erro.contains(nome), "{erro}");
+    let cofre_s = cofre.path().to_str().expect("utf8");
+    for comando in ["gmail", "email"] {
+        let o = a.sbf(&[comando, "coletar", "--inventario", cofre_s]);
+        assert_eq!(o.status.code(), Some(2), "{}", erro(&o));
+        assert!(erro(&o).contains("nenhuma conta conectada"), "{}", erro(&o));
     }
-    // Nada foi criado no cofre.
     assert_eq!(std::fs::read_dir(cofre.path()).expect("ler").count(), 0);
 }
 
 #[test]
 fn argumentos_errados_saem_com_2_e_mostram_o_uso() {
+    let a = Ambiente::novo();
     for args in [
         vec!["gmail"],
-        vec!["gmail", "coletar"],
+        vec!["email"],
+        vec!["email", "coletar"],
         vec![
-            "gmail",
+            "email",
             "coletar",
             "--inventario",
             "/x",
             "--limite",
             "muitos",
         ],
-        vec!["gmail", "coletar", "--senha", "x"],
+        vec!["email", "coletar", "--senha", "x"],
     ] {
-        let saida = sbf().args(&args).output().expect("rodar o sbf");
-        assert_eq!(saida.status.code(), Some(2), "{args:?}");
-        assert!(
-            String::from_utf8_lossy(&saida.stderr).contains("sbf gmail coletar"),
-            "{args:?}"
-        );
+        let o = a.sbf(&args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        assert!(erro(&o).contains("sbf email"), "{args:?}");
     }
+}
+
+#[test]
+fn contas_adicionar_seguir_e_o_outlook_em_breve() {
+    let a = Ambiente::novo();
+    let o = a.sbf(&["email", "contas"]);
+    assert!(o.status.success(), "{}", erro(&o));
+    assert!(saida(&o).contains("nenhuma conta"));
+
+    let o = a.sbf(&["email", "adicionar", "--tipo", "outlook"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(erro(&o).contains("em breve"), "{}", erro(&o));
+
+    let o = a.sbf(&["email", "adicionar", "--tipo", "gmail", "--apelido", "Casa"]);
+    assert!(o.status.success(), "{}", erro(&o));
+    assert!(saida(&o).contains("conta gmail adicionada"));
+    let o = a.sbf(&["email", "adicionar"]);
+    assert!(saida(&o).contains("conta gmail-2 adicionada"));
+
+    let o = a.sbf(&["email", "contas"]);
+    let s = saida(&o);
+    assert!(
+        s.contains("gmail\tGmail") && s.contains("gmail-2\tGmail"),
+        "{s}"
+    );
+    assert!(s.contains("não conectado"), "{s}");
+    assert!(!s.contains("GOOGLE_MAIL"), "{s}");
+
+    let o = a.sbf(&["email", "seguir", "gmail", "Viagens"]);
+    assert!(o.status.success(), "{}", erro(&o));
+    let o = a.sbf(&["email", "deixar", "gmail", "Viagens"]);
+    assert!(saida(&o).contains("deixa de coletar"), "{}", saida(&o));
+
+    // Entrar sem o Client ID e o Client secret do aplicativo diz o que fazer (sem abrir nada).
+    let o = a.sbf(&["email", "entrar", "gmail-2"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(erro(&o).contains("sbf email app"), "{}", erro(&o));
+
+    let o = a.sbf(&["email", "remover", "gmail-2"]);
+    assert!(o.status.success(), "{}", erro(&o));
+    assert!(!saida(&a.sbf(&["email", "contas"])).contains("gmail-2"));
 }
