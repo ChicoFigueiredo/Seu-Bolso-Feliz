@@ -1,0 +1,96 @@
+//! RITA-07 com o Ollama de verdade: `qwen3-coder:30b` sobre um documento **fictício**.
+//! Ignorado por padrão (precisa do Ollama em `localhost:11434` com o modelo); serve para
+//! calibrar o prompt e as descrições das ferramentas:
+//!
+//! ```text
+//! cargo test -p sbf-rita --test ollama -- --ignored --nocapture
+//! ```
+
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use sbf_ia::{
+    ChatCompletions, ConfiguracaoChatCompletions, ENDERECO_DO_OLLAMA, MODELO_LOCAL_PADRAO,
+};
+use sbf_regras::catalogo::Catalogo;
+use sbf_rita::{Contexto, DadosDaTela, Evento, Rita, SimilaresFixos, entrada_de_documento};
+
+const FATURA: &str = "OPERADORA EXEMPLO TELECOM S/A\nFatura de Internet Fibra\nContrato nº 4455-7788\nCliente: Fulano de Tal\nReferente a: 10/2026\nVencimento: 15/11/2026\nValor total a pagar: R$ 129,90\nCódigo de barras: 00000.00000 00000.000000 00000.000000 0 00000000000000\n";
+
+fn fatura(mes: &str, venc: &str, valor: &str, n: u8) -> sbf_regras::Entrada {
+    entrada_de_documento(
+        &format!("{n:02x}").repeat(32),
+        Some(&format!("fatura-{mes}.txt")),
+        Some("text/plain"),
+        Some(&format!(
+            "OPERADORA EXEMPLO TELECOM S/A\nFatura de Internet Fibra\nContrato nº 4455-7788\nCliente: Fulano de Tal\nReferente a: {mes}\nVencimento: {venc}\nValor total a pagar: R$ {valor}\n"
+        )),
+    )
+}
+
+#[test]
+#[ignore = "precisa do Ollama local com qwen3-coder:30b"]
+fn rita_com_o_ollama_real_cria_um_rascunho_que_passa() {
+    let modelo =
+        std::env::var("SBF_RITA_MODELO").unwrap_or_else(|_| MODELO_LOCAL_PADRAO.to_owned());
+    let endereco =
+        std::env::var("SBF_RITA_ENDERECO").unwrap_or_else(|_| ENDERECO_DO_OLLAMA.to_owned());
+    let d = tempfile::tempdir().expect("pasta");
+    Catalogo::abrir(&d.path().join("regras.sqlite")).expect("catálogo");
+    let item = entrada_de_documento(
+        &"aa".repeat(32),
+        Some("fatura-10-2026.txt"),
+        Some("text/plain"),
+        Some(FATURA),
+    );
+    let similares = vec![
+        fatura("09/2026", "15/10/2026", "129,90", 1),
+        fatura("08/2026", "15/09/2026", "119,90", 2),
+        entrada_de_documento(
+            &"cc".repeat(32),
+            Some("energia.txt"),
+            Some("text/plain"),
+            Some("Energia Exemplo\nConta de luz\nVencimento: 20/11/2026\nValor: R$ 210,00\n"),
+        ),
+    ];
+    let ctx = Contexto::novo(
+        DadosDaTela::de_documento(d.path(), item),
+        Arc::new(sbf_script::ExecutorNoProcesso::novo()),
+    )
+    .com_similares(Arc::new(SimilaresFixos(similares)));
+    let provedor =
+        ChatCompletions::novo(ConfiguracaoChatCompletions::local(endereco, modelo), None)
+            .expect("provedor");
+    let mut rita = Rita::nova(ctx);
+    let parar = AtomicBool::new(false);
+    let t0 = std::time::Instant::now();
+    let r = rita
+        .pedir(
+            &provedor,
+            "o título e o número do contrato determinam o padrão; a data de vencimento determina a competência e o valor total é o valor; cria",
+            &parar,
+            None,
+            &mut |e| match e {
+                Evento::Chamada(c) => eprintln!("  [{}] {} {} -> {}", c.numero, c.nome, c.argumentos, c.resultado),
+                Evento::Fala(t) => eprintln!("  Rita: {t}"),
+                Evento::Consumo(_) => {}
+            },
+        )
+        .expect("relatório");
+    eprintln!(
+        "parada {:?} em {:.1}s; tokens {}/{}",
+        r.parada,
+        t0.elapsed().as_secs_f64(),
+        r.consumo.tokens_entrada,
+        r.consumo.tokens_saida
+    );
+    eprintln!("{}", r.resposta);
+    assert!(
+        !r.rascunhos.is_empty(),
+        "o modelo não criou nenhum rascunho"
+    );
+    assert!(
+        r.melhor().is_some_and(|m| m.pre_teste.passou),
+        "o rascunho não passou no pré-teste"
+    );
+}

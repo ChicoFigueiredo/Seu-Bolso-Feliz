@@ -114,3 +114,25 @@ pub fn entrada_de_documento(
         momento: None,
     }
 }
+
+/// A entrada de um registro do banco (Movimentações): só o que a tela sabe, a descrição.
+pub fn entrada_de_registro(id: &str, descricao: &str) -> Entrada {
+    Entrada {
+        versao_do_esquema: VERSAO_DO_ESQUEMA,
+        id: format!("registro:{id}"),
+        tipo: TipoDeEntrada::Registro,
+        origem: Origem {
+            canal: Canal::Pluggy,
+            id_externo: Some(id.to_owned()),
+        },
+        sha256: None,
+        mime: None,
+        nome: None,
+        texto: None,
+        dicas: Dicas {
+            descricao: Some(descricao.to_owned()),
+            ..Dicas::default()
+        },
+        momento: None,
+    }
+}

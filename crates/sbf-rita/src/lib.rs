@@ -21,7 +21,9 @@ pub mod provedores;
 
 pub use claude::ClaudeDeRita;
 pub use cofre::{FonteDeSimilares, SimilaresDoCofre, SimilaresFixos};
-pub use contexto::{Contexto, DadosDaTela, TituloDaLista, entrada_de_documento};
+pub use contexto::{
+    Contexto, DadosDaTela, TituloDaLista, entrada_de_documento, entrada_de_registro,
+};
 pub use ferramentas::{
     ChamadaFeita, EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, RascunhoCriado, Sessao,
     definicoes,
@@ -29,6 +31,6 @@ pub use ferramentas::{
 pub use laco::{Evento, Parada, Relatorio, Rita};
 pub use pre_teste::{PreTeste, pre_testar};
 pub use provedores::{
-    ConfiguracaoDeRita, GuardaDeProvedores, GuardaEmMemoria, ProvedorConfigurado, ProvedorDaRita,
-    TipoDeProvedor, construir,
+    ComCache, ConfiguracaoDeRita, GuardaDeProvedores, GuardaEmMemoria, ProvedorConfigurado,
+    ProvedorDaRita, TipoDeProvedor, construir,
 };
