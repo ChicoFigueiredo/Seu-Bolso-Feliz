@@ -1942,3 +1942,68 @@ fn o_campo_em_que_as_candidatas_discordam_sai_do_mesmo_criterio_do_motor() {
         outra => panic!("{outra:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// Mês por extenso sem ano (spec 15: o ano vem do `momento` da entrada)
+// ---------------------------------------------------------------------------------------
+
+const PRESTACAO: &str = "Prestação atual\nR$ 1.234,56\nVencimento em 25 de Novembro\n";
+
+fn def_prestacao() -> Definicao {
+    let mut d = Definicao::simples("prestacao-habitacao", "prestacao atual");
+    d.extrair.insert(
+        "competencia".into(),
+        extracao(r"Vencimento em (\d+ de [A-Za-zç]+)", Formato::Competencia),
+    );
+    d.extrair.insert(
+        "vencimento".into(),
+        extracao(r"Vencimento em (\d+ de [A-Za-zç]+)", Formato::Data),
+    );
+    d.obrigatorios = vec!["competencia".into()];
+    d
+}
+
+fn ler_prestacao(momento: Option<&str>) -> sbf_regras::Reconhecimento {
+    let v = VersaoDeRegra::avulsa(nova("prestacao", def_prestacao()), 1, Estado::Ativa).unwrap();
+    let mut e = entrada("p1", PRESTACAO);
+    e.momento = momento.map(str::to_owned);
+    match Motor::novo(vec![v], vec![], None).ler(&e).decisao {
+        Decisao::Reconhecido(r) => *r,
+        outra => panic!("{outra:?}"),
+    }
+}
+
+#[test]
+fn competencia_e_data_sem_ano_saem_do_momento_da_entrada() {
+    let r = ler_prestacao(Some("2026-11-20"));
+    assert_eq!(
+        r.campos["competencia"].valor,
+        Valor::Competencia("2026-11".into())
+    );
+    assert_eq!(
+        r.campos["vencimento"].valor,
+        Valor::Data("2026-11-25".into())
+    );
+    assert!(!r.revisar, "{:?}", r.motivos);
+    // Perto da virada do ano o mês mais próximo é o de dezembro do ano anterior.
+    let mut e = entrada("p2", "Prestação atual\nVencimento em 28 de Dezembro\n");
+    e.momento = Some("2026-01-05T09:00:00-03:00".into());
+    let v = VersaoDeRegra::avulsa(nova("prestacao", def_prestacao()), 1, Estado::Ativa).unwrap();
+    let Decisao::Reconhecido(r) = Motor::novo(vec![v], vec![], None).ler(&e).decisao else {
+        panic!()
+    };
+    assert_eq!(
+        r.campos["competencia"].valor,
+        Valor::Competencia("2025-12".into())
+    );
+}
+
+#[test]
+fn sem_momento_o_campo_fica_sem_valor_e_o_motivo_diz_por_que() {
+    let r = ler_prestacao(None);
+    assert!(!r.campos.contains_key("competencia"));
+    assert!(r.revisar, "campo obrigatório ausente vai para revisão");
+    let m = r.motivos.join(" | ");
+    assert!(m.contains("sem ano"), "{m}");
+    assert!(m.contains("`momento`"), "{m}");
+}

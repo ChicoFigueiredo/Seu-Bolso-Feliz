@@ -896,7 +896,21 @@ impl Catalogo {
         executor: Option<&dyn ExecutorDeScript>,
     ) -> Resultado<RelatorioDosExemplos> {
         let v = self.versao(regra, versao)?;
-        let motor = Motor::novo(vec![v], self.parametros()?, None);
+        self.testar_versao(&v, executor)
+    }
+
+    /// Os exemplos da regra rodados sobre uma versão que pode nem estar gravada (o ensaio de
+    /// um rascunho avulso).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn testar_versao(
+        &self,
+        v: &VersaoDeRegra,
+        executor: Option<&dyn ExecutorDeScript>,
+    ) -> Resultado<RelatorioDosExemplos> {
+        let (regra, versao) = (v.regra.as_str(), v.versao);
+        let motor = Motor::novo(vec![v.clone()], self.parametros()?, None);
         let mut resultados = Vec::new();
         for ex in self.exemplos(regra)? {
             let leitura = motor.ler_com(&ex.entrada, executor);

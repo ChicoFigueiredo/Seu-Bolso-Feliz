@@ -1113,6 +1113,8 @@ mod testes {
                     decisao: sbf_rita::pre_teste::DecisaoNoItem::Esta,
                     campos: vec![],
                     diagnostico: vec![],
+                    condicoes_falhando: 0,
+                    faltam: vec![],
                 },
                 exemplos: sbf_rita::pre_teste::DosExemplos {
                     total: 0,

@@ -287,7 +287,7 @@ fn rita06_texto_com_injecao_nao_ativa_nada_nem_chama_ferramenta_fora_da_lista() 
             assert!(!f.nome.contains(proibida), "{}", f.nome);
         }
     }
-    assert_eq!(pedidos[0].ferramentas.len(), 7);
+    assert_eq!(pedidos[0].ferramentas.len(), 8);
 }
 
 #[test]
@@ -366,9 +366,16 @@ fn rascunho_que_nao_casa_nao_passa_e_o_modelo_ve_o_diagnostico() {
         .pedir(&falso, "cria", &nao(), &RegistroFalso::novo(), &mut |_| {})
         .expect("relatório");
     assert_eq!(r.parada, Parada::Passou);
-    assert_eq!(r.rascunhos.len(), 2);
-    assert!(!r.rascunhos[0].pre_teste.passou);
-    assert!(r.rascunhos[1].pre_teste.passou);
+    // A tentativa que não passou não virou versão: só a que passou.
+    assert_eq!(r.rascunhos.len(), 1);
+    assert!(r.rascunhos[0].pre_teste.passou);
+    assert_eq!(
+        catalogo(d.path())
+            .versoes("comprovante-pix-banco-exemplo")
+            .expect("versões")
+            .len(),
+        1
+    );
     // O segundo passo viu o diagnóstico do primeiro.
     let pedidos = falso.pedidos();
     let Mensagem::Ferramenta { conteudo, .. } = pedidos[1].mensagens.last().expect("mensagem")
@@ -377,13 +384,14 @@ fn rascunho_que_nao_casa_nao_passa_e_o_modelo_ve_o_diagnostico() {
     };
     let v: Value = serde_json::from_str(dentro_do_bloco(conteudo)).expect("json");
     assert_eq!(v["passou"], false);
+    assert_eq!(v["gravado"], false);
     assert!(
         v["item"]["diagnostico"][0]
             .as_str()
-            .is_some_and(|t| t.contains("todos[0]")),
+            .is_some_and(|t| t.contains("todos[0]") && t.contains("`boleto bancario` não aparece")),
         "{v}"
     );
-    assert_eq!(r.melhor, Some(1));
+    assert_eq!(r.melhor, Some(0));
 }
 
 #[test]

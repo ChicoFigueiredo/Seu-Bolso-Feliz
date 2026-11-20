@@ -13,11 +13,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use sbf_ia::{ClaudeCli, ErroDeIa, NaturezaDoCusto, Registro, ServidorMcp};
+use sbf_mcp::backup::Backups;
 
 use sbf_regras::script::ExecutorDeScript;
 
 use crate::contexto::{Contexto, DadosDaTela};
-use crate::ferramentas::{EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, rastro_resumido};
+use crate::ferramentas::{
+    EstadoDaSessao, FERRAMENTAS, MAXIMO_DE_CHAMADAS, Sessao, rastro_resumido,
+};
 use crate::laco::{Parada, Relatorio, texto_final};
 use crate::mcp::ContextoDoMcp;
 use crate::prompt::{instrucoes, pedido_do_usuario};
@@ -146,7 +149,7 @@ impl ClaudeDeRita {
         };
         let permitidas: Vec<String> = FERRAMENTAS.iter().map(|f| (*f).to_owned()).collect();
         // O rastro dos padrões do item vai no primeiro prompt (D8), como no laço próprio.
-        let rastro = rastro_resumido(&Contexto::novo(tela.clone(), executor));
+        let rastro = rastro_resumido(&Contexto::novo(tela.clone(), executor.clone()));
         let prompt = format!(
             "{}\n\n{}",
             instrucoes(),
@@ -167,6 +170,27 @@ impl ClaudeDeRita {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        let maximo = if lido.maximo == 0 {
+            MAXIMO_DE_CHAMADAS
+        } else {
+            lido.maximo
+        };
+        // O servidor MCP só ensaia: se nenhuma tentativa passou, a melhor vira uma (só uma)
+        // versão de rascunho aqui, no fim do pedido.
+        let mut aviso = None;
+        let lido = if lido.passou() || lido.tentativas.is_empty() {
+            lido
+        } else {
+            let mut s = Sessao::nova(
+                Contexto::novo(tela.clone(), executor),
+                pedido,
+                &format!("claude-cli {}", self.modelo),
+                Backups::novo(&tela.cofre),
+            );
+            s.restaurar(lido);
+            aviso = s.encerrar().err();
+            s.estado()
+        };
         let parada = if lido.passou() {
             Parada::Passou
         } else if lido.estourou {
@@ -174,14 +198,12 @@ impl ClaudeDeRita {
         } else {
             Parada::Respondeu
         };
-        let maximo = if lido.maximo == 0 {
-            MAXIMO_DE_CHAMADAS
-        } else {
-            lido.maximo
-        };
         let sessao = EstadoDaSessao { maximo, ..lido };
         let melhor = sessao.melhor();
-        let resposta = texto_final(parada, &saida.texto, &sessao, melhor);
+        let mut resposta = texto_final(parada, &saida.texto, &sessao, melhor);
+        if let Some(a) = aviso {
+            resposta = format!("{resposta}\nNão consegui gravar o rascunho: {a}");
+        }
         Ok(Relatorio {
             resposta,
             parada,

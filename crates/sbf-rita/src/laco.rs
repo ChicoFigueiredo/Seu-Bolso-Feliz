@@ -1,7 +1,8 @@
 //! O laço do agente (spec 15, D11): fala com o provedor, executa as chamadas de ferramenta e
 //! devolve o resultado, até o primeiro rascunho que passa no pré-teste, até o modelo responder
 //! sem chamar nada, até o teto de 8 chamadas (imposto aqui, pela [`Sessao`]) ou até o usuário
-//! mandar parar.
+//! mandar parar. Só a tentativa que passa vira versão; se nenhuma passa, o fim do pedido grava
+//! uma só, a melhor ([`Sessao::encerrar`]).
 //!
 //! Nenhum texto de documento vai a log ou erro, e nenhuma chave passa por aqui.
 
@@ -252,9 +253,22 @@ impl Rita {
                 break Parada::Limite;
             }
         };
+        // No máximo um rascunho por pedido: o que não passou só vira versão aqui, uma vez, com a
+        // melhor tentativa (D11). Quem interrompeu não quer versão nenhuma.
+        let mut aviso = None;
+        let mut parada = parada;
+        if matches!(parada, Parada::Respondeu | Parada::Limite) {
+            aviso = sessao.encerrar().err();
+            if sessao.passou() {
+                parada = Parada::Passou;
+            }
+        }
         let estado = sessao.estado();
         let melhor = estado.melhor();
-        let resposta = texto_final(parada, &ultimo_texto, &estado, melhor);
+        let mut resposta = texto_final(parada, &ultimo_texto, &estado, melhor);
+        if let Some(a) = aviso {
+            resposta = format!("{resposta}\nNão consegui gravar o rascunho: {a}");
+        }
         if parada != Parada::Respondeu {
             // A conversa segue coerente para o próximo pedido.
             self.mensagens.push(Mensagem::Assistente {
@@ -321,7 +335,7 @@ pub(crate) fn texto_final(
             r.pre_teste.linhas().join("\n")
         ),
         (Parada::Limite, Some(r)) => format!(
-            "Parei após {} chamadas de ferramenta (o limite por pedido). O melhor rascunho até aqui é {}, mas não passou no pré-teste: {}\n{}",
+            "Parei após {} chamadas de ferramenta (o limite por pedido). Nenhuma tentativa passou no pré-teste; gravei uma só versão, a melhor, {}. Ela não passou: {}\n{}",
             sessao.maximo,
             sobre(r),
             r.pre_teste.motivo,
@@ -331,6 +345,17 @@ pub(crate) fn texto_final(
             "Parei após {} chamadas de ferramenta (o limite por pedido), sem nenhum rascunho. Peça de novo, mais específico.",
             sessao.maximo
         ),
+        (Parada::Respondeu, Some(r)) if r.neste_pedido && !r.pre_teste.passou => {
+            let fala = ultimo.trim();
+            format!(
+                "{}{}Nenhuma tentativa passou no pré-teste; gravei uma só versão, a melhor, {}. Ela não passou: {}\n{}",
+                fala,
+                if fala.is_empty() { "" } else { "\n\n" },
+                sobre(r),
+                r.pre_teste.motivo,
+                r.pre_teste.linhas().join("\n")
+            )
+        }
         (Parada::Interrompida, _) => "Parei a pedido.".to_owned(),
         (_, _) if !ultimo.trim().is_empty() => ultimo.trim().to_owned(),
         (_, _) => "Sem resposta do modelo.".to_owned(),
