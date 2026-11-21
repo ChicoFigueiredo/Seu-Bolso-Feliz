@@ -53,6 +53,32 @@ A lista da tela Hoje com o que pede atenção no livro-caixa: compromissos venci
 movimentações sem categoria, não alocadas ou não confirmadas e documentos a revisar.
 _Avoid_: pendências (reservado ao inventário), a revisar
 
+## Contas
+
+**Conta do extrato**:
+A conta como o banco a identifica e a conexão a traz: instituição, tipo e número
+("BANCO · 000000-1"). É a identidade da conta e não muda por vontade do usuário. A
+poupança vinculada é outra conta do extrato, com o mesmo número da corrente.
+_Avoid_: produto, subconta
+
+**Código da conta**:
+O nome pelo qual a planilha conhece a conta: "CX-0001", "C6", "Nubank". Só passa a
+valer para uma conta do extrato quando o usuário confirma o par; um código sem par não
+aponta para dinheiro nenhum.
+_Avoid_: apelido (para o código), número da conta
+
+**Apelido da conta**:
+O nome curto, opcional, que o usuário dá a uma conta para lembrar para que ela serve:
+"Consignado", "Bolão do trabalho". Não identifica nada: duas contas podem ter o mesmo apelido.
+_Avoid_: código, nome do banco
+
+**Rótulo da conta**:
+O que a tela mostra no lugar da conta do extrato: o código, seguido do apelido quando
+houver ("CX-0002 · Consignado"). A poupança vinculada leva o rótulo da corrente de mesmo
+número com "Poupança" na frente ("Poupança CX-0002 · Consignado"). Conta do extrato sem
+par confirmado aparece como o banco a chama.
+_Avoid_: nome da conta, label
+
 ## Classificação
 
 Três eixos independentes. Uma movimentação pode ter os três ao mesmo tempo, e nenhum
