@@ -30,6 +30,7 @@ mod escrita;
 mod modelo;
 mod projecao;
 mod resumo;
+mod rotulo;
 mod servico;
 
 pub use banco::Banco;
@@ -37,6 +38,7 @@ pub use modelo::FABRICA_NOME_DO_MODELO;
 pub use projecao::{
     projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
 };
+pub use rotulo::Rotulador;
 pub use servico::PlanejamentoSqlite;
 
 use serde::{Deserialize, Serialize};
@@ -391,11 +393,16 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
-/// Uma conta do planejamento (o código da planilha, como `CX-0001`) e a conta do extrato a
-/// que ela corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO · 000000-1`).
+/// Uma conta do planejamento: o **código da conta** (o nome que a planilha usa, como
+/// `CX-0001`), o **apelido** opcional que o usuário lhe deu ("Reserva") e a conta do extrato a
+/// que o código corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO ·
+/// 000000-1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContaDoPlanejamento {
     pub codigo: String,
+    /// O nome curto, opcional, que aparece depois do código no rótulo. Não identifica nada.
+    #[serde(default)]
+    pub apelido: Option<String>,
     /// `None` enquanto o usuário não confirmou um par.
     pub conta_do_extrato: Option<String>,
 }
@@ -1003,6 +1010,12 @@ pub enum Alteracao {
         codigo: String,
         conta_do_extrato: Option<String>,
     },
+    /// Dá (ou tira, com `None`) o apelido de um código de conta. Vale também para um código
+    /// que ainda não tem par; o histórico guarda o apelido de antes, e dá para desfazer.
+    DefinirApelidoDaConta {
+        codigo: String,
+        apelido: Option<String>,
+    },
     /// Define (ou tira, com `None`) a assinatura de um recorrente.
     DefinirAssinatura {
         recorrente: String,
@@ -1234,9 +1247,15 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
-    /// Os códigos de conta em uso (nas versões) e o par confirmado de cada um.
+    /// Os códigos de conta em uso (nas versões, ou já com par ou apelido), cada um com o
+    /// apelido e o par confirmado.
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
         Ok(Vec::new())
+    }
+
+    /// O rótulo das contas do extrato (ver [`Rotulador`]), do que o planejamento sabe agora.
+    fn rotulador(&self) -> Resultado<Rotulador> {
+        Ok(Rotulador::novo(&self.contas()?, &self.contas_do_extrato()?))
     }
 
     /// Os pares código ↔ conta do extrato que o histórico sugere, para códigos ainda sem par

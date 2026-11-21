@@ -403,6 +403,7 @@ mod testes {
         assert_eq!(sem[0].movimento, "pluggy:txn_o");
         p.contas = vec![ContaDoPlanejamento {
             codigo: "CX-0001".to_owned(),
+            apelido: None,
             conta_do_extrato: Some("BANCO · 1".to_owned()),
         }];
         let com = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("com par");

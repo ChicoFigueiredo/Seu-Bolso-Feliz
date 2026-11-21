@@ -796,3 +796,194 @@ fn conciliacoes_da_ocorrencia_trazem_o_movimento_e_a_conta() {
     assert!(!v[0].mesma_conta);
     assert!(v[0].movimento.is_some());
 }
+
+// ---------------------------------------------------------------------------------------
+// Apelido da conta e rótulo
+// ---------------------------------------------------------------------------------------
+
+fn apelidar(
+    s: &mut PlanejamentoSqlite,
+    codigo: &str,
+    apelido: Option<&str>,
+) -> Result<sbf_planejamento::Recibo, ErroDoPlanejamento> {
+    s.aplicar(
+        Alteracao::DefinirApelidoDaConta {
+            codigo: codigo.into(),
+            apelido: apelido.map(str::to_owned),
+        },
+        Autor::Usuario,
+    )
+}
+
+fn apelido_de(s: &PlanejamentoSqlite, codigo: &str) -> Option<String> {
+    s.contas()
+        .expect("contas")
+        .into_iter()
+        .find(|c| c.codigo == codigo)
+        .and_then(|c| c.apelido)
+}
+
+#[test]
+fn apelido_grava_aparece_em_contas_troca_e_tira_com_historico() {
+    let mut s = servico(&Extrato::default());
+    criar(
+        &mut s,
+        "Aluguel",
+        Natureza::Saida,
+        5,
+        Some(100_000),
+        Some("CX-0001"),
+    );
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    apelidar(&mut s, "CX-0001", Some("  Reserva ")).expect("dar");
+    assert_eq!(apelido_de(&s, "CX-0001"), Some("Reserva".into()));
+    apelidar(&mut s, "CX-0001", Some("Casa")).expect("trocar");
+    assert_eq!(apelido_de(&s, "CX-0001"), Some("Casa".into()));
+    // Texto em branco e `None` tiram o apelido; a linha continua, só o campo esvazia.
+    apelidar(&mut s, "CX-0001", Some("   ")).expect("tirar");
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    apelidar(&mut s, "CX-0001", Some("Volta")).expect("dar");
+    apelidar(&mut s, "CX-0001", None).expect("tirar");
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    let h = s.historico(Some("CX-0001"), 10).expect("historico");
+    assert_eq!(h.len(), 5);
+    assert!(h.iter().all(|e| e.autor == Autor::Usuario));
+}
+
+#[test]
+fn apelido_vale_para_codigo_sem_par_e_sem_versao_e_nao_mexe_no_par() {
+    let mut s = servico(&Extrato::default());
+    apelidar(&mut s, "Antiga", Some("Poupança velha")).expect("dar");
+    let contas = s.contas().expect("contas");
+    assert_eq!(contas.len(), 1);
+    assert_eq!(contas[0].codigo, "Antiga");
+    assert_eq!(contas[0].apelido.as_deref(), Some("Poupança velha"));
+    assert_eq!(contas[0].conta_do_extrato, None);
+    // Ligar e desligar o par não apaga o apelido, nem o contrário.
+    mapear(&mut s, "Antiga", Some("BANCO · 9"));
+    assert_eq!(apelido_de(&s, "Antiga"), Some("Poupança velha".into()));
+    mapear(&mut s, "Antiga", None);
+    assert_eq!(apelido_de(&s, "Antiga"), Some("Poupança velha".into()));
+    apelidar(&mut s, "Antiga", None).expect("tirar");
+    mapear(&mut s, "Antiga", Some("BANCO · 9"));
+    assert_eq!(
+        s.contas().expect("contas")[0].conta_do_extrato.as_deref(),
+        Some("BANCO · 9")
+    );
+}
+
+#[test]
+fn apelido_valida_codigo_e_tamanho() {
+    let mut s = servico(&Extrato::default());
+    assert!(matches!(
+        apelidar(&mut s, "  ", Some("x")),
+        Err(ErroDoPlanejamento::Invalida(_))
+    ));
+    let longo = "x".repeat(61);
+    assert!(matches!(
+        apelidar(&mut s, "CX", Some(&longo)),
+        Err(ErroDoPlanejamento::Invalida(_))
+    ));
+    assert!(s.contas().expect("contas").is_empty());
+}
+
+#[test]
+fn apelido_e_par_se_desfazem_e_a_linha_nunca_e_apagada() {
+    let mut s = servico(&Extrato::default());
+    let r1 = apelidar(&mut s, "CX-9", Some("Um")).expect("dar");
+    let r2 = apelidar(&mut s, "CX-9", Some("Dois")).expect("trocar");
+    s.desfazer(&r2.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    assert_eq!(apelido_de(&s, "CX-9"), Some("Um".into()));
+    s.desfazer(&r1.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    assert_eq!(apelido_de(&s, "CX-9"), None);
+    // Desfazer o mesmo duas vezes é recusado, como as outras alterações.
+    assert!(s.desfazer(&r1.alteracao_id, Autor::Usuario).is_err());
+
+    let ligar = s
+        .aplicar(
+            Alteracao::MapearConta {
+                codigo: "CX-9".into(),
+                conta_do_extrato: Some("BANCO · 1".into()),
+            },
+            Autor::Usuario,
+        )
+        .expect("ligar");
+    s.desfazer(&ligar.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    // Sem par, sem apelido e sem versão que o use, o código sai da lista; a linha fica.
+    assert!(s.contas().expect("contas").is_empty());
+    let linhas: i64 = s
+        .banco
+        .conexao()
+        .query_row("SELECT count(*) FROM contas_do_planejamento", [], |l| {
+            l.get(0)
+        })
+        .expect("contar");
+    assert_eq!(linhas, 1);
+
+    // Nada se apaga de fato: o gatilho do esquema recusa o DELETE.
+    assert!(
+        s.banco
+            .conexao()
+            .execute("DELETE FROM contas_do_planejamento", [])
+            .is_err()
+    );
+}
+
+#[test]
+fn rotulador_junta_pares_apelidos_e_poupanca_vinculada() {
+    let extrato = Extrato::default();
+    extrato.por("a", 8, 100, "BANCO EXEMPLO · 000000-1", "X");
+    extrato.por("b", 8, 100, "BANCO EXEMPLO Poupança · 000000-1", "X");
+    extrato.por("c", 8, 100, "BANCO EXEMPLO · 000000-2", "X");
+    let mut s = servico(&extrato);
+    mapear(&mut s, "CX-0001", Some("BANCO EXEMPLO · 000000-1"));
+    apelidar(&mut s, "CX-0001", Some("Reserva")).expect("dar");
+    let r = s.rotulador().expect("rotulador");
+    assert_eq!(r.rotular("BANCO EXEMPLO · 000000-1"), "CX-0001 · Reserva");
+    assert_eq!(
+        r.rotular("BANCO EXEMPLO Poupança · 000000-1"),
+        "Poupança CX-0001 · Reserva"
+    );
+    assert_eq!(
+        r.rotular("BANCO EXEMPLO · 000000-2"),
+        "BANCO EXEMPLO · 000000-2"
+    );
+    // Todas as contas continuam na lista do extrato: o rótulo só troca o nome.
+    assert_eq!(s.contas_do_extrato().expect("contas").len(), 3);
+}
+
+#[test]
+fn a_poupanca_vinculada_nao_vale_como_par_na_conciliacao() {
+    // A derivação é só de exibição: o movimento da poupança não casa com o par da corrente.
+    let extrato = Extrato::default();
+    extrato.por(
+        "pluggy:txn_p",
+        8,
+        -10_000,
+        "BANCO EXEMPLO Poupança · 000000-1",
+        "ENERGIA",
+    );
+    let mut s = servico(&extrato);
+    let luz = criar(
+        &mut s,
+        "Luz",
+        Natureza::Saida,
+        8,
+        Some(10_000),
+        Some("CX-0001"),
+    );
+    mapear(&mut s, "CX-0001", Some("BANCO EXEMPLO · 000000-1"));
+    let o = IdOcorrencia {
+        recorrente: luz,
+        competencia: comp(2026, 11),
+        parcela: None,
+    };
+    let candidatos = s.candidatos_de_conciliacao(&o).expect("candidatos");
+    assert!(
+        candidatos.iter().all(|c| !c.mesma_conta),
+        "a conta da poupança não é a do par"
+    );
+}
