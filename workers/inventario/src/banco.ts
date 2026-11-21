@@ -14,7 +14,7 @@ export const VERSAO_DO_SCHEMA = "2";
  * dono do esquema. Com user_version >= 1 o Bun não roda DDL; acima desta
  * versão, recusa o banco.
  */
-export const VERSAO_RUST_CONHECIDA = 4;
+export const VERSAO_RUST_CONHECIDA = 5;
 
 export function versaoDoBanco(db: Database): number {
   const linha = db.query("PRAGMA user_version").get() as { user_version: number };
