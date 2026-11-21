@@ -1731,6 +1731,13 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
             conta_do_extrato: Some(c),
         } => format!("Ligar a conta {codigo} a {c}."),
         Alteracao::MapearConta { codigo, .. } => format!("Desligar a conta {codigo}."),
+        Alteracao::DefinirApelidoDaConta {
+            codigo,
+            apelido: Some(a),
+        } => format!("Dar o apelido \u{201c}{a}\u{201d} à conta {codigo}."),
+        Alteracao::DefinirApelidoDaConta { codigo, .. } => {
+            format!("Tirar o apelido da conta {codigo}.")
+        }
         Alteracao::Desconciliar { ocorrencia, .. } => {
             format!("Desfazer a conciliação de {ocorrencia}.")
         }

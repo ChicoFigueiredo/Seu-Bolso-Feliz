@@ -118,6 +118,10 @@ pub struct Janela {
     pub centro: Vista,
     flutuantes: HashMap<u64, Vista>,
     cache: Cache,
+    /// O rótulo das contas de agora; a `ConsultaRotulada` do app o lê.
+    pub rotulos: crate::rotulos::RotulosDasContas,
+    /// A geração do Controle em que `rotulos` foi lido.
+    rotulos_geracao: Option<u64>,
     pesquisa: String,
     pub periodo: Periodo,
     /// Filtro "Quem decidiu" (aba Início): `None` = todos.
@@ -277,6 +281,8 @@ impl Janela {
             centro: Vista::default(),
             flutuantes: HashMap::new(),
             cache: Cache::default(),
+            rotulos: crate::rotulos::RotulosDasContas::default(),
+            rotulos_geracao: None,
             pesquisa: String::new(),
             periodo: Periodo::default(),
             quem_decidiu: None,
@@ -411,7 +417,27 @@ impl Janela {
         self.ligacoes.planejamento = true;
         let hoje = self.hoje_como_data();
         self.controle = crate::controle_ui::EstadoDoControle::novo(hoje);
+        self.rotulos_geracao = None;
+        self.atualizar_rotulos();
         self.navegacao = Navegacao::nova(Destino::AreaFutura("controle"));
+    }
+
+    /// Relê o rótulo das contas quando o planejamento mudou (a geração do Controle subiu: uma
+    /// escrita da janela ou do disco). O que a janela já leu com os nomes de antes é esquecido.
+    fn atualizar_rotulos(&mut self) {
+        let geracao = self.controle.geracao();
+        if self.rotulos_geracao == Some(geracao) {
+            return;
+        }
+        let Some(pl) = self.planejamento.as_ref() else {
+            return;
+        };
+        if let Ok(rotulador) = pl.0.rotulador() {
+            self.rotulos.definir(rotulador.clone());
+            self.controle.rotulador = rotulador;
+            self.cache.limpar();
+        }
+        self.rotulos_geracao = Some(geracao);
     }
 
     /// `hoje` (texto `AAAA-MM-DD`) como data; se o texto não serve, o relógio.
@@ -730,6 +756,8 @@ impl Janela {
             estados: self.estado_do_achado.iter().cloned().collect(),
             fontes: self.fonte.iter().cloned().collect(),
             tipos: self.tipo_do_documento.iter().cloned().collect(),
+            // O rótulo das contas expande a pesquisa na `ConsultaRotulada`, não aqui.
+            contas_do_texto: Vec::new(),
         }
     }
 
@@ -1809,6 +1837,7 @@ impl Janela {
         comandos: &mut dyn Comandos,
     ) {
         self.reler_o_que_mudou(ctx);
+        self.atualizar_rotulos();
         // Clicar num lote (na área Lotes ou numa aba) faz dele o lote atual.
         if let Some(r) = &self.centro.selecao.foco
             && r.tipo == Tipo::Lote
@@ -1881,7 +1910,10 @@ impl Janela {
                     });
                 }
                 Pedido::Caixa(p) => self.caixa_pedido(p),
-                Pedido::Controle(p) => self.controle_pedido(p),
+                Pedido::Controle(p) => {
+                    self.controle_pedido(p);
+                    self.atualizar_rotulos();
+                }
                 Pedido::Ligacao(p) => self.ligacao(ctx, p),
                 Pedido::Alterar(pedido) => self.alterar(pedido),
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
@@ -2252,6 +2284,10 @@ impl Janela {
                         ..
                     }) => "Par de conta confirmado.",
                     Some(Alteracao::MapearConta { .. }) => "Par de conta desligado.",
+                    Some(Alteracao::DefinirApelidoDaConta {
+                        apelido: Some(_), ..
+                    }) => "Apelido da conta salvo.",
+                    Some(Alteracao::DefinirApelidoDaConta { .. }) => "Apelido da conta tirado.",
                     Some(Alteracao::Excecao {
                         excecao: sbf_planejamento::Excecao::QuantidadeSoDesteMes { .. },
                         ..

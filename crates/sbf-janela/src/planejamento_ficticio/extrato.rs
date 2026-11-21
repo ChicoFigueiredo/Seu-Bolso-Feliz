@@ -17,6 +17,11 @@ pub const CONTA_DO_SALARIO: &str = "BANCO EXEMPLO · 000000-1";
 pub const CONTA_SEM_PAR: &str = "BANCO EXEMPLO · 000000-2";
 /// A conta do extrato do Nubank fictício, com par já confirmado.
 pub const CONTA_DO_NUBANK: &str = "CARTAO EXEMPLO · 000000-9";
+/// A poupança de mesmo número da conta do Nubank: sem par próprio, aparece como
+/// "Poupança Nubank · Dia a dia".
+pub const POUPANCA_DO_NUBANK: &str = "CARTAO EXEMPLO Poupança · 000000-9";
+/// O apelido fictício do código `Nubank`.
+pub const APELIDO_DO_NUBANK: &str = "Dia a dia";
 /// O texto da assinatura do salário fictício.
 pub const TEXTO_DO_SALARIO: &str = "SALARIO EMPRESA EXEMPLO";
 /// O líquido do contracheque fictício (o crédito do mês corrente).
@@ -70,6 +75,8 @@ impl PlanejamentoFicticio {
         ));
         self.mapa_contas
             .push(("Nubank".into(), CONTA_DO_NUBANK.into()));
+        self.apelidos_das_contas
+            .push(("Nubank".into(), APELIDO_DO_NUBANK.into()));
         for (d, valor) in [(-2, 815_400), (-1, 819_900), (0, LIQUIDO_DO_SALARIO.0)] {
             let comp = h.somar_meses(d);
             let Some(oc) = self.ocorrencia_de("rec_salario", comp, hoje) else {
@@ -95,6 +102,14 @@ impl PlanejamentoFicticio {
                 confirmada: d < 0,
             });
         }
+        self.extrato.push(movimento(
+            "rendimento_001",
+            hoje.somar_dias(-4),
+            1_250,
+            POUPANCA_DO_NUBANK,
+            "RENDIMENTO POUPANCA EXEMPLO",
+            "credito",
+        ));
         let base = hoje.somar_dias(-6);
         self.extrato.push(movimento(
             "pix_001",
@@ -134,6 +149,13 @@ impl PlanejamentoFicticio {
             .map(|(_, c)| c.as_str())
     }
 
+    fn apelido_do_codigo(&self, codigo: &str) -> Option<&str> {
+        self.apelidos_das_contas
+            .iter()
+            .find(|(a, _)| a == codigo)
+            .map(|(_, apelido)| apelido.as_str())
+    }
+
     fn assinatura_de(&self, recorrente: &str) -> Option<&Assinatura> {
         self.assinaturas
             .iter()
@@ -149,6 +171,7 @@ impl PlanejamentoFicticio {
                 if v.iter().all(|c| &c.codigo != a) {
                     v.push(ContaDoPlanejamento {
                         codigo: a.clone(),
+                        apelido: self.apelido_do_codigo(a).map(str::to_owned),
                         conta_do_extrato: self.conta_do_codigo(a).map(str::to_owned),
                     });
                 }
@@ -586,6 +609,29 @@ impl PlanejamentoFicticio {
         Ok(self.registrar(autor, "contas", texto.into(), alt))
     }
 
+    pub(super) fn definir_apelido_da_conta(
+        &mut self,
+        codigo: String,
+        apelido: Option<String>,
+        autor: Autor,
+        alt: &Alteracao,
+    ) -> Resultado<Recibo> {
+        if self.contas_impl().iter().all(|c| c.codigo != codigo) {
+            return Err(ErroDoPlanejamento::NaoEncontrado(codigo));
+        }
+        self.apelidos_das_contas.retain(|(a, _)| *a != codigo);
+        let apelido = apelido
+            .map(|a| a.trim().to_owned())
+            .filter(|a| !a.is_empty());
+        let texto = if let Some(a) = apelido {
+            self.apelidos_das_contas.push((codigo, a));
+            "Deu um apelido à conta."
+        } else {
+            "Tirou o apelido da conta."
+        };
+        Ok(self.registrar(autor, "contas", texto.into(), alt))
+    }
+
     pub(super) fn definir_assinatura(
         &mut self,
         recorrente: String,
@@ -803,5 +849,57 @@ mod testes {
         assert!(!sug.confirmada);
         // Rodar de novo não duplica.
         assert_eq!(s.buscar_conciliacoes(&periodo, hoje()).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_demonstracao_tem_apelido_e_poupanca_vinculada() {
+        let s = servico();
+        let nu = s
+            .contas()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.codigo == "Nubank")
+            .expect("nu");
+        assert_eq!(nu.apelido.as_deref(), Some(APELIDO_DO_NUBANK));
+        let r = s.rotulador().unwrap();
+        assert_eq!(r.rotular(CONTA_DO_NUBANK), "Nubank · Dia a dia");
+        assert_eq!(r.rotular(POUPANCA_DO_NUBANK), "Poupança Nubank · Dia a dia");
+        // A conta sem par continua como veio, e todas continuam na lista do extrato.
+        assert_eq!(r.rotular(CONTA_SEM_PAR), CONTA_SEM_PAR);
+        assert!(
+            s.contas_do_extrato()
+                .unwrap()
+                .contains(&POUPANCA_DO_NUBANK.to_owned())
+        );
+    }
+
+    #[test]
+    fn dar_e_tirar_o_apelido_na_demonstracao() {
+        let mut s = servico();
+        s.aplicar(
+            Alteracao::DefinirApelidoDaConta {
+                codigo: "CX-0001".into(),
+                apelido: Some(" Casa ".into()),
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+        let cx = |s: &PlanejamentoFicticio| {
+            s.contas()
+                .unwrap()
+                .into_iter()
+                .find(|c| c.codigo == "CX-0001")
+                .and_then(|c| c.apelido)
+        };
+        assert_eq!(cx(&s).as_deref(), Some("Casa"));
+        s.aplicar(
+            Alteracao::DefinirApelidoDaConta {
+                codigo: "CX-0001".into(),
+                apelido: None,
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+        assert_eq!(cx(&s), None);
     }
 }

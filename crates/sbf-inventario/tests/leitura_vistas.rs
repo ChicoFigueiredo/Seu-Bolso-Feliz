@@ -636,3 +636,49 @@ fn filtros_da_aba_inicio_valem_nas_areas() {
     );
     let _: BTreeMap<u8, u8> = BTreeMap::new();
 }
+
+/// Quem mostra um rótulo no lugar da conta (a janela) leva a pesquisa pelo rótulo até aqui como
+/// `contas_do_texto`: os registros dessas contas entram, sem tirar os que o texto já achava.
+#[test]
+fn pesquisa_acha_tambem_as_contas_do_texto() {
+    let (_b, conn) = abrir();
+    let ctx = Contexto::novo(&conn).expect("contexto");
+    use sbf_inventario::consulta::Area;
+    let conta: String = conn
+        .query_row(
+            "SELECT conta_provavel FROM registro WHERE conta_provavel IS NOT NULL LIMIT 1",
+            [],
+            |l| l.get(0),
+        )
+        .expect("uma conta");
+    let da_conta: usize = conn
+        .query_row(
+            "SELECT count(*) FROM registro WHERE conta_provavel = ?",
+            [&conta],
+            |l| l.get::<_, i64>(0),
+        )
+        .map(|n| usize::try_from(n).expect("n"))
+        .expect("contar");
+    let quantas = |filtro: Filtro| {
+        vistas::tabela_da_area(&ctx, Area::Registros, &filtro)
+            .expect("área")
+            .linhas
+            .len()
+    };
+    let rotulo_que_ninguem_tem = "rotulo-que-nenhum-registro-tem".to_owned();
+    assert_eq!(
+        quantas(Filtro {
+            texto: Some(rotulo_que_ninguem_tem.clone()),
+            ..Filtro::default()
+        }),
+        0
+    );
+    assert_eq!(
+        quantas(Filtro {
+            texto: Some(rotulo_que_ninguem_tem),
+            contas_do_texto: vec![conta],
+            ..Filtro::default()
+        }),
+        da_conta
+    );
+}
