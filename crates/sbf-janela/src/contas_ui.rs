@@ -1,4 +1,4 @@
-//! A tela "Contas do planejamento": uma linha por apelido da planilha (`CX-0001`), com a conta
+//! A tela "Contas do planejamento": uma linha por código da planilha (`CX-0001`), com a conta
 //! do extrato a que ele corresponde. O histórico **propõe** o par e o usuário confirma cada
 //! um; nada é ligado sozinho. Só lê por `&dyn Planejamento`; escrever é um pedido
 //! (`MapearConta`) que a janela aplica fora do desenho.
@@ -23,9 +23,9 @@ pub struct DadosDasContas {
 }
 
 impl DadosDasContas {
-    /// A sugestão do histórico para um apelido ainda sem par.
-    pub fn sugestao_de(&self, apelido: &str) -> Option<&ParDeConta> {
-        self.sugestoes.iter().find(|s| s.apelido == apelido)
+    /// A sugestão do histórico para um código ainda sem par.
+    pub fn sugestao_de(&self, codigo: &str) -> Option<&ParDeConta> {
+        self.sugestoes.iter().find(|s| s.codigo == codigo)
     }
 }
 
@@ -41,7 +41,7 @@ pub fn carregar(plan: &dyn Planejamento) -> Result<DadosDasContas, String> {
 #[derive(Debug, Default)]
 pub struct EstadoDasContas {
     cache: Option<(u64, Result<DadosDasContas, String>)>,
-    /// O apelido cuja lista de contas do extrato está aberta ("Escolher…").
+    /// O código cuja lista de contas do extrato está aberta ("Escolher…").
     pub escolhendo: Option<String>,
 }
 
@@ -57,11 +57,11 @@ impl EstadoDasContas {
     }
 }
 
-/// O pedido que confirma (`Some`) ou desliga (`None`) o par de um apelido.
-pub fn pedido_de_par(apelido: &str, conta: Option<&str>) -> Pedido {
+/// O pedido que confirma (`Some`) ou desliga (`None`) o par de um código.
+pub fn pedido_de_par(codigo: &str, conta: Option<&str>) -> Pedido {
     Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
         Alteracao::MapearConta {
-            apelido: apelido.to_owned(),
+            codigo: codigo.to_owned(),
             conta_do_extrato: conta.map(str::to_owned),
         },
     ]))
@@ -85,7 +85,7 @@ pub fn area(
             componentes::titulo(ui, "Contas do planejamento", 20.0);
             texto_pequeno(
                 ui,
-                "Liga o apelido da planilha à conta do extrato. O histórico propõe; cada par só vale depois que você confirma.",
+                "Liga o código da planilha à conta do extrato. O histórico propõe; cada par só vale depois que você confirma.",
             );
             mensagem(ui, estado);
             ui.add_space(8.0);
@@ -131,7 +131,7 @@ fn linha_da_conta(
     let p = tema::paleta(ui.ctx());
     moldura(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(&c.apelido).strong().size(15.0));
+            ui.label(RichText::new(&c.codigo).strong().size(15.0));
             match &c.conta_do_extrato {
                 Some(conta) => {
                     ui.label(icones::icone_cor("sync_alt", 15.0, p.tinta_suave));
@@ -144,7 +144,7 @@ fn linha_da_conta(
             }
         });
         if c.conta_do_extrato.is_none()
-            && let Some(s) = dados.sugestao_de(&c.apelido)
+            && let Some(s) = dados.sugestao_de(&c.codigo)
         {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
@@ -168,32 +168,32 @@ fn linha_da_conta(
             texto_pequeno(ui, s.motivo.clone());
             if ui
                 .button(format!("{}  Confirmar", icones::texto("task_alt")))
-                .on_hover_text("Liga este apelido a essa conta do extrato")
+                .on_hover_text("Liga este código a essa conta do extrato")
                 .clicked()
             {
-                pedidos.push(pedido_de_par(&c.apelido, Some(&s.conta_do_extrato)));
+                pedidos.push(pedido_de_par(&c.codigo, Some(&s.conta_do_extrato)));
             }
         }
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            let aberto = local.escolhendo.as_deref() == Some(c.apelido.as_str());
+            let aberto = local.escolhendo.as_deref() == Some(c.codigo.as_str());
             if ui
                 .selectable_label(aberto, "Escolher…")
                 .on_hover_text("Escolhe a conta do extrato entre as que aparecem nele")
                 .clicked()
             {
-                local.escolhendo = (!aberto).then(|| c.apelido.clone());
+                local.escolhendo = (!aberto).then(|| c.codigo.clone());
             }
             if c.conta_do_extrato.is_some()
                 && ui
                     .button("Desligar")
-                    .on_hover_text("Desfaz o par; o apelido volta a ficar sem conta do extrato")
+                    .on_hover_text("Desfaz o par; o código volta a ficar sem conta do extrato")
                     .clicked()
             {
-                pedidos.push(pedido_de_par(&c.apelido, None));
+                pedidos.push(pedido_de_par(&c.codigo, None));
             }
         });
-        if local.escolhendo.as_deref() == Some(c.apelido.as_str()) {
+        if local.escolhendo.as_deref() == Some(c.codigo.as_str()) {
             ui.add_space(2.0);
             if dados.do_extrato.is_empty() {
                 texto_pequeno(ui, "O extrato ainda não trouxe nenhuma conta.");
@@ -201,7 +201,7 @@ fn linha_da_conta(
             for conta in &dados.do_extrato {
                 let atual = c.conta_do_extrato.as_deref() == Some(conta.as_str());
                 if ui.selectable_label(atual, conta).clicked() {
-                    pedidos.push(pedido_de_par(&c.apelido, Some(conta)));
+                    pedidos.push(pedido_de_par(&c.codigo, Some(conta)));
                     local.escolhendo = None;
                 }
             }

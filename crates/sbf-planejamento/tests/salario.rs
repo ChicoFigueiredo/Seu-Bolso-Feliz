@@ -173,10 +173,10 @@ fn vincular_contracheque(s: &mut PlanejamentoSqlite, salario: &str) {
     .expect("vincular");
 }
 
-fn mapear(s: &mut PlanejamentoSqlite, apelido: &str, conta: &str) {
+fn mapear(s: &mut PlanejamentoSqlite, codigo: &str, conta: &str) {
     s.aplicar(
         Alteracao::MapearConta {
-            apelido: apelido.into(),
+            codigo: codigo.into(),
             conta_do_extrato: Some(conta.into()),
         },
         Autor::Usuario,

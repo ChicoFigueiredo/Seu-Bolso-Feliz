@@ -391,19 +391,19 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
-/// Uma conta do planejamento (o apelido da planilha, como `CX-0001`) e a conta do extrato a
+/// Uma conta do planejamento (o código da planilha, como `CX-0001`) e a conta do extrato a
 /// que ela corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO · 000000-1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContaDoPlanejamento {
-    pub apelido: String,
+    pub codigo: String,
     /// `None` enquanto o usuário não confirmou um par.
     pub conta_do_extrato: Option<String>,
 }
 
-/// Um par apelido ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
+/// Um par código ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParDeConta {
-    pub apelido: String,
+    pub codigo: String,
     pub conta_do_extrato: String,
     /// Quantas conciliações (confirmadas ou sugeridas) e assinaturas apontam para o par.
     pub evidencias: u32,
@@ -413,7 +413,7 @@ pub struct ParDeConta {
 
 /// Como achar no extrato o movimento de um recorrente de valor variável (o salário): o texto
 /// que a descrição do banco traz e a janela em dias em volta do vencimento. A conta vem da
-/// versão (o apelido) e do par confirmado.
+/// versão (o código) e do par confirmado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assinatura {
     /// Comparado sem acento e sem caixa, como "contém" ("SALARIO CAIXA").
@@ -996,9 +996,11 @@ pub enum Alteracao {
         ocorrencia: IdOcorrencia,
         movimento: String,
     },
-    /// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato.
+    /// Confirma (ou desfaz, com `None`) o par código ↔ conta do extrato.
     MapearConta {
-        apelido: String,
+        // O JSON gravado antes do rename (histórico, propostas) dizia `apelido`.
+        #[serde(alias = "apelido")]
+        codigo: String,
         conta_do_extrato: Option<String>,
     },
     /// Define (ou tira, com `None`) a assinatura de um recorrente.
@@ -1232,18 +1234,18 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
-    /// Os apelidos de conta em uso (nas versões) e o par confirmado de cada um.
+    /// Os códigos de conta em uso (nas versões) e o par confirmado de cada um.
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
         Ok(Vec::new())
     }
 
-    /// Os pares apelido ↔ conta do extrato que o histórico sugere, para apelidos ainda sem par
+    /// Os pares código ↔ conta do extrato que o histórico sugere, para códigos ainda sem par
     /// confirmado. Não grava nada.
     fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
         Ok(Vec::new())
     }
 
-    /// As contas que aparecem no extrato (para escolher o par de um apelido), em ordem.
+    /// As contas que aparecem no extrato (para escolher o par de um código), em ordem.
     fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
         Ok(Vec::new())
     }

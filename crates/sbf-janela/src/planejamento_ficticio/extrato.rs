@@ -1,5 +1,5 @@
 //! O extrato fictício e a conciliação do planejamento fictício: contas do planejamento,
-//! pares apelido ↔ conta do extrato, assinaturas e candidatos. Tudo inventado; nada vem do
+//! pares código ↔ conta do extrato, assinaturas e candidatos. Tudo inventado; nada vem do
 //! inventário nem da Pluggy reais.
 
 use sbf_planejamento::{
@@ -122,15 +122,15 @@ impl PlanejamentoFicticio {
         ));
     }
 
-    fn apelido_da(&self, recorrente: &str, comp: Competencia) -> Option<String> {
+    fn codigo_da(&self, recorrente: &str, comp: Competencia) -> Option<String> {
         let r = self.recorrente_interno(recorrente)?;
         Self::versao_vigente(r, comp)?.conta.clone()
     }
 
-    fn conta_do_apelido(&self, apelido: &str) -> Option<&str> {
+    fn conta_do_codigo(&self, codigo: &str) -> Option<&str> {
         self.mapa_contas
             .iter()
-            .find(|(a, _)| a == apelido)
+            .find(|(a, _)| a == codigo)
             .map(|(_, c)| c.as_str())
     }
 
@@ -146,42 +146,42 @@ impl PlanejamentoFicticio {
         for r in &self.recorrentes {
             for ver in &r.versoes {
                 let Some(a) = &ver.conta else { continue };
-                if v.iter().all(|c| &c.apelido != a) {
+                if v.iter().all(|c| &c.codigo != a) {
                     v.push(ContaDoPlanejamento {
-                        apelido: a.clone(),
-                        conta_do_extrato: self.conta_do_apelido(a).map(str::to_owned),
+                        codigo: a.clone(),
+                        conta_do_extrato: self.conta_do_codigo(a).map(str::to_owned),
                     });
                 }
             }
         }
-        v.sort_by(|a, b| a.apelido.cmp(&b.apelido));
+        v.sort_by(|a, b| a.codigo.cmp(&b.codigo));
         v
     }
 
     pub(super) fn pares_sugeridos_impl(&self) -> Vec<ParDeConta> {
-        // (apelido, conta) -> (conciliações, créditos que batem com a assinatura)
+        // (código, conta) -> (conciliações, créditos que batem com a assinatura)
         let mut pontos: Vec<(String, String, u32, u32)> = Vec::new();
-        let mut somar = |apelido: &str, conta: &str, conc: u32, assin: u32| {
+        let mut somar = |codigo: &str, conta: &str, conc: u32, assin: u32| {
             if let Some(p) = pontos
                 .iter_mut()
-                .find(|(a, c, _, _)| a == apelido && c == conta)
+                .find(|(a, c, _, _)| a == codigo && c == conta)
             {
                 p.2 += conc;
                 p.3 += assin;
             } else {
-                pontos.push((apelido.into(), conta.into(), conc, assin));
+                pontos.push((codigo.into(), conta.into(), conc, assin));
             }
         };
         for c in &self.conciliacoes {
             let Some(m) = self.extrato.iter().find(|m| m.movimento == c.movimento) else {
                 continue;
             };
-            if let Some(a) = self.apelido_da(&c.ocorrencia.recorrente, c.ocorrencia.competencia) {
+            if let Some(a) = self.codigo_da(&c.ocorrencia.recorrente, c.ocorrencia.competencia) {
                 somar(&a, &m.conta_do_extrato, 1, 0);
             }
         }
         for (rec, ass) in &self.assinaturas {
-            let Some(a) = self.apelido_da(rec, Competencia::de_data(self.hoje)) else {
+            let Some(a) = self.codigo_da(rec, Competencia::de_data(self.hoje)) else {
                 continue;
             };
             let texto = normalizar_texto(&ass.texto);
@@ -192,14 +192,14 @@ impl PlanejamentoFicticio {
             }
         }
         let mut saida: Vec<ParDeConta> = Vec::new();
-        for (apelido, conta, conc, assin) in pontos {
-            if self.conta_do_apelido(&apelido).is_some() {
+        for (codigo, conta, conc, assin) in pontos {
+            if self.conta_do_codigo(&codigo).is_some() {
                 continue;
             }
             let evidencias = conc + assin;
             if saida
                 .iter()
-                .any(|p| p.apelido == apelido && p.evidencias >= evidencias)
+                .any(|p| p.codigo == codigo && p.evidencias >= evidencias)
             {
                 continue;
             }
@@ -220,15 +220,15 @@ impl PlanejamentoFicticio {
                     if assin == 1 { "crédito" } else { "créditos" }
                 ));
             }
-            saida.retain(|p| p.apelido != apelido);
+            saida.retain(|p| p.codigo != codigo);
             saida.push(ParDeConta {
-                apelido,
+                codigo,
                 conta_do_extrato: conta,
                 evidencias,
                 motivo: partes.join(" e "),
             });
         }
-        saida.sort_by(|a, b| a.apelido.cmp(&b.apelido));
+        saida.sort_by(|a, b| a.codigo.cmp(&b.codigo));
         saida
     }
 
@@ -255,7 +255,7 @@ impl PlanejamentoFicticio {
         let conta_certa = o
             .conta
             .as_deref()
-            .and_then(|a| self.conta_do_apelido(a))
+            .and_then(|a| self.conta_do_codigo(a))
             .map(str::to_owned);
         let esperado = self
             .composicao_vigente(&o.id)
@@ -301,7 +301,7 @@ impl PlanejamentoFicticio {
         let conta_certa = self
             .ocorrencia_de(&id.recorrente, id.competencia, self.hoje)
             .and_then(|o| o.conta)
-            .and_then(|a| self.conta_do_apelido(&a).map(str::to_owned));
+            .and_then(|a| self.conta_do_codigo(&a).map(str::to_owned));
         self.conciliacoes
             .iter()
             .filter(|c| c.ocorrencia == *id)
@@ -409,7 +409,7 @@ impl PlanejamentoFicticio {
         let conta_certa = self
             .ocorrencia_de(&id.recorrente, id.competencia, self.hoje)
             .and_then(|o| o.conta)
-            .and_then(|a| self.conta_do_apelido(&a).map(str::to_owned));
+            .and_then(|a| self.conta_do_codigo(&a).map(str::to_owned));
         contracheque && conta_certa.as_deref() == Some(m.conta_do_extrato.as_str())
     }
 
@@ -562,15 +562,15 @@ impl PlanejamentoFicticio {
 
     pub(super) fn mapear_conta(
         &mut self,
-        apelido: String,
+        codigo: String,
         conta: Option<String>,
         autor: Autor,
         alt: &Alteracao,
     ) -> Resultado<Recibo> {
-        if self.contas_impl().iter().all(|c| c.apelido != apelido) {
-            return Err(ErroDoPlanejamento::NaoEncontrado(apelido));
+        if self.contas_impl().iter().all(|c| c.codigo != codigo) {
+            return Err(ErroDoPlanejamento::NaoEncontrado(codigo));
         }
-        self.mapa_contas.retain(|(a, _)| *a != apelido);
+        self.mapa_contas.retain(|(a, _)| *a != codigo);
         let texto = match conta {
             Some(c) => {
                 if !self.contas_do_extrato_impl().contains(&c) {
@@ -578,7 +578,7 @@ impl PlanejamentoFicticio {
                         "essa conta não aparece no extrato".into(),
                     ));
                 }
-                self.mapa_contas.push((apelido, c));
+                self.mapa_contas.push((codigo, c));
                 "Confirmou o par de conta."
             }
             None => "Desligou o par de conta.",
@@ -639,16 +639,16 @@ mod testes {
     fn o_salario_nasce_sem_par_e_o_historico_sugere_a_conta_do_extrato() {
         let s = servico();
         let contas = s.contas().unwrap();
-        let cx = contas.iter().find(|c| c.apelido == "CX-0001").expect("cx");
+        let cx = contas.iter().find(|c| c.codigo == "CX-0001").expect("cx");
         assert_eq!(cx.conta_do_extrato, None);
-        let nu = contas.iter().find(|c| c.apelido == "Nubank").expect("nu");
+        let nu = contas.iter().find(|c| c.codigo == "Nubank").expect("nu");
         assert_eq!(nu.conta_do_extrato.as_deref(), Some(CONTA_DO_NUBANK));
         let pares = s.pares_de_conta_sugeridos().unwrap();
-        let par = pares.iter().find(|p| p.apelido == "CX-0001").expect("par");
+        let par = pares.iter().find(|p| p.codigo == "CX-0001").expect("par");
         assert_eq!(par.conta_do_extrato, CONTA_DO_SALARIO);
         assert!(par.evidencias >= 3, "{par:?}");
         assert!(par.motivo.contains("conciliaç"), "{}", par.motivo);
-        assert!(pares.iter().all(|p| p.apelido != "Nubank"));
+        assert!(pares.iter().all(|p| p.codigo != "Nubank"));
     }
 
     #[test]
@@ -656,25 +656,25 @@ mod testes {
         let mut s = servico();
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,
         )
         .unwrap();
         let contas = s.contas().unwrap();
-        let cx = contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
+        let cx = contas.iter().find(|c| c.codigo == "CX-0001").unwrap();
         assert_eq!(cx.conta_do_extrato.as_deref(), Some(CONTA_DO_SALARIO));
         assert!(
             s.pares_de_conta_sugeridos()
                 .unwrap()
                 .iter()
-                .all(|p| p.apelido != "CX-0001")
+                .all(|p| p.codigo != "CX-0001")
         );
         // Conta que não existe no extrato não vira par.
         let erro = s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some("NADA · 1".into()),
             },
             Autor::Usuario,
@@ -683,7 +683,7 @@ mod testes {
         // Desligar volta ao estado sem par.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: None,
             },
             Autor::Usuario,
@@ -693,7 +693,7 @@ mod testes {
         assert!(
             contas
                 .iter()
-                .find(|c| c.apelido == "CX-0001")
+                .find(|c| c.codigo == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .is_none()
@@ -705,7 +705,7 @@ mod testes {
         let mut s = servico();
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,
