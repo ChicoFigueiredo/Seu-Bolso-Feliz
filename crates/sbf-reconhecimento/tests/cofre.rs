@@ -997,7 +997,7 @@ fn com_par_de_conta_e_assinatura_o_credito_de_valor_diferente_tem_duas_provas_e_
     let mut plan = c.plan();
     plan.aplicar(
         Alteracao::MapearConta {
-            apelido: "CX-0001".into(),
+            codigo: "CX-0001".into(),
             conta_do_extrato: Some("BANCO FICTICIO · 0001".into()),
         },
         Autor::Usuario,

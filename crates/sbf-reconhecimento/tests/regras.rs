@@ -161,7 +161,7 @@ impl Cenario {
         self.plan()
             .aplicar(
                 Alteracao::MapearConta {
-                    apelido: "CX-0001".into(),
+                    codigo: "CX-0001".into(),
                     conta_do_extrato: Some(CONTA.into()),
                 },
                 Autor::Usuario,

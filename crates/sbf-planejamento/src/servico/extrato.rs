@@ -28,7 +28,7 @@ fn hoje_do_relogio(s: &PlanejamentoSqlite) -> Data {
 pub(super) fn contas(s: &PlanejamentoSqlite) -> Resultado<Vec<ContaDoPlanejamento>> {
     let c = s.banco.conexao();
     let pares = banco::ler_pares_de_conta(c)?;
-    let mut apelidos: BTreeSet<String> = banco::ler_recorrentes(c, None, false)?
+    let mut codigos: BTreeSet<String> = banco::ler_recorrentes(c, None, false)?
         .iter()
         .flat_map(|r| r.versoes.iter())
         .filter_map(|v| v.conta.as_deref())
@@ -36,12 +36,12 @@ pub(super) fn contas(s: &PlanejamentoSqlite) -> Resultado<Vec<ContaDoPlanejament
         .filter(|a| !a.is_empty())
         .map(str::to_owned)
         .collect();
-    apelidos.extend(pares.keys().cloned());
-    Ok(apelidos
+    codigos.extend(pares.keys().cloned());
+    Ok(codigos
         .into_iter()
-        .map(|apelido| ContaDoPlanejamento {
-            conta_do_extrato: pares.get(&apelido).cloned(),
-            apelido,
+        .map(|codigo| ContaDoPlanejamento {
+            conta_do_extrato: pares.get(&codigo).cloned(),
+            codigo,
         })
         .collect())
 }
@@ -136,7 +136,7 @@ pub(super) fn candidatos(
 }
 
 /// As conciliações gravadas da ocorrência, cada uma com o movimento do extrato (procurado no
-/// dia da conciliação) e se a conta bate com o par confirmado do apelido.
+/// dia da conciliação) e se a conta bate com o par confirmado do código.
 pub(super) fn conciliacoes_da_ocorrencia(
     s: &PlanejamentoSqlite,
     id: &IdOcorrencia,
@@ -318,13 +318,13 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
     for rec in ativos(&dados) {
         let (excecoes, conciliacoes) = (dados.excecoes_de(&rec.id), dados.conciliacoes_de(&rec.id));
         for x in conciliacoes {
-            let apelido = versao_vigente(rec, x.ocorrencia.competencia)
+            let codigo = versao_vigente(rec, x.ocorrencia.competencia)
                 .and_then(|v| v.conta.as_deref())
                 .map(str::trim)
                 .filter(|a| !a.is_empty());
-            if let (Some(apelido), Some(conta)) = (apelido, conta_do.get(x.movimento.as_str())) {
+            if let (Some(codigo), Some(conta)) = (codigo, conta_do.get(x.movimento.as_str())) {
                 evidencias.push(Evidencia {
-                    apelido: apelido.to_owned(),
+                    codigo: codigo.to_owned(),
                     conta_do_extrato: (*conta).to_owned(),
                     indicio: Indicio::Conciliacao {
                         confirmada: x.confirmada,
@@ -358,10 +358,10 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
         .into_iter()
         .filter(|o| !o.suprimida())
         {
-            let Some(apelido) = o.conta.as_deref().map(str::trim).filter(|a| !a.is_empty()) else {
+            let Some(codigo) = o.conta.as_deref().map(str::trim).filter(|a| !a.is_empty()) else {
                 continue;
             };
-            let apelido = apelido.to_owned();
+            let codigo = codigo.to_owned();
             let alvo = Alvo {
                 ocorrencia: o,
                 esperado: None,
@@ -372,7 +372,7 @@ pub(super) fn pares_sugeridos(s: &PlanejamentoSqlite) -> Resultado<Vec<ParDeCont
                 && !m.conta_do_extrato.trim().is_empty()
             {
                 evidencias.push(Evidencia {
-                    apelido,
+                    codigo,
                     conta_do_extrato: m.conta_do_extrato.clone(),
                     indicio: Indicio::Assinatura,
                 });

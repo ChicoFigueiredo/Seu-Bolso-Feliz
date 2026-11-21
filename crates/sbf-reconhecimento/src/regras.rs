@@ -1004,7 +1004,7 @@ fn pagar_fatura(
         ));
     };
     let usados = movimentos_ja_conciliados(ctx, v, 15)?;
-    let apelido = ocorrencia
+    let codigo = ocorrencia
         .conta
         .as_deref()
         .map(str::trim)
@@ -1012,7 +1012,7 @@ fn pagar_fatura(
     let conta_do_extrato = plan
         .contas()?
         .into_iter()
-        .find(|c| c.apelido.trim() == apelido)
+        .find(|c| c.codigo.trim() == codigo)
         .and_then(|c| c.conta_do_extrato);
     let assinatura = plan.assinatura(&ocorrencia.id.recorrente)?;
     let candidatos: Vec<(MovimentoDoExtrato, bool)> = ctx

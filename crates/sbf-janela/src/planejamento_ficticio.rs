@@ -2015,9 +2015,9 @@ impl PlanejamentoFicticio {
                 Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
             }
             Alteracao::MapearConta {
-                apelido,
+                codigo,
                 conta_do_extrato,
-            } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
+            } => self.mapear_conta(codigo, conta_do_extrato, autor, &alt),
             Alteracao::Desconciliar {
                 ocorrencia,
                 movimento,
@@ -2519,7 +2519,7 @@ mod testes {
         // Sem composição do mês, a sugestão que já existe continua sugestão.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,

@@ -3457,7 +3457,7 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                     ui.label("Conta");
                     ui.add_enabled(
                         daqui,
-                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0001"),
+                        egui::TextEdit::singleline(conta).hint_text("código, como CX-0001"),
                     );
                     ui.end_row();
                     ui.label("Centro");
@@ -4232,7 +4232,7 @@ mod testes {
     fn mapear_salario(j: &mut crate::janela::Janela) {
         j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(crate::planejamento_ficticio::CONTA_DO_SALARIO.into()),
             },
         ]));
@@ -4244,7 +4244,7 @@ mod testes {
         let j = janela_ligada();
         let pl = j.planejamento.as_ref().unwrap().0.as_ref();
         let d = crate::contas_ui::carregar(pl).expect("contas");
-        let cx = d.contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
+        let cx = d.contas.iter().find(|c| c.codigo == "CX-0001").unwrap();
         assert!(cx.conta_do_extrato.is_none());
         let s = d.sugestao_de("CX-0001").expect("sugestão");
         assert_eq!(
@@ -4275,7 +4275,7 @@ mod testes {
         assert_eq!(
             d.contas
                 .iter()
-                .find(|c| c.apelido == "CX-0001")
+                .find(|c| c.codigo == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .as_deref(),

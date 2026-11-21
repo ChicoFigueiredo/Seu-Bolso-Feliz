@@ -112,10 +112,10 @@ fn base(s: &PlanejamentoSqlite, id: &str) -> i64 {
         .versao_do_registro
 }
 
-fn mapear(s: &mut PlanejamentoSqlite, apelido: &str, conta: Option<&str>) {
+fn mapear(s: &mut PlanejamentoSqlite, codigo: &str, conta: Option<&str>) {
     s.aplicar(
         Alteracao::MapearConta {
-            apelido: apelido.into(),
+            codigo: codigo.into(),
             conta_do_extrato: conta.map(str::to_owned),
         },
         Autor::Usuario,
@@ -179,7 +179,7 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
         s.contas()
             .expect("contas")
             .iter()
-            .map(|c| (c.apelido.as_str(), c.conta_do_extrato.as_deref()))
+            .map(|c| (c.codigo.as_str(), c.conta_do_extrato.as_deref()))
             .collect::<Vec<_>>(),
         [("CX-0001", None), ("Nubank", None)]
     );
@@ -205,10 +205,10 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
 #[test]
 fn mapear_conta_valida_os_campos() {
     let mut s = servico(&Extrato::default());
-    for (apelido, conta) in [("  ", Some("B")), ("CX", Some(" "))] {
+    for (codigo, conta) in [("  ", Some("B")), ("CX", Some(" "))] {
         let erro = s.aplicar(
             Alteracao::MapearConta {
-                apelido: apelido.into(),
+                codigo: codigo.into(),
                 conta_do_extrato: conta.map(str::to_owned),
             },
             Autor::Usuario,
@@ -218,7 +218,7 @@ fn mapear_conta_valida_os_campos() {
 }
 
 #[test]
-fn contas_incluem_o_par_mesmo_sem_versao_usando_o_apelido() {
+fn contas_incluem_o_par_mesmo_sem_versao_usando_o_codigo() {
     let mut s = servico(&Extrato::default());
     mapear(&mut s, "Antiga", Some("BANCO · 9"));
     let contas = s.contas().expect("contas");
@@ -636,21 +636,21 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
     conciliar(&mut s, &net, "pluggy:txn_3", 5_000, 9, false);
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 2);
-    assert_eq!(pares[0].apelido, "CX-0001");
+    assert_eq!(pares[0].codigo, "CX-0001");
     assert_eq!(pares[0].conta_do_extrato, "BANCO · 1");
     assert_eq!(pares[0].evidencias, 2);
     assert_eq!(
         pares[0].motivo,
         "1 conciliação confirmada e 1 conciliação sugerida"
     );
-    assert_eq!(pares[1].apelido, "Nubank");
+    assert_eq!(pares[1].codigo, "Nubank");
     assert_eq!(pares[1].conta_do_extrato, "BANCO · 2");
 
-    // Com o par confirmado, o apelido sai da lista.
+    // Com o par confirmado, o código sai da lista.
     mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 1);
-    assert_eq!(pares[0].apelido, "Nubank");
+    assert_eq!(pares[0].codigo, "Nubank");
 }
 
 #[test]

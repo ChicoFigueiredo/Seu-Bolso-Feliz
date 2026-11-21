@@ -1727,10 +1727,10 @@ pub fn descrever(alteracao: &Alteracao, nome: &dyn Fn(&str) -> String) -> String
         Alteracao::VincularDocumento { nome: doc, .. } => format!("Vincular o documento {doc}."),
         Alteracao::DesvincularDocumento { .. } => "Desvincular um documento.".to_owned(),
         Alteracao::MapearConta {
-            apelido,
+            codigo,
             conta_do_extrato: Some(c),
-        } => format!("Ligar a conta {apelido} a {c}."),
-        Alteracao::MapearConta { apelido, .. } => format!("Desligar a conta {apelido}."),
+        } => format!("Ligar a conta {codigo} a {c}."),
+        Alteracao::MapearConta { codigo, .. } => format!("Desligar a conta {codigo}."),
         Alteracao::Desconciliar { ocorrencia, .. } => {
             format!("Desfazer a conciliação de {ocorrencia}.")
         }

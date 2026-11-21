@@ -445,7 +445,7 @@ pub fn sugerir(
             .conta
             .as_deref()
             .map(str::trim)
-            .and_then(|a| pares.iter().find(|p| p.apelido.trim() == a))
+            .and_then(|a| pares.iter().find(|p| p.codigo.trim() == a))
             .and_then(|p| p.conta_do_extrato.clone());
         let conta_ok = conta_exigida.as_deref().is_some_and(|c| {
             escolhidos
