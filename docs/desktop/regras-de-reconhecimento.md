@@ -112,14 +112,16 @@ discordam num deles, o sbf não escolhe sozinho: a entrada vai para revisão.
 
 A regra **propõe**; ela não grava. Cada proposta é uma destas formas:
 
-| Forma                                                                    | Use para                                                                                                    |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `{"provar_registro": {"janela_dias": 2}}`                                | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo. |
-| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}` | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                         |
-| `"pagar_fatura"`                                                         | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).  |
+| Forma                                                                                                          | Use para                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{"provar_registro": {"janela_dias": 2}}`                                                                      | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo.                                                                                              |
+| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}`                                       | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                                                                                                                      |
+| `"pagar_fatura"`                                                                                               | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).                                                                                               |
+| `{"vincular_ocorrencia": {"compromisso": "servico exemplo", "tipo_documento": "comprovante", "janela_dias": 20}}` | Anexar o documento à ocorrência do mês do compromisso mais perto da data dele, sem exigir valor nem débito no extrato (cobrança em dólar no cartão). Empate de distância não sugere; o usuário confirma. |
 
 Essas propostas usam os campos `valor_centavos`, `data` (ou `vencimento`, na fatura), `conta`
-e `cartao`. Sem o campo necessário, a proposta não sai e a regra diz o que falta.
+e `cartao`; `vincular_ocorrencia` só pede `data` (ou `vencimento`). Os formatos `data` e
+`competencia` leem também datas em inglês (`November 20, 2026`, `Nov 20, 2026`, `20 November 2026`). Sem o campo necessário, a proposta não sai e a regra diz o que falta.
 
 ### 2.4 Exemplo completo: Comprovante Pix · Banco Exemplo (fictício)
 
