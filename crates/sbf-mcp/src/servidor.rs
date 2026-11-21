@@ -48,6 +48,8 @@ esquema!(PedidoDeRegistros, ParamsDeRegistros {
     fornecedor: Option<String>,
     /// Categoria exata (sem diferenciar maiúsculas).
     categoria: Option<String>,
+    /// A conta: o rótulo (CX-0001 · Apelido), o código, o apelido ou o nome do banco.
+    conta: Option<String>,
     /// Data inicial, AAAA-MM-DD, inclusive.
     de: Option<String>,
     /// Data final, AAAA-MM-DD, inclusive.
@@ -107,7 +109,7 @@ esquema!(PedidoDoLivro, ParamsDoLivro {
     texto: Option<String>,
     /// Nome da categoria.
     categoria: Option<String>,
-    /// Nome da conta.
+    /// Nome da conta ou o rótulo dela (código, apelido).
     conta: Option<String>,
     /// Data inicial, AAAA-MM-DD, inclusive.
     de: Option<String>,
@@ -248,7 +250,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Paginado."
+        description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Cada registro traz conta (a do extrato) e conta_rotulo (codigo e apelido que o usuario deu, como CX-0001 · Reserva); o filtro conta aceita um ou outro. Paginado."
     )]
     fn buscar_registros(
         &self,
