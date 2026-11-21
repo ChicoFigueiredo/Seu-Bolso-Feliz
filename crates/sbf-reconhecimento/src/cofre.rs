@@ -17,6 +17,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use sbf_coleta::pastas::{registrar_arrastado, sha256_do_arquivo};
 use sbf_ia::{Controle, Fila, Provedor, Registro};
 use sbf_inventario::caixa_de_entrada::{self as caixa, Canal, Chegada, Estado as EstadoDaCaixa};
+use sbf_inventario::impressao_do_texto;
 use sbf_inventario::sugestao::RegistroDaIa;
 use sbf_inventario::texto::{self, METODO_TEXTO_SIMPLES};
 use sbf_ocr::{DesfechoDoOcr, FalhaDoOcr, Ocr};
@@ -602,8 +603,27 @@ impl ReconhecedorDoCofre {
         if let Some(na_caixa) = na_caixa {
             // Duas origens fora a fonte `arrastado` (que o próprio reconhecimento cria ao
             // copiar um arquivo solto): o mesmo conteúdo já foi achado em outro lugar.
-            let repetido = caixa::origens_de_fora(&conn, &resultado.sha256).is_ok_and(|n| n >= 2);
-            let leitura = crate::caixa_de_entrada::leitura_do_resultado(&resultado, repetido);
+            let repetido_por_bytes =
+                caixa::origens_de_fora(&conn, &resultado.sha256).is_ok_and(|n| n >= 2);
+            // Ou o mesmo texto com bytes diferentes (a Stripe gera o PDF de novo a cada envio;
+            // o mesmo recibo chega por e-mail e pelo Telegram): o achado mais antigo segue
+            // como está e o mais novo é a possível duplicidade. Quem gravou `texto` por fora
+            // (os scripts Bun) deixou a impressão pendente: completa antes de comparar.
+            let _ = impressao_do_texto::completar_pendentes(&conn);
+            let igual_a = impressao_do_texto::original_do_mesmo_texto(&conn, &resultado.sha256)
+                .ok()
+                .flatten();
+            let repetido = repetido_por_bytes || igual_a.is_some();
+            let mut leitura = crate::caixa_de_entrada::leitura_do_resultado(&resultado, repetido);
+            if let (false, Some(original), EstadoDaCaixa::PossivelDuplicidade) =
+                (repetido_por_bytes, igual_a, leitura.estado)
+            {
+                let de_quem = format!("mesmo texto de {}", original.nome);
+                leitura.resumo = Some(match leitura.resumo.take() {
+                    Some(resumo) => format!("{resumo} · {de_quem}"),
+                    None => de_quem,
+                });
+            }
             let gravou = match na_caixa {
                 NaCaixa::Registrar(chegada) => caixa::registrar(&conn, &leitura, &chegada).is_ok(),
                 NaCaixa::Atualizar => caixa::atualizar(&conn, &leitura).is_ok(),
