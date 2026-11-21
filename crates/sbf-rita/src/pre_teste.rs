@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use sbf_regras::catalogo::{Catalogo, VersaoDeRegra};
-use sbf_regras::motor::Motor;
+use sbf_regras::motor::{Motor, identidade_dos_campos};
 use sbf_regras::simulacao::{ResumoDaDecisao, simular};
 use sbf_regras::{Decisao, Entrada, Leitura, ResultadoDaExecucao};
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,10 @@ pub struct DaAmostra {
     pub casam: usize,
     /// Até [`MAXIMO_DE_TITULOS`].
     pub titulos: Vec<String>,
+    /// Dos que casam, quantos teriam a mesma `identidade` de outro que também casa (o mesmo
+    /// documento por outro canal): seriam repetidos pelo padrão. Zero sem `identidade`.
+    #[serde(default)]
+    pub repetidas: usize,
 }
 
 /// Um padrão ativo e quantos documentos do pré-teste ele afeta.
@@ -153,6 +157,12 @@ impl PreTeste {
                 format!(" ({})", self.amostra.titulos.join("; "))
             }
         ));
+        if self.amostra.repetidas > 0 {
+            l.push(format!(
+                "Pela identidade, {} desses documentos seriam repetidos (o mesmo documento por outro canal).",
+                self.amostra.repetidas
+            ));
+        }
         for a in &self.empates {
             l.push(format!(
                 "Empata com `{}` em {} documentos.",
@@ -202,6 +212,7 @@ impl PreTeste {
                 "examinados": self.amostra.examinados,
                 "casam": self.amostra.casam,
                 "titulos": self.amostra.titulos,
+                "repetidas_pela_identidade": self.amostra.repetidas,
             },
             "empates": self.empates,
             "derruba": self.derrubadas,
@@ -355,10 +366,19 @@ pub fn pre_testar_versao(
         examinados: parecidos.len(),
         casam: 0,
         titulos: Vec::new(),
+        repetidas: 0,
     };
+    let mut identidades = std::collections::BTreeSet::new();
     for e in &parecidos {
-        if casou(&candidato.ler(e), regra, versao) {
+        let leitura = candidato.ler(e);
+        if casou(&leitura, regra, versao) {
             amostra.casam += 1;
+            if let Decisao::Reconhecido(r) = &leitura.decisao
+                && let Some(i) = identidade_dos_campos(&alvo.definicao.identidade, &r.campos)
+                && !identidades.insert(i)
+            {
+                amostra.repetidas += 1;
+            }
             if amostra.titulos.len() < MAXIMO_DE_TITULOS {
                 amostra.titulos.push(titulo_da_entrada(e));
             }
