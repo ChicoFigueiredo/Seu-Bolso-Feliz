@@ -259,6 +259,23 @@ pub enum Quem {
     Sistema,
 }
 
+/// O tipo do documento que uma proposta `vincular_ocorrencia` anexa. Espelha
+/// `sbf_planejamento::TipoDeDocumento` (este crate não depende do planejamento): os nomes na
+/// serialização são os mesmos, e quem aplica a proposta converte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDoDocumento {
+    Contracheque,
+    /// Cobrança (a *invoice*): não prova pagamento.
+    Fatura,
+    Boleto,
+    /// Prova de pagamento (o *receipt*).
+    Comprovante,
+    Contrato,
+    NotaFiscal,
+    Outro,
+}
+
 /// Uma proposta abstrata: o que procurar, não o que gravar (AC-LUA-06). Não existe
 /// variante para lançar, pagar ou criar movimentação; quem aplica é o Rust de quem chama.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +297,16 @@ pub enum Proposta {
         janela_dias: u32,
         /// Um nome para achar o compromisso ("Energia"), se a regra sabe.
         compromisso: Option<String>,
+    },
+    /// Anexar o documento à ocorrência do mês de um compromisso, sem exigir valor nem débito no
+    /// extrato (a cobrança em dólar no cartão nunca bate o valor). Só liga o arquivo.
+    VincularOcorrencia {
+        data: String,
+        /// Folga em dias entre `data` e o vencimento da ocorrência.
+        janela_dias: u32,
+        /// Um trecho do nome do compromisso ("servico exemplo").
+        compromisso: String,
+        tipo_documento: TipoDoDocumento,
     },
     /// O débito no banco paga uma fatura de cartão: é pagamento de fatura, não gasto
     /// (os itens da fatura já são os gastos). D11.

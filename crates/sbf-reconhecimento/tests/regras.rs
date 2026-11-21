@@ -1072,3 +1072,262 @@ fn competencia_sem_ano_usa_o_momento_do_inventario() {
         Valor::Competencia("2026-11".into())
     );
 }
+
+// ---------------------------------------------------------------- vincular_ocorrencia
+
+const INVOICE_DA_NUVEM: &str = "Nuvem Exemplo Inc\nInvoice\nInvoice number  NE-0001\n\
+Date of issue  November 20, 2026\n$4.00 USD due November 20, 2026\n";
+const RECEIPT_DA_NUVEM: &str = "Nuvem Exemplo Inc\nReceipt\nReceipt number  NE-0001-R\n\
+Date paid  November 20, 2026\n$4.00 USD paid\n";
+
+/// Uma regra em inglês que só liga o documento à ocorrência do mês (sem valor, sem extrato).
+fn regra_da_nuvem(
+    id: &str,
+    titulo: &str,
+    regex_da_data: &str,
+    tipo: sbf_regras::TipoDoDocumento,
+    janela_dias: u32,
+) -> NovaVersao {
+    let mut d = Definicao::simples(id, titulo);
+    d.detectar
+        .todos
+        .push(Condicao::Contem("nuvem exemplo".into()));
+    d.extrair
+        .insert("data".into(), extracao(regex_da_data, Formato::Data));
+    d.obrigatorios = vec!["data".into()];
+    d.propor = vec![ModeloDeProposta::VincularOcorrencia {
+        compromisso: "Nuvem Exemplo".into(),
+        tipo_documento: tipo,
+        janela_dias,
+    }];
+    nova(id, d)
+}
+
+fn regra_da_invoice() -> NovaVersao {
+    regra_da_nuvem(
+        "invoice-nuvem-exemplo",
+        "invoice",
+        r"Date of issue\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Fatura,
+        20,
+    )
+}
+
+fn regra_do_receipt() -> NovaVersao {
+    regra_da_nuvem(
+        "receipt-nuvem-exemplo",
+        "receipt",
+        r"Date paid\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Comprovante,
+        20,
+    )
+}
+
+fn ocorrencia_de(id: String, ano: i32, mes: u8) -> AlvoDoDocumento {
+    AlvoDoDocumento::Ocorrencia {
+        id: sbf_planejamento::IdOcorrencia {
+            recorrente: id,
+            competencia: comp(ano, mes),
+            parcela: None,
+        },
+    }
+}
+
+fn so_vincular(r: &Resultado) -> &Sugestao {
+    r.sugestoes
+        .iter()
+        .find(|s| matches!(s, Sugestao::Vincular { regra: Some(_), .. }))
+        .unwrap_or_else(|| panic!("nenhum vincular de regra: {:?} {:?}", r.sugestoes, r.avisos))
+}
+
+#[test]
+fn vincular_ocorrencia_liga_a_invoice_e_o_receipt_em_ingles_a_mesma_ocorrencia() {
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice());
+    c.instalar(regra_do_receipt());
+    let alvo = ocorrencia_de(id, 2026, 11);
+
+    let invoice = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+    let s = so_vincular(&invoice);
+    let Sugestao::Vincular {
+        alvo: a,
+        rotulo,
+        tipo,
+        data,
+        ..
+    } = s
+    else {
+        panic!("{s:?}");
+    };
+    assert_eq!(a, &alvo);
+    assert_eq!(rotulo, "Vincular a Nuvem Exemplo PRO · 11/2026");
+    assert_eq!(*tipo, sbf_planejamento::TipoDeDocumento::Fatura);
+    assert_eq!(*data, sbf_planejamento::Data::nova(2026, 11, 20));
+    assert!(!s.e_automatica());
+    assert!(
+        s.da_regra().is_some(),
+        "o retorno do usuário vai para a regra"
+    );
+
+    let mut plan = c.plan();
+    confirmar(&mut plan, &invoice, s);
+    let receipt = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    let s = so_vincular(&receipt);
+    assert!(matches!(
+        s,
+        Sugestao::Vincular {
+            tipo: sbf_planejamento::TipoDeDocumento::Comprovante,
+            ..
+        }
+    ));
+    confirmar(&mut plan, &receipt, s);
+
+    let documentos = plan.documentos(&alvo).unwrap();
+    assert_eq!(
+        documentos.len(),
+        2,
+        "os dois documentos na mesma ocorrência"
+    );
+    assert!(documentos.iter().any(|d| d.sha256 == invoice.sha256));
+    assert!(documentos.iter().any(|d| d.sha256 == receipt.sha256));
+}
+
+#[test]
+fn vincular_ocorrencia_aceita_a_ocorrencia_ja_conciliada() {
+    let c = cenario();
+    let id = c.criar(
+        "Nuvem Exemplo PRO",
+        Natureza::Saida,
+        2_200,
+        20,
+        Some("CX-0001"),
+    );
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-20",
+        -2_200,
+        "NUVEM EXEMPLO",
+    );
+    let alvo = ocorrencia_de(id, 2026, 11);
+    let AlvoDoDocumento::Ocorrencia { id: ocorrencia } = alvo.clone() else {
+        unreachable!()
+    };
+    c.plan()
+        .aplicar(
+            Alteracao::Conciliar {
+                conciliacao: sbf_planejamento::Conciliacao {
+                    ocorrencia,
+                    movimento: "pluggy:txn_1".into(),
+                    valor: Centavos(2_200),
+                    data: sbf_planejamento::Data::nova(2026, 11, 20).unwrap(),
+                    confirmada: true,
+                },
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+    c.instalar(regra_do_receipt());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+
+    let Sugestao::Vincular { alvo: a, .. } = so_vincular(&r) else {
+        unreachable!()
+    };
+    assert_eq!(a, &alvo, "recibo em ocorrência já paga é válido");
+}
+
+#[test]
+fn vincular_ocorrencia_sem_ocorrencia_na_janela_nao_sugere_nada() {
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 5, None);
+    // A ocorrência de novembro vence dia 5; o documento é de 20/11 e a janela é de 5 dias.
+    c.instalar(regra_da_nuvem(
+        "invoice-nuvem-exemplo",
+        "invoice",
+        r"Date of issue\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Fatura,
+        5,
+    ));
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+    assert!(
+        r.avisos.iter().any(|a| a.contains("ocorrência")),
+        "o motivo aparece: {:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn vincular_ocorrencia_de_outro_compromisso_nao_sugere_nada() {
+    let c = cenario();
+    c.criar("Energia", Natureza::Saida, 18_750, 20, None);
+    c.instalar(regra_da_invoice());
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+}
+
+#[test]
+fn vincular_ocorrencia_com_empate_de_distancia_nao_adivinha() {
+    let c = cenario();
+    // 18 e 22 de novembro: as duas a 2 dias do documento (20/11).
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 18, None);
+    c.criar("Nuvem Exemplo Team", Natureza::Saida, 4_400, 22, None);
+    c.instalar(regra_da_invoice());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+    assert!(
+        r.avisos.iter().any(|a| a.contains("empate")),
+        "o motivo diz que empatou: {:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn vincular_ocorrencia_escolhe_a_mais_proxima() {
+    let c = cenario();
+    let perto = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 18, None);
+    c.criar("Nuvem Exemplo Team", Natureza::Saida, 4_400, 28, None);
+    c.instalar(regra_da_invoice());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    let Sugestao::Vincular { alvo, .. } = so_vincular(&r) else {
+        unreachable!()
+    };
+    assert_eq!(alvo, &ocorrencia_de(perto, 2026, 11));
+}
+
+#[test]
+fn vincular_ocorrencia_nao_repete_o_documento_ja_vinculado() {
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_do_receipt());
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    let mut plan = c.plan();
+    confirmar(&mut plan, &r, so_vincular(&r));
+    assert_eq!(
+        plan.documentos(&ocorrencia_de(id, 2026, 11)).unwrap().len(),
+        1
+    );
+
+    // O mesmo conteúdo de novo (outro caminho): já está ligado, não sugere de novo.
+    let de_novo = c.rodar(&c.com_regras(), &c.solto("copia.txt", RECEIPT_DA_NUVEM));
+
+    assert!(
+        de_novo.sugestoes.iter().all(|s| s.da_regra().is_none()),
+        "{:?}",
+        de_novo.sugestoes
+    );
+    assert!(
+        de_novo.avisos.iter().any(|a| a.contains("já está ligado")),
+        "{:?}",
+        de_novo.avisos
+    );
+}

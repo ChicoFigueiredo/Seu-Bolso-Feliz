@@ -18,7 +18,8 @@ use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Campo, Canal, DeOnde, Entrada, ErroDasRegras, Proposta, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    Campo, Canal, DeOnde, Entrada, ErroDasRegras, Proposta, TipoDeEntrada, TipoDoDocumento,
+    VERSAO_DO_ESQUEMA, Valor,
 };
 
 /// Teto de tamanho de um regex compilado (evita regex patológico vindo de uma regra).
@@ -145,6 +146,15 @@ impl Definicao {
         {
             if !nome_valido(nome) {
                 return Err(erro(format!("nome inválido `{nome}` (use [a-z0-9_]+)")));
+            }
+        }
+        for proposta in &self.propor {
+            if let ModeloDeProposta::VincularOcorrencia { compromisso, .. } = proposta
+                && normalizar(compromisso).is_empty()
+            {
+                return Err(erro(
+                    "propor `vincular_ocorrencia`: `compromisso` vazio".to_owned(),
+                ));
             }
         }
         let todos = compilar_condicoes(&self.detectar.todos)?;
@@ -349,6 +359,14 @@ pub enum ModeloDeProposta {
         compromisso: Option<String>,
     },
     PagarFatura,
+    /// Anexa o documento à ocorrência do mês do compromisso (o campo `data`, ou `vencimento`);
+    /// não pede valor. Os dois campos são obrigatórios na definição.
+    VincularOcorrencia {
+        /// Um trecho do nome do compromisso, comparado sem acento nem maiúsculas.
+        compromisso: String,
+        tipo_documento: TipoDoDocumento,
+        janela_dias: u32,
+    },
 }
 
 impl ModeloDeProposta {
@@ -388,6 +406,21 @@ impl ModeloDeProposta {
                     .map_err(|m| format!("proposta conciliar_ocorrencia não gerada: {m}"))?,
                 janela_dias: *janela_dias,
                 compromisso: compromisso.clone(),
+            }),
+            Self::VincularOcorrencia {
+                compromisso,
+                tipo_documento,
+                janela_dias,
+            } => Ok(Proposta::VincularOcorrencia {
+                data: data("data")
+                    .or_else(|_| data("vencimento"))
+                    .map_err(|_| {
+                        "proposta vincular_ocorrencia não gerada: falta o campo `data` (ou `vencimento`)"
+                            .to_owned()
+                    })?,
+                janela_dias: *janela_dias,
+                compromisso: compromisso.trim().to_owned(),
+                tipo_documento: *tipo_documento,
             }),
             Self::PagarFatura => Ok(Proposta::PagarFatura {
                 valor_centavos: centavos("valor_centavos")
@@ -755,7 +788,7 @@ pub fn parse_data(bruto: &str) -> Option<String> {
     {
         let (m, d) = resto.split_once('-')?;
         (d, m, a)
-    } else {
+    } else if s.contains('/') || s.matches('-').count() == 2 {
         let sep = if s.contains('/') { '/' } else { '-' };
         let mut it = s.split(sep);
         let (d, m, a) = (it.next()?, it.next()?, it.next()?);
@@ -763,6 +796,9 @@ pub fn parse_data(bruto: &str) -> Option<String> {
             return None;
         }
         (d, m, a)
+    } else {
+        // `25 de novembro de 2026`, `November 20, 2026`: só com o ano; sem ano, `aplicar_em`.
+        return data_por_extenso(s, None);
     };
     let dia = so_digitos(d, 2)?;
     let mes = so_digitos(m, 2)?;
@@ -806,13 +842,34 @@ const MESES: [&str; 12] = [
     "dezembro",
 ];
 
-/// O número do mês (1 a 12) de `janeiro`, `Março`, `mar`... (sem diferenciar maiúsculas nem
-/// acentos). A abreviação é a de três letras.
+const MESES_EM_INGLES: [&str; 12] = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
+/// O número do mês (1 a 12) de `janeiro`, `Março`, `mar`, `November`, `Sept`... (sem
+/// diferenciar maiúsculas nem acentos). A abreviação é a de três letras (mais `sept`). Os
+/// dois idiomas valem juntos: nenhum trio de letras é um mês num idioma e outro no outro.
 fn mes_por_nome(palavra: &str) -> Option<u32> {
     let p = normalizar(palavra);
-    MESES
-        .iter()
-        .position(|m| *m == p || (p.len() == 3 && m.starts_with(p.as_str())))
+    let abreviacao = p.len() == 3 || p == "sept";
+    let acha = |meses: &[&str; 12]| {
+        meses
+            .iter()
+            .position(|m| *m == p || (abreviacao && m.starts_with(&p[..3.min(p.len())])))
+    };
+    acha(&MESES)
+        .or_else(|| acha(&MESES_EM_INGLES))
         .and_then(|i| u32::try_from(i + 1).ok())
 }
 
@@ -824,21 +881,28 @@ struct MesPorExtenso {
 }
 
 /// Lê `25 de Novembro`, `25 de novembro de 2026`, `Novembro`, `novembro de 2026`, `nov/2026`
-/// e `25 nov`. Qualquer outra coisa (palavra a mais, número solto) é `None`.
+/// e `25 nov`; em inglês, `November 20, 2026`, `Nov 20 2026`, `20 November 2026`, `Nov 20` e
+/// `Sept 2026`. Qualquer outra coisa (palavra a mais, número solto) é `None`.
 fn so_o_mes(bruto: &str) -> Option<MesPorExtenso> {
     let normal = normalizar(bruto);
     let partes: Vec<&str> = normal.split(' ').filter(|p| *p != "de").collect();
+    let numero = |p: &str, tamanho: std::ops::RangeInclusive<usize>| {
+        tamanho.contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit())
+    };
     let (dia, resto) = match partes.first() {
-        Some(p) if p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit()) => {
-            (Some(p.parse::<u32>().ok()?), &partes[1..])
-        }
+        Some(p) if numero(p, 1..=2) => (Some(p.parse::<u32>().ok()?), &partes[1..]),
         _ => (None, &partes[..]),
     };
-    let (nome, ano) = match resto {
-        [m] => (*m, None),
-        [m, a] if a.len() == 4 && a.bytes().all(|b| b.is_ascii_digit()) => {
-            (*m, Some(a.parse::<i32>().ok()?))
-        }
+    let (nome, dia, ano) = match (dia, resto) {
+        (_, [m]) => (*m, dia, None),
+        (_, [m, a]) if numero(a, 4..=4) => (*m, dia, Some(a.parse::<i32>().ok()?)),
+        // O inglês põe o dia depois do mês: `Nov 20`, `November 20, 2026`.
+        (None, [m, d]) if numero(d, 1..=2) => (*m, Some(d.parse::<u32>().ok()?), None),
+        (None, [m, d, a]) if numero(d, 1..=2) && numero(a, 4..=4) => (
+            *m,
+            Some(d.parse::<u32>().ok()?),
+            Some(a.parse::<i32>().ok()?),
+        ),
         _ => return None,
     };
     Some(MesPorExtenso {
@@ -997,6 +1061,109 @@ mod testes {
     }
 
     #[test]
+    fn datas_em_ingles_com_ano() {
+        for (texto, esperado) in [
+            ("November 20, 2026", "2026-11-20"),
+            ("November 20 2026", "2026-11-20"),
+            ("Nov 20, 2026", "2026-11-20"),
+            ("20 November 2026", "2026-11-20"),
+            ("20 Nov 2026", "2026-11-20"),
+            ("NOVEMBER 5, 2026", "2026-11-05"),
+            ("Sept 3, 2026", "2026-09-03"),
+            ("September 3, 2026", "2026-09-03"),
+            ("Dec 31, 2026", "2026-12-31"),
+            ("January 1, 2027", "2027-01-01"),
+            ("Feb 29, 2028", "2028-02-29"),
+            ("Aug 9 2026", "2026-08-09"),
+            ("Oct 9 2026", "2026-10-09"),
+            ("May 9 2026", "2026-05-09"),
+            ("Apr 9 2026", "2026-04-09"),
+        ] {
+            assert_eq!(parse_data(texto).as_deref(), Some(esperado), "{texto}");
+            assert_eq!(
+                Formato::Data.aplicar(texto),
+                Some(Valor::Data(esperado.to_owned())),
+                "{texto}"
+            );
+        }
+        assert_eq!(parse_data("Feb 29, 2027"), None);
+        assert_eq!(parse_data("Nov 31, 2026"), None);
+        assert_eq!(parse_data("Novem 20, 2026"), None);
+        assert_eq!(parse_data("November 2026"), None, "data pede o dia");
+    }
+
+    #[test]
+    fn competencia_em_ingles() {
+        let c = |t: &str| Formato::Competencia.aplicar(t);
+        let comp = |s: &str| Some(Valor::Competencia(s.to_owned()));
+        assert_eq!(c("November 20, 2026"), comp("2026-11"));
+        assert_eq!(c("20 November 2026"), comp("2026-11"));
+        assert_eq!(c("November 2026"), comp("2026-11"));
+        assert_eq!(c("Sept 2026"), comp("2026-09"));
+        assert_eq!(c("Dec 2026"), comp("2026-12"));
+        assert_eq!(c("November 20"), None, "sem ano e sem momento");
+        assert_eq!(
+            Formato::Competencia.aplicar_em("November 20", Some("2026-11-21")),
+            comp("2026-11")
+        );
+    }
+
+    #[test]
+    fn data_em_ingles_sem_ano_usa_o_momento() {
+        let f = |t: &str, m: Option<&str>| Formato::Data.aplicar_em(t, m);
+        let d = |s: &str| Some(Valor::Data(s.to_owned()));
+        assert_eq!(f("November 20", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("Nov 20", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("20 Nov", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("Dec 28", Some("2027-01-05")), d("2026-12-28"));
+        assert_eq!(f("Jan 3", Some("2026-12-30T10:00:00Z")), d("2027-01-03"));
+        assert_eq!(f("Nov 20", None), None);
+    }
+
+    #[test]
+    fn meses_dos_dois_idiomas_convivem() {
+        // O mesmo número de mês nos dois idiomas.
+        for (pt, en, mes) in [
+            ("jan", "jan", "01"),
+            ("fev", "feb", "02"),
+            ("mar", "mar", "03"),
+            ("abr", "apr", "04"),
+            ("mai", "may", "05"),
+            ("jun", "jun", "06"),
+            ("jul", "jul", "07"),
+            ("ago", "aug", "08"),
+            ("set", "sep", "09"),
+            ("out", "oct", "10"),
+            ("nov", "nov", "11"),
+            ("dez", "dec", "12"),
+        ] {
+            let esperado = Some(Valor::Competencia(format!("2026-{mes}")));
+            assert_eq!(
+                Formato::Competencia.aplicar(&format!("{pt}/2026")),
+                esperado,
+                "{pt}"
+            );
+            assert_eq!(
+                Formato::Competencia.aplicar(&format!("{en} 2026")),
+                esperado,
+                "{en}"
+            );
+        }
+        assert_eq!(
+            Formato::Data.aplicar("25 de Novembro de 2026"),
+            Some(Valor::Data("2026-11-25".to_owned()))
+        );
+        assert_eq!(
+            Formato::Data.aplicar("25 de dezembro de 2026"),
+            Some(Valor::Data("2026-12-25".to_owned()))
+        );
+        assert_eq!(
+            Formato::Competencia.aplicar("March 2026"),
+            Some(Valor::Competencia("2026-03".to_owned()))
+        );
+    }
+
+    #[test]
     fn mes_sem_ano_usa_o_mes_mais_proximo_do_momento() {
         let f = |fmt: Formato, t: &str, m: Option<&str>| {
             fmt.aplicar_em(t, m).map(|v| match v {
@@ -1099,6 +1266,55 @@ mod testes {
         d.detectar.algum.push(Condicao::Contem("d".into()));
         d.detectar.algum.push(Condicao::Contem("e".into()));
         assert_eq!(d.especificidade(), 4);
+    }
+
+    #[test]
+    fn vincular_ocorrencia_no_json_e_na_geracao() {
+        let j = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]},
+            "propor":[{"vincular_ocorrencia":{"compromisso":"servico exemplo","tipo_documento":"comprovante","janela_dias":20}}]}"#;
+        let d: Definicao = serde_json::from_str(j).unwrap();
+        assert!(d.validar().is_ok());
+        let campo = |v: Valor| Campo {
+            valor: v,
+            de_onde: DeOnde::Dica { nome: "x".into() },
+        };
+        let mut campos = BTreeMap::new();
+        assert!(d.propor[0].gerar(&campos).is_err(), "sem data");
+        campos.insert(
+            "vencimento".to_owned(),
+            campo(Valor::Data("2026-11-20".into())),
+        );
+        let esperado = Proposta::VincularOcorrencia {
+            data: "2026-11-20".into(),
+            janela_dias: 20,
+            compromisso: "servico exemplo".into(),
+            tipo_documento: TipoDoDocumento::Comprovante,
+        };
+        assert_eq!(
+            d.propor[0].gerar(&campos).unwrap(),
+            esperado,
+            "cai no vencimento"
+        );
+        campos.insert("data".to_owned(), campo(Valor::Data("2026-11-19".into())));
+        assert!(matches!(
+            d.propor[0].gerar(&campos),
+            Ok(Proposta::VincularOcorrencia { data, .. }) if data == "2026-11-19"
+        ));
+        // Sem compromisso ou com um tipo que não existe, a definição não vale.
+        for ruim in [
+            r#"{"vincular_ocorrencia":{"compromisso":"  ","tipo_documento":"outro","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"tipo_documento":"outro","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"compromisso":"a","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"compromisso":"a","tipo_documento":"recibo","janela_dias":3}}"#,
+        ] {
+            let j = format!(
+                r#"{{"tipo_documental":"x","detectar":{{"todos":[{{"contem":"abc"}}]}},"propor":[{ruim}]}}"#
+            );
+            let ok = serde_json::from_str::<Definicao>(&j)
+                .ok()
+                .is_some_and(|d| d.validar().is_ok());
+            assert!(!ok, "{ruim}");
+        }
     }
 
     #[test]

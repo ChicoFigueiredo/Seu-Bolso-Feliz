@@ -675,6 +675,17 @@ pub(crate) fn detalhe_da_sugestao(ui: &mut Ui, p: &Paleta, sug: &Sugestao, aplic
                 p.tinta_suave,
             );
         }
+        Sugestao::Vincular { data, .. } => {
+            pequeno(
+                ui,
+                format!(
+                    "{}Confirmar liga o documento à ocorrência; nada é conciliado nem criado.",
+                    data.map(|d| format!("Documento de {}. ", data_texto(d)))
+                        .unwrap_or_default()
+                ),
+                p.tinta_suave,
+            );
+        }
         Sugestao::ConciliarOcorrencia {
             conciliacao,
             provas,
@@ -756,6 +767,12 @@ fn descrever_proposta(pr: &Proposta) -> String {
                 .map(|c| format!(" de {c}"))
                 .unwrap_or_default(),
             dinheiro(*valor_centavos),
+            dia(data)
+        ),
+        Proposta::VincularOcorrencia {
+            data, compromisso, ..
+        } => format!(
+            "ligar o documento à ocorrência de {compromisso} perto de {}",
             dia(data)
         ),
         Proposta::PagarFatura {

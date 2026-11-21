@@ -152,6 +152,11 @@ pub enum Sugestao {
         rotulo: String,
         tipo: TipoDeDocumento,
         data: Option<Data>,
+        /// A regra (id e versão) que propôs `vincular_ocorrencia`; `None` no vínculo do
+        /// contracheque, que não vem de regra. Nunca é automática: o usuário confirma.
+        regra: Option<(IdDaRegra, u32)>,
+        /// A chave de idempotência da proposta (`registrar_retorno`), junto de `regra`.
+        chave: Option<String>,
     },
     /// Passar a usar as rubricas do contracheque: com eventuais, duas composições (a do mês e
     /// a das fixas); sem, uma só. A pessoa troca a marcação de cada rubrica no cartão antes
@@ -394,6 +399,11 @@ impl Sugestao {
             Sugestao::ProvarRegistro { regra, chave, .. }
             | Sugestao::ConciliarOcorrencia { regra, chave, .. }
             | Sugestao::PagarFatura { regra, chave, .. } => Some((regra, chave)),
+            Sugestao::Vincular {
+                regra: Some(regra),
+                chave: Some(chave),
+                ..
+            } => Some((regra, chave)),
             _ => None,
         }
     }
@@ -615,6 +625,8 @@ mod testes {
                 rotulo: "Vincular ao Salário · 10/2026".to_owned(),
                 tipo: TipoDeDocumento::Contracheque,
                 data: None,
+                regra: None,
+                chave: None,
             }],
             avisos: Vec::new(),
             entrada: None,

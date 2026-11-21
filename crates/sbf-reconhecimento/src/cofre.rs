@@ -1108,6 +1108,8 @@ impl ReconhecedorDoCofre {
                 rotulo: format!("Vincular ao {} · {mes}", recorrente.nome),
                 tipo: TipoDeDocumento::Contracheque,
                 data: Some(c.pagamento.dia(1)),
+                regra: None,
+                chave: None,
             });
         }
         if !vigentes.iter().all(|v| *v) {
