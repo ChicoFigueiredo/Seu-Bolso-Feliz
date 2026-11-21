@@ -33,7 +33,8 @@ use sbf_regras::motor::Motor;
 use sbf_regras::script::ExecutorDeScript;
 use sbf_regras::{
     Campo, Canal, DeOnde, Decisao, Dicas, Entrada, ErroDasRegras, Estado as EstadoDaRegra, Origem,
-    Proposta, Quem, Reconhecimento, Retorno, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    Proposta, Quem, Reconhecimento, Retorno, TipoDeEntrada, TipoDoDocumento, VERSAO_DO_ESQUEMA,
+    Valor,
 };
 
 use crate::cofre::{Estado, ReconhecedorDoCofre, ler_contracheque};
@@ -371,6 +372,9 @@ pub(crate) fn ler_com_regras(
         momento_do_arquivo(conn, &estado.sha256, caminho).as_deref(),
     );
     let mut leitura = motor.ler(&entrada);
+    // O mesmo documento, pela identidade do padrão, já visto por outro canal? Sem o catálogo
+    // não há como saber: segue como não repetido.
+    let _ = catalogo.marcar_repetido(&mut leitura);
 
     let mut situacao = None;
     match leitura.decisao.clone() {
@@ -494,7 +498,8 @@ impl ReconhecedorDoCofre {
             },
             momento: m.momento.map(str::to_owned),
         };
-        let leitura = motor.ler(&entrada);
+        let mut leitura = motor.ler(&entrada);
+        let _ = catalogo.marcar_repetido(&mut leitura);
         let reconhecido = match leitura.decisao.clone() {
             Decisao::Reconhecido(rec) => Reconhecido::PelaRegra {
                 reconhecimento: rec,
@@ -602,6 +607,20 @@ pub(crate) fn sugerir_das_propostas(
                 *janela_dias,
                 compromisso.as_deref(),
             ),
+            Proposta::VincularOcorrencia {
+                data,
+                janela_dias,
+                compromisso,
+                tipo_documento,
+            } => match &rec.repetido_de {
+                // O mesmo documento (pela identidade do padrão) já foi visto: não se anexa
+                // duas vezes à mesma ocorrência.
+                Some(primeira) => Ok(Resolvida::Nada(format!(
+                    "mesmo documento que {}, já visto",
+                    nome_curto_da_entrada(primeira)
+                ))),
+                None => vincular_ocorrencia(&ctx, data, *janela_dias, compromisso, *tipo_documento),
+            },
             Proposta::PagarFatura {
                 valor_centavos,
                 vencimento,
@@ -615,6 +634,15 @@ pub(crate) fn sugerir_das_propostas(
         }
     }
     Ok(sugestoes)
+}
+
+/// O sha cortado em 8 caracteres; um id que não é sha (`gmail:...`) fica como veio.
+fn nome_curto_da_entrada(id: &str) -> String {
+    if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        id.chars().take(8).collect()
+    } else {
+        id.to_owned()
+    }
 }
 
 enum Resolvida {
@@ -866,6 +894,78 @@ fn conciliar_ocorrencia(
             provas,
         },
     )))
+}
+
+fn tipo_do_documento(t: TipoDoDocumento) -> TipoDeDocumento {
+    match t {
+        TipoDoDocumento::Contracheque => TipoDeDocumento::Contracheque,
+        TipoDoDocumento::Fatura => TipoDeDocumento::Fatura,
+        TipoDoDocumento::Boleto => TipoDeDocumento::Boleto,
+        TipoDoDocumento::Comprovante => TipoDeDocumento::Comprovante,
+        TipoDoDocumento::Contrato => TipoDeDocumento::Contrato,
+        TipoDoDocumento::NotaFiscal => TipoDeDocumento::NotaFiscal,
+        TipoDoDocumento::Outro => TipoDeDocumento::Outro,
+    }
+}
+
+/// Anexa o documento à ocorrência do compromisso mais perto da data dele. Não exige valor nem
+/// débito no extrato, e não filtra por `livre`: um recibo numa ocorrência já paga vale. O
+/// empate de distância não se adivinha. Nunca é automática: o usuário confirma.
+fn vincular_ocorrencia(
+    ctx: &Contexto<'_>,
+    data: &str,
+    janela: u32,
+    compromisso: &str,
+    tipo: TipoDoDocumento,
+) -> Achado<Resolvida> {
+    let nome = normalizar(compromisso).trim().to_owned();
+    let (Some(plan), Some(d), false) = (ctx.plan, Data::de_iso(data), nome.is_empty()) else {
+        return Ok(Resolvida::Nada(
+            "sem planejamento (ou data ilegível) para ligar o documento à ocorrência".to_owned(),
+        ));
+    };
+    let dias = i64::from(janela);
+    let candidatas: Vec<(i64, Ocorrencia)> = ocorrencias_perto(ctx, d, dias)?
+        .into_iter()
+        .filter(|o| normalizar(&o.nome).contains(nome.as_str()))
+        .map(|o| (o.vencimento.dias_ate(d).abs(), o))
+        .collect();
+    let Some(menor) = candidatas.iter().map(|(distancia, _)| *distancia).min() else {
+        return Ok(Resolvida::Nada(format!(
+            "não achei a ocorrência do compromisso a até {dias} dias da data do documento"
+        )));
+    };
+    let mut mais_proximas = candidatas
+        .iter()
+        .filter(|(distancia, _)| *distancia == menor);
+    let (Some((_, ocorrencia)), None) = (mais_proximas.next(), mais_proximas.next()) else {
+        return Ok(Resolvida::Nada(format!(
+            "empate: mais de uma ocorrência do compromisso a {menor} dias da data do documento; escolha na mão"
+        )));
+    };
+    let alvo = AlvoDoDocumento::Ocorrencia {
+        id: ocorrencia.id.clone(),
+    };
+    if plan
+        .documentos(&alvo)?
+        .iter()
+        .any(|x| x.sha256 == ctx.sha && !x.desvinculado)
+    {
+        return Ok(Resolvida::Nada(
+            "o documento já está ligado a esta ocorrência".to_owned(),
+        ));
+    }
+    Ok(Resolvida::Sugestao(Box::new(Sugestao::Vincular {
+        alvo,
+        rotulo: format!(
+            "Vincular a {} · {:02}/{}",
+            ocorrencia.nome, ocorrencia.id.competencia.mes, ocorrencia.id.competencia.ano
+        ),
+        tipo: tipo_do_documento(tipo),
+        data: Some(d),
+        regra: Some(regra_da(ctx)),
+        chave: Some(ctx.rec.chave.clone()),
+    })))
 }
 
 /// Tipos de movimento que nunca pagam fatura (o `pagamento_fatura` é justamente o que serve).

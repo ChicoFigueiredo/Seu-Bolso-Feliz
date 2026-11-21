@@ -45,6 +45,9 @@ pub mod protegidos;
 // O texto extraído de um achado e o `canonical_fingerprint`.
 pub mod texto;
 
+// A impressão do texto: achar o mesmo documento com bytes diferentes.
+pub mod impressao_do_texto;
+
 // A Caixa de entrada: a fila de reconhecimento dos documentos novos.
 pub mod caixa_de_entrada;
 

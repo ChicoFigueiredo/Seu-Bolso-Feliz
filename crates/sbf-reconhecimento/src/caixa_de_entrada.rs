@@ -25,8 +25,19 @@ pub fn canal_da_caixa(canal: sbf_regras::Canal) -> Option<Canal> {
     }
 }
 
+/// O padrão que reconheceu o documento viu a mesma identidade (`identidade` da definição) em
+/// outra entrada antes: o mesmo documento por outro canal, com bytes diferentes.
+#[must_use]
+pub fn repetido_pelo_padrao(r: &Resultado) -> bool {
+    matches!(
+        &r.reconhecido,
+        Reconhecido::PelaRegra { reconhecimento } if reconhecimento.repetido_de.is_some()
+    )
+}
+
 /// O estado do documento depois do reconhecimento. `repetido`: o mesmo conteúdo já tinha
-/// sido achado em outro lugar (só vale para o que foi reconhecido).
+/// sido achado em outro lugar (só vale para o que foi reconhecido). Um repetido pela
+/// identidade do padrão ([`repetido_pelo_padrao`]) conta como repetido mesmo com `false`.
 #[must_use]
 pub fn estado_do_resultado(r: &Resultado, repetido: bool) -> Estado {
     match &r.texto {
@@ -53,7 +64,7 @@ pub fn estado_do_resultado(r: &Resultado, repetido: bool) -> Estado {
             }
         }
     };
-    if repetido {
+    if repetido || repetido_pelo_padrao(r) {
         Estado::PossivelDuplicidade
     } else {
         reconhecido

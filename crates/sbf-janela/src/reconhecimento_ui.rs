@@ -627,7 +627,8 @@ fn sugestao(
         (
             Sugestao::ProvarRegistro { .. }
             | Sugestao::ConciliarOcorrencia { .. }
-            | Sugestao::PagarFatura { .. },
+            | Sugestao::PagarFatura { .. }
+            | Sugestao::Vincular { regra: Some(_), .. },
             _,
         ) => {
             reconhecimento_regras_ui::detalhe_da_sugestao(ui, p, sug, c.automaticas.contains(&s));

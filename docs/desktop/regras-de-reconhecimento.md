@@ -64,6 +64,7 @@ campos são:
 | `script_le_texto`   | booleano      | falso           | Se `true`, o script recebe o texto do documento.                                    |
 | `texto_de_ocr`      | booleano      | falso           | Se `true`, o texto vem de OCR (imagem) e é limpo do ruído antes de ler (ver 2.6).   |
 | `propor`            | lista         | `[]`            | As propostas que a regra faz (ver abaixo).                                          |
+| `identidade`        | lista         | `[]`            | Campos de `extrair` que identificam o documento (ver 2.7). Vazia não entra no JSON. |
 
 ### 2.1 Condições de `detectar`
 
@@ -112,14 +113,16 @@ discordam num deles, o sbf não escolhe sozinho: a entrada vai para revisão.
 
 A regra **propõe**; ela não grava. Cada proposta é uma destas formas:
 
-| Forma                                                                    | Use para                                                                                                    |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `{"provar_registro": {"janela_dias": 2}}`                                | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo. |
-| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}` | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                         |
-| `"pagar_fatura"`                                                         | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).  |
+| Forma                                                                                                          | Use para                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{"provar_registro": {"janela_dias": 2}}`                                                                      | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo.                                                                                              |
+| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}`                                       | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                                                                                                                      |
+| `"pagar_fatura"`                                                                                               | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).                                                                                               |
+| `{"vincular_ocorrencia": {"compromisso": "servico exemplo", "tipo_documento": "comprovante", "janela_dias": 20}}` | Anexar o documento à ocorrência do mês do compromisso mais perto da data dele, sem exigir valor nem débito no extrato (cobrança em dólar no cartão). Empate de distância não sugere; o usuário confirma. |
 
 Essas propostas usam os campos `valor_centavos`, `data` (ou `vencimento`, na fatura), `conta`
-e `cartao`. Sem o campo necessário, a proposta não sai e a regra diz o que falta.
+e `cartao`; `vincular_ocorrencia` só pede `data` (ou `vencimento`). Os formatos `data` e
+`competencia` leem também datas em inglês (`November 20, 2026`, `Nov 20, 2026`, `20 November 2026`). Sem o campo necessário, a proposta não sai e a regra diz o que falta.
 
 ### 2.4 Exemplo completo: Comprovante Pix · Banco Exemplo (fictício)
 
@@ -251,6 +254,33 @@ A normalização é idempotente e só vale para a regra que pede. A opção **n�
 quando é falsa**, então as regras que já existem mantêm o mesmo checksum. As posições dos campos
 extraídos (`de_onde`) valem para o texto já limpo, não para o que o tesseract devolveu. Escreva o
 regex da regra pensando no texto limpo: `Valor:\s*R\$\s*([\d.,]+)` lê `Valor:  RS 1.234,5O`.
+
+### 2.7 Identidade do documento: `"identidade": [...]`
+
+O mesmo documento costuma chegar por dois canais com bytes diferentes (a invoice `ABC123-0001`
+por e-mail e encaminhada pelo Telegram). O sha não pega isso, e um padrão com
+`vincular_ocorrencia` sugeriria anexar a mesma fatura duas vezes. Diga quais campos de `extrair`
+identificam o documento:
+
+```json
+"extrair": { "numero_do_recibo": { "regex": "Recibo n[^ ]* ([0-9]+)", "formato": "texto" } },
+"identidade": ["numero_do_recibo"]
+```
+
+- Cada nome precisa existir em `extrair`. Com mais de um, a identidade é a junção dos valores
+  (minúsculas, sem espaços nas pontas, separados por `|`).
+- Quando uma versão **ativa ou consolidada** reconhece uma entrada com a identidade completa, o
+  catálogo grava `(padrão, identidade, entrada)` em `identidade_da_entrada` (`regras.sqlite`,
+  migração 3). Rascunho, simulação e pré-teste não gravam. Campo que não saiu: não grava e não
+  marca.
+- A primeira entrada gravada de um par `(padrão, identidade)` é a original. As seguintes são
+  **repetidas pelo padrão**: a Caixa de entrada as marca como Possível duplicidade e
+  `vincular_ocorrencia` não sugere o vínculo, só avisa "mesmo documento que `<sha curto>`, já
+  visto". As outras propostas seguem como estão.
+- A identidade vale **dentro do padrão**: uma fatura e um recibo com o mesmo número de invoice,
+  em padrões diferentes, não são repetidos. Não use campo que se repete todo mês (contrato,
+  conta, valor).
+- A lista vazia não entra no JSON, então as versões que já existem mantêm o checksum.
 
 ## 3. Exemplos: o teste que libera a ativação
 

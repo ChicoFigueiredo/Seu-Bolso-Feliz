@@ -248,6 +248,12 @@ Possível duplicidade, Protegido por senha, Não reconhecido, Processando. Os es
 internos do pipeline não aparecem na interface.
 _Avoid_: ingestion job, draft batch, reconciliation status, parsed, posted
 
+**Possível duplicidade**:
+O estado do documento que já chegou antes, ou por mais de um lugar com os mesmos bytes, ou com
+bytes diferentes e o mesmo texto (o recibo que chega por e-mail e pelo Telegram); o mais
+antigo segue como está e o mais novo é o marcado.
+_Avoid_: duplicata, cópia
+
 **Origem**:
 Cada lugar onde um mesmo conteúdo foi encontrado — um caminho no disco, um anexo do
 Gmail, uma conversa do WhatsApp. O mesmo comprovante, byte a byte, salvo em três lugares
