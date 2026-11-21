@@ -65,6 +65,7 @@ FORMATO DE `definicao` (JSON):
 - `aplica_a`: SÓ documento, registro ou mensagem (nunca o tipo do documento). Uma condição é um objeto com UMA chave (`contem`, `regex`...); `texto` não existe, use `contem`. `propor` é opcional: provar_registro, conciliar_ocorrencia (janela_dias) ou \"pagar_fatura\". Para só ANEXAR o documento à ocorrência do mês de um compromisso, sem valor nem débito no extrato (fatura em dólar no cartão, recibo em inglês): {{\"vincular_ocorrencia\":{{\"compromisso\":\"nuvem exemplo\",\"tipo_documento\":\"comprovante\",\"janela_dias\":20}}}} (`tipo_documento`: fatura, boleto, comprovante, contrato, nota_fiscal, outro, contracheque; usa o campo `data` ou `vencimento`). Datas em inglês (`November 20, 2026`, `Nov 20, 2026`, `20 November 2026`) também valem em `data` e `competencia`.
 - NOMES: o campo da data se chama `competencia` quando o pedido fala em competência ou ciclo (`vencimento` se fala só em vencimento); o valor, `valor_centavos`; os identificadores, `contrato`, `conta`... O `tipo_documental` e o `nome` refletem o pedido (ex.: 'comprovante de prestação da habitação'), nunca um genérico como 'contrato-prestacao' ou 'documento'; o `regra` é o mesmo texto em minúsculas e hífens.
 - `texto_de_ocr`: true quando o item é uma imagem ou um print (o esqueleto já traz): o motor conserta `O`/`l` dentro de números e `RS` vira `R$` antes de detectar e extrair.
+- `identidade` (opcional): os nomes de campos de `extrair` que, juntos, identificam O DOCUMENTO (não o compromisso): o número do recibo, a linha digitável, a autenticação, o número da invoice. O mesmo documento que chega por dois canais com o texto um pouco diferente tem o mesmo número, e o segundo vira \"Possível duplicidade\" em vez de gerar outra sugestão. NÃO use campo que se repete a cada mês (contrato, conta, valor) e omita a chave se o documento não tem um número único. Exemplo: {{\"extrair\":{{\"numero_do_recibo\":{{\"regex\":\"Recibo n[^ ]* ([0-9]+)\",\"formato\":\"texto\"}}}},\"identidade\":[\"numero_do_recibo\"]}}
 - `id` do padrão (`regra`): minúsculas, dígitos e hífen. Em `regex`, mande a barra invertida UMA vez só (\\s, \\d): a chamada de ferramenta já cuida do escape.
 
 EXEMPLO (fictício). Pedido: 'o título e o número do contrato determinam; o vencimento é a competência'. Texto: 'Conta de Água Exemplo / Contrato 998877-6 / Vencimento em 10 de Março / Valor R$ 89,90'. Definição: {{\"tipo_documental\":\"conta-agua-exemplo\",\"detectar\":{{\"todos\":[{{\"contem\":\"conta de agua\"}},{{\"contem\":\"998877-6\"}}]}},\"extrair\":{{\"contrato\":{{\"regex\":\"Contrato\\s*([\\d-]+)\",\"formato\":\"texto\"}},\"competencia\":{{\"regex\":\"Vencimento em (\\d{{1,2}} de [A-Za-zç]+)\",\"formato\":\"competencia\"}},\"valor_centavos\":{{\"regex\":\"R\\$\\s*([\\d.,]+)\",\"formato\":\"centavos\"}}}},\"obrigatorios\":[\"contrato\",\"competencia\"]}}"
@@ -174,6 +175,31 @@ mod testes {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn o_exemplo_de_identidade_do_prompt_e_uma_definicao_valida() {
+        let texto = instrucoes();
+        let inicio = texto
+            .find("{\"extrair\":{\"numero_do_recibo\"")
+            .expect("exemplo de identidade no prompt");
+        let parcial: serde_json::Value = serde_json::Deserializer::from_str(&texto[inicio..])
+            .into_iter::<serde_json::Value>()
+            .next()
+            .expect("um valor")
+            .expect("o exemplo é JSON");
+        let mut definicao = serde_json::json!({
+            "tipo_documental": "recibo-exemplo",
+            "detectar": {"todos": [{"contem": "recibo"}]},
+        });
+        for (k, v) in parcial.as_object().expect("objeto") {
+            definicao[k] = v.clone();
+        }
+        let d: sbf_regras::definicao::Definicao =
+            serde_json::from_value(definicao).expect("a definição do exemplo vale");
+        d.validar()
+            .expect("identidade aponta para um campo de extrair");
+        assert_eq!(d.identidade, vec!["numero_do_recibo".to_owned()]);
     }
 
     #[test]
