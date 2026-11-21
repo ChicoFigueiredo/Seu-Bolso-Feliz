@@ -27,6 +27,7 @@ mod caixa_de_entrada;
 mod canais;
 mod captura;
 mod coletor;
+mod contas;
 mod email;
 mod entrada;
 mod estacao;
