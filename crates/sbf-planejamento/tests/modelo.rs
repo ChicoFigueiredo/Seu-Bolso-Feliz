@@ -834,7 +834,7 @@ fn o_banco_nao_deixa_editar_nem_apagar_o_calculo() {
     assert!(c.execute("DELETE FROM modelos", []).is_err());
     assert!(c.execute("DELETE FROM ligacoes_de_modelo", []).is_err());
     assert!(c.execute("DELETE FROM valores_de_parametro", []).is_err());
-    assert_eq!(s.banco.versao_do_esquema().expect("v"), 8);
+    assert_eq!(s.banco.versao_do_esquema().expect("v"), 9);
 }
 
 #[test]
