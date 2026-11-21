@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// A versão do esquema que este código cria e entende.
-pub const VERSAO_DO_ESQUEMA: u32 = 8;
+pub const VERSAO_DO_ESQUEMA: u32 = 9;
 
 const ESPERA_OCUPADO: Duration = Duration::from_secs(30);
 
@@ -317,6 +317,13 @@ const MIGRACOES: &[&str] = &[
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
     CREATE TRIGGER valores_de_parametro_sem_delete BEFORE DELETE ON valores_de_parametro
     BEGIN SELECT RAISE(ABORT, 'a exclusão é lógica'); END;
+    ",
+    // 9: Apelido da conta. Em `contas_do_planejamento` a coluna `apelido` (esquema 5) guarda o
+    // CÓDIGO da conta (`CX-0001`); o nome curto que o usuário dá à conta ("Reserva") é a
+    // coluna nova `apelido_da_conta`, opcional. Só soma uma coluna: nada se apaga e o gatilho
+    // que proíbe DELETE continua valendo (tirar o apelido deixa o campo vazio).
+    "
+    ALTER TABLE contas_do_planejamento ADD COLUMN apelido_da_conta TEXT;
     ",
 ];
 
@@ -1088,7 +1095,8 @@ pub(crate) fn ler_documentos(
 // Contas e assinaturas
 // ---------------------------------------------------------------------------------------
 
-/// Os pares confirmados: apelido -> conta do extrato (só os que têm conta).
+/// Os pares confirmados: código da conta (coluna `apelido`) -> conta do extrato (só os que
+/// têm conta).
 pub(crate) fn ler_pares_de_conta(c: &Connection) -> Resultado<HashMap<String, String>> {
     let mut stmt = c.prepare(
         "SELECT apelido, conta_do_extrato FROM contas_do_planejamento
@@ -1098,6 +1106,18 @@ pub(crate) fn ler_pares_de_conta(c: &Connection) -> Resultado<HashMap<String, St
         .query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?
         .collect::<Result<HashMap<_, _>, _>>()?;
     Ok(pares)
+}
+
+/// Os apelidos das contas: código da conta -> apelido (só os que têm apelido).
+pub(crate) fn ler_apelidos_de_conta(c: &Connection) -> Resultado<HashMap<String, String>> {
+    let mut stmt = c.prepare(
+        "SELECT apelido, apelido_da_conta FROM contas_do_planejamento
+         WHERE apelido_da_conta IS NOT NULL AND trim(apelido_da_conta) <> ''",
+    )?;
+    let apelidos = stmt
+        .query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(apelidos)
 }
 
 /// As assinaturas ativas: recorrente -> assinatura.

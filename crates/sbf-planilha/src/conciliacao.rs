@@ -38,7 +38,7 @@ pub fn sugerir(
     let pares: HashMap<String, String> = plan
         .contas()?
         .into_iter()
-        .filter_map(|c| Some((c.apelido, c.conta_do_extrato?)))
+        .filter_map(|c| Some((c.codigo, c.conta_do_extrato?)))
         .collect();
     let mut alvos = Vec::new();
     for o in controle
@@ -402,7 +402,8 @@ mod testes {
         let sem = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("sem par");
         assert_eq!(sem[0].movimento, "pluggy:txn_o");
         p.contas = vec![ContaDoPlanejamento {
-            apelido: "CX-0001".to_owned(),
+            codigo: "CX-0001".to_owned(),
+            apelido: None,
             conta_do_extrato: Some("BANCO · 1".to_owned()),
         }];
         let com = sugerir(&c, &p, &periodo(), &Mapa::vazio(), &cfg, HOJE).expect("com par");

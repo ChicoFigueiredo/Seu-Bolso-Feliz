@@ -183,6 +183,10 @@ impl Area {
 pub struct Filtro {
     /// Pesquisar: texto livre.
     pub texto: Option<String>,
+    /// Contas do extrato (`conta_provavel`) que a pesquisa `texto` também acha, além do que o
+    /// texto já acha por si: quem mostra um rótulo no lugar da conta (a janela) põe aqui as
+    /// contas cujo rótulo casa com o texto. Só vale junto com `texto`.
+    pub contas_do_texto: Vec<String>,
     /// Período: do ciclo `AAAA-MM` ao ciclo `AAAA-MM`, inclusive.
     pub ciclos: Option<(String, String)>,
     /// Estados do achado (`novo`, `documento`, `descartado`, `duvida`).

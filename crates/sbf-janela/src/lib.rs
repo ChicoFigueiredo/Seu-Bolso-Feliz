@@ -60,6 +60,7 @@ pub mod regras;
 pub mod regras_ui;
 pub mod rita_ui;
 pub mod roteiros;
+pub mod rotulos;
 pub mod rubricas;
 pub mod tabela;
 pub mod tema;

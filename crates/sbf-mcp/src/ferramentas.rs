@@ -176,6 +176,8 @@ pub struct ParamsDeRegistros {
     pub texto: Option<String>,
     pub fornecedor: Option<String>,
     pub categoria: Option<String>,
+    /// O rótulo da conta, o código, o apelido ou o nome do banco (a conta do extrato).
+    pub conta: Option<String>,
     pub de: Option<String>,
     pub ate: Option<String>,
     pub estado: Option<String>,
@@ -558,12 +560,23 @@ impl Nucleo {
 
     // ---------------------------------------------------------------- registros
 
+    /// O rótulo das contas (código e apelido dos pares confirmados). Sem planejamento ligado,
+    /// ou se ele não abre, ninguém tem rótulo e a conta aparece como veio.
+    fn rotulador(&self) -> sbf_planejamento::Rotulador {
+        self.plano
+            .as_ref()
+            .and_then(|p| (p.fabrica)().ok())
+            .and_then(|plan| plan.rotulador().ok())
+            .unwrap_or_default()
+    }
+
     /// Busca registros com filtros, mais novos primeiro.
     ///
     /// # Errors
     /// Falha do SQLite.
     pub fn buscar_registros(&self, p: &ParamsDeRegistros) -> Resultado {
         let c = self.leitura()?;
+        let rotulador = self.rotulador();
         let mut o = Onde::default();
         if let Some(t) = limpo(&p.texto) {
             let like = padrao_like(t);
@@ -583,6 +596,27 @@ impl Nucleo {
         }
         if p.sem_categoria == Some(true) {
             o.sem_valor("(categoria_provavel IS NULL OR categoria_provavel = '')");
+        }
+        if let Some(k) = limpo(&p.conta) {
+            // A conta do registro é a do extrato; o filtro aceita também o rótulo e o nome do
+            // banco, então as contas que o texto acha viram a lista do `IN`.
+            let mut st = c
+                .prepare(
+                    "SELECT DISTINCT conta_provavel FROM registro WHERE conta_provavel IS NOT NULL",
+                )
+                .map_err(erro)?;
+            let casam: Vec<String> = st
+                .query_map([], |l| l.get::<_, String>(0))
+                .map_err(erro)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(erro)?
+                .into_iter()
+                .filter(|conta| rotulador.casa(conta, k))
+                .collect();
+            o.e(
+                "conta_provavel IN (SELECT value FROM json_each(?))",
+                json!(casam).to_string(),
+            );
         }
         if let Some(de) = limpo(&p.de) {
             o.e("substr(data, 1, 10) >= ?", de.to_owned());
@@ -613,6 +647,7 @@ impl Nucleo {
             .map_err(erro)?;
         let itens = st
             .query_map(params_from_iter(o.valores.iter()), |l| {
+                let conta = l.get::<_, Option<String>>(7)?;
                 Ok(json!({
                     "id": l.get::<_, i64>(0)?,
                     "data": l.get::<_, String>(1)?,
@@ -621,7 +656,8 @@ impl Nucleo {
                     "descricao": curto(l.get(4)?, 120),
                     "fornecedor": l.get::<_, Option<String>>(5)?,
                     "categoria": l.get::<_, Option<String>>(6)?,
-                    "conta": l.get::<_, Option<String>>(7)?,
+                    "conta": conta,
+                    "conta_rotulo": rotulador.rotular_opcional(conta.as_deref()),
                     "estado": l.get::<_, String>(8)?,
                     "decidido_por": l.get::<_, Option<String>>(9)?,
                     "tem_documento": l.get::<_, bool>(10)?,
@@ -640,6 +676,7 @@ impl Nucleo {
     /// Registro inexistente ou falha do SQLite.
     pub fn ver_registro(&self, id: i64) -> Resultado {
         let c = self.leitura()?;
+        let rotulador = self.rotulador();
         let mut v: Value = c
             .query_row(
                 "SELECT tipo, substr(data, 1, 10), data_tipo, ciclo_id, valor_centavos,
@@ -682,6 +719,7 @@ impl Nucleo {
                    FROM sub_registro WHERE registro_id = ?1 ORDER BY id LIMIT 30",
             )
             .map_err(erro)?;
+        v["conta_rotulo"] = json!(rotulador.rotular_opcional(v["conta"].as_str()));
         v["sub_registros"] = Value::Array(
             st.query_map([id], |l| {
                 Ok(json!({
@@ -983,6 +1021,7 @@ impl Nucleo {
         let texto = limpo(&p.texto).map(str::to_lowercase);
         let categoria = limpo(&p.categoria).map(str::to_lowercase);
         let conta = limpo(&p.conta).map(str::to_lowercase);
+        let rotulador = self.rotulador();
         let busca = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
         let mut achadas: Vec<Value> = Vec::new();
         for linha in st.query_map([], |l| l.get::<_, String>(0)).map_err(erro)? {
@@ -1022,6 +1061,7 @@ impl Nucleo {
             }
             if let Some(k) = &conta
                 && nome_conta.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str())
+                && !nome_conta.as_deref().is_some_and(|n| rotulador.casa(n, k))
             {
                 continue;
             }
@@ -1032,6 +1072,7 @@ impl Nucleo {
                 "valor_centavos": v.get("valor"),
                 "descricao": curto(descricao, 120),
                 "categoria": nome_cat,
+                "conta_rotulo": rotulador.rotular_opcional(nome_conta.as_deref()),
                 "conta": nome_conta,
                 "confirmada": v.get("confirmada"),
             }));

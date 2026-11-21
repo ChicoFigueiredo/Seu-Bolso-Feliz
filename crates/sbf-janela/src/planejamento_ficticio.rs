@@ -47,6 +47,8 @@ pub struct PlanejamentoFicticio {
     extrato: Vec<MovimentoDoExtrato>,
     /// Apelido do planejamento -> conta do extrato, os pares confirmados.
     mapa_contas: Vec<(String, String)>,
+    /// Código da conta -> apelido.
+    apelidos_das_contas: Vec<(String, String)>,
     assinaturas: Vec<(String, Assinatura)>,
     /// Recorrentes cujo valor "disponível" antecede o crédito (feriado bancário), em dias.
     antecipa_dias: Vec<(String, i64)>,
@@ -115,6 +117,7 @@ impl PlanejamentoFicticio {
             saldos: Vec::new(),
             extrato: Vec::new(),
             mapa_contas: Vec::new(),
+            apelidos_das_contas: Vec::new(),
             assinaturas: Vec::new(),
             antecipa_dias: vec![("rec_salario".into(), 2)],
             contador: 0,
@@ -1555,6 +1558,7 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::VincularDocumento { .. }
         | Alteracao::DesvincularDocumento { .. }
         | Alteracao::MapearConta { .. }
+        | Alteracao::DefinirApelidoDaConta { .. }
         | Alteracao::CriarModelo { .. }
         | Alteracao::NovaVersaoDoCalculo { .. } => None,
         Alteracao::DefinirAssinatura { recorrente, .. }
@@ -2015,9 +2019,12 @@ impl PlanejamentoFicticio {
                 Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
             }
             Alteracao::MapearConta {
-                apelido,
+                codigo,
                 conta_do_extrato,
-            } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
+            } => self.mapear_conta(codigo, conta_do_extrato, autor, &alt),
+            Alteracao::DefinirApelidoDaConta { codigo, apelido } => {
+                self.definir_apelido_da_conta(codigo, apelido, autor, &alt)
+            }
             Alteracao::Desconciliar {
                 ocorrencia,
                 movimento,
@@ -2519,7 +2526,7 @@ mod testes {
         // Sem composição do mês, a sugestão que já existe continua sugestão.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,

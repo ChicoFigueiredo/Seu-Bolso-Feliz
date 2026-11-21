@@ -1718,7 +1718,7 @@ fn abrir_cria_o_arquivo_com_permissao_0600_e_os_dados_sobrevivem() {
         & 0o777;
     assert_eq!(modo, 0o600);
     let banco = Banco::abrir(&caminho).expect("reabrir");
-    assert_eq!(banco.versao_do_esquema().expect("versão"), 8);
+    assert_eq!(banco.versao_do_esquema().expect("versão"), 9);
     let s = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
     assert!(s.recorrente(&id).expect("ler").is_some());
 }
@@ -1922,7 +1922,7 @@ fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
             [],
         )
         .expect("config");
-        // Volta ao esquema 2: o que as migrações 4 a 8 criaram sai para elas poderem rodar de novo.
+        // Volta ao esquema 2: o que as migrações 4 a 9 criaram sai para elas poderem rodar de novo.
         c.execute_batch(
             "DROP TABLE valores_de_parametro; DROP TABLE ligacoes_de_modelo;
              DROP TABLE calculos; DROP TABLE modelos;
@@ -1934,7 +1934,7 @@ fn inicio_gravado_como_competencia_vira_o_dia_1_na_migracao() {
              ALTER TABLE conciliacoes DROP COLUMN autor;
              ALTER TABLE conciliacoes DROP COLUMN sem_automatico;",
         )
-        .expect("desfaz as migrações 4 a 8");
+        .expect("desfaz as migrações 4 a 9");
         c.pragma_update(None, "user_version", 2_i64)
             .expect("versão");
     }
@@ -1995,4 +1995,54 @@ fn ac28_compra_no_cartao_nao_conta_duas_vezes_no_caixa() {
     assert_eq!(c.linhas.len(), 2, "as duas aparecem");
     assert_eq!(c.resumo.saidas_de_caixa_previstas, Centavos(100_000));
     assert_eq!(c.resumo.compras_no_cartao, Centavos(3_500));
+}
+
+/// A migração 9 só soma a coluna do apelido: o par e o histórico de um banco da versão 8
+/// ficam como estavam.
+#[test]
+fn migracao_9_soma_o_apelido_da_conta_sem_perder_o_par() {
+    use sbf_planejamento::*;
+    let pasta = tempfile::tempdir().expect("pasta");
+    let caminho = pasta.path().join("planejamento.sqlite");
+    {
+        let banco = Banco::abrir(&caminho).expect("abrir");
+        let mut s = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
+        s.aplicar(
+            Alteracao::MapearConta {
+                codigo: "CX-0001".into(),
+                conta_do_extrato: Some("BANCO EXEMPLO · 000000-1".into()),
+            },
+            Autor::Usuario,
+        )
+        .expect("ligar");
+        let c = s.banco.conexao();
+        c.execute_batch("ALTER TABLE contas_do_planejamento DROP COLUMN apelido_da_conta;")
+            .expect("volta ao esquema 8");
+        c.pragma_update(None, "user_version", 8_i64)
+            .expect("versão");
+    }
+    let mut s = PlanejamentoSqlite::novo(
+        Banco::abrir(&caminho).expect("reabrir"),
+        Box::new(SemSaldos),
+    );
+    assert_eq!(s.banco.versao_do_esquema().expect("versão"), 9);
+    let contas = s.contas().expect("contas");
+    assert_eq!(contas.len(), 1);
+    assert_eq!(
+        contas[0].conta_do_extrato.as_deref(),
+        Some("BANCO EXEMPLO · 000000-1")
+    );
+    assert_eq!(contas[0].apelido, None);
+    s.aplicar(
+        Alteracao::DefinirApelidoDaConta {
+            codigo: "CX-0001".into(),
+            apelido: Some("Reserva".into()),
+        },
+        Autor::Usuario,
+    )
+    .expect("apelido");
+    assert_eq!(
+        s.contas().expect("contas")[0].apelido.as_deref(),
+        Some("Reserva")
+    );
 }

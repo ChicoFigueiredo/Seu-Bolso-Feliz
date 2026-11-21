@@ -157,6 +157,11 @@ impl AppSbf {
     ) -> Self {
         let mut janela = janela;
         janela.na_casca = true;
+        // A leitura mostra o rótulo das contas; o planejamento da janela o mantém em dia.
+        let consulta: Box<dyn Consulta> = Box::new(crate::rotulos::ConsultaRotulada::nova(
+            consulta,
+            janela.rotulos.clone(),
+        ));
         let paineis_visiveis = PainelDoDock::TODOS
             .into_iter()
             .map(|p| {

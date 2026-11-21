@@ -30,6 +30,7 @@ mod escrita;
 mod modelo;
 mod projecao;
 mod resumo;
+mod rotulo;
 mod servico;
 
 pub use banco::Banco;
@@ -37,6 +38,7 @@ pub use modelo::FABRICA_NOME_DO_MODELO;
 pub use projecao::{
     projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
 };
+pub use rotulo::Rotulador;
 pub use servico::PlanejamentoSqlite;
 
 use serde::{Deserialize, Serialize};
@@ -391,19 +393,24 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
-/// Uma conta do planejamento (o apelido da planilha, como `CX-0001`) e a conta do extrato a
-/// que ela corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO · 000000-1`).
+/// Uma conta do planejamento: o **código da conta** (o nome que a planilha usa, como
+/// `CX-0001`), o **apelido** opcional que o usuário lhe deu ("Reserva") e a conta do extrato a
+/// que o código corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO ·
+/// 000000-1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContaDoPlanejamento {
-    pub apelido: String,
+    pub codigo: String,
+    /// O nome curto, opcional, que aparece depois do código no rótulo. Não identifica nada.
+    #[serde(default)]
+    pub apelido: Option<String>,
     /// `None` enquanto o usuário não confirmou um par.
     pub conta_do_extrato: Option<String>,
 }
 
-/// Um par apelido ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
+/// Um par código ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParDeConta {
-    pub apelido: String,
+    pub codigo: String,
     pub conta_do_extrato: String,
     /// Quantas conciliações (confirmadas ou sugeridas) e assinaturas apontam para o par.
     pub evidencias: u32,
@@ -413,7 +420,7 @@ pub struct ParDeConta {
 
 /// Como achar no extrato o movimento de um recorrente de valor variável (o salário): o texto
 /// que a descrição do banco traz e a janela em dias em volta do vencimento. A conta vem da
-/// versão (o apelido) e do par confirmado.
+/// versão (o código) e do par confirmado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assinatura {
     /// Comparado sem acento e sem caixa, como "contém" ("SALARIO CAIXA").
@@ -996,10 +1003,18 @@ pub enum Alteracao {
         ocorrencia: IdOcorrencia,
         movimento: String,
     },
-    /// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato.
+    /// Confirma (ou desfaz, com `None`) o par código ↔ conta do extrato.
     MapearConta {
-        apelido: String,
+        // O JSON gravado antes do rename (histórico, propostas) dizia `apelido`.
+        #[serde(alias = "apelido")]
+        codigo: String,
         conta_do_extrato: Option<String>,
+    },
+    /// Dá (ou tira, com `None`) o apelido de um código de conta. Vale também para um código
+    /// que ainda não tem par; o histórico guarda o apelido de antes, e dá para desfazer.
+    DefinirApelidoDaConta {
+        codigo: String,
+        apelido: Option<String>,
     },
     /// Define (ou tira, com `None`) a assinatura de um recorrente.
     DefinirAssinatura {
@@ -1232,18 +1247,24 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
-    /// Os apelidos de conta em uso (nas versões) e o par confirmado de cada um.
+    /// Os códigos de conta em uso (nas versões, ou já com par ou apelido), cada um com o
+    /// apelido e o par confirmado.
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
         Ok(Vec::new())
     }
 
-    /// Os pares apelido ↔ conta do extrato que o histórico sugere, para apelidos ainda sem par
+    /// O rótulo das contas do extrato (ver [`Rotulador`]), do que o planejamento sabe agora.
+    fn rotulador(&self) -> Resultado<Rotulador> {
+        Ok(Rotulador::novo(&self.contas()?, &self.contas_do_extrato()?))
+    }
+
+    /// Os pares código ↔ conta do extrato que o histórico sugere, para códigos ainda sem par
     /// confirmado. Não grava nada.
     fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
         Ok(Vec::new())
     }
 
-    /// As contas que aparecem no extrato (para escolher o par de um apelido), em ordem.
+    /// As contas que aparecem no extrato (para escolher o par de um código), em ordem.
     fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
         Ok(Vec::new())
     }

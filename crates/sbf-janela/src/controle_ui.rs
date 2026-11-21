@@ -269,6 +269,8 @@ pub struct EstadoDoControle {
     pub oferta_de_assinatura: Option<OfertaDeAssinatura>,
     /// A tela "Contas do planejamento".
     pub contas: crate::contas_ui::EstadoDasContas,
+    /// O rótulo das contas do extrato (a janela o relê quando o planejamento muda).
+    pub rotulador: sbf_planejamento::Rotulador,
     /// O que o usuário digita em "Quantidade só deste mês" (do Modelo de compromisso), por
     /// ocorrência: trocar de linha começa de novo.
     quantidade_em_edicao: Option<(IdOcorrencia, String)>,
@@ -320,6 +322,7 @@ impl EstadoDoControle {
             conciliar_aberto: None,
             oferta_de_assinatura: None,
             contas: crate::contas_ui::EstadoDasContas::default(),
+            rotulador: sbf_planejamento::Rotulador::default(),
             quantidade_em_edicao: None,
             selecao_da_previa: None,
             motivos_de_recusa: std::collections::HashMap::new(),
@@ -2267,7 +2270,10 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
     let aba = estado.aba_do_detalhe.efetiva(tem_rubricas);
     ui.separator();
     let contracheques = contracheques_de(dados);
-    let vm_movimentos = movimentos_do_detalhe(&sel, dados);
+    let mut vm_movimentos = movimentos_do_detalhe(&sel, dados);
+    if let Some(vm) = vm_movimentos.as_mut() {
+        vm.rotulador = estado.rotulador.clone();
+    }
     let faixa = movimentos::faixa_do_contracheque(
         dados.composicao.as_ref(),
         &contracheques,
@@ -3457,7 +3463,7 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                     ui.label("Conta");
                     ui.add_enabled(
                         daqui,
-                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0001"),
+                        egui::TextEdit::singleline(conta).hint_text("código, como CX-0001"),
                     );
                     ui.end_row();
                     ui.label("Centro");
@@ -4232,7 +4238,7 @@ mod testes {
     fn mapear_salario(j: &mut crate::janela::Janela) {
         j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(crate::planejamento_ficticio::CONTA_DO_SALARIO.into()),
             },
         ]));
@@ -4244,7 +4250,7 @@ mod testes {
         let j = janela_ligada();
         let pl = j.planejamento.as_ref().unwrap().0.as_ref();
         let d = crate::contas_ui::carregar(pl).expect("contas");
-        let cx = d.contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
+        let cx = d.contas.iter().find(|c| c.codigo == "CX-0001").unwrap();
         assert!(cx.conta_do_extrato.is_none());
         let s = d.sugestao_de("CX-0001").expect("sugestão");
         assert_eq!(
@@ -4275,7 +4281,7 @@ mod testes {
         assert_eq!(
             d.contas
                 .iter()
-                .find(|c| c.apelido == "CX-0001")
+                .find(|c| c.codigo == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .as_deref(),

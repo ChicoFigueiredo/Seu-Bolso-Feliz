@@ -156,9 +156,12 @@ pub(crate) fn aplicar_na(
         } => vincular_documento(c, alvo, sha256, *tipo_documento, nome, *data, autor, agora)?,
         Alteracao::DesvincularDocumento { id } => desvincular_documento(c, id)?,
         Alteracao::MapearConta {
-            apelido,
+            codigo,
             conta_do_extrato,
-        } => mapear_conta(c, apelido, conta_do_extrato.as_deref(), autor, agora)?,
+        } => mapear_conta(c, codigo, conta_do_extrato.as_deref(), autor, agora)?,
+        Alteracao::DefinirApelidoDaConta { codigo, apelido } => {
+            definir_apelido_da_conta(c, codigo, apelido.as_deref(), autor, agora)?
+        }
         Alteracao::DefinirAssinatura {
             recorrente,
             assinatura,
@@ -1386,43 +1389,104 @@ fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
 // Contas do extrato e assinaturas
 // ---------------------------------------------------------------------------------------
 
+/// O maior apelido de conta, em caracteres.
+const MAXIMO_DO_APELIDO: usize = 60;
+
 /// A maior janela de uma assinatura, em dias.
 const JANELA_MAXIMA_DA_ASSINATURA: u8 = 60;
 
-/// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato. Nada é apagado: desfazer
+/// Confirma (ou desfaz, com `None`) o par código ↔ conta do extrato. Nada é apagado: desfazer
 /// deixa a linha sem conta.
 fn mapear_conta(
     c: &Connection,
-    apelido: &str,
+    codigo: &str,
     conta_do_extrato: Option<&str>,
     autor: &Autor,
     agora: &str,
 ) -> Resultado<Feito> {
-    let apelido = apelido.trim();
-    nao_vazio(apelido, "o apelido da conta")?;
+    let codigo = codigo.trim();
+    nao_vazio(codigo, "o código da conta")?;
     let conta = conta_do_extrato.map(str::trim);
     if let Some(conta) = conta {
         nao_vazio(conta, "a conta do extrato")?;
     }
+    let antes: Option<Option<String>> = c
+        .query_row(
+            "SELECT conta_do_extrato FROM contas_do_planejamento WHERE apelido = ?1",
+            params![codigo],
+            |l| l.get(0),
+        )
+        .optional()?;
     c.execute(
         "INSERT INTO contas_do_planejamento (apelido, conta_do_extrato, quando, autor)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (apelido) DO UPDATE
          SET conta_do_extrato = excluded.conta_do_extrato, quando = excluded.quando,
              autor = excluded.autor",
-        params![apelido, conta, agora, json(autor)?],
+        params![codigo, conta, agora, json(autor)?],
     )?;
     Ok(Feito {
-        alvo: apelido.to_owned(),
+        alvo: codigo.to_owned(),
         recorrente: None,
         resumo: if conta.is_some() {
-            format!("Confirmou a conta do extrato de {apelido}.")
+            format!("Confirmou a conta do extrato de {codigo}.")
         } else {
-            format!("Desfez o par de conta de {apelido}.")
+            format!("Desfez o par de conta de {codigo}.")
         },
         versao_nova: 0,
         grava_historico: true,
-        inversa: None,
+        // Desfazer volta ao par de antes (ou a nenhum): a linha nunca é apagada.
+        inversa: inversa_de(Alteracao::MapearConta {
+            codigo: codigo.to_owned(),
+            conta_do_extrato: antes.flatten(),
+        }),
+    })
+}
+
+/// Dá (ou tira, com `None`) o apelido de um código de conta. Nada é apagado: tirar deixa o
+/// campo vazio, e o apelido de antes fica no histórico (e no inverso, para o Desfazer).
+fn definir_apelido_da_conta(
+    c: &Connection,
+    codigo: &str,
+    apelido: Option<&str>,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let codigo = codigo.trim();
+    nao_vazio(codigo, "o código da conta")?;
+    let apelido = apelido.map(str::trim).filter(|a| !a.is_empty());
+    if apelido.is_some_and(|a| a.chars().count() > MAXIMO_DO_APELIDO) {
+        return invalida("o apelido da conta é longo demais");
+    }
+    let antes: Option<Option<String>> = c
+        .query_row(
+            "SELECT apelido_da_conta FROM contas_do_planejamento WHERE apelido = ?1",
+            params![codigo],
+            |l| l.get(0),
+        )
+        .optional()?;
+    c.execute(
+        "INSERT INTO contas_do_planejamento (apelido, apelido_da_conta, quando, autor)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (apelido) DO UPDATE
+         SET apelido_da_conta = excluded.apelido_da_conta, quando = excluded.quando,
+             autor = excluded.autor",
+        params![codigo, apelido, agora, json(autor)?],
+    )?;
+    Ok(Feito {
+        alvo: codigo.to_owned(),
+        recorrente: None,
+        resumo: if apelido.is_some() {
+            format!("Deu um apelido à conta {codigo}.")
+        } else {
+            format!("Tirou o apelido da conta {codigo}.")
+        },
+        versao_nova: 0,
+        grava_historico: true,
+        inversa: inversa_de(Alteracao::DefinirApelidoDaConta {
+            codigo: codigo.to_owned(),
+            apelido: antes.flatten(),
+        }),
     })
 }
 

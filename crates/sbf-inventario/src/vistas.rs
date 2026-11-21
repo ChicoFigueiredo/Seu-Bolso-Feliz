@@ -332,13 +332,24 @@ pub fn selecao_do_filtro(ctx: &Contexto<'_>, filtro: &Filtro, alvo: Alvo) -> Sel
     if let Some(t) = texto_do_filtro(filtro) {
         let padrao = Value::Text(format!("%{t}%"));
         s = match alvo {
-            Alvo::Registro => s.onde(
-                format!(
-                    "r.descricao_original LIKE ? OR r.supplier_name_raw LIKE ? OR r.fornecedor_normalizado LIKE ? OR {} LIKE ? OR r.categoria_provavel LIKE ? OR r.conta_provavel LIKE ?",
-                    ctx.dialeto.contraparte("r.")
-                ),
-                vec![padrao; 6],
-            ),
+            Alvo::Registro => {
+                // As contas cujo rótulo casa com o texto entram como mais uma alternativa.
+                let contas = &filtro.contas_do_texto;
+                let por_rotulo = if contas.is_empty() {
+                    String::new()
+                } else {
+                    format!(" OR r.conta_provavel IN ({})", marcas(contas.len()))
+                };
+                let mut valores = vec![padrao; 6];
+                valores.extend(contas.iter().map(|c| texto(c.as_str())));
+                s.onde(
+                    format!(
+                        "r.descricao_original LIKE ? OR r.supplier_name_raw LIKE ? OR r.fornecedor_normalizado LIKE ? OR {} LIKE ? OR r.categoria_provavel LIKE ? OR r.conta_provavel LIKE ?{por_rotulo}",
+                        ctx.dialeto.contraparte("r.")
+                    ),
+                    valores,
+                )
+            }
             Alvo::Achado => s.onde(
                 "a.supplier_name_raw LIKE ? OR a.notas LIKE ? OR a.document_type LIKE ? OR EXISTS (SELECT 1 FROM origem o WHERE o.content_hash = a.content_hash AND (o.filename LIKE ? OR o.local_filepath LIKE ? OR o.gmail_subject LIKE ? OR o.gmail_from LIKE ?))",
                 vec![padrao; 7],

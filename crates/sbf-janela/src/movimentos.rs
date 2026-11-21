@@ -5,7 +5,7 @@
 use egui::{Frame, Margin, RichText, Stroke, Ui};
 use sbf_planejamento::{
     Assinatura, Centavos, Competencia, Composicao, Conciliacao, ConciliacaoComMovimento, Data,
-    DocumentoVinculado, IdOcorrencia, MovimentoCandidato, TipoDeDocumento,
+    DocumentoVinculado, IdOcorrencia, MovimentoCandidato, Rotulador, TipoDeDocumento,
 };
 
 use crate::componentes;
@@ -56,6 +56,9 @@ pub struct VmDeMovimentos {
     /// "Pix para Fulana de Tal · 2 débitos somam o previsto", ou o aviso da soma.
     pub rotulo_da_sugestao: Option<String>,
     pub candidatos: Vec<MovimentoCandidato>,
+    /// O rótulo das contas do extrato: a seção o mostra no lugar da conta, com a conta do
+    /// extrato na dica. Vazio (sem rótulo nenhum): a conta aparece como veio.
+    pub rotulador: Rotulador,
     /// Desconto em folha: não passa pelo extrato, e a seção só mostra a baixa pelo contracheque.
     pub de_folha: bool,
 }
@@ -321,7 +324,17 @@ fn botao_de_ignorar(ui: &mut Ui, ocorrencia: &IdOcorrencia, pedidos: &mut Vec<Pe
     }
 }
 
-fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
+/// A conta do movimento como a seção a mostra: o rótulo, com a conta do extrato na dica.
+fn conta_do_movimento(ui: &mut Ui, r: &Rotulador, conta: &str) {
+    let p = tema::paleta(ui.ctx());
+    let rotulo = r.rotular(conta);
+    let resposta = ui.label(RichText::new(&rotulo).size(11.5).color(p.tinta_suave));
+    if rotulo != conta {
+        resposta.on_hover_text(format!("Conta do extrato: {conta}"));
+    }
+}
+
+fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm, r: &Rotulador) {
     let p = tema::paleta(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         if let Some(d) = m.data {
@@ -349,7 +362,7 @@ fn linha_do_movimento(ui: &mut Ui, m: &MovimentoVm) {
         });
     }
     if let Some(c) = &m.conta {
-        pequeno(ui, c.clone());
+        conta_do_movimento(ui, r, c);
     }
     if let Some(d) = &m.descricao {
         pequeno(ui, d.clone());
@@ -453,7 +466,7 @@ fn secao_de_folha(ui: &mut Ui, vm: &VmDeMovimentos) {
             ui.horizontal_wrapped(|ui| {
                 componentes::selo(ui, "Conciliado", p.sucesso_sutil, p.sucesso);
             });
-            linha_do_movimento(ui, m);
+            linha_do_movimento(ui, m, &vm.rotulador);
         });
     }
     if vm.confirmadas.is_empty() {
@@ -497,7 +510,7 @@ pub fn secao(
                         componentes::selo(ui, "automática", p.info_sutil, p.info);
                     }
                 });
-                linha_do_movimento(ui, m);
+                linha_do_movimento(ui, m, &vm.rotulador);
             });
             if m.automatica {
                 ui.horizontal_wrapped(|ui| {
@@ -547,7 +560,9 @@ pub fn secao(
                 botao_de_ignorar(ui, ocorrencia, pedidos);
             });
             for m in &vm.sugeridas {
-                cartao_clicavel(ui, m, pedidos, |ui| linha_do_movimento(ui, m));
+                cartao_clicavel(ui, m, pedidos, |ui| {
+                    linha_do_movimento(ui, m, &vm.rotulador);
+                });
             }
         });
     } else if let Some(s) = &vm.sugestao {
@@ -565,7 +580,9 @@ pub fn secao(
                 }
                 botao_de_ignorar(ui, ocorrencia, pedidos);
             });
-            cartao_clicavel(ui, s, pedidos, |ui| linha_do_movimento(ui, s));
+            cartao_clicavel(ui, s, pedidos, |ui| {
+                linha_do_movimento(ui, s, &vm.rotulador);
+            });
         });
     }
     if vm.confirmadas.is_empty() && vm.sugestao.is_none() && vm.sugeridas.is_empty() {
@@ -621,7 +638,7 @@ pub fn secao(
                         componentes::selo(ui, "conta", p.sucesso_sutil, p.sucesso);
                     }
                 });
-                pequeno(ui, c.movimento.conta_do_extrato.clone());
+                conta_do_movimento(ui, &vm.rotulador, &c.movimento.conta_do_extrato);
                 pequeno(ui, c.movimento.descricao.clone());
                 if let Some(d) = c.diferenca.filter(|d| d.0 != 0) {
                     ui.horizontal_wrapped(|ui| {

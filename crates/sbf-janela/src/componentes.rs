@@ -76,8 +76,18 @@ pub fn link_item(ui: &mut Ui, alvo: &Ref, texto: &str, pedidos: &mut Vec<Pedido>
         }
         return r;
     }
+    // Conta com rótulo: o link mostra o rótulo e a dica guarda a conta do extrato (`BANCO · num`;
+    // a conta do livro-caixa tem outro tipo de chave e fica como está).
+    let conta_do_extrato = if alvo.tipo == sbf_inventario::Tipo::Conta
+        && texto != alvo.chave
+        && alvo.chave.contains(" · ")
+    {
+        format!("Conta do extrato: {}\n", alvo.chave)
+    } else {
+        String::new()
+    };
     r.on_hover_text(format!(
-        "{} · clique abre, Ctrl+clique abre ao lado",
+        "{conta_do_extrato}{} · clique abre, Ctrl+clique abre ao lado",
         alvo.tipo.singular()
     ))
 }
