@@ -1125,6 +1125,7 @@ mod testes {
                     examinados: 0,
                     casam: 0,
                     titulos: vec![],
+                    repetidas: 0,
                 },
                 empates: vec![sbf_rita::pre_teste::Afetado {
                     regra: "y".into(),

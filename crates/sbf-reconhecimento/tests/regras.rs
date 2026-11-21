@@ -1331,3 +1331,133 @@ fn vincular_ocorrencia_nao_repete_o_documento_ja_vinculado() {
         de_novo.avisos
     );
 }
+
+// ------------------------------------------------------------ identidade do documento
+
+const INVOICE_POR_EMAIL: &str = "Nuvem Exemplo Inc\nInvoice\nInvoice number  NE-0001\n\
+Date of issue  November 20, 2026\n$4.00 USD due November 20, 2026\n";
+/// O mesmo documento encaminhado pelo Telegram: o texto muda um pouco, o número é o mesmo.
+const INVOICE_PELO_TELEGRAM: &str = "Nuvem Exemplo Inc (encaminhado)\nInvoice\n\
+Invoice number   ne-0001 \nDate of issue  November 20, 2026\n$4.00 USD\n";
+
+fn regra_da_invoice_com_identidade() -> NovaVersao {
+    let mut v = regra_da_invoice();
+    v.definicao.extrair.insert(
+        "numero_da_invoice".into(),
+        extracao(r"Invoice number\s+([A-Za-z0-9-]+)", Formato::Texto),
+    );
+    v.definicao.identidade = vec!["numero_da_invoice".into()];
+    v
+}
+
+#[test]
+fn a_mesma_invoice_por_dois_canais_e_possivel_duplicidade_e_nao_vincula_duas_vezes() {
+    use sbf_inventario::caixa_de_entrada::{Canal, Estado, Filtro};
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let r = c.com_regras().com_caixa_de_entrada(Canal::Cli, false);
+
+    let primeira = c.rodar(&r, &c.solto("email.txt", INVOICE_POR_EMAIL));
+    assert!(
+        primeira.sugestoes.iter().any(|s| s.da_regra().is_some()),
+        "a primeira sugere o vínculo"
+    );
+    let segunda = c.rodar(&r, &c.solto("telegram.txt", INVOICE_PELO_TELEGRAM));
+    assert_ne!(primeira.sha256, segunda.sha256, "bytes diferentes");
+
+    // Nenhum vínculo duplicado: sai um aviso que diz de quem é repetido.
+    assert!(
+        segunda.sugestoes.iter().all(|s| s.da_regra().is_none()),
+        "{:?}",
+        segunda.sugestoes
+    );
+    let curto: String = primeira.sha256.chars().take(8).collect();
+    assert!(
+        segunda
+            .avisos
+            .iter()
+            .any(|a| a.contains("mesmo documento que") && a.contains(&curto)),
+        "{:?}",
+        segunda.avisos
+    );
+    // A Caixa marca a segunda como Possível duplicidade; a primeira não.
+    let nome_da_primeira = "email.txt";
+    let fila = sbf_inventario::caixa_de_entrada::listar(&c.conexao(), &Filtro::caixa()).unwrap();
+    let estado_de = |sha: &str| {
+        fila.iter()
+            .find(|e| e.content_hash == sha)
+            .map(|e| e.estado)
+    };
+    assert_eq!(
+        estado_de(&segunda.sha256),
+        Some(Estado::PossivelDuplicidade)
+    );
+    assert_ne!(
+        estado_de(&primeira.sha256),
+        Some(Estado::PossivelDuplicidade),
+        "{nome_da_primeira}"
+    );
+    // E só um documento chega à ocorrência se o usuário confirmar a primeira.
+    let mut plan = c.plan();
+    confirmar(&mut plan, &primeira, so_vincular(&primeira));
+    assert_eq!(
+        plan.documentos(&ocorrencia_de(id, 2026, 11)).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn a_mesma_invoice_em_outro_padrao_nao_e_duplicidade() {
+    use sbf_inventario::caixa_de_entrada::{Canal, Estado, Filtro};
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let mut recibo = regra_do_receipt();
+    recibo.definicao.extrair.insert(
+        "numero_da_invoice".into(),
+        extracao(
+            r"Receipt number\s+([A-Za-z0-9-]+?)(?:-R)?\s",
+            Formato::Texto,
+        ),
+    );
+    recibo.definicao.identidade = vec!["numero_da_invoice".into()];
+    c.instalar(recibo);
+    let r = c.com_regras().com_caixa_de_entrada(Canal::Cli, false);
+    c.rodar(&r, &c.solto("invoice.txt", INVOICE_POR_EMAIL));
+    let recibo = c.rodar(&r, &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    assert!(
+        recibo.sugestoes.iter().any(|s| s.da_regra().is_some()),
+        "{:?} {:?}",
+        recibo.sugestoes,
+        recibo.avisos
+    );
+    let fila = sbf_inventario::caixa_de_entrada::listar(&c.conexao(), &Filtro::caixa()).unwrap();
+    assert!(
+        fila.iter().all(|e| e.estado != Estado::PossivelDuplicidade),
+        "{fila:?}"
+    );
+}
+
+#[test]
+fn identidade_repetida_chega_ao_estado_da_caixa_sem_depender_do_sha() {
+    use sbf_reconhecimento::caixa_de_entrada::{estado_do_resultado, leitura_do_resultado};
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let r = c.com_regras();
+    let primeira = c.rodar(&r, &c.solto("email.txt", INVOICE_POR_EMAIL));
+    let segunda = c.rodar(&r, &c.solto("telegram.txt", INVOICE_PELO_TELEGRAM));
+    assert_ne!(
+        estado_do_resultado(&primeira, false),
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
+    assert_eq!(
+        estado_do_resultado(&segunda, false),
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
+    assert_eq!(
+        leitura_do_resultado(&segunda, false).estado,
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
+}
