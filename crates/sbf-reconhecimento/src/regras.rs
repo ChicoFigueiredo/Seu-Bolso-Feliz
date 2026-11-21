@@ -372,6 +372,9 @@ pub(crate) fn ler_com_regras(
         momento_do_arquivo(conn, &estado.sha256, caminho).as_deref(),
     );
     let mut leitura = motor.ler(&entrada);
+    // O mesmo documento, pela identidade do padrão, já visto por outro canal? Sem o catálogo
+    // não há como saber: segue como não repetido.
+    let _ = catalogo.marcar_repetido(&mut leitura);
 
     let mut situacao = None;
     match leitura.decisao.clone() {
@@ -495,7 +498,8 @@ impl ReconhecedorDoCofre {
             },
             momento: m.momento.map(str::to_owned),
         };
-        let leitura = motor.ler(&entrada);
+        let mut leitura = motor.ler(&entrada);
+        let _ = catalogo.marcar_repetido(&mut leitura);
         let reconhecido = match leitura.decisao.clone() {
             Decisao::Reconhecido(rec) => Reconhecido::PelaRegra {
                 reconhecimento: rec,
@@ -608,7 +612,15 @@ pub(crate) fn sugerir_das_propostas(
                 janela_dias,
                 compromisso,
                 tipo_documento,
-            } => vincular_ocorrencia(&ctx, data, *janela_dias, compromisso, *tipo_documento),
+            } => match &rec.repetido_de {
+                // O mesmo documento (pela identidade do padrão) já foi visto: não se anexa
+                // duas vezes à mesma ocorrência.
+                Some(primeira) => Ok(Resolvida::Nada(format!(
+                    "mesmo documento que {}, já visto",
+                    nome_curto_da_entrada(primeira)
+                ))),
+                None => vincular_ocorrencia(&ctx, data, *janela_dias, compromisso, *tipo_documento),
+            },
             Proposta::PagarFatura {
                 valor_centavos,
                 vencimento,
@@ -622,6 +634,15 @@ pub(crate) fn sugerir_das_propostas(
         }
     }
     Ok(sugestoes)
+}
+
+/// O sha cortado em 8 caracteres; um id que não é sha (`gmail:...`) fica como veio.
+fn nome_curto_da_entrada(id: &str) -> String {
+    if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        id.chars().take(8).collect()
+    } else {
+        id.to_owned()
+    }
 }
 
 enum Resolvida {
