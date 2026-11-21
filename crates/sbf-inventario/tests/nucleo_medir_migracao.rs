@@ -160,3 +160,153 @@ fn medir_migracao_de_um_inventario_grande() {
         println!("  {nome:<40} {:>7.2} s", t.elapsed().as_secs_f64());
     }
 }
+
+/// Um texto fictício de ~2,6 KB, diferente a cada `i` (palavras sorteadas por um LCG).
+fn texto_ficticio(i: u64) -> String {
+    const PALAVRAS: [&str; 16] = [
+        "fatura",
+        "energia",
+        "vencimento",
+        "referencia",
+        "total",
+        "pagamento",
+        "recibo",
+        "assinatura",
+        "cliente",
+        "documento",
+        "valor",
+        "emissao",
+        "codigo",
+        "barras",
+        "banco",
+        "conta",
+    ];
+    let mut estado = i.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+    let mut saida = String::with_capacity(2_700);
+    while saida.len() < 2_600 {
+        estado = estado
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        saida.push_str(PALAVRAS[(estado >> 60) as usize]);
+        saida.push(if estado & 0x100 == 0 { ' ' } else { '\n' });
+        if estado & 0x7000 == 0 {
+            saida.push_str(&format!("{} ", estado >> 40));
+        }
+    }
+    saida
+}
+
+/// A migração 5 sobre um cofre na v4 com ~390 mil textos (~1 GB), como o real.
+///
+/// `SBF_MEDIR_TEXTOS=390000 SBF_MEDIR_PASTA=/algum/lugar/novo cargo test -p sbf-inventario
+/// --test nucleo_medir_migracao medir_migracao_5 -- --ignored --nocapture`
+#[test]
+#[ignore = "medição; rode com --ignored --nocapture"]
+fn medir_migracao_5_com_muitos_textos() {
+    use bancada_armazem::Armazem;
+    use sbf_inventario::{banco::pragmas, migracoes};
+
+    let textos: u64 = std::env::var("SBF_MEDIR_TEXTOS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(390_000);
+    let base = std::env::var_os("SBF_MEDIR_PASTA").map(std::path::PathBuf::from);
+    let pasta = match &base {
+        Some(b) => tempfile::tempdir_in(b).unwrap(),
+        None => tempfile::tempdir().unwrap(),
+    };
+    let caminho = pasta.path().join("inventario.sqlite");
+    let t = Instant::now();
+    {
+        let mut armazem = Armazem::abrir(&caminho, &pragmas()).unwrap();
+        armazem.migrar_ate(&migracoes::escada(), 4).unwrap();
+    }
+    let c = Connection::open(&caminho).unwrap();
+    c.execute_batch("PRAGMA synchronous = OFF; BEGIN").unwrap();
+    {
+        let mut achado = c
+            .prepare(
+                "INSERT INTO achado (content_hash, file_size_bytes, camada) VALUES (?1, 1000, 'A')",
+            )
+            .unwrap();
+        let mut texto_st = c
+            .prepare(
+                "INSERT INTO texto (content_hash, metodo, conteudo) VALUES (?1, 'pdftotext', ?2)",
+            )
+            .unwrap();
+        for i in 0..textos {
+            let h = format!("{i:064x}");
+            achado.execute(params![h]).unwrap();
+            // Um em cada 20 é curto (foto com OCR vazio), um em cada 10 repete o texto anterior.
+            let conteudo = if i % 20 == 0 {
+                "ocr vazio".to_owned()
+            } else if i % 10 == 1 {
+                texto_ficticio(i - 1).replace(' ', "  ")
+            } else {
+                texto_ficticio(i)
+            };
+            texto_st.execute(params![h, conteudo]).unwrap();
+        }
+    }
+    c.execute_batch("COMMIT").unwrap();
+    c.close().unwrap();
+    println!(
+        "fixture v4: {textos} textos, {:.0} MB, gerada em {:.1} s",
+        tamanho_mb(&caminho),
+        t.elapsed().as_secs_f64()
+    );
+
+    let mut inventario = Inventario::abrir(&caminho).unwrap();
+    let inicio = Instant::now();
+    let marcas: RefCell<Vec<(String, Instant)>> = RefCell::new(Vec::new());
+    inventario
+        .migrar_com_andamento(pasta.path().join("copia.sqlite"), &|etapa| {
+            marcas
+                .borrow_mut()
+                .push((format!("{etapa:?}"), Instant::now()));
+        })
+        .unwrap();
+    let fim = Instant::now();
+    let marcas = marcas.into_inner();
+    for (i, (nome, comeco)) in marcas.iter().enumerate() {
+        let termino = marcas.get(i + 1).map_or(fim, |m| m.1);
+        let nome: String = nome.chars().take(40).collect();
+        println!("  {nome:<40} {:>7.2} s", (termino - *comeco).as_secs_f64());
+    }
+    println!(
+        "migrar_com_andamento v4 -> v5: {:.2} s",
+        (fim - inicio).as_secs_f64()
+    );
+    let n = |sql: &str| -> i64 {
+        inventario
+            .conexao()
+            .query_row(sql, [], |l| l.get(0))
+            .unwrap()
+    };
+    println!(
+        "impressoes: {} linhas, {} com impressao, {} impressoes distintas",
+        n("SELECT COUNT(*) FROM impressao_do_texto"),
+        n("SELECT COUNT(*) FROM impressao_do_texto WHERE impressao IS NOT NULL"),
+        n("SELECT COUNT(DISTINCT impressao) FROM impressao_do_texto"),
+    );
+    let t = Instant::now();
+    let mut mais_de_um = 0;
+    for i in [1u64, 11, 21, 389_991] {
+        if i < textos {
+            let h = format!("{i:064x}");
+            mais_de_um += usize::from(
+                sbf_inventario::impressao_do_texto::original_do_mesmo_texto(
+                    inventario.conexao(),
+                    &h,
+                )
+                .unwrap()
+                .is_some(),
+            );
+        }
+    }
+    println!(
+        "4 buscas de original: {:.1} ms ({mais_de_um} acharam)",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
+    println!("banco depois: {:.0} MB", tamanho_mb(&caminho));
+}

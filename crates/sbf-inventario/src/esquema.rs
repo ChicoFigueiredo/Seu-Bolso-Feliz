@@ -18,3 +18,7 @@ pub const MIGRACAO_3_TRIAGEM: &str = include_str!("../sql/0003-triagem.sql");
 
 /// Migração 4: a Caixa de entrada, a fila de reconhecimento dos documentos novos.
 pub const MIGRACAO_4_CAIXA_DE_ENTRADA: &str = include_str!("../sql/0004-caixa-de-entrada.sql");
+
+/// Migração 5: a impressão do texto (documento repetido com bytes diferentes). A tabela, o
+/// índice e os gatilhos; o preenchimento do que já existe é feito em Rust.
+pub const MIGRACAO_5_IMPRESSAO_DO_TEXTO: &str = include_str!("../sql/0005-impressao-do-texto.sql");

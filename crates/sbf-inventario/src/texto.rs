@@ -60,8 +60,8 @@ pub fn ler_texto(
         .optional()
 }
 
-/// Grava o texto do achado e, quando há, o `canonical_fingerprint` dele (só se o texto entrou:
-/// a primeira extração vale). Não abre transação: roda
+/// Grava o texto do achado, a impressão do texto (`impressao_do_texto`) e, quando há, o
+/// `canonical_fingerprint` dele (só se o texto entrou: a primeira extração vale). Não abre transação: roda
 /// dentro da de quem chama (a rodada de PDF protegido) ou use [`registrar_texto`].
 ///
 /// # Errors
@@ -77,6 +77,11 @@ pub fn gravar_texto(
         "INSERT OR IGNORE INTO texto (content_hash, metodo, conteudo) VALUES (?1, ?2, ?3)",
         params![content_hash, metodo, conteudo],
     )?;
+    if inseriu == 1 {
+        // A impressão do texto (documento repetido com bytes diferentes) sai junto, na
+        // mesma transação de quem grava.
+        crate::impressao_do_texto::calcular(conexao, content_hash)?;
+    }
     // A impressão é do texto que ficou: se já havia outro, ela não muda.
     if let (Some(impressao), 1) = (impressao, inseriu) {
         conexao.execute(
