@@ -75,6 +75,13 @@ pub struct Definicao {
     pub texto_de_ocr: bool,
     #[serde(default)]
     pub propor: Vec<ModeloDeProposta>,
+    /// Os nomes dos campos de `extrair` que, juntos, identificam o documento
+    /// (`numero_do_recibo`, `linha_digitavel`, `autenticacao`). O mesmo documento que chega
+    /// por dois canais, com o texto um pouco diferente, tem a mesma identidade: a segunda
+    /// entrada é **repetida pelo padrão** (Possível duplicidade). Vazio por padrão, e **não
+    /// entra no JSON quando é vazio**, para não mudar o checksum das versões que já existem.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identidade: Vec<String>,
 }
 
 impl Definicao {
@@ -97,6 +104,7 @@ impl Definicao {
             script_le_texto: false,
             texto_de_ocr: false,
             propor: Vec::new(),
+            identidade: Vec::new(),
         }
     }
 
@@ -146,6 +154,13 @@ impl Definicao {
         {
             if !nome_valido(nome) {
                 return Err(erro(format!("nome inválido `{nome}` (use [a-z0-9_]+)")));
+            }
+        }
+        for nome in &self.identidade {
+            if !self.extrair.contains_key(nome) {
+                return Err(erro(format!(
+                    "identidade: `{nome}` não é um campo de `extrair`"
+                )));
             }
         }
         for proposta in &self.propor {
@@ -1266,6 +1281,30 @@ mod testes {
         d.detectar.algum.push(Condicao::Contem("d".into()));
         d.detectar.algum.push(Condicao::Contem("e".into()));
         assert_eq!(d.especificidade(), 4);
+    }
+
+    #[test]
+    fn identidade_precisa_ser_campo_de_extrair_e_vazia_nao_entra_no_json() {
+        let sem = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]}}"#;
+        let d: Definicao = serde_json::from_str(sem).unwrap();
+        assert!(d.identidade.is_empty());
+        assert!(
+            !serde_json::to_string(&d).unwrap().contains("identidade"),
+            "lista vazia não muda o JSON (nem o checksum) das versões antigas"
+        );
+        let com = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]},
+            "extrair":{"numero_do_recibo":{"regex":"Recibo (\\d+)","formato":"texto"}},
+            "identidade":["numero_do_recibo"]}"#;
+        let mut d: Definicao = serde_json::from_str(com).unwrap();
+        d.validar().unwrap();
+        assert!(
+            serde_json::to_string(&d)
+                .unwrap()
+                .contains("\"identidade\"")
+        );
+        d.identidade = vec!["numero_que_nao_existe".into()];
+        let erro = d.validar().unwrap_err().to_string();
+        assert!(erro.contains("numero_que_nao_existe"), "{erro}");
     }
 
     #[test]

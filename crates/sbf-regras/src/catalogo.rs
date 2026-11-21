@@ -465,8 +465,23 @@ SELECT entrada, 1, MAX(em) FROM execucao
  GROUP BY entrada;
 ";
 
+/// A identidade do documento: para cada padrão ativo ou consolidado que declara `identidade`,
+/// as entradas que o reconheceram com a identidade completa. A primeira gravada de um par
+/// `(regra, identidade)` é a original; as seguintes são repetidas pelo padrão. Só acrescenta
+/// uma tabela e um índice (nada do que existe muda).
+const ESQUEMA_3: &str = "
+CREATE TABLE IF NOT EXISTS identidade_da_entrada (
+    regra TEXT NOT NULL,
+    identidade TEXT NOT NULL,
+    entrada TEXT NOT NULL,
+    em TEXT NOT NULL,
+    PRIMARY KEY (regra, identidade, entrada)
+);
+CREATE INDEX IF NOT EXISTS identidade_por_regra ON identidade_da_entrada (regra, identidade);
+";
+
 /// As migrações, em ordem; `PRAGMA user_version` guarda quantas já rodaram.
-const MIGRACOES: &[&str] = &[ESQUEMA_1, ESQUEMA_2];
+const MIGRACOES: &[&str] = &[ESQUEMA_1, ESQUEMA_2, ESQUEMA_3];
 
 const COLUNAS_DA_VERSAO: &str = "regra, versao, definicao, script, checksum, autor, motivo, \
      criada_em, estado, aceitas_seguidas, ativada_em, consolidada_em, desativada_em";
@@ -1143,6 +1158,18 @@ impl Catalogo {
             Decisao::Nenhuma => {}
         }
         let tx = self.conn.transaction().map_err(banco)?;
+        // A identidade do documento: só de quem reconheceu com a identidade completa (o motor
+        // só a preenche para versão ativa ou consolidada). A primeira gravada é a original.
+        if let Decisao::Reconhecido(r) = &leitura.decisao
+            && let Some(identidade) = &r.identidade
+        {
+            tx.execute(
+                "INSERT OR IGNORE INTO identidade_da_entrada (regra, identidade, entrada, em)
+                     VALUES (?1, ?2, ?3, ?4)",
+                params![r.regra, identidade, leitura.entrada, agora()],
+            )
+            .map_err(banco)?;
+        }
         for e in &leitura.execucoes {
             if e.resultado == ResultadoDaExecucao::NaoSeAplica {
                 continue;
@@ -1180,6 +1207,57 @@ impl Catalogo {
             .map_err(banco)?;
         }
         tx.commit().map_err(banco)
+    }
+
+    /// A entrada em que o par `(regra, identidade)` foi visto **primeiro**, se alguma.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn entrada_da_identidade(
+        &self,
+        regra: &str,
+        identidade: &str,
+    ) -> Resultado<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT entrada FROM identidade_da_entrada WHERE regra = ?1 AND identidade = ?2
+                 ORDER BY rowid LIMIT 1",
+                params![regra, identidade],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(banco)
+    }
+
+    /// Marca o reconhecimento como repetido pelo padrão: se outra entrada, gravada antes, tem
+    /// a mesma `(regra, identidade)`, preenche `repetido_de` com o sha dela. Só lê; chame
+    /// **antes** de [`Catalogo::registrar_execucao`] ou depois, tanto faz (a original é a
+    /// primeira gravada, e reprocessá-la não a torna repetida).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn marcar_repetido(&self, leitura: &mut Leitura) -> Resultado<()> {
+        let entrada = leitura.entrada.clone();
+        if let Decisao::Reconhecido(r) = &mut leitura.decisao
+            && let Some(identidade) = &r.identidade
+        {
+            r.repetido_de = self
+                .entrada_da_identidade(&r.regra, identidade)?
+                .filter(|primeira| *primeira != entrada);
+        }
+        Ok(())
+    }
+
+    /// Quantas identidades estão gravadas.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn total_de_identidades(&self) -> Resultado<u64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM identidade_da_entrada", [], |r| {
+                contagem(r, 0)
+            })
+            .map_err(banco)
     }
 
     /// Quantas execuções estão gravadas.

@@ -188,7 +188,7 @@ fn o_esquema_novo_nao_estraga_um_catalogo_antigo_e_migra_o_ambiguo() {
         c.sql_cru_para_testes("PRAGMA user_version = 1").unwrap();
     }
     let c = Catalogo::abrir(&caminho).unwrap();
-    assert_eq!(c.versao_do_esquema().unwrap(), 2);
+    assert_eq!(c.versao_do_esquema().unwrap(), 3);
     let m = marca(&c, "f1");
     assert!(
         m.ambiguo,
