@@ -344,6 +344,17 @@ pub struct Reconhecimento {
     #[serde(default)]
     pub exibir: Vec<String>,
     pub propostas: Vec<Proposta>,
+    /// A identidade do documento: os campos de `identidade` da definição, normalizados
+    /// (minúsculas, sem espaços nas pontas) e juntos por `|`. `None` se a versão não declara
+    /// `identidade`, se falta algum dos campos, ou se a versão é rascunho ou desativada
+    /// (só ativa e consolidada identificam). Não entra na chave de idempotência.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identidade: Option<String>,
+    /// A entrada (o sha) em que o mesmo documento, pela `identidade` deste padrão, já tinha
+    /// sido visto antes. Quem chama o preenche com `Catalogo::marcar_repetido`; o motor não
+    /// sabe do que já foi visto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetido_de: Option<String>,
     /// Chave de idempotência: sha256 de (entrada.id, regra, versão, checksum, checksums dos
     /// parâmetros usados). Reprocessar não duplica proposta (AC-LUA-04, AC-LUA-09).
     pub chave: String,

@@ -294,6 +294,8 @@ impl Motor {
             evidencias: Vec::new(),
             exibir: Vec::new(),
             propostas: Vec::new(),
+            identidade: None,
+            repetido_de: None,
             chave: chave_de_idempotencia(&entrada.id, &v.regra, v.versao, &v.checksum, &[]),
         };
         if rec.leitor.is_some() {
@@ -364,6 +366,10 @@ impl Motor {
                 Err(m) => rec.motivos.push(m),
             }
         }
+        // Só quem de fato reconhece identifica: rascunho e desativada não.
+        if matches!(v.estado, crate::Estado::Ativa | crate::Estado::Consolidada) {
+            rec.identidade = identidade_dos_campos(&v.definicao.identidade, &rec.campos);
+        }
         rec.chave = chave_de_idempotencia(
             &entrada.id,
             &v.regra,
@@ -373,6 +379,24 @@ impl Motor {
         );
         Ok(Some(rec))
     }
+}
+
+/// A identidade do documento: os valores dos campos de `nomes`, em minúsculas e sem espaços
+/// nas pontas, juntos por `|`. `None` se a lista é vazia ou se falta (ou está vazio) algum
+/// campo. Não olha o estado da versão: quem grava só grava a de versão ativa ou consolidada
+/// (ver [`Motor::ler`]); o pré-teste usa isto sobre um rascunho para contar repetidos.
+pub fn identidade_dos_campos(nomes: &[String], campos: &BTreeMap<String, Campo>) -> Option<String> {
+    if nomes.is_empty() {
+        return None;
+    }
+    let partes: Option<Vec<String>> = nomes
+        .iter()
+        .map(|n| {
+            let v = campos.get(n)?.valor.to_string().trim().to_lowercase();
+            (!v.is_empty()).then_some(v)
+        })
+        .collect();
+    partes.map(|p| p.join("|"))
 }
 
 /// A entrada com o texto passado por [`normalizar_ocr`]. As posições dos campos extraídos
