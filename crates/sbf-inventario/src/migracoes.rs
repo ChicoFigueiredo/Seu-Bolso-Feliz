@@ -12,6 +12,8 @@
 //!   [`GATILHO_QUE_RECUSA_SUBSTITUIR`], que vale também para conexões de fora do app.
 //! - **3**: a triagem por IA ([`esquema::MIGRACAO_3_TRIAGEM`], spec 09).
 //! - **4**: a Caixa de entrada, a fila de reconhecimento ([`esquema::MIGRACAO_4_CAIXA_DE_ENTRADA`]).
+//! - **5**: a impressão do texto, para achar o mesmo documento com bytes diferentes
+//!   ([`esquema::MIGRACAO_5_IMPRESSAO_DO_TEXTO`]); preenche as dos textos que já existem.
 //!
 //! Regra de ouro: migração aplicada num banco real nunca é editada; só se acrescenta uma.
 
@@ -21,7 +23,7 @@ use rusqlite::{Connection, Transaction};
 use crate::esquema;
 
 /// A versão de esquema que esta build entende e produz.
-pub const VERSAO_ATUAL: u32 = 4;
+pub const VERSAO_ATUAL: u32 = 5;
 
 /// O valor de `meta.schema_versao` que o Bun grava no esquema adotado.
 pub const VERSAO_DO_BUN_ADOTADA: &str = "2";
@@ -59,7 +61,7 @@ pub const COLUNAS_DO_GARANTIR_COLUNA: &[(&str, &str, &str)] = &[
 
 const MARCADOR_DO_BUN: &str = "SELECT valor FROM meta WHERE chave = 'schema_versao'";
 
-static MIGRACOES: [Migracao; 4] = [
+static MIGRACOES: [Migracao; 5] = [
     Migracao::sql(
         "esquema do inventário do Bun, versão 2",
         esquema::MIGRACAO_1_BASE_BUN,
@@ -75,6 +77,10 @@ static MIGRACOES: [Migracao; 4] = [
     Migracao::sql(
         "caixa de entrada: a fila de reconhecimento dos documentos novos",
         esquema::MIGRACAO_4_CAIXA_DE_ENTRADA,
+    ),
+    Migracao::codigo(
+        "impressão do texto: acha o mesmo documento com bytes diferentes",
+        migracao_5,
     ),
 ];
 
@@ -124,6 +130,11 @@ fn migracao_2(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     })?;
     tx.execute_batch(&gatilhos)?;
     tx.execute_batch(GATILHO_QUE_RECUSA_SUBSTITUIR)
+}
+
+fn migracao_5(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch(esquema::MIGRACAO_5_IMPRESSAO_DO_TEXTO)?;
+    crate::impressao_do_texto::preencher_tudo(tx).map(|_| ())
 }
 
 /// Confere, coluna a coluna, que um banco a adotar tem tudo o que a migração 1 cria.
