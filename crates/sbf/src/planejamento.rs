@@ -6,6 +6,7 @@
 //! sbf planejamento ocultos  --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar]
 //! sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar]
 //! sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar]
+//! sbf planejamento contas --inventario <cofre> (listar | ligar | desligar | apelido ...)   (ver `contas.rs`)
 //! ```
 //!
 //! A saída padrão mostra só contagens. `--detalhar` mostra a prévia linha a linha no
@@ -29,7 +30,7 @@ use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
 use sbf_reconhecimento::{UsoDeRubricas, salario};
 
-const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento importar-historico --inventario <cofre> --planilha <arq> [--de AAAA.MM] [--ate AAAA.MM] [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
+const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento importar-historico --inventario <cofre> --planilha <arq> [--de AAAA.MM] [--ate AAAA.MM] [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM | sbf planejamento contas --inventario <cofre> (listar | ligar <codigo> <conta-do-extrato> | desligar <codigo> | apelido <codigo> (<texto> | --limpar)) [--autor X]";
 
 type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 
@@ -51,6 +52,9 @@ pub fn rodar(args: &[String]) -> ExitCode {
         return acompanhar(&args[1..]);
     }
     let mut saida = std::io::stdout();
+    if args.first().map(String::as_str) == Some("contas") {
+        return crate::contas::rodar(&args[1..], &abrir_planejamento, &mut saida);
+    }
     rodar_com(args, &abrir_planejamento, &mut saida)
 }
 
