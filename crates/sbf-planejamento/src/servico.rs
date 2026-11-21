@@ -279,6 +279,7 @@ fn recorrente_do_alvo(c: &Connection, alteracao: &Alteracao) -> Resultado<Option
         | Alteracao::CriarGrupo { .. }
         | Alteracao::DesvincularDocumento { .. }
         | Alteracao::MapearConta { .. }
+        | Alteracao::DefinirApelidoDaConta { .. }
         | Alteracao::CriarModelo { .. }
         | Alteracao::NovaVersaoDoCalculo { .. } => None,
         Alteracao::DefinirAssinatura { recorrente, .. }

@@ -28,6 +28,7 @@ fn hoje_do_relogio(s: &PlanejamentoSqlite) -> Data {
 pub(super) fn contas(s: &PlanejamentoSqlite) -> Resultado<Vec<ContaDoPlanejamento>> {
     let c = s.banco.conexao();
     let pares = banco::ler_pares_de_conta(c)?;
+    let mut apelidos = banco::ler_apelidos_de_conta(c)?;
     let mut codigos: BTreeSet<String> = banco::ler_recorrentes(c, None, false)?
         .iter()
         .flat_map(|r| r.versoes.iter())
@@ -36,11 +37,14 @@ pub(super) fn contas(s: &PlanejamentoSqlite) -> Resultado<Vec<ContaDoPlanejament
         .filter(|a| !a.is_empty())
         .map(str::to_owned)
         .collect();
+    // Um código com par ou com apelido aparece mesmo sem nenhuma versão que o use.
     codigos.extend(pares.keys().cloned());
+    codigos.extend(apelidos.keys().cloned());
     Ok(codigos
         .into_iter()
         .map(|codigo| ContaDoPlanejamento {
             conta_do_extrato: pares.get(&codigo).cloned(),
+            apelido: apelidos.remove(&codigo),
             codigo,
         })
         .collect())
