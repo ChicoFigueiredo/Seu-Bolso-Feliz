@@ -82,6 +82,8 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     rotulo: format!("Vincular ao Salário · {mes}"),
                     tipo: TipoDeDocumento::Contracheque,
                     data: None,
+                    regra: None,
+                    chave: None,
                 },
                 Sugestao::UsarRubricas {
                     rotulo: uso.rotulo(&uso.eventuais_iniciais()),

@@ -402,6 +402,8 @@ mod testes {
                 rotulo: "Vincular ao Salário · 10/2026".to_owned(),
                 tipo: TipoDeDocumento::Contracheque,
                 data: None,
+                regra: None,
+                chave: None,
             }],
             avisos: vec!["aviso ficticio".to_owned()],
             entrada: None,
