@@ -892,6 +892,21 @@ pub(crate) fn conciliacao_foi_desfeita(
     )
 }
 
+/// O documento já foi desvinculado deste alvo alguma vez (linha com `desvinculado = 1`).
+pub(crate) fn documento_foi_desvinculado(
+    conexao: &Connection,
+    recorrente: &str,
+    ocorrencia: Option<&str>,
+    sha256: &str,
+) -> Resultado<bool> {
+    existe(
+        conexao,
+        "SELECT 1 FROM documentos_vinculados
+         WHERE recorrente_id = ?1 AND ocorrencia IS ?2 AND sha256 = ?3 AND desvinculado = 1",
+        params![recorrente, ocorrencia, sha256],
+    )
+}
+
 /// Quem gravou a conciliação (ocorrência, movimento) ainda viva, se alguém.
 pub(crate) fn autor_da_conciliacao(
     conexao: &Connection,

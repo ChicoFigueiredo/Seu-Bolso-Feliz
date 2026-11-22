@@ -5,7 +5,8 @@
 //! pede que a pessoa diga qual. Só lê o planejamento.
 
 use sbf_planejamento::{
-    AlvoDoDocumento, Centavos, Competencia, Composicao, Natureza, Planejamento, Recorrente, Rubrica,
+    AlvoDoDocumento, Autor, Centavos, Competencia, Composicao, Natureza, Planejamento, Recorrente,
+    Rubrica,
 };
 
 /// Por que não saiu um recorrente do salário.
@@ -114,4 +115,52 @@ pub fn ja_vinculado(
         .map_err(falha)?
         .iter()
         .any(|d| d.sha256 == sha256))
+}
+
+/// O documento está ligado a este alvo por uma regra que agiu sozinha (`Autor::Regra`) e o
+/// usuário não o desfez: é o vínculo que o cartão mostra como "Vinculado automaticamente".
+///
+/// # Errors
+/// Falha do planejamento.
+pub fn vinculado_por_regra(
+    plan: &dyn Planejamento,
+    alvo: &AlvoDoDocumento,
+    sha256: &str,
+) -> Result<bool, ErroDoSalario> {
+    Ok(plan.documentos(alvo).map_err(falha)?.iter().any(|d| {
+        d.sha256 == sha256
+            && d.alvo == *alvo
+            && !d.desvinculado
+            && matches!(d.autor, Autor::Regra { .. })
+    }))
+}
+
+/// O usuário já desvinculou este documento deste alvo alguma vez: a regra não o refaz.
+///
+/// # Errors
+/// Falha do planejamento.
+pub fn vinculo_desfeito(
+    plan: &dyn Planejamento,
+    alvo: &AlvoDoDocumento,
+    sha256: &str,
+) -> Result<bool, ErroDoSalario> {
+    plan.documento_desvinculado(alvo, sha256).map_err(falha)
+}
+
+/// A ocorrência da competência existe para o recorrente (o contracheque de outubro tem o
+/// Salário de 10/2026 onde ligar).
+///
+/// # Errors
+/// Falha do planejamento.
+pub fn ocorrencia_existe(
+    plan: &dyn Planejamento,
+    recorrente: &str,
+    competencia: Competencia,
+    hoje: sbf_planejamento::Data,
+) -> Result<bool, ErroDoSalario> {
+    Ok(plan
+        .proximas(recorrente, competencia, 1, hoje)
+        .map_err(falha)?
+        .iter()
+        .any(|o| o.id.competencia == competencia))
 }

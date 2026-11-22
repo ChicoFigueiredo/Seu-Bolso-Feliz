@@ -36,7 +36,8 @@ use sbf_triagem::rodada::{
 use crate::descontos::{propor_descontos, sugestao_de_baixa};
 use crate::regras::{self, Ligadas};
 use crate::salario::{
-    ErroDoSalario, composicao_ja_vigente, ja_vinculado, recorrente_do_salario, valor_digitado,
+    ErroDoSalario, composicao_ja_vigente, ja_vinculado, ocorrencia_existe, recorrente_do_salario,
+    valor_digitado, vinculado_por_regra, vinculo_desfeito,
 };
 use crate::{
     Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, Reconhecedor, Reconhecido, Resultado,
@@ -352,6 +353,19 @@ impl ReconhecedorDoCofre {
             cancelar,
             Some(NaCaixa::Registrar(chegada)),
         )
+    }
+
+    /// Aplica no planejamento do cofre as ligações de alta confiança do resultado, sem janela
+    /// e sem clique (ver [`crate::automaticas`]). Quem entrega o arquivo por um canal (o
+    /// worker) chama depois de o reconhecimento gravar a Caixa de entrada.
+    ///
+    /// # Errors
+    /// O motivo genérico quando o planejamento não abre.
+    pub fn aplicar_automaticas(
+        &self,
+        resultado: &Resultado,
+    ) -> Result<crate::automaticas::Saida, String> {
+        crate::automaticas::aplicar_automaticas_do_resultado(&self.cofre, resultado)
     }
 
     /// A leitura de um conteúdo falhou antes de o reconhecimento saber o que ele é (o arquivo
@@ -1110,19 +1124,32 @@ impl ReconhecedorDoCofre {
         let marcacao = uso.eventuais_iniciais();
         let uso_dos_descontos = uso.clone();
         let composicoes = uso.composicoes(&marcacao);
+        let hoje = Data::hoje_em_sao_paulo();
         let vinculado = ja_vinculado(&plan, &alvo, &estado.sha256);
+        let por_regra = vinculado_por_regra(&plan, &alvo, &estado.sha256);
+        let desfeito = vinculo_desfeito(&plan, &alvo, &estado.sha256);
+        let tem_ocorrencia = ocorrencia_existe(&plan, &recorrente.id, c.pagamento, hoje);
         let vigentes: Vec<_> = composicoes
             .iter()
             .map(|k| composicao_ja_vigente(&plan, k))
             .collect();
-        let (Ok(vinculado), Ok(vigentes)) = (
+        let (Ok(vinculado), Ok(por_regra), Ok(desfeito), Ok(tem_ocorrencia), Ok(vigentes)) = (
             vinculado,
+            por_regra,
+            desfeito,
+            tem_ocorrencia,
             vigentes.into_iter().collect::<Result<Vec<bool>, _>>(),
         ) else {
             return Situacao::Falhou("não deu para ler o planejamento".to_owned());
         };
         let mut sugestoes = Vec::new();
-        if !vinculado {
+        // Confiança alta (liga sozinho): o contracheque foi lido e a soma das rubricas bate
+        // com o líquido; o recorrente do salário é um só (`recorrente_do_salario` garante);
+        // a ocorrência do mês existe; o usuário nunca desvinculou este documento daqui. Um
+        // vínculo que a regra já fez volta como automático, para o cartão mostrar "Vinculado
+        // automaticamente · Desfazer".
+        if !vinculado || por_regra {
+            let automatica = por_regra || (c.conferido && tem_ocorrencia && !desfeito);
             sugestoes.push(Sugestao::Vincular {
                 alvo,
                 rotulo: format!("Vincular ao {} · {mes}", recorrente.nome),
@@ -1130,6 +1157,7 @@ impl ReconhecedorDoCofre {
                 data: Some(c.pagamento.dia(1)),
                 regra: None,
                 chave: None,
+                automatica,
             });
         }
         if !vigentes.iter().all(|v| *v) {

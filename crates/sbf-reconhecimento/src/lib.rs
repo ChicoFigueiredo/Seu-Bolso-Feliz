@@ -15,15 +15,18 @@
 //!    triagem, nunca uma decisão.
 //! 6. [`Etapa::Sugerir`]: o que ligar no planejamento.
 //!
-//! **Nada muda no planejamento sem o clique do usuário.** O reconhecimento escreve no
-//! inventário (achado, acervo, texto, sugestão da IA), como o worker faria com o mesmo
-//! arquivo numa pasta vigiada; as [`Sugestao`]es só viram [`Alteracao`] quando a janela as
-//! confirma.
+//! **Nada muda no planejamento sem o clique do usuário, exceto a alta confiança.** O
+//! reconhecimento escreve no inventário (achado, acervo, texto, sugestão da IA), como o worker
+//! faria com o mesmo arquivo numa pasta vigiada; as [`Sugestao`]es só viram [`Alteracao`]
+//! quando a janela as confirma. A exceção são as [`Sugestao::e_automatica`] (conciliação das
+//! três provas, vínculo do contracheque conferido, vínculo de padrão consolidado), que
+//! [`automaticas`] aplica sem clique, com `Autor::Regra`, e o usuário pode desfazer.
 //!
 //! Costura entre dois agentes (2026-11-16): o agente do motor implementa o reconhecedor real
 //! (módulos novos neste crate); o agente da janela escreve contra [`Reconhecedor`] e
 //! [`ReconhecedorFicticio`]. Mudar um tipo público exige avisar o integrador.
 
+pub mod automaticas;
 pub mod caixa_de_entrada;
 pub mod cofre;
 pub mod descontos;
@@ -153,10 +156,16 @@ pub enum Sugestao {
         tipo: TipoDeDocumento,
         data: Option<Data>,
         /// A regra (id e versão) que propôs `vincular_ocorrencia`; `None` no vínculo do
-        /// contracheque, que não vem de regra. Nunca é automática: o usuário confirma.
+        /// contracheque, que vem do leitor nativo e não de regra.
         regra: Option<(IdDaRegra, u32)>,
         /// A chave de idempotência da proposta (`registrar_retorno`), junto de `regra`.
         chave: Option<String>,
+        /// Liga sozinho, sem clique (`Autor::Regra`). No contracheque: lido, com a soma das
+        /// rubricas batendo com o líquido, um só recorrente de salário, a ocorrência do mês
+        /// existindo e o vínculo nunca desfeito pelo usuário. No padrão: só consolidado e
+        /// também sem vínculo desfeito. Um vínculo que a regra já fez também volta como
+        /// automático, para o cartão mostrar "Vinculado automaticamente · Desfazer".
+        automatica: bool,
     },
     /// Passar a usar as rubricas do contracheque: com eventuais, duas composições (a do mês e
     /// a das fixas); sem, uma só. A pessoa troca a marcação de cada rubrica no cartão antes
@@ -359,10 +368,12 @@ impl Sugestao {
         }
     }
 
-    /// A conciliação das três provas, que a janela aplica sozinha (`Autor::Regra`) quando o
-    /// resultado chega. As demais esperam o clique.
+    /// A ligação que se aplica sozinha (`Autor::Regra`) quando o resultado chega: a
+    /// conciliação das três provas e o vínculo de alta confiança (contracheque conferido,
+    /// padrão consolidado). As demais esperam o clique.
     pub fn e_automatica(&self) -> bool {
         match self {
+            Sugestao::Vincular { automatica, .. } => *automatica,
             Sugestao::Conciliar { provas, .. } => *provas >= PROVAS_POSSIVEIS,
             Sugestao::ProvarRegistro { automatica, .. }
             | Sugestao::ConciliarOcorrencia { automatica, .. }
@@ -388,6 +399,23 @@ impl Sugestao {
             | Sugestao::PagarFatura {
                 conciliacao, regra, ..
             } => Some((conciliacao, format!("{}@{}", regra.0, regra.1))),
+            _ => None,
+        }
+    }
+
+    /// O nome do autor (`Autor::Regra`) com que um vínculo automático é gravado:
+    /// `"contracheque"` (leitor nativo) ou `"<id>@<versão>"` (um padrão consolidado). `None`
+    /// quando a sugestão não é um vínculo automático.
+    pub fn autor_do_vinculo_automatico(&self) -> Option<String> {
+        match self {
+            Sugestao::Vincular {
+                automatica: true,
+                regra,
+                ..
+            } => Some(regra.as_ref().map_or_else(
+                || "contracheque".to_owned(),
+                |(id, versao)| format!("{id}@{versao}"),
+            )),
             _ => None,
         }
     }
@@ -627,6 +655,7 @@ mod testes {
                 data: None,
                 regra: None,
                 chave: None,
+                automatica: false,
             }],
             avisos: Vec::new(),
             entrada: None,
