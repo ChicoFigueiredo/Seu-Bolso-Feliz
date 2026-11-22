@@ -10,12 +10,12 @@ Exemplo de tipo que se cadastra assim: um comprovante de Pix de um banco fictíc
 
 ## 1. O ciclo de uma regra
 
-| Estado          | O que faz                                                                                     | Quem leva a ele                                                                            |
-| --------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| **Rascunho**    | Nunca roda na caixa de entrada. Só serve para teste e simulação.                              | Qualquer um que salva (dono, IA, correção)                                                 |
-| **Ativa**       | Reconhece e **propõe**. Nada vira conciliação sem o clique do usuário.                        | Só o usuário (janela ou terminal interativo)                                               |
-| **Consolidada** | Como a ativa, e concilia sozinha quando as três provas batem exatamente. Sempre com Desfazer. | O sbf sugere depois de **5 propostas aceitas seguidas**, sem correção; só o usuário aprova |
-| **Desativada**  | Saiu de cena e fica no histórico.                                                             | Desativar, ou a substituição por uma versão nova ativada                                   |
+| Estado          | O que faz                                                                                                                                           | Quem leva a ele                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Rascunho**    | Nunca roda na caixa de entrada. Só serve para teste e simulação.                                                                                    | Qualquer um que salva (dono, IA, correção)                                                 |
+| **Ativa**       | Reconhece e **propõe**. Nada vira conciliação sem o clique do usuário.                                                                              | Só o usuário (janela ou terminal interativo)                                               |
+| **Consolidada** | Como a ativa, e concilia sozinha quando as três provas batem exatamente e vincula sozinha o documento à ocorrência que propõe. Sempre com Desfazer. | O sbf sugere depois de **5 propostas aceitas seguidas**, sem correção; só o usuário aprova |
+| **Desativada**  | Saiu de cena e fica no histórico.                                                                                                                   | Desativar, ou a substituição por uma versão nova ativada                                   |
 
 Regras do ciclo:
 
@@ -32,6 +32,31 @@ Quem pode mudar o estado: o usuário, na janela do sbf ou num terminal interativ
 confirmou, e o MCP (D15, 2026-11-18: controle total, com `mcp` no histórico de estado). Os
 exemplos que falham bloqueiam a ativação para todos. Uma IA sem essa decisão (`Quem::Ia`)
 segue sem ativar, consolidar, desativar nem reverter (ADR-021).
+
+### 1.1 O que é automático, e por quê
+
+Um documento que chega por qualquer rota (Telegram, Gmail, pasta, celular) passa pelo padrão
+e, **quando a confiança é alta**, já vai para o controle: o worker aplica logo depois de
+gravar a linha da Caixa de entrada, sem janela e sem clique; a janela aplica o mesmo no
+cartão que o worker ainda não tocou. Cada ligação automática é gravada com autor "regra"
+(`contracheque`, `<regra>@<versão>` ou `tres-provas`), aparece no cartão como "Vinculado
+automaticamente" ou "Conciliado automaticamente", e o **Desfazer** devolve a sugestão ao
+cartão.
+
+| Ligação                                                       | Automática quando                                                                                                                                                                                                    | Senão           |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| Vínculo do **contracheque** (leitor nativo)                   | O demonstrativo foi lido e a soma das rubricas bate com o líquido; há um só recorrente de salário; a ocorrência do mês do pagamento existe; o documento ainda não está ligado a ela; ele nunca foi desvinculado dela | Espera o clique |
+| `vincular_ocorrencia` de um **padrão**                        | O padrão está **consolidado** e o usuário nunca desvinculou o documento daquela ocorrência                                                                                                                           | Só propõe       |
+| Conciliação (`conciliar_ocorrencia`, `pagar_fatura`, salário) | As três provas batem e, num padrão, ele está consolidado; o par nunca foi desfeito                                                                                                                                   | Espera o clique |
+
+Tudo o mais espera o clique: usar as rubricas do contracheque, criar compromissos de desconto
+em folha, dar baixa nos descontos, `provar_registro` e a conciliação com menos de três provas.
+Um padrão só **ativo** só propõe. A regra **nunca refaz** o que o usuário desfez (documento
+desvinculado, par de conciliação desconciliado), e aplicar duas vezes não duplica nada. Uma
+falha ao escrever no planejamento não derruba o reconhecimento: o worker registra só a
+categoria da falha (`falhou passo=vinculo-automatico`) e a sugestão continua esperando o
+clique; o que ele liga entra no log como `vinculou automaticamente n=<k>`, sem nome nem
+valor.
 
 ## 2. A definição (formato JSON)
 
@@ -113,12 +138,12 @@ discordam num deles, o sbf não escolhe sozinho: a entrada vai para revisão.
 
 A regra **propõe**; ela não grava. Cada proposta é uma destas formas:
 
-| Forma                                                                                                          | Use para                                                                                                                                                                                                 |
-| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `{"provar_registro": {"janela_dias": 2}}`                                                                      | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo.                                                                                              |
-| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}`                                       | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                                                                                                                      |
-| `"pagar_fatura"`                                                                                               | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).                                                                                               |
-| `{"vincular_ocorrencia": {"compromisso": "servico exemplo", "tipo_documento": "comprovante", "janela_dias": 20}}` | Anexar o documento à ocorrência do mês do compromisso mais perto da data dele, sem exigir valor nem débito no extrato (cobrança em dólar no cartão). Empate de distância não sugere; o usuário confirma. |
+| Forma                                                                                                             | Use para                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{"provar_registro": {"janela_dias": 2}}`                                                                         | O documento prova um registro do banco que já existe (o comprovante prova o débito). Nunca cria gasto novo.                                                                                                                                                     |
+| `{"conciliar_ocorrencia": {"janela_dias": 3, "compromisso": "Energia"}}`                                          | Ligar a ocorrência de um compromisso do mês ao documento. `compromisso` é opcional.                                                                                                                                                                             |
+| `"pagar_fatura"`                                                                                                  | O débito no banco paga uma fatura de cartão. É pagamento, não gasto (os itens da fatura já são os gastos).                                                                                                                                                      |
+| `{"vincular_ocorrencia": {"compromisso": "servico exemplo", "tipo_documento": "comprovante", "janela_dias": 20}}` | Anexar o documento à ocorrência do mês do compromisso mais perto da data dele, sem exigir valor nem débito no extrato (cobrança em dólar no cartão). Empate de distância não sugere; o usuário confirma, a não ser que o padrão esteja consolidado (seção 1.1). |
 
 Essas propostas usam os campos `valor_centavos`, `data` (ou `vencimento`, na fatura), `conta`
 e `cartao`; `vincular_ocorrencia` só pede `data` (ou `vencimento`). Os formatos `data` e

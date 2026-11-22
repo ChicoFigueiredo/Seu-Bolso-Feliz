@@ -254,7 +254,8 @@ _Avoid_: preview, thumbnail, visualizador
 **Caixa de entrada**:
 A fila única de documentos recebidos e ainda não resolvidos, independente de origem. Lista os
 que o reconhecimento **reconheceu** (Pronto, Precisa revisar, Possível duplicidade); é onde se
-decidem as sugestões de ligação ao planejamento. O que ele não reconheceu vai para A triar.
+decidem as sugestões de ligação ao planejamento; a de alta confiança já vem feita (**Vínculo
+automático**, com Desfazer). O que ele não reconheceu vai para A triar.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
 
 **Canal** (da Caixa de entrada):
@@ -325,11 +326,26 @@ campos tirar dele e o que propor. Muda sem recompilar o sbf e só vale depois qu
 usuário ativa a versão. Uma versão nova recomeça como **ativa** (só propõe); depois de 5
 propostas aceitas seguidas, sem correção, o sbf sugere torná-la **consolidada**, e só o
 usuário aprova. Um padrão consolidado concilia sozinho, mas apenas com as três provas
-exatas e sempre com Desfazer; uma rejeição, um Desfazer ou uma versão nova o devolve ao
-estado ativo. Nasce de três jeitos: escrito no editor, rascunho montado a partir de uma correção
+exatas, e vincula sozinho o documento à ocorrência que ele propõe; sempre com Desfazer. Uma
+rejeição, um Desfazer ou uma versão nova o devolve ao estado ativo. Nasce de três jeitos: escrito no editor, rascunho montado a partir de uma correção
 na caixa de entrada, ou proposto pela IA ou pelo assistente — e nenhum desses o ativa.
 _Avoid_: regra de reconhecimento (nome antigo, até 2026-11-20), plugin, template, parser,
 alerta (alerta avisa; padrão de reconhecimento reconhece)
+
+**Vínculo automático**:
+O documento vai para o controle sem janela aberta e sem clique, quando a confiança é alta.
+Roda assim que o reconhecimento termina, qualquer que seja a rota por onde o documento chegou
+(Telegram, Gmail, pasta, celular), no worker; a janela aplica o mesmo no cartão que ainda
+não foi tocado. Só estas ligações são automáticas, sempre gravadas com autor "regra" e com
+Desfazer: (1) o **vínculo do contracheque**, quando o demonstrativo foi lido, a soma das
+rubricas bate com o líquido, há um só recorrente de salário e a ocorrência do mês do
+pagamento existe; (2) o **vínculo de um padrão consolidado** (proposta "vincular
+ocorrência"); (3) a **conciliação das três provas** (do salário, ou de um padrão
+consolidado). Nada mais é automático: usar as rubricas, criar compromissos de desconto em
+folha, dar baixa, e a conciliação com menos de três provas continuam esperando o clique, e
+um padrão só ativo só propõe. O que o usuário desfaz (documento desvinculado, par
+desconciliado) a regra nunca refaz. Aplicar duas vezes não duplica nada.
+_Avoid_: ligação silenciosa, auto-aprovação
 
 **Script**:
 Trecho curto em Lua anexado a um padrão de reconhecimento para calcular ou transformar
