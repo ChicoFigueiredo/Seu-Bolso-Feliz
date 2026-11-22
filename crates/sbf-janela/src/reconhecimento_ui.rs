@@ -650,7 +650,11 @@ fn sugestao(
             );
             if ui
                 .small_button("Desfazer")
-                .on_hover_text("Desfaz a conciliação; ela volta a ser uma sugestão")
+                .on_hover_text(if matches!(sug, Sugestao::Vincular { .. }) {
+                    "Desvincula o documento; o vínculo volta a ser uma sugestão"
+                } else {
+                    "Desfaz a conciliação; ela volta a ser uma sugestão"
+                })
                 .clicked()
             {
                 pedidos.push(Pedido::Desfazer(cartao, s));

@@ -679,9 +679,14 @@ pub(crate) fn detalhe_da_sugestao(ui: &mut Ui, p: &Paleta, sug: &Sugestao, aplic
             pequeno(
                 ui,
                 format!(
-                    "{}Confirmar liga o documento à ocorrência; nada é conciliado nem criado.",
+                    "{}{}",
                     data.map(|d| format!("Documento de {}. ", data_texto(d)))
-                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                    if aplicada {
+                        "O documento ficou ligado à ocorrência; nada foi conciliado nem criado."
+                    } else {
+                        "Confirmar liga o documento à ocorrência; nada é conciliado nem criado."
+                    }
                 ),
                 p.tinta_suave,
             );
@@ -726,14 +731,20 @@ pub(crate) fn detalhe_da_sugestao(ui: &mut Ui, p: &Paleta, sug: &Sugestao, aplic
     }
 }
 
-/// "Conciliado automaticamente pela regra X ·" (o Desfazer vem em seguida).
+/// "Conciliado automaticamente pela regra X ·" ou "Vinculado automaticamente ·" (o Desfazer
+/// vem em seguida).
 pub(crate) fn texto_da_automatica(sug: &Sugestao, nomes: &BTreeMap<String, String>) -> String {
+    let feito = if matches!(sug, Sugestao::Vincular { .. }) {
+        "Vinculado"
+    } else {
+        "Conciliado"
+    };
     match sug.da_regra() {
         Some(((id, _), _)) => format!(
-            "Conciliado automaticamente pelo padrão {} ·",
+            "{feito} automaticamente pelo padrão {} ·",
             nomes.get(id).map_or(id.as_str(), String::as_str)
         ),
-        None => "Conciliado automaticamente ·".to_owned(),
+        None => format!("{feito} automaticamente ·"),
     }
 }
 

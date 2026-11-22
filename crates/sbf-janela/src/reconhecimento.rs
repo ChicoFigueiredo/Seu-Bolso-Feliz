@@ -22,6 +22,7 @@ use crate::padroes_visiveis::PesosDasVersoes;
 use sbf_planejamento::{
     Alteracao, AlvoDoDocumento, Autor, Conciliacao, Planejamento, TipoDeDocumento,
 };
+use sbf_reconhecimento::automaticas;
 use sbf_reconhecimento::descontos::{self, preservar_ligacoes};
 use sbf_reconhecimento::{
     Andamento, ErroDoReconhecimento, Etapa, Reconhecedor, Reconhecido, Resultado, Situacao,
@@ -567,9 +568,12 @@ impl Janela {
         })
     }
 
-    /// As conciliações das três provas que o reconhecimento achou: a janela as grava sozinha
-    /// (`Autor::Regra`), exceto o par que já foi desfeito alguma vez. É a única escrita sem
-    /// clique (AC-07), e o cartão mostra "Conciliado automaticamente · Desfazer".
+    /// As ligações de alta confiança que o reconhecimento achou (as conciliações das três
+    /// provas, o vínculo do contracheque conferido, o vínculo de um padrão consolidado): a
+    /// janela as grava sozinha (`Autor::Regra`), exceto o que o usuário já desfez (par
+    /// desfeito, documento desvinculado). Quem grava é [`automaticas::aplicar_automaticas`],
+    /// o mesmo código do worker (que já pode ter feito o vínculo: então o cartão só o mostra
+    /// como feito). O cartão mostra "Conciliado/Vinculado automaticamente · Desfazer".
     fn aplicar_automaticas(&mut self, cartao: usize) {
         let ligador = self.ligador_de_salario();
         let Some(c) = self.reconhecimento.cartoes.get_mut(cartao) else {
@@ -578,80 +582,40 @@ impl Janela {
         let Some(resultado) = c.resultado() else {
             return;
         };
-        let sha = resultado.sha256.clone();
-        // `conciliacao_automatica` cobre o salário (`tres-provas`) e as regras consolidadas
-        // (`<id>@<versão>`), cada uma com o nome do autor.
-        let automaticas: Vec<(usize, Conciliacao, String)> = resultado
-            .sugestoes
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| {
-                s.conciliacao_automatica()
-                    .map(|(c, regra)| (i, c.clone(), regra))
-            })
-            .collect();
-        if automaticas.is_empty() {
+        if !resultado.sugestoes.iter().any(Sugestao::e_automatica) {
             return;
         }
+        let sha = resultado.sha256.clone();
         let Some(pl) = self.planejamento.as_mut() else {
             return;
         };
-        let plan = pl.0.as_mut();
-        let mut aviso = None;
-        let mut feitas = 0usize;
-        for (i, conciliacao, regra) in automaticas {
-            // O usuário já disse "não" a este par: a regra não o refaz.
-            if plan
-                .conciliacao_desfeita(&conciliacao.ocorrencia, &conciliacao.movimento)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let confirmada = Conciliacao {
-                confirmada: true,
-                ..conciliacao
-            };
-            let ja = plan
-                .conciliacoes_da_ocorrencia(&confirmada.ocorrencia)
-                .map(|v| {
-                    v.iter().any(|g| {
-                        g.conciliacao.confirmada && g.conciliacao.movimento == confirmada.movimento
-                    })
-                })
-                .unwrap_or(false);
-            if !ja {
-                let r = plan.aplicar(
-                    Alteracao::Conciliar {
-                        conciliacao: confirmada.clone(),
-                    },
-                    Autor::Regra { regra },
-                );
-                if let Err(e) = r {
-                    c.erro_de_sugestao = Some((i, mensagem_de_erro(&e)));
-                    continue;
-                }
-            }
-            c.confirmadas.push(i);
-            c.automaticas.push(i);
-            feitas += 1;
-            aviso = aviso.or(ligar_ao_credito(ligador.as_deref(), &sha, &confirmada));
+        let saida = automaticas::aplicar_automaticas(pl.0.as_mut(), resultado);
+        for (i, e) in &saida.falhas {
+            c.erro_de_sugestao = Some((*i, mensagem_de_erro(e)));
         }
-        if feitas > 0 {
+        let mut aviso = None;
+        let mut so_vinculos = true;
+        for a in &saida.aplicadas {
+            c.confirmadas.push(a.indice);
+            c.automaticas.push(a.indice);
+            if let Some(conciliacao) = &a.conciliacao {
+                so_vinculos = false;
+                aviso = aviso.or(ligar_ao_credito(ligador.as_deref(), &sha, conciliacao));
+            }
+        }
+        if !saida.aplicadas.is_empty() {
             self.controle.recarregar();
-            self.controle.mensagem = Some((
-                aviso.map_or_else(
-                    || {
-                        "Conciliado automaticamente: as três provas batem. Dá para desfazer."
-                            .to_owned()
-                    },
-                    str::to_owned,
-                ),
-                false,
-            ));
+            let texto = if so_vinculos {
+                "Vinculado automaticamente ao controle. Dá para desfazer."
+            } else {
+                "Conciliado automaticamente: as três provas batem. Dá para desfazer."
+            };
+            self.controle.mensagem = Some((aviso.unwrap_or(texto).to_owned(), false));
         }
     }
 
-    /// Desfaz a conciliação que a regra fez sozinha: exclusão lógica, com histórico. A sugestão
+    /// Desfaz a ligação que a regra fez sozinha (conciliação: exclusão lógica; vínculo:
+    /// desvincula o documento), com histórico. A sugestão
     /// volta ao cartão para ser confirmada à mão, e a regra não a refaz. Quando a conciliação
     /// veio de uma regra de reconhecimento, o Desfazer é registrado como `Desfeito` (D4).
     pub fn desfazer_automatica(&mut self, cartao: usize, sugestao: usize) {
@@ -669,20 +633,50 @@ impl Janela {
         else {
             return;
         };
-        let Some((conciliacao, _)) = sug.conciliacao_automatica() else {
-            return;
-        };
-        let conciliacao = conciliacao.clone();
+        let sha = c.resultado().map(|r| r.sha256.clone()).unwrap_or_default();
         let Some(pl) = self.planejamento.as_mut() else {
             return;
         };
-        let r = pl.0.as_mut().aplicar(
-            Alteracao::Desconciliar {
-                ocorrencia: conciliacao.ocorrencia,
-                movimento: conciliacao.movimento,
-            },
-            Autor::Usuario,
-        );
+        let plan = pl.0.as_mut();
+        // O vínculo automático desfaz-se desvinculando o documento (a linha fica marcada, e a
+        // regra não refaz); a conciliação, com a exclusão lógica.
+        let (r, o_que) = if let Sugestao::Vincular { alvo, .. } = &sug {
+            let doc = plan.documentos(alvo).ok().and_then(|docs| {
+                docs.into_iter().find(|d| {
+                    d.sha256 == sha
+                        && d.alvo == *alvo
+                        && !d.desvinculado
+                        && matches!(d.autor, Autor::Regra { .. })
+                })
+            });
+            let Some(doc) = doc else {
+                // Já não está ligado (alguém desvinculou): só limpa o cartão.
+                c.confirmadas.retain(|i| *i != sugestao);
+                c.automaticas.retain(|i| *i != sugestao);
+                return;
+            };
+            (
+                plan.aplicar(
+                    Alteracao::DesvincularDocumento { id: doc.id },
+                    Autor::Usuario,
+                ),
+                "Vínculo desfeito. Ele volta a ser uma sugestão.",
+            )
+        } else {
+            let Some((conciliacao, _)) = sug.conciliacao_automatica() else {
+                return;
+            };
+            (
+                plan.aplicar(
+                    Alteracao::Desconciliar {
+                        ocorrencia: conciliacao.ocorrencia.clone(),
+                        movimento: conciliacao.movimento.clone(),
+                    },
+                    Autor::Usuario,
+                ),
+                "Conciliação desfeita. Ela volta a ser uma sugestão.",
+            )
+        };
         self.controle.recarregar();
         match r {
             Ok(_) => {
@@ -691,10 +685,7 @@ impl Janela {
                 if let Some((_, chave)) = sug.da_regra() {
                     registrar_desfeito(fonte.as_ref(), c, chave);
                 }
-                self.controle.mensagem = Some((
-                    "Conciliação desfeita. Ela volta a ser uma sugestão.".to_owned(),
-                    false,
-                ));
+                self.controle.mensagem = Some((o_que.to_owned(), false));
             }
             Err(e) => c.erro_de_sugestao = Some((sugestao, mensagem_de_erro(&e))),
         }
@@ -1421,6 +1412,133 @@ mod testes {
         let i = indice_de(&j, |s| matches!(s, Sugestao::Conciliar { .. }));
         j.confirmar_sugestao(0, i);
         assert!(conciliado_de_outubro(&j).is_some());
+    }
+
+    /// Uma janela cujo reconhecedor devolve o contracheque com o vínculo automático (o que o
+    /// leitor produz quando o contracheque está conferido e a ocorrência do mês existe).
+    fn janela_com_vinculo_automatico() -> Janela {
+        let (mut j, _) = janela_com_ligador(false);
+        let mut resposta = reconhecedor_do_contracheque()
+            .reconhecer(
+                std::path::Path::new("a.pdf"),
+                &mut |_| {},
+                &AtomicBool::new(false),
+            )
+            .expect("resposta");
+        resposta
+            .sugestoes
+            .retain(|s| matches!(s, Sugestao::Vincular { .. }));
+        for s in &mut resposta.sugestoes {
+            if let Sugestao::Vincular { automatica, .. } = s {
+                *automatica = true;
+            }
+        }
+        j.ligar_reconhecedor(Arc::new(ReconhecedorFicticio::novo(Ok(resposta))));
+        j
+    }
+
+    fn autores_dos_documentos(j: &Janela) -> Vec<Autor> {
+        j.planejamento
+            .as_ref()
+            .expect("planejamento")
+            .0
+            .documentos(&alvo_de_outubro())
+            .expect("documentos")
+            .into_iter()
+            .map(|d| d.autor)
+            .collect()
+    }
+
+    #[test]
+    fn o_vinculo_automatico_se_aplica_sozinho_com_autor_regra_e_o_cartao_mostra_como_feito() {
+        let mut j = janela_com_vinculo_automatico();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let c = &j.reconhecimento.cartoes[0];
+        assert!(c.automaticas.contains(&0) && c.confirmadas.contains(&0));
+        assert_eq!(
+            autores_dos_documentos(&j),
+            vec![Autor::Regra {
+                regra: "contracheque".to_owned()
+            }]
+        );
+        let sug = &c.resultado().expect("r").sugestoes[0];
+        assert_eq!(
+            crate::reconhecimento_regras_ui::texto_da_automatica(sug, &c.nomes_das_regras),
+            "Vinculado automaticamente ·"
+        );
+    }
+
+    #[test]
+    fn vinculo_que_o_worker_ja_fez_aparece_como_feito_sem_duplicar() {
+        let mut j = janela_com_vinculo_automatico();
+        // O worker (sem janela) já ligou o documento, com o mesmo autor.
+        let sha =
+            crate::demonstracao::hash_do_nome(crate::reconhecimento_ficticio::NOME_DO_CONTRACHEQUE);
+        j.planejamento
+            .as_mut()
+            .expect("planejamento")
+            .0
+            .aplicar(
+                Alteracao::VincularDocumento {
+                    alvo: alvo_de_outubro(),
+                    sha256: sha,
+                    tipo_documento: TipoDeDocumento::Contracheque,
+                    nome: "contracheque-2026-10.pdf".to_owned(),
+                    data: None,
+                },
+                Autor::Regra {
+                    regra: "contracheque".to_owned(),
+                },
+            )
+            .expect("vincular");
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        let c = &j.reconhecimento.cartoes[0];
+        assert!(c.automaticas.contains(&0), "{:?}", c.erro_de_sugestao);
+        assert!(c.erro_de_sugestao.is_none());
+        assert_eq!(documentos_do_alvo(&j), 1);
+    }
+
+    #[test]
+    fn desfazer_o_vinculo_automatico_desvincula_com_o_usuario_e_a_regra_nao_refaz() {
+        let mut j = janela_com_vinculo_automatico();
+        let dir = tempfile::tempdir().expect("dir");
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        assert_eq!(documentos_do_alvo(&j), 1);
+
+        j.desfazer_automatica(0, 0);
+
+        let c = &j.reconhecimento.cartoes[0];
+        assert!(!c.confirmadas.contains(&0) && !c.automaticas.contains(&0));
+        assert_eq!(documentos_do_alvo(&j), 0);
+        let historico = j
+            .planejamento
+            .as_ref()
+            .expect("p")
+            .0
+            .historico(Some(ID_DO_SALARIO), 20)
+            .expect("historico");
+        assert!(
+            historico
+                .iter()
+                .any(|e| e.autor == Autor::Usuario && e.resumo.contains("Desvinculou")),
+            "{historico:?}"
+        );
+        // Soltar o mesmo arquivo de novo (o reconhecedor ainda diz "automática"): a regra não
+        // refaz o que o usuário desfez, e a sugestão fica no cartão.
+        j.limpar_reconhecimento();
+        j.soltar_arquivos(vec![arquivo(&dir, "contracheque.pdf")], None);
+        esperar(&mut j);
+        assert_eq!(documentos_do_alvo(&j), 0);
+        assert!(j.reconhecimento.cartoes[0].automaticas.is_empty());
+        // O clique liga, como qualquer sugestão.
+        j.confirmar_sugestao(0, 0);
+        assert_eq!(documentos_do_alvo(&j), 1);
+        assert_eq!(autores_dos_documentos(&j), vec![Autor::Usuario]);
     }
 
     #[test]
