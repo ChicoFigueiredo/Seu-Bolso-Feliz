@@ -28,7 +28,7 @@ use sbf_triagem::rodada::Progresso;
 use sbf_worker::estado::{EstadoDoWorker, agora, texto_da_barra};
 use sbf_worker::laco::{
     ArquivoNovo, ColetorDeMensageiros, ColetorDeNuvem, Dados, ResumoDaNuvem, ResumoDaTriagem,
-    ResumoDeMensageiros, Triador, Worker, carregar_config,
+    ResumoDeMensageiros, Triador, Vinculos, Worker, carregar_config,
 };
 use sbf_worker::registro::Falha;
 use sbf_worker::trava::Trava;
@@ -419,6 +419,8 @@ pub fn rodar(args: &[String]) -> ExitCode {
 struct ReconhecimentoDasPastas {
     dados: Dados,
     reconhecedor: Option<sbf_reconhecimento::ReconhecedorDoCofre>,
+    /// O que o último arquivo reconhecido ligou sozinho ao controle.
+    ultimo: Vinculos,
 }
 
 impl ReconhecimentoDasPastas {
@@ -426,7 +428,29 @@ impl ReconhecimentoDasPastas {
         Self {
             dados,
             reconhecedor: None,
+            ultimo: Vinculos::default(),
         }
+    }
+}
+
+/// A alta confiança do reconhecimento vai para o controle sem janela e sem clique (o vínculo
+/// do contracheque conferido, o de um padrão consolidado, a conciliação das três provas). Roda
+/// **depois** de o reconhecimento gravar a linha da Caixa de entrada: uma falha aqui (banco
+/// ocupado, planejamento que não abre) não desfaz o reconhecimento, só vira a falha
+/// `vinculo-automatico` no log, sem dado nenhum. Sem `planejamento.sqlite`, não faz nada.
+fn ligar_ao_controle(
+    r: &sbf_reconhecimento::ReconhecedorDoCofre,
+    resultado: &sbf_reconhecimento::Resultado,
+) -> Vinculos {
+    match r.aplicar_automaticas(resultado) {
+        Ok(saida) => Vinculos {
+            novos: saida.novas(),
+            falha: (!saida.falhas.is_empty()).then_some(Falha::Banco),
+        },
+        Err(_) => Vinculos {
+            novos: 0,
+            falha: Some(Falha::Banco),
+        },
     }
 }
 
@@ -462,19 +486,78 @@ impl sbf_worker::laco::ReconhecedorDePastas for ReconhecimentoDasPastas {
             r.registrar_falha_da_leitura(chegada, &a.sha256, &nome);
             return Err(Falha::Disco);
         };
-        r.reconhecer_chegada(chegada, &caminho, &mut |_| {}, cancelar)
-            .map(|_| ())
+        let resultado = r
+            .reconhecer_chegada(chegada, &caminho, &mut |_| {}, cancelar)
             .map_err(|e| match e {
                 sbf_reconhecimento::ErroDoReconhecimento::Banco(_) => Falha::Banco,
                 sbf_reconhecimento::ErroDoReconhecimento::Arquivo(_) => Falha::Disco,
                 sbf_reconhecimento::ErroDoReconhecimento::Cancelado => Falha::Outra,
-            })
+            })?;
+        self.ultimo = ligar_ao_controle(r, &resultado);
+        Ok(())
+    }
+
+    fn vinculos_do_ultimo(&mut self) -> Vinculos {
+        std::mem::take(&mut self.ultimo)
     }
 }
 
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    fn resultado_com_vinculo_automatico() -> sbf_reconhecimento::Resultado {
+        use sbf_planejamento::{Competencia, TipoDeDocumento};
+        use sbf_reconhecimento::{EstadoDoTexto, Reconhecido, Resultado, Sugestao};
+        Resultado {
+            sha256: "ab".repeat(32),
+            nome: "contracheque.pdf".to_owned(),
+            ja_existia: false,
+            texto: EstadoDoTexto::Extraido,
+            reconhecido: Reconhecido::Nada {
+                motivo: "teste".to_owned(),
+            },
+            sugestoes: vec![Sugestao::Vincular {
+                alvo: sbf_reconhecimento::ocorrencia_do_mes(
+                    "rec_salario",
+                    Competencia { ano: 2026, mes: 10 },
+                ),
+                rotulo: "Vincular ao Salário · 10/2026".to_owned(),
+                tipo: TipoDeDocumento::Contracheque,
+                data: None,
+                regra: None,
+                chave: None,
+                automatica: true,
+            }],
+            avisos: Vec::new(),
+            entrada: None,
+            leitura: None,
+        }
+    }
+
+    #[test]
+    fn ligar_ao_controle_sem_planejamento_nao_faz_nada() {
+        let cofre = tempfile::tempdir().expect("cofre");
+        let r = crate::reconhecer::montar(cofre.path(), None, false).expect("montar");
+        let v = ligar_ao_controle(&r, &resultado_com_vinculo_automatico());
+        assert_eq!(v, Vinculos::default());
+    }
+
+    #[test]
+    fn falha_ao_escrever_no_planejamento_vira_so_a_categoria_da_falha() {
+        let cofre = tempfile::tempdir().expect("cofre");
+        std::fs::write(cofre.path().join("planejamento.sqlite"), b"nao e um banco")
+            .expect("quebrar");
+        let r = crate::reconhecer::montar(cofre.path(), None, false).expect("montar");
+        let v = ligar_ao_controle(&r, &resultado_com_vinculo_automatico());
+        assert_eq!(
+            v,
+            Vinculos {
+                novos: 0,
+                falha: Some(Falha::Banco)
+            }
+        );
+    }
 
     #[test]
     fn valor_da_flag() {

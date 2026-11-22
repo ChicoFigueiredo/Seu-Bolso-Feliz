@@ -286,6 +286,23 @@ pub trait ReconhecedorDePastas {
     /// # Errors
     /// A categoria da falha.
     fn reconhecer(&mut self, arquivo: &ArquivoNovo, cancelar: &AtomicBool) -> Result<(), Falha>;
+
+    /// Logo depois de um [`ReconhecedorDePastas::reconhecer`] que deu certo: o que o
+    /// reconhecimento ligou sozinho no planejamento (alta confiança, sem janela e sem clique).
+    /// Uma escrita que falhou **não** derruba o reconhecimento (a linha da Caixa de entrada
+    /// já está gravada): vem em [`Vinculos::falha`]. O padrão é nada.
+    fn vinculos_do_ultimo(&mut self) -> Vinculos {
+        Vinculos::default()
+    }
+}
+
+/// O que um arquivo reconhecido ligou sozinho ao controle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Vinculos {
+    /// Ligações novas gravadas.
+    pub novos: usize,
+    /// A categoria da falha ao escrever no planejamento, se houve (nunca com dados).
+    pub falha: Option<Falha>,
 }
 
 /// Quantos achados novos a reconciliação reconhece por pasta e por volta (o resto fica para a
@@ -701,13 +718,24 @@ impl Worker {
         let Some(mut r) = self.reconhecedor_de_pastas.take() else {
             return;
         };
+        let mut vinculados = 0usize;
         for a in arquivos {
             if cancelar.load(Ordering::Relaxed) {
                 break;
             }
-            if let Err(f) = r.reconhecer(a, cancelar) {
-                self.falhou("reconhecimento", f);
+            match r.reconhecer(a, cancelar) {
+                Ok(()) => {
+                    let v = r.vinculos_do_ultimo();
+                    vinculados += v.novos;
+                    if let Some(f) = v.falha {
+                        self.falhou("vinculo-automatico", f);
+                    }
+                }
+                Err(f) => self.falhou("reconhecimento", f),
             }
+        }
+        if vinculados > 0 {
+            let _ = self.registro.registrar(&Evento::Vinculou { n: vinculados });
         }
         self.reconhecedor_de_pastas = Some(r);
     }
