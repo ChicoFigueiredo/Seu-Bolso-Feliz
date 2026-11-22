@@ -15,7 +15,7 @@ use sbf_worker::laco::{
     Analista, ArquivoNovo, ColetorDeGmail, ColetorDeMensageiros, ColetorDeNuvem, ColetorDeTelegram,
     Dados, Indexador, LeitorDeImagens, PassadaDePadroes, ReconhecedorDePastas, ResumoDaNuvem,
     ResumoDaPassada, ResumoDaTriagem, ResumoDeMensageiros, ResumoDoGmail, ResumoDoIndice,
-    ResumoDoOcr, ResumoDoTelegram, ResumoDosPontos, Triador, Worker,
+    ResumoDoOcr, ResumoDoTelegram, ResumoDosPontos, Triador, Vinculos, Worker,
 };
 use sbf_worker::registro::Falha;
 
@@ -989,4 +989,64 @@ fn o_arquivo_que_chegou_com_o_worker_parado_e_reconhecido_pela_reconciliacao() {
         [("parado.pdf".to_owned(), "disco:teste".to_owned())]
     );
     w.encerrar();
+}
+
+/// Um reconhecedor que diz o que ligou sozinho ao controle depois de cada arquivo.
+struct ReconhecedorQueLiga(Vinculos);
+impl ReconhecedorDePastas for ReconhecedorQueLiga {
+    fn reconhecer(&mut self, _: &ArquivoNovo, _: &AtomicBool) -> Result<(), Falha> {
+        Ok(())
+    }
+    fn vinculos_do_ultimo(&mut self) -> Vinculos {
+        self.0
+    }
+}
+
+#[test]
+fn o_vinculo_automatico_vira_uma_linha_de_log_so_com_a_contagem() {
+    let c = cenario();
+    sbf_inventario::caixa_de_entrada::garantir_tabela(
+        &sbf_worker::banco::abrir(&c.dados.banco).unwrap(),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(c.raiz.join("chegou.pdf"), "contracheque ficticio").unwrap();
+    let mut w = Worker::novo(c.dados.clone(), config(&c), None, None)
+        .unwrap()
+        .com_reconhecimento_das_pastas(Box::new(ReconhecedorQueLiga(Vinculos {
+            novos: 1,
+            falha: None,
+        })));
+    w.passo(agora(), Duration::from_millis(10), &AtomicBool::new(false));
+    w.encerrar();
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(log.contains("vinculou automaticamente n=1"), "{log}");
+    assert!(!log.contains("falhou"), "{log}");
+    assert!(!log.contains("chegou.pdf"), "o log não cita o arquivo");
+}
+
+#[test]
+fn falha_ao_ligar_ao_controle_vira_aviso_e_nao_derruba_o_reconhecimento() {
+    let c = cenario();
+    sbf_inventario::caixa_de_entrada::garantir_tabela(
+        &sbf_worker::banco::abrir(&c.dados.banco).unwrap(),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(c.raiz.join("chegou.pdf"), "contracheque ficticio").unwrap();
+    let mut w = Worker::novo(c.dados.clone(), config(&c), None, None)
+        .unwrap()
+        .com_reconhecimento_das_pastas(Box::new(ReconhecedorQueLiga(Vinculos {
+            novos: 0,
+            falha: Some(Falha::Banco),
+        })));
+    w.passo(agora(), Duration::from_millis(10), &AtomicBool::new(false));
+    w.encerrar();
+    let log = std::fs::read_to_string(c.dados.log()).unwrap();
+    assert!(
+        log.contains("falhou passo=vinculo-automatico causa=banco"),
+        "{log}"
+    );
+    assert!(!log.contains("passo=reconhecimento"), "{log}");
+    assert!(!log.contains("vinculou automaticamente"), "{log}");
 }

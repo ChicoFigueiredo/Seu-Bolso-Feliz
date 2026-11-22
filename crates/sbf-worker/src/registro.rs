@@ -161,9 +161,16 @@ pub enum Evento<'a> {
         /// Documentos com texto vezes versões vigentes.
         total: u64,
     },
+    /// Documentos reconhecidos que o worker ligou sozinho ao controle (só a contagem: nem
+    /// o documento, nem a ocorrência, nem valor).
+    Vinculou {
+        /// Quantas ligações novas.
+        n: usize,
+    },
     /// Um passo falhou.
     Falhou {
-        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `telegram`, `triagem`, `estado`).
+        /// O passo (`vigia`, `reconciliacao`, `nuvem`, `mensageiros`, `telegram`, `triagem`,
+        /// `estado`, `vinculo-automatico`).
         passo: &'static str,
         /// A categoria.
         falha: Falha,
@@ -249,6 +256,7 @@ impl fmt::Display for Evento<'_> {
                 "pontos novos={novos} reabertos={reabertos} fechados={fechados}"
             ),
             Self::Padroes { feitos, total } => write!(f, "padroes: {feitos} de {total}"),
+            Self::Vinculou { n } => write!(f, "vinculou automaticamente n={n}"),
             Self::Falhou { passo, falha } => write!(f, "falhou passo={passo} causa={falha}"),
             Self::FalhouConta {
                 passo,
