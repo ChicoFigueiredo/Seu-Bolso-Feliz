@@ -72,6 +72,9 @@ impl Reconhecimento for ReconhecimentoDoCofre {
                 &AtomicBool::new(false),
             )
             .map_err(|e| e.to_string())?;
+        // A alta confiança vai para o controle sem janela e sem clique. Falhar aqui não
+        // desfaz o reconhecimento: a sugestão continua esperando o clique na janela.
+        let _ = self.reconhecedor.aplicar_automaticas(&r);
         Ok(desfecho(&r.reconhecido))
     }
 

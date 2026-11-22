@@ -97,10 +97,15 @@ struct ReconhecedorDoSbf {
 
 impl Reconhecer for ReconhecedorDoSbf {
     fn reconhecer(&mut self, caminho: &Path) -> Result<(), String> {
-        self.r
+        let resultado = self
+            .r
             .reconhecer(caminho, &mut |_| {}, &self.cancelar)
-            .map(|_| ())
-            .map_err(|_| "o reconhecimento não leu o arquivo".to_owned())
+            .map_err(|_| "o reconhecimento não leu o arquivo".to_owned())?;
+        // A alta confiança vai para o controle sem janela e sem clique. Falhar aqui não
+        // desfaz o reconhecimento (a linha da Caixa de entrada já está gravada): a sugestão
+        // continua esperando o clique na janela.
+        let _ = self.r.aplicar_automaticas(&resultado);
+        Ok(())
     }
 }
 
