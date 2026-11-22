@@ -84,6 +84,7 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     data: None,
                     regra: None,
                     chave: None,
+                    automatica: false,
                 },
                 Sugestao::UsarRubricas {
                     rotulo: uso.rotulo(&uso.eventuais_iniciais()),

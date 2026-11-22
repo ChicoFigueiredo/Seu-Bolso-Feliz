@@ -1479,6 +1479,13 @@ impl Planejamento for PlanejamentoFicticio {
             .cloned())
     }
 
+    fn documento_desvinculado(&self, alvo: &AlvoDoDocumento, sha256: &str) -> Resultado<bool> {
+        Ok(self
+            .documentos
+            .iter()
+            .any(|d| d.desvinculado && &d.alvo == alvo && d.sha256 == sha256))
+    }
+
     fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {
         Ok(self
             .desfeitas

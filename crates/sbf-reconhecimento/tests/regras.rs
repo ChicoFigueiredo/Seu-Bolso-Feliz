@@ -1332,6 +1332,65 @@ fn vincular_ocorrencia_nao_repete_o_documento_ja_vinculado() {
     );
 }
 
+#[test]
+fn vincular_ocorrencia_de_padrao_ativo_so_propoe_e_de_consolidado_vincula_sozinho() {
+    use sbf_reconhecimento::automaticas::aplicar_automaticas_do_resultado;
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    let alvo = ocorrencia_de(id, 2026, 11);
+    c.instalar(regra_do_receipt());
+
+    // Padrão só ativo: sugere, não é automática, e aplicar não grava nada.
+    let ativo = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    assert!(!so_vincular(&ativo).e_automatica());
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &ativo).unwrap();
+    assert!(saida.aplicadas.is_empty());
+    assert!(c.plan().documentos(&alvo).unwrap().is_empty());
+
+    // Consolidado: automática, gravada com o autor "<regra>@<versão>".
+    c.consolidar("receipt-nuvem-exemplo", RECEIPT_DA_NUVEM);
+    let outro = format!("{RECEIPT_DA_NUVEM}\n");
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt-2.txt", &outro));
+    let s = so_vincular(&r);
+    assert!(s.e_automatica());
+    assert_eq!(
+        s.autor_do_vinculo_automatico().as_deref(),
+        Some("receipt-nuvem-exemplo@1")
+    );
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &r).unwrap();
+    assert_eq!(saida.novas(), 1);
+    let docs = c.plan().documentos(&alvo).unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(
+        docs[0].autor,
+        Autor::Regra {
+            regra: "receipt-nuvem-exemplo@1".to_owned()
+        }
+    );
+    // Idempotente: de novo, nada novo.
+    assert_eq!(
+        aplicar_automaticas_do_resultado(&c.cofre, &r)
+            .unwrap()
+            .novas(),
+        0
+    );
+    assert_eq!(c.plan().documentos(&alvo).unwrap().len(), 1);
+
+    // O usuário desfaz: a regra não refaz, e a sugestão volta sem ser automática.
+    let doc = docs.into_iter().next().unwrap();
+    c.plan()
+        .aplicar(
+            Alteracao::DesvincularDocumento { id: doc.id },
+            Autor::Usuario,
+        )
+        .unwrap();
+    let depois = c.rodar(&c.com_regras(), &c.solto("receipt-2.txt", &outro));
+    assert!(!so_vincular(&depois).e_automatica());
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &r).unwrap();
+    assert!(saida.aplicadas.is_empty());
+    assert!(c.plan().documentos(&alvo).unwrap().is_empty());
+}
+
 // ------------------------------------------------------------ identidade do documento
 
 const INVOICE_POR_EMAIL: &str = "Nuvem Exemplo Inc\nInvoice\nInvoice number  NE-0001\n\

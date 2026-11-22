@@ -404,6 +404,7 @@ mod testes {
                 data: None,
                 regra: None,
                 chave: None,
+                automatica: false,
             }],
             avisos: vec!["aviso ficticio".to_owned()],
             entrada: None,

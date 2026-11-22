@@ -1240,6 +1240,13 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
+    /// O usuário já desvinculou este documento (pelo sha256) deste alvo alguma vez: uma regra
+    /// não refaz o vínculo sozinha, como não refaz a conciliação desfeita. O padrão é `false`.
+    fn documento_desvinculado(&self, alvo: &AlvoDoDocumento, sha256: &str) -> Resultado<bool> {
+        let _ = (alvo, sha256);
+        Ok(false)
+    }
+
     /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
     /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {

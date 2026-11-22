@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use sbf_planejamento::conciliacao::normalizar;
 use sbf_planejamento::{
-    AlvoDoDocumento, Banco, Centavos, Competencia, Conciliacao, Data, EstadoDaOcorrencia, Filtro,
-    FonteDeMovimentos as _, MovimentoCandidato, MovimentoDoExtrato, Natureza, Ocorrencia, Periodo,
-    Planejamento, PlanejamentoSqlite, SemSaldos, TipoDeDocumento,
+    AlvoDoDocumento, Autor, Banco, Centavos, Competencia, Conciliacao, Data, EstadoDaOcorrencia,
+    Filtro, FonteDeMovimentos as _, MovimentoCandidato, MovimentoDoExtrato, Natureza, Ocorrencia,
+    Periodo, Planejamento, PlanejamentoSqlite, SemSaldos, TipoDeDocumento,
 };
 use sbf_planilha::contracheque::Contracheque;
 use sbf_planilha::movimentos::MovimentosDaPluggy;
@@ -744,9 +744,14 @@ fn regra_da(ctx: &Contexto<'_>) -> (String, u32) {
     (ctx.rec.regra.clone(), ctx.rec.versao)
 }
 
+/// A regra só age sozinha quando está consolidada e o usuário nunca desfez a ligação.
+fn consolidada_e_nao_desfeita(ctx: &Contexto<'_>, desfeita: bool) -> bool {
+    ctx.consolidada && !desfeita
+}
+
 /// A regra só concilia sozinha quando está consolidada e as três provas batem.
 fn automatica(ctx: &Contexto<'_>, provas: u8, desfeita: bool) -> bool {
-    ctx.consolidada && provas >= PROVAS_POSSIVEIS && !desfeita
+    consolidada_e_nao_desfeita(ctx, desfeita) && provas >= PROVAS_POSSIVEIS
 }
 
 fn provar_registro(
@@ -910,7 +915,8 @@ fn tipo_do_documento(t: TipoDoDocumento) -> TipoDeDocumento {
 
 /// Anexa o documento à ocorrência do compromisso mais perto da data dele. Não exige valor nem
 /// débito no extrato, e não filtra por `livre`: um recibo numa ocorrência já paga vale. O
-/// empate de distância não se adivinha. Nunca é automática: o usuário confirma.
+/// empate de distância não se adivinha. Só é automática quando o padrão está consolidado e o
+/// usuário nunca desvinculou o documento desta ocorrência; padrão ativo só propõe.
 fn vincular_ocorrencia(
     ctx: &Contexto<'_>,
     data: &str,
@@ -946,15 +952,25 @@ fn vincular_ocorrencia(
     let alvo = AlvoDoDocumento::Ocorrencia {
         id: ocorrencia.id.clone(),
     };
-    if plan
-        .documentos(&alvo)?
-        .iter()
-        .any(|x| x.sha256 == ctx.sha && !x.desvinculado)
+    let ligados = plan.documentos(&alvo)?;
+    // O vínculo que uma regra consolidada já fez sozinha volta como sugestão automática, para
+    // o cartão mostrá-lo como feito ("Vinculado automaticamente · Desfazer").
+    let feito_pela_regra = ligados.iter().any(|x| {
+        x.sha256 == ctx.sha
+            && !x.desvinculado
+            && x.alvo == alvo
+            && matches!(x.autor, Autor::Regra { .. })
+    });
+    if !feito_pela_regra
+        && ligados
+            .iter()
+            .any(|x| x.sha256 == ctx.sha && !x.desvinculado)
     {
         return Ok(Resolvida::Nada(
             "o documento já está ligado a esta ocorrência".to_owned(),
         ));
     }
+    let desfeito = plan.documento_desvinculado(&alvo, ctx.sha)?;
     Ok(Resolvida::Sugestao(Box::new(Sugestao::Vincular {
         alvo,
         rotulo: format!(
@@ -965,6 +981,7 @@ fn vincular_ocorrencia(
         data: Some(d),
         regra: Some(regra_da(ctx)),
         chave: Some(ctx.rec.chave.clone()),
+        automatica: feito_pela_regra || consolidada_e_nao_desfeita(ctx, desfeito),
     })))
 }
 

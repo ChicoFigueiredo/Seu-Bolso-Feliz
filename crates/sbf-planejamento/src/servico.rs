@@ -1049,6 +1049,22 @@ impl Planejamento for PlanejamentoSqlite {
         banco::conciliacao_foi_desfeita(self.banco.conexao(), &ocorrencia.to_string(), movimento)
     }
 
+    fn documento_desvinculado(
+        &self,
+        alvo: &crate::AlvoDoDocumento,
+        sha256: &str,
+    ) -> Resultado<bool> {
+        let c = self.banco.conexao();
+        match alvo {
+            crate::AlvoDoDocumento::Recorrente { id } => {
+                banco::documento_foi_desvinculado(c, id, None, sha256)
+            }
+            crate::AlvoDoDocumento::Ocorrencia { id } => {
+                banco::documento_foi_desvinculado(c, &id.recorrente, Some(&id.to_string()), sha256)
+            }
+        }
+    }
+
     /// Para uma ocorrência, devolve também os documentos da regra (o recorrente): um
     /// contrato ligado ao recorrente vale para todos os meses. Para o recorrente, só os da
     /// regra. Os mais recentes primeiro.
