@@ -6028,9 +6028,13 @@ name = "sbf-roteiros"
 version = "0.1.0"
 dependencies = [
  "bancada-navegador",
+ "base64 0.22.1",
+ "regex",
  "rusqlite",
  "sbf-chaveiro",
  "sbf-coleta",
+ "sbf-coletor",
+ "sbf-gmail",
  "sbf-ia",
  "sbf-processo",
  "serde",
