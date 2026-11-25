@@ -27,6 +27,10 @@ use crate::regras::{
     PedidoDeProposta, PedidoDeRegra, PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste,
     PedidoDeVersao, Regras,
 };
+use crate::roteiros_escritos::{
+    FERRAMENTAS as FERRAMENTAS_DOS_ROTEIROS_ESCRITOS, PedidoDeRoteiroEscrito,
+    PedidoDeVerRoteiroEscrito, RoteirosEscritos,
+};
 use crate::telegram::{
     FERRAMENTAS as FERRAMENTAS_DO_TELEGRAM, PedidoDeColeta, PedidoDeConversas, PedidoDeSeguir,
 };
@@ -203,6 +207,11 @@ impl Servidor {
         }
         if !nucleo.tem_regras() {
             for nome in FERRAMENTAS_DAS_REGRAS.iter().chain(&ESCRITA_DAS_REGRAS) {
+                tool_router.remove_route(nome);
+            }
+        }
+        if !nucleo.tem_roteiros_escritos() {
+            for nome in &FERRAMENTAS_DOS_ROTEIROS_ESCRITOS {
                 tool_router.remove_route(nome);
             }
         }
@@ -516,6 +525,33 @@ impl Servidor {
     }
 
     #[tool(
+        description = "PROPÕE um roteiro ESCRITO (Luau, para o navegador): valida o manifesto (hosts, rótulos do chaveiro, MFA, movimenta_dinheiro, classe) e salva um RASCUNHO com autor mcp. PROPOR NÃO ATIVA E NÃO EXECUTA: ao contrário das regras, o MCP NUNCA ativa, desativa, testa nem executa roteiro escrito; quem ativa é o usuário, só no terminal (`sbf roteiros escrito ativar`, com confirmação digitada) ou na janela. Manifesto inválido é recusado com o motivo; o mesmo conteúdo não duplica a versão. Fonte e manifesto até 64 KiB. Nunca ponha senha, CPF ou código: só rótulos do chaveiro. Há backup automático antes da primeira escrita da sessão."
+    )]
+    fn propor_roteiro_escrito(
+        &self,
+        Parameters(p): Parameters<PedidoDeRoteiroEscrito>,
+    ) -> Result<String, String> {
+        self.roteiros_escritos("propor_roteiro_escrito", |r| r.propor(&p))
+    }
+
+    #[tool(
+        description = "Lista os roteiros escritos (Luau): nome, descrição, versão ativa, última versão e o estado da última (rascunho, testado, ativo ou aposentado). Só leitura."
+    )]
+    fn listar_roteiros_escritos(&self) -> Result<String, String> {
+        self.roteiros_escritos("listar_roteiros_escritos", |r| r.listar())
+    }
+
+    #[tool(
+        description = "Mostra um roteiro escrito: o manifesto, o fonte Luau, o estado, o autor, o resultado do teste e o histórico de estados. Sem versão, a mais nova (o campo ativa diz qual está em vigor). Só leitura; nunca devolve segredo (o manifesto guarda só rótulos do chaveiro)."
+    )]
+    fn ver_roteiro_escrito(
+        &self,
+        Parameters(p): Parameters<PedidoDeVerRoteiroEscrito>,
+    ) -> Result<String, String> {
+        self.roteiros_escritos("ver_roteiro_escrito", |r| r.ver(&p))
+    }
+
+    #[tool(
         description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_exclusao_logica(
@@ -812,6 +848,14 @@ impl Servidor {
         responder(nome, self.nucleo.regras().and_then(f))
     }
 
+    fn roteiros_escritos(
+        &self,
+        nome: &str,
+        f: impl FnOnce(&RoteirosEscritos) -> Result<Value, String>,
+    ) -> Result<String, String> {
+        responder(nome, self.nucleo.roteiros_escritos().and_then(f))
+    }
+
     fn propor(&self, nome: &str, chave: &str, e: Alt) -> Result<String, String> {
         responder(
             nome,
@@ -824,7 +868,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar e telegram_coletar/telegram_seguir tambem aplicam direto: coletam o Gmail e o Telegram para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar e telegram_coletar/telegram_seguir tambem aplicam direto: coletam o Gmail e o Telegram para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). ROTEIROS ESCRITOS (Luau, navegador com credenciais) sao diferentes das regras: o mcp so PROPOE (propor_roteiro_escrito cria um RASCUNHO com autor mcp) e consulta (listar_roteiros_escritos, ver_roteiro_escrito); NAO existe ferramenta que ative, desative, teste ou execute roteiro escrito, e ativar e so do usuario, no terminal (sbf roteiros escrito ativar) ou na janela. Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 

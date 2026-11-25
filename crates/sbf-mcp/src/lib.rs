@@ -10,11 +10,16 @@
 //! continuam só propondo. Antes da primeira escrita de cada banco na sessão há backup (módulo
 //! [`backup`]); se ele falha, a escrita é recusada. A triagem do inventário segue só do
 //! usuário: `sugerir` apenas grava sugestões (modelo `mcp`). O livro-caixa é só leitura.
+//!
+//! **Roteiros escritos** (spec 14, RE-19; módulo [`roteiros_escritos`]): o MCP só **propõe**
+//! (rascunho com autor `mcp`) e consulta. Ao contrário das regras, não há ferramenta que
+//! ative, desative, teste ou execute: um roteiro escrito comanda um navegador com credenciais.
 
 pub mod backup;
 pub mod ferramentas;
 pub mod plano;
 pub mod regras;
+pub mod roteiros_escritos;
 pub mod servidor;
 pub mod telegram;
 

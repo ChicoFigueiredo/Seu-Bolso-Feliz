@@ -5836,6 +5836,7 @@ dependencies = [
  "sbf-inventario",
  "sbf-planejamento",
  "sbf-regras",
+ "sbf-roteiros",
  "sbf-script",
  "sbf-triagem",
  "serde",
