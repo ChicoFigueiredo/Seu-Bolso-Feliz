@@ -1003,6 +1003,23 @@ impl Confirmacao {
             esperado: esperado.to_owned(),
         })
     }
+
+    /// Confere a digitação feita na janela do app (o mesmo caminho humano das regras de
+    /// reconhecimento, ADR-021). Só a janela do SBF a usa; o MCP e a IA nunca constroem uma
+    /// `Confirmacao` (um teste do crate `sbf-mcp` garante que nem a importam).
+    ///
+    /// # Errors
+    /// Digitação diferente do esperado.
+    pub fn da_janela(digitado: &str, esperado: &str) -> Resultado<Self> {
+        if digitado != esperado {
+            return Err(ErroDeRoteiro::Invalido(
+                "confirmação diferente do pedido; nada foi alterado.".into(),
+            ));
+        }
+        Ok(Self {
+            esperado: esperado.to_owned(),
+        })
+    }
 }
 
 /// O resultado de um teste no site falso, entregue por quem executa (outra frente).
