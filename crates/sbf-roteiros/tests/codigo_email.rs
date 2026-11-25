@@ -525,6 +525,83 @@ mod codigo_email {
         assert!(r.iter().all(|m| m.corpo.contains("123456")));
     }
 
+    /// Uma mensagem gravada com cabeçalhos extras (`From` repetido, `Authentication-Results`…).
+    fn gravada_com_cabecalhos(id: &str, extras: &[(&str, &str)]) -> MensagemDoGmail {
+        let mut m = gravada(
+            id,
+            REMETENTE,
+            "Seu código",
+            "Use o código 482913.",
+            1_700_000_030_000,
+        );
+        for (nome, valor) in extras {
+            m.payload.headers.push(
+                serde_json::from_value(serde_json::json!({"name": nome, "value": valor}))
+                    .expect("cabeçalho"),
+            );
+        }
+        m
+    }
+
+    fn quantas_passam(ms: Vec<MensagemDoGmail>) -> usize {
+        CaixaGmail::com_fonte(GmailGravado::com(ms))
+            .mensagens_recentes(REMETENTE, t(0))
+            .expect("mensagens")
+            .len()
+    }
+
+    #[test]
+    fn gmail_descarta_from_ambiguo_ou_repetido() {
+        let ruins = [
+            "nao-responda@portal.exemplo.test, atacante@mal.test",
+            "<atacante@mal.test> <nao-responda@portal.exemplo.test>",
+        ];
+        let mut ms: Vec<MensagemDoGmail> = ruins
+            .iter()
+            .enumerate()
+            .map(|(i, de)| gravada(&format!("r{i}"), de, "a", "111111", 1_700_000_030_000))
+            .collect();
+        // dois cabeçalhos `From`: o segundo é o do atacante
+        ms.push(gravada_com_cabecalhos(
+            "dois-from",
+            &[("From", "atacante@mal.test")],
+        ));
+        assert_eq!(quantas_passam(ms), 0);
+        assert_eq!(quantas_passam(vec![gravada_com_cabecalhos("ok", &[])]), 1);
+    }
+
+    #[test]
+    fn gmail_descarta_mensagem_que_falhou_no_dmarc_ou_no_spf() {
+        for ruim in [
+            "mx.exemplo.test; dkim=pass; spf=fail smtp.mailfrom=mal.test; dmarc=pass",
+            "mx.exemplo.test; spf=pass; dmarc=fail (p=reject) header.from=portal.exemplo.test",
+            "MX.EXEMPLO.TEST; SPF = FAIL; DMARC=PASS",
+        ] {
+            let m = gravada_com_cabecalhos("x", &[("Authentication-Results", ruim)]);
+            assert_eq!(quantas_passam(vec![m]), 0, "{ruim}");
+        }
+        // um segundo cabeçalho de resultados também vale
+        let m = gravada_com_cabecalhos(
+            "y",
+            &[
+                (
+                    "Authentication-Results",
+                    "mx.exemplo.test; spf=pass; dmarc=pass",
+                ),
+                ("authentication-results", "mx2.exemplo.test; dmarc=fail"),
+            ],
+        );
+        assert_eq!(quantas_passam(vec![m]), 0);
+        // aprovada, ou sem o cabeçalho, ou softfail, a mensagem vale
+        for ok in [
+            "mx.exemplo.test; dkim=pass; spf=pass; dmarc=pass",
+            "mx.exemplo.test; spf=softfail; dmarc=none",
+        ] {
+            let m = gravada_com_cabecalhos("z", &[("Authentication-Results", ok)]);
+            assert_eq!(quantas_passam(vec![m]), 1, "{ok}");
+        }
+    }
+
     #[test]
     fn gmail_recusa_remetente_que_alteraria_a_consulta() {
         let caixa = CaixaGmail::com_fonte(GmailGravado::com(Vec::new()));
