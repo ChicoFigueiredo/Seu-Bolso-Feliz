@@ -34,6 +34,12 @@ pub trait FonteDeSenhas {
     /// # Errors
     /// Texto sem o valor.
     fn cpf(&self) -> Result<Segredo, String>;
+
+    /// A caixa de e-mail onde chega o código do MFA por e-mail (só o roteiro escrito com
+    /// `mfa.tipo = "email"` a usa). Quem não tem e-mail não a implementa: `None`.
+    fn caixa_de_email(&self) -> Option<Box<dyn crate::codigo_email::CaixaDeEmail + '_>> {
+        None
+    }
 }
 
 impl FonteDeSenhas for sbf_chaveiro::Chaveiro {
@@ -43,6 +49,14 @@ impl FonteDeSenhas for sbf_chaveiro::Chaveiro {
     }
     fn cpf(&self) -> Result<Segredo, String> {
         sbf_chaveiro::Chaveiro::cpf(self).map_err(|_| "o CPF não está no chaveiro".to_owned())
+    }
+
+    /// O Gmail da conta conectada, com a mesma autorização da coleta (o refresh token está no
+    /// chaveiro). Sem autorização, `None`: o verbo do e-mail falha com uma mensagem clara.
+    fn caixa_de_email(&self) -> Option<Box<dyn crate::codigo_email::CaixaDeEmail + '_>> {
+        crate::codigo_email::CaixaGmail::real(Some(self), sbf_gmail::Alvo::legado())
+            .ok()
+            .map(|c| Box::new(c) as Box<dyn crate::codigo_email::CaixaDeEmail + '_>)
     }
 }
 
@@ -491,7 +505,7 @@ fn conferir_barrado(c: &mut Contexto<'_>) -> Resultado<()> {
     Ok(())
 }
 
-fn nome_de_arquivo_seguro(nome: &str) -> String {
+pub(crate) fn nome_de_arquivo_seguro(nome: &str) -> String {
     let limpo: String = nome
         .chars()
         .map(|c| {

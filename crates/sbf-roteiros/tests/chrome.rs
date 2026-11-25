@@ -674,3 +674,31 @@ fn ro_02_no_navegador_a_excecao_do_comprovante_vale_e_o_resto_continua_barrado()
     );
     chrome.fechar();
 }
+
+#[test]
+fn texto_no_chrome_le_o_que_se_ve_e_nunca_o_valor_de_campo() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/comprovante")).unwrap();
+    assert_eq!(chrome.texto("#ok").unwrap(), "Comprovante de pagamento");
+    assert!(chrome.texto("#nao-existe").is_err());
+
+    chrome.navegar(&site.url("/login")).unwrap();
+    chrome.preencher("#cpf", CPF).unwrap();
+    chrome
+        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .unwrap();
+    // O valor existe no campo, mas `texto` recusa o campo e a página inteira não o repete.
+    assert!(chrome.texto("#senha").is_err());
+    assert!(chrome.texto("#cpf").is_err());
+    let corpo = chrome.texto("body").unwrap();
+    assert!(
+        !corpo.contains(SENHA) && !corpo.contains(CPF),
+        "o texto visível da página não traz valor de campo"
+    );
+    chrome.fechar();
+}
