@@ -19,8 +19,8 @@
 pub mod banco;
 pub mod bloqueio;
 pub mod cdp;
-pub mod codigo_email;
 pub mod chrome;
+pub mod codigo_email;
 pub mod erro;
 pub mod escrito;
 pub mod executor;
