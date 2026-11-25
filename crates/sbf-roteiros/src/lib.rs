@@ -27,6 +27,7 @@ pub mod escrito;
 pub mod executor;
 pub mod gravacao;
 pub mod inventario;
+pub mod manifesto;
 pub mod passo;
 pub mod servico;
 
