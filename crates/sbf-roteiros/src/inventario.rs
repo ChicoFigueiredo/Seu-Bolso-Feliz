@@ -15,7 +15,7 @@ use std::path::Path;
 const RESPONSAVEL: &str = "sbf-roteiros@1";
 
 /// As extensões que um download de roteiro pode ter para entrar no acervo. Um site (ou um
-/// roteiro) hostil não faz o roteiro trazer um executável, uma página ou um script para o
+/// roteiro) hostil não faz o roteiro trazer um executável, uma página ou um programa para o
 /// cofre. Outra extensão (ou nenhuma) é recusada e o arquivo é descartado.
 pub const EXTENSOES_ACEITAS: &[&str] = &[
     "pdf", "csv", "xml", "ofx", "txt", "xlsx", "zip", "png", "jpg", "jpeg",

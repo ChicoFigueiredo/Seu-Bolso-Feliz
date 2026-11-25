@@ -2,14 +2,14 @@
 //!
 //! Só serve a roteiro cujo manifesto declara `movimenta_dinheiro: false`; essa regra é do
 //! importador, não daqui. O remetente e o formato do código vêm do MANIFESTO, nunca do
-//! script Luau. O fluxo:
+//! roteiro (o fonte Luau). O fluxo:
 //!
 //! 1. o executor marca `pedido_em` (o instante em que o site mandou o código);
 //! 2. [`esperar_codigo`] consulta a [`CaixaDeEmail`] em intervalos, até o prazo;
 //! 3. só vale mensagem recebida **depois** de `pedido_em` (nunca um código velho), e o formato
 //!    é aplicado ancorado (`\b(?:formato)\b`): exatamente um código por mensagem;
 //! 4. o código sai como [`Segredo`] (zeroize) e vai direto ao campo; nunca a log, `Debug`,
-//!    erro nem ao script.
+//!    erro nem ao fonte Luau.
 //!
 //! **Autorização:** o adaptador [`CaixaGmail`] reaproveita o `sbf-gmail`: o mesmo refresh token
 //! do chaveiro, o mesmo cliente HTTP. A consulta é estreita: `from:<remetente> after:<instante>`,
