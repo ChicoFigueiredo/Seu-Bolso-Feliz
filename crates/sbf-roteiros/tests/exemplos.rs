@@ -12,12 +12,15 @@ const CONTRACHEQUE_JSON: &str = include_str!("../exemplos/contracheque-exemplo.j
 const CONTRACHEQUE_LUAU: &str = include_str!("../exemplos/contracheque-exemplo.luau");
 const CONEXOES_JSON: &str = include_str!("../exemplos/atualizar-conexoes-exemplo.json");
 const CONEXOES_LUAU: &str = include_str!("../exemplos/atualizar-conexoes-exemplo.luau");
+const PLUGGY_JSON: &str = include_str!("../exemplos/meu-pluggy-atualizar.json");
+const PLUGGY_LUAU: &str = include_str!("../exemplos/meu-pluggy-atualizar.luau");
 
 /// Os únicos nomes que um roteiro pode usar (a tabela do contrato).
 const VERBOS_DO_CONTRATO: &[&str] = &[
     "abrir",
     "esperar",
     "existe",
+    "esperar_sumir",
     "clicar",
     "texto",
     "tabela",
@@ -78,8 +81,19 @@ impl Verbos for Fake {
         self.anotar(format!("clicar {seletor}"));
         Ok(())
     }
-    fn texto(&mut self, _s: &str) -> ResultadoDeVerbo<String> {
-        Ok(String::new())
+    fn esperar_sumir(&mut self, seletor: &str, _prazo: Duration) -> ResultadoDeVerbo<bool> {
+        self.anotar(format!("esperar_sumir {seletor}"));
+        Ok(true)
+    }
+    fn texto(&mut self, seletor: &str) -> ResultadoDeVerbo<String> {
+        // Só o painel do Meu Pluggy lê texto: o botão de ação é "Atualizar", o item é um banco.
+        Ok(if seletor.contains("button:nth-of-type(1)") {
+            "Atualizar".to_owned()
+        } else if seletor.contains("a:nth-of-type(") {
+            "Banco Um Hoje Ver detalhes".to_owned()
+        } else {
+            String::new()
+        })
     }
     fn tabela(&mut self, _s: &str) -> ResultadoDeVerbo<Vec<Vec<String>>> {
         Ok(Vec::new())
@@ -171,6 +185,19 @@ fn manifesto_de_atualizar_conexoes_valida() {
     assert_eq!(m.hosts, ["portal-de-conexoes.exemplo.test"]);
 }
 
+#[test]
+fn manifesto_do_meu_pluggy_valida() {
+    let m = Manifesto::de_json(PLUGGY_JSON).unwrap();
+    assert_eq!(m.nome, "meu-pluggy-atualizar");
+    assert_eq!(m.classe, Classe::AtualizarConexao);
+    assert_eq!(m.mfa, Mfa::Manual);
+    assert!(!m.movimenta_dinheiro);
+    assert!(m.rotulo_senha.is_none(), "o login é por e-mail: sem senha");
+    assert!(m.hosts.contains(&"meu.pluggy.ai".to_owned()));
+    assert_eq!(m.url_inicial, "https://meu.pluggy.ai/connections");
+    assert_eq!(m.agenda_horas, Some(24));
+}
+
 // ----- fontes ------------------------------------------------------------------------------
 
 /// Os nomes depois de `navegador.` e `util.` no fonte.
@@ -208,6 +235,7 @@ fn os_roteiros_usam_so_verbos_do_contrato_e_nada_proibido() {
     for (nome, fonte) in [
         ("contracheque", CONTRACHEQUE_LUAU),
         ("conexoes", CONEXOES_LUAU),
+        ("meu-pluggy", PLUGGY_LUAU),
     ] {
         assert!(!fonte.trim().is_empty(), "{nome}: vazio");
         assert!(fonte.len() <= 64 * 1024, "{nome}: passa de 64 KiB");
@@ -386,4 +414,54 @@ fn atualizar_conexoes_falha_se_o_painel_nao_aparece() {
     let mut fake = Fake::novo("2026-11-24", |_| false);
     let erro = rodar(CONEXOES_LUAU, &mut fake).unwrap_err().to_string();
     assert!(erro.contains("painel de conexões"), "{erro}");
+}
+
+// ----- Meu Pluggy --------------------------------------------------------------------------
+
+/// Três conexões na lista; o widget abre depois de cada "Atualizar" e some.
+fn painel_do_pluggy(com_widget: bool) -> impl Fn(&str) -> bool {
+    move |s| {
+        if s.contains("zoid-pluggy-connect-widget") {
+            return com_widget;
+        }
+        if let Some(i) = s.split("a:nth-of-type(").nth(1) {
+            let n: u32 = i.trim_end_matches(')').parse().unwrap_or(99);
+            return n <= 3;
+        }
+        true
+    }
+}
+
+#[test]
+fn meu_pluggy_atualiza_cada_conexao_e_so_clica_em_atualizar() {
+    let mut fake = Fake::novo("2026-11-25", painel_do_pluggy(true));
+    let saida = rodar(PLUGGY_LUAU, &mut fake).unwrap();
+    assert!(
+        saida
+            .registros
+            .iter()
+            .any(|r| r.contains("conexões atualizadas: 3 de 3")),
+        "{:?}",
+        saida.registros
+    );
+    let cliques = fake.com_prefixo("clicar ");
+    let atualizar: Vec<_> = cliques
+        .iter()
+        .filter(|c| c.ends_with("div:nth-of-type(2) > button:nth-of-type(1)"))
+        .collect();
+    assert_eq!(atualizar.len(), 3, "{cliques:?}");
+    // Nunca o segundo botão do bloco ("Excluir").
+    assert!(
+        !cliques.iter().any(|c| c.contains("button:nth-of-type(2)")),
+        "{cliques:?}"
+    );
+    assert_eq!(fake.com_prefixo("esperar_sumir ").len(), 3);
+    assert!(fake.com_prefixo("preencher").is_empty(), "sem segredo");
+}
+
+#[test]
+fn meu_pluggy_falha_quando_o_widget_nao_abre() {
+    let mut fake = Fake::novo("2026-11-25", painel_do_pluggy(false));
+    let erro = rodar(PLUGGY_LUAU, &mut fake).unwrap_err();
+    assert!(erro.to_string().contains("não atualizaram"), "{erro}");
 }
