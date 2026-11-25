@@ -1159,6 +1159,8 @@ impl AppCasca for AppSbf {
             }
             "opcoes" => {
                 componentes::titulo(ui, "Opções", 18.0);
+                carimbo_de_versao_ui(ui);
+                ui.add_space(12.0);
                 bancada_casca::vista::opcoes_de_aparencia(ui, &self.textos);
                 ui.add_space(12.0);
                 opcoes_da_previa(ui, &mut self.janela.get_mut().previas);
@@ -1183,6 +1185,7 @@ impl AppCasca for AppSbf {
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);
                 linha(ui, "Versão", env!("CARGO_PKG_VERSION").to_owned());
+                carimbo_de_versao_ui(ui);
                 ui.label(RichText::new("Fatia 2: o inventário e o livro-caixa (só leitura, mais mudar a categoria) no desktop. Fontes Manrope e Instrument Serif (OFL) e Material Symbols Rounded (Apache-2.0).").color(p.tinta_suave));
             }
         }
@@ -1292,6 +1295,34 @@ impl AppCasca for AppSbf {
         if id == "sincronizacao" {
             bancada_casca::abrir(ctx, Destino::Area(Area::Sincronizacao).rota());
         }
+    }
+}
+
+/// O carimbo do binário: a linha de versão e o aviso de build com alterações.
+#[derive(Debug, Clone)]
+struct CarimboDeVersao {
+    linha: String,
+    aviso: Option<String>,
+}
+
+static CARIMBO_DE_VERSAO: std::sync::OnceLock<CarimboDeVersao> = std::sync::OnceLock::new();
+
+/// Registra o carimbo de versão do binário (commit do SBF e da bancada, data) para Opções e
+/// Sobre mostrarem. O `build.rs` do binário `sbf` é quem sabe; a janela só exibe. Só a
+/// primeira chamada vale.
+pub fn definir_carimbo_de_versao(linha: String, aviso: Option<String>) {
+    let _ = CARIMBO_DE_VERSAO.set(CarimboDeVersao { linha, aviso });
+}
+
+/// A linha de versão e, em destaque, o aviso se o build tinha alterações não commitadas.
+fn carimbo_de_versao_ui(ui: &mut Ui) {
+    let Some(c) = CARIMBO_DE_VERSAO.get() else {
+        return;
+    };
+    let p = tema::paleta(ui.ctx());
+    ui.label(RichText::new(&c.linha).color(p.tinta_suave));
+    if let Some(a) = &c.aviso {
+        ui.label(RichText::new(format!("Atenção: {a}")).color(p.aviso));
     }
 }
 
