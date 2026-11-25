@@ -6,7 +6,7 @@
 //! campo `continuar`; a janela grava `1` (Continuar) ou `2` (Cancelar).
 
 use crate::erro::{ErroDeRoteiro, Resultado};
-use crate::manifesto::{LIMITE_DE_BYTES, Manifesto};
+use crate::manifesto::{LIMITE_DE_BYTES, Manifesto, tem_caractere_perigoso};
 use crate::passo::{Passo, Roteiro, validar_nome};
 use rusqlite::{Connection, OptionalExtension as _, params};
 use std::path::Path;
@@ -915,8 +915,9 @@ impl EstadoEscrito {
     }
 }
 
-/// Quem escreveu a versão. Só quem importa; **ativar não depende do autor**: depende da
-/// [`Confirmacao`].
+/// Quem escreveu a versão. Só quem importa; **ativar depende da [`Confirmacao`]**, e o texto
+/// que o usuário digita depende do autor: quem não é o próprio usuário (`mcp`, `ia:*`) obriga a
+/// digitar também o host principal (ver [`BancoDeRoteiros::esperado_para_ativar`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutorEscrito {
     Usuario,
@@ -959,23 +960,33 @@ impl AutorEscrito {
     }
 }
 
-/// A prova de que o **usuário**, num terminal interativo, digitou a confirmação pedida. É o
-/// único jeito de chamar [`BancoDeRoteiros::ativar`] e [`BancoDeRoteiros::desativar`]: o MCP e
-/// a IA não têm terminal e, por isso, não conseguem construir uma. Quem constrói é só o CLI
-/// interativo (`sbf roteiros escrito ativar`).
+/// A prova de que o **usuário** digitou a confirmação pedida. É o único jeito de chamar
+/// [`BancoDeRoteiros::ativar`] e [`BancoDeRoteiros::desativar`]. Quem a constrói são o terminal
+/// interativo (`sbf roteiros escrito ativar`, [`Confirmacao::do_terminal`]) e a janela do app
+/// ([`Confirmacao::da_janela`]); o MCP e a IA não a constroem.
+///
+/// Atenção: isto é **autoridade por convenção** (os construtores são `pub`): o que impede o
+/// MCP e a IA de ativar não é o sistema de tipos, é o teste de arquitetura
+/// `crates/sbf-roteiros/tests/autoridade.rs`, que falha se `sbf-mcp`, `sbf-worker` ou `sbf-ia`
+/// citarem `Confirmacao`, `da_janela`, `do_terminal`, `marcar_testado`, `.ativar(` ou
+/// `.desativar(`.
 #[derive(Debug)]
 pub struct Confirmacao {
     esperado: String,
 }
 
 impl Confirmacao {
-    /// O que o usuário tem de digitar para ativar: `<roteiro>@<versao>`.
+    /// `<roteiro>@<versao>`: o texto de ativar de uma versão escrita **pelo usuário**. Não use
+    /// para decidir o que pedir: a fonte do texto a digitar é
+    /// [`BancoDeRoteiros::esperado_para_ativar`], que acrescenta o host quando o autor é o MCP
+    /// ou a IA. Este é só o miolo dele.
     #[must_use]
     pub fn texto_de_ativar(roteiro: &str, versao: u32) -> String {
         format!("{roteiro}@{versao}")
     }
 
-    /// O que o usuário tem de digitar para desativar: o nome do roteiro.
+    /// O nome do roteiro: o texto de desativar. A fonte é
+    /// [`BancoDeRoteiros::esperado_para_desativar`].
     #[must_use]
     pub fn texto_de_desativar(roteiro: &str) -> String {
         roteiro.to_owned()
@@ -1008,7 +1019,7 @@ impl Confirmacao {
 
     /// Confere a digitação feita na janela do app (o mesmo caminho humano das regras de
     /// reconhecimento, ADR-021). Só a janela do SBF a usa; o MCP e a IA nunca constroem uma
-    /// `Confirmacao` (um teste do crate `sbf-mcp` garante que nem a importam).
+    /// `Confirmacao` (o teste `tests/autoridade.rs` falha se esses crates a citarem).
     ///
     /// # Errors
     /// Digitação diferente do esperado.
@@ -1082,7 +1093,9 @@ fn invalido_escrito(m: impl Into<String>) -> ErroDeRoteiro {
     ErroDeRoteiro::Invalido(m.into())
 }
 
-fn u32_de(n: i64) -> u32 {
+/// `i64` do SQLite para `u32` (satura em vez de estourar). Também usado por
+/// `execucao_escrita.rs`, que ainda tem uma cópia local a remover.
+pub(crate) fn u32_de(n: i64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
@@ -1120,11 +1133,15 @@ impl BancoDeRoteiros {
         if fonte.len() > LIMITE_DE_BYTES {
             return Err(invalido_escrito("o fonte do roteiro passa de 64 KiB"));
         }
-        if fonte.contains('\0') {
-            return Err(invalido_escrito("o fonte do roteiro tem byte nulo"));
+        if tem_caractere_perigoso(fonte, true) {
+            return Err(invalido_escrito(
+                "o fonte do roteiro tem caractere de controle (fora quebra de linha `\\n` e tabulação) ou de direção do texto; salve o arquivo com fim de linha LF",
+            ));
         }
-        if motivo.chars().count() > 500 {
-            return Err(invalido_escrito("o motivo passa de 500 caracteres"));
+        if motivo.chars().count() > 500 || tem_caractere_perigoso(motivo, false) {
+            return Err(invalido_escrito(
+                "o motivo passa de 500 caracteres ou tem caractere de controle ou de direção",
+            ));
         }
         let checksum = manifesto.checksum_com(fonte)?;
         let json = manifesto.json_canonico()?;
@@ -1255,8 +1272,11 @@ impl BancoDeRoteiros {
     }
 
     /// Registra o resultado do teste. **Só de rascunho.** Se passou, a versão vira `testado`;
-    /// se falhou, continua rascunho (o resumo fica no histórico). Quem roda o teste (o
-    /// executor contra o site falso) é outra frente; aqui só se grava.
+    /// se falhou, continua rascunho (o resumo fica no histórico).
+    ///
+    /// É `pub` só porque os testes de integração do crate precisam dela. **Em produção só
+    /// `testar_escrito` (`teste_escrito.rs`), que de fato roda o roteiro no site falso, a
+    /// chama**; nem o MCP, nem o worker, nem a IA podem citá-la (`tests/autoridade.rs`).
     ///
     /// # Errors
     /// Versão inexistente ou que não é rascunho.
@@ -1297,13 +1317,43 @@ impl BancoDeRoteiros {
         Ok(novo)
     }
 
+    /// O texto que o usuário tem de digitar para ativar `nome` v`numero`. É a **única fonte**
+    /// desse texto: o terminal, a janela e [`BancoDeRoteiros::ativar`] usam esta função.
+    ///
+    /// - autor `usuario`: `<roteiro>@<versao>`;
+    /// - autor `mcp` ou `ia:*`: `<roteiro>@<versao> <host-principal>` (o primeiro de `hosts`),
+    ///   para que quem ativa algo proposto por outro seja obrigado a LER o host que vai receber
+    ///   a senha do chaveiro; `rotulo_senha` e `hosts` são autodeclarados pelo autor.
+    ///
+    /// # Errors
+    /// Roteiro ou versão inexistente.
+    pub fn esperado_para_ativar(&self, nome: &str, numero: u32) -> Resultado<String> {
+        let v = self.versao_escrita(nome, numero)?;
+        let base = Confirmacao::texto_de_ativar(nome, numero);
+        Ok(match v.autor {
+            AutorEscrito::Usuario => base,
+            AutorEscrito::Mcp | AutorEscrito::Ia(_) => {
+                // `hosts` nunca é vazio (o manifesto guardado passou em `validar`)
+                let host = v.manifesto.hosts.first().map_or("", String::as_str);
+                format!("{base} {host}")
+            }
+        })
+    }
+
+    /// O texto que o usuário tem de digitar para desativar `nome`: o nome do roteiro. Desativar
+    /// só para a execução, então não pede o host; é a única fonte desse texto.
+    #[must_use]
+    pub fn esperado_para_desativar(&self, nome: &str) -> String {
+        Confirmacao::texto_de_desativar(nome)
+    }
+
     /// Ativa uma versão `testado` e aposenta a ativa anterior, numa transação. A
-    /// [`Confirmacao`] tem de ser a de `<roteiro>@<versao>`.
+    /// [`Confirmacao`] tem de ser a de [`BancoDeRoteiros::esperado_para_ativar`].
     ///
     /// # Errors
     /// Confirmação de outro pedido, versão que não está `testado`, ou falha do banco.
     pub fn ativar(&self, nome: &str, numero: u32, confirmacao: &Confirmacao) -> Resultado<()> {
-        if confirmacao.esperado != Confirmacao::texto_de_ativar(nome, numero) {
+        if confirmacao.esperado != self.esperado_para_ativar(nome, numero)? {
             return Err(invalido_escrito("a confirmação é de outro pedido"));
         }
         let (id, v) = self.ler_versao(nome, numero)?;
@@ -1352,7 +1402,7 @@ impl BancoDeRoteiros {
     /// # Errors
     /// Confirmação de outro pedido, roteiro inexistente ou nenhuma versão ativa.
     pub fn desativar(&self, nome: &str, confirmacao: &Confirmacao) -> Resultado<u32> {
-        if confirmacao.esperado != Confirmacao::texto_de_desativar(nome) {
+        if confirmacao.esperado != self.esperado_para_desativar(nome) {
             return Err(invalido_escrito("a confirmação é de outro pedido"));
         }
         self.id_do_escrito(nome)?;
@@ -1911,6 +1961,111 @@ mod testes_escrito {
         assert!(
             b.desativar("contracheque", &conf_ativar("contracheque", 2))
                 .is_err()
+        );
+    }
+
+    fn importar_como(b: &BancoDeRoteiros, autor: &AutorEscrito) -> u32 {
+        let n = b
+            .importar_escrito(&manifesto("contracheque"), FONTE, autor, "proposta")
+            .unwrap()
+            .numero;
+        b.marcar_testado("contracheque", n, &passou()).unwrap();
+        n
+    }
+
+    #[test]
+    fn autor_usuario_digita_so_nome_e_versao() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let n = importar_como(&b, &AutorEscrito::Usuario);
+        assert_eq!(
+            b.esperado_para_ativar("contracheque", n).unwrap(),
+            "contracheque@1"
+        );
+        b.ativar("contracheque", n, &conf_ativar("contracheque", n))
+            .unwrap();
+    }
+
+    #[test]
+    fn autor_mcp_ou_ia_exige_o_host_principal_na_digitacao() {
+        for autor in [AutorEscrito::Mcp, AutorEscrito::Ia("modelo-x".into())] {
+            let b = BancoDeRoteiros::em_memoria().unwrap();
+            let n = importar_como(&b, &autor);
+            let esperado = b.esperado_para_ativar("contracheque", n).unwrap();
+            assert_eq!(esperado, "contracheque@1 portal.exemplo.test");
+            // só `nome@versão` não vale para quem o MCP ou a IA propôs
+            let sem_host =
+                Confirmacao::do_terminal(true, "contracheque@1", "contracheque@1").unwrap();
+            let e = b
+                .ativar("contracheque", n, &sem_host)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("outro pedido"), "{e}");
+            assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+            // com o host digitado, ativa
+            let c = Confirmacao::do_terminal(true, &esperado, &esperado).unwrap();
+            b.ativar("contracheque", n, &c).unwrap();
+            assert_eq!(
+                b.versao_ativa_escrita("contracheque")
+                    .unwrap()
+                    .unwrap()
+                    .numero,
+                n
+            );
+        }
+    }
+
+    #[test]
+    fn o_host_do_esperado_e_o_primeiro_de_hosts() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let mut m = manifesto("contracheque");
+        m.hosts = vec!["auth.exemplo.test".into(), "portal.exemplo.test".into()];
+        m.url_inicial = "https://auth.exemplo.test/entrar".into();
+        b.importar_escrito(&m, FONTE, &AutorEscrito::Mcp, "")
+            .unwrap();
+        assert_eq!(
+            b.esperado_para_ativar("contracheque", 1).unwrap(),
+            "contracheque@1 auth.exemplo.test"
+        );
+        assert!(b.esperado_para_ativar("contracheque", 9).is_err());
+        assert_eq!(b.esperado_para_desativar("contracheque"), "contracheque");
+    }
+
+    #[test]
+    fn fonte_e_motivo_com_controle_ou_direcao_sao_recusados() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        for ruim in [
+            "a()\u{1b}[3A",
+            "a()\r\nb()",
+            "a() --\u{202e}",
+            "a()\u{2066}",
+            "a()\u{85}",
+            "a()\0",
+        ] {
+            let e = b
+                .importar_escrito(&manifesto("contracheque"), ruim, &AutorEscrito::Usuario, "")
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("controle"), "{ruim:?}: {e}");
+            assert!(
+                b.importar_escrito(
+                    &manifesto("contracheque"),
+                    FONTE,
+                    &AutorEscrito::Usuario,
+                    ruim
+                )
+                .is_err(),
+                "motivo {ruim:?}"
+            );
+        }
+        // quebra de linha e tabulação do fonte continuam valendo
+        assert!(
+            b.importar_escrito(
+                &manifesto("contracheque"),
+                "a()\n\tb()\n",
+                &AutorEscrito::Usuario,
+                ""
+            )
+            .is_ok()
         );
     }
 
