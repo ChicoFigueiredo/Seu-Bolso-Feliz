@@ -15,6 +15,12 @@ sbf-coleta = { path = "../sbf-coleta" }
 sbf-chaveiro = { path = "../sbf-chaveiro" }
 # Abrir o Chrome sob a regra única de processo externo (ADR-012).
 sbf-processo = { path = "../sbf-processo" }
+# O código do MFA por e-mail: o mesmo cliente e a mesma autorização (refresh token no chaveiro)
+# da coleta do Gmail; nenhum fluxo de OAuth novo.
+sbf-gmail = { path = "../sbf-gmail" }
+sbf-coletor = { path = "../sbf-coletor" }
+# O formato do código (ancorado) vem do manifesto.
+regex = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
