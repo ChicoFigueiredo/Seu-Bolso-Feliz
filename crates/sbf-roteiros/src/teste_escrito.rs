@@ -1,4 +1,4 @@
-//! O `testar` do roteiro escrito (spec 14, §5): roda a versão **ponta a ponta no site falso**
+//! O `testar` do roteiro escrito (spec 16, §5): roda a versão **ponta a ponta no site falso**
 //! local (`127.0.0.1`), com um Chrome sem janela e um perfil descartável, e grava o resultado
 //! com [`BancoDeRoteiros::marcar_testado`]. Só o teste verde leva o rascunho a `testado` (e só
 //! um `testado` pode ser ativado, no terminal, pelo usuário).

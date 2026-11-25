@@ -61,9 +61,7 @@ pub struct LinhaDeExecucaoEscrita {
 /// Um evento da execução: (quando, tipo, mensagem).
 pub type EventoDaExecucaoEscrita = (String, String, String);
 
-fn u32_de(n: i64) -> u32 {
-    u32::try_from(n).unwrap_or(u32::MAX)
-}
+use crate::banco::u32_de;
 
 impl BancoDeRoteiros {
     /// Começa uma execução da versão `numero` do roteiro escrito `nome`, **atomicamente**: se

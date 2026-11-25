@@ -1,4 +1,4 @@
-//! As ferramentas de roteiros escritos (spec 14, RE-19): o MCP só PROPÕE. Roteiros e
+//! As ferramentas de roteiros escritos (spec 16, RE-19): o MCP só PROPÕE. Roteiros e
 //! manifestos fictícios (`exemplo.test`), num `roteiros.sqlite` temporário.
 #![allow(clippy::unwrap_used)]
 

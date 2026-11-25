@@ -1,4 +1,4 @@
-//! Conexões › Roteiros, parte dos **roteiros escritos** (Luau, spec 14).
+//! Conexões › Roteiros, parte dos **roteiros escritos** (Luau, spec 16).
 //!
 //! Um roteiro escrito é um programa em Luau, escrito à mão, que comanda o Chrome por verbos de
 //! alto nível. Aqui a janela lista os roteiros, mostra o manifesto, o fonte (só leitura), o

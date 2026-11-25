@@ -1,4 +1,4 @@
-//! As ferramentas de roteiros escritos em Luau (spec 14, seção 7 e RE-19). **O MCP só propõe.**
+//! As ferramentas de roteiros escritos em Luau (spec 16, seção 7 e RE-19). **O MCP só propõe.**
 //!
 //! Ao contrário das regras de reconhecimento (ADR-021, D15), onde o MCP ativa, um roteiro
 //! escrito comanda um navegador com credenciais. Por isso aqui há só três ferramentas:
