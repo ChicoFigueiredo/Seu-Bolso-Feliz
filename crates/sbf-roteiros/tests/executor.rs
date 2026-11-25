@@ -164,7 +164,13 @@ fn ro_01_erro_do_navegador_que_repete_a_senha_e_limpo() {
         fn preencher(&mut self, s: &str, t: &str) -> R<()> {
             self.0.preencher(s, t)
         }
-        fn preencher_segredo(&mut self, _s: &str, segredo: &Segredo) -> R<()> {
+        fn preencher_segredo(
+            &mut self,
+            _s: &str,
+            segredo: &Segredo,
+            _tipo: sbf_roteiros::navegador::TipoDeCampo,
+            _url_permitida: &dyn Fn(&str) -> bool,
+        ) -> R<()> {
             Err(ErroDoNavegador::Navegador(format!(
                 "campo recusou o valor {}",
                 segredo.expor()

@@ -13,8 +13,9 @@
 
 use crate::banco::{BancoDeRoteiros, EstadoDaExecucao};
 use crate::bloqueio::{self, Bloqueio};
+use crate::codigo_email::ErroDeCodigo;
 use crate::erro::{ErroDeRoteiro, Resultado};
-use crate::navegador::Navegador;
+use crate::navegador::{Navegador, TipoDeCampo};
 use crate::pagina::MotivoDePausa;
 use crate::passo::{Passo, Roteiro};
 use sbf_chaveiro::Segredo;
@@ -52,11 +53,33 @@ impl FonteDeSenhas for sbf_chaveiro::Chaveiro {
     }
 
     /// O Gmail da conta conectada, com a mesma autorização da coleta (o refresh token está no
-    /// chaveiro). Sem autorização, `None`: o verbo do e-mail falha com uma mensagem clara.
+    /// chaveiro). Sem autorização, **não engole o erro**: devolve uma caixa que responde
+    /// [`ErroDeCodigo::Autorizacao`] a toda consulta, e o verbo do e-mail termina o roteiro
+    /// com "Autorização do Gmail ausente: entre de novo em Conexões › E-mail". (A escolha da
+    /// conta por roteiro fica para depois: hoje vale a conta legada.)
     fn caixa_de_email(&self) -> Option<Box<dyn crate::codigo_email::CaixaDeEmail + '_>> {
-        crate::codigo_email::CaixaGmail::real(Some(self), sbf_gmail::Alvo::legado())
-            .ok()
-            .map(|c| Box::new(c) as Box<dyn crate::codigo_email::CaixaDeEmail + '_>)
+        match crate::codigo_email::CaixaGmail::real(Some(self), sbf_gmail::Alvo::legado()) {
+            Ok(c) => Some(Box::new(c) as Box<dyn crate::codigo_email::CaixaDeEmail + '_>),
+            Err(ErroDeCodigo::Autorizacao) => Some(Box::new(CaixaSemAutorizacao)),
+            // Outra falha (o cliente não subiu): sem caixa, o verbo diz que ela não está disponível.
+            Err(_) => None,
+        }
+    }
+}
+
+/// A caixa de quem não tem autorização do Gmail: toda consulta responde `Autorizacao`
+/// (sem remetente, corpo nem código), que o `esperar_codigo` devolve na hora, sem esperar a
+/// janela inteira.
+#[derive(Debug, Clone, Copy)]
+pub struct CaixaSemAutorizacao;
+
+impl crate::codigo_email::CaixaDeEmail for CaixaSemAutorizacao {
+    fn mensagens_recentes(
+        &self,
+        _remetente: &str,
+        _desde: std::time::SystemTime,
+    ) -> Result<Vec<crate::codigo_email::MensagemCurta>, ErroDeCodigo> {
+        Err(ErroDeCodigo::Autorizacao)
     }
 }
 
@@ -442,6 +465,18 @@ fn conferir_host(c: &mut Contexto<'_>, passo: usize, esperado: Option<&str>) -> 
     }
 }
 
+/// O mesmo critério de [`conferir_host`], como predicado sobre a URL, para o navegador o
+/// reconferir **dentro do motor**, imediatamente antes de digitar (TOCTOU): `https` (ou
+/// `http` no próprio computador) e o host aprovado no passo.
+fn url_do_host_aprovado(esperado: Option<&str>) -> impl Fn(&str) -> bool {
+    let esperado = esperado.unwrap_or("").to_owned();
+    move |url: &str| {
+        !esperado.is_empty()
+            && crate::passo::esquema_aceito_para_segredo(url)
+            && crate::passo::host_de(url).as_deref() == Some(esperado.as_str())
+    }
+}
+
 /// O campo onde um segredo vai cair, como o navegador o descreve: a senha só num
 /// `input type=password`; o CPF só num campo de texto (nunca de senha, botão ou área).
 fn conferir_campo_do_segredo(
@@ -612,7 +647,9 @@ pub fn executar_passo(
             // Entra na lista de limpeza ANTES de ir ao campo: se a falha repetir o valor, some.
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
-            c.navegador.preencher_segredo(seletor, segredo)?;
+            let permitida = url_do_host_aprovado(host.as_deref());
+            c.navegador
+                .preencher_segredo(seletor, segredo, TipoDeCampo::Senha, &permitida)?;
             Ok(())
         }
         Passo::PreencherCpf { seletor, host } => {
@@ -623,7 +660,9 @@ pub fn executar_passo(
             let segredo = c.senhas.cpf().map_err(ErroDeRoteiro::Chaveiro)?;
             usados.push(segredo);
             let segredo = usados.last().ok_or(ErroDeRoteiro::Cancelado)?;
-            c.navegador.preencher_segredo(seletor, segredo)?;
+            let permitida = url_do_host_aprovado(host.as_deref());
+            c.navegador
+                .preencher_segredo(seletor, segredo, TipoDeCampo::Texto, &permitida)?;
             Ok(())
         }
         Passo::Baixar { seletor, nome } => {

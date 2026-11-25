@@ -14,6 +14,7 @@ use sbf_roteiros::cdp::Cdp;
 use sbf_roteiros::chrome::{Chrome, OpcoesDoChrome};
 use sbf_roteiros::executor::{Contexto, Decisao, Fim, Opcoes, Pausa, executar};
 use sbf_roteiros::inventario::NoInventario;
+use sbf_roteiros::navegador::TipoDeCampo;
 use sbf_roteiros::passo::Passo;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
@@ -206,7 +207,12 @@ fn a_pagina_simplificada_do_chrome_nao_tem_valor_de_campo() {
     chrome.navegar(&site.url("/login")).unwrap();
     chrome.preencher("#cpf", CPF).unwrap();
     chrome
-        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
         .unwrap();
     // o valor existe na página (o site vai aceitar), mas a página simplificada não o mostra
     let valor_no_dom = Cdp::conectar(chrome.alvo_da_pagina())
@@ -242,7 +248,12 @@ fn ro_02_no_navegador_clique_e_envio_perigosos_sao_barrados() {
     chrome.navegar(&site.url("/login")).unwrap();
     chrome.preencher("#cpf", CPF).unwrap();
     chrome
-        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
         .unwrap();
     chrome.clicar("#entrar").unwrap();
     assert!(chrome.visivel("#pagar").unwrap(), "chegou ao painel");
@@ -690,7 +701,12 @@ fn texto_no_chrome_le_o_que_se_ve_e_nunca_o_valor_de_campo() {
     chrome.navegar(&site.url("/login")).unwrap();
     chrome.preencher("#cpf", CPF).unwrap();
     chrome
-        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
         .unwrap();
     // O valor existe no campo, mas `texto` recusa o campo e a página inteira não o repete.
     assert!(chrome.texto("#senha").is_err());

@@ -16,7 +16,9 @@ use bancada_navegador::politica::Bloqueio;
 use comum::{PausaFalsa, clicavel, inventario};
 use rusqlite::Connection;
 use sbf_chaveiro::Segredo;
-use sbf_roteiros::banco::{AutorEscrito, BancoDeRoteiros, Confirmacao, EstadoDaExecucao};
+use sbf_roteiros::banco::{
+    AutorEscrito, BancoDeRoteiros, Confirmacao, EstadoDaExecucao, EstadoEscrito,
+};
 use sbf_roteiros::banco::{ResultadoDoTeste, VersaoEscrita};
 use sbf_roteiros::codigo_email::{CaixaDeEmail, ErroDeCodigo, MensagemCurta, Relogio};
 use sbf_roteiros::erro::ErroDeRoteiro;
@@ -823,22 +825,158 @@ fn rotulo_diferente_do_manifesto_e_erro_sem_revelar_nada() {
     assert!(n.digitados.is_empty(), "o chaveiro nem foi consultado");
 }
 
+/// O CPF é o único do chaveiro: o manifesto não precisa de `rotulo_cpf` para ele ser digitado,
+/// mas só no host aprovado.
 #[test]
-fn manifesto_sem_rotulo_de_cpf_nao_digita_cpf() {
+fn cpf_e_digitado_no_host_aprovado_sem_rotulo_e_recusado_em_host_de_fora() {
     let m = Manifesto::de_json(
         r##"{"nome":"sem-cpf","url_inicial":"https://portal.exemplo.test/entrar",
         "hosts":["portal.exemplo.test"],"rotulo_senha":"senha:portal-exemplo",
         "mfa":{"tipo":"nenhum"},"movimenta_dinheiro":false}"##,
     )
     .unwrap();
+    assert!(m.rotulo_cpf.is_none());
+    // No host aprovado: digita.
     let c = Cenario::novo(
         &m,
         r##"navegador.abrir("https://portal.exemplo.test/entrar") navegador.preencher_cpf("#cpf")"##,
     );
     let mut n = portal(BASE, "painel");
     let (rel, _) = c.executar(&mut n, &Ctx::novo());
-    falhou_com(&rel.fim, "rotulo_cpf");
+    assert_eq!(rel.fim, Fim::Concluida, "{rel:?}");
+    assert_eq!(n.digitados, vec![("#cpf".to_owned(), CPF.to_owned())]);
+    // Em página de host fora da lista: recusa, nada digitado.
+    let c = Cenario::novo(&m, r##"navegador.preencher_cpf("#cpf")"##);
+    let mut n = portal(BASE, "painel");
+    n.atual = "fora".into();
+    let (rel, _) = c.executar(&mut n, &Ctx::novo());
+    falhou_com(&rel.fim, "hosts do manifesto");
     assert!(n.digitados.is_empty());
+}
+
+// ------------------------------------------------------------------------------------------
+// TOCTOU da digitação do segredo
+// ------------------------------------------------------------------------------------------
+
+#[test]
+fn pagina_que_muda_de_host_entre_a_checagem_e_a_digitacao_nao_recebe_segredo() {
+    for (pagina, verbo, mfa) in [
+        (
+            "entrar",
+            r##"navegador.preencher_senha("#senha", "senha:portal-exemplo")"##,
+            MFA_NENHUM,
+        ),
+        ("entrar", r##"navegador.preencher_cpf("#cpf")"##, MFA_NENHUM),
+        (
+            "codigo",
+            r##"navegador.preencher_codigo_do_email("#codigo", { janela_segundos = 30 })"##,
+            MFA_EMAIL,
+        ),
+    ] {
+        let fonte = format!(
+            "navegador.abrir('https://portal.exemplo.test/{pagina}')\npcall(function() {verbo} end)\nnavegador.registrar('seguiu')"
+        );
+        let mut n = portal(BASE, "painel");
+        // O site "redireciona por timer" para outro host depois que o SBF conferiu a página e
+        // antes de a digitação chegar ao navegador.
+        n.redireciona_antes_de_digitar = Some("fora".into());
+        let ctx = Ctx::novo().com_caixa(CaixaFalsa::com(vec![email_com_codigo(5)]));
+        let (rel, c, execucao) = rodar(mfa, "consulta", &fonte, &mut n, &ctx);
+        // Nada foi digitado, o roteiro termina (o `pcall` não o salva) e sem eco de segredo.
+        assert!(n.digitados.is_empty(), "{verbo}: nada digitado");
+        falhou_com(&rel.fim, "hosts do manifesto");
+        assert!(rel.registros.is_empty(), "{verbo}: parou no verbo");
+        nenhum_segredo(&format!("{rel:?}"), "relatório");
+        nenhum_segredo(
+            &format!("{:?}", c.banco().eventos_escritos(execucao).unwrap()),
+            "eventos",
+        );
+        let h = c.banco().historico_escrito(None, 1).unwrap();
+        assert_eq!(h[0].estado, EstadoDaExecucao::Falhou);
+        nenhum_segredo(&format!("{h:?}"), "histórico");
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// Guarda de rascunho (RE-16)
+// ------------------------------------------------------------------------------------------
+
+#[test]
+fn rascunho_e_testado_so_rodam_no_modo_teste_nunca_com_opcoes_de_producao() {
+    let m = manifesto(MFA_NENHUM, "consulta");
+    let dir = TempDir::new().unwrap();
+    let (amb, _conn) = ambiente(&dir);
+    let banco = amb.banco().unwrap();
+    let numero = banco
+        .importar_escrito(
+            &m,
+            "navegador.registrar('rodou')",
+            &AutorEscrito::Usuario,
+            "teste",
+        )
+        .unwrap()
+        .numero;
+    let ctx = Ctx::novo();
+    let rodar_com = |versao: &VersaoEscrita, opcoes: &OpcoesEscrito, prefixo: &str| {
+        let execucao = banco
+            .iniciar_execucao_escrita(&versao.roteiro, versao.numero, "janela")
+            .unwrap();
+        let mut n = portal(prefixo, "painel");
+        let r = executar_escrito_em(
+            &amb,
+            &mut n,
+            versao,
+            execucao,
+            &Servicos {
+                senhas: &Chaveiro,
+                caixa: None,
+                relogio: &ctx.relogio,
+                pausa: Some(&ctx.pausa),
+                opcoes,
+            },
+            &ctx.cancelar,
+        );
+        // libera a execução (o banco só admite uma por roteiro)
+        let _ = banco.finalizar_escrita(execucao, EstadoDaExecucao::Falhou, Some("teste"), 0, 0);
+        r
+    };
+    let modo_teste = OpcoesEscrito {
+        mapa_de_hosts: vec![("portal.exemplo.test".into(), "http://127.0.0.1:4101".into())],
+        aceitar_http_loopback: true,
+    };
+
+    // Rascunho: produção recusa; modo teste (o caminho do `testar`) roda.
+    let rascunho = banco.versao_escrita(&m.nome, numero).unwrap();
+    assert_eq!(rascunho.estado, EstadoEscrito::Rascunho);
+    let e = rodar_com(&rascunho, &OpcoesEscrito::default(), BASE).unwrap_err();
+    assert!(e.to_string().contains("não está ativa"), "{e}");
+    // Só uma das duas opções de teste não basta.
+    let so_mapa = OpcoesEscrito {
+        aceitar_http_loopback: false,
+        ..modo_teste.clone()
+    };
+    assert!(rodar_com(&rascunho, &so_mapa, BASE).is_err());
+    let rel = rodar_com(&rascunho, &modo_teste, "http://127.0.0.1:4101").unwrap();
+    assert_eq!(rel.fim, Fim::Concluida, "{rel:?}");
+
+    // O estado vem do banco: uma struct que se declara ativa não engana a guarda.
+    let mut mentirosa = rascunho.clone();
+    mentirosa.estado = EstadoEscrito::Ativo;
+    assert!(rodar_com(&mentirosa, &OpcoesEscrito::default(), BASE).is_err());
+
+    // Testado: continua recusado em produção.
+    banco.marcar_testado(&m.nome, numero, &passou()).unwrap();
+    let testado = banco.versao_escrita(&m.nome, numero).unwrap();
+    assert_eq!(testado.estado, EstadoEscrito::Testado);
+    assert!(rodar_com(&testado, &OpcoesEscrito::default(), BASE).is_err());
+
+    // Ativa: roda com as opções de produção. O estado vem do banco, não da struct.
+    let digitado = Confirmacao::texto_de_ativar(&m.nome, numero);
+    let conf = Confirmacao::do_terminal(true, &digitado, &digitado).unwrap();
+    banco.ativar(&m.nome, numero, &conf).unwrap();
+    let ativa = banco.versao_ativa_escrita(&m.nome).unwrap().unwrap();
+    let rel = rodar_com(&ativa, &OpcoesEscrito::default(), BASE).unwrap();
+    assert_eq!(rel.fim, Fim::Concluida, "{rel:?}");
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1192,6 +1330,100 @@ fn captcha_pausa_espera_o_usuario_e_continua() {
     let eventos = c.banco().eventos_escritos(execucao).unwrap();
     assert!(eventos.iter().any(|(_, t, _)| t == "pausa"));
     assert!(eventos.iter().any(|(_, t, _)| t == "retomada"));
+}
+
+/// O usuário que demora: espera `0` ms e continua (e acende o sinal que libera o painel).
+struct PausaLenta {
+    espera: Duration,
+    sinal: Arc<AtomicBool>,
+}
+
+impl sbf_roteiros::executor::Pausa for PausaLenta {
+    fn aguardar(&self, _execucao: i64, _motivo: &str) -> Decisao {
+        std::thread::sleep(self.espera);
+        self.sinal.store(true, Ordering::SeqCst);
+        Decisao::Continuar
+    }
+}
+
+#[test]
+fn o_tempo_da_pausa_automatica_e_acumulado_e_zera_ao_ler_mas_a_pausa_explicita_nao_conta() {
+    let m = manifesto(MFA_NENHUM, "consulta");
+    let dir = TempDir::new().unwrap();
+    let (amb, _conn) = ambiente(&dir);
+    let banco = amb.banco().unwrap();
+    let sinal = Arc::new(AtomicBool::new(false));
+    let mut n = portal(BASE, "mfa");
+    n.liberacao = Some(Arc::clone(&sinal));
+    let mut destino = SoDestino;
+    let cancelar = AtomicBool::new(false);
+    let relogio = RelogioFalso::novo();
+    let pausa = PausaLenta {
+        espera: Duration::from_millis(150),
+        sinal,
+    };
+    let mut v = SbfVerbos::novo(Entradas {
+        manifesto: &m,
+        execucao: 1,
+        navegador: &mut n,
+        senhas: &Chaveiro,
+        caixa: None,
+        relogio: &relogio,
+        pausa: &pausa,
+        destino: &mut destino,
+        banco: &banco,
+        pasta: dir.path().join("p"),
+        opcoes: amb.opcoes,
+        teste: OpcoesEscrito::default(),
+        cancelar: &cancelar,
+    });
+    assert_eq!(v.tempo_pausado_automatico(), Duration::ZERO);
+    luau::Verbos::abrir(&mut v, "https://portal.exemplo.test/entrar").unwrap();
+    // O clique cai na página do CAPTCHA: a pausa automática espera o usuário.
+    luau::Verbos::clicar(&mut v, "#entrar").unwrap();
+    assert_eq!(v.pausas(), 1);
+    let gasto = v.tempo_pausado_automatico();
+    assert!(gasto >= Duration::from_millis(150), "{gasto:?}");
+    assert!(gasto < Duration::from_secs(5), "{gasto:?}");
+    assert_eq!(v.tempo_pausado_automatico(), Duration::ZERO, "zera ao ler");
+    // A pausa que o próprio roteiro pede NÃO é automática: o host já a conta à parte.
+    luau::Verbos::pausa(&mut v, "confirme no app").unwrap();
+    assert_eq!(v.pausas(), 2);
+    assert_eq!(v.tempo_pausado_automatico(), Duration::ZERO);
+}
+
+#[test]
+fn sem_autorizacao_do_gmail_o_verbo_do_email_falha_na_hora_com_a_mensagem_certa() {
+    let mut n = portal(BASE, "codigo");
+    let ctx = Ctx::novo();
+    let c = Cenario::novo(&manifesto(MFA_EMAIL, "consulta"), SO_CODIGO);
+    let caixa = sbf_roteiros::executor::CaixaSemAutorizacao;
+    let execucao = c
+        .banco()
+        .iniciar_execucao_escrita(&c.versao.roteiro, c.versao.numero, "janela")
+        .unwrap();
+    let rel = executar_escrito_em(
+        &c.amb,
+        &mut n,
+        &c.versao,
+        execucao,
+        &Servicos {
+            senhas: &Chaveiro,
+            caixa: Some(&caixa),
+            relogio: &ctx.relogio,
+            pausa: Some(&ctx.pausa),
+            opcoes: &ctx.opcoes,
+        },
+        &ctx.cancelar,
+    )
+    .unwrap();
+    falhou_com(
+        &rel.fim,
+        "Autorização do Gmail ausente: entre de novo em Conexões › E-mail",
+    );
+    assert!(n.digitados.is_empty());
+    // Não esperou a janela inteira: o relógio de teste só avança quando alguém espera.
+    assert_eq!(ctx.relogio.agora.get(), t(0));
 }
 
 #[test]
