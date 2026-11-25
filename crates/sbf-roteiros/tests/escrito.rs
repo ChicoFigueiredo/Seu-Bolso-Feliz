@@ -1909,3 +1909,60 @@ fn agenda_respeita_o_intervalo_desde_a_ultima_execucao_e_encerra_orfas() {
         vec!["rot-a".to_owned()]
     );
 }
+
+// ------------------------------------------------------------------------------------------
+// `navegador.esperar_sumir` no host do SBF (implementação padrão do trait, sobre `existe`)
+// ------------------------------------------------------------------------------------------
+
+#[test]
+fn esperar_sumir_devolve_true_quando_o_elemento_sai_da_tela() {
+    // O clique em #entrar leva ao painel: o #entrar do login deixa de estar visível.
+    let fonte = r##"
+        navegador.abrir("https://portal.exemplo.test/entrar")
+        navegador.clicar("#entrar")
+        navegador.registrar("sumiu=" .. tostring(navegador.esperar_sumir("#entrar", 2)))
+        navegador.registrar("ja_ausente=" .. tostring(navegador.esperar_sumir("#nao-existe", 2)))
+    "##;
+    let mut n = portal(BASE, "painel");
+    let (rel, _c, _) = rodar(MFA_NENHUM, "consulta", fonte, &mut n, &Ctx::novo());
+    assert_eq!(rel.fim, Fim::Concluida, "{rel:?}");
+    assert_eq!(rel.registros, vec!["sumiu=true", "ja_ausente=true"]);
+}
+
+#[test]
+fn esperar_sumir_devolve_false_quando_o_prazo_acaba_com_o_elemento_na_tela() {
+    let fonte = r##"
+        navegador.abrir("https://portal.exemplo.test/painel")
+        navegador.registrar("sumiu=" .. tostring(navegador.esperar_sumir("#titulo", 1)))
+    "##;
+    let mut n = portal(BASE, "painel");
+    let (rel, _c, _) = rodar(MFA_NENHUM, "consulta", fonte, &mut n, &Ctx::novo());
+    assert_eq!(rel.fim, Fim::Concluida, "{rel:?}");
+    assert_eq!(rel.registros, vec!["sumiu=false"]);
+}
+
+#[test]
+fn esperar_sumir_respeita_o_cancelamento_no_meio_da_espera() {
+    let fonte = r##"
+        navegador.abrir("https://portal.exemplo.test/painel")
+        navegador.esperar_sumir("#titulo", 100)
+        navegador.registrar("nao devia chegar aqui")
+    "##;
+    let mut n = portal(BASE, "painel");
+    let ctx = Ctx::novo();
+    let c = Cenario::novo(&manifesto(MFA_NENHUM, "consulta"), fonte);
+    let inicio = std::time::Instant::now();
+    let (rel, _) = std::thread::scope(|s| {
+        s.spawn(|| {
+            std::thread::sleep(Duration::from_millis(400));
+            ctx.cancelar.store(true, Ordering::SeqCst);
+        });
+        c.executar(&mut n, &ctx)
+    });
+    assert_eq!(rel.fim, Fim::Cancelada, "{rel:?}");
+    assert!(rel.registros.is_empty(), "{:?}", rel.registros);
+    assert!(
+        inicio.elapsed() < Duration::from_secs(20),
+        "a espera de 100 s tem de acabar com o cancelamento"
+    );
+}
