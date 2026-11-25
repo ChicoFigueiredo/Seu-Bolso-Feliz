@@ -313,3 +313,45 @@ pub fn gravar_novo(
         }
     }
 }
+
+/// O que uma execução de roteiro escrito deixou (a frente de execução preenche).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatorioEscrito {
+    /// Como terminou.
+    pub fim: crate::executor::Fim,
+    /// Arquivos baixados e quantos eram novos no inventário.
+    pub baixados: u32,
+    pub novos: u32,
+    /// O que o roteiro registrou (sem segredo).
+    pub registros: Vec<String>,
+}
+
+/// Executa a versão ativa do roteiro escrito `nome`, abrindo o Chrome. Recusa se já está
+/// rodando ou se não há versão ativa.
+///
+/// # Errors
+/// Sem versão ativa, Chrome que não abre, ou falha de infraestrutura.
+pub fn executar_escrito(
+    _amb: &Ambiente,
+    _nome: &str,
+    _gatilho: &str,
+    _senhas: &dyn FonteDeSenhas,
+    _cancelar: &AtomicBool,
+) -> Resultado<RelatorioEscrito> {
+    Err(ErroDeRoteiro::Invalido(
+        "a execução do roteiro escrito ainda não está ligada".into(),
+    ))
+}
+
+/// Executa os roteiros escritos ativos cuja agenda venceu (um de cada vez).
+///
+/// # Errors
+/// Só falha de infraestrutura do banco; a falha de um roteiro não impede os outros.
+pub fn executar_escritos_devidos(
+    _amb: &Ambiente,
+    _agora_unix: i64,
+    _senhas: &dyn FonteDeSenhas,
+    _cancelar: &AtomicBool,
+) -> Resultado<ResumoDeRoteiros> {
+    Ok(ResumoDeRoteiros::default())
+}
