@@ -186,12 +186,10 @@ fn proposta_nova_nao_mexe_na_versao_ativa() {
         },
     )
     .unwrap();
-    let confirmacao = Confirmacao::do_terminal(
-        true,
-        "contracheque-exemplo@1",
-        &Confirmacao::texto_de_ativar("contracheque-exemplo", 1),
-    )
-    .unwrap();
+    // a versão é do MCP: o usuário digita também o host principal
+    let esperado = b.esperado_para_ativar("contracheque-exemplo", 1).unwrap();
+    assert!(esperado.ends_with(" portal.exemplo.test"), "{esperado}");
+    let confirmacao = Confirmacao::do_terminal(true, &esperado, &esperado).unwrap();
     b.ativar("contracheque-exemplo", 1, &confirmacao).unwrap();
 
     let r = c

@@ -129,8 +129,12 @@ JSON ao lado do `.luau`, importado como o `regras importar`.
    último teste verde dessa versão.
 3. **Ativo.** `sbf roteiros escrito ativar` (ou o botão da janela) só **na janela do app ou
    num terminal interativo**, sempre com confirmação digitada: `nome@versão` para ativar e
-   `nome` para desativar, como as regras (ADR-021). Sem janela nem terminal, recusa e nada
-   muda. O MCP e a IA **nunca** ativam, desativam, testam nem executam.
+   `nome` para desativar, como as regras (ADR-021). Se a versão foi proposta pelo MCP ou pela
+   IA, ativar pede `nome@versão host-principal` (o primeiro de `hosts`): quem ativa algo que
+   outro escreveu é obrigado a ler o host que vai receber a senha do chaveiro. O resumo antes
+   da digitação mostra o autor, os `hosts`, o `rotulo_senha`, o MFA e o fonte; o
+   `movimenta_dinheiro` aparece como "declarado pelo autor", não verificado. Sem janela nem
+   terminal, recusa e nada muda. O MCP e a IA **nunca** ativam, desativam, testam nem executam.
 4. **Nova versão.** Editar cria uma versão nova em rascunho; a ativa nunca é editada.
    Desativar e voltar à versão anterior preservam o histórico.
 
@@ -160,6 +164,17 @@ As ferramentas do MCP para roteiros escritos (nomes a fixar na implementação, 
 `propor_*`) criam rascunho e consultam. Não há ferramenta que ative, desative, teste, execute
 ou leia segredo. Diferente das regras de reconhecimento (ADR-021, D15), onde o MCP
 ativa: um roteiro escrito comanda um navegador com credenciais.
+
+**Backup do MCP.** Antes da primeira escrita da sessão o MCP copia o `roteiros.sqlite`
+inteiro (manifestos com hosts, rótulos do chaveiro e remetente do e-mail, fontes Luau e
+eventos de todas as versões) para `<cofre>/backups/mcp/`. A cópia não leva senha nem CPF
+(o banco só guarda rótulos), mas é tão sensível quanto o catálogo: fica só no cofre.
+
+**A autoridade de ativar é por convenção, verificada por teste.** A prova de confirmação do
+banco (`Confirmacao`) tem construtores públicos, porque o terminal e a janela precisam deles.
+O teste de arquitetura `crates/sbf-roteiros/tests/autoridade.rs` falha se `sbf-mcp`,
+`sbf-worker` ou `sbf-ia` citarem `Confirmacao`, `da_janela`, `do_terminal`, `marcar_testado`
+ou chamarem `.ativar(`/`.desativar(` de roteiro escrito.
 
 ## 8. Segurança
 
