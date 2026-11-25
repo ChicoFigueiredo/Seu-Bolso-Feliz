@@ -272,8 +272,15 @@ impl Navegador for PortalEmMemoria {
     fn preencher(&mut self, seletor: &str, texto: &str) -> Resultado<()> {
         self.dentro.preencher(seletor, texto)
     }
-    fn preencher_segredo(&mut self, seletor: &str, segredo: &Segredo) -> Resultado<()> {
-        self.dentro.preencher_segredo(seletor, segredo)
+    fn preencher_segredo(
+        &mut self,
+        seletor: &str,
+        segredo: &Segredo,
+        tipo: sbf_roteiros::navegador::TipoDeCampo,
+        url_permitida: &dyn Fn(&str) -> bool,
+    ) -> Resultado<()> {
+        self.dentro
+            .preencher_segredo(seletor, segredo, tipo, url_permitida)
     }
     fn clicar_e_baixar(
         &mut self,
