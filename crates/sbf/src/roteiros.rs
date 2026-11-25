@@ -26,7 +26,7 @@ use sbf_roteiros::banco::{AutorEscrito, BancoDeRoteiros, Confirmacao, EstadoEscr
 use sbf_roteiros::executor::FonteDeSenhas;
 use sbf_roteiros::gravacao::Guia;
 use sbf_roteiros::manifesto::{Classe, Manifesto, Mfa};
-use sbf_roteiros::servico::{Ambiente, executar_devidos};
+use sbf_roteiros::servico::{Ambiente, executar_devidos, executar_escritos_devidos};
 use sbf_worker::laco::{ColetorDeRoteiros, Dados, ResumoDeRoteiros};
 use sbf_worker::registro::Falha;
 
@@ -157,7 +157,13 @@ impl ColetorDeRoteiros for RoteirosReais {
         amb.prazo_da_pausa = PAUSA_NO_WORKER;
         let banco = amb.banco().map_err(|_| Falha::Banco)?;
         let agora_i = i64::try_from(agora_).unwrap_or(i64::MAX);
-        if banco.devidos(agora_i).map_err(|_| Falha::Banco)?.is_empty() {
+        // Os roteiros gravados (JSON) e os escritos (Luau) devidos pela agenda.
+        let sem_gravados = banco.devidos(agora_i).map_err(|_| Falha::Banco)?.is_empty();
+        let sem_escritos = banco
+            .escritos_devidos(agora_i)
+            .map_err(|_| Falha::Banco)?
+            .is_empty();
+        if sem_gravados && sem_escritos {
             return self
                 .em_fio
                 .passar(cancelar, |_| Ok(ResumoDeRoteiros::default()));
@@ -199,10 +205,14 @@ fn rodar_devidos(
     });
     let r = executar_devidos(amb, agora_i, senhas, guia.as_ref(), cancelar)
         .map_err(|_| Falha::Externo)?;
+    // Os roteiros escritos (Luau) seguem a agenda do manifesto, um de cada vez, depois dos
+    // gravados. A falha de um não impede o outro; o Chrome abre e fecha em cada execução.
+    let e =
+        executar_escritos_devidos(amb, agora_i, senhas, cancelar).map_err(|_| Falha::Externo)?;
     Ok(ResumoDeRoteiros {
-        executados: r.executados,
-        baixados: r.baixados as usize,
-        novos: r.novos as usize,
+        executados: r.executados + e.executados,
+        baixados: (r.baixados + e.baixados) as usize,
+        novos: (r.novos + e.novos) as usize,
     })
 }
 
