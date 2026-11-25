@@ -194,6 +194,49 @@ pub(crate) fn preparar(conn: &rusqlite::Connection) -> Resultado<()> {
 }
 
 impl BancoDeRoteiros {
+    /// Confere um pedido de Baixa forçada **sem gravar nada**: o roteiro existe, os meses seguem
+    /// a regra do manifesto e o período passa na mesma conta da execução (o manifesto declara
+    /// `de`/`ate`, `de` não é depois de `ate`, no máximo 60 meses). Devolve o período já aparado.
+    ///
+    /// # Errors
+    /// As de [`Self::propor_baixa_forcada`], menos o teto de pendentes.
+    pub fn validar_baixa_forcada(
+        &self,
+        nome: &str,
+        de: Option<&str>,
+        ate: Option<&str>,
+        agora_unix: i64,
+    ) -> Resultado<(Option<String>, Option<String>)> {
+        let de = match de {
+            Some(t) => conferir_mes("de", t)?,
+            None => None,
+        };
+        let ate = match ate {
+            Some(t) => conferir_mes("ate", t)?,
+            None => None,
+        };
+        let existe: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM roteiro_escrito WHERE nome = ?1",
+                [nome],
+                |l| l.get(0),
+            )
+            .optional()?;
+        if existe.is_none() {
+            return Err(ErroDeRoteiro::Invalido(format!(
+                "roteiro escrito `{nome}` não encontrado"
+            )));
+        }
+        let manifesto = manifesto_de_referencia(self, nome)?;
+        resolver_pedido(
+            &manifesto,
+            &pedido_de_periodo(de.as_deref(), ate.as_deref(), true),
+            agora_unix,
+        )?;
+        Ok((de, ate))
+    }
+
     /// **Propõe** uma Baixa forçada de `nome` no período `de` a `ate` (cada um `AAAA-MM` ou
     /// relativo; sem eles, o padrão do roteiro). Só grava a proposta: não executa nada, não
     /// força nada. Devolve a proposta e se ela é nova (a mesma proposta pendente, com o mesmo
@@ -210,31 +253,11 @@ impl BancoDeRoteiros {
         autor: &str,
         agora_unix: i64,
     ) -> Resultado<(PropostaDeBaixa, bool)> {
-        let de = match de {
-            Some(t) => conferir_mes("de", t)?,
-            None => None,
-        };
-        let ate = match ate {
-            Some(t) => conferir_mes("ate", t)?,
-            None => None,
-        };
-        let roteiro_id: i64 = self
-            .conn
-            .query_row(
-                "SELECT id FROM roteiro_escrito WHERE nome = ?1",
-                [nome],
-                |l| l.get(0),
-            )
-            .optional()?
-            .ok_or_else(|| {
-                ErroDeRoteiro::Invalido(format!("roteiro escrito `{nome}` não encontrado"))
-            })?;
-        // O mesmo teste que a execução faz: declara os parâmetros, de ≤ ate, no máximo 60 meses.
-        let manifesto = manifesto_de_referencia(self, nome)?;
-        resolver_pedido(
-            &manifesto,
-            &pedido_de_periodo(de.as_deref(), ate.as_deref(), true),
-            agora_unix,
+        let (de, ate) = self.validar_baixa_forcada(nome, de, ate, agora_unix)?;
+        let roteiro_id: i64 = self.conn.query_row(
+            "SELECT id FROM roteiro_escrito WHERE nome = ?1",
+            [nome],
+            |l| l.get(0),
         )?;
         let validas = agora_unix - VALIDADE_EM_SEGUNDOS;
         let existente = self

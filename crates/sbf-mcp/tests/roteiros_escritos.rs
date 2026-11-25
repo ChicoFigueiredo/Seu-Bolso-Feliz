@@ -12,8 +12,8 @@ use ajuda::{Banco, banco_limpo};
 use rmcp::ServerHandler;
 use sbf_mcp::Nucleo;
 use sbf_mcp::roteiros_escritos::{
-    FERRAMENTAS, MENSAGEM_DE_PROPOSTA, PedidoDeRoteiroEscrito, PedidoDeVerRoteiroEscrito,
-    RoteirosEscritos,
+    FERRAMENTAS, MENSAGEM_DE_BAIXA, MENSAGEM_DE_PROPOSTA, PedidoDeBaixaForcada,
+    PedidoDeRoteiroEscrito, PedidoDeVerRoteiroEscrito, RoteirosEscritos,
 };
 use sbf_mcp::servidor::Servidor;
 use sbf_roteiros::banco::{
@@ -358,6 +358,123 @@ fn leituras_nao_fazem_backup_e_cada_chamada_grava_saida_ia() {
     assert_eq!(c.saidas("mcp:propor_roteiro_escrito"), 1);
 }
 
+// ------------------------------------------------------------------------ baixa forçada
+
+const MANIFESTO_COM_PERIODO: &str = r#"{"nome":"contracheque-exemplo","descricao":"fictício",
+    "url_inicial":"https://portal.exemplo.test/entrar","hosts":["portal.exemplo.test"],
+    "rotulo_senha":null,"rotulo_cpf":null,"mfa":{"tipo":"nenhum"},
+    "movimenta_dinheiro":false,"classe":"consulta",
+    "parametros":[{"nome":"de","tipo":"mes","padrao":"0"},{"nome":"ate","tipo":"mes","padrao":"0"}]}"#;
+
+/// Importa e ativa (como o usuário faria) um roteiro que declara `de` e `ate`.
+fn roteiro_ativo_com_periodo(c: &Cenario) {
+    let b = c.banco_de_roteiros();
+    let m = sbf_roteiros::manifesto::Manifesto::de_json(MANIFESTO_COM_PERIODO).unwrap();
+    let n = b
+        .importar_escrito(&m, FONTE, &AutorEscrito::Usuario, "t")
+        .unwrap()
+        .numero;
+    b.marcar_testado(
+        &m.nome,
+        n,
+        &ResultadoDoTeste {
+            passou: true,
+            resumo: "verde".into(),
+        },
+    )
+    .unwrap();
+    let d = Confirmacao::texto_de_ativar(&m.nome, n);
+    b.ativar(&m.nome, n, &Confirmacao::do_terminal(true, &d, &d).unwrap())
+        .unwrap();
+}
+
+fn baixa(nome: &str, de: Option<&str>, ate: Option<&str>) -> PedidoDeBaixaForcada {
+    PedidoDeBaixaForcada {
+        nome: nome.to_owned(),
+        de: de.map(str::to_owned),
+        ate: ate.map(str::to_owned),
+    }
+}
+
+#[test]
+fn propor_baixa_forcada_so_grava_uma_proposta_pendente_e_nao_executa() {
+    let c = cenario(true);
+    roteiro_ativo_com_periodo(&c);
+    let r = c
+        .roteiros()
+        .propor_baixa(&baixa("contracheque-exemplo", Some("-1"), Some("0")))
+        .unwrap();
+    assert_eq!(r["criada"], true);
+    assert_eq!(r["estado"], "pendente");
+    assert_eq!(r["autor"], "mcp");
+    assert_eq!(r["titulo"], "Baixar de novo: contracheque-exemplo -1 a 0");
+    assert_eq!(r["mensagem"], MENSAGEM_DE_BAIXA);
+    let b = c.banco_de_roteiros();
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let pendentes = b.propostas_de_baixa_pendentes(agora).unwrap();
+    assert_eq!(pendentes.len(), 1);
+    assert_eq!(pendentes[0].roteiro, "contracheque-exemplo");
+    // não executou nada, não suspendeu nem retomou nada
+    assert!(b.historico_escrito(None, 10).unwrap().is_empty());
+    assert!(
+        b.agenda_suspensa_escrita("contracheque-exemplo")
+            .unwrap()
+            .is_none()
+    );
+    // a mesma proposta não duplica
+    let de_novo = c
+        .roteiros()
+        .propor_baixa(&baixa("contracheque-exemplo", Some("-1"), Some("0")))
+        .unwrap();
+    assert_eq!(de_novo["criada"], false);
+    assert_eq!(de_novo["id"], r["id"]);
+    assert_eq!(c.saidas("mcp:propor_baixa_forcada"), 2);
+}
+
+#[test]
+fn propor_baixa_forcada_invalida_e_recusada_sem_backup_nem_proposta() {
+    let c = cenario(true);
+    roteiro_ativo_com_periodo(&c);
+    let erro = |p: PedidoDeBaixaForcada| c.roteiros().propor_baixa(&p).unwrap_err();
+    assert!(erro(baixa("contracheque-exemplo", Some("2026-13"), None)).contains("AAAA-MM"));
+    assert!(erro(baixa("contracheque-exemplo", Some("-1"), Some("-3"))).contains("depois de"));
+    assert!(erro(baixa("nao-existe", None, None)).contains("não encontrado"));
+    assert!(erro(baixa("", None, None)).contains("nome"));
+    assert!(!c.pasta_de_backups().exists());
+    let b = c.banco_de_roteiros();
+    assert!(
+        b.propostas_de_baixa_pendentes(i64::MAX / 2)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn propor_baixa_forcada_sem_o_banco_nao_cria_arquivo() {
+    let c = cenario(false);
+    assert!(
+        c.roteiros()
+            .propor_baixa(&baixa("contracheque-exemplo", None, None))
+            .unwrap_err()
+            .contains("não encontrado")
+    );
+    assert!(!c.caminho.exists());
+}
+
+#[test]
+fn propor_baixa_forcada_faz_o_backup_da_primeira_escrita() {
+    let c = cenario(true);
+    roteiro_ativo_com_periodo(&c);
+    c.roteiros()
+        .propor_baixa(&baixa("contracheque-exemplo", Some("0"), None))
+        .unwrap();
+    let copias = std::fs::read_dir(c.pasta_de_backups()).unwrap().count();
+    assert_eq!(copias, 1);
+}
+
 // ------------------------------------------------------------------------ só propõe
 
 #[test]
@@ -367,11 +484,12 @@ fn nao_existe_ferramenta_de_ativar_executar_testar_ou_desativar() {
     for f in FERRAMENTAS {
         assert!(nomes.iter().any(|n| n == f), "falta {f}");
     }
-    // Toda ferramenta que fala de roteiro é uma das três permitidas.
-    let de_roteiro: Vec<_> = nomes.iter().filter(|n| n.contains("roteiro")).collect();
+    // Toda ferramenta que fala de roteiro (ou de baixa) é uma das quatro permitidas.
+    let fala_de_roteiro = |n: &str| n.contains("roteiro") || n.contains("baixa");
+    let de_roteiro: Vec<_> = nomes.iter().filter(|n| fala_de_roteiro(n)).collect();
     assert_eq!(de_roteiro.len(), FERRAMENTAS.len(), "{de_roteiro:?}");
     for n in &nomes {
-        if n.contains("roteiro") {
+        if fala_de_roteiro(n) {
             assert!(
                 FERRAMENTAS.contains(&n.as_str()),
                 "ferramenta de roteiro inesperada: {n}"

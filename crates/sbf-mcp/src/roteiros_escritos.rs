@@ -5,6 +5,10 @@
 //!
 //! - `propor_roteiro_escrito`: valida o manifesto (as regras duras do `Manifesto`) e importa
 //!   como **rascunho** com autor `mcp`. Nunca ativa, nunca executa, nunca testa.
+//! - `propor_baixa_forcada`: **propõe** baixar de novo um período, mesmo que o conteúdo já esteja
+//!   no inventário (a Baixa forçada). Só grava uma proposta pendente, que aparece na janela como
+//!   "Baixar de novo: <roteiro> <período>"; o usuário a aceita ali e é a **janela** que executa
+//!   o roteiro com `forcar = true`. O MCP nunca executa, nunca força e nunca retoma a agenda.
 //! - `listar_roteiros_escritos` e `ver_roteiro_escrito`: só leitura.
 //!
 //! Não existe ferramenta que ative, desative, execute ou teste. Ativar é só no terminal
@@ -41,11 +45,15 @@ use crate::backup::{Backups, Qual};
 
 /// Os nomes das ferramentas de roteiros escritos. São **todas**: nenhuma ativa, executa ou
 /// testa. O servidor só as anuncia com [`RoteirosEscritos`] ligado.
-pub const FERRAMENTAS: [&str; 3] = [
+pub const FERRAMENTAS: [&str; 4] = [
     "propor_roteiro_escrito",
+    "propor_baixa_forcada",
     "listar_roteiros_escritos",
     "ver_roteiro_escrito",
 ];
+
+/// O que o Claude lê depois de propor uma Baixa forçada.
+pub const MENSAGEM_DE_BAIXA: &str = "proposta pendente: o usuário a aceita na janela (Conexões › Roteiros), que então executa o roteiro com a Baixa forçada. O MCP nunca executa, força nem retoma.";
 
 /// O que o MCP **não** faz com roteiros escritos (a descrição do servidor e os testes citam).
 pub const MENSAGEM_DE_PROPOSTA: &str = "rascunho criado; ativar só no terminal (`sbf roteiros escrito ativar`) ou na janela. O MCP nunca ativa nem executa roteiro escrito.";
@@ -67,6 +75,19 @@ pub struct PedidoDeRoteiroEscrito {
     pub fonte: String,
     /// Por que esta versão existe, em até 500 caracteres.
     pub motivo: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PedidoDeBaixaForcada {
+    /// O nome do roteiro escrito (kebab-case).
+    pub nome: String,
+    /// O primeiro mês a baixar de novo: `AAAA-MM` (como `2026-10`) ou relativo ao mês corrente
+    /// (`0`, `-1`, `-2`…). Sem ele, vale o padrão do roteiro. O roteiro tem de declarar o
+    /// parâmetro `de`.
+    pub de: Option<String>,
+    /// O último mês: mesmo formato. Sem ele, vale o padrão do roteiro. De `de` a `ate`, no
+    /// máximo 60 meses, e `de` não pode ser depois de `ate`.
+    pub ate: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -115,6 +136,17 @@ impl RoteirosEscritos {
     /// demais, backup que falhou ou falha do banco.
     pub fn propor(&self, p: &PedidoDeRoteiroEscrito) -> Resultado {
         self.executar("propor_roteiro_escrito", |s| s.proposta(p))
+    }
+
+    /// `propor_baixa_forcada`: grava uma proposta **pendente** de baixar de novo o período. Não
+    /// executa o roteiro, não força nada: a janela mostra "Baixar de novo: <roteiro> <período>"
+    /// e só o usuário a aceita.
+    ///
+    /// # Errors
+    /// Roteiro inexistente, período inválido para o manifesto, pendentes demais, backup que
+    /// falhou ou falha do banco.
+    pub fn propor_baixa(&self, p: &PedidoDeBaixaForcada) -> Resultado {
+        self.executar("propor_baixa_forcada", |s| s.proposta_de_baixa(p))
     }
 
     /// `listar_roteiros_escritos` (só leitura).
@@ -212,6 +244,47 @@ impl RoteirosEscritos {
         }))
     }
 
+    fn proposta_de_baixa(&self, p: &PedidoDeBaixaForcada) -> Resultado {
+        let nome = p.nome.trim();
+        if nome.is_empty() || nome.chars().count() > MAX_NOME {
+            return Err(format!("nome tem de ter de 1 a {MAX_NOME} caracteres"));
+        }
+        // Sem o banco não há roteiro: nem backup nem arquivo novo.
+        let banco = self
+            .banco_de_leitura()?
+            .ok_or_else(|| format!("roteiro escrito `{nome}` não encontrado"))?;
+        let agora = agora_unix();
+        // Confere tudo antes de escrever: um pedido inválido nem dispara backup. O banco
+        // confere de novo ao gravar (a mesma conta do roteiro na hora de executar).
+        banco
+            .validar_baixa_forcada(nome, p.de.as_deref(), p.ate.as_deref(), agora)
+            .map_err(pt)?;
+        drop(banco);
+        self.antes_de_escrever()?;
+        let banco = BancoDeRoteiros::abrir(&self.caminho).map_err(pt)?;
+        let (proposta, nova) = banco
+            .propor_baixa_forcada(nome, p.de.as_deref(), p.ate.as_deref(), "mcp", agora)
+            .map_err(pt)?;
+        let mensagem = if nova {
+            MENSAGEM_DE_BAIXA.to_owned()
+        } else {
+            "esta proposta já estava pendente; nada foi criado. O MCP nunca executa, força nem retoma."
+                .to_owned()
+        };
+        Ok(json!({
+            "criada": nova,
+            "id": proposta.id,
+            "roteiro": proposta.roteiro,
+            "de": proposta.de,
+            "ate": proposta.ate,
+            "periodo": proposta.periodo(),
+            "titulo": proposta.titulo(),
+            "estado": proposta.estado.texto(),
+            "autor": proposta.autor,
+            "mensagem": mensagem,
+        }))
+    }
+
     /// O banco só se já existe: ler não cria arquivo nenhum.
     fn banco_de_leitura(&self) -> Result<Option<BancoDeRoteiros>, String> {
         if !self.caminho.is_file() {
@@ -298,6 +371,12 @@ impl RoteirosEscritos {
             "historico": historico,
         }))
     }
+}
+
+fn agora_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 fn conteudo(v: &VersaoEscrita) -> Value {
