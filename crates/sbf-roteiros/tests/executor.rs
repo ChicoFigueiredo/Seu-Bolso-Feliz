@@ -4,11 +4,11 @@
 
 mod comum;
 
+use bancada_navegador::falso::{Elemento, NavegadorFalso};
 use comum::{CPF, PausaFalsa, SENHA, Senhas, clicavel, inventario, site};
 use sbf_roteiros::Navegador as _;
 use sbf_roteiros::banco::{BancoDeRoteiros, OrigemDaVersao};
 use sbf_roteiros::executor::{Contexto, Decisao, Fim, Opcoes, Relatorio, executar};
-use sbf_roteiros::falso::{Elemento, NavegadorFalso};
 use sbf_roteiros::inventario::NoInventario;
 use sbf_roteiros::passo::{FORMATO, Passo, Roteiro};
 use std::sync::atomic::AtomicBool;
@@ -141,9 +141,9 @@ fn ro_01_a_senha_e_o_cpf_chegam_ao_campo_e_a_nada_mais() {
 #[test]
 fn ro_01_erro_do_navegador_que_repete_a_senha_e_limpo() {
     // Um navegador que erra e repete o valor na mensagem não faz a senha chegar ao histórico.
+    use bancada_navegador::erro::{ErroDoNavegador, Resultado as R};
     use sbf_chaveiro::Segredo;
     use sbf_roteiros::bloqueio::{Bloqueio, Candidato};
-    use sbf_roteiros::erro::{ErroDeRoteiro, Resultado as R};
     use sbf_roteiros::navegador::Navegador;
     use sbf_roteiros::pagina::Pagina;
 
@@ -165,7 +165,7 @@ fn ro_01_erro_do_navegador_que_repete_a_senha_e_limpo() {
             self.0.preencher(s, t)
         }
         fn preencher_segredo(&mut self, _s: &str, segredo: &Segredo) -> R<()> {
-            Err(ErroDeRoteiro::Navegador(format!(
+            Err(ErroDoNavegador::Navegador(format!(
                 "campo recusou o valor {}",
                 segredo.expor()
             )))

@@ -580,7 +580,7 @@ pub fn executar_passo(
                     "campo de senha só se preenche com a senha do chaveiro",
                 ));
             }
-            c.navegador.preencher(seletor, texto)
+            Ok(c.navegador.preencher(seletor, texto)?)
         }
         Passo::PreencherSenha {
             seletor,

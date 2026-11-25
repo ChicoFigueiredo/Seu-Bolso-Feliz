@@ -567,6 +567,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bancada-navegador"
+version = "0.1.0"
+dependencies = [
+ "bancada-segredos",
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "mlua",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+ "zeroize",
+]
+
+[[package]]
 name = "bancada-rede"
 version = "0.1.0"
 dependencies = [
@@ -6011,8 +6027,7 @@ dependencies = [
 name = "sbf-roteiros"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "getrandom 0.3.4",
+ "bancada-navegador",
  "rusqlite",
  "sbf-chaveiro",
  "sbf-coleta",

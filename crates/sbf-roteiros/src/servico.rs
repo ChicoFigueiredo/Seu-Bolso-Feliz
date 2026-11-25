@@ -95,7 +95,7 @@ impl Ambiente {
     /// # Errors
     /// Chrome ausente ou que não subiu.
     pub fn abrir_chrome(&self) -> Resultado<Chrome> {
-        Chrome::abrir(&OpcoesDoChrome {
+        crate::chrome::abrir(&OpcoesDoChrome {
             programa: self.programa_do_chrome.clone(),
             perfil: self.perfil(),
             sem_janela: self.sem_janela,

@@ -1,14 +1,15 @@
 //! Guarda de código para RO-01: o valor de um `Segredo` só é exposto onde precisa.
 //!
-//! `Segredo::expor` pode aparecer em: `chrome.rs` (entrega ao CDP), `executor.rs` (troca por
-//! `***` do que sai), `gravacao.rs` (limpa a página antes de ir à IA) e `falso.rs` (navegador
-//! de teste). Nenhum outro arquivo de produção do crate chama.
+//! `Segredo::expor` pode aparecer em: `executor.rs` (troca por `***` do que sai) e
+//! `gravacao.rs` (limpa a página antes de ir à IA). Nenhum outro arquivo de produção do crate
+//! chama. A entrega ao CDP (`chrome.rs`) e o navegador falso moram na bancada, que tem a sua
+//! própria guarda (`bancada-navegador/tests/seguranca_fontes.rs`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 
-const PERMITIDOS: &[&str] = &["chrome.rs", "executor.rs", "gravacao.rs", "falso.rs"];
+const PERMITIDOS: &[&str] = &["executor.rs", "gravacao.rs"];
 
 #[test]
 fn so_quem_precisa_expoe_o_segredo() {
