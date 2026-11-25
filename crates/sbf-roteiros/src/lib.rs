@@ -31,6 +31,7 @@ pub mod inventario;
 pub mod manifesto;
 pub mod passo;
 pub mod servico;
+pub mod teste_escrito;
 
 pub use banco::{
     BancoDeRoteiros, EstadoDaExecucao, LinhaDeExecucao, LinhaDeRoteiro, OrigemDaVersao, Proposta,
