@@ -33,6 +33,9 @@ pub enum Qual {
     Inventario,
     Planejamento,
     Regras,
+    /// O `roteiros.sqlite` da pasta de dados do app (fora do cofre): a cópia também vai para
+    /// `<cofre>/backups/mcp/`.
+    Roteiros,
 }
 
 type Relogio = dyn Fn() -> String + Send + Sync;

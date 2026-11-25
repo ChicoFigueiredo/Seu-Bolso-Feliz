@@ -46,6 +46,7 @@ pub struct Nucleo {
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
+    roteiros_escritos: Option<crate::roteiros_escritos::RoteirosEscritos>,
     gmail: ColetaDoGmail,
     telegram: Option<crate::telegram::Ponte>,
     backups: crate::backup::Backups,
@@ -264,6 +265,7 @@ impl Nucleo {
             semelhantes: Semelhantes(None),
             plano: None,
             regras: None,
+            roteiros_escritos: None,
             gmail: ColetaDoGmail::default(),
             telegram: None,
             backups,
@@ -371,6 +373,41 @@ impl Nucleo {
                 .com_backups(self.backups.clone()),
         );
         self
+    }
+
+    /// Liga as ferramentas de roteiros escritos (só propor e consultar) sobre `caminho` (o
+    /// `roteiros.sqlite` da pasta de dados do app, fora do cofre). Chame depois de `com_busca`,
+    /// para herdar o nível do cliente. Se o arquivo já existe, ele entra no backup automático
+    /// (`<cofre>/backups/mcp/`) antes da primeira escrita da sessão.
+    #[must_use]
+    pub fn com_roteiros_escritos(mut self, caminho: PathBuf) -> Self {
+        self.backups
+            .registrar(crate::backup::Qual::Roteiros, caminho.clone());
+        self.roteiros_escritos = Some(
+            crate::roteiros_escritos::RoteirosEscritos::novo(
+                caminho,
+                self.banco.clone(),
+                self.nivel(),
+            )
+            .com_backups(self.backups.clone()),
+        );
+        self
+    }
+
+    /// Há roteiros escritos ligados?
+    #[must_use]
+    pub fn tem_roteiros_escritos(&self) -> bool {
+        self.roteiros_escritos.is_some()
+    }
+
+    /// As ferramentas de roteiros escritos.
+    ///
+    /// # Errors
+    /// Roteiros escritos não ligados.
+    pub fn roteiros_escritos(&self) -> Result<&crate::roteiros_escritos::RoteirosEscritos, String> {
+        self.roteiros_escritos
+            .as_ref()
+            .ok_or_else(|| "os roteiros escritos não estão ligados a este servidor".to_owned())
     }
 
     /// Liga as ferramentas do Telegram (a ponte é do `sbf`; o MCP não fala MTProto).
