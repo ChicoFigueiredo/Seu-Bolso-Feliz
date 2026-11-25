@@ -259,6 +259,55 @@ impl Politica for ListaDeBloqueio {
     }
 }
 
+/// O texto (normalizado: sem acento, minúsculas, por palavras) que marca o botão de "atualizar
+/// conexão" do agregador (o Meu Pluggy). É um conjunto **fechado e exato**: "Atualizar dados
+/// cadastrais" não está nele (e a lista de bloqueio o barra).
+pub const ATUALIZAR_CONEXAO: &[&str] = &[
+    "atualizar",
+    "sincronizar",
+    "atualizar conexao",
+    "reconectar",
+];
+
+/// O texto do elemento é exatamente um dos de [`ATUALIZAR_CONEXAO`]?
+#[must_use]
+pub fn e_atualizar_conexao(candidato: &Candidato) -> Option<String> {
+    candidato
+        .campos
+        .iter()
+        .find(|(campo, _)| campo == "texto")
+        .map(|(_, valor)| palavras(valor).join(" "))
+        .filter(|t| ATUALIZAR_CONEXAO.contains(&t.as_str()))
+}
+
+/// Confere um elemento que o roteiro **escrito** vai clicar, segundo a classe do manifesto:
+///
+/// - `consulta`: a lista normal, e o botão de atualizar conexão **não** é liberado (barrado);
+/// - `atualizar_conexao`: a lista normal, com uma exceção nomeada: o elemento cujo texto é
+///   exatamente "atualizar", "sincronizar", "atualizar conexão" ou "reconectar" passa. Os
+///   outros campos dele (rótulo, destino, nome) continuam sendo conferidos, e pagar,
+///   transferir, contratar e alterar cadastro seguem barrados.
+#[must_use]
+pub fn avaliar_para_classe(
+    candidato: &Candidato,
+    classe: crate::manifesto::Classe,
+) -> Option<Bloqueio> {
+    let Some(texto) = e_atualizar_conexao(candidato) else {
+        return avaliar(candidato);
+    };
+    match classe {
+        crate::manifesto::Classe::Consulta => Some(Bloqueio {
+            campo: "texto".to_owned(),
+            termo: format!("{texto} (só a classe atualizar_conexao clica aqui)"),
+        }),
+        crate::manifesto::Classe::AtualizarConexao => {
+            let mut sem_texto = candidato.clone();
+            sem_texto.campos.retain(|(campo, _)| campo != "texto");
+            avaliar(&sem_texto)
+        }
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
