@@ -1,10 +1,10 @@
 //! Apoio dos testes: o site falso em memória, as senhas fictícias e o inventário em arquivo.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
+use bancada_navegador::falso::{Elemento, NavegadorFalso};
 use rusqlite::Connection;
 use sbf_chaveiro::Segredo;
 use sbf_roteiros::executor::{Decisao, FonteDeSenhas, Pausa};
-use sbf_roteiros::falso::{Elemento, NavegadorFalso};
 use sbf_roteiros::pagina::Elemento as ElementoDePagina;
 use sbf_roteiros::pagina::{Campo, Formulario, Pagina};
 use std::collections::VecDeque;

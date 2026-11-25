@@ -6,6 +6,7 @@
 
 mod comum;
 
+use bancada_navegador::site_falso::{Configuracao, PDF_FICTICIO, SiteFalso};
 use comum::{CPF, SENHA, Senhas, inventario};
 use sbf_roteiros::Navegador as _;
 use sbf_roteiros::banco::{BancoDeRoteiros, OrigemDaVersao};
@@ -14,7 +15,6 @@ use sbf_roteiros::chrome::{Chrome, OpcoesDoChrome};
 use sbf_roteiros::executor::{Contexto, Decisao, Fim, Opcoes, Pausa, executar};
 use sbf_roteiros::inventario::NoInventario;
 use sbf_roteiros::passo::Passo;
-use sbf_roteiros::site_falso::{Configuracao, PDF_FICTICIO, SiteFalso};
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -28,7 +28,7 @@ fn ligado() -> bool {
 }
 
 fn abrir(pasta: &std::path::Path) -> Chrome {
-    Chrome::abrir(&OpcoesDoChrome {
+    sbf_roteiros::chrome::abrir(&OpcoesDoChrome {
         programa: None,
         perfil: pasta.join("perfil"),
         sem_janela: std::env::var("SBF_CHROME_VISIVEL").ok().as_deref() != Some("1"),

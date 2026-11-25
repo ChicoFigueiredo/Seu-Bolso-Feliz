@@ -29,4 +29,13 @@ pub enum ErroDeRoteiro {
     Cancelado,
 }
 
+impl From<bancada_navegador::ErroDoNavegador> for ErroDeRoteiro {
+    fn from(e: bancada_navegador::ErroDoNavegador) -> Self {
+        match e {
+            bancada_navegador::ErroDoNavegador::Disco(e) => Self::Disco(e),
+            bancada_navegador::ErroDoNavegador::Navegador(m) => Self::Navegador(m),
+        }
+    }
+}
+
 pub type Resultado<T> = Result<T, ErroDeRoteiro>;

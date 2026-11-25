@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 bancada-armazem = { path = "../bancada/crates/bancada-armazem" }
 bancada-segredos = { path = "../bancada/crates/bancada-segredos" }
+bancada-navegador = { path = "../bancada/crates/bancada-navegador" }
 sbf-inventario = { path = "crates/sbf-inventario" }
 sbf-regras = { path = "crates/sbf-regras" }
 sbf-script = { path = "crates/sbf-script" }
