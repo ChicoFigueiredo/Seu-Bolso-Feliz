@@ -259,13 +259,26 @@ uso: sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
   mostrar <nome> [--versao <n>]          manifesto, fonte, versões e histórico de estados
   testar <nome> <versao> --cenario <c>   roda a versão no site falso local (Chrome sem janela,
                                          senhas fictícias); passou => `testado`. Sai 0 se passou,
-                                         1 se falhou. Cenários: contracheque
+                                         1 se falhou. Cenários: contracheque, conexoes
   ativar <nome> <versao>                 só num terminal interativo, com confirmação digitada;
                                          só de uma versão testada; aposenta a ativa anterior.
                                          Mostra autor, hosts, rótulos do chaveiro, MFA e o fonte
                                          Luau; se foi proposta pelo MCP ou pela IA, a digitação
                                          é `<nome>@<versao> <host>`
   desativar <nome>                       idem (aposenta a versão ativa)
+  entrar --url <https://...>             login à mão, SEM controle: abre o Chrome do perfil dedicado
+                                         sem a porta de automação (sites como o Google recusam
+                                         navegador controlado). Entre com Google, e-mail, o que
+                                         for; feche a janela ao terminar. A sessão do site fica no
+                                         perfil para os roteiros. O SBF não lê nem digita nada
+  observar --url <https://...> [--saida <pasta>] [--minutos <n>] [--intervalo-ms <n>]
+                                         modo ASSISTIDO: abre o Chrome visível com o perfil
+                                         dedicado e só LÊ. Você navega e entra à mão; a cada
+                                         mudança grava a página simplificada (sem valor de
+                                         campo) em `pagina-NNN.txt`, para quem for escrever o
+                                         roteiro ler. Não clica nem digita. Termina no prazo
+                                         (padrão 20 min, máx 60) ou ao criar o arquivo `parar`
+                                         na pasta de saída (padrão: <dados>/roteiros/observacao)
 
 O roteiro escrito vive em `roteiros.sqlite`, na pasta de dados do app (fora do cofre).
 Ativar e desativar não rodam sem terminal: o MCP e a IA só propõem (criam rascunho).";
@@ -795,6 +808,181 @@ fn testar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
     }
 }
 
+/// O prazo padrão e o máximo do `observar`, em minutos.
+const OBSERVAR_PADRAO_MIN: u64 = 20;
+const OBSERVAR_MAXIMO_MIN: u64 = 60;
+
+/// `observar`: o modo assistido. Só lê (nunca clica nem digita); quem navega e entra é o
+/// usuário, no Chrome visível do perfil dedicado, e os cookies ficam nesse perfil para os
+/// roteiros. A página simplificada (sem valor de campo, número mascarado) vai para arquivos.
+fn observar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
+    use sbf_roteiros::Navegador as _;
+    use std::hash::{DefaultHasher, Hash as _, Hasher as _};
+    let (soltos, valores) = opcoes(resto, &["--url", "--saida", "--minutos", "--intervalo-ms"])?;
+    if !soltos.is_empty() {
+        return Err(uso(
+            "uso: observar --url <https://...> [--saida <pasta>] [--minutos <n>]",
+        ));
+    }
+    let url = valores
+        .get("--url")
+        .ok_or_else(|| uso("observar pede --url <https://...>"))?;
+    if !url.starts_with("https://") || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(uso("a URL do observar tem de ser https:// e sem espaços"));
+    }
+    let minutos = match valores.get("--minutos") {
+        None => OBSERVAR_PADRAO_MIN,
+        Some(t) => t
+            .parse::<u64>()
+            .ok()
+            .filter(|m| (1..=OBSERVAR_MAXIMO_MIN).contains(m))
+            .ok_or_else(|| uso(format!("--minutos vai de 1 a {OBSERVAR_MAXIMO_MIN}")))?,
+    };
+    let intervalo = match valores.get("--intervalo-ms") {
+        None => 2000,
+        Some(t) => t
+            .parse::<u64>()
+            .ok()
+            .filter(|m| (250..=10_000).contains(m))
+            .ok_or_else(|| uso("--intervalo-ms vai de 250 a 10000"))?,
+    };
+    let saida = valores.get("--saida").map_or_else(
+        || a.dados.join("roteiros").join("observacao"),
+        PathBuf::from,
+    );
+    std::fs::create_dir_all(&saida)
+        .map_err(|e| op(format!("não deu para criar {}: {e}", saida.display())))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&saida, std::fs::Permissions::from_mode(0o700));
+    }
+    let parar = saida.join("parar");
+    let _ = std::fs::remove_file(&parar);
+
+    let mut amb = Ambiente::novo(a.dados, &a.dados.join("cofre-do-observar-nao-usado"));
+    amb.programa_do_chrome.clone_from(&a.chrome);
+    let mut chrome = amb.abrir_chrome()?;
+    chrome
+        .navegar(url)
+        .map_err(|e| op(format!("não abriu a página: {e}")))?;
+    w(
+        a.saida,
+        &format!(
+            "Observando por até {minutos} min (só leitura). Páginas em {}. Para encerrar antes: crie {}",
+            saida.display(),
+            parar.display()
+        ),
+    );
+    let fim = std::time::Instant::now() + std::time::Duration::from_secs(minutos * 60);
+    let mut ultimo: u64 = 0;
+    let mut n: u32 = 0;
+    // Sondas: seletores comuns de diálogo/iframe/progresso (o conteúdo de um iframe de outro
+    // domínio a página simplificada não enxerga). Só registra quando o conjunto visível muda.
+    const SONDAS: [&str; 9] = [
+        "iframe",
+        "iframe[src*=\"pluggy\"]",
+        "[role=\"dialog\"]",
+        "[role=\"alertdialog\"]",
+        "[role=\"progressbar\"]",
+        "dialog",
+        "[aria-modal=\"true\"]",
+        "[class*=\"modal\"]",
+        "[class*=\"overlay\"]",
+    ];
+    let inicio = std::time::Instant::now();
+    let mut sondas_antes = String::new();
+    while std::time::Instant::now() < fim && !parar.exists() {
+        let visiveis: Vec<&str> = SONDAS
+            .iter()
+            .copied()
+            .filter(|s| chrome.visivel(s).unwrap_or(false))
+            .collect();
+        let linha = visiveis.join(" ; ");
+        if linha != sondas_antes {
+            sondas_antes.clone_from(&linha);
+            let registro = format!("{:>6.1}s  {}\n", inicio.elapsed().as_secs_f32(), linha);
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(saida.join("sondas.txt"))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, registro.as_bytes()));
+        }
+        // Uma leitura que falha (a página está navegando) não encerra: tenta de novo.
+        if let Ok(pagina) = chrome.pagina() {
+            let texto = pagina.mascarar().para_texto();
+            let mut h = DefaultHasher::new();
+            texto.hash(&mut h);
+            let marca = h.finish();
+            if marca != ultimo {
+                ultimo = marca;
+                n += 1;
+                let arquivo = saida.join(format!("pagina-{n:03}.txt"));
+                std::fs::write(&arquivo, &texto)
+                    .map_err(|e| op(format!("não deu para gravar {}: {e}", arquivo.display())))?;
+                w(a.saida, &format!("pagina-{n:03}.txt gravada"));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(intervalo));
+    }
+    chrome.fechar();
+    w(
+        a.saida,
+        &format!("Observação encerrada: {n} página(s) gravada(s)."),
+    );
+    Ok(())
+}
+
+/// `entrar`: o login assistido SEM controle. O Chrome sobe sem porta de depuração (nada de CDP),
+/// no mesmo perfil dedicado dos roteiros, e o SBF só espera a janela fechar. É para sites que
+/// recusam navegador controlado (login com Google): o que fica no perfil é a sessão do próprio
+/// site, que os roteiros reaproveitam depois.
+fn entrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
+    use sbf_roteiros::chrome::{
+        Lancador as _, LancadorDoSbf, TravaDoPerfil, apagar_dados_de_formulario,
+        argumentos_do_chrome, localizar_chrome, preparar_preferencias,
+    };
+    let (soltos, valores) = opcoes(resto, &["--url"])?;
+    if !soltos.is_empty() {
+        return Err(uso("uso: entrar --url <https://...>"));
+    }
+    let url = valores
+        .get("--url")
+        .ok_or_else(|| uso("entrar pede --url <https://...>"))?;
+    if !url.starts_with("https://") || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(uso("a URL do entrar tem de ser https:// e sem espaços"));
+    }
+    let amb = Ambiente::novo(a.dados, &a.dados.join("cofre-do-entrar-nao-usado"));
+    let perfil = amb.perfil();
+    let programa = a
+        .chrome
+        .clone()
+        .or_else(localizar_chrome)
+        .ok_or_else(|| op("não achei o Chrome nem o Chromium instalado"))?;
+    std::fs::create_dir_all(&perfil)
+        .map_err(|e| op(format!("não deu para criar o perfil: {e}")))?;
+    let _trava = TravaDoPerfil::obter(&perfil).map_err(|e| op(e.to_string()))?;
+    apagar_dados_de_formulario(&perfil);
+    preparar_preferencias(&perfil).map_err(|e| op(e.to_string()))?;
+    let mut args = argumentos_do_chrome(&perfil, false, LancadorDoSbf.sem_sandbox());
+    // Sem controle: fora a porta de depuração; a página inicial é a pedida.
+    args.retain(|x| !x.starts_with("--remote-debugging-port") && x != "about:blank");
+    args.push(url.clone());
+    let mut filho = LancadorDoSbf.lancar(&programa, &args).map_err(op)?;
+    w(
+        a.saida,
+        "Chrome aberto SEM controle. Entre no site; ao terminar, feche a janela do Chrome.",
+    );
+    filho
+        .wait()
+        .map_err(|e| op(format!("falha ao esperar o Chrome: {e}")))?;
+    w(
+        a.saida,
+        "Chrome fechado; a sessão ficou no perfil dedicado.",
+    );
+    Ok(())
+}
+
 fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
     let Some((sub, resto)) = args.split_first() else {
         return Err(uso("falta o subcomando"));
@@ -807,6 +995,8 @@ fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
         "testar" => testar(a, resto),
         "ativar" => ativar(a, resto),
         "desativar" => desativar(a, resto),
+        "observar" => observar(a, resto),
+        "entrar" => entrar(a, resto),
         outro => Err(uso(format!("subcomando desconhecido: {outro}"))),
     }
 }
