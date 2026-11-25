@@ -6,6 +6,15 @@
 //! banco, então vale também para as que a agenda do worker disparou), e deixa **Executar
 //! agora** (só com versão ativa).
 //!
+//! **Agenda, período e Baixa forçada** (spec 18). A lista e o detalhe mostram a **Agenda** do
+//! manifesto em texto legível ("todo dia às 04:00, 12:00 e 20:00"). Se o site recusou a entrada
+//! a agenda do roteiro fica suspensa: a janela mostra a data e o motivo e o botão **Retomar
+//! agenda** (só o usuário retoma; o teste `tests/autoridade.rs` proíbe MCP, worker e IA).
+//! "Executar agora" abre os campos do período (`de` e `até`: `AAAA-MM` ou relativo, como `-1`,
+//! pela mesma regra do manifesto) e a opção **Forçar a baixa**, que só executa depois de um
+//! diálogo de confirmação. As propostas de Baixa forçada do MCP aparecem como "Baixar de novo:
+//! <roteiro> <período>" e só o usuário as aceita; é esta janela que então executa.
+//!
 //! **Sua vez no navegador.** Quando uma execução (da janela ou do worker, outro processo) para
 //! num CAPTCHA, no código do aplicativo autenticador (TOTP) ou num MFA manual, a janela lê isso
 //! do banco e mostra o cartão com **Continuar** e **Abortar**; o pedido volta ao executor
@@ -31,10 +40,16 @@ use sbf_roteiros::banco::{
     AutorEscrito, BancoDeRoteiros, Confirmacao, DetalheDoEscrito, EstadoDaExecucao, EstadoEscrito,
     EventoEscrito, VersaoEscrita,
 };
-use sbf_roteiros::execucao_escrita::{EventoDaExecucaoEscrita, LinhaDeExecucaoEscrita};
+use sbf_roteiros::execucao_escrita::{
+    EventoDaExecucaoEscrita, LinhaDeExecucaoEscrita, SuspensaoDaAgenda,
+};
 use sbf_roteiros::executor::Fim;
-use sbf_roteiros::manifesto::{Classe, Manifesto, Mfa};
-use sbf_roteiros::servico::{Ambiente, RelatorioEscrito, executar_escrito};
+use sbf_roteiros::manifesto::{Classe, EntradaDeAgenda, Manifesto, Mfa};
+use sbf_roteiros::parametros::{TipoDeParametro, ValorBruto};
+use sbf_roteiros::proposta_baixa::{PropostaDeBaixa, conferir_mes};
+use sbf_roteiros::servico::{
+    Ambiente, PedidoDeExecucao, RelatorioEscrito, executar_escrito_com, resolver_pedido,
+};
 
 use crate::{componentes, tema};
 
@@ -89,6 +104,144 @@ pub fn texto_da_agenda(horas: Option<u32>) -> String {
     }
 }
 
+/// "a", "a e b", "a, b e c".
+fn juntar(itens: &[String]) -> String {
+    match itens {
+        [] => String::new(),
+        [a] => a.clone(),
+        [ini @ .., ultimo] => format!("{} e {ultimo}", ini.join(", ")),
+    }
+}
+
+/// O nome de um parâmetro como o usuário lê (`ate` é "até").
+fn nome_do_parametro(nome: &str) -> &str {
+    match nome {
+        "ate" => "até",
+        "forcar" => "forçar",
+        outro => outro,
+    }
+}
+
+/// O valor de um parâmetro como o usuário lê.
+fn valor_do_parametro(v: &ValorBruto) -> String {
+    match v {
+        ValorBruto::Texto(t) => t.clone(),
+        ValorBruto::Booleano(true) => "sim".to_owned(),
+        ValorBruto::Booleano(false) => "não".to_owned(),
+    }
+}
+
+/// Uma entrada da agenda em português: "todo dia às 04:00, 12:00 e 20:00" ou "dias 20, 21, 30 e
+/// 1 às 04:00, 12:00 e 20:00, com de=-1 e até=0". Horários e dias no fuso do usuário (UTC−3).
+#[must_use]
+pub fn texto_da_entrada(e: &EntradaDeAgenda) -> String {
+    let horas = match e.horarios.as_slice() {
+        [h] if h.starts_with("01:") => format!("à {h}"),
+        hs => format!("às {}", juntar(hs)),
+    };
+    let quando = match e.dias_do_mes.as_deref() {
+        None | Some([]) => "todo dia".to_owned(),
+        Some([d]) => format!("dia {d}"),
+        Some(ds) => {
+            let ds: Vec<String> = ds.iter().map(u8::to_string).collect();
+            format!("dias {}", juntar(&ds))
+        }
+    };
+    let mut t = format!("{quando} {horas}");
+    if !e.parametros.is_empty() {
+        // `de` e `até` primeiro, nessa ordem; o resto em ordem alfabética.
+        let mut ps: Vec<(&String, &ValorBruto)> = e.parametros.iter().collect();
+        ps.sort_by_key(|(n, _)| {
+            (
+                match n.as_str() {
+                    "de" => 0,
+                    "ate" => 1,
+                    _ => 2,
+                },
+                (*n).clone(),
+            )
+        });
+        let ps: Vec<String> = ps
+            .into_iter()
+            .map(|(n, v)| format!("{}={}", nome_do_parametro(n), valor_do_parametro(v)))
+            .collect();
+        t.push_str(", com ");
+        t.push_str(&juntar(&ps));
+    }
+    t
+}
+
+/// A **Agenda** do manifesto: as entradas de `agenda` (separadas por ponto e vírgula) ou, no
+/// manifesto antigo, o "a cada N horas" de `agenda_horas`.
+#[must_use]
+pub fn texto_da_agenda_do_manifesto(m: &Manifesto) -> String {
+    if m.agenda.is_empty() {
+        return texto_da_agenda(m.agenda_horas);
+    }
+    m.agenda
+        .iter()
+        .map(texto_da_entrada)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Dias desde 1970-01-01 para (ano, mês, dia) civil (algoritmo de Howard Hinnant, ao contrário).
+fn data_dos_dias(dias: i64) -> (i64, i64, i64) {
+    let z = dias + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let dia = doy - (153 * mp + 2) / 5 + 1;
+    let mes = if mp < 10 { mp + 3 } else { mp - 9 };
+    let ano = yoe + era * 400 + i64::from(mes <= 2);
+    (ano, mes, dia)
+}
+
+/// "AAAA-MM-DD HH:MM" de um instante unix no fuso do usuário (UTC−3).
+#[must_use]
+pub fn data_hora_local(unix: i64) -> String {
+    let local = unix.saturating_sub(3 * 3_600);
+    let (a, m, d) = data_dos_dias(local.div_euclid(86_400));
+    let seg = local.rem_euclid(86_400);
+    format!(
+        "{a:04}-{m:02}-{d:02} {:02}:{:02}",
+        seg / 3_600,
+        seg % 3_600 / 60
+    )
+}
+
+/// A **Suspensão da agenda** em português: quando e por quê (o motivo já vem limpo de segredo).
+#[must_use]
+pub fn texto_da_suspensao(s: &SuspensaoDaAgenda) -> String {
+    let motivo = s.motivo.trim().trim_end_matches('.');
+    let motivo = if motivo.is_empty() {
+        "o site recusou a entrada"
+    } else {
+        motivo
+    };
+    format!(
+        "Agenda suspensa desde {} (UTC−3): {motivo}. O roteiro não roda mais sozinho até você retomar a agenda; Executar agora continua valendo.",
+        data_hora_local(s.desde_unix)
+    )
+}
+
+/// **Retomar agenda**: só o usuário, na janela (o banco grava a retomada no histórico do
+/// roteiro). Devolve a mensagem de sucesso ou o motivo da recusa.
+///
+/// # Errors
+/// Roteiro inexistente ou falha do banco.
+pub fn retomar_agenda(banco: &BancoDeRoteiros, nome: &str) -> Result<String, String> {
+    match banco.retomar_agenda_escrita(nome) {
+        Ok(true) => Ok(format!(
+            "{nome}: agenda retomada. O que ficou para trás roda uma vez, na próxima passada do worker."
+        )),
+        Ok(false) => Ok(format!("{nome}: a agenda já não estava suspensa.")),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Uma linha do histórico de estados.
 #[must_use]
 pub fn linha_do_evento(e: &EventoEscrito) -> String {
@@ -124,6 +277,9 @@ pub struct ResumoDeEscrito {
     pub ultima: u32,
     pub ativa: Option<u32>,
     pub agenda: String,
+    /// A agenda do roteiro está suspensa (o site recusou a entrada). O banco guarda isso por
+    /// roteiro, não na versão: quem monta o resumo o anexa com [`Self::com_suspensao`].
+    pub suspensa: Option<SuspensaoDaAgenda>,
 }
 
 impl ResumoDeEscrito {
@@ -144,8 +300,16 @@ impl ResumoDeEscrito {
             estado_da_ultima: nova.estado,
             ultima: nova.numero,
             ativa: ativa.map(|v| v.numero),
-            agenda: texto_da_agenda(m.agenda_horas),
+            agenda: texto_da_agenda_do_manifesto(m),
+            suspensa: None,
         })
+    }
+
+    /// Anexa a suspensão da agenda, se houver.
+    #[must_use]
+    pub fn com_suspensao(mut self, suspensa: Option<SuspensaoDaAgenda>) -> Self {
+        self.suspensa = suspensa;
+        self
     }
 
     /// A linha de metadados do cartão.
@@ -416,6 +580,23 @@ pub fn rotulo_do_gatilho(g: &str) -> &str {
 /// Uma linha do histórico de execuções.
 #[must_use]
 pub fn linha_da_execucao(e: &LinhaDeExecucaoEscrita) -> String {
+    linha_da_execucao_com(e, 0)
+}
+
+/// A frase dos arquivos descartados: "2 descartados (já estavam no inventário)".
+#[must_use]
+pub fn texto_dos_descartados(n: u32) -> String {
+    if n == 1 {
+        "1 descartado (já estava no inventário)".to_owned()
+    } else {
+        format!("{n} descartados (já estavam no inventário)")
+    }
+}
+
+/// Como [`linha_da_execucao`], com os arquivos que a execução **descartou** por já estarem no
+/// inventário (a baixa por conteúdo): eles não contam como novos.
+#[must_use]
+pub fn linha_da_execucao_com(e: &LinhaDeExecucaoEscrita, descartados: u32) -> String {
     let fim = match &e.concluida_em {
         Some(f) => format!("até {}", hora_curta(f)),
         None => "em andamento".to_owned(),
@@ -440,6 +621,10 @@ pub fn linha_da_execucao(e: &LinhaDeExecucaoEscrita) -> String {
             if e.novos == 1 { "" } else { "s" }
         ));
     }
+    if descartados > 0 {
+        t.push_str(" · ");
+        t.push_str(&texto_dos_descartados(descartados));
+    }
     t
 }
 
@@ -447,6 +632,10 @@ pub fn linha_da_execucao(e: &LinhaDeExecucaoEscrita) -> String {
 #[must_use]
 pub fn linha_do_evento_da_execucao(e: &EventoDaExecucaoEscrita) -> String {
     let (quando, tipo, mensagem) = e;
+    if tipo == "descartado" {
+        // A baixa por conteúdo: o arquivo já estava no inventário e foi descartado.
+        return format!("{} · descartado: {mensagem}", hora_curta(quando));
+    }
     format!("{} · {tipo} · {mensagem}", hora_curta(quando))
 }
 
@@ -465,17 +654,27 @@ pub fn texto_da_pausa(motivo: Option<&str>) -> String {
 /// O que a janela diz de uma execução que terminou: o texto e se é erro.
 #[must_use]
 pub fn texto_do_relatorio(r: &RelatorioEscrito) -> (String, bool) {
+    if let Some(motivo) = &r.entrada_recusada {
+        return (
+            format!("o site recusou a entrada: {motivo}. A agenda do roteiro foi suspensa."),
+            true,
+        );
+    }
     match &r.fim {
-        Fim::Concluida => (
-            format!(
+        Fim::Concluida => {
+            let mut t = format!(
                 "concluída: {} baixado{}, {} novo{} no inventário",
                 r.baixados,
                 if r.baixados == 1 { "" } else { "s" },
                 r.novos,
                 if r.novos == 1 { "" } else { "s" }
-            ),
-            false,
-        ),
+            );
+            if r.descartados > 0 {
+                t.push_str(", ");
+                t.push_str(&texto_dos_descartados(r.descartados));
+            }
+            (t, false)
+        }
         Fim::Falhou { motivo, .. } => (format!("falhou: {motivo}"), true),
         Fim::Bloqueada { bloqueio, .. } => (
             format!("bloqueada pela lista de bloqueio: {bloqueio}"),
@@ -490,6 +689,149 @@ pub fn texto_do_relatorio(r: &RelatorioEscrito) -> (String, bool) {
 #[must_use]
 pub fn versao_padrao(d: &DetalheDoEscrito) -> Option<u32> {
     d.versoes.iter().map(|v| v.numero).max()
+}
+
+// ---------------------------------------------------------------------------------------
+// Executar agora: período e Baixa forçada
+// ---------------------------------------------------------------------------------------
+
+/// A pergunta do diálogo que antecede toda **Baixa forçada**.
+pub const PERGUNTA_DA_BAIXA_FORCADA: &str =
+    "Baixar de novo mesmo que o conteúdo já esteja no inventário?";
+
+/// A explicação do diálogo: o que a opção muda.
+pub const EXPLICACAO_DA_BAIXA_FORCADA: &str = "Sem a Baixa forçada, um arquivo cujo conteúdo (o arquivo ou o texto dele) já está no inventário é descartado. Com ela, o roteiro baixa e registra de novo o que encontrar.";
+
+/// Um parâmetro declarado pelo manifesto, como campo do formulário "Executar agora".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampoDoFormulario {
+    pub nome: String,
+    pub tipo: TipoDeParametro,
+    /// O que o usuário digitou (`mes`); vazio vale o padrão do roteiro.
+    pub texto: String,
+    /// A caixa marcada (`booleano`).
+    pub marcado: bool,
+    /// O padrão que o manifesto declara, só para mostrar de dica.
+    pub padrao: String,
+}
+
+/// O formulário do botão **Executar agora**: os parâmetros que o manifesto declara (os meses
+/// `de` e `até`, por exemplo) mais a opção **Forçar a baixa**, que existe em todo roteiro.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormularioDeExecucao {
+    pub roteiro: String,
+    pub campos: Vec<CampoDoFormulario>,
+    /// A Baixa forçada: abre o diálogo de confirmação antes de executar.
+    pub forcar: bool,
+}
+
+impl FormularioDeExecucao {
+    /// O formulário do roteiro `m`: um campo por parâmetro declarado (menos `forcar`, que tem a
+    /// opção própria).
+    #[must_use]
+    pub fn novo(m: &Manifesto) -> Self {
+        let campos = m
+            .parametros
+            .iter()
+            .filter(|p| !(p.nome == "forcar" && p.tipo == TipoDeParametro::Booleano))
+            .map(|p| CampoDoFormulario {
+                nome: p.nome.clone(),
+                tipo: p.tipo,
+                texto: String::new(),
+                marcado: matches!(p.padrao, Some(ValorBruto::Booleano(true))),
+                padrao: match (&p.padrao, p.tipo) {
+                    (Some(v), _) => valor_do_parametro(v),
+                    (None, TipoDeParametro::Mes) => "0".to_owned(),
+                    (None, TipoDeParametro::Booleano) => "não".to_owned(),
+                },
+            })
+            .collect();
+        Self {
+            roteiro: m.nome.clone(),
+            campos,
+            forcar: false,
+        }
+    }
+
+    /// O roteiro aceita período (declara parâmetros de mês)?
+    #[must_use]
+    pub fn tem_periodo(&self) -> bool {
+        self.campos.iter().any(|c| c.tipo == TipoDeParametro::Mes)
+    }
+
+    /// Monta e **confere** o pedido de execução: cada mês pela regra do manifesto (`AAAA-MM` ou
+    /// relativo `0`, `-1`…), e depois a mesma conta da execução (`de` não depois de `até`, no
+    /// máximo 60 meses). Campo de mês vazio entrega nada: vale o padrão do roteiro.
+    ///
+    /// # Errors
+    /// O motivo, em português, para mostrar ao usuário.
+    pub fn pedido(&self, m: &Manifesto, agora_unix: i64) -> Result<PedidoDeExecucao, String> {
+        let mut pedido = PedidoDeExecucao {
+            forcar: self.forcar,
+            ..PedidoDeExecucao::default()
+        };
+        for c in &self.campos {
+            match c.tipo {
+                TipoDeParametro::Mes => {
+                    if let Some(t) = conferir_mes(nome_do_parametro(&c.nome), &c.texto)
+                        .map_err(motivo_do_erro)?
+                    {
+                        pedido
+                            .entregues
+                            .insert(c.nome.clone(), ValorBruto::Texto(t));
+                    }
+                }
+                TipoDeParametro::Booleano => {
+                    pedido
+                        .entregues
+                        .insert(c.nome.clone(), ValorBruto::Booleano(c.marcado));
+                }
+            }
+        }
+        resolver_pedido(m, &pedido, agora_unix).map_err(motivo_do_erro)?;
+        Ok(pedido)
+    }
+}
+
+/// A mensagem do erro sem o prefixo técnico.
+fn motivo_do_erro(e: sbf_roteiros::ErroDeRoteiro) -> String {
+    match e {
+        sbf_roteiros::ErroDeRoteiro::Invalido(m) => m,
+        outro => outro.to_string(),
+    }
+}
+
+/// O período de um pedido em português, para o diálogo: "de 2026-10 até 2026-11", "a partir de
+/// -1" ou "período padrão do roteiro".
+#[must_use]
+pub fn texto_do_periodo(p: &PedidoDeExecucao) -> String {
+    let t = |n: &str| match p.entregues.get(n) {
+        Some(ValorBruto::Texto(t)) => Some(t.clone()),
+        _ => None,
+    };
+    match (t("de"), t("ate")) {
+        (Some(d), Some(a)) if d == a => format!("mês {d}"),
+        (Some(d), Some(a)) => format!("de {d} até {a}"),
+        (Some(d), None) => format!("a partir de {d}"),
+        (None, Some(a)) => format!("até {a}"),
+        (None, None) => "período padrão do roteiro".to_owned(),
+    }
+}
+
+/// Uma execução à espera da confirmação da **Baixa forçada**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaixaPendente {
+    pub roteiro: String,
+    pub pedido: PedidoDeExecucao,
+    /// A proposta do MCP que o usuário está aceitando, se for o caso.
+    pub proposta: Option<i64>,
+}
+
+/// O instante de agora (unix).
+fn agora_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -527,6 +869,16 @@ pub struct Escritos {
     historico: HashMap<String, Vec<LinhaDeExecucaoEscrita>>,
     /// Os eventos das execuções que o usuário expandiu.
     eventos: HashMap<i64, Vec<EventoDaExecucaoEscrita>>,
+    /// As agendas suspensas (o site recusou a entrada), por roteiro.
+    suspensas: HashMap<String, SuspensaoDaAgenda>,
+    /// Quantos arquivos cada execução descartou por já estarem no inventário.
+    descartados: HashMap<i64, u32>,
+    /// As propostas de Baixa forçada que o MCP deixou pendentes.
+    propostas: Vec<PropostaDeBaixa>,
+    /// O formulário "Executar agora" aberto (um por vez).
+    formulario: Option<FormularioDeExecucao>,
+    /// A Baixa forçada esperando a confirmação do diálogo.
+    baixa: Option<BaixaPendente>,
 }
 
 /// Quantas execuções o detalhe mostra por roteiro.
@@ -572,7 +924,30 @@ impl Escritos {
                 historico.insert(d.nome.clone(), h);
             }
         }
+        let mut descartados = HashMap::new();
+        for x in historico.values().flatten() {
+            if let Ok(n) = banco.descartados_da_execucao_escrita(x.id)
+                && n > 0
+            {
+                descartados.insert(x.id, n);
+            }
+        }
         self.historico = historico;
+        self.descartados = descartados;
+        self.suspensas = self
+            .detalhes
+            .iter()
+            .filter_map(|d| {
+                banco
+                    .agenda_suspensa_escrita(&d.nome)
+                    .ok()
+                    .flatten()
+                    .map(|s| (d.nome.clone(), s))
+            })
+            .collect();
+        self.propostas = banco
+            .propostas_de_baixa_pendentes(agora_unix())
+            .unwrap_or_default();
         let abertas: Vec<i64> = self.eventos.keys().copied().collect();
         for id in abertas {
             match banco.eventos_escritos(id) {
@@ -690,7 +1065,7 @@ impl Escritos {
                 resultado_do_teste: teste.map(str::to_owned),
             }
         }
-        let a = manifesto(
+        let mut a = manifesto(
             "contracheque-exemplo",
             "Baixa o demonstrativo de pagamento do mês no portal fictício.",
             Mfa::Email {
@@ -698,8 +1073,28 @@ impl Escritos {
                 formato: "\\d{6}".to_owned(),
             },
             Classe::Consulta,
-            Some(168),
+            None,
         );
+        // A agenda do contracheque: o do dia 30 substitui o do dia 20, então olha o mês passado
+        // e o corrente, nos dias em que o portal costuma publicar.
+        a.agenda = vec![EntradaDeAgenda {
+            horarios: vec!["04:00".to_owned(), "12:00".to_owned(), "20:00".to_owned()],
+            dias_do_mes: Some(vec![20, 21, 30, 1]),
+            parametros: [
+                ("de".to_owned(), ValorBruto::Texto("-1".to_owned())),
+                ("ate".to_owned(), ValorBruto::Texto("0".to_owned())),
+            ]
+            .into_iter()
+            .collect(),
+        }];
+        a.parametros = ["de", "ate"]
+            .iter()
+            .map(|n| sbf_roteiros::parametros::ParametroDeclarado {
+                nome: (*n).to_owned(),
+                tipo: TipoDeParametro::Mes,
+                padrao: Some(ValorBruto::Texto("0".to_owned())),
+            })
+            .collect();
         let b = manifesto(
             "extrato-banco-exemplo",
             "Consulta o extrato no banco fictício; o código do aplicativo autenticador (TOTP) muda por minuto.",
@@ -851,6 +1246,15 @@ impl Escritos {
                 "contracheque-exemplo".to_owned(),
                 vec![
                     exec(
+                        14,
+                        "contracheque-exemplo",
+                        1,
+                        "agenda",
+                        EstadoDaExecucao::EntradaRecusada,
+                        Some("entrada recusada: o portal recusou a senha"),
+                        0,
+                    ),
+                    exec(
                         12,
                         "contracheque-exemplo",
                         1,
@@ -896,8 +1300,32 @@ impl Escritos {
                     "download".to_owned(),
                     "demonstrativo.pdf".to_owned(),
                 ),
+                (
+                    "2026-11-24T08:31:11.000Z".to_owned(),
+                    "descartado".to_owned(),
+                    "demonstrativo-anterior.pdf: já estava no inventário".to_owned(),
+                ),
             ],
         )]);
+        self.descartados = HashMap::from([(12, 1)]);
+        self.suspensas = HashMap::from([(
+            "contracheque-exemplo".to_owned(),
+            SuspensaoDaAgenda {
+                desde_unix: 1_795_608_000,
+                motivo: "o portal recusou a senha".to_owned(),
+            },
+        )]);
+        self.propostas = vec![PropostaDeBaixa {
+            id: 1,
+            roteiro: "contracheque-exemplo".to_owned(),
+            de: Some("-1".to_owned()),
+            ate: Some("0".to_owned()),
+            autor: "mcp".to_owned(),
+            criada_unix: 1_795_608_000,
+            estado: sbf_roteiros::proposta_baixa::EstadoDaPropostaDeBaixa::Pendente,
+        }];
+        self.formulario = None;
+        self.baixa = None;
         self.aguardando = vec![exec(
             13,
             "atualizar-conexoes-exemplo",
@@ -946,31 +1374,39 @@ impl Escritos {
         }
     }
 
-    /// Dispara a versão ativa numa thread de trabalho: a janela não trava.
-    fn executar(&mut self, amb: Option<&Ambiente>, chaveiro: Option<&Chaveiro>, nome: &str) {
+    /// Dispara a versão ativa numa thread de trabalho: a janela não trava. O `pedido` leva o
+    /// período e a **Baixa forçada**. Devolve se a execução começou.
+    fn executar(
+        &mut self,
+        amb: Option<&Ambiente>,
+        chaveiro: Option<&Chaveiro>,
+        nome: &str,
+        pedido: PedidoDeExecucao,
+    ) -> bool {
         let Some(amb) = amb.cloned() else {
             self.aviso = Some((
                 "Na demonstração os roteiros não rodam: não há navegador nem site.".into(),
                 false,
             ));
-            return;
+            return false;
         };
         if self.rodando(nome) {
-            return;
+            return false;
         }
         let Some(chaveiro) = chaveiro.cloned() else {
             self.aviso = Some((
                 "O chaveiro não abriu: sem ele o roteiro não tem a senha do site.".into(),
                 true,
             ));
-            return;
+            return false;
         };
         let cancelar = Arc::new(AtomicBool::new(false));
         let c2 = Arc::clone(&cancelar);
         let (tx, rx) = channel();
         let n = nome.to_owned();
         std::thread::spawn(move || {
-            let r = executar_escrito(&amb, &n, "janela", &chaveiro, &c2).map_err(|e| e.to_string());
+            let r = executar_escrito_com(&amb, &n, "janela", &chaveiro, &c2, &pedido)
+                .map_err(|e| e.to_string());
             let _ = tx.send(r);
         });
         self.em_curso.push(EmCursoEscrito {
@@ -978,6 +1414,272 @@ impl Escritos {
             cancelar,
             resposta: rx,
         });
+        true
+    }
+
+    /// O botão **Executar agora**: abre (ou fecha) o formulário do período e da Baixa forçada.
+    fn alternar_formulario(&mut self, d: &DetalheDoEscrito) {
+        if self
+            .formulario
+            .as_ref()
+            .is_some_and(|f| f.roteiro == d.nome)
+        {
+            self.formulario = None;
+            return;
+        }
+        if let Some(v) = d.versoes.iter().find(|v| v.estado == EstadoEscrito::Ativo) {
+            self.formulario = Some(FormularioDeExecucao::novo(&v.manifesto));
+        }
+    }
+
+    /// O formulário "Executar agora" do roteiro `d`, logo abaixo do cartão dele.
+    fn formulario_ui(
+        &mut self,
+        ui: &mut Ui,
+        d: &DetalheDoEscrito,
+        amb: Option<&Ambiente>,
+        chaveiro: Option<&Chaveiro>,
+    ) {
+        let Some(mut f) = self.formulario.clone().filter(|f| f.roteiro == d.nome) else {
+            return;
+        };
+        let Some(m) = d
+            .versoes
+            .iter()
+            .find(|v| v.estado == EstadoEscrito::Ativo)
+            .map(|v| v.manifesto.clone())
+        else {
+            self.formulario = None;
+            return;
+        };
+        let p = tema::paleta(ui.ctx());
+        let mut executar = false;
+        let mut fechar = false;
+        componentes::cartao(ui, |ui| {
+            componentes::titulo(ui, &format!("Executar agora: {}", d.nome), 15.0);
+            if f.tem_periodo() {
+                ui.label(
+                    RichText::new("Mês no formato AAAA-MM (como 2026-10) ou relativo ao mês corrente: 0 é este mês, -1 o mês passado. Vazio vale o padrão do roteiro.")
+                        .size(12.0)
+                        .color(p.tinta_suave),
+                );
+            }
+            for c in &mut f.campos {
+                ui.horizontal(|ui| match c.tipo {
+                    TipoDeParametro::Mes => {
+                        ui.label(nome_do_parametro(&c.nome));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut c.texto)
+                                .id_salt(("parametro-escrito", &d.nome, &c.nome))
+                                .hint_text(format!("padrão {}", c.padrao))
+                                .desired_width(110.0),
+                        );
+                    }
+                    TipoDeParametro::Booleano => {
+                        ui.checkbox(&mut c.marcado, nome_do_parametro(&c.nome));
+                    }
+                });
+            }
+            ui.checkbox(
+                &mut f.forcar,
+                "Forçar a baixa (baixar de novo o que o inventário já tem)",
+            );
+            if f.forcar {
+                ui.label(
+                    RichText::new("Pede uma confirmação antes de executar.")
+                        .size(12.0)
+                        .color(p.aviso),
+                );
+            }
+            ui.horizontal(|ui| {
+                executar = ui.button("Executar").clicked();
+                fechar = ui.button("Cancelar").clicked();
+            });
+        });
+        if fechar {
+            self.formulario = None;
+        } else if executar {
+            match f.pedido(&m, agora_unix()) {
+                Ok(pedido) if pedido.forcar => {
+                    self.baixa = Some(BaixaPendente {
+                        roteiro: d.nome.clone(),
+                        pedido,
+                        proposta: None,
+                    });
+                    self.formulario = None;
+                }
+                Ok(pedido) => {
+                    if self.executar(amb, chaveiro, &d.nome, pedido) {
+                        self.formulario = None;
+                    }
+                }
+                Err(e) => {
+                    self.aviso = Some((e, true));
+                    self.formulario = Some(f);
+                }
+            }
+        } else {
+            self.formulario = Some(f);
+        }
+    }
+
+    /// O diálogo da **Baixa forçada**: sem confirmar, nada executa.
+    fn baixa_ui(
+        &mut self,
+        ctx: &egui::Context,
+        banco: Option<&BancoDeRoteiros>,
+        amb: Option<&Ambiente>,
+        chaveiro: Option<&Chaveiro>,
+    ) {
+        let Some(b) = self.baixa.clone() else {
+            return;
+        };
+        let mut confirmar = false;
+        let mut desistir = false;
+        egui::Modal::new(egui::Id::new("baixa-forcada-escrita")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            componentes::titulo(ui, PERGUNTA_DA_BAIXA_FORCADA, 16.0);
+            ui.label(format!("Roteiro: {}", b.roteiro));
+            ui.label(format!("Período: {}", texto_do_periodo(&b.pedido)));
+            ui.add_space(4.0);
+            ui.label(EXPLICACAO_DA_BAIXA_FORCADA);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                confirmar = ui.button("Baixar de novo").clicked();
+                desistir = ui.button("Cancelar").clicked();
+            });
+        });
+        if desistir {
+            self.baixa = None;
+        } else if confirmar {
+            self.confirmar_baixa(banco, amb, chaveiro);
+        }
+    }
+
+    /// "Propostas do Claude": as Baixas forçadas que o MCP propôs. Só o usuário aceita (o que
+    /// abre o diálogo da Baixa forçada) ou recusa.
+    fn propostas_ui(&mut self, ui: &mut Ui, banco: Option<&BancoDeRoteiros>) {
+        if self.propostas.is_empty() {
+            return;
+        }
+        let p = tema::paleta(ui.ctx());
+        componentes::rotulo_de_secao(
+            ui,
+            &format!("Propostas do Claude ({})", self.propostas.len()),
+        );
+        let mut aceitar: Option<i64> = None;
+        let mut recusar: Option<i64> = None;
+        for prop in self.propostas.clone() {
+            let ativa = self.detalhes.iter().any(|d| {
+                d.nome == prop.roteiro && d.versoes.iter().any(|v| v.estado == EstadoEscrito::Ativo)
+            });
+            let pode = ativa && !self.rodando(&prop.roteiro);
+            componentes::cartao(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(prop.titulo()).strong());
+                    ui.label(
+                        RichText::new(format!(
+                            "proposta de {} em {}",
+                            prop.autor,
+                            data_hora_local(prop.criada_unix)
+                        ))
+                        .size(12.0)
+                        .color(p.tinta_suave),
+                    );
+                });
+                ui.label(
+                    RichText::new("Baixa forçada: baixar de novo mesmo que o conteúdo já esteja no inventário. Nada acontece até você aceitar.")
+                        .size(12.0)
+                        .color(p.tinta_suave),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(pode && banco.is_some(), egui::Button::new("Aceitar…"))
+                        .on_disabled_hover_text(
+                            "O roteiro precisa de versão ativa e sem execução em curso.",
+                        )
+                        .clicked()
+                    {
+                        aceitar = Some(prop.id);
+                    }
+                    if ui
+                        .add_enabled(banco.is_some(), egui::Button::new("Recusar"))
+                        .clicked()
+                    {
+                        recusar = Some(prop.id);
+                    }
+                });
+            });
+            ui.add_space(4.0);
+        }
+        let Some(b) = banco else {
+            return;
+        };
+        if let Some(id) = aceitar {
+            self.aceitar_proposta(b, id);
+        }
+        if let Some(id) = recusar {
+            self.recusar_proposta(b, id);
+        }
+    }
+
+    /// O usuário clicou em **Aceitar** numa proposta: abre o diálogo da Baixa forçada. Nada
+    /// executa nem se decide antes da confirmação do diálogo.
+    pub fn aceitar_proposta(&mut self, banco: &BancoDeRoteiros, id: i64) {
+        match banco.pedido_da_proposta_de_baixa(id, agora_unix()) {
+            Ok(pedido) => {
+                let roteiro = self
+                    .propostas
+                    .iter()
+                    .find(|x| x.id == id)
+                    .map(|x| x.roteiro.clone())
+                    .unwrap_or_default();
+                self.baixa = Some(BaixaPendente {
+                    roteiro,
+                    pedido,
+                    proposta: Some(id),
+                });
+            }
+            Err(e) => self.aviso = Some((e.to_string(), true)),
+        }
+    }
+
+    /// O usuário **recusou** uma proposta: nada é baixado.
+    pub fn recusar_proposta(&mut self, banco: &BancoDeRoteiros, id: i64) {
+        self.aviso = Some(
+            match banco.decidir_proposta_de_baixa(id, false, agora_unix()) {
+                Ok(()) => ("Proposta recusada; nada foi baixado.".to_owned(), false),
+                Err(e) => (e.to_string(), true),
+            },
+        );
+        self.reler(banco);
+    }
+
+    /// O usuário confirmou o diálogo da **Baixa forçada**: executa o roteiro com `forcar` e, se
+    /// a execução começou e veio de uma proposta, a marca como aceita.
+    pub fn confirmar_baixa(
+        &mut self,
+        banco: Option<&BancoDeRoteiros>,
+        amb: Option<&Ambiente>,
+        chaveiro: Option<&Chaveiro>,
+    ) {
+        let Some(b) = self.baixa.take() else {
+            return;
+        };
+        let mut pedido = b.pedido.clone();
+        pedido.forcar = true;
+        if self.executar(amb, chaveiro, &b.roteiro, pedido)
+            && let (Some(id), Some(banco)) = (b.proposta, banco)
+            && let Err(e) = banco.decidir_proposta_de_baixa(id, true, agora_unix())
+        {
+            self.aviso = Some((
+                format!("A baixa começou, mas não anotei a proposta: {e}"),
+                true,
+            ));
+        }
+        if let Some(banco) = banco {
+            self.reler(banco);
+        }
     }
 
     /// Pede o cancelamento de tudo o que roda (ao fechar a janela).
@@ -1019,17 +1721,21 @@ impl Escritos {
             );
             return;
         }
+        self.propostas_ui(ui, banco);
         let detalhes = self.detalhes.clone();
         for d in &detalhes {
             let Some(r) = ResumoDeEscrito::de(d) else {
                 continue;
             };
-            self.cartao(ui, d, &r, amb, chaveiro);
+            let r = r.com_suspensao(self.suspensas.get(&d.nome).cloned());
+            self.cartao(ui, d, &r, banco);
+            self.formulario_ui(ui, d, amb, chaveiro);
             if self.selecionado.as_deref() == Some(d.nome.as_str()) {
                 self.detalhe(ui, d, banco);
             }
             ui.add_space(6.0);
         }
+        self.baixa_ui(ui.ctx(), banco, amb, chaveiro);
     }
 
     fn cartao(
@@ -1037,11 +1743,11 @@ impl Escritos {
         ui: &mut Ui,
         d: &DetalheDoEscrito,
         r: &ResumoDeEscrito,
-        amb: Option<&Ambiente>,
-        chaveiro: Option<&Chaveiro>,
+        banco: Option<&BancoDeRoteiros>,
     ) {
         let p = tema::paleta(ui.ctx());
         let rodando = self.rodando(&r.nome);
+        let mut retomar = false;
         let (fundo, cor) = match r.estado_da_ultima {
             EstadoEscrito::Ativo => (p.sucesso_sutil, p.sucesso),
             EstadoEscrito::Testado => (p.info_sutil, p.info),
@@ -1076,7 +1782,7 @@ impl Escritos {
                         )
                         .clicked()
                     {
-                        self.executar(amb, chaveiro, &r.nome);
+                        self.alternar_formulario(d);
                     }
                     if ui.button("Detalhes").clicked() {
                         if self.selecionado.as_deref() == Some(r.nome.as_str()) {
@@ -1102,14 +1808,37 @@ impl Escritos {
                     .size(12.5)
                     .color(p.tinta_suave),
             );
+            if let Some(susp) = &r.suspensa {
+                componentes::aviso(
+                    ui,
+                    "error",
+                    &texto_da_suspensao(susp),
+                    p.perigo_sutil,
+                    p.borda,
+                    p.perigo,
+                );
+                if ui
+                    .add_enabled(banco.is_some(), egui::Button::new("Retomar agenda"))
+                    .on_hover_text(
+                        "Só você retoma. Faça isso depois de conferir a senha e o portal.",
+                    )
+                    .clicked()
+                {
+                    retomar = true;
+                }
+            }
             match (
                 self.historico.get(&r.nome).and_then(|h| h.first()),
                 self.ultimos.get(&r.nome),
             ) {
                 (Some(e), _) => {
+                    let descartados = self.descartados.get(&e.id).copied().unwrap_or(0);
                     ui.label(
-                        RichText::new(format!("Última execução: {}", linha_da_execucao(e)))
-                            .color(cor_da_execucao(&p, e.estado)),
+                        RichText::new(format!(
+                            "Última execução: {}",
+                            linha_da_execucao_com(e, descartados)
+                        ))
+                        .color(cor_da_execucao(&p, e.estado)),
                     );
                 }
                 (None, Some(u)) => {
@@ -1121,6 +1850,13 @@ impl Escritos {
                 }
             }
         });
+        if retomar && let Some(b) = banco {
+            self.aviso = Some(match retomar_agenda(b, &r.nome) {
+                Ok(t) => (t, false),
+                Err(e) => (e, true),
+            });
+            self.reler(b);
+        }
     }
 
     fn detalhe(&mut self, ui: &mut Ui, d: &DetalheDoEscrito, banco: Option<&BancoDeRoteiros>) {
@@ -1221,9 +1957,12 @@ impl Escritos {
                 ui.label(RichText::new("Nenhuma execução ainda.").color(p.tinta_suave));
             }
             for x in &execucoes {
-                let titulo = RichText::new(linha_da_execucao(x))
-                    .size(12.0)
-                    .color(cor_da_execucao(&p, x.estado));
+                let titulo = RichText::new(linha_da_execucao_com(
+                    x,
+                    self.descartados.get(&x.id).copied().unwrap_or(0),
+                ))
+                .size(12.0)
+                .color(cor_da_execucao(&p, x.estado));
                 let aberto = egui::CollapsingHeader::new(titulo)
                     .id_salt(("execucao-escrita", x.id))
                     .show(ui, |ui| match self.eventos.get(&x.id) {
@@ -1440,7 +2179,33 @@ pub fn linhas_do_manifesto(m: &Manifesto) -> Vec<String> {
         "movimenta dinheiro: {}",
         if m.movimenta_dinheiro { "sim" } else { "não" }
     ));
-    l.push(format!("agenda: {}", texto_da_agenda(m.agenda_horas)));
+    if m.agenda.is_empty() {
+        l.push(format!("agenda: {}", texto_da_agenda(m.agenda_horas)));
+    } else {
+        l.push("agenda (UTC−3):".to_owned());
+        l.extend(
+            m.agenda
+                .iter()
+                .map(|e| format!("  · {}", texto_da_entrada(e))),
+        );
+    }
+    if !m.parametros.is_empty() {
+        let ps: Vec<String> = m
+            .parametros
+            .iter()
+            .map(|p| {
+                let tipo = match p.tipo {
+                    TipoDeParametro::Mes => "mês",
+                    TipoDeParametro::Booleano => "sim ou não",
+                };
+                let padrao = p.padrao.as_ref().map_or(String::new(), |v| {
+                    format!(", padrão {}", valor_do_parametro(v))
+                });
+                format!("{} ({tipo}{padrao})", nome_do_parametro(&p.nome))
+            })
+            .collect();
+        l.push(format!("parâmetros: {}", ps.join(", ")));
+    }
     l
 }
 
@@ -1965,5 +2730,456 @@ mod testes {
         }
         assert!(e.pedido.is_some(), "sem clique, o pedido continua aberto");
         assert_eq!(e.aguardando.len(), 1, "a demonstração mostra a pausa");
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Agenda, suspensão, período e Baixa forçada (spec 18)
+    // ----------------------------------------------------------------------------------
+
+    fn entrada(
+        horarios: &[&str],
+        dias: Option<&[u8]>,
+        params: &[(&str, ValorBruto)],
+    ) -> EntradaDeAgenda {
+        EntradaDeAgenda {
+            horarios: horarios.iter().map(|h| (*h).to_owned()).collect(),
+            dias_do_mes: dias.map(<[u8]>::to_vec),
+            parametros: params
+                .iter()
+                .map(|(n, v)| ((*n).to_owned(), v.clone()))
+                .collect(),
+        }
+    }
+
+    fn texto(t: &str) -> ValorBruto {
+        ValorBruto::Texto(t.to_owned())
+    }
+
+    fn declarado(
+        nome: &str,
+        tipo: TipoDeParametro,
+        padrao: Option<ValorBruto>,
+    ) -> sbf_roteiros::parametros::ParametroDeclarado {
+        sbf_roteiros::parametros::ParametroDeclarado {
+            nome: nome.to_owned(),
+            tipo,
+            padrao,
+        }
+    }
+
+    /// Um manifesto com `de`, `ate` e `forcar` declarados.
+    fn manifesto_com_periodo(nome: &str) -> Manifesto {
+        let mut m = manifesto(nome, Mfa::Nenhum);
+        m.agenda_horas = None;
+        m.parametros = vec![
+            declarado("de", TipoDeParametro::Mes, Some(texto("0"))),
+            declarado("ate", TipoDeParametro::Mes, Some(texto("0"))),
+            declarado(
+                "forcar",
+                TipoDeParametro::Booleano,
+                Some(ValorBruto::Booleano(false)),
+            ),
+        ];
+        m
+    }
+
+    /// Um banco com a versão 1 de `manifesto_com_periodo` já ativa.
+    fn banco_ativo(nome: &str) -> BancoDeRoteiros {
+        let b = BancoDeRoteiros::em_memoria().expect("banco");
+        let m = manifesto_com_periodo(nome);
+        let n = b
+            .importar_escrito(
+                &m,
+                "navegador.registrar(\"oi\")",
+                &AutorEscrito::Usuario,
+                "",
+            )
+            .expect("importa")
+            .numero;
+        b.marcar_testado(
+            nome,
+            n,
+            &sbf_roteiros::banco::ResultadoDoTeste {
+                passou: true,
+                resumo: "ok".into(),
+            },
+        )
+        .expect("testa");
+        let c = confirmacao_da_janela(
+            &Confirmacao::texto_de_ativar(nome, n),
+            &Confirmacao::texto_de_ativar(nome, n),
+        )
+        .expect("confirma");
+        b.ativar(nome, n, &c).expect("ativa");
+        b
+    }
+
+    #[test]
+    fn a_agenda_vira_texto_legivel() {
+        let todo_dia = entrada(&["04:00", "12:00", "20:00"], None, &[]);
+        assert_eq!(
+            texto_da_entrada(&todo_dia),
+            "todo dia às 04:00, 12:00 e 20:00"
+        );
+        let com_dias = entrada(
+            &["04:00", "12:00", "20:00"],
+            Some(&[20, 21, 30, 1]),
+            &[("ate", texto("0")), ("de", texto("-1"))],
+        );
+        assert_eq!(
+            texto_da_entrada(&com_dias),
+            "dias 20, 21, 30 e 1 às 04:00, 12:00 e 20:00, com de=-1 e até=0"
+        );
+        assert_eq!(
+            texto_da_entrada(&entrada(&["06:30", "18:00"], Some(&[5]), &[])),
+            "dia 5 às 06:30 e 18:00"
+        );
+        assert_eq!(
+            texto_da_entrada(&entrada(&["01:00"], None, &[])),
+            "todo dia à 01:00"
+        );
+        assert_eq!(
+            texto_da_entrada(&entrada(
+                &["08:00"],
+                None,
+                &[("forcar", ValorBruto::Booleano(true))]
+            )),
+            "todo dia às 08:00, com forçar=sim"
+        );
+    }
+
+    #[test]
+    fn a_agenda_do_manifesto_cobre_entradas_e_o_a_cada_n_horas_antigo() {
+        let mut m = manifesto("r", Mfa::Nenhum);
+        assert_eq!(texto_da_agenda_do_manifesto(&m), "a cada 7 dias");
+        m.agenda_horas = None;
+        assert_eq!(texto_da_agenda_do_manifesto(&m), "só pelo botão");
+        m.agenda = vec![
+            entrada(&["04:00"], Some(&[1]), &[]),
+            entrada(&["12:00", "20:00"], None, &[]),
+        ];
+        assert_eq!(
+            texto_da_agenda_do_manifesto(&m),
+            "dia 1 às 04:00; todo dia às 12:00 e 20:00"
+        );
+    }
+
+    #[test]
+    fn o_resumo_e_o_manifesto_na_tela_mostram_a_agenda_e_os_parametros() {
+        let b = BancoDeRoteiros::em_memoria().expect("banco");
+        let mut m = manifesto_com_periodo("contracheque-exemplo");
+        m.agenda = vec![entrada(
+            &["04:00", "12:00", "20:00"],
+            Some(&[20, 21, 30, 1]),
+            &[("de", texto("-1")), ("ate", texto("0"))],
+        )];
+        b.importar_escrito(&m, "navegador.registrar(\"a\")", &AutorEscrito::Usuario, "")
+            .expect("importa");
+        let d = b.mostrar("contracheque-exemplo").expect("mostra");
+        let r = ResumoDeEscrito::de(&d).expect("resumo");
+        assert_eq!(
+            r.agenda,
+            "dias 20, 21, 30 e 1 às 04:00, 12:00 e 20:00, com de=-1 e até=0"
+        );
+        assert!(
+            r.linha_de_metadados()
+                .contains("agenda: dias 20, 21, 30 e 1")
+        );
+        let linhas = linhas_do_manifesto(&m);
+        assert!(linhas.iter().any(|l| l == "agenda (UTC−3):"), "{linhas:?}");
+        assert!(
+            linhas
+                .iter()
+                .any(|l| l.contains("dias 20, 21, 30 e 1 às 04:00")),
+            "{linhas:?}"
+        );
+        assert!(
+            linhas
+                .iter()
+                .any(|l| l == "parâmetros: de (mês, padrão 0), até (mês, padrão 0), forçar (sim ou não, padrão não)"),
+            "{linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_hora_local_usa_o_fuso_do_usuario() {
+        assert_eq!(data_hora_local(1_795_608_000), "2026-11-25 09:00");
+        // 21h do dia 30 em UTC−3 é 00h do dia 1 em UTC: continua dia 30
+        assert_eq!(data_hora_local(1_796_083_200), "2026-11-30 21:00");
+        assert_eq!(data_hora_local(0), "1969-12-31 21:00");
+    }
+
+    #[test]
+    fn a_suspensao_mostra_data_e_motivo() {
+        let t = texto_da_suspensao(&SuspensaoDaAgenda {
+            desde_unix: 1_795_608_000,
+            motivo: "o portal recusou a senha.".to_owned(),
+        });
+        assert!(t.contains("desde 2026-11-25 09:00 (UTC−3)"), "{t}");
+        assert!(t.contains("o portal recusou a senha."), "{t}");
+        assert!(t.contains("Executar agora continua valendo"), "{t}");
+        let vazio = texto_da_suspensao(&SuspensaoDaAgenda {
+            desde_unix: 0,
+            motivo: "  ".to_owned(),
+        });
+        assert!(vazio.contains("o site recusou a entrada"), "{vazio}");
+    }
+
+    #[test]
+    fn retomar_agenda_chama_o_banco_e_so_uma_vez() {
+        let b = banco_ativo("contracheque-exemplo");
+        b.suspender_agenda_escrita(
+            "contracheque-exemplo",
+            "o portal recusou a senha",
+            1_795_608_000,
+        )
+        .expect("suspende");
+        let mut e = Escritos::default();
+        e.reler(&b);
+        assert_eq!(e.suspensas.len(), 1);
+        let r = ResumoDeEscrito::de(&e.detalhes[0])
+            .expect("resumo")
+            .com_suspensao(e.suspensas.get("contracheque-exemplo").cloned());
+        assert!(r.suspensa.is_some());
+        let msg = retomar_agenda(&b, "contracheque-exemplo").expect("retoma");
+        assert!(msg.contains("agenda retomada"), "{msg}");
+        assert!(
+            b.agenda_suspensa_escrita("contracheque-exemplo")
+                .unwrap()
+                .is_none()
+        );
+        // o histórico do roteiro guarda a retomada
+        let d = b.mostrar("contracheque-exemplo").unwrap();
+        assert!(
+            d.eventos.iter().any(|ev| ev.3 == "agenda_retomada"),
+            "{:?}",
+            d.eventos
+        );
+        let de_novo = retomar_agenda(&b, "contracheque-exemplo").expect("já retomada");
+        assert!(de_novo.contains("já não estava suspensa"), "{de_novo}");
+        assert!(retomar_agenda(&b, "nao-existe").is_err());
+        e.reler(&b);
+        assert!(e.suspensas.is_empty());
+    }
+
+    #[test]
+    fn o_historico_mostra_o_descartado_ja_no_inventario() {
+        let b = banco_ativo("contracheque-exemplo");
+        let id = b
+            .iniciar_execucao_escrita("contracheque-exemplo", 1, "agenda")
+            .expect("inicia");
+        b.evento_escrito(id, "download", "demonstrativo.pdf")
+            .unwrap();
+        b.evento_escrito(
+            id,
+            "descartado",
+            "demonstrativo.pdf: já estava no inventário",
+        )
+        .unwrap();
+        b.finalizar_escrita(id, EstadoDaExecucao::Concluida, None, 1, 0)
+            .unwrap();
+        let mut e = Escritos::default();
+        e.reler(&b);
+        assert_eq!(e.descartados.get(&id), Some(&1));
+        let x = &e.historico["contracheque-exemplo"][0];
+        let linha = linha_da_execucao_com(x, e.descartados[&id]);
+        assert!(linha.contains("1 baixado, 0 novos"), "{linha}");
+        assert!(
+            linha.contains("1 descartado (já estava no inventário)"),
+            "{linha}"
+        );
+        let ev = b.eventos_escritos(id).unwrap();
+        let t = linha_do_evento_da_execucao(&ev[1]);
+        assert!(
+            t.ends_with("descartado: demonstrativo.pdf: já estava no inventário"),
+            "{t}"
+        );
+        assert_eq!(
+            texto_dos_descartados(3),
+            "3 descartados (já estavam no inventário)"
+        );
+    }
+
+    #[test]
+    fn o_relatorio_diz_descartados_e_entrada_recusada() {
+        let rel = |descartados, recusada: Option<&str>| RelatorioEscrito {
+            fim: Fim::Concluida,
+            baixados: 3,
+            novos: 1,
+            descartados,
+            registros: vec![],
+            entrada_recusada: recusada.map(str::to_owned),
+        };
+        let (t, erro) = texto_do_relatorio(&rel(2, None));
+        assert!(!erro);
+        assert_eq!(
+            t,
+            "concluída: 3 baixados, 1 novo no inventário, 2 descartados (já estavam no inventário)"
+        );
+        let (t, erro) = texto_do_relatorio(&rel(0, Some("o portal recusou a senha")));
+        assert!(erro);
+        assert!(t.contains("agenda do roteiro foi suspensa"), "{t}");
+    }
+
+    #[test]
+    fn o_formulario_pede_so_os_parametros_do_manifesto_e_confere_o_periodo() {
+        let m = manifesto_com_periodo("contracheque-exemplo");
+        let agora = 1_795_608_000; // 2026-11-25
+        let mut f = FormularioDeExecucao::novo(&m);
+        // `forcar` tem a opção própria: só `de` e `ate` viram campos
+        let nomes: Vec<_> = f.campos.iter().map(|c| c.nome.as_str()).collect();
+        assert_eq!(nomes, ["de", "ate"]);
+        assert!(f.tem_periodo());
+        // vazio vale o padrão do roteiro: nada entregue, sem forçar
+        let p = f.pedido(&m, agora).expect("padrão");
+        assert!(p.entregues.is_empty() && !p.forcar);
+        assert_eq!(texto_do_periodo(&p), "período padrão do roteiro");
+        // absoluto e relativo, com espaços
+        f.campos[0].texto = " 2026-10 ".to_owned();
+        f.campos[1].texto = "0".to_owned();
+        let p = f.pedido(&m, agora).expect("absoluto e relativo");
+        assert_eq!(p.entregues["de"], texto("2026-10"));
+        assert_eq!(p.entregues["ate"], texto("0"));
+        assert_eq!(texto_do_periodo(&p), "de 2026-10 até 0");
+        // a opção Forçar a baixa vira o pedido
+        f.forcar = true;
+        assert!(f.pedido(&m, agora).expect("forçar").forcar);
+        // mesma regra do manifesto
+        for ruim in ["2026-13", "+1", "1", "abc", "2026-1"] {
+            f.campos[0].texto = ruim.to_owned();
+            let e = f.pedido(&m, agora).unwrap_err();
+            assert!(e.contains("AAAA-MM"), "{ruim}: {e}");
+        }
+        f.campos[0].texto = "2026-11".to_owned();
+        f.campos[1].texto = "2026-10".to_owned();
+        let e = f.pedido(&m, agora).unwrap_err();
+        assert!(e.contains("depois de"), "{e}");
+        f.campos[0].texto = "-70".to_owned();
+        f.campos[1].texto = "0".to_owned();
+        let e = f.pedido(&m, agora).unwrap_err();
+        assert!(e.contains("60 meses"), "{e}");
+    }
+
+    #[test]
+    fn roteiro_sem_parametros_so_oferece_forcar_a_baixa() {
+        let m = manifesto("r", Mfa::Nenhum);
+        let mut f = FormularioDeExecucao::novo(&m);
+        assert!(f.campos.is_empty() && !f.tem_periodo());
+        f.forcar = true;
+        let p = f.pedido(&m, 0).expect("forçar sem período");
+        assert!(p.forcar && p.entregues.is_empty());
+    }
+
+    #[test]
+    fn a_proposta_so_vira_baixa_depois_da_confirmacao_e_nao_decide_sem_executar() {
+        let b = banco_ativo("contracheque-exemplo");
+        let (proposta, _) = b
+            .propor_baixa_forcada(
+                "contracheque-exemplo",
+                Some("-1"),
+                Some("0"),
+                "mcp",
+                agora_unix(),
+            )
+            .expect("propõe");
+        let mut e = Escritos::default();
+        e.reler(&b);
+        assert_eq!(e.propostas.len(), 1);
+        assert_eq!(
+            e.propostas[0].titulo(),
+            "Baixar de novo: contracheque-exemplo -1 a 0"
+        );
+        // aceitar só abre o diálogo: nada executa, a proposta segue pendente
+        e.aceitar_proposta(&b, proposta.id);
+        let pend = e.baixa.clone().expect("diálogo aberto");
+        assert_eq!(pend.proposta, Some(proposta.id));
+        assert!(pend.pedido.forcar);
+        assert_eq!(texto_do_periodo(&pend.pedido), "de -1 até 0");
+        assert!(b.historico_escrito(None, 5).unwrap().is_empty());
+        assert_eq!(
+            b.propostas_de_baixa_pendentes(agora_unix()).unwrap().len(),
+            1
+        );
+        // confirmar sem navegador (a demonstração): não executa e a proposta continua pendente
+        e.confirmar_baixa(Some(&b), None, None);
+        assert!(e.baixa.is_none());
+        assert!(
+            e.aviso
+                .as_ref()
+                .is_some_and(|(t, _)| t.contains("demonstração"))
+        );
+        assert!(e.em_curso.is_empty());
+        assert!(b.historico_escrito(None, 5).unwrap().is_empty());
+        assert_eq!(
+            b.propostas_de_baixa_pendentes(agora_unix()).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn recusar_a_proposta_nao_baixa_nada() {
+        let b = banco_ativo("contracheque-exemplo");
+        let (proposta, _) = b
+            .propor_baixa_forcada("contracheque-exemplo", None, None, "mcp", agora_unix())
+            .expect("propõe");
+        let mut e = Escritos::default();
+        e.reler(&b);
+        e.recusar_proposta(&b, proposta.id);
+        assert!(e.propostas.is_empty());
+        assert!(e.baixa.is_none() && e.em_curso.is_empty());
+        assert!(b.historico_escrito(None, 5).unwrap().is_empty());
+        assert!(
+            e.aviso
+                .as_ref()
+                .is_some_and(|(t, erro)| t.contains("recusada") && !erro)
+        );
+    }
+
+    #[test]
+    fn a_pergunta_da_baixa_forcada_e_a_combinada() {
+        assert_eq!(
+            PERGUNTA_DA_BAIXA_FORCADA,
+            "Baixar de novo mesmo que o conteúdo já esteja no inventário?"
+        );
+    }
+
+    #[test]
+    fn a_secao_desenha_formulario_proposta_e_dialogo_sem_travar() {
+        let ctx = egui::Context::default();
+        crate::tema::instalar_fontes(&ctx);
+        crate::tema::aplicar(&ctx, "claro");
+        let mut e = Escritos::default();
+        e.demonstracao();
+        assert_eq!(e.propostas.len(), 1);
+        assert_eq!(e.suspensas.len(), 1);
+        let ativo = e.detalhes[0].versoes[0].manifesto.clone();
+        let mut f = FormularioDeExecucao::novo(&ativo);
+        f.forcar = true;
+        f.campos[0].texto = "-1".to_owned();
+        e.formulario = Some(f);
+        e.baixa = Some(BaixaPendente {
+            roteiro: "contracheque-exemplo".to_owned(),
+            pedido: sbf_roteiros::proposta_baixa::pedido_de_periodo(Some("-1"), Some("0"), true),
+            proposta: None,
+        });
+        for _ in 0..2 {
+            let entrada = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let mut saida = ctx.run_ui(entrada, |ui| {
+                e.sua_vez_ui(ui, None);
+                e.ui(ui, None, None, None);
+            });
+            saida.textures_delta.clear();
+        }
+        assert!(
+            e.formulario.is_some(),
+            "sem clique, o formulário continua aberto"
+        );
+        assert!(e.baixa.is_some(), "sem clique, o diálogo continua aberto");
     }
 }
