@@ -8,17 +8,24 @@
 //! - `listar_roteiros_escritos` e `ver_roteiro_escrito`: só leitura.
 //!
 //! Não existe ferramenta que ative, desative, execute ou teste. Ativar é só no terminal
-//! interativo (`sbf roteiros escrito ativar`, com confirmação digitada) ou na janela; o tipo
-//! `Confirmacao` do banco não se constrói sem terminal, e este módulo nem o importa.
+//! interativo (`sbf roteiros escrito ativar`, com confirmação digitada) ou na janela. Quem
+//! constrói a prova de confirmação do banco (o tipo `Confirmacao`) são só o terminal e a janela;
+//! o MCP, o worker e a IA não a constroem. Isso é **convenção verificada por teste**, não por
+//! tipo: `crates/sbf-roteiros/tests/autoridade.rs` falha se qualquer fonte deste crate (ou do
+//! worker e da IA) a citar, ou chamar `marcar_testado`, `ativar` ou `desativar` de roteiro
+//! escrito. Para quem o MCP propôs, o usuário ainda digita também o host principal ao ativar.
 //!
 //! O catálogo é o `roteiros.sqlite` da **pasta de dados do app**, fora do cofre. Antes da
 //! primeira escrita da sessão ele é copiado para `<cofre>/backups/mcp/` (ver
-//! [`crate::backup`]), se já existir; se o backup falha, a escrita é recusada.
+//! [`crate::backup`]), se já existir; se o backup falha, a escrita é recusada. **A cópia é do
+//! arquivo inteiro**: leva os manifestos (hosts, rótulos do chaveiro, remetente do e-mail), os
+//! fontes Luau e os eventos de todas as versões. Não leva senha nem CPF (o banco só guarda
+//! rótulos), mas o backup é tão sensível quanto o catálogo e fica só no cofre.
 //!
 //! Como nas outras ferramentas, cada chamada grava uma linha em `saida_ia` (destinatário
 //! `mcp:<ferramenta>`), sem o conteúdo. A saída não passa pelo mascaramento de texto: o fonte
 //! e o manifesto só guardam **rótulos** do chaveiro (nunca senha, CPF ou código), e mascarar
-//! um script o corromperia.
+//! um fonte Luau o corromperia.
 
 use std::path::PathBuf;
 

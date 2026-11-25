@@ -83,6 +83,25 @@ pub const PALAVRA: &[&str] = &[
     "financiamentos",
     "assinar",
     "assine",
+    // efeito destrutivo ou irreversível (um roteiro só consulta e baixa)
+    "excluir",
+    "exclua",
+    "remover",
+    "remova",
+    "desconectar",
+    "desconecte",
+    "revogar",
+    "revogue",
+    "apagar",
+    "apague",
+    "doar",
+    "doacao",
+    "doacoes",
+    "delete",
+    "remove",
+    "disconnect",
+    "revoke",
+    "order",
 ];
 
 /// Frases de **consulta** que contêm um termo da lista e mesmo assim passam: o comprovante de
@@ -135,6 +154,8 @@ pub const FRASES: &[&str] = &[
     "debito automatico",
     "debito em conta automatico",
     "cadastrar debito",
+    "confirmar pagamento",
+    "confirm payment",
 ];
 
 /// O tamanho máximo de cada campo examinado (um cartão clicável com a página inteira dentro
@@ -142,11 +163,27 @@ pub const FRASES: &[&str] = &[
 pub const LIMITE_DO_CAMPO: usize = 300;
 
 /// Quebra `texto` em palavras minúsculas, sem acento, separando `camelCase`.
+///
+/// Um texto que passa de [`LIMITE_DO_CAMPO`] é examinado pela **cabeça e pela cauda** (os
+/// primeiros e os últimos `LIMITE_DO_CAMPO` caracteres): quem esconde "Pagar" no fim de um
+/// texto comprido não escapa só por ter enchido o começo.
 #[must_use]
 pub fn palavras(texto: &str) -> Vec<String> {
-    let mut separado = String::with_capacity(texto.len() + 8);
+    let total = texto.chars().count();
+    let examinado: Vec<char> = if total > LIMITE_DO_CAMPO {
+        // o espaço no meio impede que cabeça e cauda formem uma palavra que não existe
+        texto
+            .chars()
+            .take(LIMITE_DO_CAMPO)
+            .chain(std::iter::once(' '))
+            .chain(texto.chars().skip(total - LIMITE_DO_CAMPO))
+            .collect()
+    } else {
+        texto.chars().collect()
+    };
+    let mut separado = String::with_capacity(examinado.len() + 8);
     let mut anterior: Option<char> = None;
-    for c in texto.chars().take(LIMITE_DO_CAMPO) {
+    for c in examinado {
         if let Some(a) = anterior
             && a.is_lowercase()
             && c.is_uppercase()
@@ -260,14 +297,11 @@ impl Politica for ListaDeBloqueio {
 }
 
 /// O texto (normalizado: sem acento, minúsculas, por palavras) que marca o botão de "atualizar
-/// conexão" do agregador (o Meu Pluggy). É um conjunto **fechado e exato**: "Atualizar dados
-/// cadastrais" não está nele (e a lista de bloqueio o barra).
-pub const ATUALIZAR_CONEXAO: &[&str] = &[
-    "atualizar",
-    "sincronizar",
-    "atualizar conexao",
-    "reconectar",
-];
+/// conexão" do agregador (o Meu Pluggy). É um conjunto **fechado e exato** de DUAS palavras:
+/// "Atualizar dados cadastrais" não está nele (e a lista de bloqueio o barra). "Reconectar" e
+/// "atualizar conexão" ficam de fora de propósito: reconectar ou reautorizar no banco é do
+/// usuário (decisão do projeto, ADR-022).
+pub const ATUALIZAR_CONEXAO: &[&str] = &["atualizar", "sincronizar"];
 
 /// O texto do elemento é exatamente um dos de [`ATUALIZAR_CONEXAO`]?
 #[must_use]
@@ -284,7 +318,7 @@ pub fn e_atualizar_conexao(candidato: &Candidato) -> Option<String> {
 ///
 /// - `consulta`: a lista normal, e o botão de atualizar conexão **não** é liberado (barrado);
 /// - `atualizar_conexao`: a lista normal, com uma exceção nomeada: o elemento cujo texto é
-///   exatamente "atualizar", "sincronizar", "atualizar conexão" ou "reconectar" passa. Os
+///   exatamente "atualizar" ou "sincronizar" passa. Os
 ///   outros campos dele (rótulo, destino, nome) continuam sendo conferidos, e pagar,
 ///   transferir, contratar e alterar cadastro seguem barrados.
 #[must_use]
@@ -475,6 +509,126 @@ mod testes {
         assert!(!motivo.contains("1234"));
         assert!(!motivo.contains("9999"));
         assert!(motivo.contains("pagar"));
+    }
+
+    #[test]
+    fn termos_destrutivos_em_portugues_e_ingles_sao_bloqueados() {
+        for texto in [
+            "Excluir",
+            "Excluir documento",
+            "Exclua",
+            "Remover",
+            "Remover conexão",
+            "Desconectar",
+            "Desconectar conta",
+            "Revogar acesso",
+            "Apagar",
+            "Apagar tudo",
+            "Cancelar conta",
+            "Encerrar conta",
+            "Confirmar pagamento",
+            "Enviar dinheiro",
+            "Doar",
+            "Delete",
+            "Delete file",
+            "Remove",
+            "Disconnect",
+            "Revoke access",
+            "Confirm payment",
+            "Order",
+            "Order now",
+            "Buy",
+        ] {
+            assert!(bloqueia("texto", texto), "deveria bloquear: {texto}");
+        }
+        assert!(bloqueia("id", "btnExcluir"));
+        assert!(bloqueia("name", "delete-account"));
+        assert!(bloqueia("destino", "/conexoes/desconectar"));
+        assert!(bloqueia("destino", "/api/revoke?id=1"));
+    }
+
+    #[test]
+    fn leitura_legitima_continua_passando_com_os_termos_novos() {
+        for texto in [
+            "Baixar",
+            "Baixar extrato",
+            "Baixar contracheque",
+            "Ver",
+            "Ver detalhes",
+            "Consultar",
+            "Atualizar",
+            "Sincronizar",
+            "Ordenar por data",
+            "Movimentações",
+            "Remoção de ruído",
+            // "excluídos" é um rótulo, não o verbo "excluir"
+            "Documentos excluídos",
+        ] {
+            assert!(!bloqueia("texto", texto), "não deveria bloquear: {texto}");
+        }
+        assert!(!bloqueia("destino", "/extratos/2026-10.pdf"));
+        assert!(!bloqueia("id", "btnBaixar"));
+    }
+
+    #[test]
+    fn o_fim_de_um_texto_comprido_tambem_e_examinado() {
+        let enchimento = "Consultar saldo e extrato. ".repeat(40);
+        assert!(enchimento.chars().count() > LIMITE_DO_CAMPO * 2);
+        // o termo está depois do limite: antes passava, agora o fim é examinado
+        let no_fim = format!("{enchimento}Pagar agora");
+        assert!(bloqueia("texto", &no_fim));
+        let no_meio = format!(
+            "{}Pagar agora{}",
+            "x ".repeat(LIMITE_DO_CAMPO),
+            "y ".repeat(LIMITE_DO_CAMPO)
+        );
+        // o meio fica de fora de propósito (um cartão com a página dentro não bloqueia por uma
+        // palavra perdida no meio)
+        assert!(!bloqueia("texto", &no_meio));
+        // e a emenda entre cabeça e cauda não forma palavra nova
+        let emenda = format!(
+            "{}pag{}ar",
+            "x ".repeat(LIMITE_DO_CAMPO / 2 - 1),
+            "y".repeat(LIMITE_DO_CAMPO * 2)
+        );
+        assert!(!bloqueia("texto", &emenda));
+        assert!(!bloqueia("texto", &enchimento));
+    }
+
+    #[test]
+    fn so_atualizar_e_sincronizar_exatos_liberam_a_classe_atualizar_conexao() {
+        use crate::manifesto::Classe;
+        let texto = |t: &str| Candidato::com(&[("texto", t)]);
+        for t in ["Atualizar", "atualizar", "ATUALIZAR", "Sincronizar"] {
+            assert!(
+                avaliar_para_classe(&texto(t), Classe::AtualizarConexao).is_none(),
+                "{t}"
+            );
+            // na classe consulta o mesmo botão é barrado
+            assert!(
+                avaliar_para_classe(&texto(t), Classe::Consulta).is_some(),
+                "{t}"
+            );
+        }
+        // reconectar e "atualizar conexão" saíram do conjunto: não são exceção; "reconectar"
+        // não casa com a lista base e passa como qualquer botão, "atualizar conexão" também
+        assert!(e_atualizar_conexao(&texto("Reconectar")).is_none());
+        assert!(e_atualizar_conexao(&texto("Atualizar conexão")).is_none());
+        assert!(e_atualizar_conexao(&texto("Atualizar conexao")).is_none());
+        for t in [
+            "Atualizar dados cadastrais",
+            "Atualizar e pagar",
+            "Sincronizar e pagar",
+        ] {
+            assert!(
+                avaliar_para_classe(&texto(t), Classe::AtualizarConexao).is_some(),
+                "{t}"
+            );
+        }
+        // o destino de pagamento continua barrando o texto exato
+        let c = Candidato::com(&[("texto", "Atualizar"), ("destino", "/pagamento/novo")]);
+        assert!(avaliar_para_classe(&c, Classe::AtualizarConexao).is_some());
+        assert_eq!(ATUALIZAR_CONEXAO, &["atualizar", "sincronizar"]);
     }
 
     #[test]
