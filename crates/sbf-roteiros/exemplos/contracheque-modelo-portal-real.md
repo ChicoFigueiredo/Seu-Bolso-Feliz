@@ -12,11 +12,13 @@ No manifesto (`.json`):
 - `hosts` e `url_inicial`: o nome do servidor do portal (`<HOST-DO-PORTAL>`) e a página de
   entrada (`https://<HOST-DO-PORTAL>/<CAMINHO-DA-ENTRADA>`). Só `https`; o roteiro não navega
   nem digita segredo fora de `hosts`. Se o login mora em outro host, ponha os dois.
-- `rotulo_senha` e `rotulo_cpf`: os rótulos do chaveiro onde você guardou a senha e o CPF
-  (`<ROTULO-DA-SENHA-NO-CHAVEIRO>`). O roteiro só cita o rótulo.
+- `rotulo_senha`: o rótulo do chaveiro onde você guardou a senha
+  (`<ROTULO-DA-SENHA-NO-CHAVEIRO>`). O roteiro só cita o rótulo. O CPF não precisa de rótulo:
+  `navegador.preencher_cpf` usa o CPF único do chaveiro (`rotulo_cpf` é campo opcional
+  reservado, sem efeito nesta fatia).
 - `mfa`: `email` com o `remetente` exato que envia o código (`<REMETENTE-DO-CODIGO>`) e o
-  `formato` (por exemplo `\\d{6}` para seis dígitos). Se o portal usa token de app
-  autenticador ou CAPTCHA, use `{"tipo": "manual"}` e `navegador.pausa(...)` no roteiro.
+  `formato` (por exemplo `\\d{6}` para seis dígitos). Se o portal usa o código de um aplicativo
+  autenticador (TOTP) ou CAPTCHA, use `{"tipo": "manual"}` e `navegador.pausa(...)` no roteiro.
   MFA por e-mail só é aceito com `movimenta_dinheiro: false`.
 - `agenda_horas`: de quantas em quantas horas o worker roda (168 = semanal).
 
@@ -29,16 +31,18 @@ Se o portal mostra o mês por texto (por exemplo "Novembro/2026"), leia a lista 
 ## Importar, testar e ativar
 
 ```bash
-sbf roteiros escrito importar contracheque-meu-orgao.json --script contracheque-meu-orgao.luau
+sbf roteiros escrito importar contracheque-meu-orgao.json --fonte contracheque-meu-orgao.luau
 sbf roteiros escrito listar                              # veja o número da versão criada
-sbf roteiros escrito testar contracheque-meu-orgao 1     # no site falso, sem rede externa
-sbf roteiros escrito ativar contracheque-meu-orgao 1     # só em terminal interativo, com confirmação digitada
+sbf roteiros escrito testar contracheque-meu-orgao 1 --cenario contracheque  # no site falso, sem rede externa
+sbf roteiros escrito ativar contracheque-meu-orgao 1     # na janela ou em terminal interativo, com confirmação digitada (contracheque-meu-orgao@1)
 ```
 
 - `importar` valida o manifesto e cria a versão em **rascunho**. Editar sempre cria versão
   nova em rascunho; a versão ativa nunca muda.
 - `testar` roda o rascunho no site falso (o portal de teste do motor), nunca no portal real.
-- `ativar` só aceita versão testada e exige você, num terminal, digitando a confirmação. IA e MCP só propõem rascunhos.
+- `ativar` só aceita versão testada e exige você, na janela ou num terminal interativo,
+  digitando a confirmação (`nome@versão`); `desativar` pede o `nome`. O MCP e a IA só propõem
+  rascunhos: nunca ativam, desativam, testam nem executam.
 
 Depois de ativo, o roteiro roda no botão "Executar agora" da janela e pela agenda. Se o portal
-pedir token ou CAPTCHA, o roteiro avisa e espera você continuar.
+pedir o código do aplicativo autenticador (TOTP) ou CAPTCHA, o roteiro avisa e espera você continuar.

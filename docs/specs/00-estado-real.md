@@ -231,6 +231,14 @@ descarta problema de formato de chave.
 | integração **66/66**        | 31/60 |
 | E2E **12/12** em reset frio | 10/12 |
 
+### 12. Desktop Rust: roteiros escritos em Luau — 🟡 em implementação nesta branch
+
+Roteiros escritos em Luau (manifesto JSON + `.luau`, rascunho, teste no site falso, ativação
+com confirmação digitada) sobre o motor de navegador `bancada-navegador`, que mora na bancada
+(ADR-022). Spec: [16-desktop-roteiros-escritos-fatia-1](16-desktop-roteiros-escritos-fatia-1.md).
+Estado: em implementação na branch `feat/roteiros-luau`; nada é ✅ até o relatório de aceite
+registrar evidência (teste + chamador) para cada linha RE-01..RE-36.
+
 ## Gaps reais, em ordem de importância
 
 Atualizado em 2026-08-05. Os fechados ficam na lista, riscados, porque saber o

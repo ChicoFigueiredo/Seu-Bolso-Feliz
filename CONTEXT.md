@@ -480,7 +480,9 @@ os dois passam pela mesma lista de bloqueio e pelo mesmo chaveiro:
   até o site mudar.
 - **Roteiro escrito**: um programa em Luau, escrito à mão ao lado de um manifesto, que só
   chama **verbos** (abrir, esperar, clicar, ler texto, baixar). Nasce em rascunho e só vale
-  depois de ativado, como uma regra de reconhecimento.
+  depois de ativado, como uma regra de reconhecimento: a ativação e a desativação só
+  ocorrem na janela do app ou num terminal interativo, com confirmação digitada. O MCP e a IA
+  só propõem rascunho; nunca ativam, desativam, testam nem executam.
 
 Luau é só a linguagem do roteiro escrito. Não é o **Script** de uma regra de reconhecimento,
 que calcula campos de um documento e nunca toca um site.
@@ -498,6 +500,13 @@ O que um roteiro declara no manifesto sobre o tipo de coisa que faz no site: **c
 (o padrão: só lê e baixa) ou **atualizar conexão** (também aperta "Atualizar" ou "Sincronizar"
 nas conexões de um agregador, como o Meu Pluggy). Nenhuma classe libera pagar, transferir,
 contratar ou alterar cadastro.
+
+A classe `consulta` barra clicar em elemento cujo texto é exatamente "Atualizar" ou
+"Sincronizar", para que a exceção da outra classe seja de fato uma exceção; a classe
+`atualizar_conexao` libera só esses dois textos exatos, e os demais campos do elemento
+(destino, rótulo, nome) continuam conferidos ("Atualizar e pagar" segue barrado).
+"Reconectar" e "atualizar conexão" não fazem parte do conjunto: reautorizar no banco é do
+usuário.
 _Avoid_: permissão, nível, modo, perfil
 
 **MFA por e-mail**:
