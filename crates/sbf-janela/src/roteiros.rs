@@ -1134,7 +1134,9 @@ fn selo_da_execucao(ui: &mut Ui, estado: EstadoDaExecucao) {
     let p = tema::paleta(ui.ctx());
     let (fundo, cor) = match estado {
         EstadoDaExecucao::Concluida => (p.sucesso_sutil, p.sucesso),
-        EstadoDaExecucao::Falhou | EstadoDaExecucao::Bloqueada => (p.perigo_sutil, p.perigo),
+        EstadoDaExecucao::Falhou
+        | EstadoDaExecucao::Bloqueada
+        | EstadoDaExecucao::EntradaRecusada => (p.perigo_sutil, p.perigo),
         EstadoDaExecucao::AguardandoUsuario => (p.aviso_sutil, p.aviso),
         EstadoDaExecucao::Rodando => (p.info_sutil, p.info),
         EstadoDaExecucao::Cancelada => (p.superficie_3, p.tinta_suave),

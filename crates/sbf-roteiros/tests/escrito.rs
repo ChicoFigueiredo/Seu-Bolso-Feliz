@@ -1833,7 +1833,9 @@ fn agenda_dispara_os_devidos_um_a_um_e_a_falha_de_um_nao_impede_outro() {
             fim: Fim::Concluida,
             baixados: 2,
             novos: 1,
+            descartados: 0,
             registros: vec![],
+            entrada_recusada: None,
         })
     })
     .unwrap();
@@ -1893,7 +1895,9 @@ fn agenda_respeita_o_intervalo_desde_a_ultima_execucao_e_encerra_orfas() {
             fim: Fim::Concluida,
             baixados: 0,
             novos: 0,
+            descartados: 0,
             registros: vec![],
+            entrada_recusada: None,
         })
     })
     .unwrap();

@@ -398,6 +398,7 @@ pub fn rotulo_da_execucao(e: EstadoDaExecucao) -> &'static str {
         EstadoDaExecucao::Falhou => "falhou",
         EstadoDaExecucao::Bloqueada => "bloqueada pela lista de bloqueio",
         EstadoDaExecucao::Cancelada => "cancelada",
+        EstadoDaExecucao::EntradaRecusada => "entrada recusada: agenda suspensa",
     }
 }
 
@@ -666,6 +667,8 @@ impl Escritos {
                 movimenta_dinheiro: false,
                 classe,
                 agenda_horas: agenda,
+                agenda: Vec::new(),
+                parametros: Vec::new(),
             }
         }
         fn versao(
@@ -1396,9 +1399,10 @@ fn cor_da_execucao(p: &tema::Paleta, e: EstadoDaExecucao) -> egui::Color32 {
     match e {
         EstadoDaExecucao::Concluida => p.sucesso,
         EstadoDaExecucao::Rodando | EstadoDaExecucao::AguardandoUsuario => p.aviso,
-        EstadoDaExecucao::Falhou | EstadoDaExecucao::Bloqueada | EstadoDaExecucao::Cancelada => {
-            p.perigo
-        }
+        EstadoDaExecucao::Falhou
+        | EstadoDaExecucao::Bloqueada
+        | EstadoDaExecucao::Cancelada
+        | EstadoDaExecucao::EntradaRecusada => p.perigo,
     }
 }
 
@@ -1457,6 +1461,8 @@ mod testes {
             movimenta_dinheiro: false,
             classe: Classe::Consulta,
             agenda_horas: Some(168),
+            agenda: Vec::new(),
+            parametros: Vec::new(),
         }
     }
 
@@ -1659,7 +1665,9 @@ mod testes {
             fim,
             baixados: 1,
             novos: 1,
+            descartados: 0,
             registros: vec![],
+            entrada_recusada: None,
         };
         let (t, erro) = texto_do_relatorio(&rel(Fim::Concluida));
         assert!(!erro);

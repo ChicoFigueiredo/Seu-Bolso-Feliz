@@ -14,7 +14,16 @@ use std::path::{Path, PathBuf};
 const CRATES_PROIBIDOS: [&str; 3] = ["sbf-mcp", "sbf-worker", "sbf-ia"];
 
 /// Citar isto, em qualquer lugar do código, é ter o que só o usuário tem.
-const PROIBIDOS: [&str; 4] = ["Confirmacao", "da_janela", "do_terminal", "marcar_testado"];
+///
+/// `retomar_agenda`: só o usuário (terminal interativo, depois a janela) retoma a agenda
+/// suspensa por `navegador.entrada_recusada`; o MCP, o worker e a IA nunca.
+const PROIBIDOS: [&str; 5] = [
+    "Confirmacao",
+    "da_janela",
+    "do_terminal",
+    "marcar_testado",
+    "retomar_agenda",
+];
 
 /// Chamar isto num arquivo que toca em roteiros escritos é ativar ou desativar.
 const ACOES: [&str; 2] = [".ativar(", ".desativar("];
@@ -102,6 +111,7 @@ fn o_detector_acha_o_proibido_e_ignora_comentarios() {
     assert!(!achados("let b = BancoDeRoteiros::abrir(p); b.marcar_testado(x);").is_empty());
     assert!(!achados("use sbf_roteiros::x; b.ativar(n, 1, &c);").is_empty());
     assert!(!achados("use sbf_roteiros::x; b.desativar(n, &c);").is_empty());
+    assert!(!achados("b.retomar_agenda_escrita(n);").is_empty());
     // as regras de reconhecimento também têm `.ativar(`: só conta junto dos roteiros
     assert!(achados("c.ativar(&regra, 1, &Quem::Mcp)").is_empty());
     let comentado = sem_comentarios(

@@ -18,6 +18,7 @@
 //! `Input.insertText` do CDP. O roteiro gravado guarda só o rótulo do chaveiro; a IA recebe a
 //! página sem valor de campo nenhum; nada disso vai a log, `Debug` ou erro.
 
+pub mod agenda;
 pub mod banco;
 pub mod bloqueio;
 pub mod chrome;
@@ -29,6 +30,7 @@ pub mod executor;
 pub mod gravacao;
 pub mod inventario;
 pub mod manifesto;
+pub mod parametros;
 pub mod passo;
 pub mod servico;
 pub mod teste_escrito;

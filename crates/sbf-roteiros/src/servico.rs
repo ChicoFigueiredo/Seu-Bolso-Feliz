@@ -13,13 +13,16 @@ use crate::chrome::{Chrome, OpcoesDoChrome};
 use crate::codigo_email::{CaixaDeEmail, Relogio, RelogioReal};
 use crate::erro::{ErroDeRoteiro, Resultado};
 use crate::escrito::{Entradas, OpcoesEscrito, PausaDoEscrito, SbfVerbos, fim_do_roteiro};
+use crate::execucao_escrita::{DevidoEscrito, InicioDaExecucao};
 use crate::executor::{Contexto, Fim, FonteDeSenhas, Opcoes, Pausa, PausaNoBanco, Relatorio};
 use crate::gravacao::{Aprovador, FimDaGravacao, Guia, executar_com_conserto, gravar_guiado};
 use crate::inventario::NoInventario;
 use crate::manifesto::Mfa;
 use crate::navegador::Navegador;
-use bancada_navegador::luau::{self, Limites};
+use crate::parametros::{self, ValorBruto};
+use bancada_navegador::luau::{self, ErroDeRoteiro as ErroDoLuau, Limites, Parametros};
 use rusqlite::Connection;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -329,8 +332,98 @@ pub struct RelatorioEscrito {
     /// Arquivos baixados e quantos eram novos no inventário.
     pub baixados: u32,
     pub novos: u32,
+    /// Quantos dos baixados foram descartados por já estarem no inventário (a baixa por
+    /// conteúdo, spec 18): não contam em `novos`. Vão ao histórico como "já estava no
+    /// inventário".
+    pub descartados: u32,
     /// O que o roteiro registrou (já limpo de segredo).
     pub registros: Vec<String>,
+    /// O motivo (limpo de segredo) quando o roteiro terminou em `navegador.entrada_recusada`:
+    /// a execução fica em `entrada_recusada` e a agenda do roteiro foi suspensa.
+    pub entrada_recusada: Option<String>,
+}
+
+/// O que se pede a uma execução do roteiro escrito além do nome: os parâmetros entregues (da
+/// entrada da agenda, do terminal ou da janela), a **Baixa forçada** e, se veio da agenda, a
+/// entrada e o instante previsto.
+///
+/// `forcar` não depende de o manifesto declarar um parâmetro `forcar`: o inventário passa a
+/// aceitar de novo o que já tem. Se o manifesto o declara, o roteiro também o vê em
+/// `parametros.forcar` (verdadeiro quando o pedido força ou o valor entregue é `true`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PedidoDeExecucao {
+    /// Valores dos parâmetros declarados (brutos: o mês relativo ainda não foi resolvido).
+    pub entregues: BTreeMap<String, ValorBruto>,
+    /// Baixa forçada.
+    pub forcar: bool,
+    /// A entrada de `agenda` que a disparou.
+    pub entrada: Option<usize>,
+    /// O instante agendado que a tornou devida.
+    pub previsto_unix: Option<i64>,
+}
+
+/// O pedido já resolvido contra o manifesto: o que o Luau recebe e o que o histórico guarda.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecucaoResolvida {
+    /// A tabela `parametros` do Luau (mês relativo já virou `AAAA-MM`).
+    pub parametros: Parametros,
+    /// A baixa é forçada?
+    pub forcar: bool,
+    /// De onde veio e com que parâmetros (para o histórico).
+    pub inicio: InicioDaExecucao,
+}
+
+/// Resolve o `pedido` contra os parâmetros declarados do `manifesto`. O mês relativo conta a
+/// partir do mês do instante previsto (execução agendada: o mês para o qual a entrada foi
+/// marcada, mesmo que o PC só volte depois) ou, sem ele, do mês de `agora_unix`, sempre no
+/// fuso do usuário (UTC−3).
+///
+/// # Errors
+/// Parâmetro não declarado, valor do tipo errado, mês fora do calendário, `de` depois de
+/// `ate` ou mais de 60 meses.
+pub fn resolver_pedido(
+    manifesto: &crate::manifesto::Manifesto,
+    pedido: &PedidoDeExecucao,
+    agora_unix: i64,
+) -> Resultado<ExecucaoResolvida> {
+    let referencia = pedido.previsto_unix.unwrap_or(agora_unix);
+    let mut entregues = pedido.entregues.clone();
+    let declara_forcar = manifesto
+        .parametros
+        .iter()
+        .any(|p| p.nome == "forcar" && p.tipo == crate::parametros::TipoDeParametro::Booleano);
+    if pedido.forcar && declara_forcar {
+        entregues.insert("forcar".to_owned(), ValorBruto::Booleano(true));
+    }
+    let resolvidos = parametros::resolver(
+        &manifesto.parametros,
+        &entregues,
+        parametros::mes_corrente(referencia),
+    )?;
+    let forcar = pedido.forcar
+        || resolvidos.obter("forcar") == Some(&luau::ValorDeParametro::Booleano(true));
+    let json = if pedido.forcar && !declara_forcar {
+        // O roteiro não vê, mas o histórico mostra que a baixa foi forçada.
+        let mut p = resolvidos.clone();
+        p.inserir_booleano("forcar", true);
+        parametros::para_json(&p)
+    } else {
+        parametros::para_json(&resolvidos)
+    };
+    Ok(ExecucaoResolvida {
+        parametros: resolvidos,
+        forcar,
+        inicio: InicioDaExecucao {
+            entrada: pedido.entrada,
+            previsto_unix: pedido.previsto_unix,
+            parametros_json: Some(json),
+        },
+    })
+}
+
+fn unix_de(t: std::time::SystemTime) -> i64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// O que o roteiro escrito usa além do navegador: senhas, e-mail, relógio e o modo teste.
@@ -382,6 +475,29 @@ pub fn executar_escrito_em(
     servicos: &Servicos<'_>,
     cancelar: &AtomicBool,
 ) -> Resultado<RelatorioEscrito> {
+    let agora = unix_de(servicos.relogio.agora());
+    let resolvida = resolver_pedido(&versao.manifesto, &PedidoDeExecucao::default(), agora)?;
+    executar_escrito_em_com(
+        amb, navegador, versao, execucao, servicos, cancelar, &resolvida,
+    )
+}
+
+/// Como [`executar_escrito_em`], com os parâmetros já resolvidos (e a Baixa forçada) de
+/// [`resolver_pedido`]. Se o roteiro termina em `navegador.entrada_recusada`, a execução fica
+/// em `entrada_recusada` e a agenda do roteiro é suspensa (menos no modo teste, que nunca mexe
+/// na agenda).
+///
+/// # Errors
+/// As de [`executar_escrito_em`].
+pub fn executar_escrito_em_com(
+    amb: &Ambiente,
+    navegador: &mut dyn Navegador,
+    versao: &VersaoEscrita,
+    execucao: i64,
+    servicos: &Servicos<'_>,
+    cancelar: &AtomicBool,
+    resolvida: &ExecucaoResolvida,
+) -> Resultado<RelatorioEscrito> {
     // Revalida em tempo de execução (regra dura: MFA por e-mail só sem movimentar dinheiro).
     versao.manifesto.validar()?;
     servicos.opcoes.validar(&versao.manifesto)?;
@@ -403,14 +519,15 @@ pub fn executar_escrito_em(
         }
     }
     let conn = amb.conexao_do_inventario()?;
-    let mut destino = NoInventario::novo(&conn, &amb.cofre, &versao.roteiro, execucao);
+    let mut destino =
+        NoInventario::novo(&conn, &amb.cofre, &versao.roteiro, execucao).forcando(resolvida.forcar);
     let pausa = PausaDoEscrito {
         banco: &banco,
         prazo: amb.prazo_da_pausa,
         intervalo: Duration::from_millis(500),
         cancelar,
     };
-    let (fim, baixados, novos, registros) = {
+    let (fim, baixados, novos, descartados, registros, recusada) = {
         let mut verbos = SbfVerbos::novo(Entradas {
             manifesto: &versao.manifesto,
             execucao,
@@ -426,25 +543,52 @@ pub fn executar_escrito_em(
             teste: servicos.opcoes.clone(),
             cancelar,
         });
-        let r = luau::executar(&versao.fonte, &mut verbos, &Limites::default());
+        let r = luau::executar_com(
+            &versao.fonte,
+            &mut verbos,
+            &Limites::default(),
+            &resolvida.parametros,
+        );
         let fim = fim_do_roteiro(&r, &verbos);
+        // O cancelamento vale mais que a recusa (o script pode tê-la dito ao sair).
+        let recusada = match &r {
+            Err(ErroDoLuau::EntradaRecusada(m)) if !verbos.foi_cancelado() => Some(verbos.limpo(m)),
+            _ => None,
+        };
         (
             fim,
             verbos.baixados(),
             verbos.novos(),
+            verbos.descartados(),
             verbos.registros().to_vec(),
+            recusada,
         )
     };
     destino.fechar("concluida")?;
     // Sobra de download que não chegou ao inventário: não fica na pasta de dados.
     let _ = std::fs::remove_dir_all(amb.pasta_da_execucao(execucao));
-    let (estado, motivo) = estado_do_fim(&fim);
+    let (estado, motivo) = match &recusada {
+        Some(m) => (
+            EstadoDaExecucao::EntradaRecusada,
+            Some(format!("entrada recusada: {m}")),
+        ),
+        None => estado_do_fim(&fim),
+    };
+    if let Some(m) = &recusada {
+        banco.evento_escrito(execucao, "entrada_recusada", m)?;
+        if !modo_teste {
+            let agora = unix_de(servicos.relogio.agora());
+            banco.suspender_agenda_escrita(&versao.roteiro, m, agora)?;
+        }
+    }
     banco.finalizar_escrita(execucao, estado, motivo.as_deref(), baixados, novos)?;
     Ok(RelatorioEscrito {
         fim,
         baixados,
         novos,
+        descartados,
         registros,
+        entrada_recusada: recusada,
     })
 }
 
@@ -460,6 +604,30 @@ pub fn executar_escrito(
     senhas: &dyn FonteDeSenhas,
     cancelar: &AtomicBool,
 ) -> Resultado<RelatorioEscrito> {
+    executar_escrito_com(
+        amb,
+        nome,
+        gatilho,
+        senhas,
+        cancelar,
+        &PedidoDeExecucao::default(),
+    )
+}
+
+/// Como [`executar_escrito`], com os parâmetros e a Baixa forçada do `pedido`. Um roteiro de
+/// agenda suspensa roda à mão do mesmo jeito (e, se der certo, a agenda NÃO volta sozinha).
+///
+/// # Errors
+/// As de [`executar_escrito`], mais parâmetros inválidos (nesse caso, numa execução de agenda,
+/// fica uma execução `falhou` no histórico para a entrada não repetir a cada passada).
+pub fn executar_escrito_com(
+    amb: &Ambiente,
+    nome: &str,
+    gatilho: &str,
+    senhas: &dyn FonteDeSenhas,
+    cancelar: &AtomicBool,
+    pedido: &PedidoDeExecucao,
+) -> Resultado<RelatorioEscrito> {
     let banco = amb.banco()?;
     let Some(versao) = banco.versao_ativa_escrita(nome)? else {
         return Err(ErroDeRoteiro::Invalido(format!(
@@ -467,8 +635,32 @@ pub fn executar_escrito(
         )));
     };
     versao.manifesto.validar()?;
+    let agora = unix_de(RelogioReal.agora());
+    let resolvida = match resolver_pedido(&versao.manifesto, pedido, agora) {
+        Ok(r) => r,
+        Err(e) => {
+            if pedido.entrada.is_some() {
+                let inicio = InicioDaExecucao {
+                    entrada: pedido.entrada,
+                    previsto_unix: pedido.previsto_unix,
+                    parametros_json: None,
+                };
+                let id =
+                    banco.iniciar_execucao_escrita_com(nome, versao.numero, gatilho, &inicio)?;
+                banco.finalizar_escrita(
+                    id,
+                    EstadoDaExecucao::Falhou,
+                    Some(&e.to_string()),
+                    0,
+                    0,
+                )?;
+            }
+            return Err(e);
+        }
+    };
     // Atômico: recusa se outro processo (a janela, o worker) já a executa.
-    let execucao = banco.iniciar_execucao_escrita(nome, versao.numero, gatilho)?;
+    let execucao =
+        banco.iniciar_execucao_escrita_com(nome, versao.numero, gatilho, &resolvida.inicio)?;
     let falhou = |e: &ErroDeRoteiro| {
         let _ = banco.finalizar_escrita(
             execucao,
@@ -495,7 +687,7 @@ pub fn executar_escrito(
     for aviso in chrome.avisos() {
         let _ = banco.evento_escrito(execucao, "aviso", aviso);
     }
-    let r = executar_escrito_em(
+    let r = executar_escrito_em_com(
         amb,
         &mut chrome,
         &versao,
@@ -508,6 +700,7 @@ pub fn executar_escrito(
             opcoes: &OpcoesEscrito::default(),
         },
         cancelar,
+        &resolvida,
     );
     chrome.fechar();
     if let Err(e) = &r {
@@ -517,7 +710,8 @@ pub fn executar_escrito(
     r
 }
 
-/// Executa os roteiros escritos ativos cuja agenda venceu (um de cada vez).
+/// Executa os roteiros escritos ativos cuja agenda venceu (um de cada vez). Cada entrada
+/// devida roda uma vez, com os parâmetros dela, na ordem da lista.
 ///
 /// # Errors
 /// Só falha de infraestrutura do banco; a falha de um roteiro não impede os outros.
@@ -527,13 +721,32 @@ pub fn executar_escritos_devidos(
     senhas: &dyn FonteDeSenhas,
     cancelar: &AtomicBool,
 ) -> Resultado<ResumoDeRoteiros> {
-    executar_escritos_devidos_com(amb, agora_unix, cancelar, &mut |nome| {
-        executar_escrito(amb, nome, "agenda", senhas, cancelar)
+    executar_escritos_agendados_com(amb, agora_unix, cancelar, &mut |d| {
+        executar_escrito_com(
+            amb,
+            &d.nome,
+            "agenda",
+            senhas,
+            cancelar,
+            &pedido_da_agenda(d),
+        )
     })
 }
 
+/// O pedido que uma entrada devida faz: os parâmetros dela e de onde veio.
+#[must_use]
+pub fn pedido_da_agenda(d: &DevidoEscrito) -> PedidoDeExecucao {
+    PedidoDeExecucao {
+        entregues: d.parametros.clone(),
+        forcar: false,
+        entrada: d.entrada,
+        previsto_unix: d.previsto_unix,
+    }
+}
+
 /// Como [`executar_escritos_devidos`], com a execução de cada roteiro por `executar` (os
-/// testes trocam o Chrome por um navegador falso).
+/// testes trocam o Chrome por um navegador falso). Só recebe o nome; use
+/// [`executar_escritos_agendados_com`] para ver a entrada e os parâmetros.
 ///
 /// # Errors
 /// Só falha de infraestrutura do banco.
@@ -543,15 +756,34 @@ pub fn executar_escritos_devidos_com(
     cancelar: &AtomicBool,
     executar: &mut dyn FnMut(&str) -> Resultado<RelatorioEscrito>,
 ) -> Resultado<ResumoDeRoteiros> {
+    executar_escritos_agendados_com(amb, agora_unix, cancelar, &mut |d| executar(&d.nome))
+}
+
+/// A passada da agenda: encerra as órfãs e roda, uma a uma, as entradas devidas (a suspensa,
+/// a que está rodando e a ainda não vencida ficam de fora).
+///
+/// # Errors
+/// Só falha de infraestrutura do banco.
+pub fn executar_escritos_agendados_com(
+    amb: &Ambiente,
+    agora_unix: i64,
+    cancelar: &AtomicBool,
+    executar: &mut dyn FnMut(&DevidoEscrito) -> Resultado<RelatorioEscrito>,
+) -> Resultado<ResumoDeRoteiros> {
     let banco = amb.banco()?;
     banco.encerrar_orfas_escritas()?;
     let mut resumo = ResumoDeRoteiros::default();
-    for nome in banco.escritos_devidos(agora_unix)? {
+    for devido in banco.escritos_devidos_agendados(agora_unix)? {
         if cancelar.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
+        // Um que parou em `entrada_recusada` na passada suspendeu a agenda: os outros
+        // devidos do mesmo roteiro não rodam.
+        if banco.agenda_suspensa_escrita(&devido.nome)?.is_some() {
+            continue;
+        }
         resumo.executados += 1;
-        if let Ok(rel) = executar(&nome) {
+        if let Ok(rel) = executar(&devido) {
             resumo.baixados += rel.baixados;
             resumo.novos += rel.novos;
             if rel.fim == Fim::Concluida {

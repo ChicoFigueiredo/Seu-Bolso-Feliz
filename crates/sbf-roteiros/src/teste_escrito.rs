@@ -890,7 +890,9 @@ mod testes {
             },
             baixados: 0,
             novos: 0,
+            descartados: 0,
             registros: vec![format!("viu {CPF_FICTICIO}")],
+            entrada_recusada: None,
         };
         let r = avaliar(
             &rel,
@@ -986,7 +988,9 @@ mod testes {
             fim,
             baixados: 0,
             novos: 0,
+            descartados: 0,
             registros: registros.iter().map(|r| (*r).to_owned()).collect(),
+            entrada_recusada: None,
         }
     }
 

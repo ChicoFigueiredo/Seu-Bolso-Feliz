@@ -8,13 +8,20 @@
 //! A pausa para o usuário usa o campo `continuar`, que a janela grava (`1` continua, `2`
 //! cancela), como no roteiro gravado.
 
+use crate::agenda;
 use crate::banco::{BancoDeRoteiros, EstadoDaExecucao};
 use crate::erro::{ErroDeRoteiro, Resultado};
-use rusqlite::{OptionalExtension as _, params};
+use crate::manifesto::Manifesto;
+use crate::parametros::ValorBruto;
+use rusqlite::{Connection, OptionalExtension as _, params};
+use std::collections::BTreeMap;
 
-/// O esquema das execuções do roteiro escrito (criado junto com o resto do banco).
-pub(crate) const SQL: &str = "
-CREATE TABLE IF NOT EXISTS execucao_escrita (
+/// O esquema das execuções do roteiro escrito (criado junto com o resto do banco). As colunas
+/// `entrada_agenda`, `previsto_unix` e `parametros_json` (spec 18) e o estado `entrada_recusada`
+/// vieram depois: [`preparar`] leva um banco antigo até aqui sem perder nada.
+fn ddl_da_tabela(nome: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS {nome} (
   id            INTEGER PRIMARY KEY,
   roteiro_id    INTEGER NOT NULL REFERENCES roteiro_escrito(id),
   versao_id     INTEGER NOT NULL REFERENCES roteiro_escrito_versao(id),
@@ -23,14 +30,22 @@ CREATE TABLE IF NOT EXISTS execucao_escrita (
   iniciada_unix INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   concluida_em  TEXT,
   estado        TEXT NOT NULL DEFAULT 'rodando' CHECK (estado IN
-                  ('rodando','aguardando_usuario','concluida','falhou','bloqueada','cancelada')),
+                  ('rodando','aguardando_usuario','concluida','falhou','bloqueada','cancelada',
+                   'entrada_recusada')),
   chamada       INTEGER NOT NULL DEFAULT 0,
   motivo        TEXT,
   baixados      INTEGER NOT NULL DEFAULT 0,
   novos         INTEGER NOT NULL DEFAULT 0,
   continuar     INTEGER NOT NULL DEFAULT 0,
-  pid           INTEGER
-);
+  pid           INTEGER,
+  entrada_agenda  INTEGER,
+  previsto_unix   INTEGER,
+  parametros_json TEXT
+);"
+    )
+}
+
+const SQL_RESTANTE: &str = "
 CREATE INDEX IF NOT EXISTS execucao_escrita_roteiro ON execucao_escrita(roteiro_id, id);
 CREATE TABLE IF NOT EXISTS evento_escrito_execucao (
   id          INTEGER PRIMARY KEY,
@@ -40,6 +55,95 @@ CREATE TABLE IF NOT EXISTS evento_escrito_execucao (
   mensagem    TEXT NOT NULL
 );
 ";
+
+/// As colunas que já existiam antes da spec 18 (a cópia da reconstrução leva só estas).
+const COLUNAS_ANTIGAS: &str = "id, roteiro_id, versao_id, gatilho, iniciada_em, iniciada_unix, \
+     concluida_em, estado, chamada, motivo, baixados, novos, continuar, pid";
+
+/// Cria o que falta e leva um banco antigo ao esquema atual, **sem apagar nada**: colunas
+/// aditivas (`ALTER TABLE ADD COLUMN`) e, só se a tabela das execuções ainda não aceita o
+/// estado `entrada_recusada` (um `CHECK` não se altera), a reconstrução dela com as linhas
+/// copiadas. Os gatilhos de imutabilidade das versões não são tocados.
+///
+/// # Errors
+/// Banco.
+pub(crate) fn preparar(conn: &Connection) -> Resultado<()> {
+    conn.execute_batch(&ddl_da_tabela("execucao_escrita"))?;
+    conn.execute_batch(SQL_RESTANTE)?;
+    adicionar_coluna(conn, "roteiro_escrito", "suspenso_unix", "INTEGER")?;
+    adicionar_coluna(conn, "roteiro_escrito", "suspenso_motivo", "TEXT")?;
+    for (coluna, tipo) in [
+        ("entrada_agenda", "INTEGER"),
+        ("previsto_unix", "INTEGER"),
+        ("parametros_json", "TEXT"),
+    ] {
+        adicionar_coluna(conn, "execucao_escrita", coluna, tipo)?;
+    }
+    if !aceita_entrada_recusada(conn)? {
+        reconstruir(conn)?;
+    }
+    Ok(())
+}
+
+fn aceita_entrada_recusada(conn: &Connection) -> Resultado<bool> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'execucao_escrita'",
+            [],
+            |l| l.get(0),
+        )
+        .optional()?;
+    Ok(sql.is_none_or(|s| s.contains("entrada_recusada")))
+}
+
+fn adicionar_coluna(conn: &Connection, tabela: &str, coluna: &str, tipo: &str) -> Resultado<()> {
+    let existe = {
+        let mut st = conn.prepare(&format!("PRAGMA table_info({tabela})"))?;
+        let nomes = st
+            .query_map([], |l| l.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        nomes.iter().any(|n| n == coluna)
+    };
+    if existe {
+        return Ok(());
+    }
+    match conn.execute_batch(&format!("ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")) {
+        Ok(()) => Ok(()),
+        // Outro processo (a janela, o worker) acabou de acrescentar a mesma coluna.
+        Err(e) if e.to_string().contains("duplicate column") => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// A receita oficial do SQLite para mudar um `CHECK`: com as chaves estrangeiras desligadas
+/// (senão o `DROP TABLE` apagaria os eventos por cascata), cria a tabela nova, copia, troca.
+fn reconstruir(conn: &Connection) -> Resultado<()> {
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let r = (|| -> Resultado<()> {
+        let tx =
+            rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+        // Outro processo pode ter reconstruído enquanto esperávamos a trava.
+        if aceita_entrada_recusada(&tx)? {
+            return Ok(());
+        }
+        tx.execute_batch(&format!(
+            "{}
+             INSERT INTO execucao_escrita_nova ({COLUNAS_ANTIGAS}, entrada_agenda, previsto_unix,
+                                                  parametros_json)
+               SELECT {COLUNAS_ANTIGAS}, entrada_agenda, previsto_unix, parametros_json
+                 FROM execucao_escrita;
+             DROP TABLE execucao_escrita;
+             ALTER TABLE execucao_escrita_nova RENAME TO execucao_escrita;
+             CREATE INDEX IF NOT EXISTS execucao_escrita_roteiro
+               ON execucao_escrita(roteiro_id, id);",
+            ddl_da_tabela("execucao_escrita_nova")
+        ))?;
+        tx.commit()?;
+        Ok(())
+    })();
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    r
+}
 
 /// Uma execução do roteiro escrito, para o histórico da janela.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +160,41 @@ pub struct LinhaDeExecucaoEscrita {
     pub motivo: Option<String>,
     pub baixados: i64,
     pub novos: i64,
+}
+
+/// De onde uma execução veio e com que parâmetros resolvidos ela rodou. Tudo vazio numa
+/// execução manual sem parâmetros (botão, terminal).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InicioDaExecucao {
+    /// A posição da entrada em `Manifesto::agenda` (só execução agendada).
+    pub entrada: Option<usize>,
+    /// O instante agendado (unix) que a tornou devida.
+    pub previsto_unix: Option<i64>,
+    /// Os parâmetros resolvidos, em JSON (mês e sim/não, nunca segredo).
+    pub parametros_json: Option<String>,
+}
+
+/// Um roteiro escrito com uma entrada da agenda devida (ou a `agenda_horas` antiga vencida).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevidoEscrito {
+    pub nome: String,
+    /// A versão ativa.
+    pub numero: u32,
+    /// A entrada de `agenda` que venceu; `None` na `agenda_horas` antiga.
+    pub entrada: Option<usize>,
+    /// O instante agendado que a tornou devida; `None` na `agenda_horas` antiga.
+    pub previsto_unix: Option<i64>,
+    /// O que a entrada entrega aos parâmetros declarados (antes de resolver o mês relativo).
+    pub parametros: BTreeMap<String, ValorBruto>,
+}
+
+/// Por que a agenda de um roteiro está suspensa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensaoDaAgenda {
+    /// Quando (unix) o roteiro foi suspenso.
+    pub desde_unix: i64,
+    /// O motivo, já limpo de segredo (até 200 caracteres).
+    pub motivo: String,
 }
 
 /// Um evento da execução: (quando, tipo, mensagem).
@@ -76,6 +215,21 @@ impl BancoDeRoteiros {
         nome: &str,
         numero: u32,
         gatilho: &str,
+    ) -> Resultado<i64> {
+        self.iniciar_execucao_escrita_com(nome, numero, gatilho, &InicioDaExecucao::default())
+    }
+
+    /// Como [`Self::iniciar_execucao_escrita`], guardando de onde a execução veio (a entrada da
+    /// agenda e o instante previsto) e os parâmetros resolvidos que ela recebeu.
+    ///
+    /// # Errors
+    /// As mesmas de [`Self::iniciar_execucao_escrita`].
+    pub fn iniciar_execucao_escrita_com(
+        &self,
+        nome: &str,
+        numero: u32,
+        gatilho: &str,
+        inicio: &InicioDaExecucao,
     ) -> Resultado<i64> {
         let tx = rusqlite::Transaction::new_unchecked(
             &self.conn,
@@ -105,8 +259,18 @@ impl BancoDeRoteiros {
             return Err(ErroDeRoteiro::Invalido("o roteiro já está rodando".into()));
         }
         tx.execute(
-            "INSERT INTO execucao_escrita (roteiro_id, versao_id, gatilho, pid) VALUES (?1,?2,?3,?4)",
-            params![roteiro_id, versao_id, gatilho, std::process::id()],
+            "INSERT INTO execucao_escrita
+               (roteiro_id, versao_id, gatilho, pid, entrada_agenda, previsto_unix, parametros_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                roteiro_id,
+                versao_id,
+                gatilho,
+                std::process::id(),
+                inicio.entrada.map(|e| e as i64),
+                inicio.previsto_unix,
+                inicio.parametros_json
+            ],
         )?;
         let id = tx.last_insert_rowid();
         tx.commit()?;
@@ -343,17 +507,36 @@ impl BancoDeRoteiros {
         Ok(n)
     }
 
-    /// Os roteiros escritos **ativos** cuja agenda venceu: a `agenda_horas` do manifesto da
-    /// versão ativa e a última execução (de qualquer gatilho) dizem. Quem não tem agenda, ou
-    /// está rodando, fica de fora. Devolve os nomes, em ordem.
+    /// Os roteiros escritos **ativos** cuja agenda venceu (ver [`Self::escritos_devidos_agendados`]),
+    /// só os nomes, em ordem e sem repetir.
     ///
     /// # Errors
     /// Banco.
     pub fn escritos_devidos(&self, agora_unix: i64) -> Resultado<Vec<String>> {
+        let mut nomes: Vec<String> = Vec::new();
+        for d in self.escritos_devidos_agendados(agora_unix)? {
+            if !nomes.contains(&d.nome) {
+                nomes.push(d.nome);
+            }
+        }
+        Ok(nomes)
+    }
+
+    /// Os roteiros escritos **ativos** com agenda vencida, uma linha por entrada devida (na
+    /// ordem da lista do manifesto). Fica de fora quem está rodando ou esperando o usuário e
+    /// quem tem a agenda **suspensa** (`navegador.entrada_recusada`).
+    ///
+    /// - `agenda`: a entrada está devida se há um instante agendado `s` com `base < s <= agora`,
+    ///   onde `base` é o maior entre o início da última execução DAQUELA entrada (da versão em
+    ///   vigor) e a ativação da versão ([`crate::agenda`]).
+    /// - `agenda_horas` (antiga): vence `horas` depois do início da última execução, de qualquer
+    ///   gatilho.
+    ///
+    /// # Errors
+    /// Banco.
+    pub fn escritos_devidos_agendados(&self, agora_unix: i64) -> Resultado<Vec<DevidoEscrito>> {
         let mut st = self.conn.prepare(
-            "SELECT r.nome, v.manifesto,
-                    COALESCE((SELECT MAX(e.iniciada_unix) FROM execucao_escrita e
-                               WHERE e.roteiro_id = r.id), 0),
+            "SELECT r.id, r.nome, v.id, v.numero, v.manifesto, r.suspenso_unix,
                     EXISTS(SELECT 1 FROM execucao_escrita e WHERE e.roteiro_id = r.id
                              AND e.estado IN ('rodando','aguardando_usuario'))
                FROM roteiro_escrito r
@@ -363,28 +546,209 @@ impl BancoDeRoteiros {
         let linhas = st
             .query_map([], |l| {
                 Ok((
-                    l.get::<_, String>(0)?,
+                    l.get::<_, i64>(0)?,
                     l.get::<_, String>(1)?,
                     l.get::<_, i64>(2)?,
-                    l.get::<_, bool>(3)?,
+                    l.get::<_, i64>(3)?,
+                    l.get::<_, String>(4)?,
+                    l.get::<_, Option<i64>>(5)?,
+                    l.get::<_, bool>(6)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let mut saida = Vec::new();
-        for (nome, manifesto, ultima, rodando) in linhas {
-            if rodando {
+        for (roteiro_id, nome, versao_id, numero, manifesto, suspenso, rodando) in linhas {
+            if rodando || suspenso.is_some() {
                 continue;
             }
-            let Ok(m) = crate::manifesto::Manifesto::de_json(&manifesto) else {
+            let Ok(m) = Manifesto::de_json(&manifesto) else {
                 continue;
             };
-            let Some(horas) = m.agenda_horas else {
-                continue;
-            };
-            if ultima.saturating_add(i64::from(horas) * 3600) <= agora_unix {
-                saida.push(nome);
+            let numero = crate::banco::u32_de(numero);
+            if !m.agenda.is_empty() {
+                let ativacao: i64 = self.conn.query_row(
+                    "SELECT COALESCE(MAX(CAST(strftime('%s', quando) AS INTEGER)), 0)
+                       FROM roteiro_escrito_evento
+                      WHERE versao_id = ?1 AND de = 'testado' AND para = 'ativo'",
+                    [versao_id],
+                    |l| l.get(0),
+                )?;
+                let mut bases = Vec::with_capacity(m.agenda.len());
+                for i in 0..m.agenda.len() {
+                    let ultima: i64 = self.conn.query_row(
+                        "SELECT COALESCE(MAX(iniciada_unix), 0) FROM execucao_escrita
+                          WHERE roteiro_id = ?1 AND versao_id = ?2 AND entrada_agenda = ?3",
+                        params![roteiro_id, versao_id, i as i64],
+                        |l| l.get(0),
+                    )?;
+                    bases.push(ultima.max(ativacao));
+                }
+                for d in agenda::devidas(&m, agora_unix, &bases) {
+                    saida.push(DevidoEscrito {
+                        nome: nome.clone(),
+                        numero,
+                        entrada: Some(d.entrada),
+                        previsto_unix: Some(d.previsto_unix),
+                        parametros: m.agenda[d.entrada].parametros.clone(),
+                    });
+                }
+            } else if let Some(horas) = m.agenda_horas {
+                let ultima: i64 = self.conn.query_row(
+                    "SELECT COALESCE(MAX(iniciada_unix), 0) FROM execucao_escrita
+                      WHERE roteiro_id = ?1",
+                    [roteiro_id],
+                    |l| l.get(0),
+                )?;
+                if ultima.saturating_add(i64::from(horas) * 3600) <= agora_unix {
+                    saida.push(DevidoEscrito {
+                        nome,
+                        numero,
+                        entrada: None,
+                        previsto_unix: None,
+                        parametros: BTreeMap::new(),
+                    });
+                }
             }
         }
         Ok(saida)
+    }
+
+    /// De onde a execução veio (a entrada da agenda e o instante previsto) e os parâmetros que
+    /// recebeu. Tudo `None` numa execução manual sem parâmetros.
+    ///
+    /// # Errors
+    /// Banco.
+    pub fn inicio_da_execucao_escrita(&self, execucao: i64) -> Resultado<InicioDaExecucao> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT entrada_agenda, previsto_unix, parametros_json
+                   FROM execucao_escrita WHERE id = ?1",
+                [execucao],
+                |l| {
+                    Ok(InicioDaExecucao {
+                        entrada: l
+                            .get::<_, Option<i64>>(0)?
+                            .and_then(|e| usize::try_from(e).ok()),
+                        previsto_unix: l.get(1)?,
+                        parametros_json: l.get(2)?,
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
+    /// **Suspende a agenda** do roteiro: `escritos_devidos` deixa de devolvê-lo até
+    /// [`Self::retomar_agenda_escrita`]. Guarda a data e o motivo (sem controle, até 200
+    /// caracteres; quem chama já o limpou de segredo) e deixa uma linha no histórico da versão
+    /// em vigor. Suspender de novo só atualiza a data e o motivo.
+    ///
+    /// # Errors
+    /// Roteiro inexistente ou banco.
+    pub fn suspender_agenda_escrita(
+        &self,
+        nome: &str,
+        motivo: &str,
+        agora_unix: i64,
+    ) -> Resultado<()> {
+        let motivo: String = motivo
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .take(200)
+            .collect();
+        let tx = self.conn.unchecked_transaction()?;
+        let alterou = tx.execute(
+            "UPDATE roteiro_escrito SET suspenso_unix = ?2, suspenso_motivo = ?3 WHERE nome = ?1",
+            params![nome, agora_unix, motivo],
+        )?;
+        if alterou == 0 {
+            return Err(ErroDeRoteiro::Invalido(format!(
+                "roteiro escrito `{nome}` não encontrado"
+            )));
+        }
+        Self::anotar_na_versao_ativa(
+            &tx,
+            nome,
+            "agenda_suspensa",
+            "agenda",
+            &format!("agenda suspensa: {motivo}"),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// **Retoma a agenda** suspensa. Só o usuário (terminal interativo, depois a janela) chama:
+    /// o MCP, o worker e a IA nunca (`tests/autoridade.rs`). Devolve `false` se não estava
+    /// suspensa. A base das entradas não muda: o que ficou para trás durante a suspensão roda
+    /// uma vez, como numa volta qualquer (o mais recente em `(base, agora]`).
+    ///
+    /// # Errors
+    /// Roteiro inexistente ou banco.
+    pub fn retomar_agenda_escrita(&self, nome: &str) -> Resultado<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let suspensa: Option<Option<i64>> = tx
+            .query_row(
+                "SELECT suspenso_unix FROM roteiro_escrito WHERE nome = ?1",
+                [nome],
+                |l| l.get(0),
+            )
+            .optional()?;
+        let Some(suspensa) = suspensa else {
+            return Err(ErroDeRoteiro::Invalido(format!(
+                "roteiro escrito `{nome}` não encontrado"
+            )));
+        };
+        if suspensa.is_none() {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE roteiro_escrito SET suspenso_unix = NULL, suspenso_motivo = NULL
+              WHERE nome = ?1",
+            [nome],
+        )?;
+        Self::anotar_na_versao_ativa(&tx, nome, "agenda_retomada", "usuario", "agenda retomada")?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// A suspensão da agenda do roteiro, se houver.
+    ///
+    /// # Errors
+    /// Banco.
+    pub fn agenda_suspensa_escrita(&self, nome: &str) -> Resultado<Option<SuspensaoDaAgenda>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT suspenso_unix, COALESCE(suspenso_motivo, '') FROM roteiro_escrito
+                  WHERE nome = ?1 AND suspenso_unix IS NOT NULL",
+                [nome],
+                |l| {
+                    Ok(SuspensaoDaAgenda {
+                        desde_unix: l.get(0)?,
+                        motivo: l.get(1)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Uma linha no histórico de estados da versão em vigor (se há uma).
+    fn anotar_na_versao_ativa(
+        conn: &Connection,
+        nome: &str,
+        para: &str,
+        quem: &str,
+        detalhe: &str,
+    ) -> Resultado<()> {
+        // `para` nunca é `ativo`: é o `ativo` que marca o instante da ativação.
+        conn.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             SELECT v.id, 'ativo', ?4, ?2, ?3
+               FROM roteiro_escrito_versao v JOIN roteiro_escrito r ON r.id = v.roteiro_id
+              WHERE r.nome = ?1 AND v.estado = 'ativo'",
+            params![nome, quem, detalhe, para],
+        )?;
+        Ok(())
     }
 }

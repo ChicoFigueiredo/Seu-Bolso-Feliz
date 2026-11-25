@@ -195,7 +195,12 @@ fn manifesto_do_meu_pluggy_valida() {
     assert!(m.rotulo_senha.is_none(), "o login é por e-mail: sem senha");
     assert!(m.hosts.contains(&"meu.pluggy.ai".to_owned()));
     assert_eq!(m.url_inicial, "https://meu.pluggy.ai/connections");
-    assert_eq!(m.agenda_horas, Some(24));
+    // v2: agenda por horário (04:00, 12:00 e 20:00, todo dia) no lugar de `agenda_horas`.
+    assert_eq!(m.agenda_horas, None);
+    assert_eq!(m.agenda.len(), 1);
+    assert_eq!(m.agenda[0].horarios, ["04:00", "12:00", "20:00"]);
+    assert_eq!(m.agenda[0].dias_do_mes, None);
+    assert!(m.parametros.is_empty());
 }
 
 // ----- fontes ------------------------------------------------------------------------------
