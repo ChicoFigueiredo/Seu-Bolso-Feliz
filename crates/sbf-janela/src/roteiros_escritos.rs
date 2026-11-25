@@ -236,14 +236,10 @@ impl Pedido {
 pub fn confirmacao_da_janela(
     digitado: &str,
     esperado: &str,
-    comando_no_terminal: &str,
+    _comando_no_terminal: &str,
 ) -> Result<Confirmacao, String> {
-    if digitado != esperado {
-        return Err("A confirmação digitada é diferente do pedido; nada foi alterado.".to_owned());
-    }
-    Err(format!(
-        "Esta janela ainda não consegue ativar nem desativar roteiro escrito: o banco só aceita a confirmação de um terminal. Nada foi alterado. No terminal, rode: {comando_no_terminal}"
-    ))
+    Confirmacao::da_janela(digitado, esperado)
+        .map_err(|_| "A confirmação digitada é diferente do pedido; nada foi alterado.".to_owned())
 }
 
 /// Aplica o pedido ao banco. Devolve a mensagem de sucesso ou o motivo da recusa.
@@ -1071,19 +1067,28 @@ mod testes {
     }
 
     #[test]
-    fn a_janela_nao_burla_o_guarda_do_terminal() {
-        // Registra a lacuna: sem um construtor de `Confirmacao` para a janela, nada é ativado,
-        // mesmo com a digitação certa, e a mensagem aponta o comando do terminal.
+    fn a_janela_ativa_so_com_a_digitacao_exata() {
         let b = banco_com_testado();
         let mut p = Pedido::ativar("contracheque-exemplo", 1);
-        p.digitado = p.esperado();
-        let e = aplicar_pedido(&b, &p).expect_err("ainda não há construtor da janela");
-        assert!(
-            e.contains("sbf roteiros escrito ativar contracheque-exemplo 1"),
-            "{e}"
+        p.digitado = "contracheque-exemplo".into();
+        let e = aplicar_pedido(&b, &p).expect_err("digitação errada");
+        assert!(e.contains("diferente do pedido"), "{e}");
+        assert_eq!(
+            b.versao_escrita("contracheque-exemplo", 1)
+                .expect("versão")
+                .estado,
+            EstadoEscrito::Testado,
+            "nada muda"
         );
-        let v = b.versao_escrita("contracheque-exemplo", 1).expect("versão");
-        assert_eq!(v.estado, EstadoEscrito::Testado, "nada muda");
+        p.digitado = p.esperado();
+        let ok = aplicar_pedido(&b, &p).expect("digitação certa ativa");
+        assert!(ok.contains("ativado"), "{ok}");
+        assert_eq!(
+            b.versao_escrita("contracheque-exemplo", 1)
+                .expect("versão")
+                .estado,
+            EstadoEscrito::Ativo
+        );
     }
 
     #[test]

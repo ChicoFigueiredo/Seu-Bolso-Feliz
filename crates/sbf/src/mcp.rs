@@ -160,6 +160,11 @@ pub fn rodar(args: &[String]) -> ExitCode {
             nucleo
         }
     };
+    // Roteiros escritos (ADR-022): o MCP só PROPÕE (cria rascunho); nunca ativa nem executa.
+    let nucleo = match sbf_chaveiro::pasta_de_dados_do_app() {
+        Ok(dados) => nucleo.com_roteiros_escritos(dados.join("roteiros.sqlite")),
+        Err(_) => nucleo,
+    };
     // `gmail_coletar` (D15): coleta as contas de e-mail conectadas para o cofre e passa pelas
     // regras. Sempre registrada: as contas são lidas a cada chamada (um login feito depois da
     // largada vale), e sem conta a resposta é "nenhuma conta de e-mail conectada".
