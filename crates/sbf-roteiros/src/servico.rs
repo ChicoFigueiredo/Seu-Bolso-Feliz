@@ -8,7 +8,7 @@
 //! - `roteiros/execucoes/<n>`: a pasta onde os downloads da execução `n` caem antes de irem ao
 //!   cofre.
 
-use crate::banco::{BancoDeRoteiros, EstadoDaExecucao, VersaoEscrita};
+use crate::banco::{BancoDeRoteiros, EstadoDaExecucao, EstadoEscrito, VersaoEscrita};
 use crate::chrome::{Chrome, OpcoesDoChrome};
 use crate::codigo_email::{CaixaDeEmail, Relogio, RelogioReal};
 use crate::erro::{ErroDeRoteiro, Resultado};
@@ -181,6 +181,9 @@ pub fn executar_roteiro(
             return Err(e);
         }
     };
+    for aviso in chrome.avisos() {
+        let _ = banco.evento(execucao, None, "aviso", aviso);
+    }
     let r = executar_roteiro_em(
         amb,
         &mut chrome,
@@ -383,6 +386,22 @@ pub fn executar_escrito_em(
     versao.manifesto.validar()?;
     servicos.opcoes.validar(&versao.manifesto)?;
     let banco = amb.banco()?;
+    // Guarda de rascunho: com as opções de produção só roda versão ATIVA (o estado vem do
+    // banco, não da struct que o chamador montou). Rascunho e testado só rodam no modo teste,
+    // que é o caminho do `testar` (portal falso local).
+    let modo_teste =
+        !servicos.opcoes.mapa_de_hosts.is_empty() && servicos.opcoes.aceitar_http_loopback;
+    if !modo_teste {
+        let estado = banco.versao_escrita(&versao.roteiro, versao.numero)?.estado;
+        if estado != EstadoEscrito::Ativo {
+            return Err(ErroDeRoteiro::Invalido(format!(
+                "a versão {} do roteiro escrito `{}` não está ativa ({}): só se executa versão ativa",
+                versao.numero,
+                versao.roteiro,
+                estado.texto()
+            )));
+        }
+    }
     let conn = amb.conexao_do_inventario()?;
     let mut destino = NoInventario::novo(&conn, &amb.cofre, &versao.roteiro, execucao);
     let pausa = PausaDoEscrito {
@@ -471,6 +490,11 @@ pub fn executar_escrito(
             return Err(e);
         }
     };
+    // Avisos da abertura (por exemplo, o Chrome sem sandbox por `SBF_CHROME_SEM_SANDBOX`), uma
+    // vez por execução e sem dado sensível.
+    for aviso in chrome.avisos() {
+        let _ = banco.evento_escrito(execucao, "aviso", aviso);
+    }
     let r = executar_escrito_em(
         amb,
         &mut chrome,

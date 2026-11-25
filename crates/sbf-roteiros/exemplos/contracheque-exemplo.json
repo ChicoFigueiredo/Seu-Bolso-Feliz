@@ -4,7 +4,7 @@
   "url_inicial": "https://portal.exemplo.test/entrar",
   "hosts": ["portal.exemplo.test"],
   "rotulo_senha": "senha:portal-exemplo",
-  "rotulo_cpf": "cpf:portal-exemplo",
+  "rotulo_cpf": null,
   "mfa": {
     "tipo": "email",
     "remetente": "nao-responda@portal.exemplo.test",

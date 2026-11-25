@@ -23,8 +23,8 @@ elseif navegador.existe("#erro") then
   -- Sem segredo na mensagem: só o fato.
   error("o portal recusou a entrada (CPF ou senha)")
 end
--- Se o portal pedisse token do app autenticador ou CAPTCHA, o certo é parar e passar a vez
--- ao usuário: navegador.pausa("Resolva o CAPTCHA no navegador e continue").
+-- Se o portal pedisse o código do aplicativo autenticador (TOTP) ou CAPTCHA, o certo é parar e
+-- passar a vez ao usuário: navegador.pausa("Resolva o CAPTCHA no navegador e continue").
 
 -- 4. Espera a lista de contracheques.
 if not navegador.esperar("#lista", 30) then
