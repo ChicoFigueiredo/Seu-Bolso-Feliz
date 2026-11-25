@@ -177,7 +177,7 @@ E-mail is a Connection type with N accounts (`sbf email contas|adicionar|app|ent
 
 The shared shell lives in the sibling repo `/mnt/d/Chico/bancada` (private on GitHub:
 `ChicoFigueiredo/bancada`; `bancada-casca`,
-`bancada-armazem`, `bancada-segredos`), used by path (`../bancada/crates/...`), so the
+`bancada-armazem`, `bancada-segredos`, `bancada-rede`, `bancada-navegador`), used by path (`../bancada/crates/...`), so the
 SBF worktree must be a sibling of it.
 
 ```bash
