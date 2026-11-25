@@ -7,7 +7,8 @@
 //! ```text
 //! sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
 //!   importar <manifesto.json> --script <arquivo.luau> [--motivo <texto>]   (cria rascunho)
-//!   listar | mostrar <nome> [--versao <n>] | testar <nome> <versao>
+//!   listar | mostrar <nome> [--versao <n>]
+//!   testar <nome> <versao> --cenario <cenario>   (roda no site falso; sai 0 passou, 1 falhou)
 //!   ativar <nome> <versao> | desativar <nome>   (só em terminal interativo, com confirmação)
 //! ```
 //!
@@ -15,6 +16,10 @@
 //! `ativar` e `desativar` só rodam com stdin num terminal e depois de a pessoa digitar
 //! exatamente `<nome>@<versao>` (ou `<nome>`): o MCP e a IA, que não têm terminal, só
 //! importam rascunhos. Nenhuma opção nem variável de ambiente pula isso.
+//!
+//! `testar` é seguro e não pede terminal: sobe o site falso em `127.0.0.1`, abre o Chrome sem
+//! janela num perfil descartável e usa senhas fictícias em memória (nunca o chaveiro real, o
+//! Gmail, o perfil dedicado nem o cofre). Só o teste verde leva o rascunho a `testado`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,6 +32,7 @@ use sbf_roteiros::executor::FonteDeSenhas;
 use sbf_roteiros::gravacao::Guia;
 use sbf_roteiros::manifesto::{Classe, Manifesto, Mfa};
 use sbf_roteiros::servico::{Ambiente, executar_devidos, executar_escritos_devidos};
+use sbf_roteiros::teste_escrito::{Cenario, testar_escrito};
 use sbf_worker::laco::{ColetorDeRoteiros, Dados, ResumoDeRoteiros};
 use sbf_worker::registro::Falha;
 
@@ -242,7 +248,9 @@ uso: sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
                                          da versão mais nova não duplica
   listar                                 os roteiros escritos, a versão em vigor e a mais nova
   mostrar <nome> [--versao <n>]          manifesto, fonte, versões e histórico de estados
-  testar <nome> <versao>                 roda no site falso (ainda não liga: sai com código 2)
+  testar <nome> <versao> --cenario <c>   roda a versão no site falso local (Chrome sem janela,
+                                         senhas fictícias); passou => `testado`. Sai 0 se passou,
+                                         1 se falhou. Cenários: contracheque
   ativar <nome> <versao>                 só num terminal interativo, com confirmação digitada;
                                          só de uma versão testada; aposenta a ativa anterior
   desativar <nome>                       idem (aposenta a versão ativa)
@@ -279,6 +287,8 @@ const LIMITE_DO_ARQUIVO: u64 = 64 * 1024;
 /// Onde o CLI roda: a pasta de dados e o terminal.
 struct AmbienteDoCli<'a> {
     dados: &'a Path,
+    /// O Chrome a usar no `testar` (`None`: o que for achado; só os testes trocam).
+    chrome: Option<PathBuf>,
     terminal: bool,
     entrada: &'a mut dyn std::io::BufRead,
     saida: &'a mut dyn std::io::Write,
@@ -600,12 +610,54 @@ fn desativar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> 
     Ok(())
 }
 
-fn testar(resto: &[String]) -> Result<(), FalhaDoCli> {
-    let [_nome, versao] = resto else {
-        return Err(uso("uso: testar <nome> <versao>"));
+fn cenarios_disponiveis(a: &mut AmbienteDoCli) {
+    w(a.saida, "Cenários disponíveis:");
+    for c in Cenario::TODOS {
+        w(a.saida, &format!("  {:<14} {}", c.nome(), c.descricao()));
+    }
+}
+
+fn testar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
+    let (soltos, valores) = opcoes(resto, &["--cenario"])?;
+    let [nome, versao] = soltos.as_slice() else {
+        return Err(uso("uso: testar <nome> <versao> --cenario <cenario>"));
     };
-    versao_de(versao)?;
-    Err(uso("o teste no site falso chega na próxima etapa"))
+    let versao = versao_de(versao)?;
+    let Some(pedido) = valores.get("--cenario") else {
+        cenarios_disponiveis(a);
+        return Err(uso("testar pede --cenario <cenario>"));
+    };
+    let Some(cenario) = Cenario::de_texto(pedido) else {
+        cenarios_disponiveis(a);
+        return Err(uso(format!("cenário desconhecido: `{pedido}`")));
+    };
+    // Só o banco dos roteiros é o real; o cofre, o perfil do Chrome e as senhas do teste são
+    // descartáveis e fictícios (o `testar_escrito` cria e apaga). O cofre daqui nunca é aberto.
+    let mut amb = Ambiente::novo(a.dados, &a.dados.join("cofre-do-teste-nao-usado"));
+    amb.programa_do_chrome.clone_from(&a.chrome);
+    w(
+        a.saida,
+        &format!(
+            "Testando `{nome}` v{versao} no cenário {} (site falso em 127.0.0.1, Chrome sem janela)...",
+            cenario.nome()
+        ),
+    );
+    let r = testar_escrito(&amb, nome, versao, cenario)?;
+    if r.passou {
+        w(a.saida, &format!("{nome} v{versao}: PASSOU. {}", r.resumo));
+        w(
+            a.saida,
+            &format!(
+                "A versão está `testado`. Para ativar, num terminal: sbf roteiros escrito ativar {nome} {versao}"
+            ),
+        );
+        Ok(())
+    } else {
+        w(a.saida, &format!("{nome} v{versao}: FALHOU. {}", r.resumo));
+        Err(op(format!(
+            "o teste de `{nome}` v{versao} falhou; a versão continua rascunho"
+        )))
+    }
 }
 
 fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
@@ -617,7 +669,7 @@ fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
         "listar" if resto.is_empty() => listar(a),
         "listar" => Err(uso("uso: listar")),
         "mostrar" => mostrar(a, resto),
-        "testar" => testar(resto),
+        "testar" => testar(a, resto),
         "ativar" => ativar(a, resto),
         "desativar" => desativar(a, resto),
         outro => Err(uso(format!("subcomando desconhecido: {outro}"))),
@@ -665,6 +717,7 @@ pub fn rodar(args: &[String]) -> ExitCode {
     let mut saida = std::io::stdout().lock();
     let mut ambiente = AmbienteDoCli {
         dados: &dados,
+        chrome: None,
         terminal,
         entrada: &mut entrada,
         saida: &mut saida,
@@ -709,6 +762,8 @@ mod testes_escrito {
 
     struct Cenario {
         pasta: tempfile::TempDir,
+        /// O Chrome do `testar` (`None`: o que for achado).
+        chrome: Option<PathBuf>,
     }
 
     impl Cenario {
@@ -716,7 +771,10 @@ mod testes_escrito {
             let pasta = tempfile::tempdir().unwrap();
             std::fs::write(pasta.path().join("manifesto.json"), MANIFESTO).unwrap();
             std::fs::write(pasta.path().join("roteiro.luau"), FONTE).unwrap();
-            Self { pasta }
+            Self {
+                pasta,
+                chrome: None,
+            }
         }
 
         fn caminho(&self, nome: &str) -> String {
@@ -742,6 +800,7 @@ mod testes_escrito {
                 &args,
                 &mut AmbienteDoCli {
                     dados: &dados,
+                    chrome: self.chrome.clone(),
                     terminal,
                     entrada: &mut entrada,
                     saida: &mut saida,
@@ -947,21 +1006,167 @@ mod testes_escrito {
         assert!(matches!(r, Err(FalhaDoCli::Operacao(_))));
     }
 
+    fn codigo(r: Result<(), FalhaDoCli>) -> String {
+        format!("{:?}", codigo_de_saida(r))
+    }
+
     #[test]
-    fn testar_ainda_nao_liga_e_sai_com_codigo_2() {
+    fn testar_sem_cenario_lista_os_cenarios_e_sai_com_codigo_2() {
         let c = Cenario::novo();
-        let (r, _) = c.rodar(false, "", &["testar", "contracheque-exemplo", "1"]);
+        c.importar().0.unwrap();
+        let (r, saida) = c.rodar(false, "", &["testar", "contracheque-exemplo", "1"]);
         let Err(FalhaDoCli::Uso(m)) = &r else {
             panic!("devia ser erro de uso");
         };
+        assert!(m.contains("--cenario"), "{m}");
+        assert!(saida.contains("Cenários disponíveis"), "{saida}");
+        assert!(saida.contains("contracheque"), "{saida}");
+        assert_eq!(codigo(r), format!("{:?}", ExitCode::from(2)));
+        // nada rodou: continua rascunho, sem resultado de teste
+        let v = c.banco().versao_escrita("contracheque-exemplo", 1).unwrap();
+        assert_eq!(v.estado, EstadoEscrito::Rascunho);
+        assert!(v.resultado_do_teste.is_none());
+    }
+
+    #[test]
+    fn testar_com_cenario_desconhecido_ou_uso_errado_sai_com_codigo_2() {
+        let c = Cenario::novo();
+        c.importar().0.unwrap();
+        for args in [
+            vec!["testar", "contracheque-exemplo", "1", "--cenario", "outro"],
+            vec![
+                "testar",
+                "contracheque-exemplo",
+                "--cenario",
+                "contracheque",
+            ],
+            vec![
+                "testar",
+                "contracheque-exemplo",
+                "zero",
+                "--cenario",
+                "contracheque",
+            ],
+            vec!["testar", "contracheque-exemplo", "1", "--cenario"],
+        ] {
+            let (r, _) = c.rodar(false, "", &args);
+            assert!(matches!(r, Err(FalhaDoCli::Uso(_))), "{args:?}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn testar_roteiro_de_outro_cenario_e_erro_claro_com_codigo_1() {
+        // o manifesto deste arquivo não tem MFA por e-mail: não é o contracheque do site falso
+        let c = Cenario::novo();
+        c.importar().0.unwrap();
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &[
+                "testar",
+                "contracheque-exemplo",
+                "1",
+                "--cenario",
+                "contracheque",
+            ],
+        );
+        let Err(FalhaDoCli::Operacao(m)) = &r else {
+            panic!("devia ser erro de operação: {r:?}");
+        };
         assert!(
-            m.contains("o teste no site falso chega na próxima etapa"),
+            m.contains("este roteiro não é do cenário contracheque"),
             "{m}"
         );
+        assert_eq!(codigo(r), format!("{:?}", ExitCode::from(1)));
         assert_eq!(
-            format!("{:?}", codigo_de_saida(r)),
-            format!("{:?}", ExitCode::from(2))
+            c.banco()
+                .versao_escrita("contracheque-exemplo", 1)
+                .unwrap()
+                .estado,
+            EstadoEscrito::Rascunho
         );
+    }
+
+    #[test]
+    fn testar_versao_ou_roteiro_inexistente_e_erro_de_operacao() {
+        let c = Cenario::novo();
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &["testar", "nao-existe", "1", "--cenario", "contracheque"],
+        );
+        assert!(matches!(r, Err(FalhaDoCli::Operacao(_))), "{r:?}");
+    }
+
+    /// Importa os exemplos de `crates/sbf-roteiros/exemplos` (o contracheque fictício).
+    fn importar_exemplos(c: &Cenario) {
+        let exemplos = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sbf-roteiros/exemplos");
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &[
+                "importar",
+                &exemplos.join("contracheque-exemplo.json").to_string_lossy(),
+                "--script",
+                &exemplos.join("contracheque-exemplo.luau").to_string_lossy(),
+            ],
+        );
+        r.unwrap();
+    }
+
+    #[test]
+    fn testar_sem_chrome_e_erro_claro_e_nao_muda_nada() {
+        let mut c = Cenario::novo();
+        c.chrome = Some(c.pasta.path().join("nao-existe").join("chrome"));
+        importar_exemplos(&c);
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &[
+                "testar",
+                "contracheque-exemplo",
+                "1",
+                "--cenario",
+                "contracheque",
+            ],
+        );
+        let Err(FalhaDoCli::Operacao(m)) = &r else {
+            panic!("devia ser erro de operação: {r:?}");
+        };
+        assert!(m.contains("Chrome"), "{m}");
+        assert_eq!(codigo(r), format!("{:?}", ExitCode::from(1)));
+        let v = c.banco().versao_escrita("contracheque-exemplo", 1).unwrap();
+        assert_eq!(v.estado, EstadoEscrito::Rascunho);
+    }
+
+    #[test]
+    fn testar_o_exemplo_com_chrome_passa_sem_terminal_e_vira_testado() {
+        if std::env::var("SBF_CHROME_TESTE").ok().as_deref() != Some("1") {
+            eprintln!("pulado: defina SBF_CHROME_TESTE=1 para rodar com o Chrome");
+            return;
+        }
+        let c = Cenario::novo();
+        importar_exemplos(&c);
+        // `terminal = false`: testar não exige terminal interativo
+        let (r, saida) = c.rodar(
+            false,
+            "",
+            &[
+                "testar",
+                "contracheque-exemplo",
+                "1",
+                "--cenario",
+                "contracheque",
+            ],
+        );
+        r.unwrap();
+        assert!(saida.contains("PASSOU"), "{saida}");
+        assert!(!saida.contains("SenhaFicticia"), "{saida}");
+        let v = c.banco().versao_escrita("contracheque-exemplo", 1).unwrap();
+        assert_eq!(v.estado, EstadoEscrito::Testado);
+        // e o cofre nem foi criado
+        assert!(!c.dados().join("cofre-do-teste-nao-usado").exists());
+        assert_eq!(codigo(Ok(())), format!("{:?}", ExitCode::SUCCESS));
     }
 
     #[test]
