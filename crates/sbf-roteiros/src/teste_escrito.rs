@@ -8,15 +8,22 @@
 //! dedicado do Chrome (o do teste nasce e morre numa pasta temporária), o cofre e o inventário
 //! reais (o PDF fictício cai num cofre temporário) e qualquer rede além de `127.0.0.1`.
 //!
-//! Cenários desta fatia: só o [`Cenario::Contracheque`]. Ele sobe o
+//! Cenários: [`Cenario::Contracheque`] e [`Cenario::Conexoes`].
+//!
+//! **Contracheque** sobe o
 //! [`PortalDeContracheque`](bancada_navegador::site_falso::PortalDeContracheque) com CPF e senha
 //! fictícios e MFA por e-mail; o host **lógico** do manifesto (`portal.exemplo.test`) é
 //! mapeado para a base real do portal (modo teste do executor, [`OpcoesEscrito`]).
-//!
 //! O teste passa se, juntas: a execução concluiu; o login e o código foram aceitos; o
 //! contracheque do mês corrente **ou** do anterior foi baixado; o portal não registrou nenhum
 //! acesso proibido (pagar boleto, alterar cadastro); e o arquivo que entrou no inventário é o PDF
 //! fictício esperado.
+//!
+//! **Conexões** sobe o [`PortalDeConexoes`] (painel fictício do Meu Pluggy, sem login) e mapeia
+//! o host do manifesto para ele. O teste passa se, juntas: a execução concluiu; cada conexão foi
+//! atualizada exatamente uma vez; o painel não registrou nenhum acesso proibido (excluir); e
+//! nada que pareça segredo ou URL com token chegou ao resumo. Se o roteiro pede a vez do
+//! usuário (sessão expirada), o teste **falha** com o motivo da pausa: no teste não há usuário.
 
 use crate::banco::{EstadoDaExecucao, EstadoEscrito, ResultadoDoTeste, VersaoEscrita};
 use crate::chrome::{self, OpcoesDoChrome};
@@ -28,6 +35,7 @@ use crate::manifesto::{Classe, Manifesto, Mfa};
 use crate::navegador::Navegador;
 use crate::servico::{Ambiente, RelatorioEscrito, Servicos, executar_escrito_em};
 use bancada_navegador::site_falso::{Config, MfaDoPortal, PortalDeContracheque};
+use bancada_navegador::site_falso_conexoes::{Config as ConfigDeConexoes, PortalDeConexoes};
 use bancada_navegador::url::host_de;
 use regex::Regex;
 use rusqlite::Connection;
@@ -35,6 +43,7 @@ use sbf_chaveiro::Segredo;
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 use zeroize::Zeroizing;
 
@@ -54,17 +63,21 @@ pub enum Cenario {
     /// Portal de contracheque: login com CPF e senha, MFA por e-mail, lista de meses, download
     /// de PDF e os distratores "Pagar boleto" e "Alterar cadastro".
     Contracheque,
+    /// Painel de conexões do Meu Pluggy: abre cada conexão, clica em "Atualizar" e espera o
+    /// widget (iframe) terminar; o vizinho "Excluir" nunca pode ser tocado.
+    Conexoes,
 }
 
 impl Cenario {
     /// Todos os cenários, na ordem em que o CLI os lista.
-    pub const TODOS: &'static [Self] = &[Self::Contracheque];
+    pub const TODOS: &'static [Self] = &[Self::Contracheque, Self::Conexoes];
 
     /// O nome do cenário na linha de comando (`--cenario contracheque`).
     #[must_use]
     pub fn nome(self) -> &'static str {
         match self {
             Self::Contracheque => "contracheque",
+            Self::Conexoes => "conexoes",
         }
     }
 
@@ -74,6 +87,9 @@ impl Cenario {
         match self {
             Self::Contracheque => {
                 "portal de contracheque fictício: CPF e senha, código por e-mail, download do PDF do mês"
+            }
+            Self::Conexoes => {
+                "painel de conexões fictício: abre cada conexão, clica em Atualizar e espera o widget terminar"
             }
         }
     }
@@ -89,12 +105,22 @@ impl Cenario {
     /// # Errors
     /// [`ErroDeRoteiro::Invalido`] com o motivo, em português claro e sem segredo.
     fn conferir(self, m: &Manifesto) -> Resultado<AlvoDoTeste> {
-        let nao = |motivo: &str| {
-            ErroDeRoteiro::Invalido(format!(
-                "este roteiro não é do cenário {}: {motivo}",
-                self.nome()
-            ))
-        };
+        match self {
+            Self::Contracheque => self.conferir_contracheque(m),
+            Self::Conexoes => self.conferir_conexoes(m),
+        }
+    }
+
+    /// O erro de "este roteiro não é deste cenário", com o motivo.
+    fn nao(self, motivo: &str) -> ErroDeRoteiro {
+        ErroDeRoteiro::Invalido(format!(
+            "este roteiro não é do cenário {}: {motivo}",
+            self.nome()
+        ))
+    }
+
+    fn conferir_contracheque(self, m: &Manifesto) -> Resultado<AlvoDoTeste> {
+        let nao = |motivo: &str| self.nao(motivo);
         let Mfa::Email { remetente, formato } = &m.mfa else {
             return Err(nao("o manifesto tem de declarar MFA por e-mail"));
         };
@@ -127,6 +153,37 @@ impl Cenario {
             host_logico: host,
             remetente: remetente.clone(),
             rotulo_senha: m.rotulo_senha.clone().unwrap_or_default(),
+        })
+    }
+
+    fn conferir_conexoes(self, m: &Manifesto) -> Resultado<AlvoDoTeste> {
+        let nao = |motivo: &str| self.nao(motivo);
+        if m.classe != Classe::AtualizarConexao {
+            return Err(nao("a classe tem de ser `atualizar_conexao`"));
+        }
+        if m.movimenta_dinheiro {
+            return Err(nao("o roteiro movimenta dinheiro"));
+        }
+        if matches!(m.mfa, Mfa::Email { .. }) {
+            return Err(nao(
+                "o painel de conexões não tem código por e-mail: o MFA tem de ser `manual` ou `nenhum`",
+            ));
+        }
+        if m.rotulo_senha.is_some() {
+            return Err(nao(
+                "o painel de conexões não tem senha: o manifesto não pode declarar `rotulo_senha`",
+            ));
+        }
+        let Some(host) = host_de(&m.url_inicial) else {
+            return Err(nao("`url_inicial` não tem host"));
+        };
+        if !m.hosts.contains(&host) {
+            return Err(nao("o host de `url_inicial` não está em `hosts`"));
+        }
+        Ok(AlvoDoTeste {
+            host_logico: host,
+            remetente: String::new(),
+            rotulo_senha: String::new(),
         })
     }
 }
@@ -201,6 +258,32 @@ struct SemUsuario;
 
 impl Pausa for SemUsuario {
     fn aguardar(&self, _execucao: i64, _motivo: &str) -> Decisao {
+        Decisao::Expirou
+    }
+}
+
+/// Como [`SemUsuario`], mas guarda o motivo de cada pausa: o teste do cenário `conexoes` o cita
+/// no resumo (sessão expirada).
+#[derive(Default)]
+struct PausaAnotada {
+    motivos: Mutex<Vec<String>>,
+}
+
+impl PausaAnotada {
+    fn motivos(&self) -> Vec<String> {
+        self.motivos
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl Pausa for PausaAnotada {
+    fn aguardar(&self, _execucao: i64, motivo: &str) -> Decisao {
+        self.motivos
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(motivo.to_owned());
         Decisao::Expirou
     }
 }
@@ -325,8 +408,84 @@ pub fn testar_em(
     navegador: &mut dyn Navegador,
 ) -> Resultado<ResultadoDoTeste> {
     let (versao, alvo) = conferir_antes(amb, nome, numero, cenario)?;
-    let banco = amb.banco()?;
+    match cenario {
+        Cenario::Contracheque => testar_contracheque(amb, &versao, &alvo, navegador),
+        Cenario::Conexoes => {
+            let portal = PortalDeConexoes::iniciar(
+                ConfigDeConexoes::default().com_duracao_widget(DURACAO_DO_WIDGET_NO_TESTE),
+            )?;
+            testar_conexoes(amb, &versao, &alvo, &portal, navegador)
+        }
+    }
+}
 
+/// O cenário `conexoes` contra um `portal` que o chamador já subiu (para os testes olharem os
+/// contadores do painel depois, ou o subirem com sessão expirada). Mesmo caminho de
+/// [`testar_em`]: grava o resultado com `marcar_testado`.
+///
+/// # Errors
+/// Os de [`testar_em`].
+pub fn testar_conexoes_em(
+    amb: &Ambiente,
+    nome: &str,
+    numero: u32,
+    portal: &PortalDeConexoes,
+    navegador: &mut dyn Navegador,
+) -> Resultado<ResultadoDoTeste> {
+    let (versao, alvo) = conferir_antes(amb, nome, numero, Cenario::Conexoes)?;
+    testar_conexoes(amb, &versao, &alvo, portal, navegador)
+}
+
+/// Roda a versão com o vigia de teto e fecha a execução com falha se a infraestrutura quebra.
+fn rodar_com_vigia(
+    amb: &Ambiente,
+    versao: &VersaoEscrita,
+    navegador: &mut dyn Navegador,
+    servicos: &Servicos<'_>,
+) -> Resultado<RelatorioEscrito> {
+    let banco = amb.banco()?;
+    let execucao = banco.iniciar_execucao_escrita(&versao.roteiro, versao.numero, "teste")?;
+    let cancelar = AtomicBool::new(false);
+    let pronto = AtomicBool::new(false);
+    let rodou = std::thread::scope(|s| {
+        // O vigia: passado o teto, cancela (o teste não pode travar a linha de comando).
+        s.spawn(|| {
+            let inicio = std::time::Instant::now();
+            while !pronto.load(Ordering::SeqCst) {
+                if inicio.elapsed() >= TETO_DO_TESTE {
+                    cancelar.store(true, Ordering::SeqCst);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let r = executar_escrito_em(amb, navegador, versao, execucao, servicos, &cancelar);
+        pronto.store(true, Ordering::SeqCst);
+        r
+    });
+    match rodou {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            // Falha de infraestrutura no meio: a execução não pode ficar "rodando".
+            let _ = banco.finalizar_escrita(
+                execucao,
+                EstadoDaExecucao::Falhou,
+                Some(&e.to_string()),
+                0,
+                0,
+            );
+            Err(e)
+        }
+    }
+}
+
+fn testar_contracheque(
+    amb: &Ambiente,
+    versao: &VersaoEscrita,
+    alvo: &AlvoDoTeste,
+    navegador: &mut dyn Navegador,
+) -> Resultado<ResultadoDoTeste> {
+    let banco = amb.banco()?;
     let (_, mes_atual, mes_anterior) = meses_do_teste();
     let portal = PortalDeContracheque::iniciar(
         Config::nova(CPF_FICTICIO, SENHA_FICTICIA)
@@ -344,53 +503,18 @@ pub fn testar_em(
         mapa_de_hosts: vec![(alvo.host_logico.clone(), portal.url_base())],
         aceitar_http_loopback: true,
     };
-
-    let execucao = banco.iniciar_execucao_escrita(nome, numero, "teste")?;
-    let cancelar = AtomicBool::new(false);
-    let pronto = AtomicBool::new(false);
-    let rodou = std::thread::scope(|s| {
-        // O vigia: passado o teto, cancela (o teste não pode travar a linha de comando).
-        s.spawn(|| {
-            let inicio = std::time::Instant::now();
-            while !pronto.load(Ordering::SeqCst) {
-                if inicio.elapsed() >= TETO_DO_TESTE {
-                    cancelar.store(true, Ordering::SeqCst);
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        });
-        let r = executar_escrito_em(
-            amb,
-            navegador,
-            &versao,
-            execucao,
-            &Servicos {
-                senhas: &senhas,
-                caixa: Some(&caixa),
-                relogio: &RelogioReal,
-                pausa: Some(&SemUsuario),
-                opcoes: &opcoes,
-            },
-            &cancelar,
-        );
-        pronto.store(true, Ordering::SeqCst);
-        r
-    });
-    let relatorio = match rodou {
-        Ok(r) => r,
-        Err(e) => {
-            // Falha de infraestrutura no meio: a execução não pode ficar "rodando".
-            let _ = banco.finalizar_escrita(
-                execucao,
-                EstadoDaExecucao::Falhou,
-                Some(&e.to_string()),
-                0,
-                0,
-            );
-            return Err(e);
-        }
-    };
+    let relatorio = rodar_com_vigia(
+        amb,
+        versao,
+        navegador,
+        &Servicos {
+            senhas: &senhas,
+            caixa: Some(&caixa),
+            relogio: &RelogioReal,
+            pausa: Some(&SemUsuario),
+            opcoes: &opcoes,
+        },
+    )?;
     let resultado = avaliar(
         &relatorio,
         &portal,
@@ -398,7 +522,44 @@ pub fn testar_em(
         &amb.inventario,
         &codigos_a_esconder(&portal),
     );
-    banco.marcar_testado(nome, numero, &resultado)?;
+    banco.marcar_testado(&versao.roteiro, versao.numero, &resultado)?;
+    Ok(resultado)
+}
+
+/// A duração do widget no teste: curta, mas o bastante para o roteiro vê-lo abrir.
+const DURACAO_DO_WIDGET_NO_TESTE: Duration = Duration::from_secs(2);
+
+fn testar_conexoes(
+    amb: &Ambiente,
+    versao: &VersaoEscrita,
+    alvo: &AlvoDoTeste,
+    portal: &PortalDeConexoes,
+    navegador: &mut dyn Navegador,
+) -> Resultado<ResultadoDoTeste> {
+    let banco = amb.banco()?;
+    // O painel não tem senha nem CPF: o chaveiro do teste não atende rótulo nenhum.
+    let senhas = SenhasDoTeste {
+        rotulo: String::new(),
+    };
+    let pausa = PausaAnotada::default();
+    let opcoes = OpcoesEscrito {
+        mapa_de_hosts: vec![(alvo.host_logico.clone(), portal.url_base())],
+        aceitar_http_loopback: true,
+    };
+    let relatorio = rodar_com_vigia(
+        amb,
+        versao,
+        navegador,
+        &Servicos {
+            senhas: &senhas,
+            caixa: None,
+            relogio: &RelogioReal,
+            pausa: Some(&pausa),
+            opcoes: &opcoes,
+        },
+    )?;
+    let resultado = avaliar_conexoes(&relatorio, portal, &pausa.motivos(), &[]);
+    banco.marcar_testado(&versao.roteiro, versao.numero, &resultado)?;
     Ok(resultado)
 }
 
@@ -544,6 +705,87 @@ fn avaliar(
     ResultadoDoTeste { passou, resumo }
 }
 
+/// Tira de um texto o que vem depois do `?` ou do `#` de qualquer URL (onde ficam os tokens).
+fn sem_consulta_de_url(texto: &str) -> String {
+    match Regex::new(r"(https?://[^\s?#]+)[?#]\S*") {
+        Ok(r) => r.replace_all(texto, "$1").into_owned(),
+        Err(_) => texto.to_owned(),
+    }
+}
+
+/// Confere os critérios do cenário `conexoes` e monta o resumo (sem segredo nem token de URL).
+///
+/// `pausas` são os motivos das pausas que o roteiro pediu (no teste, ninguém responde).
+fn avaliar_conexoes(
+    rel: &RelatorioEscrito,
+    portal: &PortalDeConexoes,
+    pausas: &[String],
+    esconder: &[String],
+) -> ResultadoDoTeste {
+    let mut falhas: Vec<String> = Vec::new();
+    let mut fatos: Vec<String> = Vec::new();
+
+    match &rel.fim {
+        Fim::Concluida => fatos.push("a execução concluiu".to_owned()),
+        Fim::PausaExpirou { .. } => {
+            let motivo = pausas
+                .last()
+                .map_or_else(|| "sem motivo".to_owned(), Clone::clone);
+            falhas.push(format!(
+                "o roteiro pediu a vez do usuário (pausa: {motivo}) e no teste não há usuário"
+            ));
+        }
+        outro => falhas.push(format!("a execução terminou {}", fim_em_texto(outro))),
+    }
+
+    let ids = portal.ids();
+    let certas = ids
+        .iter()
+        .filter(|id| portal.atualizacoes_de(id) == 1)
+        .count();
+    if certas == ids.len() && portal.total_de_atualizacoes() == ids.len() {
+        fatos.push(format!(
+            "as {} conexões foram atualizadas uma vez cada",
+            ids.len()
+        ));
+    } else {
+        for id in &ids {
+            let n = portal.atualizacoes_de(id);
+            if n != 1 {
+                let nome = portal.nome_de(id).unwrap_or("conexão");
+                falhas.push(format!(
+                    "{nome} foi atualizada {n} vez(es) (esperado: exatamente 1)"
+                ));
+            }
+        }
+    }
+
+    let proibidos = portal.acessos_proibidos();
+    if portal.exclusoes() == 0 && proibidos.is_empty() {
+        fatos.push("nenhum acesso proibido (Excluir não foi tocado)".to_owned());
+    } else {
+        falhas.push(format!(
+            "o painel registrou acesso proibido: {}",
+            proibidos.join(", ")
+        ));
+    }
+
+    let passou = falhas.is_empty();
+    let mut resumo = if passou {
+        format!("passou no cenário conexoes: {}", fatos.join("; "))
+    } else {
+        format!("falhou no cenário conexoes: {}", falhas.join("; "))
+    };
+    if !passou && let Some(ultimo) = rel.registros.last() {
+        resumo.push_str(&format!(" (último registro do roteiro: {ultimo})"));
+    }
+    let mut resumo = sem_consulta_de_url(&resumo);
+    for valor in esconder.iter().filter(|v| !v.is_empty()) {
+        resumo = resumo.replace(valor.as_str(), "***");
+    }
+    ResultadoDoTeste { passou, resumo }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -660,5 +902,191 @@ mod testes {
         assert!(!r.passou);
         assert!(!r.resumo.contains(SENHA_FICTICIA), "{}", r.resumo);
         assert!(!r.resumo.contains(CPF_FICTICIO), "{}", r.resumo);
+    }
+
+    // ------------------------------------------------------------------ cenário conexoes
+
+    fn manifesto_conexoes(mfa: &str, classe: &str, movimenta: bool, rotulo: &str) -> Manifesto {
+        Manifesto::de_json(&format!(
+            r#"{{"nome":"meu-pluggy-atualizar","url_inicial":"https://meu.pluggy.ai/connections",
+            "hosts":["meu.pluggy.ai"],"rotulo_senha":{rotulo},"rotulo_cpf":null,"mfa":{mfa},
+            "movimenta_dinheiro":{movimenta},"classe":"{classe}"}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn o_cenario_conexoes_tem_nome_e_descricao_e_volta_do_texto() {
+        assert_eq!(Cenario::de_texto("conexoes"), Some(Cenario::Conexoes));
+        assert_eq!(Cenario::Conexoes.nome(), "conexoes");
+        assert!(Cenario::Conexoes.descricao().contains("widget"));
+        assert!(Cenario::TODOS.contains(&Cenario::Conexoes));
+        assert!(Cenario::TODOS.contains(&Cenario::Contracheque));
+    }
+
+    #[test]
+    fn manifesto_de_conexoes_com_mfa_manual_ou_nenhum_e_aceito() {
+        for mfa in [r#"{"tipo":"manual"}"#, r#"{"tipo":"nenhum"}"#] {
+            let alvo = Cenario::Conexoes
+                .conferir(&manifesto_conexoes(mfa, "atualizar_conexao", false, "null"))
+                .unwrap();
+            assert_eq!(alvo.host_logico, "meu.pluggy.ai");
+        }
+    }
+
+    #[test]
+    fn manifesto_que_nao_e_de_conexoes_e_recusado_com_motivo_claro() {
+        let manual = r#"{"tipo":"manual"}"#;
+        let casos = [
+            (
+                manifesto_conexoes(manual, "consulta", false, "null"),
+                "atualizar_conexao",
+            ),
+            (
+                manifesto_conexoes(manual, "atualizar_conexao", true, "null"),
+                "movimenta dinheiro",
+            ),
+            (
+                manifesto_conexoes(EMAIL, "atualizar_conexao", false, "null"),
+                "`manual` ou `nenhum`",
+            ),
+            (
+                manifesto_conexoes(manual, "atualizar_conexao", false, "\"senha:x\""),
+                "rotulo_senha",
+            ),
+        ];
+        for (m, trecho) in casos {
+            let e = Cenario::Conexoes.conferir(&m).unwrap_err().to_string();
+            assert!(e.contains("este roteiro não é do cenário conexoes"), "{e}");
+            assert!(e.contains(trecho), "{e}");
+        }
+        // o manifesto do contracheque também não serve ao cenário conexoes
+        let e = Cenario::Conexoes
+            .conferir(&manifesto(EMAIL, "consulta", false))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("conexoes"), "{e}");
+    }
+
+    /// Faz `POST` num caminho do painel (o que o JS da página faria).
+    fn post(portal: &PortalDeConexoes, caminho: &str) {
+        use std::io::{Read as _, Write as _};
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", portal.porta())).unwrap();
+        write!(
+            c,
+            "POST {caminho} HTTP/1.1\r\nHost: meu.pluggy.ai\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut _resp = Vec::new();
+        let _ = c.read_to_end(&mut _resp);
+    }
+
+    fn relatorio(fim: Fim, registros: &[&str]) -> RelatorioEscrito {
+        RelatorioEscrito {
+            fim,
+            baixados: 0,
+            novos: 0,
+            registros: registros.iter().map(|r| (*r).to_owned()).collect(),
+        }
+    }
+
+    #[test]
+    fn conexoes_passa_quando_cada_conexao_e_atualizada_uma_vez() {
+        let p = PortalDeConexoes::iniciar(ConfigDeConexoes::default()).unwrap();
+        for id in p.ids() {
+            post(&p, &format!("/api/atualizou/{id}"));
+        }
+        let r = avaliar_conexoes(&relatorio(Fim::Concluida, &[]), &p, &[], &[]);
+        assert!(r.passou, "{}", r.resumo);
+        assert!(
+            r.resumo.starts_with("passou no cenário conexoes"),
+            "{}",
+            r.resumo
+        );
+    }
+
+    #[test]
+    fn conexoes_falha_se_alguma_nao_foi_atualizada_ou_foi_duas_vezes() {
+        let p = PortalDeConexoes::iniciar(ConfigDeConexoes::default()).unwrap();
+        let ids = p.ids();
+        post(&p, &format!("/api/atualizou/{}", ids[0]));
+        post(&p, &format!("/api/atualizou/{}", ids[0]));
+        post(&p, &format!("/api/atualizou/{}", ids[1]));
+        // a terceira ficou sem atualizar
+        let r = avaliar_conexoes(&relatorio(Fim::Concluida, &[]), &p, &[], &[]);
+        assert!(!r.passou);
+        assert!(
+            r.resumo.contains("Banco Um foi atualizada 2 vez(es)"),
+            "{}",
+            r.resumo
+        );
+        assert!(
+            r.resumo.contains("Banco Tres foi atualizada 0 vez(es)"),
+            "{}",
+            r.resumo
+        );
+        assert!(!r.resumo.contains("Banco Dois foi"), "{}", r.resumo);
+    }
+
+    #[test]
+    fn conexoes_falha_se_excluir_foi_tocado_mesmo_com_tudo_atualizado() {
+        let p = PortalDeConexoes::iniciar(ConfigDeConexoes::default()).unwrap();
+        let ids = p.ids();
+        for id in &ids {
+            post(&p, &format!("/api/atualizou/{id}"));
+        }
+        post(&p, &format!("/api/excluiu/{}", ids[0]));
+        let r = avaliar_conexoes(&relatorio(Fim::Concluida, &[]), &p, &[], &[]);
+        assert!(!r.passou);
+        assert!(r.resumo.contains("acesso proibido"), "{}", r.resumo);
+    }
+
+    #[test]
+    fn conexoes_com_pausa_falha_citando_o_motivo_da_pausa() {
+        let p = PortalDeConexoes::iniciar(ConfigDeConexoes::default().com_sessao_expirada(true))
+            .unwrap();
+        let rel = relatorio(Fim::PausaExpirou { passo: 0 }, &[]);
+        let r = avaliar_conexoes(
+            &rel,
+            &p,
+            &["sessão expirada? entre na conta".to_owned()],
+            &[],
+        );
+        assert!(!r.passou);
+        assert!(
+            r.resumo
+                .contains("pediu a vez do usuário (pausa: sessão expirada? entre na conta)"),
+            "{}",
+            r.resumo
+        );
+    }
+
+    #[test]
+    fn o_resumo_de_conexoes_nunca_mostra_token_de_url_nem_valor_escondido() {
+        let p = PortalDeConexoes::iniciar(ConfigDeConexoes::default()).unwrap();
+        let rel = relatorio(
+            Fim::Falhou {
+                passo: 0,
+                motivo: "x".to_owned(),
+            },
+            &["abriu https://meu.pluggy.ai/connections?token=SEGREDO123#frag e SegredoFicticio"],
+        );
+        let r = avaliar_conexoes(&rel, &p, &[], &["SegredoFicticio".to_owned()]);
+        assert!(!r.passou);
+        assert!(!r.resumo.contains("SEGREDO123"), "{}", r.resumo);
+        assert!(!r.resumo.contains("token="), "{}", r.resumo);
+        assert!(!r.resumo.contains("SegredoFicticio"), "{}", r.resumo);
+        assert!(
+            r.resumo.contains("https://meu.pluggy.ai/connections"),
+            "{}",
+            r.resumo
+        );
+    }
+
+    #[test]
+    fn a_pausa_anotada_guarda_o_motivo_e_expira() {
+        let pausa = PausaAnotada::default();
+        assert_eq!(pausa.aguardar(1, "faça login"), Decisao::Expirou);
+        assert_eq!(pausa.motivos(), vec!["faça login".to_owned()]);
     }
 }
