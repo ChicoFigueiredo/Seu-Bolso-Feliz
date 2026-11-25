@@ -24,6 +24,7 @@ pub mod chrome;
 pub mod codigo_email;
 pub mod erro;
 pub mod escrito;
+pub mod execucao_escrita;
 pub mod executor;
 pub mod gravacao;
 pub mod inventario;

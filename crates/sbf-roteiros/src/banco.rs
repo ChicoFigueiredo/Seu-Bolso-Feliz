@@ -170,7 +170,7 @@ impl EstadoDaExecucao {
             Self::Cancelada => "cancelada",
         }
     }
-    fn de(t: &str) -> Self {
+    pub(crate) fn de(t: &str) -> Self {
         match t {
             "aguardando_usuario" => Self::AguardandoUsuario,
             "concluida" => Self::Concluida,
@@ -243,7 +243,7 @@ pub type Evento = (String, Option<i64>, String, String);
 /// O banco dos roteiros.
 #[derive(Debug)]
 pub struct BancoDeRoteiros {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 fn passos_de(json: &str) -> Resultado<Vec<Passo>> {
@@ -265,6 +265,7 @@ impl BancoDeRoteiros {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
+        conn.execute_batch(crate::execucao_escrita::SQL)?;
         Ok(Self { conn })
     }
 
@@ -277,6 +278,7 @@ impl BancoDeRoteiros {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
+        conn.execute_batch(crate::execucao_escrita::SQL)?;
         Ok(Self { conn })
     }
 
