@@ -472,10 +472,40 @@ a pessoa entrar de novo.
 _Avoid_: caixa postal, inbox, carteira (para os segredos)
 
 **Roteiro**:
-O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.
-Nasce da primeira coleta, guiada por IA, e se repete sem IA até o site mudar. Um roteiro
-só consulta e baixa: nunca paga, transfere, contrata ou altera cadastro.
+O caminho que uma conexão de site percorre para consultar e baixar documentos. Um roteiro
+só consulta e baixa: nunca paga, transfere, contrata ou altera cadastro. Tem dois tipos, e
+os dois passam pela mesma lista de bloqueio e pelo mesmo chaveiro:
+
+- **Roteiro gravado**: os passos em JSON que a IA grava na primeira coleta. Repete-se sem IA
+  até o site mudar.
+- **Roteiro escrito**: um programa em Luau, escrito à mão ao lado de um manifesto, que só
+  chama **verbos** (abrir, esperar, clicar, ler texto, baixar). Nasce em rascunho e só vale
+  depois de ativado, como uma regra de reconhecimento.
+
+Luau é só a linguagem do roteiro escrito. Não é o **Script** de uma regra de reconhecimento,
+que calcula campos de um documento e nunca toca um site.
 _Avoid_: script, macro, robô, automação
+
+**Verbo**:
+Uma das operações que um roteiro escrito pode chamar no navegador, como abrir uma página,
+clicar ou preencher a senha pelo rótulo do chaveiro. É a única porta do roteiro para o site:
+não há JavaScript solto, arquivo nem rede. Os verbos que digitam segredo recebem o rótulo do
+chaveiro, nunca o valor.
+_Avoid_: comando, função, API, passo (passo é a unidade do roteiro gravado)
+
+**Classe de ação**:
+O que um roteiro declara no manifesto sobre o tipo de coisa que faz no site: **consulta**
+(o padrão: só lê e baixa) ou **atualizar conexão** (também aperta "Atualizar" ou "Sincronizar"
+nas conexões de um agregador, como o Meu Pluggy). Nenhuma classe libera pagar, transferir,
+contratar ou alterar cadastro.
+_Avoid_: permissão, nível, modo, perfil
+
+**MFA por e-mail**:
+O segundo fator em que o site manda um código ao e-mail do usuário. Só um roteiro cujo
+manifesto diz que **não movimenta dinheiro** pode usá-lo: o sistema busca o código na caixa
+conectada (remetente fixo, janela curta, formato conhecido) e o digita sozinho. O código que
+muda por minuto num aplicativo (TOTP) continua sempre com o usuário.
+_Avoid_: 2FA, OTP, token, código de verificação
 
 **Coleta**:
 Uma passagem de uma conexão trazendo o que há de novo na fonte. É sempre de fora para
