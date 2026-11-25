@@ -25,8 +25,8 @@ A fatia 1 entrega o motor e o primeiro roteiro escrito, o **contracheque**, prov
 
 ### Fora desta fatia
 
-- **Meu Pluggy (fatia 2).** O manifesto já aceita `classe: "atualizar_conexao"` e a lista de
-  bloqueio já a trata, mas nenhum roteiro dela é entregue aqui.
+- **Meu Pluggy (fatia 2).** Entregue na [spec 17](17-desktop-roteiros-escritos-fatia-2-meu-pluggy.md).
+  Aqui o manifesto só aceita `classe: "atualizar_conexao"` e a lista de bloqueio já a trata.
 - **Portal real do contracheque.** A URL ainda não foi informada. Entra quando o usuário a
   passar, sem seletor inventado.
 - Código do aplicativo autenticador (TOTP) automático, banco e consentimento do Pluggy:
@@ -74,6 +74,7 @@ O roteiro chama só a tabela `navegador` e a tabela `util`. O ambiente Luau não
 | `navegador.abrir(url)`                                 | nada                      | URL conferida na lista de bloqueio e no host permitido                                      |
 | `navegador.esperar(seletor, segundos?)`                | bool                      | espera ficar visível; padrão 15 s, máximo 120 s                                             |
 | `navegador.existe(seletor)`                            | bool                      | visível agora?                                                                              |
+| `navegador.esperar_sumir(seletor, segundos?)`          | bool                      | espera deixar de estar visível (fatia 2); padrão 15 s, máximo 120 s; `false` se ficou       |
 | `navegador.clicar(seletor)`                            | nada                      | lista de bloqueio no executor e no navegador                                                |
 | `navegador.texto(seletor)`                             | string                    | texto **visível** do elemento; nunca o valor de `<input>` nem de senha                      |
 | `navegador.tabela(seletor)`                            | lista de listas de string |                                                                                             |
