@@ -67,7 +67,7 @@ pub mod tema;
 pub mod triagem;
 
 pub use acoes::{ACOES, Aba, ContextoDasAcoes, DefinicaoDeAcao, Disponibilidade, IdAcao};
-pub use app::{AppSbf, config_da_casca};
+pub use app::{AppSbf, config_da_casca, definir_carimbo_de_versao};
 pub use composta::ConsultaComposta;
 pub use controle_ui::{EstadoDoControle, PedidoDoControle, PlanejamentoLigado};
 pub use dinheiro::{AndamentoDoPareamento, EstacaoDoLivro, EstacaoLigada, Pareamento};
