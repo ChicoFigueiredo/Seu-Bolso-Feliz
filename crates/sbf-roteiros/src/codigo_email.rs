@@ -343,18 +343,28 @@ fn do_gmail(e: ErroDoGmail) -> ErroDeCodigo {
 }
 
 /// O endereço de um cabeçalho `From` (`Fulano <a@b.test>` ou `a@b.test`), em minúsculas.
-fn endereco_do_cabecalho(de: &str) -> String {
-    let miolo = match (de.rfind('<'), de.rfind('>')) {
+///
+/// `None` se o cabeçalho é ambíguo: com vírgula (uma lista de remetentes, ou um nome que tenta
+/// esconder outro endereço) ou com mais de um `<` (`<a@b.test> <c@d.test>`). Na dúvida, a
+/// mensagem não vale: o código do MFA só vem de um remetente inequívoco.
+fn endereco_do_cabecalho(de: &str) -> Option<String> {
+    if de.contains(',') || de.matches('<').count() > 1 || de.matches('>').count() > 1 {
+        return None;
+    }
+    let miolo = match (de.find('<'), de.find('>')) {
         (Some(a), Some(b)) if a < b => &de[a + 1..b],
-        _ => de,
+        (None, None) => de,
+        _ => return None,
     };
-    miolo.trim().to_lowercase()
+    Some(miolo.trim().to_lowercase())
 }
 
 /// O cabeçalho `De` é mesmo do remetente? Endereço (`a@b.test`): igual. Domínio (`b.test`): o
 /// domínio do endereço é ele ou um subdomínio dele.
 fn do_remetente(de: &str, remetente: &str) -> bool {
-    let endereco = endereco_do_cabecalho(de);
+    let Some(endereco) = endereco_do_cabecalho(de) else {
+        return false;
+    };
     let remetente = remetente.to_lowercase();
     if remetente.contains('@') {
         return endereco == remetente;
@@ -370,6 +380,34 @@ fn cabecalho<'a>(m: &'a MensagemDoGmail, nome: &str) -> &'a str {
         .iter()
         .find(|h| h.name.eq_ignore_ascii_case(nome))
         .map_or("", |h| h.value.as_str())
+}
+
+/// Quantos cabeçalhos com este nome a mensagem tem.
+fn quantos_cabecalhos(m: &MensagemDoGmail, nome: &str) -> usize {
+    m.payload
+        .headers
+        .iter()
+        .filter(|h| h.name.eq_ignore_ascii_case(nome))
+        .count()
+}
+
+/// Algum cabeçalho `Authentication-Results` diz que a mensagem **falhou** no DMARC ou no SPF?
+/// Sem o cabeçalho, nada se afirma (nem todo provedor o grava); com `dmarc=fail` ou `spf=fail`
+/// a mensagem é de quem fingiu ser o remetente e é descartada.
+fn reprovada_na_autenticacao(m: &MensagemDoGmail) -> bool {
+    m.payload
+        .headers
+        .iter()
+        .filter(|h| h.name.eq_ignore_ascii_case("Authentication-Results"))
+        .any(|h| {
+            let compacto: String = h
+                .value
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+                .to_lowercase();
+            compacto.contains("dmarc=fail") || compacto.contains("spf=fail")
+        })
 }
 
 /// A consulta estreita: o remetente e o instante (segundos desde a época, como o Gmail pede).
@@ -397,8 +435,12 @@ impl<F: FonteDeGmail> CaixaDeEmail for CaixaGmail<F> {
         let mut saida = Vec::new();
         for referencia in pagina.messages.iter().take(MAXIMO_DE_MENSAGENS) {
             let mensagem = self.fonte.mensagem(&referencia.id).map_err(do_gmail)?;
-            // O Gmail casa `from:` de forma frouxa: confere o endereço de verdade.
-            if !do_remetente(cabecalho(&mensagem, "From"), remetente) {
+            // O Gmail casa `from:` de forma frouxa: confere o endereço de verdade, exige um
+            // único `From` e descarta quem falhou no DMARC ou no SPF.
+            if quantos_cabecalhos(&mensagem, "From") != 1
+                || !do_remetente(cabecalho(&mensagem, "From"), remetente)
+                || reprovada_na_autenticacao(&mensagem)
+            {
                 continue;
             }
             // Sem data interna legível não há como provar que o código é novo: descarta.
@@ -459,5 +501,27 @@ mod testes {
             "portal.exemplo.test"
         ));
         assert!(!do_remetente("a@outro.test", "a@portal.exemplo.test"));
+    }
+
+    #[test]
+    fn from_ambiguo_nao_vale() {
+        let r = "nao-responda@portal.exemplo.test";
+        assert!(do_remetente("Portal <nao-responda@portal.exemplo.test>", r));
+        assert!(do_remetente("nao-responda@portal.exemplo.test", r));
+        for ruim in [
+            // lista de remetentes: o "primeiro" é o bom, o resto engana
+            "nao-responda@portal.exemplo.test, atacante@mal.test",
+            "atacante@mal.test, <nao-responda@portal.exemplo.test>",
+            "\"Portal, <nao-responda@portal.exemplo.test>\" <atacante@mal.test>",
+            // mais de um `<`
+            "<atacante@mal.test> <nao-responda@portal.exemplo.test>",
+            "Portal <nao-responda@portal.exemplo.test> <atacante@mal.test>",
+            // ângulos desencontrados
+            "Portal nao-responda@portal.exemplo.test>",
+            "Portal >nao-responda@portal.exemplo.test<",
+        ] {
+            assert!(!do_remetente(ruim, r), "{ruim}");
+            assert!(endereco_do_cabecalho(ruim).is_none(), "{ruim}");
+        }
     }
 }
