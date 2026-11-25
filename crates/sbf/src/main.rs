@@ -46,6 +46,7 @@ mod script;
 mod servidor;
 mod telegram;
 mod triagem;
+mod versao;
 mod worker;
 
 use std::path::PathBuf;
@@ -533,10 +534,12 @@ fn main() -> ExitCode {
         let payload = String::from("payload-que-nao-pode-aparecer");
         std::panic::panic_any(payload);
     }
+    let carimbo = versao::Carimbo::do_build();
+    sbf_janela::definir_carimbo_de_versao(carimbo.linha(), carimbo.aviso());
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--versao") | Some("--version") => {
-            println!("sbf {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", versao::Carimbo::do_build().linha());
             ExitCode::SUCCESS
         }
         Some("--demonstracao") => match app_de_demonstracao() {
