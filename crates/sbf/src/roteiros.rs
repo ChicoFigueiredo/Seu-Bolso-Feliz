@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
-//!   importar <manifesto.json> --script <arquivo.luau> [--motivo <texto>]   (cria rascunho)
+//!   importar <manifesto.json> --fonte <arquivo.luau> [--motivo <texto>]   (cria rascunho)
 //!   listar | mostrar <nome> [--versao <n>]
 //!   testar <nome> <versao> --cenario <cenario>   (roda no site falso; sai 0 passou, 1 falhou)
 //!   ativar <nome> <versao> | desativar <nome>   (só em terminal interativo, com confirmação)
@@ -14,8 +14,15 @@
 //!
 //! O catálogo é o `roteiros.sqlite` da pasta de dados do app, fora do cofre. Ver [`AJUDA`].
 //! `ativar` e `desativar` só rodam com stdin num terminal e depois de a pessoa digitar
-//! exatamente `<nome>@<versao>` (ou `<nome>`): o MCP e a IA, que não têm terminal, só
+//! exatamente o texto que o banco pede (`BancoDeRoteiros::esperado_para_ativar`):
+//! `<nome>@<versao>` para o que o próprio usuário importou, e `<nome>@<versao> <host>` para o
+//! que o MCP ou a IA propuseram (assim quem ativa é obrigado a ler o host que vai receber a
+//! senha do chaveiro). `desativar` pede `<nome>`. O MCP e a IA, que não têm terminal, só
 //! importam rascunhos. Nenhuma opção nem variável de ambiente pula isso.
+//!
+//! Toda string que veio do banco (autor, motivo, hosts, rótulos, fonte…) passa por um
+//! escapador antes de ir ao terminal: controle e direção de texto viram `\xNN` ou `\u{..}`
+//! visíveis, para que um rascunho hostil não mova o cursor, não apague linhas nem forje saída.
 //!
 //! `testar` é seguro e não pede terminal: sobe o site falso em `127.0.0.1`, abre o Chrome sem
 //! janela num perfil descartável e usa senhas fictícias em memória (nunca o chaveiro real, o
@@ -30,7 +37,9 @@ use sbf_ia::{NivelDeConfianca, Registro};
 use sbf_roteiros::banco::{AutorEscrito, BancoDeRoteiros, Confirmacao, EstadoEscrito};
 use sbf_roteiros::executor::FonteDeSenhas;
 use sbf_roteiros::gravacao::Guia;
-use sbf_roteiros::manifesto::{Classe, Manifesto, Mfa};
+use sbf_roteiros::manifesto::{
+    Classe, Manifesto, Mfa, escapar_fonte_para_terminal, escapar_para_terminal,
+};
 use sbf_roteiros::servico::{Ambiente, executar_devidos, executar_escritos_devidos};
 use sbf_roteiros::teste_escrito::{Cenario, testar_escrito};
 use sbf_worker::laco::{ColetorDeRoteiros, Dados, ResumoDeRoteiros};
@@ -243,7 +252,7 @@ impl sbf_janela::roteiros::IaDosRoteiros for IaDoInventario {
 pub const AJUDA: &str = "\
 uso: sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
 
-  importar <manifesto.json> --script <arquivo.luau> [--motivo <texto>]
+  importar <manifesto.json> --fonte <arquivo.luau> [--motivo <texto>]
                                          cria um RASCUNHO (nunca ativa); o mesmo conteúdo
                                          da versão mais nova não duplica
   listar                                 os roteiros escritos, a versão em vigor e a mais nova
@@ -252,7 +261,10 @@ uso: sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
                                          senhas fictícias); passou => `testado`. Sai 0 se passou,
                                          1 se falhou. Cenários: contracheque
   ativar <nome> <versao>                 só num terminal interativo, com confirmação digitada;
-                                         só de uma versão testada; aposenta a ativa anterior
+                                         só de uma versão testada; aposenta a ativa anterior.
+                                         Mostra autor, hosts, rótulos do chaveiro, MFA e o fonte
+                                         Luau; se foi proposta pelo MCP ou pela IA, a digitação
+                                         é `<nome>@<versao> <host>`
   desativar <nome>                       idem (aposenta a versão ativa)
 
 O roteiro escrito vive em `roteiros.sqlite`, na pasta de dados do app (fora do cofre).
@@ -263,7 +275,7 @@ Ativar e desativar não rodam sem terminal: o MCP e a IA só propõem (criam ras
 enum FalhaDoCli {
     /// Uso errado da linha de comando (código 2).
     Uso(String),
-    /// FalhaDoCli da operação (código 1).
+    /// A operação falhou (código 1).
     Operacao(String),
 }
 
@@ -294,8 +306,11 @@ struct AmbienteDoCli<'a> {
     saida: &'a mut dyn std::io::Write,
 }
 
+/// Escreve uma linha (ou o fonte, de várias). Rede de segurança: nenhum controle (fora `\n` e
+/// tabulação) nem direção de texto chega ao terminal, mesmo que um campo tenha escapado do
+/// escapador específico dele.
 fn w(saida: &mut dyn std::io::Write, linha: &str) {
-    let _ = writeln!(saida, "{linha}");
+    let _ = writeln!(saida, "{}", escapar_fonte_para_terminal(linha));
 }
 
 fn ler_texto(caminho: &Path) -> Result<String, FalhaDoCli> {
@@ -334,24 +349,35 @@ fn curto(checksum: &str) -> &str {
     checksum.get(..12).unwrap_or(checksum)
 }
 
+/// Uma string do banco ou do manifesto, escapada para ir ao terminal (uma linha só).
+fn e(texto: &str) -> String {
+    escapar_para_terminal(texto)
+}
+
 fn mfa_texto(m: &Mfa) -> String {
     match m {
         Mfa::Nenhum => "nenhum".to_owned(),
-        Mfa::Manual => "manual (o roteiro pausa e a vez é sua)".to_owned(),
-        Mfa::Email { remetente, formato } => {
-            format!("código por e-mail de {remetente}, formato {formato}")
+        Mfa::Manual => {
+            "manual (código do aplicativo autenticador, CAPTCHA: o roteiro pausa e a vez é sua)"
+                .to_owned()
         }
+        Mfa::Email { remetente, formato } => format!(
+            "código por e-mail de {}, formato {} (o roteiro lê o seu Gmail)",
+            e(remetente),
+            e(formato)
+        ),
     }
 }
 
 fn resumo_do_manifesto(m: &Manifesto) -> Vec<String> {
+    let hosts: Vec<String> = m.hosts.iter().map(|h| e(h)).collect();
     vec![
-        format!("  hosts: {}", m.hosts.join(", ")),
-        format!("  url inicial: {}", m.url_inicial),
+        format!("  hosts: {}", hosts.join(", ")),
+        format!("  url inicial: {}", e(&m.url_inicial)),
         format!("  mfa: {}", mfa_texto(&m.mfa)),
         format!(
-            "  movimenta dinheiro: {}",
-            if m.movimenta_dinheiro { "sim" } else { "não" }
+            "  movimenta_dinheiro: {} (declarado pelo autor, não verificado)",
+            m.movimenta_dinheiro
         ),
         format!(
             "  classe: {}",
@@ -367,10 +393,70 @@ fn resumo_do_manifesto(m: &Manifesto) -> Vec<String> {
         ),
         format!(
             "  chaveiro: senha {}, CPF {}",
-            m.rotulo_senha.as_deref().unwrap_or("não usa"),
-            m.rotulo_cpf.as_deref().unwrap_or("não usa")
+            m.rotulo_senha
+                .as_deref()
+                .map_or_else(|| "não usa".to_owned(), e),
+            m.rotulo_cpf
+                .as_deref()
+                .map_or_else(|| "não usa".to_owned(), e)
         ),
     ]
+}
+
+/// Quantas linhas do fonte o `ativar` imprime inteiras; acima disso manda ler com `mostrar`.
+const LINHAS_DO_FONTE_NO_ATIVAR: usize = 200;
+
+/// O que o `ativar` mostra em destaque antes da digitação: de quem é a versão e para onde vai
+/// a senha do chaveiro. O autor, os hosts e o rótulo são **autodeclarados** pelo autor da
+/// versão; quando o autor não é o próprio usuário, o aviso diz isso com todas as letras.
+fn destaque_do_ativar(v: &sbf_roteiros::banco::VersaoEscrita) -> Vec<String> {
+    let m = &v.manifesto;
+    let autor = e(&v.autor.texto());
+    let hosts: Vec<String> = m.hosts.iter().map(|h| e(h)).collect();
+    let mut l = vec![
+        "==================== CONFIRA ANTES DE ATIVAR ====================".to_owned(),
+        format!("  AUTOR DA VERSÃO: {autor}"),
+        format!(
+            "  HOSTS (os únicos que o roteiro abre e que recebem a senha): {}",
+            hosts.join(", ")
+        ),
+        format!(
+            "  RÓTULO DA SENHA no chaveiro: {}",
+            m.rotulo_senha
+                .as_deref()
+                .map_or_else(|| "não usa".to_owned(), e)
+        ),
+        format!(
+            "  RÓTULO DO CPF no chaveiro: {}",
+            m.rotulo_cpf
+                .as_deref()
+                .map_or_else(|| "não usa".to_owned(), e)
+        ),
+        format!(
+            "  MFA POR E-MAIL: {}",
+            match &m.mfa {
+                Mfa::Email { remetente, .. } => format!(
+                    "SIM, o roteiro vai ler o seu Gmail atrás do código de {}",
+                    e(remetente)
+                ),
+                Mfa::Manual => "não (MFA manual: o roteiro pausa e a vez é sua)".to_owned(),
+                Mfa::Nenhum => "não".to_owned(),
+            }
+        ),
+        format!(
+            "  movimenta_dinheiro: {} (declarado pelo autor, não verificado)",
+            m.movimenta_dinheiro
+        ),
+    ];
+    if v.autor != AutorEscrito::Usuario {
+        l.push(format!(
+            "  !! PROPOSTO POR {autor}: não foi você quem escreveu. Os hosts e o rótulo da senha acima são declarados por esse autor: a senha do chaveiro `{}` será digitada em {}. Só ative se esse host é mesmo o site daquele rótulo.",
+            m.rotulo_senha.as_deref().map_or_else(|| "(nenhuma)".to_owned(), e),
+            hosts.first().map_or("", String::as_str)
+        ));
+    }
+    l.push("=================================================================".to_owned());
+    l
 }
 
 /// Opções `--nome valor` e argumentos soltos (sem repetição, sem desconhecidas).
@@ -402,17 +488,19 @@ fn opcoes(
 }
 
 fn importar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
-    let (soltos, valores) = opcoes(resto, &["--script", "--motivo"])?;
+    let (soltos, valores) = opcoes(resto, &["--fonte", "--motivo"])?;
     let [arquivo] = soltos.as_slice() else {
         return Err(uso(
-            "uso: importar <manifesto.json> --script <arquivo.luau> [--motivo <texto>]",
+            "uso: importar <manifesto.json> --fonte <arquivo.luau> [--motivo <texto>]",
         ));
     };
-    let script = valores
-        .get("--script")
-        .ok_or_else(|| uso("importar pede --script <arquivo.luau>"))?;
+    let caminho_do_fonte = valores
+        .get("--fonte")
+        .ok_or_else(|| uso("importar pede --fonte <arquivo.luau>"))?;
     let manifesto = Manifesto::de_json(&ler_texto(Path::new(arquivo))?)?;
-    let fonte = ler_texto(Path::new(script))?;
+    // Fim de linha do Windows (CRLF) vira LF: o banco recusa `\r` solto (é como se esconde
+    // texto no terminal), então só o par CRLF é aceito aqui e normalizado.
+    let fonte = ler_texto(Path::new(caminho_do_fonte))?.replace("\r\n", "\n");
     let motivo = valores.get("--motivo").map_or("", String::as_str);
     let banco = abrir_banco(a)?;
     let i = banco.importar_escrito(&manifesto, &fonte, &AutorEscrito::Usuario, motivo)?;
@@ -421,7 +509,8 @@ fn importar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
             a.saida,
             &format!(
                 "{} v{}: rascunho criado. Falta testar no site falso e ativar num terminal interativo.",
-                manifesto.nome, i.numero
+                e(&manifesto.nome),
+                i.numero
             ),
         );
     } else {
@@ -429,7 +518,8 @@ fn importar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
             a.saida,
             &format!(
                 "{} v{}: já é a versão mais nova com este conteúdo; nada foi criado.",
-                manifesto.nome, i.numero
+                e(&manifesto.nome),
+                i.numero
             ),
         );
     }
@@ -452,7 +542,7 @@ fn listar(a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
             a.saida,
             &format!(
                 "{}: {em_vigor}; mais nova v{} ({})",
-                l.nome,
+                e(&l.nome),
                 l.ultima,
                 l.estado_da_ultima.texto()
             ),
@@ -477,7 +567,7 @@ fn mostrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
             .or_else(|| d.versoes.last())
             .map_or(0, |v| v.numero),
     };
-    w(a.saida, &format!("{}:", d.nome));
+    w(a.saida, &format!("{}:", e(&d.nome)));
     for v in &d.versoes {
         w(
             a.saida,
@@ -485,17 +575,17 @@ fn mostrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
                 "  v{}: {} (autor {}, checksum {}, {}){}{}",
                 v.numero,
                 v.estado.texto(),
-                v.autor.texto(),
-                curto(&v.checksum),
-                v.criada_em,
+                e(&v.autor.texto()),
+                e(curto(&v.checksum)),
+                e(&v.criada_em),
                 if v.motivo.is_empty() {
                     String::new()
                 } else {
-                    format!(" - {}", v.motivo)
+                    format!(" - {}", e(&v.motivo))
                 },
                 v.resultado_do_teste
                     .as_ref()
-                    .map_or(String::new(), |t| format!(" [teste {t}]")),
+                    .map_or(String::new(), |t| format!(" [teste {}]", e(t))),
             ),
         );
     }
@@ -503,27 +593,30 @@ fn mostrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
         .versoes
         .iter()
         .find(|v| v.numero == escolhida)
-        .ok_or_else(|| op(format!("`{nome}` não tem a versão {escolhida}")))?;
+        .ok_or_else(|| op(format!("`{}` não tem a versão {escolhida}", e(nome))))?;
     w(a.saida, &format!("Manifesto da v{}:", v.numero));
     if !v.manifesto.descricao.is_empty() {
-        w(a.saida, &format!("  {}", v.manifesto.descricao));
+        w(a.saida, &format!("  {}", e(&v.manifesto.descricao)));
     }
     for l in resumo_do_manifesto(&v.manifesto) {
         w(a.saida, &l);
     }
-    w(a.saida, &format!("Fonte da v{}:", v.numero));
-    w(a.saida, &v.fonte);
+    w(a.saida, &format!("Fonte Luau da v{}:", v.numero));
+    w(a.saida, &escapar_fonte_para_terminal(&v.fonte));
     w(a.saida, "Histórico:");
     for (quando, versao, de, para, quem, detalhe) in &d.eventos {
         w(
             a.saida,
             &format!(
-                "  {quando} v{versao}: {} -> {para} ({quem}){}",
-                de.as_deref().unwrap_or("novo"),
+                "  {} v{versao}: {} -> {} ({}){}",
+                e(quando),
+                e(de.as_deref().unwrap_or("novo")),
+                e(para),
+                e(quem),
                 if detalhe.is_empty() {
                     String::new()
                 } else {
-                    format!(" {detalhe}")
+                    format!(" {}", e(detalhe))
                 }
             ),
         );
@@ -546,7 +639,11 @@ fn confirmar(
     for l in resumo {
         w(a.saida, l);
     }
-    let _ = write!(a.saida, "Para confirmar, digite exatamente `{esperado}`: ");
+    let _ = write!(
+        a.saida,
+        "Para confirmar, digite exatamente `{}`: ",
+        e(esperado)
+    );
     let _ = a.saida.flush();
     let mut linha = String::new();
     let lidos = a
@@ -574,21 +671,45 @@ fn ativar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
     let v = banco.versao_escrita(nome, versao)?;
     if v.estado != EstadoEscrito::Testado {
         return Err(op(format!(
-            "só uma versão testada pode ser ativada; `{nome}` v{versao} está {}",
+            "só uma versão testada pode ser ativada; `{}` v{versao} está {}",
+            e(nome),
             v.estado.texto()
         )));
     }
     let mut resumo = vec![format!(
-        "ativar `{nome}` v{versao} (autor {}, checksum {}): {}",
-        v.autor.texto(),
-        curto(&v.checksum),
-        v.motivo
+        "ativar `{}` v{versao} (checksum {}){}",
+        e(nome),
+        e(&v.checksum),
+        if v.motivo.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", e(&v.motivo))
+        }
     )];
+    resumo.extend(destaque_do_ativar(&v));
+    if !v.manifesto.descricao.is_empty() {
+        resumo.push(format!("  descrição: {}", e(&v.manifesto.descricao)));
+    }
     resumo.extend(resumo_do_manifesto(&v.manifesto));
-    let esperado = Confirmacao::texto_de_ativar(nome, versao);
+    let linhas = v.fonte.lines().count();
+    if linhas <= LINHAS_DO_FONTE_NO_ATIVAR {
+        resumo.push(format!(
+            "Fonte Luau ({linhas} linhas), leia antes de digitar:"
+        ));
+        resumo.push(escapar_fonte_para_terminal(&v.fonte));
+        resumo.push("--- fim do fonte ---".to_owned());
+    } else {
+        resumo.push(format!(
+            "Fonte Luau: {linhas} linhas (passa de {LINHAS_DO_FONTE_NO_ATIVAR}), checksum {}. Leia antes de digitar: sbf roteiros escrito mostrar {} --versao {versao}",
+            e(&v.checksum),
+            e(nome)
+        ));
+    }
+    // A única fonte do texto a digitar é o banco (inclui o host se o autor não é o usuário).
+    let esperado = banco.esperado_para_ativar(nome, versao)?;
     let conf = confirmar(a, &resumo, &esperado)?;
     banco.ativar(nome, versao, &conf)?;
-    w(a.saida, &format!("{nome} v{versao}: ativada."));
+    w(a.saida, &format!("{} v{versao}: ativada.", e(nome)));
     Ok(())
 }
 
@@ -601,12 +722,17 @@ fn desativar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> 
     }
     let banco = abrir_banco(a)?;
     let Some(v) = banco.versao_ativa_escrita(nome)? else {
-        return Err(op(format!("`{nome}` não tem versão ativa")));
+        return Err(op(format!("`{}` não tem versão ativa", e(nome))));
     };
-    let resumo = vec![format!("desativar `{nome}` (v{} em vigor)", v.numero)];
-    let conf = confirmar(a, &resumo, &Confirmacao::texto_de_desativar(nome))?;
+    let resumo = vec![format!(
+        "desativar `{}` (v{} em vigor, autor {})",
+        e(nome),
+        v.numero,
+        e(&v.autor.texto())
+    )];
+    let conf = confirmar(a, &resumo, &banco.esperado_para_desativar(nome))?;
     let n = banco.desativar(nome, &conf)?;
-    w(a.saida, &format!("{nome} v{n}: desativada."));
+    w(a.saida, &format!("{} v{n}: desativada.", e(nome)));
     Ok(())
 }
 
@@ -638,24 +764,33 @@ fn testar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
     w(
         a.saida,
         &format!(
-            "Testando `{nome}` v{versao} no cenário {} (site falso em 127.0.0.1, Chrome sem janela)...",
+            "Testando `{}` v{versao} no cenário {} (site falso em 127.0.0.1, Chrome sem janela)...",
+            e(nome),
             cenario.nome()
         ),
     );
     let r = testar_escrito(&amb, nome, versao, cenario)?;
     if r.passou {
-        w(a.saida, &format!("{nome} v{versao}: PASSOU. {}", r.resumo));
+        w(
+            a.saida,
+            &format!("{} v{versao}: PASSOU. {}", e(nome), e(&r.resumo)),
+        );
         w(
             a.saida,
             &format!(
-                "A versão está `testado`. Para ativar, num terminal: sbf roteiros escrito ativar {nome} {versao}"
+                "A versão está `testado`. Para ativar, num terminal: sbf roteiros escrito ativar {} {versao}",
+                e(nome)
             ),
         );
         Ok(())
     } else {
-        w(a.saida, &format!("{nome} v{versao}: FALHOU. {}", r.resumo));
+        w(
+            a.saida,
+            &format!("{} v{versao}: FALHOU. {}", e(nome), e(&r.resumo)),
+        );
         Err(op(format!(
-            "o teste de `{nome}` v{versao} falhou; a versão continua rascunho"
+            "o teste de `{}` v{versao} falhou; a versão continua rascunho",
+            e(nome)
         )))
     }
 }
@@ -729,11 +864,11 @@ fn codigo_de_saida(r: Result<(), FalhaDoCli>) -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(FalhaDoCli::Uso(m)) => {
-            eprintln!("sbf: {m}");
+            eprintln!("sbf: {}", e(&m));
             ExitCode::from(2)
         }
         Err(FalhaDoCli::Operacao(m)) => {
-            eprintln!("sbf: {m}");
+            eprintln!("sbf: {}", e(&m));
             ExitCode::from(1)
         }
     }
@@ -815,7 +950,7 @@ mod testes_escrito {
             self.rodar(
                 false,
                 "",
-                &["importar", &m, "--script", &s, "--motivo", "primeira"],
+                &["importar", &m, "--fonte", &s, "--motivo", "primeira"],
             )
         }
 
@@ -878,15 +1013,15 @@ mod testes_escrito {
         std::fs::write(c.pasta.path().join("ruim.json"), ruim).unwrap();
         let m = c.caminho("ruim.json");
         let s = c.caminho("roteiro.luau");
-        let (r, _) = c.rodar(false, "", &["importar", &m, "--script", &s]);
+        let (r, _) = c.rodar(false, "", &["importar", &m, "--fonte", &s]);
         assert!(matches!(r, Err(FalhaDoCli::Operacao(ref e)) if e.contains("https")));
         let (r, _) = c.rodar(
             false,
             "",
-            &["importar", &c.caminho("nao-existe.json"), "--script", &s],
+            &["importar", &c.caminho("nao-existe.json"), "--fonte", &s],
         );
         assert!(matches!(r, Err(FalhaDoCli::Operacao(_))));
-        // sem --script é erro de uso
+        // sem --fonte é erro de uso
         let (r, _) = c.rodar(false, "", &["importar", &c.caminho("manifesto.json")]);
         assert!(matches!(r, Err(FalhaDoCli::Uso(_))));
         assert!(c.banco().listar_escritos().unwrap().is_empty());
@@ -1006,6 +1141,244 @@ mod testes_escrito {
         assert!(matches!(r, Err(FalhaDoCli::Operacao(_))));
     }
 
+    /// Importa o manifesto e o fonte do cenário como se outro autor tivesse proposto.
+    fn propor_como(c: &Cenario, autor: &AutorEscrito, fonte: &str) -> u32 {
+        let m = Manifesto::de_json(MANIFESTO).unwrap();
+        let n = c
+            .banco()
+            .importar_escrito(&m, fonte, autor, "proposta")
+            .unwrap()
+            .numero;
+        c.testar_direto(n);
+        n
+    }
+
+    #[test]
+    fn ativar_de_versao_do_mcp_ou_da_ia_exige_o_host_na_digitacao() {
+        for autor in [AutorEscrito::Mcp, AutorEscrito::Ia("modelo-x".into())] {
+            let c = Cenario::novo();
+            propor_como(&c, &autor, FONTE);
+            // só `nome@versão` não basta
+            let (r, saida) = c.rodar(
+                true,
+                "contracheque-exemplo@1\n",
+                &["ativar", "contracheque-exemplo", "1"],
+            );
+            assert!(
+                matches!(r, Err(FalhaDoCli::Operacao(ref m)) if m.contains("confirmação diferente")),
+                "{r:?}"
+            );
+            assert!(
+                saida.contains("digite exatamente `contracheque-exemplo@1 portal.exemplo.test`"),
+                "{saida}"
+            );
+            assert_eq!(
+                c.banco()
+                    .versao_escrita("contracheque-exemplo", 1)
+                    .unwrap()
+                    .estado,
+                EstadoEscrito::Testado
+            );
+            // com o host, ativa
+            let (r, saida) = c.rodar(
+                true,
+                "contracheque-exemplo@1 portal.exemplo.test\n",
+                &["ativar", "contracheque-exemplo", "1"],
+            );
+            assert_eq!(r, Ok(()), "{saida}");
+            assert!(saida.contains("ativada"), "{saida}");
+        }
+    }
+
+    #[test]
+    fn ativar_de_versao_do_usuario_nao_pede_o_host() {
+        let c = Cenario::novo();
+        propor_como(&c, &AutorEscrito::Usuario, FONTE);
+        let (r, saida) = c.rodar(
+            true,
+            "contracheque-exemplo@1\n",
+            &["ativar", "contracheque-exemplo", "1"],
+        );
+        assert_eq!(r, Ok(()), "{saida}");
+        assert!(
+            saida.contains("digite exatamente `contracheque-exemplo@1`"),
+            "{saida}"
+        );
+        assert!(!saida.contains("PROPOSTO POR"), "{saida}");
+    }
+
+    #[test]
+    fn ativar_mostra_em_destaque_autor_hosts_rotulo_mfa_e_fonte() {
+        let c = Cenario::novo();
+        propor_como(&c, &AutorEscrito::Mcp, FONTE);
+        let (_, saida) = c.rodar(true, "", &["ativar", "contracheque-exemplo", "1"]);
+        for trecho in [
+            "CONFIRA ANTES DE ATIVAR",
+            "AUTOR DA VERSÃO: mcp",
+            "HOSTS",
+            "portal.exemplo.test",
+            "RÓTULO DA SENHA no chaveiro: senha:portal-exemplo",
+            "MFA POR E-MAIL: não",
+            "PROPOSTO POR mcp",
+            "movimenta_dinheiro: false (declarado pelo autor",
+            "Fonte Luau (1 linhas)",
+            "navegador.abrir('https://portal.exemplo.test/entrar')",
+        ] {
+            assert!(saida.contains(trecho), "falta `{trecho}` em:\n{saida}");
+        }
+        // tudo isso vem ANTES do pedido de digitação
+        let pedido = saida.find("Para confirmar").unwrap();
+        assert!(saida.find("CONFIRA ANTES DE ATIVAR").unwrap() < pedido);
+        assert!(saida.find("Fonte Luau").unwrap() < pedido);
+    }
+
+    #[test]
+    fn ativar_com_mfa_por_email_avisa_que_le_o_gmail() {
+        let c = Cenario::novo();
+        let com_email = MANIFESTO.replace(
+            r#""mfa": { "tipo": "nenhum" }"#,
+            r#""mfa": { "tipo": "email", "remetente": "nao-responda@portal.exemplo.test", "formato": "\\d{6}" }"#,
+        );
+        let m = Manifesto::de_json(&com_email).unwrap();
+        c.banco()
+            .importar_escrito(&m, FONTE, &AutorEscrito::Usuario, "")
+            .unwrap();
+        c.testar_direto(1);
+        let (_, saida) = c.rodar(true, "", &["ativar", "contracheque-exemplo", "1"]);
+        assert!(saida.contains("MFA POR E-MAIL: SIM"), "{saida}");
+        assert!(saida.contains("Gmail"), "{saida}");
+    }
+
+    #[test]
+    fn ativar_com_fonte_grande_mostra_so_linhas_e_checksum() {
+        let c = Cenario::novo();
+        let grande = "navegador.registrar('x')\n".repeat(250);
+        propor_como(&c, &AutorEscrito::Usuario, &grande);
+        let (_, saida) = c.rodar(true, "", &["ativar", "contracheque-exemplo", "1"]);
+        let v = c.banco().versao_escrita("contracheque-exemplo", 1).unwrap();
+        assert!(saida.contains("250 linhas"), "{saida}");
+        assert!(saida.contains(&v.checksum), "{saida}");
+        assert!(
+            saida.contains("sbf roteiros escrito mostrar contracheque-exemplo --versao 1"),
+            "{saida}"
+        );
+        assert!(!saida.contains("navegador.registrar('x')"), "{saida}");
+    }
+
+    /// Um rascunho hostil gravado direto no banco (a validação do importar não o deixaria
+    /// entrar): controle e direção de texto em todo campo que o CLI imprime.
+    fn hostil(c: &Cenario) {
+        let banco = c.banco();
+        drop(banco);
+        let conn = rusqlite::Connection::open(c.dados().join("roteiros.sqlite")).unwrap();
+        conn.execute(
+            "INSERT INTO roteiro_escrito (nome) VALUES ('contracheque-exemplo')",
+            [],
+        )
+        .unwrap();
+        let manifesto = MANIFESTO
+            .replace("Contracheque fictício", "desc\\u001b[3Apresa\\r\\u202efdp")
+            .replace("senha:portal-exemplo", "rotulo\\u001b[2Kx\\u202e");
+        let manifesto: serde_json::Value = serde_json::from_str(&manifesto).unwrap();
+        conn.execute(
+            "INSERT INTO roteiro_escrito_versao
+               (roteiro_id, numero, manifesto, fonte, checksum, estado, autor, motivo)
+             VALUES (1, 1, ?1, ?2, 'abc', 'testado', 'ia:evil\u{1b}[31m', ?3)",
+            rusqlite::params![
+                manifesto.to_string(),
+                "navegador.registrar('a')\u{1b}[3A\rfalso\n",
+                "motivo\u{1b}[3A\r\u{202e}\n[OK] linha forjada"
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             VALUES (1, NULL, 'rascunho', 'evil\u{1b}[0m', 'det\u{202e}alhe\r')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn sem_perigo(saida: &str) {
+        for c in ['\u{1b}', '\r', '\u{202e}', '\0'] {
+            assert!(!saida.contains(c), "{c:?} chegou ao terminal:\n{saida:?}");
+        }
+    }
+
+    #[test]
+    fn mostrar_listar_e_ativar_escapam_controle_e_direcao_do_banco() {
+        let c = Cenario::novo();
+        hostil(&c);
+        let (r, saida) = c.rodar(false, "", &["mostrar", "contracheque-exemplo"]);
+        assert_eq!(r, Ok(()), "{saida}");
+        sem_perigo(&saida);
+        for visivel in [
+            "\\x1b[3A",
+            "\\x0d",
+            "\\u{202e}",
+            "autor ia:evil\\x1b[31m",
+            "motivo\\x1b[3A\\x0d\\u{202e}\\x0a[OK] linha forjada",
+            "evil\\x1b[0m",
+        ] {
+            assert!(saida.contains(visivel), "falta `{visivel}` em:\n{saida}");
+        }
+        // o `\n` do motivo não forja uma linha nova "[OK]"
+        assert!(
+            !saida.lines().any(|l| l.starts_with("[OK]")),
+            "linha forjada:\n{saida}"
+        );
+        let (_, saida) = c.rodar(false, "", &["listar"]);
+        sem_perigo(&saida);
+        let (r, saida) = c.rodar(true, "", &["ativar", "contracheque-exemplo", "1"]);
+        assert!(r.is_err());
+        sem_perigo(&saida);
+        assert!(saida.contains("\\x1b[3A"), "{saida}");
+        assert!(saida.contains("rotulo\\x1b[2Kx\\u{202e}"), "{saida}");
+    }
+
+    #[test]
+    fn importar_recusa_fonte_com_escape_e_aceita_crlf() {
+        let c = Cenario::novo();
+        let m = c.caminho("manifesto.json");
+        std::fs::write(
+            c.pasta.path().join("sujo.luau"),
+            "navegador.registrar('a')\u{1b}[3A\n",
+        )
+        .unwrap();
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &["importar", &m, "--fonte", &c.caminho("sujo.luau")],
+        );
+        assert!(
+            matches!(r, Err(FalhaDoCli::Operacao(ref e)) if e.contains("controle")),
+            "{r:?}"
+        );
+        std::fs::write(
+            c.pasta.path().join("windows.luau"),
+            "navegador.registrar('a')\r\nnavegador.registrar('b')\r\n",
+        )
+        .unwrap();
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &["importar", &m, "--fonte", &c.caminho("windows.luau")],
+        );
+        assert_eq!(r, Ok(()));
+        let v = c.banco().versao_escrita("contracheque-exemplo", 1).unwrap();
+        assert_eq!(
+            v.fonte,
+            "navegador.registrar('a')\nnavegador.registrar('b')\n"
+        );
+        // a opção antiga não existe mais
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &["importar", &m, "--script", &c.caminho("roteiro.luau")],
+        );
+        assert!(matches!(r, Err(FalhaDoCli::Uso(_))), "{r:?}");
+    }
+
     fn codigo(r: Result<(), FalhaDoCli>) -> String {
         format!("{:?}", codigo_de_saida(r))
     }
@@ -1107,7 +1480,7 @@ mod testes_escrito {
             &[
                 "importar",
                 &exemplos.join("contracheque-exemplo.json").to_string_lossy(),
-                "--script",
+                "--fonte",
                 &exemplos.join("contracheque-exemplo.luau").to_string_lossy(),
             ],
         );

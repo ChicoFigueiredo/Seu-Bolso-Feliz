@@ -1,5 +1,5 @@
 //! O manifesto do **roteiro escrito**: o JSON que vem ao lado do `.luau` e diz ao que o roteiro
-//! tem direito (hosts, rótulos do chaveiro, MFA, classe e agenda). O script nunca decide isso.
+//! tem direito (hosts, rótulos do chaveiro, MFA, classe e agenda). O fonte Luau nunca decide isso.
 //!
 //! As regras duras ficam em [`Manifesto::validar`]; o `importar` recusa o que não passa. As
 //! mensagens de erro nunca repetem rótulo de chaveiro, CPF nem código.
@@ -92,7 +92,8 @@ pub fn escapar_fonte_para_terminal(texto: &str) -> String {
 pub enum Mfa {
     /// O site não pede.
     Nenhum,
-    /// O usuário resolve no navegador (token que muda por minuto, CAPTCHA): o roteiro pausa.
+    /// O usuário resolve no navegador (o código do aplicativo autenticador, o TOTP, que muda
+    /// por minuto, ou um CAPTCHA): o roteiro pausa.
     Manual,
     /// O código chega por e-mail e o motor o busca no Gmail (só para quem não movimenta dinheiro).
     Email {
