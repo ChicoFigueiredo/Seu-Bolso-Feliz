@@ -626,6 +626,7 @@ impl Roteiros {
                 ui.add_space(6.0);
             }
             self.sua_vez(ui);
+            self.escritos.sua_vez_ui(ui, self.banco.as_ref());
             self.formulario_ui(ui);
             self.gravacao_ui(ui);
             self.lista(ui);

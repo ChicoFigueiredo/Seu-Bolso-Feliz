@@ -2,12 +2,20 @@
 //!
 //! Um roteiro escrito é um programa em Luau, escrito à mão, que comanda o Chrome por verbos de
 //! alto nível. Aqui a janela lista os roteiros, mostra o manifesto, o fonte (só leitura), o
-//! histórico de estados e o resultado do último teste, e deixa **Executar agora** (só com
-//! versão ativa).
+//! histórico de estados, o resultado do último teste e o **histórico de execuções** (lido do
+//! banco, então vale também para as que a agenda do worker disparou), e deixa **Executar
+//! agora** (só com versão ativa).
+//!
+//! **Sua vez no navegador.** Quando uma execução (da janela ou do worker, outro processo) para
+//! num CAPTCHA, no código do aplicativo autenticador (TOTP) ou num MFA manual, a janela lê isso
+//! do banco e mostra o cartão com **Continuar** e **Abortar**; o pedido volta ao executor
+//! pelo mesmo banco.
 //!
 //! **Ativar e desativar não são um clique.** Cada um abre uma confirmação em que o usuário
-//! digita `nome@versão` (ativar) ou o nome (desativar). A [`Confirmacao`] do banco só é
-//! construída por [`confirmacao_da_janela`], o ponto único onde a janela pede essa prova.
+//! digita o texto pedido (`nome@versão` para ativar, o nome para desativar; para versão
+//! escrita pela IA ou pelo MCP o banco acrescenta o host principal). A [`Confirmacao`] do banco
+//! só é construída por [`confirmacao_da_janela`] (`Confirmacao::da_janela`), o ponto único onde
+//! a janela pede essa prova depois da digitação exata.
 //!
 //! A lógica de estado (quando cada botão vale, as linhas de texto, a conferência da digitação)
 //! é pura e fica separada do desenho, para os testes não precisarem de tela.
@@ -20,8 +28,10 @@ use std::sync::mpsc::{Receiver, channel};
 use egui::{Align, Layout, RichText, ScrollArea, Ui};
 use sbf_chaveiro::Chaveiro;
 use sbf_roteiros::banco::{
-    BancoDeRoteiros, Confirmacao, DetalheDoEscrito, EstadoEscrito, EventoEscrito, VersaoEscrita,
+    AutorEscrito, BancoDeRoteiros, Confirmacao, DetalheDoEscrito, EstadoDaExecucao, EstadoEscrito,
+    EventoEscrito, VersaoEscrita,
 };
+use sbf_roteiros::execucao_escrita::{EventoDaExecucaoEscrita, LinhaDeExecucaoEscrita};
 use sbf_roteiros::executor::Fim;
 use sbf_roteiros::manifesto::{Classe, Manifesto, Mfa};
 use sbf_roteiros::servico::{Ambiente, RelatorioEscrito, executar_escrito};
@@ -180,6 +190,99 @@ pub fn pode_desativar(ativa: Option<u32>, rodando: bool) -> bool {
     ativa.is_some() && !rodando
 }
 
+/// O que a confirmação mostra da versão antes de o usuário digitar: quem escreveu, para onde
+/// ela navega, de onde vêm a senha e o código de MFA. Só rótulos, nunca segredo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumoDaConfirmacao {
+    /// `usuario`, `mcp` ou `ia:<modelo>`.
+    pub autor: String,
+    /// O autor não é o usuário: a confirmação ganha destaque.
+    pub autor_externo: bool,
+    pub hosts: String,
+    pub rotulo_senha: String,
+    pub mfa: String,
+    pub movimenta_dinheiro: bool,
+}
+
+impl ResumoDaConfirmacao {
+    #[must_use]
+    pub fn de(v: &VersaoEscrita) -> Self {
+        let m = &v.manifesto;
+        Self {
+            autor: v.autor.texto(),
+            autor_externo: v.autor != AutorEscrito::Usuario,
+            hosts: m.hosts.join(", "),
+            rotulo_senha: m
+                .rotulo_senha
+                .clone()
+                .unwrap_or_else(|| "nenhum (o roteiro não usa senha)".to_owned()),
+            mfa: match &m.mfa {
+                Mfa::Nenhum => "nenhum".to_owned(),
+                Mfa::Manual => {
+                    "manual: o roteiro para e você resolve no navegador (código do aplicativo autenticador, CAPTCHA)".to_owned()
+                }
+                Mfa::Email { remetente, .. } => {
+                    format!("por e-mail: o SBF lê o código no Gmail, só de {remetente}")
+                }
+            },
+            movimenta_dinheiro: m.movimenta_dinheiro,
+        }
+    }
+
+    /// As linhas de leitura da confirmação.
+    #[must_use]
+    pub fn linhas(&self) -> Vec<String> {
+        vec![
+            format!("Quem escreveu esta versão: {}", self.autor),
+            format!("Hosts onde ela navega e digita segredo: {}", self.hosts),
+            format!("Senha do chaveiro (rótulo): {}", self.rotulo_senha),
+            format!("MFA {}", self.mfa),
+            format!(
+                "Movimenta dinheiro: {}",
+                if self.movimenta_dinheiro {
+                    "sim"
+                } else {
+                    "não"
+                }
+            ),
+        ]
+    }
+
+    /// O alerta de quando o autor não é o usuário.
+    #[must_use]
+    pub fn alerta(&self) -> Option<String> {
+        self.autor_externo.then(|| {
+            format!(
+                "Esta versão foi escrita por {}, não por você. Leia o fonte inteiro e confira os hosts antes de digitar a confirmação.",
+                self.autor
+            )
+        })
+    }
+}
+
+/// O texto que o usuário tem de digitar para ativar `nome` na versão `numero`.
+///
+/// Isolado numa função só: o banco é quem sabe o texto (para versão escrita pela IA ou pelo MCP
+/// ele inclui o host principal).
+///
+/// # Errors
+/// Versão inexistente ou falha do banco.
+// TODO(integração): trocar o corpo por `banco.esperado_para_ativar(nome, numero)`.
+pub fn texto_a_digitar_para_ativar(
+    _banco: &BancoDeRoteiros,
+    nome: &str,
+    numero: u32,
+) -> Result<String, String> {
+    Ok(Confirmacao::texto_de_ativar(nome, numero))
+}
+
+/// O texto que o usuário tem de digitar para desativar `nome`.
+// TODO(integração): trocar o corpo por `banco.esperado_para_desativar(nome)`.
+#[must_use]
+pub fn texto_a_digitar_para_desativar(_banco: &BancoDeRoteiros, nome: &str) -> String {
+    Confirmacao::texto_de_desativar(nome)
+}
+
 /// Um pedido de ativação ou desativação esperando a digitação do usuário.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pedido {
@@ -187,6 +290,10 @@ pub struct Pedido {
     /// `Some(versão)` ativa essa versão; `None` desativa o roteiro.
     pub versao: Option<u32>,
     pub digitado: String,
+    /// O que o usuário tem de digitar (calculado uma vez, quando o pedido abre).
+    esperado: String,
+    /// O que mostrar da versão antes da digitação.
+    pub resumo: Option<ResumoDaConfirmacao>,
 }
 
 impl Pedido {
@@ -196,6 +303,8 @@ impl Pedido {
             nome: nome.to_owned(),
             versao: Some(versao),
             digitado: String::new(),
+            esperado: Confirmacao::texto_de_ativar(nome, versao),
+            resumo: None,
         }
     }
 
@@ -205,39 +314,45 @@ impl Pedido {
             nome: nome.to_owned(),
             versao: None,
             digitado: String::new(),
+            esperado: Confirmacao::texto_de_desativar(nome),
+            resumo: None,
         }
     }
 
-    /// O que o usuário tem de digitar: `nome@versão` ou o nome.
+    /// Troca o texto a digitar pelo que o banco pediu.
+    #[must_use]
+    pub fn com_esperado(mut self, esperado: String) -> Self {
+        self.esperado = esperado;
+        self
+    }
+
+    /// Anexa o resumo da versão.
+    #[must_use]
+    pub fn com_resumo(mut self, resumo: ResumoDaConfirmacao) -> Self {
+        self.resumo = Some(resumo);
+        self
+    }
+
+    /// O que o usuário tem de digitar.
     #[must_use]
     pub fn esperado(&self) -> String {
-        match self.versao {
-            Some(v) => Confirmacao::texto_de_ativar(&self.nome, v),
-            None => Confirmacao::texto_de_desativar(&self.nome),
-        }
+        self.esperado.clone()
     }
 
     /// A digitação confere **exatamente** (nada de espaço ou maiúscula a mais).
     #[must_use]
     pub fn confere(&self) -> bool {
-        self.digitado == self.esperado()
+        self.digitado == self.esperado
     }
 }
 
-/// O único lugar onde a janela pede ao banco a prova de que o usuário confirmou.
-///
-/// LACUNA: `Confirmacao` só tem o construtor `do_terminal(terminal_interativo, ...)`, feito
-/// para o CLI. A janela não é um terminal, e passar `true` ali seria mentir ao guarda do
-/// banco. Enquanto o banco não oferecer um construtor próprio para a janela, a digitação é
-/// conferida aqui, mas a ativação é recusada com o caminho do terminal e nada muda.
+/// O único lugar onde a janela pede ao banco a prova de que o usuário confirmou: constrói a
+/// [`Confirmacao`] pelo caminho da janela (`Confirmacao::da_janela`) e só se a digitação
+/// confere exatamente com o pedido.
 ///
 /// # Errors
-/// Digitação diferente do esperado ou ausência do construtor da janela.
-pub fn confirmacao_da_janela(
-    digitado: &str,
-    esperado: &str,
-    _comando_no_terminal: &str,
-) -> Result<Confirmacao, String> {
+/// Digitação diferente do esperado.
+pub fn confirmacao_da_janela(digitado: &str, esperado: &str) -> Result<Confirmacao, String> {
     Confirmacao::da_janela(digitado, esperado)
         .map_err(|_| "A confirmação digitada é diferente do pedido; nada foi alterado.".to_owned())
 }
@@ -247,12 +362,7 @@ pub fn confirmacao_da_janela(
 /// # Errors
 /// Confirmação recusada ou erro do banco.
 pub fn aplicar_pedido(banco: &BancoDeRoteiros, p: &Pedido) -> Result<String, String> {
-    let esperado = p.esperado();
-    let comando = match p.versao {
-        Some(v) => format!("sbf roteiros escrito ativar {} {v}", p.nome),
-        None => format!("sbf roteiros escrito desativar {}", p.nome),
-    };
-    let conf = confirmacao_da_janela(&p.digitado, &esperado, &comando)?;
+    let conf = confirmacao_da_janela(&p.digitado, &p.esperado())?;
     match p.versao {
         Some(v) => {
             banco.ativar(&p.nome, v, &conf).map_err(|e| e.to_string())?;
@@ -263,6 +373,92 @@ pub fn aplicar_pedido(banco: &BancoDeRoteiros, p: &Pedido) -> Result<String, Str
             Ok(format!("{}@{v} desativado.", p.nome))
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Execuções: "Sua vez no navegador" e histórico (lidos do banco)
+// ---------------------------------------------------------------------------------------
+
+/// `2026-11-24T09:00:01.123Z` vira `2026-11-24 09:00:01` (UTC, como o banco grava).
+#[must_use]
+pub fn hora_curta(iso: &str) -> String {
+    iso.chars()
+        .take(19)
+        .map(|c| if c == 'T' { ' ' } else { c })
+        .collect()
+}
+
+/// O estado de uma execução, em português.
+#[must_use]
+pub fn rotulo_da_execucao(e: EstadoDaExecucao) -> &'static str {
+    match e {
+        EstadoDaExecucao::Rodando => "executando",
+        EstadoDaExecucao::AguardandoUsuario => "esperando você",
+        EstadoDaExecucao::Concluida => "concluída",
+        EstadoDaExecucao::Falhou => "falhou",
+        EstadoDaExecucao::Bloqueada => "bloqueada pela lista de bloqueio",
+        EstadoDaExecucao::Cancelada => "cancelada",
+    }
+}
+
+/// O que disparou a execução: `janela`, `agenda` ou `teste`.
+#[must_use]
+pub fn rotulo_do_gatilho(g: &str) -> &str {
+    match g {
+        "janela" => "botão da janela",
+        "agenda" => "agenda do worker",
+        "teste" => "teste no site falso",
+        outro => outro,
+    }
+}
+
+/// Uma linha do histórico de execuções.
+#[must_use]
+pub fn linha_da_execucao(e: &LinhaDeExecucaoEscrita) -> String {
+    let fim = match &e.concluida_em {
+        Some(f) => format!("até {}", hora_curta(f)),
+        None => "em andamento".to_owned(),
+    };
+    let mut t = format!(
+        "{} ({fim}) · {} · versão {} · {}",
+        hora_curta(&e.iniciada_em),
+        rotulo_do_gatilho(&e.gatilho),
+        e.versao,
+        rotulo_da_execucao(e.estado)
+    );
+    if let Some(m) = e.motivo.as_deref().filter(|m| !m.trim().is_empty()) {
+        t.push_str(": ");
+        t.push_str(m.trim());
+    }
+    if e.estado == EstadoDaExecucao::Concluida {
+        t.push_str(&format!(
+            " · {} baixado{}, {} novo{}",
+            e.baixados,
+            if e.baixados == 1 { "" } else { "s" },
+            e.novos,
+            if e.novos == 1 { "" } else { "s" }
+        ));
+    }
+    t
+}
+
+/// Uma linha de evento de uma execução (sem segredo: o banco só guarda texto já limpo).
+#[must_use]
+pub fn linha_do_evento_da_execucao(e: &EventoDaExecucaoEscrita) -> String {
+    let (quando, tipo, mensagem) = e;
+    format!("{} · {tipo} · {mensagem}", hora_curta(quando))
+}
+
+/// A frase do cartão "Sua vez no navegador".
+#[must_use]
+pub fn texto_da_pausa(motivo: Option<&str>) -> String {
+    let m = motivo
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("O site precisa de você");
+    format!(
+        "{m}. Resolva no Chrome que o SBF abriu (CAPTCHA, código do aplicativo autenticador, MFA manual) e depois clique em Continuar: o roteiro escrito retoma de onde parou. Abortar encerra a execução."
+    )
 }
 
 /// O que a janela diz de uma execução que terminou: o texto e se é erro.
@@ -323,7 +519,17 @@ pub struct Escritos {
     ultimos: HashMap<String, Ultimo>,
     pedido: Option<Pedido>,
     aviso: Option<(String, bool)>,
+    /// Execuções esperando o usuário (do banco, de qualquer processo) que ele ainda não
+    /// respondeu.
+    aguardando: Vec<LinhaDeExecucaoEscrita>,
+    /// As últimas execuções de cada roteiro (as mais novas primeiro), lidas do banco.
+    historico: HashMap<String, Vec<LinhaDeExecucaoEscrita>>,
+    /// Os eventos das execuções que o usuário expandiu.
+    eventos: HashMap<i64, Vec<EventoDaExecucaoEscrita>>,
 }
+
+/// Quantas execuções o detalhe mostra por roteiro.
+const EXECUCOES_NO_DETALHE: usize = 8;
 
 impl std::fmt::Debug for Escritos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -344,6 +550,100 @@ impl Escritos {
             .iter()
             .filter_map(|l| banco.mostrar(&l.nome).ok())
             .collect();
+        self.reler_execucoes(banco);
+    }
+
+    /// Relê do banco as execuções: as que esperam o usuário, o histórico de cada roteiro e os
+    /// eventos das que estão expandidas. É o que faz o cartão "Sua vez no navegador" aparecer
+    /// também para a execução que a agenda do worker (outro processo) disparou.
+    pub fn reler_execucoes(&mut self, banco: &BancoDeRoteiros) {
+        if let Ok(espera) = banco.aguardando_escritas() {
+            // Quem já respondeu (aqui ou em outro processo) mas ainda não voltou a rodar não
+            // pede de novo.
+            self.aguardando = espera
+                .into_iter()
+                .filter(|e| banco.pedido_do_usuario_escrita(e.id).is_ok_and(|p| p == 0))
+                .collect();
+        }
+        let mut historico = HashMap::new();
+        for d in &self.detalhes {
+            if let Ok(h) = banco.historico_escrito(Some(&d.nome), EXECUCOES_NO_DETALHE) {
+                historico.insert(d.nome.clone(), h);
+            }
+        }
+        self.historico = historico;
+        let abertas: Vec<i64> = self.eventos.keys().copied().collect();
+        for id in abertas {
+            match banco.eventos_escritos(id) {
+                Ok(ev) => {
+                    self.eventos.insert(id, ev);
+                }
+                Err(_) => {
+                    self.eventos.remove(&id);
+                }
+            }
+        }
+    }
+
+    /// O usuário respondeu à pausa: `continuar` retoma, senão **aborta**. Grava o pedido no
+    /// banco (é por ele que o executor, aqui ou no worker, fica sabendo) e, se a execução roda
+    /// nesta janela, também levanta o sinal de cancelar.
+    pub fn responder_pausa(
+        &mut self,
+        banco: Option<&BancoDeRoteiros>,
+        execucao: i64,
+        roteiro: &str,
+        continuar: bool,
+    ) {
+        if let Some(b) = banco
+            && let Err(e) = b.pedir_continuar_escrita(execucao, continuar)
+        {
+            self.aviso = Some((format!("Não consegui avisar o roteiro: {e}"), true));
+            return;
+        }
+        if !continuar && let Some(e) = self.em_curso.iter().find(|e| e.roteiro == roteiro) {
+            e.cancelar.store(true, Ordering::SeqCst);
+        }
+        self.aguardando.retain(|e| e.id != execucao);
+        self.aviso = Some((
+            if continuar {
+                format!("{roteiro}: você continuou; o roteiro escrito retoma de onde parou.")
+            } else {
+                format!("{roteiro}: você abortou; a execução termina como cancelada.")
+            },
+            !continuar,
+        ));
+    }
+
+    /// O cartão "Sua vez no navegador", um por execução que espera o usuário.
+    pub fn sua_vez_ui(&mut self, ui: &mut Ui, banco: Option<&BancoDeRoteiros>) {
+        let p = tema::paleta(ui.ctx());
+        for e in self.aguardando.clone() {
+            let mut resposta = None;
+            componentes::cartao(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Sua vez no navegador")
+                            .strong()
+                            .color(p.aviso),
+                    );
+                    ui.label(format!("· {} (roteiro escrito)", e.roteiro));
+                });
+                ui.label(RichText::new(texto_da_pausa(e.motivo.as_deref())).color(p.tinta));
+                ui.horizontal(|ui| {
+                    if ui.button("Continuar").clicked() {
+                        resposta = Some(true);
+                    }
+                    if ui.button("Abortar").clicked() {
+                        resposta = Some(false);
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            if let Some(continuar) = resposta {
+                self.responder_pausa(banco, e.id, &e.roteiro, continuar);
+            }
+        }
     }
 
     /// Dados fictícios para a demonstração e as capturas.
@@ -399,7 +699,7 @@ impl Escritos {
         );
         let b = manifesto(
             "extrato-banco-exemplo",
-            "Consulta o extrato no banco fictício; o token muda por minuto.",
+            "Consulta o extrato no banco fictício; o código do aplicativo autenticador (TOTP) muda por minuto.",
             Mfa::Manual,
             Classe::Consulta,
             None,
@@ -523,6 +823,87 @@ impl Escritos {
                 ],
             },
         ];
+        let exec = |id: i64,
+                    roteiro: &str,
+                    versao: u32,
+                    gatilho: &str,
+                    estado: EstadoDaExecucao,
+                    motivo: Option<&str>,
+                    baixados: i64| LinhaDeExecucaoEscrita {
+            id,
+            roteiro: roteiro.to_owned(),
+            versao,
+            gatilho: gatilho.to_owned(),
+            iniciada_em: "2026-11-24T08:30:00.000Z".to_owned(),
+            concluida_em: (estado != EstadoDaExecucao::AguardandoUsuario)
+                .then(|| "2026-11-24T08:31:12.000Z".to_owned()),
+            estado,
+            chamada: 9,
+            motivo: motivo.map(str::to_owned),
+            baixados,
+            novos: baixados,
+        };
+        self.historico = HashMap::from([
+            (
+                "contracheque-exemplo".to_owned(),
+                vec![
+                    exec(
+                        12,
+                        "contracheque-exemplo",
+                        1,
+                        "agenda",
+                        EstadoDaExecucao::Concluida,
+                        None,
+                        1,
+                    ),
+                    exec(
+                        7,
+                        "contracheque-exemplo",
+                        1,
+                        "janela",
+                        EstadoDaExecucao::Falhou,
+                        Some("o elemento #demonstrativo não apareceu"),
+                        0,
+                    ),
+                ],
+            ),
+            (
+                "atualizar-conexoes-exemplo".to_owned(),
+                vec![exec(
+                    13,
+                    "atualizar-conexoes-exemplo",
+                    1,
+                    "agenda",
+                    EstadoDaExecucao::AguardandoUsuario,
+                    Some("Há um CAPTCHA na página"),
+                    0,
+                )],
+            ),
+        ]);
+        self.eventos = HashMap::from([(
+            12,
+            vec![
+                (
+                    "2026-11-24T08:30:01.000Z".to_owned(),
+                    "registro".to_owned(),
+                    "entrou no portal fictício".to_owned(),
+                ),
+                (
+                    "2026-11-24T08:31:10.000Z".to_owned(),
+                    "download".to_owned(),
+                    "demonstrativo.pdf".to_owned(),
+                ),
+            ],
+        )]);
+        self.aguardando = vec![exec(
+            13,
+            "atualizar-conexoes-exemplo",
+            1,
+            "agenda",
+            EstadoDaExecucao::AguardandoUsuario,
+            Some("Há um CAPTCHA na página"),
+            0,
+        )];
         self.selecionado = None;
         self.versao_vista = None;
         self.pedido = None;
@@ -718,19 +1099,22 @@ impl Escritos {
                     .size(12.5)
                     .color(p.tinta_suave),
             );
-            match self.ultimos.get(&r.nome) {
-                Some(u) => {
-                    let cor = if u.erro { p.perigo } else { p.sucesso };
+            match (
+                self.historico.get(&r.nome).and_then(|h| h.first()),
+                self.ultimos.get(&r.nome),
+            ) {
+                (Some(e), _) => {
                     ui.label(
-                        RichText::new(format!("Última execução (nesta sessão): {}", u.texto))
-                            .color(cor),
+                        RichText::new(format!("Última execução: {}", linha_da_execucao(e)))
+                            .color(cor_da_execucao(&p, e.estado)),
                     );
                 }
-                None => {
-                    ui.label(
-                        RichText::new("Última execução: nenhuma nesta sessão da janela.")
-                            .color(p.tinta_suave),
-                    );
+                (None, Some(u)) => {
+                    let cor = if u.erro { p.perigo } else { p.sucesso };
+                    ui.label(RichText::new(format!("Última execução: {}", u.texto)).color(cor));
+                }
+                (None, None) => {
+                    ui.label(RichText::new("Última execução: nenhuma ainda.").color(p.tinta_suave));
                 }
             }
         });
@@ -752,6 +1136,8 @@ impl Escritos {
         let rodando = self.rodando(&d.nome);
         let mut pedir_ativar = false;
         let mut pedir_desativar = false;
+        let mut carregar: Vec<i64> = Vec::new();
+        let mut descartar: Vec<i64> = Vec::new();
         componentes::cartao(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Versão");
@@ -826,6 +1212,37 @@ impl Escritos {
                 }
             }
 
+            componentes::rotulo_de_secao(ui, "Histórico de execuções (horários em UTC)");
+            let execucoes = self.historico.get(&d.nome).cloned().unwrap_or_default();
+            if execucoes.is_empty() {
+                ui.label(RichText::new("Nenhuma execução ainda.").color(p.tinta_suave));
+            }
+            for x in &execucoes {
+                let titulo = RichText::new(linha_da_execucao(x))
+                    .size(12.0)
+                    .color(cor_da_execucao(&p, x.estado));
+                let aberto = egui::CollapsingHeader::new(titulo)
+                    .id_salt(("execucao-escrita", x.id))
+                    .show(ui, |ui| match self.eventos.get(&x.id) {
+                        Some(ev) if ev.is_empty() => {
+                            ui.label(RichText::new("Sem eventos.").color(p.tinta_suave));
+                        }
+                        Some(ev) => {
+                            for e in ev {
+                                ui.label(
+                                    RichText::new(linha_do_evento_da_execucao(e))
+                                        .monospace()
+                                        .size(12.0),
+                                );
+                            }
+                        }
+                        None => carregar.push(x.id),
+                    });
+                if aberto.body_returned.is_none() {
+                    descartar.push(x.id);
+                }
+            }
+
             componentes::rotulo_de_secao(ui, "Histórico de estados");
             if d.eventos.is_empty() {
                 ui.label(RichText::new("Sem eventos.").color(p.tinta_suave));
@@ -855,13 +1272,54 @@ impl Escritos {
                 }
             });
         });
+        if let Some(b) = banco {
+            for id in carregar {
+                if let Ok(ev) = b.eventos_escritos(id) {
+                    self.eventos.insert(id, ev);
+                }
+            }
+        }
+        for id in descartar {
+            self.eventos.remove(&id);
+        }
         if pedir_ativar {
-            self.pedido = Some(Pedido::ativar(&d.nome, v.numero));
+            self.abrir_pedido_de_ativar(banco, v);
         }
         if pedir_desativar {
-            self.pedido = Some(Pedido::desativar(&d.nome));
+            let resumo = d
+                .versoes
+                .iter()
+                .find(|x| x.estado == EstadoEscrito::Ativo)
+                .map(ResumoDaConfirmacao::de);
+            let esperado = match banco {
+                Some(b) => texto_a_digitar_para_desativar(b, &d.nome),
+                None => Confirmacao::texto_de_desativar(&d.nome),
+            };
+            let mut ped = Pedido::desativar(&d.nome).com_esperado(esperado);
+            if let Some(r) = resumo {
+                ped = ped.com_resumo(r);
+            }
+            self.pedido = Some(ped);
         }
         self.confirmacao(ui, &d.nome, banco);
+    }
+
+    fn abrir_pedido_de_ativar(&mut self, banco: Option<&BancoDeRoteiros>, v: &VersaoEscrita) {
+        let esperado = match banco {
+            Some(b) => match texto_a_digitar_para_ativar(b, &v.roteiro, v.numero) {
+                Ok(t) => t,
+                Err(e) => {
+                    self.aviso = Some((e, true));
+                    return;
+                }
+            },
+            None => Confirmacao::texto_de_ativar(&v.roteiro, v.numero),
+        };
+        self.pedido = Some(
+            Pedido::ativar(&v.roteiro, v.numero)
+                .com_esperado(esperado)
+                .com_resumo(ResumoDaConfirmacao::de(v)),
+        );
     }
 
     fn confirmacao(&mut self, ui: &mut Ui, nome: &str, banco: Option<&BancoDeRoteiros>) {
@@ -878,6 +1336,20 @@ impl Escritos {
                 None => format!("Desativar {nome}?"),
             };
             componentes::titulo(ui, &titulo, 15.0);
+            if let Some(alerta) = pedido.resumo.as_ref().and_then(ResumoDaConfirmacao::alerta) {
+                componentes::aviso(ui, "error", &alerta, p.perigo_sutil, p.borda, p.perigo);
+            }
+            if let Some(r) = &pedido.resumo {
+                for linha in r.linhas() {
+                    let destaque = r.autor_externo && linha.starts_with("Quem escreveu");
+                    let t = RichText::new(linha).size(12.5);
+                    ui.label(if destaque {
+                        t.strong().color(p.perigo)
+                    } else {
+                        t
+                    });
+                }
+            }
             if pedido.versao.is_some() {
                 componentes::aviso(
                     ui,
@@ -916,6 +1388,16 @@ impl Escritos {
             });
             self.pedido = None;
             self.reler(b);
+        }
+    }
+}
+
+fn cor_da_execucao(p: &tema::Paleta, e: EstadoDaExecucao) -> egui::Color32 {
+    match e {
+        EstadoDaExecucao::Concluida => p.sucesso,
+        EstadoDaExecucao::Rodando | EstadoDaExecucao::AguardandoUsuario => p.aviso,
+        EstadoDaExecucao::Falhou | EstadoDaExecucao::Bloqueada | EstadoDaExecucao::Cancelada => {
+            p.perigo
         }
     }
 }
@@ -1213,6 +1695,242 @@ mod testes {
         assert!(resumos.iter().any(|r| r.ativa.is_none()));
     }
 
+    fn execucao_esperando(b: &BancoDeRoteiros, gatilho: &str, motivo: &str) -> i64 {
+        let id = b
+            .iniciar_execucao_escrita("contracheque-exemplo", 1, gatilho)
+            .expect("inicia");
+        b.marcar_aguardando_escrita(id, motivo).expect("aguarda");
+        id
+    }
+
+    fn desenhar(e: &mut Escritos, banco: Option<&BancoDeRoteiros>) {
+        let ctx = egui::Context::default();
+        crate::tema::instalar_fontes(&ctx);
+        crate::tema::aplicar(&ctx, "claro");
+        for _ in 0..2 {
+            let entrada = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let mut saida = ctx.run_ui(entrada, |ui| {
+                e.sua_vez_ui(ui, banco);
+                e.ui(ui, banco, None, None);
+            });
+            saida.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    fn o_cartao_sua_vez_aparece_para_execucao_do_worker_e_some_ao_voltar_a_rodar() {
+        let b = banco_com_testado();
+        let mut e = Escritos::default();
+        e.reler(&b);
+        assert!(e.aguardando.is_empty(), "nada espera ainda");
+        // O worker (outro processo) disparou pela agenda e parou num CAPTCHA.
+        let id = execucao_esperando(&b, "agenda", "Há um CAPTCHA na página");
+        e.reler(&b);
+        assert_eq!(e.aguardando.len(), 1);
+        assert_eq!(e.aguardando[0].roteiro, "contracheque-exemplo");
+        assert_eq!(e.aguardando[0].gatilho, "agenda");
+        let t = texto_da_pausa(e.aguardando[0].motivo.as_deref());
+        assert!(t.starts_with("Há um CAPTCHA na página."), "{t}");
+        assert!(t.contains("código do aplicativo autenticador"), "{t}");
+        assert!(!t.to_lowercase().contains("token"), "{t}");
+        desenhar(&mut e, Some(&b));
+        b.marcar_rodando_escrita(id).expect("volta");
+        e.reler(&b);
+        assert!(e.aguardando.is_empty());
+    }
+
+    #[test]
+    fn continuar_grava_o_pedido_e_esconde_o_cartao() {
+        let b = banco_com_testado();
+        let id = execucao_esperando(&b, "janela", "MFA manual");
+        let mut e = Escritos::default();
+        e.reler(&b);
+        assert_eq!(e.aguardando.len(), 1);
+        e.responder_pausa(Some(&b), id, "contracheque-exemplo", true);
+        assert_eq!(b.pedido_do_usuario_escrita(id).expect("lê"), 1);
+        assert!(e.aguardando.is_empty());
+        assert!(matches!(&e.aviso, Some((_, false))));
+        // O executor ainda não voltou a rodar: a próxima leitura não mostra de novo.
+        e.reler(&b);
+        assert!(e.aguardando.is_empty(), "já respondida");
+    }
+
+    #[test]
+    fn abortar_grava_o_cancelamento_e_levanta_o_sinal_da_thread_da_janela() {
+        let b = banco_com_testado();
+        let id = execucao_esperando(&b, "janela", "CAPTCHA");
+        let mut e = Escritos::default();
+        let cancelar = Arc::new(AtomicBool::new(false));
+        let (_tx, rx) = channel();
+        e.em_curso.push(EmCursoEscrito {
+            roteiro: "contracheque-exemplo".to_owned(),
+            cancelar: Arc::clone(&cancelar),
+            resposta: rx,
+        });
+        e.reler(&b);
+        e.responder_pausa(Some(&b), id, "contracheque-exemplo", false);
+        assert_eq!(b.pedido_do_usuario_escrita(id).expect("lê"), 2);
+        assert!(
+            cancelar.load(Ordering::SeqCst),
+            "a thread da janela cancela"
+        );
+        assert!(e.aguardando.is_empty());
+        assert!(matches!(&e.aviso, Some((t, true)) if t.contains("abortou")));
+        e.reler(&b);
+        assert!(e.aguardando.is_empty());
+    }
+
+    #[test]
+    fn abortar_de_execucao_do_worker_so_grava_o_pedido() {
+        let b = banco_com_testado();
+        let id = execucao_esperando(&b, "agenda", "CAPTCHA");
+        let mut e = Escritos::default();
+        e.responder_pausa(Some(&b), id, "contracheque-exemplo", false);
+        assert_eq!(b.pedido_do_usuario_escrita(id).expect("lê"), 2);
+    }
+
+    #[test]
+    fn o_historico_vem_do_banco_com_gatilho_estado_e_numeros() {
+        let b = banco_com_testado();
+        let id = b
+            .iniciar_execucao_escrita("contracheque-exemplo", 1, "agenda")
+            .expect("inicia");
+        b.evento_escrito(id, "registro", "entrou no portal fictício")
+            .expect("evento");
+        b.finalizar_escrita(id, EstadoDaExecucao::Concluida, None, 2, 1)
+            .expect("fecha");
+        let id2 = b
+            .iniciar_execucao_escrita("contracheque-exemplo", 1, "janela")
+            .expect("inicia");
+        b.finalizar_escrita(
+            id2,
+            EstadoDaExecucao::Falhou,
+            Some("o elemento não apareceu"),
+            0,
+            0,
+        )
+        .expect("fecha");
+        let mut e = Escritos::default();
+        e.reler(&b);
+        let h = &e.historico["contracheque-exemplo"];
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].id, id2, "a mais nova primeiro");
+        let l0 = linha_da_execucao(&h[0]);
+        assert!(l0.contains("botão da janela"), "{l0}");
+        assert!(
+            l0.contains("versão 1 · falhou: o elemento não apareceu"),
+            "{l0}"
+        );
+        let l1 = linha_da_execucao(&h[1]);
+        assert!(l1.contains("agenda do worker"), "{l1}");
+        assert!(l1.contains("concluída · 2 baixados, 1 novo"), "{l1}");
+        assert!(!l1.contains('Z'), "{l1}");
+        // Expandir carrega os eventos (sem segredo: só o texto que o banco guardou).
+        e.eventos
+            .insert(id, b.eventos_escritos(id).expect("eventos"));
+        let ev = linha_do_evento_da_execucao(&e.eventos[&id][0]);
+        assert!(
+            ev.ends_with("· registro · entrou no portal fictício"),
+            "{ev}"
+        );
+        desenhar(&mut e, Some(&b));
+    }
+
+    #[test]
+    fn a_linha_da_execucao_em_andamento_e_a_hora_curta() {
+        assert_eq!(
+            hora_curta("2026-11-24T09:00:01.123Z"),
+            "2026-11-24 09:00:01"
+        );
+        let x = LinhaDeExecucaoEscrita {
+            id: 1,
+            roteiro: "contracheque-exemplo".into(),
+            versao: 3,
+            gatilho: "teste".into(),
+            iniciada_em: "2026-11-24T09:00:01.123Z".into(),
+            concluida_em: None,
+            estado: EstadoDaExecucao::AguardandoUsuario,
+            chamada: 4,
+            motivo: Some("CAPTCHA".into()),
+            baixados: 0,
+            novos: 0,
+        };
+        assert_eq!(
+            linha_da_execucao(&x),
+            "2026-11-24 09:00:01 (em andamento) · teste no site falso · versão 3 · esperando você: CAPTCHA"
+        );
+    }
+
+    #[test]
+    fn a_confirmacao_destaca_autor_que_nao_e_o_usuario() {
+        let b = BancoDeRoteiros::em_memoria().expect("banco");
+        let m = manifesto("contracheque-exemplo", email());
+        b.importar_escrito(
+            &m,
+            "navegador.registrar(\"a\")",
+            &AutorEscrito::Mcp,
+            "proposta",
+        )
+        .expect("mcp");
+        b.importar_escrito(
+            &m,
+            "navegador.registrar(\"b\")",
+            &AutorEscrito::Ia("claude-x".into()),
+            "",
+        )
+        .expect("ia");
+        b.importar_escrito(&m, "navegador.registrar(\"c\")", &AutorEscrito::Usuario, "")
+            .expect("usuario");
+        let r =
+            |n| ResumoDaConfirmacao::de(&b.versao_escrita("contracheque-exemplo", n).expect("v"));
+        let mcp = r(1);
+        assert!(mcp.autor_externo);
+        assert_eq!(mcp.autor, "mcp");
+        let alerta = mcp.alerta().expect("alerta");
+        assert!(alerta.contains("escrita por mcp, não por você"), "{alerta}");
+        assert!(r(2).alerta().expect("ia").contains("ia:claude-x"));
+        let eu = r(3);
+        assert!(!eu.autor_externo);
+        assert!(eu.alerta().is_none());
+        let t = eu.linhas().join("\n");
+        assert!(t.contains("Quem escreveu esta versão: usuario"), "{t}");
+        assert!(
+            t.contains("Hosts onde ela navega e digita segredo: portal.exemplo.test"),
+            "{t}"
+        );
+        assert!(
+            t.contains("Senha do chaveiro (rótulo): senha:portal-exemplo"),
+            "{t}"
+        );
+        assert!(
+            t.contains(
+                "MFA por e-mail: o SBF lê o código no Gmail, só de nao-responda@portal.exemplo.test"
+            ),
+            "{t}"
+        );
+        assert!(!t.to_lowercase().contains("token"), "{t}");
+    }
+
+    #[test]
+    fn abrir_o_pedido_de_ativar_anexa_o_resumo_e_o_texto_a_digitar() {
+        let b = banco_com_testado();
+        let v = b.versao_escrita("contracheque-exemplo", 1).expect("v");
+        let mut e = Escritos::default();
+        e.abrir_pedido_de_ativar(Some(&b), &v);
+        let p = e.pedido.as_ref().expect("pedido");
+        assert_eq!(p.esperado(), "contracheque-exemplo@1");
+        assert_eq!(p.resumo.as_ref().map(|r| r.autor.as_str()), Some("usuario"));
+        e.selecionado = Some("contracheque-exemplo".to_owned());
+        e.reler(&b);
+        desenhar(&mut e, Some(&b));
+    }
+
     #[test]
     fn a_secao_desenha_com_detalhe_e_confirmacao_sem_travar() {
         let ctx = egui::Context::default();
@@ -1231,9 +1949,13 @@ mod testes {
                 )),
                 ..egui::RawInput::default()
             };
-            let mut saida = ctx.run_ui(entrada, |ui| e.ui(ui, None, None, None));
+            let mut saida = ctx.run_ui(entrada, |ui| {
+                e.sua_vez_ui(ui, None);
+                e.ui(ui, None, None, None);
+            });
             saida.textures_delta.clear();
         }
         assert!(e.pedido.is_some(), "sem clique, o pedido continua aberto");
+        assert_eq!(e.aguardando.len(), 1, "a demonstração mostra a pausa");
     }
 }
