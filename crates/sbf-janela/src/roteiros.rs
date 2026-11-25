@@ -126,7 +126,7 @@ pub struct Roteiros {
     /// Rótulos de senha de site, só na demonstração.
     rotulos_da_demonstracao: Vec<String>,
     senhas_da_demonstracao: SenhasDeSites,
-    /// Os roteiros escritos (Luau, spec 14).
+    /// Os roteiros escritos (Luau, spec 16).
     escritos: Escritos,
 }
 

@@ -14,7 +14,7 @@ sbf-ia = { path = "../sbf-ia" }
 sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-regras = { workspace = true }
 sbf-script = { workspace = true }
-# Roteiros escritos (Luau): o MCP só propõe rascunho e consulta (spec 14, RE-19).
+# Roteiros escritos (Luau): o MCP só propõe rascunho e consulta (spec 16, RE-19).
 sbf-roteiros = { path = "../sbf-roteiros" }
 rusqlite = { workspace = true }
 serde = { workspace = true }

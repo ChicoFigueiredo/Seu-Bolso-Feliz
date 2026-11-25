@@ -11,7 +11,7 @@
 //! [`backup`]); se ele falha, a escrita é recusada. A triagem do inventário segue só do
 //! usuário: `sugerir` apenas grava sugestões (modelo `mcp`). O livro-caixa é só leitura.
 //!
-//! **Roteiros escritos** (spec 14, RE-19; módulo [`roteiros_escritos`]): o MCP só **propõe**
+//! **Roteiros escritos** (spec 16, RE-19; módulo [`roteiros_escritos`]): o MCP só **propõe**
 //! (rascunho com autor `mcp`) e consulta. Ao contrário das regras, não há ferramenta que
 //! ative, desative, teste ou execute: um roteiro escrito comanda um navegador com credenciais.
 

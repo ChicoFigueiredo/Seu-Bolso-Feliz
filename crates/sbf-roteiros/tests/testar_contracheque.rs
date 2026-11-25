@@ -1,4 +1,4 @@
-//! O `testar` do roteiro escrito (spec 14, §5): o cenário `contracheque` roda a versão contra o
+//! O `testar` do roteiro escrito (spec 16, §5): o cenário `contracheque` roda a versão contra o
 //! portal falso local (127.0.0.1). Com `SBF_CHROME_TESTE=1` o Chrome é o de verdade (sem janela,
 //! perfil descartável); sem ele, o mesmo caminho roda com o navegador falso, que cobre o que não
 //! depende de o portal responder (bloqueio, código que não chega, cenário incompatível, versão

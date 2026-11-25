@@ -1,4 +1,4 @@
-//! O **roteiro escrito** (Luau) sobre os verbos da bancada (ADR-022, spec 14).
+//! O **roteiro escrito** (Luau) sobre os verbos da bancada (ADR-022, spec 16).
 //!
 //! O host Luau (`bancada_navegador::luau`) só conhece o trait [`Verbos`]; [`SbfVerbos`] o
 //! implementa por cima do [`Navegador`], da lista de bloqueio, do chaveiro, do e-mail, da
@@ -229,6 +229,16 @@ fn url_aprovada_em(hosts: &[String], teste: &OpcoesEscrito, url: &str) -> bool {
     };
     if !hosts.contains(&host) {
         return false;
+    }
+    // Em https só vale a porta padrão: `host_de` descarta a porta, e um portal em outra porta
+    // é outro serviço (a lista de hosts do manifesto é por nome, sem porta).
+    if u.starts_with("https://") {
+        let hospedagem = autoridade
+            .rsplit_once(':')
+            .filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit()));
+        if hospedagem.is_some_and(|(_, porta)| porta != "443") {
+            return false;
+        }
     }
     u.starts_with("https://")
         || (teste.aceitar_http_loopback && u.starts_with("http://") && e_loopback(&host))
@@ -612,6 +622,14 @@ impl<'a> SbfVerbos<'a> {
 }
 
 impl Verbos for SbfVerbos<'_> {
+    fn tempo_pausado_automatico(&mut self) -> Duration {
+        SbfVerbos::tempo_pausado_automatico(self)
+    }
+
+    fn limpar(&self, texto: &str) -> String {
+        self.limpo(texto)
+    }
+
     fn abrir(&mut self, url: &str) -> ResultadoDeVerbo<()> {
         self.entrar()?;
         let u = url.trim();
@@ -1079,6 +1097,28 @@ mod testes {
 
     fn t(segundos: i64) -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(u64::try_from(segundos).unwrap_or(0))
+    }
+
+    #[test]
+    fn a_url_aprovada_so_aceita_a_porta_padrao_do_https() {
+        let hosts = vec!["portal.exemplo.test".to_owned()];
+        let producao = OpcoesEscrito::default();
+        for ok in [
+            "https://portal.exemplo.test/entrar",
+            "https://portal.exemplo.test:443/entrar",
+            "https://portal.exemplo.test/entrar?a=1:2",
+        ] {
+            assert!(url_aprovada_em(&hosts, &producao, ok), "{ok}");
+        }
+        for ruim in [
+            "https://portal.exemplo.test:8443/entrar",
+            "https://portal.exemplo.test:80/",
+            "http://portal.exemplo.test/entrar",
+            "https://portal.exemplo.test@outro.test/",
+            "https://outro.test/entrar",
+        ] {
+            assert!(!url_aprovada_em(&hosts, &producao, ruim), "{ruim}");
+        }
     }
 
     #[test]
