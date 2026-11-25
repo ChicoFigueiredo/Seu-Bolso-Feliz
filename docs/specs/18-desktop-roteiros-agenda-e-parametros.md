@@ -4,7 +4,8 @@ Continua as [spec 16](16-desktop-roteiros-escritos-fatia-1.md) e
 [spec 17](17-desktop-roteiros-escritos-fatia-2-meu-pluggy.md). Os termos (**Agenda**,
 **Parâmetros do roteiro**, **Baixa forçada**, **Suspensão da agenda**) estão no `CONTEXT.md`.
 Esta entrega o **núcleo**: o manifesto, a agenda, os parâmetros, a suspensão e o terminal. O
-descarte por conteúdo vem do inventário (`NoInventario`) e a janela fica para a frente seguinte.
+descarte por conteúdo vem do inventário (`NoInventario`) e a janela e o MCP estão na seção
+"A janela e o MCP" mais abaixo.
 
 ## O problema
 
@@ -58,7 +59,7 @@ quando vazios, então as versões já importadas mantêm o mesmo checksum.
 
 - a **agenda**: os `parametros` da entrada que venceu;
 - o **terminal**: `sbf roteiros escrito executar <nome> --inventario <cofre> [--de M] [--ate M] [--forcar]`;
-- a **janela**: o botão "Executar agora" (frente seguinte).
+- a **janela**: o botão "Executar agora", com os campos de período e a Baixa forçada.
 
 O relativo conta a partir do mês do **instante previsto** quando a execução vem da agenda (o
 mês para o qual a entrada foi marcada, mesmo que o computador só volte depois) e do mês de
@@ -95,7 +96,7 @@ limpeza de segredo e vai a no máximo 200 caracteres), a execução fica no esta
 devolvê-lo. O erro não se captura com `pcall`. O modo teste nunca suspende.
 
 - Só o usuário retoma: `sbf roteiros escrito retomar <nome>` (terminal interativo, sem
-  confirmação digitada); a janela vem depois. O MCP, o worker e a IA **nunca** retomam
+  confirmação digitada) ou o botão **Retomar agenda** da janela. O MCP, o worker e a IA **nunca** retomam
   (`tests/autoridade.rs` proíbe `retomar_agenda` nesses crates).
 - Execução manual de roteiro suspenso é permitida e, se der certo, **não retoma** sozinha.
 - A suspensão acompanha o roteiro, não a versão: ativar uma versão nova não a retoma.
@@ -132,11 +133,48 @@ testes):
 | A1-15 | O MCP, o worker e a IA não citam `retomar_agenda`                                                              | `tests/autoridade.rs`                  |
 | A1-16 | O `meu-pluggy-atualizar` (v2) tem a agenda 04:00, 12:00 e 20:00 todo dia e o `.luau` não mudou                 | `tests/exemplos.rs`                    |
 
+## A janela e o MCP (frente J)
+
+Conexões › Roteiros, parte dos roteiros escritos (`crates/sbf-janela/src/roteiros_escritos.rs`):
+
+- **Agenda legível**, no cartão e no detalhe: "todo dia às 04:00, 12:00 e 20:00" ou "dias 20,
+  21, 30 e 1 às 04:00, 12:00 e 20:00, com de=-1 e até=0" (fuso UTC−3). O manifesto antigo mostra
+  o "a cada N horas".
+- **Suspensão da agenda**: o cartão mostra a data (UTC−3) e o motivo e o botão **Retomar
+  agenda**, que chama `retomar_agenda_escrita` do banco. Sem confirmação digitada (é só o usuário
+  na janela; o teste de arquitetura proíbe o MCP, o worker e a IA).
+- **Executar agora** abre o formulário do período: um campo por parâmetro de mês que o manifesto
+  declara (`de` e `até`: `AAAA-MM` ou relativo, `0`, `-1`…, a mesma regra do manifesto; vazio vale
+  o padrão do roteiro) e a opção **Forçar a baixa**. Com ela marcada, a janela pergunta "Baixar de
+  novo mesmo que o conteúdo já esteja no inventário?" e só então executa com `forcar = true`.
+- **Histórico**: o evento `descartado` ("<arquivo>: já estava no inventário") aparece nos eventos
+  da execução e a linha da execução conta os descartados à parte dos novos.
+- **Propostas do Claude** (nesta tela): cada proposta de Baixa forçada do MCP aparece como "Baixar
+  de novo: <roteiro> <período>" com **Aceitar…** (abre o mesmo diálogo; ao confirmar, a janela
+  executa e marca a proposta como aceita) e **Recusar**.
+
+O MCP ganhou `propor_baixa_forcada(nome, de?, ate?)`. Ela só grava uma linha em
+`proposta_baixa_forcada` (`roteiros.sqlite`; o período é conferido pela mesma conta da execução;
+vale 7 dias; a mesma proposta pendente não duplica; no máximo 20 pendentes) depois do backup da
+primeira escrita da sessão. O mecanismo de propostas do controle mensal (`Alteracao`, tabela
+`propostas` do planejamento) é financeiro e confirma dentro de uma transação, então não serve
+para executar um roteiro: por isso a proposta de baixa mora no banco dos roteiros.
+
+Verificação:
+
+| Id    | Verificação                                                                                            | Onde                                      |
+| ----- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| J1-01 | Agenda em texto legível (todo dia, dias do mês, parâmetros, entradas, `agenda_horas` antigo)           | `sbf-janela` `roteiros_escritos` (testes) |
+| J1-02 | Suspensão com data e motivo; Retomar agenda chama o banco, uma vez só                                  | `sbf-janela` `roteiros_escritos` (testes) |
+| J1-03 | Formulário do período confere `AAAA-MM`/relativo, `de` ≤ `até`, 60 meses; vazio vale o padrão          | `sbf-janela` `roteiros_escritos` (testes) |
+| J1-04 | Forçar a baixa passa por diálogo; recusar ou confirmar sem navegador não executa nem decide a proposta | `sbf-janela` `roteiros_escritos` (testes) |
+| J1-05 | Histórico mostra o `descartado` e conta os descartados à parte dos novos                               | `sbf-janela` `roteiros_escritos` (testes) |
+| J1-06 | `propor_baixa_forcada` só grava proposta pendente; inválida não faz backup; não duplica; teto de 20    | `sbf-mcp` `tests/roteiros_escritos.rs`    |
+| J1-07 | Proposta: validade de 7 dias, decidir uma vez só, pedido forçado montado a partir do período           | `sbf-roteiros` `proposta_baixa` (testes)  |
+| J1-08 | MCP e IA não citam funções que executam, forçam ou suspendem; MCP, worker e IA não decidem a proposta  | `sbf-roteiros` `tests/autoridade.rs`      |
+
 ## Fora desta entrega
 
-- A janela: botão "Executar agora" com período, confirmação da Baixa forçada, retomar a agenda e
-  mostrar a agenda do manifesto (`texto_da_agenda` ainda só conhece `agenda_horas`).
-- A proposta de Baixa forçada pelo MCP (o MCP só propõe).
 - Pausa de MFA/CAPTCHA numa execução pelo terminal: a pausa espera o `continuar` que a janela
   grava, então pelo terminal o prazo da pausa (30 minutos) é o limite.
 - Contracheque no portal real: segue um modelo com placeholders em
