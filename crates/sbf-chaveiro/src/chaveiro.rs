@@ -225,6 +225,19 @@ impl Chaveiro {
         Ok(self.guarda.gravar(CHAVE_DO_CPF, cpf)?)
     }
 
+    /// Guarda o CPF digitado à mão (na janela): confere os dígitos verificadores e grava só os 11
+    /// dígitos, sem máscara. O texto digitado é de quem chama (a janela o zera).
+    ///
+    /// # Errors
+    /// [`ErroDoChaveiro::CpfInvalido`] (sem repetir o número) ou falha da guarda.
+    pub fn guardar_cpf_digitado(&self, digitado: &str) -> Result<(), ErroDoChaveiro> {
+        if !crate::cpf::cpf_valido(digitado) {
+            return Err(ErroDoChaveiro::CpfInvalido);
+        }
+        let digitos: String = digitado.chars().filter(char::is_ascii_digit).collect();
+        self.guardar_cpf(Segredo::novo(digitos))
+    }
+
     /// Guarda (ou troca) a senha própria do rótulo.
     pub fn guardar_senha(&self, rotulo: &str, senha: Segredo) -> Result<(), ErroDoChaveiro> {
         Ok(self.guarda.gravar(&chave_de_senha(rotulo)?, senha)?)

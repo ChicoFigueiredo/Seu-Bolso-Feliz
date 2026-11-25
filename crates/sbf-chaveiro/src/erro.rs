@@ -30,6 +30,9 @@ pub enum ErroDoChaveiro {
     RotuloInvalido,
     /// Falha de disco ao ler ou apagar o `cofre.enc`.
     Disco { tipo: std::io::ErrorKind },
+    /// O CPF digitado não confere (dígitos verificadores errados ou tamanho diferente de 11).
+    /// A mensagem nunca repete o que foi digitado.
+    CpfInvalido,
     /// A guarda de segredos (keyring do sistema ou arquivo de fallback) falhou.
     Guarda(ErroDeSegredo),
 }
@@ -75,6 +78,9 @@ impl fmt::Display for ErroDoChaveiro {
                 "Um rótulo do cofre.enc é inválido (vazio, longo demais ou com caractere de \
                  controle). Nada foi importado.",
             ),
+            Self::CpfInvalido => {
+                f.write_str("O CPF não confere: confira os 11 dígitos. Nada foi guardado.")
+            }
             Self::Disco { tipo } => write!(f, "Falha de disco no cofre.enc: {tipo}."),
             Self::Guarda(erro) => write!(f, "{erro}"),
         }
