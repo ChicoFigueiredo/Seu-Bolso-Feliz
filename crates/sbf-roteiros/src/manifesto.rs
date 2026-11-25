@@ -27,6 +27,65 @@ use sha2::{Digest, Sha256};
 /// O maior manifesto ou fonte aceito: 64 KiB.
 pub const LIMITE_DE_BYTES: usize = 64 * 1024;
 
+/// O caractere muda a direção do texto ou separa linhas por Unicode (U+202A..202E, U+2066..2069,
+/// U+200E/F, U+061C, U+2028/9)? É o truque de mostrar no terminal um texto diferente do que o
+/// arquivo guarda.
+#[must_use]
+pub fn e_bidi(c: char) -> bool {
+    matches!(
+        c,
+        '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{061C}'
+            | '\u{2028}'
+            | '\u{2029}'
+    )
+}
+
+/// O texto tem caractere de controle (ESC, `\r`, `\n`, byte nulo, C1…) ou de direção? Com
+/// `permite_quebra`, `\n` e `\t` não contam (o fonte do roteiro).
+#[must_use]
+pub fn tem_caractere_perigoso(texto: &str, permite_quebra: bool) -> bool {
+    texto
+        .chars()
+        .any(|c| (c.is_control() && !(permite_quebra && matches!(c, '\n' | '\t'))) || e_bidi(c))
+}
+
+fn escapar_com(texto: &str, manter_quebra: bool) -> String {
+    let mut s = String::with_capacity(texto.len());
+    for c in texto.chars() {
+        if manter_quebra && matches!(c, '\n' | '\t') {
+            s.push(c);
+        } else if c.is_control() || e_bidi(c) {
+            let n = u32::from(c);
+            if n <= 0xFF {
+                s.push_str(&format!("\\x{n:02x}"));
+            } else {
+                s.push_str(&format!("\\u{{{n:04x}}}"));
+            }
+        } else {
+            s.push(c);
+        }
+    }
+    s
+}
+
+/// Troca controle e direção por um escape visível (`\x1b`, `\u{202e}`): **toda** string que
+/// veio do banco (autor, motivo, descrição, rótulos, hosts…) passa por aqui antes de ir ao
+/// terminal, para que ela nunca mova o cursor, apague linhas nem inverta o texto.
+#[must_use]
+pub fn escapar_para_terminal(texto: &str) -> String {
+    escapar_com(texto, false)
+}
+
+/// Como [`escapar_para_terminal`], mas deixa `\n` e `\t` (o fonte do roteiro, linha a linha).
+#[must_use]
+pub fn escapar_fonte_para_terminal(texto: &str) -> String {
+    escapar_com(texto, true)
+}
+
 /// Como o roteiro passa pela segunda etapa de autenticação.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "tipo", rename_all = "snake_case", deny_unknown_fields)]
@@ -107,9 +166,14 @@ impl Manifesto {
     /// A primeira regra quebrada.
     pub fn validar(&self) -> Resultado<()> {
         validar_nome_kebab(&self.nome)?;
-        if self.descricao.chars().count() > 500 || self.descricao.chars().any(char::is_control) {
+        if self.descricao.chars().count() > 500 || tem_caractere_perigoso(&self.descricao, false) {
             return Err(invalido(
-                "a descrição passa de 500 caracteres ou tem caractere de controle",
+                "a descrição passa de 500 caracteres ou tem caractere de controle ou de direção",
+            ));
+        }
+        if tem_caractere_perigoso(&self.url_inicial, false) {
+            return Err(invalido(
+                "`url_inicial` tem caractere de controle ou de direção",
             ));
         }
         if self.hosts.is_empty() {
@@ -132,10 +196,10 @@ impl Manifesto {
             if let Some(r) = rotulo
                 && (r.trim().is_empty()
                     || r.chars().count() > 80
-                    || r.chars().any(char::is_control))
+                    || tem_caractere_perigoso(r, false))
             {
                 return Err(invalido(format!(
-                    "`{campo}` tem de ter de 1 a 80 caracteres, sem controle"
+                    "`{campo}` tem de ter de 1 a 80 caracteres, sem controle nem direção"
                 )));
             }
         }
@@ -198,10 +262,25 @@ fn validar_nome_kebab(nome: &str) -> Resultado<()> {
     }
 }
 
-/// Só hostname: rótulos de letras minúsculas, dígitos e hífen, separados por ponto. Sem
-/// esquema, caminho, porta, usuário nem curinga.
+/// Os finais de nome que só existem numa rede interna: não são sites.
+const FINAIS_INTERNOS: &[&str] = &[
+    "local",
+    "localhost",
+    "internal",
+    "lan",
+    "corp",
+    "home",
+    "localdomain",
+    "intranet",
+];
+
+/// Só hostname **público**: rótulos de letras minúsculas, dígitos e hífen, separados por ponto,
+/// com pelo menos um ponto. Sem esquema, caminho, porta, usuário nem curinga; sem IP literal
+/// (v4 ou v6), `localhost`, nome sem ponto nem final interno (`.local`, `.internal`, `.lan`,
+/// `.corp`, `.home`, `.localdomain`): um roteiro não aponta o navegador (nem a senha) para a
+/// rede da casa.
 fn validar_host(h: &str) -> Resultado<()> {
-    let ok = !h.is_empty()
+    let forma_ok = !h.is_empty()
         && h.len() <= 253
         && h.split('.').all(|r| {
             !r.is_empty()
@@ -211,13 +290,20 @@ fn validar_host(h: &str) -> Resultado<()> {
                 && r.bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         });
-    if ok {
-        Ok(())
-    } else {
-        Err(invalido(
+    if !forma_ok {
+        return Err(invalido(
             "cada item de `hosts` tem de ser só o nome do servidor em minúsculas (sem https://, caminho, porta nem curinga)",
-        ))
+        ));
     }
+    let final_do_nome = h.rsplit('.').next().unwrap_or("");
+    let e_ip =
+        h.parse::<std::net::IpAddr>().is_ok() || final_do_nome.bytes().all(|b| b.is_ascii_digit());
+    if e_ip || !h.contains('.') || h == "localhost" || FINAIS_INTERNOS.contains(&final_do_nome) {
+        return Err(invalido(
+            "cada item de `hosts` tem de ser o nome público de um site (com ponto): sem endereço IP, `localhost`, nome sem ponto nem final interno como `.local`, `.internal` ou `.lan`",
+        ));
+    }
+    Ok(())
 }
 
 /// O host de uma URL `https://`; recusa outro esquema, usuário e senha na URL.
@@ -230,7 +316,12 @@ fn host_da_url_https(url: &str) -> Resultado<String> {
         return Err(invalido("`url_inicial` não pode ter usuário nem senha"));
     }
     let host = match autoridade.rsplit_once(':') {
-        Some((h, porta)) if !porta.is_empty() && porta.bytes().all(|b| b.is_ascii_digit()) => h,
+        Some((h, "443")) => h,
+        Some((_, porta)) if !porta.is_empty() && porta.bytes().all(|b| b.is_ascii_digit()) => {
+            return Err(invalido(
+                "`url_inicial` só pode usar a porta 443 (a padrão do https), ou nenhuma",
+            ));
+        }
         Some(_) => return Err(invalido("`url_inicial` tem uma porta inválida")),
         None => autoridade,
     };
@@ -259,9 +350,9 @@ fn validar_remetente(r: &str) -> Resultado<()> {
     }
 }
 
-/// O formato do código: só `\d`, `\w`, letras, dígitos, classes `[A-Z0-9]` e quantificadores
-/// com número (`{6}`, `{4,8}`). Nada de `.`, `*`, `+`, `\s`, negação: o código tem tamanho fixo
-/// e a busca no Gmail não pode virar "qualquer texto".
+/// O formato do código: só `\d`, `\w`, letras, dígitos, classes `[A-Z0-9]` e quantificador
+/// **exato** `{n}` com 4 <= n <= 12 (`\d{6}`). Nada de `.`, `*`, `+`, `{1,99}`, `\s`, negação: o
+/// código tem tamanho fixo e a busca no Gmail não pode virar "qualquer texto".
 fn validar_formato(f: &str) -> Resultado<()> {
     let erro = || {
         invalido(
@@ -298,13 +389,11 @@ fn validar_formato(f: &str) -> Resultado<()> {
             '{' if !em_classe => {
                 let fim = cs[i..].iter().position(|&x| x == '}').ok_or_else(erro)?;
                 let dentro: String = cs[i + 1..i + fim].iter().collect();
-                let numeros: Vec<&str> = dentro.split(',').collect();
-                let bom = !numeros.is_empty()
-                    && numeros.len() <= 2
-                    && numeros.iter().all(|n| {
-                        !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit())
-                    });
-                if !bom {
+                let exato = !dentro.is_empty()
+                    && dentro.len() <= 2
+                    && dentro.bytes().all(|b| b.is_ascii_digit())
+                    && dentro.parse::<u32>().is_ok_and(|n| (4..=12).contains(&n));
+                if !exato {
                     return Err(erro());
                 }
                 tem_quantificador_numerico = true;
@@ -320,12 +409,9 @@ fn validar_formato(f: &str) -> Resultado<()> {
     }
     let re =
         Regex::new(f).map_err(|_| invalido("`mfa.formato` não é uma expressão regular válida"))?;
-    // Um código tem tamanho conhecido: ou há quantificador numérico, ou só literais/`\d` soltos;
-    // e a expressão não pode casar o texto vazio.
-    if re.is_match("")
-        || (!tem_quantificador_numerico
-            && !f.chars().any(|c| c == '\\' || c.is_ascii_alphanumeric()))
-    {
+    // Um código tem tamanho fixo e conhecido: tem de haver quantificador exato, e a expressão
+    // não pode casar o texto vazio.
+    if re.is_match("") || !tem_quantificador_numerico {
         return Err(erro());
     }
     Ok(())
@@ -460,6 +546,23 @@ mod testes {
             "-portal.exemplo.test",
             "",
             "user@portal.exemplo.test",
+            // IP literal, localhost, sem ponto e finais de rede interna
+            "127.0.0.1",
+            "10.0.0.5",
+            "192.168.0.1",
+            "1.2.3.4",
+            "[::1]",
+            "::1",
+            "localhost",
+            "banco",
+            "roteador",
+            "nas.local",
+            "painel.internal",
+            "casa.lan",
+            "ad.corp",
+            "tv.home",
+            "host.localdomain",
+            "api.localhost",
         ] {
             let m = Manifesto {
                 hosts: vec![ruim.into()],
@@ -485,6 +588,14 @@ mod testes {
             "https://usuario:x@portal.exemplo.test/",
             "https://portal.exemplo.test@mal.test/",
             "https://portal.exemplo.test:abc/",
+            // só a porta 443 (ou nenhuma)
+            "https://portal.exemplo.test:8443/x",
+            "https://portal.exemplo.test:80/",
+            "https://portal.exemplo.test:4443/",
+            // controle e direção na URL
+            "https://portal.exemplo.test/\u{1b}[3A",
+            "https://portal.exemplo.test/a\rb",
+            "https://portal.exemplo.test/\u{202e}fdp",
             "",
         ] {
             let m = Manifesto {
@@ -496,7 +607,7 @@ mod testes {
         for ok in [
             "https://portal.exemplo.test",
             "https://portal.exemplo.test/entrar?a=1#x",
-            "https://portal.exemplo.test:8443/x",
+            "https://portal.exemplo.test:443/x",
             "https://PORTAL.exemplo.test/x",
         ] {
             let m = Manifesto {
@@ -550,7 +661,8 @@ mod testes {
     fn mfa_email_formato_so_casa_o_codigo() {
         for ok in [
             r"\d{6}",
-            r"\d{4,8}",
+            r"\d{4}",
+            r"\d{12}",
             r"[A-Z0-9]{6}",
             r"\w{8}",
             r"G-\d{6}",
@@ -559,13 +671,108 @@ mod testes {
             assert!(email(ok).validar().is_ok(), "{ok}");
         }
         for ruim in [
-            "", ".*", r".{6}", r"\d+", r"\d*", r"\d{6}.*", r"\s\d{6}", r"\D{6}", r"\S{6}",
-            r"[^a]{6}", r"\d{0,6}", r"(", r"\d{6", r"\d{a}", r"\d{}", r"[a-z", r"\d{6}|",
+            "",
+            ".*",
+            r".{6}",
+            r"\d+",
+            r"\d*",
+            r"\d{6}.*",
+            r"\s\d{6}",
+            r"\D{6}",
+            r"\S{6}",
+            r"[^a]{6}",
+            r"\d{0,6}",
+            r"(",
+            r"\d{6",
+            r"\d{a}",
+            r"\d{}",
+            r"[a-z",
+            r"\d{6}|",
             r"\d{6}\.",
+            // só quantificador exato {n}, 4 <= n <= 12
+            r"\d{1,99}",
+            r"\d{4,8}",
+            r"\d{3}",
+            r"\d{13}",
+            r"\d{99}",
+            r"\d+",
+            r"\d\d\d\d\d\d",
+            "abcdef",
         ] {
             assert!(email(ruim).validar().is_err(), "{ruim}");
         }
         assert!(email(&"a".repeat(65)).validar().is_err());
+    }
+
+    #[test]
+    fn controle_e_direcao_sao_recusados_nos_campos_de_texto() {
+        for ruim in [
+            "a\u{1b}[3Ab",
+            "a\rb",
+            "a\nb",
+            "a\u{202e}b",
+            "a\u{2066}b",
+            "a\u{200f}b",
+            "a\u{85}b",
+            "a\0b",
+        ] {
+            let m = Manifesto {
+                descricao: ruim.into(),
+                ..base()
+            };
+            assert!(m.validar().is_err(), "descricao {ruim:?}");
+            let m = Manifesto {
+                rotulo_senha: Some(ruim.into()),
+                ..base()
+            };
+            assert!(m.validar().is_err(), "rotulo {ruim:?}");
+            let m = Manifesto {
+                url_inicial: format!("https://portal.exemplo.test/{ruim}"),
+                ..base()
+            };
+            assert!(m.validar().is_err(), "url {ruim:?}");
+            let m = Manifesto {
+                nome: ruim.into(),
+                ..base()
+            };
+            assert!(m.validar().is_err(), "nome {ruim:?}");
+            let m = Manifesto {
+                hosts: vec![format!("portal.exemplo.test{ruim}")],
+                ..base()
+            };
+            assert!(m.validar().is_err(), "host {ruim:?}");
+            let m = Manifesto {
+                mfa: Mfa::Email {
+                    remetente: format!("a{ruim}@portal.exemplo.test"),
+                    formato: r"\d{6}".into(),
+                },
+                ..base()
+            };
+            assert!(m.validar().is_err(), "remetente {ruim:?}");
+            let m = Manifesto {
+                mfa: Mfa::Email {
+                    remetente: "a@portal.exemplo.test".into(),
+                    formato: format!(r"\d{{6}}{ruim}"),
+                },
+                ..base()
+            };
+            assert!(m.validar().is_err(), "formato {ruim:?}");
+        }
+    }
+
+    #[test]
+    fn o_escapador_troca_controle_e_direcao_por_texto_visivel() {
+        let sujo = "ok\u{1b}[3A\rfim\u{202e}fdp\n\tx\0";
+        let e = escapar_para_terminal(sujo);
+        assert_eq!(e, "ok\\x1b[3A\\x0dfim\\u{202e}fdp\\x0a\\x09x\\x00");
+        assert!(!e.chars().any(|c| c.is_control() || e_bidi(c)));
+        // o fonte mantém quebra de linha e tabulação, escapa o resto
+        let f = escapar_fonte_para_terminal(sujo);
+        assert_eq!(f, "ok\\x1b[3A\\x0dfim\\u{202e}fdp\n\tx\\x00");
+        assert_eq!(escapar_para_terminal("açaí 日本"), "açaí 日本");
+        assert!(tem_caractere_perigoso("a\rb", true));
+        assert!(!tem_caractere_perigoso("a\n\tb", true));
+        assert!(tem_caractere_perigoso("a\nb", false));
     }
 
     #[test]
