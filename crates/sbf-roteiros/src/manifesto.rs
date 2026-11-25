@@ -122,7 +122,7 @@ impl Manifesto {
             validar_host(h)?;
         }
         let host_inicial = host_da_url_https(&self.url_inicial)?;
-        if !self.hosts.iter().any(|h| *h == host_inicial) {
+        if !self.hosts.contains(&host_inicial) {
             return Err(invalido("o host de `url_inicial` não está em `hosts`"));
         }
         for (campo, rotulo) in [
