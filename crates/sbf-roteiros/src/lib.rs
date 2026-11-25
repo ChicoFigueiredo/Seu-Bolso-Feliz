@@ -32,6 +32,7 @@ pub mod inventario;
 pub mod manifesto;
 pub mod parametros;
 pub mod passo;
+pub mod proposta_baixa;
 pub mod servico;
 pub mod teste_escrito;
 

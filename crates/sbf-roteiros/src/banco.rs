@@ -274,6 +274,7 @@ impl BancoDeRoteiros {
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
         crate::execucao_escrita::preparar(&conn)?;
+        crate::proposta_baixa::preparar(&conn)?;
         Ok(Self { conn })
     }
 
@@ -287,6 +288,7 @@ impl BancoDeRoteiros {
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
         crate::execucao_escrita::preparar(&conn)?;
+        crate::proposta_baixa::preparar(&conn)?;
         Ok(Self { conn })
     }
 

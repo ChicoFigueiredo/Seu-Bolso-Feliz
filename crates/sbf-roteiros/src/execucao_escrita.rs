@@ -322,6 +322,21 @@ impl BancoDeRoteiros {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Quantos arquivos a execução descartou por já estarem no inventário (os eventos
+    /// `descartado`, spec 18). Não conta em `novos`.
+    ///
+    /// # Errors
+    /// Banco.
+    pub fn descartados_da_execucao_escrita(&self, execucao: i64) -> Resultado<u32> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM evento_escrito_execucao
+              WHERE execucao_id = ?1 AND tipo = 'descartado'",
+            [execucao],
+            |l| l.get(0),
+        )?;
+        Ok(u32_de(n))
+    }
+
     /// Fecha a execução.
     ///
     /// # Errors
