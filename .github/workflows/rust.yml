@@ -95,7 +95,7 @@ jobs:
       - name: Testes
         if: steps.token.outputs.tem == 'true'
         working-directory: sbf
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       - name: Build release
         if: steps.token.outputs.tem == 'true'
