@@ -267,20 +267,20 @@ impl ResumoDaConfirmacao {
 ///
 /// # Errors
 /// Versão inexistente ou falha do banco.
-// TODO(integração): trocar o corpo por `banco.esperado_para_ativar(nome, numero)`.
 pub fn texto_a_digitar_para_ativar(
-    _banco: &BancoDeRoteiros,
+    banco: &BancoDeRoteiros,
     nome: &str,
     numero: u32,
 ) -> Result<String, String> {
-    Ok(Confirmacao::texto_de_ativar(nome, numero))
+    banco
+        .esperado_para_ativar(nome, numero)
+        .map_err(|e| e.to_string())
 }
 
 /// O texto que o usuário tem de digitar para desativar `nome`.
-// TODO(integração): trocar o corpo por `banco.esperado_para_desativar(nome)`.
 #[must_use]
-pub fn texto_a_digitar_para_desativar(_banco: &BancoDeRoteiros, nome: &str) -> String {
-    Confirmacao::texto_de_desativar(nome)
+pub fn texto_a_digitar_para_desativar(banco: &BancoDeRoteiros, nome: &str) -> String {
+    banco.esperado_para_desativar(nome)
 }
 
 /// Um pedido de ativação ou desativação esperando a digitação do usuário.
