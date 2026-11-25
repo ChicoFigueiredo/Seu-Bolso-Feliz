@@ -9,9 +9,13 @@
 //!   na allowlist, senão o roteiro termina. Os verbos de segredo recusam página fora dela.
 //! - **Bloqueio.** `clicar` e `baixar` conferem o elemento na lista de bloqueio (e o navegador
 //!   confere de novo no clique). A classe do manifesto decide quem pode clicar em "Atualizar".
-//! - **Segredo.** O script passa só o rótulo (que tem de ser o do manifesto); senha, CPF e
-//!   código do e-mail vão do chaveiro/Gmail direto ao campo e entram na lista de limpeza: todo
-//!   texto que volta ao script, ao log, ao banco ou a um erro passa por ela.
+//! - **Segredo.** O script passa só o rótulo da senha (que tem de ser o do manifesto); o CPF é
+//!   o único do chaveiro e não leva rótulo. Senha, CPF e código do e-mail vão do
+//!   chaveiro/Gmail direto ao campo, **só no host aprovado**, e entram na lista de limpeza: todo
+//!   texto que volta ao script, ao log, ao banco ou a um erro passa por ela. A conferência do
+//!   host não basta (a página pode redirecionar entre a conferência e a digitação): o motor a
+//!   refaz imediatamente antes de digitar, pelo predicado de [`SbfVerbos::url_aprovada`], e
+//!   aborta sem digitar se a página mudou.
 //! - **Pausa.** CAPTCHA e MFA de token (detectados na página) e `navegador.pausa` esperam o
 //!   usuário.
 //! - **Download.** Vai para o inventário (origem `roteiro:<nome>/<execução>/<arquivo>`); o
@@ -27,7 +31,7 @@ use crate::codigo_email::{BuscaDeCodigo, CaixaDeEmail, ErroDeCodigo, Relogio, es
 use crate::erro::{ErroDeRoteiro, Resultado};
 use crate::executor::{Decisao, Destino, FonteDeSenhas, Opcoes, Pausa, Recebido, limpar_texto};
 use crate::manifesto::{Manifesto, Mfa};
-use crate::navegador::Navegador;
+use crate::navegador::{Navegador, TipoDeCampo};
 use bancada_navegador::ErroDoNavegador;
 use bancada_navegador::luau::{
     ErroDeRoteiro as ErroDoLuau, ErroDeVerbo, ResultadoDeVerbo, Saida, Verbos,
@@ -43,6 +47,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const FOLGA_DO_PEDIDO: Duration = Duration::from_secs(10);
 /// O fuso do usuário: UTC−3 fixo (São Paulo não tem horário de verão desde 2019).
 const FUSO_EM_SEGUNDOS: i64 = -3 * 3600;
+/// O que o roteiro vê quando a caixa de e-mail não tem autorização (sem dado nenhum).
+const MENSAGEM_SEM_AUTORIZACAO_DO_GMAIL: &str =
+    "Autorização do Gmail ausente: entre de novo em Conexões › E-mail";
 /// Quantos registros do roteiro se guardam no relatório.
 const MAXIMO_DE_REGISTROS: usize = 500;
 
@@ -160,6 +167,9 @@ pub struct SbfVerbos<'a> {
     ultimo_bloqueio: Option<Bloqueio>,
     cancelado: bool,
     expirou: bool,
+    /// Quanto tempo o roteiro ficou parado numa pausa **automática** (CAPTCHA, código do
+    /// aplicativo): o host Luau o desconta do tempo total.
+    pausado: Duration,
 }
 
 impl std::fmt::Debug for SbfVerbos<'_> {
@@ -190,6 +200,40 @@ fn e_loopback(host: &str) -> bool {
     matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
+/// A URL real traduzida para o host lógico (modo teste); fora dele, a própria URL.
+fn url_logica(teste: &OpcoesEscrito, url: &str) -> String {
+    let minuscula = url.to_ascii_lowercase();
+    for (logico, base) in &teste.mapa_de_hosts {
+        let base = base.trim_end_matches('/').to_ascii_lowercase();
+        if let Some(resto) = minuscula.strip_prefix(&base)
+            && (resto.is_empty() || resto.starts_with(['/', '?', '#']))
+        {
+            return format!("https://{logico}{}", &url[base.len()..]);
+        }
+    }
+    url.to_owned()
+}
+
+/// A URL (lógica) é de um dos `hosts`, por `https` (ou `http` no próprio computador, só no modo
+/// teste), sem usuário nem senha embutidos?
+fn url_aprovada_em(hosts: &[String], teste: &OpcoesEscrito, url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    let autoridade = u
+        .split_once("://")
+        .map_or("", |(_, r)| r.split(['/', '?', '#']).next().unwrap_or(""));
+    if autoridade.contains('@') {
+        return false;
+    }
+    let Some(host) = host_de(&u) else {
+        return false;
+    };
+    if !hosts.contains(&host) {
+        return false;
+    }
+    u.starts_with("https://")
+        || (teste.aceitar_http_loopback && u.starts_with("http://") && e_loopback(&host))
+}
+
 fn resumo_do_seletor(seletor: &str) -> String {
     seletor.chars().take(80).collect()
 }
@@ -213,7 +257,16 @@ impl<'a> SbfVerbos<'a> {
             ultimo_bloqueio: None,
             cancelado: false,
             expirou: false,
+            pausado: Duration::ZERO,
         }
+    }
+
+    /// O tempo que o roteiro passou em pausas automáticas (CAPTCHA, código do aplicativo
+    /// detectado em `abrir`, `clicar` e `esperar`) desde a última leitura. **Zera ao ler.** O
+    /// host Luau desconta isto do tempo total do roteiro: o usuário que demora a resolver o
+    /// CAPTCHA não pode estourar o teto de execução.
+    pub fn tempo_pausado_automatico(&mut self) -> Duration {
+        std::mem::take(&mut self.pausado)
     }
 
     /// Arquivos entregues ao inventário nesta execução.
@@ -307,16 +360,7 @@ impl<'a> SbfVerbos<'a> {
 
     /// A URL real (a que o navegador devolve) traduzida para o host lógico, no modo teste.
     fn logica(&self, url: &str) -> String {
-        let minuscula = url.to_ascii_lowercase();
-        for (logico, base) in &self.e.teste.mapa_de_hosts {
-            let base = base.trim_end_matches('/').to_ascii_lowercase();
-            if let Some(resto) = minuscula.strip_prefix(&base)
-                && (resto.is_empty() || resto.starts_with(['/', '?', '#']))
-            {
-                return format!("https://{logico}{}", &url[base.len()..]);
-            }
-        }
-        url.to_owned()
+        url_logica(&self.e.teste, url)
     }
 
     /// A URL lógica traduzida para onde o navegador deve ir, no modo teste.
@@ -336,21 +380,17 @@ impl<'a> SbfVerbos<'a> {
     /// A URL (lógica) é de um host do manifesto, por `https` (ou `http` no próprio computador,
     /// só no modo teste), sem usuário nem senha embutidos?
     fn url_permitida(&self, url: &str) -> bool {
-        let u = url.trim().to_ascii_lowercase();
-        let autoridade = u
-            .split_once("://")
-            .map_or("", |(_, r)| r.split(['/', '?', '#']).next().unwrap_or(""));
-        if autoridade.contains('@') {
-            return false;
-        }
-        let Some(host) = host_de(&u) else {
-            return false;
-        };
-        if !self.e.manifesto.hosts.contains(&host) {
-            return false;
-        }
-        u.starts_with("https://")
-            || (self.e.teste.aceitar_http_loopback && u.starts_with("http://") && e_loopback(&host))
+        url_aprovada_em(&self.e.manifesto.hosts, &self.e.teste, url)
+    }
+
+    /// O predicado que o navegador reconfere **dentro do motor**, imediatamente antes de digitar
+    /// um segredo: recebe a URL REAL que o Chrome carregou, traduz para o host lógico (modo
+    /// teste) e aplica a mesma regra de [`Self::url_permitida`]. Dono dos dados (não empresta
+    /// o `self`, que o navegador está usando).
+    pub fn url_aprovada(&self) -> impl Fn(&str) -> bool + use<> {
+        let hosts = self.e.manifesto.hosts.clone();
+        let teste = self.e.teste.clone();
+        move |url: &str| url_aprovada_em(&hosts, &teste, &url_logica(&teste, url))
     }
 
     /// A página em que o navegador está agora é permitida e não é de bloqueio? Com `estrito`,
@@ -416,6 +456,24 @@ impl<'a> SbfVerbos<'a> {
             return Ok(());
         }
         Err(falhou("o CPF e o código só vão num campo de texto"))
+    }
+
+    /// A digitação do segredo falhou no navegador. Se foi porque a página saiu dos hosts do
+    /// manifesto (um redirecionamento entre a conferência e a digitação), o roteiro TERMINA
+    /// (`HostNaoPermitido`, que o `pcall` do script não captura); senão, é falha comum. Nunca
+    /// leva o segredo.
+    fn falha_de_digitacao(&mut self, e: &ErroDoNavegador) -> ErroDeVerbo {
+        if matches!(
+            self.conferir_host_do_segredo(),
+            Err(ErroDeVerbo::HostNaoPermitido)
+        ) {
+            self.anotar(
+                "host",
+                "a página saiu dos hosts antes de o segredo ser digitado",
+            );
+            return ErroDeVerbo::HostNaoPermitido;
+        }
+        falhou(limpar_texto(&e.to_string(), &self.usados))
     }
 
     // ---------------------------------------------------------------- elementos
@@ -518,7 +576,10 @@ impl<'a> SbfVerbos<'a> {
         {
             return Ok(false);
         }
-        self.pausar(motivo.frase())?;
+        let comeco = Instant::now();
+        let r = self.pausar(motivo.frase());
+        self.pausado = self.pausado.saturating_add(comeco.elapsed());
+        r?;
         self.liberada_em = Some(p.url);
         Ok(true)
     }
@@ -687,20 +748,21 @@ impl Verbos for SbfVerbos<'_> {
         // Entra na lista de limpeza ANTES de ir ao campo: se uma falha repetir o valor, some.
         self.usados.push(segredo);
         self.anotar("preencher_senha", &resumo_do_seletor(seletor));
+        let permitida = self.url_aprovada();
         let Some(segredo) = self.usados.last() else {
             return Err(ErroDeVerbo::Abortado);
         };
-        self.e
-            .navegador
-            .preencher_segredo(seletor, segredo)
-            .map_err(|e| falhou(limpar_texto(&e.to_string(), &self.usados)))
+        let r =
+            self.e
+                .navegador
+                .preencher_segredo(seletor, segredo, TipoDeCampo::Senha, &permitida);
+        r.map_err(|e| self.falha_de_digitacao(&e))
     }
 
     fn preencher_cpf(&mut self, seletor: &str) -> ResultadoDeVerbo<()> {
         self.entrar()?;
-        if self.e.manifesto.rotulo_cpf.is_none() {
-            return Err(falhou("o manifesto não declara `rotulo_cpf`"));
-        }
+        // O CPF é o único do chaveiro (`FonteDeSenhas::cpf`): não leva rótulo. Só vai ao campo
+        // de texto de uma página do host aprovado, conferido de novo pelo motor ao digitar.
         self.exigir_visivel(seletor)?;
         let host = self.conferir_host_do_segredo()?;
         self.conferir_campo_do_segredo(seletor, false)?;
@@ -712,13 +774,15 @@ impl Verbos for SbfVerbos<'_> {
             .map_err(|_| falhou("o CPF não está no chaveiro"))?;
         self.usados.push(segredo);
         self.anotar("preencher_cpf", &resumo_do_seletor(seletor));
+        let permitida = self.url_aprovada();
         let Some(segredo) = self.usados.last() else {
             return Err(ErroDeVerbo::Abortado);
         };
-        self.e
-            .navegador
-            .preencher_segredo(seletor, segredo)
-            .map_err(|e| falhou(limpar_texto(&e.to_string(), &self.usados)))
+        let r =
+            self.e
+                .navegador
+                .preencher_segredo(seletor, segredo, TipoDeCampo::Texto, &permitida);
+        r.map_err(|e| self.falha_de_digitacao(&e))
     }
 
     fn preencher_codigo_do_email(
@@ -745,7 +809,7 @@ impl Verbos for SbfVerbos<'_> {
             return Err(falhou("a caixa de e-mail não está disponível"));
         };
         self.exigir_visivel(seletor)?;
-        let host = self.conferir_host_do_segredo()?;
+        self.conferir_host_do_segredo()?;
         self.conferir_campo_do_segredo(seletor, false)?;
         // O código só vale se chegou depois do login: o instante do último clique, com folga.
         let pedido_em = self
@@ -762,17 +826,26 @@ impl Verbos for SbfVerbos<'_> {
         self.conferir_cancelado()?;
         let codigo = r.map_err(|e| match e {
             ErroDeCodigo::Expirou => ErroDeVerbo::Prazo(e.to_string()),
+            ErroDeCodigo::Autorizacao => falhou(MENSAGEM_SEM_AUTORIZACAO_DO_GMAIL),
             outro => falhou(outro.to_string()),
         })?;
+        // A espera pode ter levado minutos: o site pode ter redirecionado, trocado de página
+        // ou de campo. Reconfere tudo ANTES de digitar (o motor ainda reconfere ao digitar).
+        let host = self.conferir_host_do_segredo().inspect_err(|_| {
+            self.anotar("host", "a página mudou durante a espera do código");
+        })?;
+        self.conferir_campo_do_segredo(seletor, false)?;
         self.e.navegador.fase_de_login(Some(&host));
         self.usados.push(codigo);
+        let permitida = self.url_aprovada();
         let Some(codigo) = self.usados.last() else {
             return Err(ErroDeVerbo::Abortado);
         };
-        self.e
+        let r = self
+            .e
             .navegador
-            .preencher_segredo(seletor, codigo)
-            .map_err(|e| falhou(limpar_texto(&e.to_string(), &self.usados)))
+            .preencher_segredo(seletor, codigo, TipoDeCampo::Texto, &permitida);
+        r.map_err(|e| self.falha_de_digitacao(&e))
     }
 
     fn baixar(&mut self, seletor: &str, nome: Option<&str>) -> ResultadoDeVerbo<String> {
