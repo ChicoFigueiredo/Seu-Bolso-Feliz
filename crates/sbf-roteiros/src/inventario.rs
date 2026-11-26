@@ -14,6 +14,13 @@ use std::path::Path;
 
 const RESPONSAVEL: &str = "sbf-roteiros@1";
 
+/// As extensões que um download de roteiro pode ter para entrar no acervo. Um site (ou um
+/// roteiro) hostil não faz o roteiro trazer um executável, uma página ou um programa para o
+/// cofre. Outra extensão (ou nenhuma) é recusada e o arquivo é descartado.
+pub const EXTENSOES_ACEITAS: &[&str] = &[
+    "pdf", "csv", "xml", "ofx", "txt", "xlsx", "zip", "png", "jpg", "jpeg",
+];
+
 /// A chave da origem: `roteiro:<nome>/<execução>/<arquivo>`.
 #[must_use]
 pub fn chave_da_origem(roteiro: &str, execucao: i64, arquivo: &str) -> String {
@@ -115,14 +122,33 @@ impl<'a> NoInventario<'a> {
 impl Destino for NoInventario<'_> {
     fn receber(&mut self, arquivo: &Path, nome: &str) -> Resultado<Recebido> {
         self.vistos += 1;
-        let chave = chave_da_origem(&self.roteiro, self.execucao, nome);
-        let tamanho = std::fs::metadata(arquivo)?.len();
-        let hash = sha256_do_arquivo(arquivo)?;
         let ext = arquivo
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
+        if !EXTENSOES_ACEITAS.contains(&ext.as_str()) {
+            // Descarta sem hashear nem gravar: nada entra no acervo. O que a página chamou o
+            // arquivo não é repetido (só se a extensão é curta e simples).
+            let _ = std::fs::remove_file(arquivo);
+            let vista = if !ext.is_empty()
+                && ext.len() <= 8
+                && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+            {
+                format!(".{ext}")
+            } else if ext.is_empty() {
+                "nenhuma".to_owned()
+            } else {
+                "desconhecida".to_owned()
+            };
+            return Err(ErroDeRoteiro::Invalido(format!(
+                "download recusado: a extensão ({vista}) não é aceita; só {}. O arquivo foi descartado.",
+                EXTENSOES_ACEITAS.join(", ")
+            )));
+        }
+        let chave = chave_da_origem(&self.roteiro, self.execucao, nome);
+        let tamanho = std::fs::metadata(arquivo)?.len();
+        let hash = sha256_do_arquivo(arquivo)?;
         let fonte = self.fonte();
         // Conferir e gravar numa transação só, com a trava de escrita já tomada: a janela e o
         // worker podem receber o mesmo conteúdo ao mesmo tempo e só um deles o cria.

@@ -8,12 +8,15 @@ publish.workspace = true
 
 [dependencies]
 sbf-livro = { path = "../sbf-livro", default-features = false }
+sbf-regras = { workspace = true }
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]
+sbf-script = { workspace = true }
 tempfile.workspace = true
 
 [lints]

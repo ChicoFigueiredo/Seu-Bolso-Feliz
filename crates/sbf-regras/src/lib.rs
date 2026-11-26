@@ -26,14 +26,18 @@
 //!   e devolve o diff.
 //! - `rascunho`: monta, sem IA, uma versão-rascunho a partir de uma correção do usuário.
 //! - `fabrica`: as regras que vêm com o sbf (D10).
+//! - `biblioteca`: a biblioteca de regras de fábrica para documentos financeiros brasileiros comuns
+//!   (arquivos em `fabrica/biblioteca/`), todas em rascunho.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod biblioteca;
 pub mod catalogo;
 pub mod definicao;
 pub mod fabrica;
+pub mod marcacao;
 pub mod motor;
 pub mod rascunho;
 pub mod script;
@@ -127,6 +131,14 @@ pub struct Dicas {
     pub data: Option<String>,
     /// A descrição do registro no banco ("PIX ENVIADO FULANO").
     pub descricao: Option<String>,
+    /// O nome do favorecido (ou de quem pagou) que o banco informa à parte da descrição.
+    /// Na CAIXA a descrição é só "PIX ENVIADO": o favorecido só aparece aqui.
+    #[serde(default)]
+    pub contraparte: Option<String>,
+    /// O CPF/CNPJ da contraparte, às vezes formatado. Dado pessoal: casa condições e pode
+    /// ser extraído, mas **nunca** é gravado em `execucao` nem na proposta.
+    #[serde(default)]
+    pub contraparte_doc: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -231,16 +243,37 @@ pub enum Autor {
 }
 
 /// Quem pede uma ação no catálogo. Ativar, consolidar, desativar e reverter exigem
-/// [`Quem::Usuario`] (D14); o catálogo recusa os outros com [`ErroDasRegras::NaoPermitido`].
+/// [`Quem::Usuario`] ou [`Quem::Mcp`] (D14, substituída em parte pela D15); o catálogo recusa
+/// os outros com [`ErroDasRegras::NaoPermitido`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Quem {
     /// O usuário, na janela ou num terminal interativo que confirmou.
     Usuario,
-    /// A IA, pelo MCP.
+    /// Uma IA sem a decisão do dono (rascunhos, sugestões): nunca ativa nada.
     Ia,
+    /// O servidor MCP, com controle total (D15): ativa, desativa, reverte e consolida, com
+    /// `mcp` no histórico de estado. Os exemplos que falham (D12) bloqueiam do mesmo jeito.
+    Mcp,
     /// O próprio sbf (semear a fábrica, rebaixar uma consolidada depois de um Desfazer).
     Sistema,
+}
+
+/// O tipo do documento que uma proposta `vincular_ocorrencia` anexa. Espelha
+/// `sbf_planejamento::TipoDeDocumento` (este crate não depende do planejamento): os nomes na
+/// serialização são os mesmos, e quem aplica a proposta converte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDoDocumento {
+    Contracheque,
+    /// Cobrança (a *invoice*): não prova pagamento.
+    Fatura,
+    Boleto,
+    /// Prova de pagamento (o *receipt*).
+    Comprovante,
+    Contrato,
+    NotaFiscal,
+    Outro,
 }
 
 /// Uma proposta abstrata: o que procurar, não o que gravar (AC-LUA-06). Não existe
@@ -264,6 +297,16 @@ pub enum Proposta {
         janela_dias: u32,
         /// Um nome para achar o compromisso ("Energia"), se a regra sabe.
         compromisso: Option<String>,
+    },
+    /// Anexar o documento à ocorrência do mês de um compromisso, sem exigir valor nem débito no
+    /// extrato (a cobrança em dólar no cartão nunca bate o valor). Só liga o arquivo.
+    VincularOcorrencia {
+        data: String,
+        /// Folga em dias entre `data` e o vencimento da ocorrência.
+        janela_dias: u32,
+        /// Um trecho do nome do compromisso ("servico exemplo").
+        compromisso: String,
+        tipo_documento: TipoDoDocumento,
     },
     /// O débito no banco paga uma fatura de cartão: é pagamento de fatura, não gasto
     /// (os itens da fatura já são os gastos). D11.
@@ -295,7 +338,23 @@ pub struct Reconhecimento {
     pub motivos: Vec<String>,
     /// Rótulos das evidências usadas (`rubrica_irrf`, `tabela:irrf-2026-01`).
     pub evidencias: Vec<String>,
+    /// Linhas curtas que o script quer mostrar no cartão do Reconhecimento. **Só para a
+    /// tela**: não entra na chave de idempotência, não vai para a tabela `execucao` nem para
+    /// a proposta gravada, porque pode conter texto do documento.
+    #[serde(default)]
+    pub exibir: Vec<String>,
     pub propostas: Vec<Proposta>,
+    /// A identidade do documento: os campos de `identidade` da definição, normalizados
+    /// (minúsculas, sem espaços nas pontas) e juntos por `|`. `None` se a versão não declara
+    /// `identidade`, se falta algum dos campos, ou se a versão é rascunho ou desativada
+    /// (só ativa e consolidada identificam). Não entra na chave de idempotência.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identidade: Option<String>,
+    /// A entrada (o sha) em que o mesmo documento, pela `identidade` deste padrão, já tinha
+    /// sido visto antes. Quem chama o preenche com `Catalogo::marcar_repetido`; o motor não
+    /// sabe do que já foi visto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetido_de: Option<String>,
     /// Chave de idempotência: sha256 de (entrada.id, regra, versão, checksum, checksums dos
     /// parâmetros usados). Reprocessar não duplica proposta (AC-LUA-04, AC-LUA-09).
     pub chave: String,

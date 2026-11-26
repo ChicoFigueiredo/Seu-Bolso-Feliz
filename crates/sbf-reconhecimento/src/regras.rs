@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use sbf_planejamento::conciliacao::normalizar;
 use sbf_planejamento::{
-    AlvoDoDocumento, Banco, Centavos, Competencia, Conciliacao, Data, EstadoDaOcorrencia, Filtro,
-    FonteDeMovimentos as _, MovimentoCandidato, MovimentoDoExtrato, Natureza, Ocorrencia, Periodo,
-    Planejamento, PlanejamentoSqlite, SemSaldos, TipoDeDocumento,
+    AlvoDoDocumento, Autor, Banco, Centavos, Competencia, Conciliacao, Data, EstadoDaOcorrencia,
+    Filtro, FonteDeMovimentos as _, MovimentoCandidato, MovimentoDoExtrato, Natureza, Ocorrencia,
+    Periodo, Planejamento, PlanejamentoSqlite, SemSaldos, TipoDeDocumento,
 };
 use sbf_planilha::contracheque::Contracheque;
 use sbf_planilha::movimentos::MovimentosDaPluggy;
@@ -33,11 +33,12 @@ use sbf_regras::motor::Motor;
 use sbf_regras::script::ExecutorDeScript;
 use sbf_regras::{
     Campo, Canal, DeOnde, Decisao, Dicas, Entrada, ErroDasRegras, Estado as EstadoDaRegra, Origem,
-    Proposta, Quem, Reconhecimento, Retorno, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    Proposta, Quem, Reconhecimento, Retorno, TipoDeEntrada, TipoDoDocumento, VERSAO_DO_ESQUEMA,
+    Valor,
 };
 
 use crate::cofre::{Estado, ReconhecedorDoCofre, ler_contracheque};
-use crate::{PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
+use crate::{ErroDoReconhecimento, PROVAS_POSSIVEIS, Reconhecido, Situacao, Sugestao};
 
 /// O catálogo das regras, na pasta do cofre.
 pub const ARQUIVO_DAS_REGRAS: &str = "regras.sqlite";
@@ -87,6 +88,7 @@ pub fn entrada_do_documento(
     texto: Option<&str>,
     canal: Canal,
     id_externo: Option<&str>,
+    momento: Option<&str>,
 ) -> Entrada {
     Entrada {
         versao_do_esquema: VERSAO_DO_ESQUEMA,
@@ -101,8 +103,27 @@ pub fn entrada_do_documento(
         nome: Some(nome.to_owned()),
         texto: texto.map(str::to_owned),
         dicas: Dicas::default(),
-        momento: None,
+        momento: momento.map(str::to_owned),
     }
+}
+
+/// O momento de um arquivo que o motor vai ler (spec 15): o do inventário (a menor data de
+/// origem, ou quando foi indexado) e, para o arquivo que ainda não tem achado, a data dele no
+/// disco. ISO 8601.
+pub(crate) fn momento_do_arquivo(
+    conn: &rusqlite::Connection,
+    sha256: &str,
+    caminho: &Path,
+) -> Option<String> {
+    sbf_inventario::texto::momento_do_achado(conn, sha256)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            std::fs::metadata(caminho)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(sbf_coleta::pastas::iso_de)
+        })
 }
 
 /// A entrada de um registro da Pluggy (D13): id `pluggy:<id>`, tipo Registro, e as dicas
@@ -130,6 +151,8 @@ pub fn entrada_do_registro(m: &MovimentoDoExtrato) -> Entrada {
             valor_centavos: Some(m.valor.0),
             data: Some(m.data.to_string()),
             descricao: (!m.descricao.trim().is_empty()).then(|| m.descricao.clone()),
+            contraparte: m.contraparte.clone().filter(|c| !c.trim().is_empty()),
+            contraparte_doc: m.contraparte_doc.clone().filter(|c| !c.trim().is_empty()),
         },
         momento: Some(m.data.to_string()),
     }
@@ -292,10 +315,34 @@ pub fn aviso_do_irrf(rec: &Reconhecimento) -> Option<String> {
 // O passo "Leitores locais" com o motor
 // ---------------------------------------------------------------------------------------
 
+/// A pasta, dentro do cofre, onde a coleta do Telegram deixa as mídias (`sbf telegram coletar`).
+pub const PASTA_DO_TELEGRAM: &str = "entrada/telegram";
+
+/// O canal de um arquivo: o que chegou pela coleta do Telegram (em `entrada/telegram/`) é
+/// `Telegram`; o resto do cofre é `Cofre`; fora dele, `Arrastado`.
+pub(crate) fn canal_do_arquivo(cofre: &Path, caminho: &Path, dentro_do_cofre: bool) -> Canal {
+    if !dentro_do_cofre {
+        return Canal::Arrastado;
+    }
+    let da_pasta = match (
+        caminho.canonicalize(),
+        cofre.join(PASTA_DO_TELEGRAM).canonicalize(),
+    ) {
+        (Ok(a), Ok(t)) => a.starts_with(t),
+        _ => false,
+    };
+    if da_pasta {
+        Canal::Telegram
+    } else {
+        Canal::Cofre
+    }
+}
+
 /// Roda o motor no passo de leitura local. `None` quando as regras não estão ligadas, o
 /// catálogo não abre ou nenhuma regra se aplica: aí vale o caminho de sempre (AC-LUA-14).
 pub(crate) fn ler_com_regras(
     reconhecedor: &ReconhecedorDoCofre,
+    conn: &rusqlite::Connection,
     estado: &mut Estado,
     caminho: &Path,
 ) -> Option<Situacao> {
@@ -304,10 +351,12 @@ pub(crate) fn ler_com_regras(
     catalogo.semear_fabrica().ok()?;
     let motor = Motor::das_vigentes(&catalogo, ligadas.executor.clone()).ok()?;
 
-    let canal = if estado.dentro_do_cofre {
-        Canal::Cofre
-    } else {
-        Canal::Arrastado
+    let (canal, id_externo) = match &estado.origem {
+        Some((canal, id)) => (*canal, Some(id.as_str())),
+        None => (
+            canal_do_arquivo(&reconhecedor.cofre, caminho, estado.dentro_do_cofre),
+            None,
+        ),
     };
     let nome = caminho
         .file_name()
@@ -319,9 +368,13 @@ pub(crate) fn ler_com_regras(
         mime_do_arquivo(caminho),
         estado.conteudo.as_deref(),
         canal,
-        None,
+        id_externo,
+        momento_do_arquivo(conn, &estado.sha256, caminho).as_deref(),
     );
     let mut leitura = motor.ler(&entrada);
+    // O mesmo documento, pela identidade do padrão, já visto por outro canal? Sem o catálogo
+    // não há como saber: segue como não repetido.
+    let _ = catalogo.marcar_repetido(&mut leitura);
 
     let mut situacao = None;
     match leitura.decisao.clone() {
@@ -378,6 +431,98 @@ pub(crate) fn ler_com_regras(
     estado.entrada = Some(entrada);
     estado.leitura = Some(leitura);
     situacao
+}
+
+/// Uma mensagem sem arquivo (o corpo de um e-mail, um texto do Telegram) que chegou por um
+/// canal e vai passar pelas regras.
+#[derive(Debug, Clone, Copy)]
+pub struct MensagemRecebida<'a> {
+    pub canal: Canal,
+    /// A identidade estável da entrada (`gmail:<id da mensagem>`).
+    pub id: &'a str,
+    /// O id no canal (o id da mensagem), que a regra vê em `Entrada.origem`.
+    pub id_externo: &'a str,
+    /// O assunto e o corpo, como vieram.
+    pub texto: &'a str,
+    /// Quando chegou, ISO 8601, se o canal diz.
+    pub momento: Option<&'a str>,
+    /// `AAAA-MM-DD`, se o canal diz.
+    pub data: Option<&'a str>,
+}
+
+impl ReconhecedorDoCofre {
+    /// Passa uma mensagem pelas regras de reconhecimento (entrada tipo `Mensagem`). Grava só o
+    /// rastro das regras (execução e propostas abertas); nada vai para o planejamento e a
+    /// mensagem em si não é gravada aqui (quem a entrega guarda no inventário, se quiser).
+    ///
+    /// Sem `com_regras`, ou com o catálogo fechado, devolve [`Reconhecido::Nada`].
+    ///
+    /// # Errors
+    /// Nenhum hoje: falhas do catálogo viram [`Reconhecido::Nada`] com o motivo genérico.
+    pub fn reconhecer_mensagem(
+        &self,
+        m: &MensagemRecebida<'_>,
+    ) -> Result<Reconhecido, ErroDoReconhecimento> {
+        let nada = |motivo: &str| {
+            Ok(Reconhecido::Nada {
+                motivo: motivo.to_owned(),
+            })
+        };
+        let Some(ligadas) = self.regras.as_ref() else {
+            return nada("as regras de reconhecimento não estão ligadas");
+        };
+        let Ok(mut catalogo) = Catalogo::abrir(&self.cofre.join(ARQUIVO_DAS_REGRAS)) else {
+            return nada("não deu para abrir o catálogo de regras");
+        };
+        if catalogo.semear_fabrica().is_err() {
+            return nada("não deu para preparar o catálogo de regras");
+        }
+        let Ok(motor) = Motor::das_vigentes(&catalogo, ligadas.executor.clone()) else {
+            return nada("não deu para montar o motor de regras");
+        };
+        let entrada = Entrada {
+            versao_do_esquema: VERSAO_DO_ESQUEMA,
+            id: m.id.to_owned(),
+            tipo: TipoDeEntrada::Mensagem,
+            origem: Origem {
+                canal: m.canal,
+                id_externo: Some(m.id_externo.to_owned()),
+            },
+            sha256: None,
+            mime: None,
+            nome: None,
+            texto: Some(m.texto.to_owned()),
+            dicas: Dicas {
+                data: m.data.map(str::to_owned),
+                ..Dicas::default()
+            },
+            momento: m.momento.map(str::to_owned),
+        };
+        let mut leitura = motor.ler(&entrada);
+        let _ = catalogo.marcar_repetido(&mut leitura);
+        let reconhecido = match leitura.decisao.clone() {
+            Decisao::Reconhecido(rec) => Reconhecido::PelaRegra {
+                reconhecimento: rec,
+            },
+            Decisao::Ambiguo { candidatas, motivo } => Reconhecido::Ambiguo { candidatas, motivo },
+            Decisao::Nenhuma => Reconhecido::Nada {
+                motivo: "nenhuma regra reconheceu a mensagem".to_owned(),
+            },
+        };
+        let gravou = catalogo.registrar_execucao(&leitura).is_ok();
+        let propostas_ok = match &reconhecido {
+            Reconhecido::PelaRegra { reconhecimento } if !reconhecimento.propostas.is_empty() => {
+                catalogo
+                    .registrar_proposta(reconhecimento, &entrada.id)
+                    .is_ok()
+            }
+            _ => true,
+        };
+        if !(gravou && propostas_ok) {
+            return nada("não consegui gravar o rastro das regras de reconhecimento");
+        }
+        Ok(reconhecido)
+    }
 }
 
 fn mime_do_arquivo(caminho: &Path) -> &'static str {
@@ -462,6 +607,20 @@ pub(crate) fn sugerir_das_propostas(
                 *janela_dias,
                 compromisso.as_deref(),
             ),
+            Proposta::VincularOcorrencia {
+                data,
+                janela_dias,
+                compromisso,
+                tipo_documento,
+            } => match &rec.repetido_de {
+                // O mesmo documento (pela identidade do padrão) já foi visto: não se anexa
+                // duas vezes à mesma ocorrência.
+                Some(primeira) => Ok(Resolvida::Nada(format!(
+                    "mesmo documento que {}, já visto",
+                    nome_curto_da_entrada(primeira)
+                ))),
+                None => vincular_ocorrencia(&ctx, data, *janela_dias, compromisso, *tipo_documento),
+            },
             Proposta::PagarFatura {
                 valor_centavos,
                 vencimento,
@@ -475,6 +634,15 @@ pub(crate) fn sugerir_das_propostas(
         }
     }
     Ok(sugestoes)
+}
+
+/// O sha cortado em 8 caracteres; um id que não é sha (`gmail:...`) fica como veio.
+fn nome_curto_da_entrada(id: &str) -> String {
+    if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        id.chars().take(8).collect()
+    } else {
+        id.to_owned()
+    }
 }
 
 enum Resolvida {
@@ -576,9 +744,14 @@ fn regra_da(ctx: &Contexto<'_>) -> (String, u32) {
     (ctx.rec.regra.clone(), ctx.rec.versao)
 }
 
+/// A regra só age sozinha quando está consolidada e o usuário nunca desfez a ligação.
+fn consolidada_e_nao_desfeita(ctx: &Contexto<'_>, desfeita: bool) -> bool {
+    ctx.consolidada && !desfeita
+}
+
 /// A regra só concilia sozinha quando está consolidada e as três provas batem.
 fn automatica(ctx: &Contexto<'_>, provas: u8, desfeita: bool) -> bool {
-    ctx.consolidada && provas >= PROVAS_POSSIVEIS && !desfeita
+    consolidada_e_nao_desfeita(ctx, desfeita) && provas >= PROVAS_POSSIVEIS
 }
 
 fn provar_registro(
@@ -728,6 +901,90 @@ fn conciliar_ocorrencia(
     )))
 }
 
+fn tipo_do_documento(t: TipoDoDocumento) -> TipoDeDocumento {
+    match t {
+        TipoDoDocumento::Contracheque => TipoDeDocumento::Contracheque,
+        TipoDoDocumento::Fatura => TipoDeDocumento::Fatura,
+        TipoDoDocumento::Boleto => TipoDeDocumento::Boleto,
+        TipoDoDocumento::Comprovante => TipoDeDocumento::Comprovante,
+        TipoDoDocumento::Contrato => TipoDeDocumento::Contrato,
+        TipoDoDocumento::NotaFiscal => TipoDeDocumento::NotaFiscal,
+        TipoDoDocumento::Outro => TipoDeDocumento::Outro,
+    }
+}
+
+/// Anexa o documento à ocorrência do compromisso mais perto da data dele. Não exige valor nem
+/// débito no extrato, e não filtra por `livre`: um recibo numa ocorrência já paga vale. O
+/// empate de distância não se adivinha. Só é automática quando o padrão está consolidado e o
+/// usuário nunca desvinculou o documento desta ocorrência; padrão ativo só propõe.
+fn vincular_ocorrencia(
+    ctx: &Contexto<'_>,
+    data: &str,
+    janela: u32,
+    compromisso: &str,
+    tipo: TipoDoDocumento,
+) -> Achado<Resolvida> {
+    let nome = normalizar(compromisso).trim().to_owned();
+    let (Some(plan), Some(d), false) = (ctx.plan, Data::de_iso(data), nome.is_empty()) else {
+        return Ok(Resolvida::Nada(
+            "sem planejamento (ou data ilegível) para ligar o documento à ocorrência".to_owned(),
+        ));
+    };
+    let dias = i64::from(janela);
+    let candidatas: Vec<(i64, Ocorrencia)> = ocorrencias_perto(ctx, d, dias)?
+        .into_iter()
+        .filter(|o| normalizar(&o.nome).contains(nome.as_str()))
+        .map(|o| (o.vencimento.dias_ate(d).abs(), o))
+        .collect();
+    let Some(menor) = candidatas.iter().map(|(distancia, _)| *distancia).min() else {
+        return Ok(Resolvida::Nada(format!(
+            "não achei a ocorrência do compromisso a até {dias} dias da data do documento"
+        )));
+    };
+    let mut mais_proximas = candidatas
+        .iter()
+        .filter(|(distancia, _)| *distancia == menor);
+    let (Some((_, ocorrencia)), None) = (mais_proximas.next(), mais_proximas.next()) else {
+        return Ok(Resolvida::Nada(format!(
+            "empate: mais de uma ocorrência do compromisso a {menor} dias da data do documento; escolha na mão"
+        )));
+    };
+    let alvo = AlvoDoDocumento::Ocorrencia {
+        id: ocorrencia.id.clone(),
+    };
+    let ligados = plan.documentos(&alvo)?;
+    // O vínculo que uma regra consolidada já fez sozinha volta como sugestão automática, para
+    // o cartão mostrá-lo como feito ("Vinculado automaticamente · Desfazer").
+    let feito_pela_regra = ligados.iter().any(|x| {
+        x.sha256 == ctx.sha
+            && !x.desvinculado
+            && x.alvo == alvo
+            && matches!(x.autor, Autor::Regra { .. })
+    });
+    if !feito_pela_regra
+        && ligados
+            .iter()
+            .any(|x| x.sha256 == ctx.sha && !x.desvinculado)
+    {
+        return Ok(Resolvida::Nada(
+            "o documento já está ligado a esta ocorrência".to_owned(),
+        ));
+    }
+    let desfeito = plan.documento_desvinculado(&alvo, ctx.sha)?;
+    Ok(Resolvida::Sugestao(Box::new(Sugestao::Vincular {
+        alvo,
+        rotulo: format!(
+            "Vincular a {} · {:02}/{}",
+            ocorrencia.nome, ocorrencia.id.competencia.mes, ocorrencia.id.competencia.ano
+        ),
+        tipo: tipo_do_documento(tipo),
+        data: Some(d),
+        regra: Some(regra_da(ctx)),
+        chave: Some(ctx.rec.chave.clone()),
+        automatica: feito_pela_regra || consolidada_e_nao_desfeita(ctx, desfeito),
+    })))
+}
+
 /// Tipos de movimento que nunca pagam fatura (o `pagamento_fatura` é justamente o que serve).
 const TIPOS_QUE_NAO_PAGAM_FATURA: [&str; 3] = ["transferencia_interna", "investimento", "estorno"];
 
@@ -764,7 +1021,7 @@ fn pagar_fatura(
         ));
     };
     let usados = movimentos_ja_conciliados(ctx, v, 15)?;
-    let apelido = ocorrencia
+    let codigo = ocorrencia
         .conta
         .as_deref()
         .map(str::trim)
@@ -772,7 +1029,7 @@ fn pagar_fatura(
     let conta_do_extrato = plan
         .contas()?
         .into_iter()
-        .find(|c| c.apelido.trim() == apelido)
+        .find(|c| c.codigo.trim() == codigo)
         .and_then(|c| c.conta_do_extrato);
     let assinatura = plan.assinatura(&ocorrencia.id.recorrente)?;
     let candidatos: Vec<(MovimentoDoExtrato, bool)> = ctx
@@ -823,4 +1080,29 @@ fn pagar_fatura(
         automatica: automatica(ctx, provas, desfeita),
         provas,
     })))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod testes_do_canal {
+    use super::*;
+
+    #[test]
+    fn o_que_veio_do_telegram_tem_canal_telegram() {
+        let d = tempfile::tempdir().unwrap();
+        let cofre = d.path();
+        let do_telegram = cofre.join("entrada/telegram/Casa-1/10-boleto.pdf");
+        let do_acervo = cofre.join("acervo/ab/abcdef.pdf");
+        for a in [&do_telegram, &do_acervo] {
+            std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+            std::fs::write(a, b"%PDF").unwrap();
+        }
+        assert_eq!(canal_do_arquivo(cofre, &do_telegram, true), Canal::Telegram);
+        assert_eq!(canal_do_arquivo(cofre, &do_acervo, true), Canal::Cofre);
+        // Fora do cofre é sempre arrastado, mesmo com nome de pasta parecido.
+        assert_eq!(
+            canal_do_arquivo(cofre, &do_telegram, false),
+            Canal::Arrastado
+        );
+    }
 }

@@ -108,13 +108,15 @@ impl AppDoInventario {
                 let arquivo_do_plano = self.pasta.join("planejamento.sqlite");
                 if arquivo_do_plano.exists() {
                     match sbf_planejamento::Banco::abrir(&arquivo_do_plano) {
-                        Ok(banco) => janela.ligar_planejamento(Box::new(
-                            sbf_planejamento::PlanejamentoSqlite::novo(
-                                banco,
-                                crate::mcp::saldos_do_cofre(&self.pasta),
-                            )
-                            .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
-                        )),
+                        Ok(banco) => {
+                            janela.ligar_planejamento(Box::new(crate::script::com_calculo(
+                                sbf_planejamento::PlanejamentoSqlite::novo(
+                                    banco,
+                                    crate::mcp::saldos_do_cofre(&self.pasta),
+                                )
+                                .com_movimentos(crate::mcp::movimentos_do_cofre(&self.pasta)),
+                            )))
+                        }
                         Err(e) => eprintln!("sbf: o planejamento não abriu ({e})"),
                     }
                 }
@@ -123,16 +125,27 @@ impl AppDoInventario {
                 match sbf_regras::catalogo::Catalogo::abrir(&self.pasta.join("regras.sqlite")) {
                     Ok(mut c) => {
                         if let Err(e) = c.semear_fabrica() {
-                            eprintln!("sbf: as regras de fábrica não entraram ({e})");
+                            eprintln!("sbf: os padrões de fábrica não entraram ({e})");
                         }
-                        janela
-                            .regras
-                            .ligar(sbf_janela::regras::FonteDasRegras::nova(
-                                std::sync::Arc::new(std::sync::Mutex::new(c)),
+                        let catalogo = std::sync::Arc::new(std::sync::Mutex::new(c));
+                        let para_ja_casaram = std::sync::Arc::clone(&catalogo);
+                        janela.regras.ligar(
+                            sbf_janela::regras::FonteDasRegras::nova(
+                                catalogo,
                                 crate::script::executor_de_script().ok(),
-                            ));
+                            )
+                            .com_ja_casaram(std::sync::Arc::new(
+                                move |entrada: &str| {
+                                    para_ja_casaram
+                                        .lock()
+                                        .map_err(|_| "o catálogo de padrões travou".to_owned())?
+                                        .padroes_que_casaram(entrada)
+                                        .map_err(|e| e.to_string())
+                                },
+                            )),
+                        );
                     }
-                    Err(e) => eprintln!("sbf: o catálogo de regras não abriu ({e})"),
+                    Err(e) => eprintln!("sbf: o catálogo de padrões não abriu ({e})"),
                 }
                 let mut f =
                     Ferramentas::nova(inventario.caminho().to_path_buf(), self.pasta.clone());
@@ -162,14 +175,59 @@ impl AppDoInventario {
                 let reconhecedor = crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), true)
                     .or_else(|_| crate::reconhecer::montar(&self.pasta, f.chaveiro.clone(), false));
                 if let Ok(r) = reconhecedor {
-                    janela.ligar_reconhecedor(std::sync::Arc::new(r));
+                    // Arrastar também cai na Caixa de entrada (e, sendo ação do usuário,
+                    // reabre o que ele já tinha resolvido).
+                    janela.ligar_reconhecedor(std::sync::Arc::new(r.com_caixa_de_entrada(
+                        sbf_inventario::caixa_de_entrada::Canal::Arrastado,
+                        true,
+                    )));
                 }
+                // A Caixa de entrada do próprio cofre.
+                janela.ligar_caixa_de_entrada(std::sync::Arc::new(
+                    crate::caixa_de_entrada::CaixaDeEntradaDoCofre::nova(
+                        self.pasta.clone(),
+                        f.chaveiro.clone(),
+                    ),
+                ));
                 janela.ferramentas = Some(f);
+                // O MCP escreve em `planejamento.sqlite` e `regras.sqlite`, e o worker em
+                // `inventario.sqlite`: a janela percebe e relê o que mostra.
+                janela.vigiar_cofre(&self.pasta);
                 // Conexões › Roteiros (spec 10, C1): o Chrome, o chaveiro e o `claude` do
                 // usuário. Nada roda até você clicar em Executar ou em Gravar novo.
                 if let Ok(dados) = sbf_chaveiro::pasta_de_dados_do_app()
                     && sbf_chaveiro::garantir_fora_do_cofre(&dados, &self.pasta).is_ok()
                 {
+                    // Conexões › Telegram, Pluggy e pastas do worker (só estado, mais o
+                    // "Coletar agora" do Telegram).
+                    janela.conexoes.ligar(
+                        self.pasta.clone(),
+                        dados.clone(),
+                        chaveiro_dos_roteiros.clone(),
+                        std::sync::Arc::new(crate::telegram::ColetaDaJanela {
+                            cofre: self.pasta.clone(),
+                            chaveiro: chaveiro_dos_roteiros.clone(),
+                        }),
+                    );
+                    // Rita (spec 15): os provedores com chaves no chaveiro, a aba IA de Conexões e o
+                    // painel. Nada é chamado até o usuário pedir.
+                    if let (Some(chaveiro), Ok(executor), Ok(programa)) = (
+                        chaveiro_dos_roteiros.clone(),
+                        crate::script::executor_de_script(),
+                        std::env::current_exe(),
+                    ) {
+                        let guarda: std::sync::Arc<dyn sbf_rita::GuardaDeProvedores> =
+                            std::sync::Arc::new(sbf_rita::ComCache::nova(std::sync::Arc::new(
+                                chaveiro,
+                            )));
+                        janela.conexoes.ia.ligar(std::sync::Arc::clone(&guarda));
+                        janela.rita.ligar(sbf_janela::rita_ui::Ambiente {
+                            cofre: self.pasta.clone(),
+                            guarda,
+                            executor,
+                            programa,
+                        });
+                    }
                     janela.roteiros.ligar(
                         crate::roteiros::ambiente(&self.pasta, &dados),
                         Some(std::sync::Arc::new(crate::roteiros::IaDoInventario {

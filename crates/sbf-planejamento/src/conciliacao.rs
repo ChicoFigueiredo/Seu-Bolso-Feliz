@@ -7,7 +7,7 @@
 //!   sugere (o usuário decide).
 //! - Tipos que nunca pagam compromisso ficam de fora (`transferencia_interna`,
 //!   `pagamento_fatura`, `investimento`, `estorno`).
-//! - **Conta**: com par confirmado (o apelido da ocorrência ↔ a conta do extrato), só serve
+//! - **Conta**: com par confirmado (o código da ocorrência ↔ a conta do extrato), só serve
 //!   movimento da conta certa. Sem par, a conta não pesa.
 //! - **Assinatura**: o movimento cuja descrição normalizada contém o texto, dentro da janela
 //!   da assinatura em volta do vencimento, é candidato com qualquer valor; a diferença de
@@ -72,7 +72,7 @@ pub struct Alvo {
     pub ocorrencia: Ocorrencia,
     /// O valor esperado (ver [`valor_esperado`]).
     pub esperado: Option<Centavos>,
-    /// A conta do extrato exigida (o par confirmado do apelido da ocorrência).
+    /// A conta do extrato exigida (o par confirmado do código da ocorrência).
     pub conta_exigida: Option<String>,
     pub assinatura: Option<Assinatura>,
 }
@@ -349,19 +349,19 @@ pub fn candidatos(
         .collect()
 }
 
-/// De onde vem um indício de que o apelido corresponde a uma conta do extrato.
+/// De onde vem um indício de que o código corresponde a uma conta do extrato.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Indicio {
     /// Uma conciliação do histórico (a do movimento está nesta conta).
     Conciliacao { confirmada: bool },
-    /// Um crédito achado pela assinatura de um recorrente do apelido.
+    /// Um crédito achado pela assinatura de um recorrente do código.
     Assinatura,
 }
 
-/// Um indício: o apelido e a conta do extrato para onde ele aponta.
+/// Um indício: o código e a conta do extrato para onde ele aponta.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evidencia {
-    pub apelido: String,
+    pub codigo: String,
     pub conta_do_extrato: String,
     pub indicio: Indicio,
 }
@@ -408,25 +408,25 @@ fn motivo_do(p: &Placar) -> String {
     }
 }
 
-/// Os pares propostos: para cada apelido, a conta do extrato com mais peso (confirmadas pesam
+/// Os pares propostos: para cada código, a conta do extrato com mais peso (confirmadas pesam
 /// mais). Empate no topo não propõe nada. Quem já tem par confirmado fica de fora.
 #[must_use]
 ///
-/// Uma conta do extrato é de um apelido só: a que já está confirmada para outro apelido não é
-/// proposta; a que dois apelidos disputam fica com o de mais peso, e no empate os dois
+/// Uma conta do extrato é de um código só: a que já está confirmada para outro código não é
+/// proposta; a que dois códigos disputam fica com o de mais peso, e no empate os dois
 /// aparecem com "disputada com …" no motivo (o usuário escolhe).
 pub fn pares_sugeridos(
     evidencias: &[Evidencia],
     ja_pareados: &HashSet<String>,
     contas_ja_usadas: &HashSet<String>,
 ) -> Vec<ParDeConta> {
-    let mut por_apelido: HashMap<&str, HashMap<&str, Placar>> = HashMap::new();
+    let mut por_codigo: HashMap<&str, HashMap<&str, Placar>> = HashMap::new();
     for e in evidencias {
-        if ja_pareados.contains(&e.apelido) || contas_ja_usadas.contains(&e.conta_do_extrato) {
+        if ja_pareados.contains(&e.codigo) || contas_ja_usadas.contains(&e.conta_do_extrato) {
             continue;
         }
-        let p = por_apelido
-            .entry(&e.apelido)
+        let p = por_codigo
+            .entry(&e.codigo)
             .or_default()
             .entry(&e.conta_do_extrato)
             .or_default();
@@ -445,9 +445,9 @@ pub fn pares_sugeridos(
             }
         }
     }
-    let vencedores: Vec<(ParDeConta, u32)> = por_apelido
+    let vencedores: Vec<(ParDeConta, u32)> = por_codigo
         .into_iter()
-        .filter_map(|(apelido, contas)| {
+        .filter_map(|(codigo, contas)| {
             let maior = contas.values().map(|p| p.peso).max()?;
             let mut do_topo = contas.iter().filter(|(_, p)| p.peso == maior);
             let (conta, placar) = do_topo.next()?;
@@ -456,7 +456,7 @@ pub fn pares_sugeridos(
             }
             Some((
                 ParDeConta {
-                    apelido: apelido.to_owned(),
+                    codigo: codigo.to_owned(),
                     conta_do_extrato: (*conta).to_owned(),
                     evidencias: placar.confirmadas + placar.sugeridas + placar.assinaturas,
                     motivo: motivo_do(placar),
@@ -465,12 +465,12 @@ pub fn pares_sugeridos(
             ))
         })
         .collect();
-    // Dois apelidos querendo a mesma conta: fica o de mais peso; no empate, os dois, avisados.
+    // Dois códigos querendo a mesma conta: fica o de mais peso; no empate, os dois, avisados.
     let mut pares: Vec<ParDeConta> = vencedores
         .iter()
         .filter(|(par, peso)| {
             !vencedores.iter().any(|(outro, peso_do_outro)| {
-                outro.apelido != par.apelido
+                outro.codigo != par.codigo
                     && outro.conta_do_extrato == par.conta_do_extrato
                     && peso_do_outro > peso
             })
@@ -479,11 +479,11 @@ pub fn pares_sugeridos(
             let mut rivais: Vec<&str> = vencedores
                 .iter()
                 .filter(|(outro, peso_do_outro)| {
-                    outro.apelido != par.apelido
+                    outro.codigo != par.codigo
                         && outro.conta_do_extrato == par.conta_do_extrato
                         && peso_do_outro == peso
                 })
-                .map(|(outro, _)| outro.apelido.as_str())
+                .map(|(outro, _)| outro.codigo.as_str())
                 .collect();
             rivais.sort_unstable();
             let mut par = par.clone();
@@ -493,7 +493,7 @@ pub fn pares_sugeridos(
             par
         })
         .collect();
-    pares.sort_by(|a, b| a.apelido.cmp(&b.apelido));
+    pares.sort_by(|a, b| a.codigo.cmp(&b.codigo));
     pares
 }
 
@@ -573,6 +573,7 @@ mod testes {
             centro: None,
             fornecedor: None,
             versao: "v".to_owned(),
+            calculo: None,
             prazo_desconhecido: false,
             sugestao_de_conciliacao: false,
         }
@@ -586,6 +587,8 @@ mod testes {
             conta_do_extrato: conta.to_owned(),
             descricao: descricao.to_owned(),
             tipo: if valor > 0 { "credito" } else { "debito" }.to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         }
     }
 
@@ -616,6 +619,8 @@ mod testes {
             mov("m_errado", 15, -9_500, "B1", "NET"),
             MovimentoDoExtrato {
                 tipo: "transferencia_interna".to_owned(),
+                contraparte: None,
+                contraparte_doc: None,
                 ..mov("m_interna", 15, -9_000, "B1", "NET")
             },
         ];
@@ -800,9 +805,9 @@ mod testes {
         assert_eq!(c[0].movimento.movimento, "livre");
     }
 
-    fn evidencia(apelido: &str, conta: &str, indicio: Indicio) -> Evidencia {
+    fn evidencia(codigo: &str, conta: &str, indicio: Indicio) -> Evidencia {
         Evidencia {
-            apelido: apelido.to_owned(),
+            codigo: codigo.to_owned(),
             conta_do_extrato: conta.to_owned(),
             indicio,
         }
@@ -824,21 +829,21 @@ mod testes {
         let ja: HashSet<String> = ["PAREADO".to_owned()].into();
         let p = pares_sugeridos(&evs, &ja, &HashSet::new());
         assert_eq!(p.len(), 2);
-        assert_eq!(p[0].apelido, "CX-1");
+        assert_eq!(p[0].codigo, "CX-1");
         assert_eq!(p[0].conta_do_extrato, "B1");
         assert_eq!(p[0].evidencias, 3);
         assert_eq!(
             p[0].motivo,
             "1 conciliação confirmada, 1 conciliação sugerida e 1 crédito da assinatura"
         );
-        assert_eq!(p[1].apelido, "CX-2");
+        assert_eq!(p[1].codigo, "CX-2");
         assert_eq!(p[1].evidencias, 1);
     }
 
     #[test]
     fn conta_disputada_fica_com_o_de_mais_peso_e_empate_avisa() {
         let sugerida = || Indicio::Conciliacao { confirmada: false };
-        // Dois apelidos com o mesmo peso querendo a mesma conta: os dois, avisados.
+        // Dois códigos com o mesmo peso querendo a mesma conta: os dois, avisados.
         let empate = [
             evidencia("CX-1", "B1", sugerida()),
             evidencia("CARTAO", "B1", sugerida()),
@@ -855,8 +860,8 @@ mod testes {
         ];
         let p = pares_sugeridos(&peso, &HashSet::new(), &HashSet::new());
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].apelido, "CX-1");
-        // Conta já confirmada para outro apelido não é proposta.
+        assert_eq!(p[0].codigo, "CX-1");
+        // Conta já confirmada para outro código não é proposta.
         let usadas: HashSet<String> = ["B1".to_owned()].into();
         assert!(pares_sugeridos(&peso, &HashSet::new(), &usadas).is_empty());
     }

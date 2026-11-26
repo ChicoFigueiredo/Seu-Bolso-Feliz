@@ -49,7 +49,7 @@ pub(super) fn tres_provas(
     }))
 }
 
-/// A conta do extrato (par confirmado) do apelido da ocorrência, se houver.
+/// A conta do extrato (par confirmado) do código da ocorrência, se houver.
 fn conta_exigida(s: &PlanejamentoSqlite, id: &IdOcorrencia) -> Resultado<Option<String>> {
     let c = s.banco.conexao();
     let hoje = data_de_segundos(s.agora());

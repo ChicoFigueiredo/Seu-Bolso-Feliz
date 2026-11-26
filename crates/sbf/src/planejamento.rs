@@ -2,9 +2,11 @@
 //!
 //! ```text
 //! sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar]
+//! sbf planejamento importar-historico --inventario <cofre> --planilha <arq> [--de AAAA.MM] [--ate AAAA.MM] [--mapa <arq>] [--confirmar] [--detalhar]
 //! sbf planejamento ocultos  --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar]
 //! sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar]
 //! sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar]
+//! sbf planejamento contas --inventario <cofre> (listar | ligar | desligar | apelido ...)   (ver `contas.rs`)
 //! ```
 //!
 //! A saída padrão mostra só contagens. `--detalhar` mostra a prévia linha a linha no
@@ -21,13 +23,14 @@ use sbf_planejamento::{
 };
 use sbf_planilha::conciliacao::{self, ConfigConciliacao};
 use sbf_planilha::contracheque;
+use sbf_planilha::historico::{self, Janela};
 use sbf_planilha::importacao;
 use sbf_planilha::leitura;
 use sbf_planilha::mapa::Mapa;
 use sbf_planilha::ocultos::{self, ConfigOcultos};
 use sbf_reconhecimento::{UsoDeRubricas, salario};
 
-const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM";
+const USO: &str = "uso: sbf planejamento importar --inventario <cofre> --planilha <arq> --aba AAAA.MM [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento importar-historico --inventario <cofre> --planilha <arq> [--de AAAA.MM] [--ate AAAA.MM] [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento ocultos --inventario <cofre> [--mapa <arq>] [--confirmar] [--detalhar] | sbf planejamento conciliar --inventario <cofre> [--ciclo AAAA-MM] [--mapa <arq>] [--detalhar] | sbf planejamento contracheque --inventario <cofre> (--arquivo <pdf|txt> | --achado <sha256>) [--recorrente <id>] [--confirmar] [--detalhar] | sbf planejamento acompanhar --inventario <cofre> --ciclo AAAA-MM | sbf planejamento contas --inventario <cofre> (listar | ligar <codigo> <conta-do-extrato> | desligar <codigo> | apelido <codigo> (<texto> | --limpar)) [--autor X]";
 
 type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 
@@ -38,10 +41,10 @@ type Abrir<'a> = &'a dyn Fn(&Path) -> Result<Box<dyn Planejamento>, String>;
 fn abrir_planejamento(cofre: &Path) -> Result<Box<dyn Planejamento>, String> {
     let banco = sbf_planejamento::Banco::abrir(cofre.join("planejamento.sqlite"))
         .map_err(|e| e.to_string())?;
-    Ok(Box::new(
+    Ok(Box::new(crate::script::com_calculo(
         sbf_planejamento::PlanejamentoSqlite::novo(banco, crate::mcp::saldos_do_cofre(cofre))
             .com_movimentos(crate::mcp::movimentos_do_cofre(cofre)),
-    ))
+    )))
 }
 
 pub fn rodar(args: &[String]) -> ExitCode {
@@ -49,6 +52,9 @@ pub fn rodar(args: &[String]) -> ExitCode {
         return acompanhar(&args[1..]);
     }
     let mut saida = std::io::stdout();
+    if args.first().map(String::as_str) == Some("contas") {
+        return crate::contas::rodar(&args[1..], &abrir_planejamento, &mut saida);
+    }
     rodar_com(args, &abrir_planejamento, &mut saida)
 }
 
@@ -57,6 +63,8 @@ struct Opcoes {
     inventario: Option<PathBuf>,
     planilha: Option<PathBuf>,
     aba: Option<String>,
+    de: Option<String>,
+    ate: Option<String>,
     mapa: Option<PathBuf>,
     ciclo: Option<String>,
     arquivo: Option<PathBuf>,
@@ -79,6 +87,8 @@ fn ler_opcoes(args: &[String]) -> Result<Opcoes, String> {
             "--inventario" => o.inventario = Some(valor("--inventario")?.into()),
             "--planilha" => o.planilha = Some(valor("--planilha")?.into()),
             "--aba" => o.aba = Some(valor("--aba")?),
+            "--de" => o.de = Some(valor("--de")?),
+            "--ate" => o.ate = Some(valor("--ate")?),
             "--mapa" => o.mapa = Some(valor("--mapa")?.into()),
             "--ciclo" => o.ciclo = Some(valor("--ciclo")?),
             "--arquivo" => o.arquivo = Some(valor("--arquivo")?.into()),
@@ -106,6 +116,7 @@ fn rodar_com(args: &[String], abrir: Abrir<'_>, saida: &mut dyn Write) -> ExitCo
     };
     let resultado = match sub.as_str() {
         "importar" => importar(&opcoes, abrir, saida),
+        "importar-historico" => importar_historico(&opcoes, abrir, saida),
         "ocultos" => achar_ocultos(&opcoes, abrir, saida),
         "conciliar" => conciliar(&opcoes, abrir, saida),
         "contracheque" => contracheque(&opcoes, abrir, saida),
@@ -227,6 +238,78 @@ fn importar(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<(), S
         saida,
         "gravado: grupos={} criados={} atualizados={} pagos_informados={}",
         c.grupos, c.criados, c.atualizados, c.pagos_informados
+    ))
+}
+
+/// `AAAA.MM` (ou `AAAA-MM`) de `--de` e `--ate`.
+fn competencia_da_opcao(texto: &Option<String>, nome: &str) -> Result<Option<Competencia>, String> {
+    let Some(t) = texto else { return Ok(None) };
+    leitura::competencia_da_aba(t)
+        .or_else(|| Competencia::de_texto(t))
+        .map(Some)
+        .ok_or_else(|| format!("{nome} tem de ser AAAA.MM (por exemplo 2023.04)"))
+}
+
+fn importar_historico(o: &Opcoes, abrir: Abrir<'_>, saida: &mut dyn Write) -> Result<(), String> {
+    let cofre = exige(&o.inventario, "--inventario")?;
+    let arquivo = exige(&o.planilha, "--planilha")?;
+    let janela = Janela {
+        de: competencia_da_opcao(&o.de, "--de")?,
+        ate: competencia_da_opcao(&o.ate, "--ate")?,
+    };
+    let mapa = mapa_de(o)?;
+    let mut plan = abrir(cofre)?;
+    let r = historico::importar_historico(arquivo, &mut *plan, &mapa, janela, o.confirmar)
+        .map_err(|e| e.to_string())?;
+    for a in &r.abas {
+        es(writeln!(saida, "{}", a.linha()))?;
+    }
+    let t = r.total();
+    es(writeln!(
+        saida,
+        "total: abas={} lidas={} novos={} encerrados={} excecoes={} pagos={} versoes={} conflitos={} falhas={} grupos={}",
+        r.abas.iter().filter(|a| a.nao_lida.is_none()).count(),
+        t.lidas,
+        t.novos,
+        t.encerrados,
+        t.excecoes,
+        t.pagos,
+        t.versoes,
+        t.conflitos,
+        t.falhas,
+        r.grupos
+    ))?;
+    let nao_lidas: Vec<&str> = r
+        .abas
+        .iter()
+        .filter(|a| a.nao_lida.is_some())
+        .map(|a| a.aba.as_str())
+        .collect();
+    if !nao_lidas.is_empty() {
+        es(writeln!(
+            saida,
+            "abas não lidas (layout): {}",
+            nao_lidas.join(", ")
+        ))?;
+    }
+    if o.detalhar {
+        for d in &r.detalhes {
+            es(writeln!(saida, "{d}"))?;
+        }
+    }
+    for f in &r.falhas {
+        es(writeln!(saida, "falha {f}"))?;
+    }
+    if !r.confirmado {
+        return es(writeln!(
+            saida,
+            "nada foi gravado (use --confirmar); a composição do salário e os adiados da aba mais recente só entram com --confirmar"
+        ));
+    }
+    es(writeln!(
+        saida,
+        "gravado: composicoes={} adiadas={}",
+        r.composicoes, r.adiadas
     ))
 }
 
@@ -586,6 +669,110 @@ mod testes {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// Planilha fictícia: 2023.04 sem linha (layout), 2026.10 com A e B, 2026.11 só com B.
+    fn planilha_historica(caminho: &Path) {
+        use rust_xlsxwriter::{ExcelDateTime, Format, Workbook};
+        let mut wb = Workbook::new();
+        let data = Format::new().set_num_format("dd/mm/yyyy");
+        for (aba, itens) in [
+            ("2023.04", Vec::new()),
+            ("2026.10", vec!["Item A", "Item B"]),
+            ("2026.11", vec!["Item B"]),
+        ] {
+            let ws = wb.add_worksheet();
+            ws.set_name(aba).expect("nome");
+            let ano: u16 = aba[..4].parse().expect("ano");
+            let mes: u8 = aba[5..].parse().expect("mes");
+            for (i, nome) in itens.iter().enumerate() {
+                let r = 6 + i as u32;
+                if i == 0 {
+                    ws.write_string(r, 1, "Casa").expect("c");
+                }
+                ws.write_string(r, 2, *nome).expect("c");
+                let dt = ExcelDateTime::from_ymd(ano, mes, 5).expect("data");
+                ws.write_datetime_with_format(r, 6, &dt, &data).expect("c");
+                ws.write_number(r, 8, 100.0).expect("c");
+            }
+        }
+        wb.save(caminho).expect("salvar");
+    }
+
+    #[test]
+    fn importar_historico_previa_so_conta_e_confirmar_grava_uma_vez() {
+        let cofre = tempfile::tempdir().expect("cofre");
+        let arq = cofre.path().join("hist.xlsx");
+        planilha_historica(&arq);
+        let abrir = |c: &Path| -> Result<Box<dyn Planejamento>, String> {
+            let banco = sbf_planejamento::Banco::abrir(c.join("planejamento.sqlite"))
+                .map_err(|e| e.to_string())?;
+            Ok(Box::new(sbf_planejamento::PlanejamentoSqlite::novo(
+                banco,
+                Box::new(sbf_planejamento::SemSaldos),
+            )))
+        };
+        let c = cofre.path().to_string_lossy().into_owned();
+        let a = arq.to_string_lossy().into_owned();
+        let rodar = |extra: &[&str]| {
+            let mut args = vec!["importar-historico", "--inventario", &c, "--planilha", &a];
+            args.extend_from_slice(extra);
+            let mut saida = Vec::new();
+            let codigo = rodar_com(&v(&args), &abrir, &mut saida);
+            assert_eq!(codigo, ExitCode::SUCCESS);
+            String::from_utf8(saida).expect("utf8")
+        };
+
+        let t = rodar(&[]);
+        assert!(t.contains("2026.10: lidas=2 novos=2"), "{t}");
+        assert!(t.contains("encerrados=1"), "{t}");
+        assert!(t.contains("2023.04: não lida (layout)"), "{t}");
+        assert!(t.contains("nada foi gravado"), "{t}");
+        assert!(!t.contains("Item"), "a saída padrão não mostra nomes: {t}");
+        assert!(
+            abrir(cofre.path())
+                .expect("abrir")
+                .recorrentes(true)
+                .expect("r")
+                .is_empty()
+        );
+
+        let t = rodar(&["--detalhar"]);
+        assert!(t.contains("Item A"), "{t}");
+
+        let t = rodar(&["--confirmar"]);
+        assert!(t.contains("gravado:"), "{t}");
+        let plan = abrir(cofre.path()).expect("abrir");
+        let rs = plan.recorrentes(false).expect("r");
+        assert_eq!(rs.len(), 2);
+        assert!(
+            rs.iter()
+                .any(|r| r.nome == "Item A" && r.cancelamento.is_some())
+        );
+
+        let t = rodar(&["--confirmar"]);
+        assert!(t.contains("novos=0 encerrados=0"), "{t}");
+        assert_eq!(plan.recorrentes(false).expect("r").len(), 2);
+
+        let t = rodar(&["--de", "2026.11"]);
+        assert!(!t.contains("2026.10:"), "{t}");
+    }
+
+    #[test]
+    fn importar_historico_recusa_competencia_ruim() {
+        let mut saida = Vec::new();
+        let abrir =
+            |_: &Path| -> Result<Box<dyn Planejamento>, String> { Ok(Box::new(Falso::default())) };
+        let args = v(&[
+            "importar-historico",
+            "--inventario",
+            "/c",
+            "--planilha",
+            "/p.xlsx",
+            "--de",
+            "abril",
+        ]);
+        assert_eq!(rodar_com(&args, &abrir, &mut saida), ExitCode::from(1));
     }
 
     #[test]

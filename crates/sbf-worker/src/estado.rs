@@ -26,7 +26,7 @@ pub fn agora() -> u64 {
 pub struct UltimaColeta {
     /// Quando (segundos unix).
     pub quando: u64,
-    /// De onde: `pastas`, `nuvem` ou `mensageiros`.
+    /// De onde: `pastas`, `nuvem`, `mensageiros` ou `telegram`.
     pub origem: String,
     /// Quantas origens novas.
     pub novos: u64,
@@ -58,6 +58,10 @@ pub struct EstadoDoWorker {
     pub nuvem_ligada: bool,
     /// A coleta de mensageiros está ligada?
     pub mensageiros_ligados: bool,
+    /// Quantas contas de e-mail estão com a autorização vencida (`invalid_grant`): o worker não
+    /// tenta essas até a pessoa entrar de novo (`sbf email entrar` ou Conexões › E-mail); as
+    /// outras contas seguem coletando.
+    pub gmail_contas_vencidas: u32,
     /// Falhas desde que subiu.
     pub falhas: u32,
 }
@@ -68,8 +72,14 @@ pub struct EstadoDoWorker {
 /// Falha de disco.
 pub fn escrever_atomico(caminho: &Path, bytes: &[u8]) -> Resultado<()> {
     use std::io::Write as _;
+    // Único por processo e por escrita: o batimento escreve de outra thread.
+    static SEQUENCIA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut tmp = caminho.as_os_str().to_owned();
-    tmp.push(format!(".tmp{}", std::process::id()));
+    tmp.push(format!(
+        ".tmp{}-{}",
+        std::process::id(),
+        SEQUENCIA.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let tmp = std::path::PathBuf::from(tmp);
     {
         let mut o = std::fs::OpenOptions::new();
@@ -149,7 +159,12 @@ pub fn texto_da_barra(estado: Option<&EstadoDoWorker>, agora: u64) -> String {
     } else {
         String::new()
     };
-    format!("Worker: rodando · {coleta}{fila}")
+    let gmail = match e.gmail_contas_vencidas {
+        0 => String::new(),
+        1 => " · E-mail: 1 conta com autorização vencida".to_owned(),
+        n => format!(" · E-mail: {n} contas com autorização vencida"),
+    };
+    format!("Worker: rodando · {coleta}{fila}{gmail}")
 }
 
 #[cfg(test)]
@@ -185,6 +200,28 @@ mod testes {
             };
             assert!(!morto.rodando(agora()));
         }
+    }
+
+    #[test]
+    fn a_barra_avisa_quando_a_autorizacao_de_contas_de_email_venceu() {
+        let agora_ = agora();
+        let e = EstadoDoWorker {
+            pid: std::process::id(),
+            atualizado_em: agora_,
+            gmail_contas_vencidas: 1,
+            ..EstadoDoWorker::default()
+        };
+        assert!(
+            texto_da_barra(Some(&e), agora_).ends_with("E-mail: 1 conta com autorização vencida")
+        );
+        let dois = EstadoDoWorker {
+            gmail_contas_vencidas: 2,
+            ..e
+        };
+        assert!(
+            texto_da_barra(Some(&dois), agora_)
+                .ends_with("E-mail: 2 contas com autorização vencida")
+        );
     }
 
     #[test]

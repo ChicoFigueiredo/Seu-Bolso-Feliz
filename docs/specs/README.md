@@ -12,16 +12,19 @@ Substituem a pilha de ~54 documentos antigos (agora em [`../_arquivo/`](../_arqu
 
 ## Índice
 
-| Spec                                                              | Capacidade                        | Estado resumido                                           |
-| ----------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------- |
-| [00-estado-real](00-estado-real.md)                               | Mapa geral + saúde do código      | —                                                         |
-| [01-ingestao](01-ingestao.md)                                     | Pipeline de documentos (3 canais) | ✅ construído e testado                                   |
-| [02-conciliacao](02-conciliacao.md)                               | Documento × registros             | ✅ motor · 🟡 UX                                          |
-| [03-padroes-documentais](03-padroes-documentais.md)               | Memória operacional               | ✅ modelo · 🟡 ligação parsing                            |
-| [04-ia-e-chat](04-ia-e-chat.md)                                   | Interface inteligente             | ✅ integrado                                              |
-| [05-dominio-financeiro](05-dominio-financeiro.md)                 | Núcleo determinístico             | ✅ testado                                                |
-| [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md) | Desktop Rust: inventário          | ⬜ proposta                                               |
-| [13-motor-regras-lua](13-motor-regras-lua.md)                     | Motor de regras Lua no Rust       | 🟢 implementada (aceite em 13-motor-regras-lua-aceite.md) |
+| Spec                                                                            | Capacidade                                                | Estado resumido                                           |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
+| [00-estado-real](00-estado-real.md)                                             | Mapa geral + saúde do código                              | —                                                         |
+| [01-ingestao](01-ingestao.md)                                                   | Pipeline de documentos (3 canais)                         | ✅ construído e testado                                   |
+| [02-conciliacao](02-conciliacao.md)                                             | Documento × registros                                     | ✅ motor · 🟡 UX                                          |
+| [03-padroes-documentais](03-padroes-documentais.md)                             | Memória operacional                                       | ✅ modelo · 🟡 ligação parsing                            |
+| [04-ia-e-chat](04-ia-e-chat.md)                                                 | Interface inteligente                                     | ✅ integrado                                              |
+| [05-dominio-financeiro](05-dominio-financeiro.md)                               | Núcleo determinístico                                     | ✅ testado                                                |
+| [06-desktop-fatia-1-inventario](06-desktop-fatia-1-inventario.md)               | Desktop Rust: inventário                                  | ⬜ proposta                                               |
+| [13-motor-regras-lua](13-motor-regras-lua.md)                                   | Motor de regras Lua no Rust                               | 🟢 implementada (aceite em 13-motor-regras-lua-aceite.md) |
+| [14-caixa-de-entrada](14-caixa-de-entrada.md)                                   | Fila do reconhecimento local                              | 🟢 implementada (aceite no próprio arquivo)               |
+| [15-rita-e-padroes-visiveis](15-rita-e-padroes-visiveis.md)                     | Rita e padrões visíveis                                   | ver o próprio arquivo                                     |
+| [16-desktop-roteiros-escritos-fatia-1](16-desktop-roteiros-escritos-fatia-1.md) | Roteiros escritos em Luau + motor de navegador na bancada | 🟡 em implementação (ADR-022)                             |
 
 ## Regras de manutenção (spec-driven)
 

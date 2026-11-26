@@ -6,6 +6,7 @@
 //! campo `continuar`; a janela grava `1` (Continuar) ou `2` (Cancelar).
 
 use crate::erro::{ErroDeRoteiro, Resultado};
+use crate::manifesto::{LIMITE_DE_BYTES, Manifesto, tem_caractere_perigoso};
 use crate::passo::{Passo, Roteiro, validar_nome};
 use rusqlite::{Connection, OptionalExtension as _, params};
 use std::path::Path;
@@ -60,6 +61,74 @@ CREATE TABLE IF NOT EXISTS evento (
 );
 ";
 
+/// O roteiro escrito (Luau): o nome, as versões **imutáveis** e o histórico de estados. Os
+/// gatilhos impedem editar ou apagar o que uma versão já guardou; só `estado` e
+/// `resultado_do_teste` mudam, e há no máximo uma versão `ativo` por roteiro.
+const SQL_ESCRITO: &str = "
+CREATE TABLE IF NOT EXISTS roteiro_escrito (
+  id        INTEGER PRIMARY KEY,
+  nome      TEXT NOT NULL UNIQUE,
+  criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS roteiro_escrito_versao (
+  id          INTEGER PRIMARY KEY,
+  roteiro_id  INTEGER NOT NULL REFERENCES roteiro_escrito(id),
+  numero      INTEGER NOT NULL,
+  manifesto   TEXT NOT NULL,
+  fonte       TEXT NOT NULL,
+  checksum    TEXT NOT NULL,
+  estado      TEXT NOT NULL CHECK (estado IN ('rascunho','testado','ativo','aposentado')),
+  autor       TEXT NOT NULL CHECK (autor IN ('usuario','mcp') OR autor LIKE 'ia:_%'),
+  motivo      TEXT,
+  criada_em   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  resultado_do_teste TEXT,
+  UNIQUE (roteiro_id, numero)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS roteiro_escrito_uma_ativa
+  ON roteiro_escrito_versao(roteiro_id) WHERE estado = 'ativo';
+CREATE TABLE IF NOT EXISTS roteiro_escrito_evento (
+  id        INTEGER PRIMARY KEY,
+  versao_id INTEGER NOT NULL REFERENCES roteiro_escrito_versao(id),
+  quando    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  de        TEXT,
+  para      TEXT NOT NULL,
+  quem      TEXT NOT NULL,
+  detalhe   TEXT NOT NULL DEFAULT ''
+);
+CREATE TRIGGER IF NOT EXISTS roteiro_escrito_versao_imutavel
+BEFORE UPDATE OF roteiro_id, numero, manifesto, fonte, checksum, autor, motivo, criada_em
+ON roteiro_escrito_versao
+BEGIN
+  SELECT RAISE(ABORT, 'uma versão de roteiro escrito nunca é editada: importe uma versão nova');
+END;
+CREATE TRIGGER IF NOT EXISTS roteiro_escrito_versao_sem_apagar
+BEFORE DELETE ON roteiro_escrito_versao
+BEGIN
+  SELECT RAISE(ABORT, 'uma versão de roteiro escrito nunca é apagada');
+END;
+CREATE TRIGGER IF NOT EXISTS roteiro_escrito_estado_sem_voltar
+BEFORE UPDATE OF estado ON roteiro_escrito_versao
+WHEN NOT (
+     (OLD.estado = 'rascunho' AND NEW.estado IN ('rascunho','testado'))
+  OR (OLD.estado = 'testado'  AND NEW.estado = 'ativo')
+  OR (OLD.estado = 'ativo'    AND NEW.estado = 'aposentado')
+  OR (OLD.estado = NEW.estado)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'transição de estado inválida no roteiro escrito');
+END;
+CREATE TRIGGER IF NOT EXISTS roteiro_escrito_evento_imutavel
+BEFORE UPDATE ON roteiro_escrito_evento
+BEGIN
+  SELECT RAISE(ABORT, 'o histórico do roteiro escrito não se edita');
+END;
+CREATE TRIGGER IF NOT EXISTS roteiro_escrito_evento_sem_apagar
+BEFORE DELETE ON roteiro_escrito_evento
+BEGIN
+  SELECT RAISE(ABORT, 'o histórico do roteiro escrito não se apaga');
+END;
+";
+
 /// Como uma versão nasceu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrigemDaVersao {
@@ -101,7 +170,7 @@ impl EstadoDaExecucao {
             Self::Cancelada => "cancelada",
         }
     }
-    fn de(t: &str) -> Self {
+    pub(crate) fn de(t: &str) -> Self {
         match t {
             "aguardando_usuario" => Self::AguardandoUsuario,
             "concluida" => Self::Concluida,
@@ -174,7 +243,7 @@ pub type Evento = (String, Option<i64>, String, String);
 /// O banco dos roteiros.
 #[derive(Debug)]
 pub struct BancoDeRoteiros {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 fn passos_de(json: &str) -> Resultado<Vec<Passo>> {
@@ -195,6 +264,8 @@ impl BancoDeRoteiros {
         let _: String = conn.query_row("PRAGMA journal_mode = WAL", [], |l| l.get(0))?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
+        conn.execute_batch(SQL_ESCRITO)?;
+        conn.execute_batch(crate::execucao_escrita::SQL)?;
         Ok(Self { conn })
     }
 
@@ -206,6 +277,8 @@ impl BancoDeRoteiros {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
+        conn.execute_batch(SQL_ESCRITO)?;
+        conn.execute_batch(crate::execucao_escrita::SQL)?;
         Ok(Self { conn })
     }
 
@@ -808,6 +881,636 @@ impl BancoDeRoteiros {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Roteiro escrito (Luau): versões imutáveis, estados e histórico
+// ---------------------------------------------------------------------------------------
+
+/// O estado de uma versão do roteiro escrito. O caminho é `rascunho → testado → ativo →
+/// aposentado`; nunca se volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoEscrito {
+    Rascunho,
+    Testado,
+    Ativo,
+    Aposentado,
+}
+
+impl EstadoEscrito {
+    #[must_use]
+    pub fn texto(self) -> &'static str {
+        match self {
+            Self::Rascunho => "rascunho",
+            Self::Testado => "testado",
+            Self::Ativo => "ativo",
+            Self::Aposentado => "aposentado",
+        }
+    }
+    fn de(t: &str) -> Self {
+        match t {
+            "testado" => Self::Testado,
+            "ativo" => Self::Ativo,
+            "aposentado" => Self::Aposentado,
+            _ => Self::Rascunho,
+        }
+    }
+}
+
+/// Quem escreveu a versão. Só quem importa; **ativar depende da [`Confirmacao`]**, e o texto
+/// que o usuário digita depende do autor: quem não é o próprio usuário (`mcp`, `ia:*`) obriga a
+/// digitar também o host principal (ver [`BancoDeRoteiros::esperado_para_ativar`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutorEscrito {
+    Usuario,
+    Mcp,
+    /// O modelo que escreveu (`ia:<modelo>`).
+    Ia(String),
+}
+
+impl AutorEscrito {
+    /// `usuario`, `mcp` ou `ia:<modelo>`.
+    #[must_use]
+    pub fn texto(&self) -> String {
+        match self {
+            Self::Usuario => "usuario".to_owned(),
+            Self::Mcp => "mcp".to_owned(),
+            Self::Ia(m) => format!("ia:{m}"),
+        }
+    }
+    fn de(t: &str) -> Self {
+        match t {
+            "usuario" => Self::Usuario,
+            "mcp" => Self::Mcp,
+            outro => Self::Ia(outro.strip_prefix("ia:").unwrap_or(outro).to_owned()),
+        }
+    }
+    fn validar(&self) -> Resultado<()> {
+        if let Self::Ia(m) = self
+            && (m.is_empty()
+                || m.len() > 80
+                || !m
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':')))
+        {
+            return Err(ErroDeRoteiro::Invalido(
+                "o modelo do autor `ia:<modelo>` tem de ter de 1 a 80 letras, dígitos, `-`, `_`, `.` ou `:`"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A prova de que o **usuário** digitou a confirmação pedida. É o único jeito de chamar
+/// [`BancoDeRoteiros::ativar`] e [`BancoDeRoteiros::desativar`]. Quem a constrói são o terminal
+/// interativo (`sbf roteiros escrito ativar`, [`Confirmacao::do_terminal`]) e a janela do app
+/// ([`Confirmacao::da_janela`]); o MCP e a IA não a constroem.
+///
+/// Atenção: isto é **autoridade por convenção** (os construtores são `pub`): o que impede o
+/// MCP e a IA de ativar não é o sistema de tipos, é o teste de arquitetura
+/// `crates/sbf-roteiros/tests/autoridade.rs`, que falha se `sbf-mcp`, `sbf-worker` ou `sbf-ia`
+/// citarem `Confirmacao`, `da_janela`, `do_terminal`, `marcar_testado`, `.ativar(` ou
+/// `.desativar(`.
+#[derive(Debug)]
+pub struct Confirmacao {
+    esperado: String,
+}
+
+impl Confirmacao {
+    /// `<roteiro>@<versao>`: o texto de ativar de uma versão escrita **pelo usuário**. Não use
+    /// para decidir o que pedir: a fonte do texto a digitar é
+    /// [`BancoDeRoteiros::esperado_para_ativar`], que acrescenta o host quando o autor é o MCP
+    /// ou a IA. Este é só o miolo dele.
+    #[must_use]
+    pub fn texto_de_ativar(roteiro: &str, versao: u32) -> String {
+        format!("{roteiro}@{versao}")
+    }
+
+    /// O nome do roteiro: o texto de desativar. A fonte é
+    /// [`BancoDeRoteiros::esperado_para_desativar`].
+    #[must_use]
+    pub fn texto_de_desativar(roteiro: &str) -> String {
+        roteiro.to_owned()
+    }
+
+    /// Confere o terminal e a digitação.
+    ///
+    /// # Errors
+    /// Sem terminal interativo, ou digitação diferente do esperado.
+    pub fn do_terminal(
+        terminal_interativo: bool,
+        digitado: &str,
+        esperado: &str,
+    ) -> Resultado<Self> {
+        if !terminal_interativo {
+            return Err(ErroDeRoteiro::Invalido(
+                "ativar e desativar só num terminal interativo, com confirmação digitada; o MCP e a IA não ativam. Nada foi alterado."
+                    .into(),
+            ));
+        }
+        if digitado != esperado {
+            return Err(ErroDeRoteiro::Invalido(
+                "confirmação diferente do pedido; nada foi alterado.".into(),
+            ));
+        }
+        Ok(Self {
+            esperado: esperado.to_owned(),
+        })
+    }
+
+    /// Confere a digitação feita na janela do app (o mesmo caminho humano das regras de
+    /// reconhecimento, ADR-021). Só a janela do SBF a usa; o MCP e a IA nunca constroem uma
+    /// `Confirmacao` (o teste `tests/autoridade.rs` falha se esses crates a citarem).
+    ///
+    /// # Errors
+    /// Digitação diferente do esperado.
+    pub fn da_janela(digitado: &str, esperado: &str) -> Resultado<Self> {
+        if digitado != esperado {
+            return Err(ErroDeRoteiro::Invalido(
+                "confirmação diferente do pedido; nada foi alterado.".into(),
+            ));
+        }
+        Ok(Self {
+            esperado: esperado.to_owned(),
+        })
+    }
+}
+
+/// O resultado de um teste no site falso, entregue por quem executa (outra frente).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultadoDoTeste {
+    pub passou: bool,
+    /// Texto curto e **sem segredo** (o motor já limpa).
+    pub resumo: String,
+}
+
+/// Uma versão do roteiro escrito. Nunca muda depois de criada, a não ser o estado e o
+/// resultado do teste.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersaoEscrita {
+    pub roteiro: String,
+    pub numero: u32,
+    pub manifesto: Manifesto,
+    pub fonte: String,
+    pub checksum: String,
+    pub estado: EstadoEscrito,
+    pub autor: AutorEscrito,
+    pub motivo: String,
+    pub criada_em: String,
+    pub resultado_do_teste: Option<String>,
+}
+
+/// O que o `importar_escrito` fez.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Importacao {
+    pub numero: u32,
+    /// `false` quando o par manifesto+fonte já era a versão mais nova e nada foi criado.
+    pub criada: bool,
+}
+
+/// Uma linha da lista de roteiros escritos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinhaDeEscrito {
+    pub nome: String,
+    pub descricao: String,
+    /// A versão em vigor, se houver.
+    pub ativa: Option<u32>,
+    pub ultima: u32,
+    pub estado_da_ultima: EstadoEscrito,
+}
+
+/// Uma mudança de estado, para o histórico: (quando, versão, de, para, quem, detalhe).
+pub type EventoEscrito = (String, u32, Option<String>, String, String, String);
+
+/// O roteiro escrito inteiro: versões e histórico.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetalheDoEscrito {
+    pub nome: String,
+    pub versoes: Vec<VersaoEscrita>,
+    pub eventos: Vec<EventoEscrito>,
+}
+
+fn invalido_escrito(m: impl Into<String>) -> ErroDeRoteiro {
+    ErroDeRoteiro::Invalido(m.into())
+}
+
+/// `i64` do SQLite para `u32` (satura em vez de estourar). Também usado por
+/// `execucao_escrita.rs`, que ainda tem uma cópia local a remover.
+pub(crate) fn u32_de(n: i64) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+impl BancoDeRoteiros {
+    fn id_do_escrito(&self, nome: &str) -> Resultado<i64> {
+        self.conn
+            .query_row(
+                "SELECT id FROM roteiro_escrito WHERE nome = ?1",
+                [nome],
+                |l| l.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| invalido_escrito(format!("roteiro escrito `{nome}` não encontrado")))
+    }
+
+    /// Importa uma versão. **Sempre cria RASCUNHO**, nunca ativa. O mesmo par manifesto+fonte
+    /// (mesmo checksum) que já é a versão mais nova devolve essa versão sem duplicar; se a mais
+    /// nova com o mesmo conteúdo está aposentada, nasce uma versão nova (assim dá para
+    /// reativar, depois de testar de novo, algo que foi desativado).
+    ///
+    /// # Errors
+    /// Manifesto inválido, fonte vazia ou maior que 64 KiB, autor inválido ou falha do banco.
+    pub fn importar_escrito(
+        &self,
+        manifesto: &Manifesto,
+        fonte: &str,
+        autor: &AutorEscrito,
+        motivo: &str,
+    ) -> Resultado<Importacao> {
+        manifesto.validar()?;
+        autor.validar()?;
+        if fonte.trim().is_empty() {
+            return Err(invalido_escrito("o roteiro escrito está vazio"));
+        }
+        if fonte.len() > LIMITE_DE_BYTES {
+            return Err(invalido_escrito("o fonte do roteiro passa de 64 KiB"));
+        }
+        if tem_caractere_perigoso(fonte, true) {
+            return Err(invalido_escrito(
+                "o fonte do roteiro tem caractere de controle (fora quebra de linha `\\n` e tabulação) ou de direção do texto; salve o arquivo com fim de linha LF",
+            ));
+        }
+        if motivo.chars().count() > 500 || tem_caractere_perigoso(motivo, false) {
+            return Err(invalido_escrito(
+                "o motivo passa de 500 caracteres ou tem caractere de controle ou de direção",
+            ));
+        }
+        let checksum = manifesto.checksum_com(fonte)?;
+        let json = manifesto.json_canonico()?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO roteiro_escrito (nome) VALUES (?1)",
+            [&manifesto.nome],
+        )?;
+        let id: i64 = tx.query_row(
+            "SELECT id FROM roteiro_escrito WHERE nome = ?1",
+            [&manifesto.nome],
+            |l| l.get(0),
+        )?;
+        let mais_nova: Option<(i64, String, String)> = tx
+            .query_row(
+                "SELECT numero, checksum, estado FROM roteiro_escrito_versao
+                 WHERE roteiro_id = ?1 ORDER BY numero DESC LIMIT 1",
+                [id],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .optional()?;
+        let ultimo = mais_nova.as_ref().map_or(0, |m| m.0);
+        if let Some((n, sum, estado)) = &mais_nova
+            && *sum == checksum
+            && estado != "aposentado"
+        {
+            return Ok(Importacao {
+                numero: u32_de(*n),
+                criada: false,
+            });
+        }
+        let numero = ultimo + 1;
+        tx.execute(
+            "INSERT INTO roteiro_escrito_versao
+               (roteiro_id, numero, manifesto, fonte, checksum, estado, autor, motivo)
+             VALUES (?1,?2,?3,?4,?5,'rascunho',?6,?7)",
+            params![id, numero, json, fonte, checksum, autor.texto(), motivo],
+        )?;
+        let versao_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             VALUES (?1,NULL,'rascunho',?2,?3)",
+            params![versao_id, autor.texto(), motivo],
+        )?;
+        tx.commit()?;
+        Ok(Importacao {
+            numero: u32_de(numero),
+            criada: true,
+        })
+    }
+
+    fn ler_versao(&self, nome: &str, numero: u32) -> Resultado<(i64, VersaoEscrita)> {
+        let linha = self
+            .conn
+            .query_row(
+                "SELECT v.id, v.numero, v.manifesto, v.fonte, v.checksum, v.estado, v.autor,
+                        COALESCE(v.motivo,''), v.criada_em, v.resultado_do_teste
+                 FROM roteiro_escrito_versao v JOIN roteiro_escrito r ON r.id = v.roteiro_id
+                 WHERE r.nome = ?1 AND v.numero = ?2",
+                params![nome, numero],
+                |l| {
+                    Ok((
+                        l.get::<_, i64>(0)?,
+                        l.get::<_, i64>(1)?,
+                        l.get::<_, String>(2)?,
+                        l.get::<_, String>(3)?,
+                        l.get::<_, String>(4)?,
+                        l.get::<_, String>(5)?,
+                        l.get::<_, String>(6)?,
+                        l.get::<_, String>(7)?,
+                        l.get::<_, String>(8)?,
+                        l.get::<_, Option<String>>(9)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| {
+                invalido_escrito(format!(
+                    "roteiro escrito `{nome}` não tem a versão {numero}"
+                ))
+            })?;
+        let (id, num, manifesto, fonte, checksum, estado, autor, motivo, criada_em, teste) = linha;
+        let manifesto: Manifesto = serde_json::from_str(&manifesto)
+            .map_err(|_| invalido_escrito("o manifesto guardado não lê"))?;
+        Ok((
+            id,
+            VersaoEscrita {
+                roteiro: nome.to_owned(),
+                numero: u32_de(num),
+                manifesto,
+                fonte,
+                checksum,
+                estado: EstadoEscrito::de(&estado),
+                autor: AutorEscrito::de(&autor),
+                motivo,
+                criada_em,
+                resultado_do_teste: teste,
+            },
+        ))
+    }
+
+    /// Uma versão do roteiro escrito.
+    ///
+    /// # Errors
+    /// Roteiro ou versão inexistente, ou falha do banco.
+    pub fn versao_escrita(&self, nome: &str, numero: u32) -> Resultado<VersaoEscrita> {
+        Ok(self.ler_versao(nome, numero)?.1)
+    }
+
+    /// A versão em vigor do roteiro escrito, se houver (é a que o executor e a agenda usam).
+    ///
+    /// # Errors
+    /// Falha do banco.
+    pub fn versao_ativa_escrita(&self, nome: &str) -> Resultado<Option<VersaoEscrita>> {
+        let numero: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT v.numero FROM roteiro_escrito_versao v
+                 JOIN roteiro_escrito r ON r.id = v.roteiro_id
+                 WHERE r.nome = ?1 AND v.estado = 'ativo'",
+                [nome],
+                |l| l.get(0),
+            )
+            .optional()?;
+        numero
+            .map(|n| self.versao_escrita(nome, u32_de(n)))
+            .transpose()
+    }
+
+    /// Registra o resultado do teste. **Só de rascunho.** Se passou, a versão vira `testado`;
+    /// se falhou, continua rascunho (o resumo fica no histórico).
+    ///
+    /// É `pub` só porque os testes de integração do crate precisam dela. **Em produção só
+    /// `testar_escrito` (`teste_escrito.rs`), que de fato roda o roteiro no site falso, a
+    /// chama**; nem o MCP, nem o worker, nem a IA podem citá-la (`tests/autoridade.rs`).
+    ///
+    /// # Errors
+    /// Versão inexistente ou que não é rascunho.
+    pub fn marcar_testado(
+        &self,
+        nome: &str,
+        numero: u32,
+        resultado: &ResultadoDoTeste,
+    ) -> Resultado<EstadoEscrito> {
+        let (id, v) = self.ler_versao(nome, numero)?;
+        if v.estado != EstadoEscrito::Rascunho {
+            return Err(invalido_escrito(format!(
+                "só um rascunho pode ser testado; a versão {numero} está {}",
+                v.estado.texto()
+            )));
+        }
+        let resumo: String = resultado.resumo.chars().take(500).collect();
+        let novo = if resultado.passou {
+            EstadoEscrito::Testado
+        } else {
+            EstadoEscrito::Rascunho
+        };
+        let texto = format!(
+            "{}: {resumo}",
+            if resultado.passou { "passou" } else { "falhou" }
+        );
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE roteiro_escrito_versao SET estado = ?1, resultado_do_teste = ?2 WHERE id = ?3",
+            params![novo.texto(), texto, id],
+        )?;
+        tx.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             VALUES (?1,'rascunho',?2,'teste',?3)",
+            params![id, novo.texto(), texto],
+        )?;
+        tx.commit()?;
+        Ok(novo)
+    }
+
+    /// O texto que o usuário tem de digitar para ativar `nome` v`numero`. É a **única fonte**
+    /// desse texto: o terminal, a janela e [`BancoDeRoteiros::ativar`] usam esta função.
+    ///
+    /// - autor `usuario`: `<roteiro>@<versao>`;
+    /// - autor `mcp` ou `ia:*`: `<roteiro>@<versao> <host-principal>` (o primeiro de `hosts`),
+    ///   para que quem ativa algo proposto por outro seja obrigado a LER o host que vai receber
+    ///   a senha do chaveiro; `rotulo_senha` e `hosts` são autodeclarados pelo autor.
+    ///
+    /// # Errors
+    /// Roteiro ou versão inexistente.
+    pub fn esperado_para_ativar(&self, nome: &str, numero: u32) -> Resultado<String> {
+        let v = self.versao_escrita(nome, numero)?;
+        let base = Confirmacao::texto_de_ativar(nome, numero);
+        Ok(match v.autor {
+            AutorEscrito::Usuario => base,
+            AutorEscrito::Mcp | AutorEscrito::Ia(_) => {
+                // `hosts` nunca é vazio (o manifesto guardado passou em `validar`)
+                let host = v.manifesto.hosts.first().map_or("", String::as_str);
+                format!("{base} {host}")
+            }
+        })
+    }
+
+    /// O texto que o usuário tem de digitar para desativar `nome`: o nome do roteiro. Desativar
+    /// só para a execução, então não pede o host; é a única fonte desse texto.
+    #[must_use]
+    pub fn esperado_para_desativar(&self, nome: &str) -> String {
+        Confirmacao::texto_de_desativar(nome)
+    }
+
+    /// Ativa uma versão `testado` e aposenta a ativa anterior, numa transação. A
+    /// [`Confirmacao`] tem de ser a de [`BancoDeRoteiros::esperado_para_ativar`].
+    ///
+    /// # Errors
+    /// Confirmação de outro pedido, versão que não está `testado`, ou falha do banco.
+    pub fn ativar(&self, nome: &str, numero: u32, confirmacao: &Confirmacao) -> Resultado<()> {
+        if confirmacao.esperado != self.esperado_para_ativar(nome, numero)? {
+            return Err(invalido_escrito("a confirmação é de outro pedido"));
+        }
+        let (id, v) = self.ler_versao(nome, numero)?;
+        if v.estado != EstadoEscrito::Testado {
+            return Err(invalido_escrito(format!(
+                "só uma versão testada pode ser ativada; a versão {numero} está {}",
+                v.estado.texto()
+            )));
+        }
+        let roteiro_id = self.id_do_escrito(nome)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let anterior: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM roteiro_escrito_versao WHERE roteiro_id = ?1 AND estado = 'ativo'",
+                [roteiro_id],
+                |l| l.get(0),
+            )
+            .optional()?;
+        if let Some(a) = anterior {
+            tx.execute(
+                "UPDATE roteiro_escrito_versao SET estado = 'aposentado' WHERE id = ?1",
+                [a],
+            )?;
+            tx.execute(
+                "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+                 VALUES (?1,'ativo','aposentado','usuario',?2)",
+                params![a, format!("substituída pela versão {numero}")],
+            )?;
+        }
+        tx.execute(
+            "UPDATE roteiro_escrito_versao SET estado = 'ativo' WHERE id = ?1",
+            [id],
+        )?;
+        tx.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             VALUES (?1,'testado','ativo','usuario','ativada com confirmação digitada')",
+            [id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Aposenta a versão ativa: o roteiro fica sem versão em vigor (a agenda para). Devolve o
+    /// número da versão aposentada.
+    ///
+    /// # Errors
+    /// Confirmação de outro pedido, roteiro inexistente ou nenhuma versão ativa.
+    pub fn desativar(&self, nome: &str, confirmacao: &Confirmacao) -> Resultado<u32> {
+        if confirmacao.esperado != self.esperado_para_desativar(nome) {
+            return Err(invalido_escrito("a confirmação é de outro pedido"));
+        }
+        self.id_do_escrito(nome)?;
+        let Some(v) = self.versao_ativa_escrita(nome)? else {
+            return Err(invalido_escrito(format!(
+                "roteiro escrito `{nome}` não tem versão ativa"
+            )));
+        };
+        let (id, _) = self.ler_versao(nome, v.numero)?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE roteiro_escrito_versao SET estado = 'aposentado' WHERE id = ?1",
+            [id],
+        )?;
+        tx.execute(
+            "INSERT INTO roteiro_escrito_evento (versao_id, de, para, quem, detalhe)
+             VALUES (?1,'ativo','aposentado','usuario','desativada com confirmação digitada')",
+            [id],
+        )?;
+        tx.commit()?;
+        Ok(v.numero)
+    }
+
+    /// Os roteiros escritos, por nome.
+    ///
+    /// # Errors
+    /// Falha do banco.
+    pub fn listar_escritos(&self) -> Resultado<Vec<LinhaDeEscrito>> {
+        let mut st = self.conn.prepare(
+            "SELECT r.nome,
+                    (SELECT manifesto FROM roteiro_escrito_versao v
+                       WHERE v.roteiro_id = r.id ORDER BY v.numero DESC LIMIT 1),
+                    (SELECT numero FROM roteiro_escrito_versao v
+                       WHERE v.roteiro_id = r.id AND v.estado = 'ativo'),
+                    (SELECT numero FROM roteiro_escrito_versao v
+                       WHERE v.roteiro_id = r.id ORDER BY v.numero DESC LIMIT 1),
+                    (SELECT estado FROM roteiro_escrito_versao v
+                       WHERE v.roteiro_id = r.id ORDER BY v.numero DESC LIMIT 1)
+             FROM roteiro_escrito r ORDER BY r.nome",
+        )?;
+        let linhas = st
+            .query_map([], |l| {
+                Ok((
+                    l.get::<_, String>(0)?,
+                    l.get::<_, Option<String>>(1)?,
+                    l.get::<_, Option<i64>>(2)?,
+                    l.get::<_, Option<i64>>(3)?,
+                    l.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(linhas
+            .into_iter()
+            .map(|(nome, manifesto, ativa, ultima, estado)| LinhaDeEscrito {
+                descricao: manifesto
+                    .and_then(|m| serde_json::from_str::<Manifesto>(&m).ok())
+                    .map(|m| m.descricao)
+                    .unwrap_or_default(),
+                nome,
+                ativa: ativa.map(u32_de),
+                ultima: u32_de(ultima.unwrap_or(0)),
+                estado_da_ultima: EstadoEscrito::de(estado.as_deref().unwrap_or("rascunho")),
+            })
+            .collect())
+    }
+
+    /// O roteiro escrito com todas as versões e o histórico de estados.
+    ///
+    /// # Errors
+    /// Roteiro inexistente ou falha do banco.
+    pub fn mostrar(&self, nome: &str) -> Resultado<DetalheDoEscrito> {
+        let id = self.id_do_escrito(nome)?;
+        let numeros: Vec<i64> = {
+            let mut st = self.conn.prepare(
+                "SELECT numero FROM roteiro_escrito_versao WHERE roteiro_id = ?1 ORDER BY numero",
+            )?;
+            st.query_map([id], |l| l.get(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut versoes = Vec::new();
+        for n in numeros {
+            versoes.push(self.versao_escrita(nome, u32_de(n))?);
+        }
+        let mut st = self.conn.prepare(
+            "SELECT e.quando, v.numero, e.de, e.para, e.quem, e.detalhe
+             FROM roteiro_escrito_evento e JOIN roteiro_escrito_versao v ON v.id = e.versao_id
+             WHERE v.roteiro_id = ?1 ORDER BY e.id",
+        )?;
+        let eventos = st
+            .query_map([id], |l| {
+                Ok((
+                    l.get::<_, String>(0)?,
+                    u32_de(l.get::<_, i64>(1)?),
+                    l.get::<_, Option<String>>(2)?,
+                    l.get::<_, String>(3)?,
+                    l.get::<_, String>(4)?,
+                    l.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(DetalheDoEscrito {
+            nome: nome.to_owned(),
+            versoes,
+            eventos,
+        })
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -963,5 +1666,571 @@ mod testes {
         assert_eq!(b.pedido_do_usuario(e).unwrap(), 1);
         b.marcar_rodando(e).unwrap();
         assert_eq!(b.pedido_do_usuario(e).unwrap(), 0);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod testes_escrito {
+    use super::*;
+    use crate::manifesto::{Classe, Mfa};
+
+    fn manifesto(nome: &str) -> Manifesto {
+        Manifesto {
+            nome: nome.into(),
+            descricao: "Contracheque do mês".into(),
+            url_inicial: "https://portal.exemplo.test/entrar".into(),
+            hosts: vec!["portal.exemplo.test".into()],
+            rotulo_senha: Some("senha:portal-exemplo".into()),
+            rotulo_cpf: None,
+            mfa: Mfa::Nenhum,
+            movimenta_dinheiro: false,
+            classe: Classe::Consulta,
+            agenda_horas: Some(168),
+        }
+    }
+
+    const FONTE: &str = "navegador.abrir('https://portal.exemplo.test/entrar')";
+
+    fn passou() -> ResultadoDoTeste {
+        ResultadoDoTeste {
+            passou: true,
+            resumo: "site falso ok".into(),
+        }
+    }
+
+    fn conf_ativar(nome: &str, v: u32) -> Confirmacao {
+        Confirmacao::do_terminal(true, &format!("{nome}@{v}"), &format!("{nome}@{v}")).unwrap()
+    }
+
+    fn conf_desativar(nome: &str) -> Confirmacao {
+        Confirmacao::do_terminal(true, nome, nome).unwrap()
+    }
+
+    fn importar(b: &BancoDeRoteiros, fonte: &str) -> Importacao {
+        b.importar_escrito(
+            &manifesto("contracheque"),
+            fonte,
+            &AutorEscrito::Usuario,
+            "m",
+        )
+        .unwrap()
+    }
+
+    /// Importa, testa e ativa a versão.
+    fn ativa(b: &BancoDeRoteiros, fonte: &str) -> u32 {
+        let n = importar(b, fonte).numero;
+        b.marcar_testado("contracheque", n, &passou()).unwrap();
+        b.ativar("contracheque", n, &conf_ativar("contracheque", n))
+            .unwrap();
+        n
+    }
+
+    #[test]
+    fn importar_cria_rascunho_numerado_e_nunca_ativa() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let i = importar(&b, FONTE);
+        assert_eq!(
+            i,
+            Importacao {
+                numero: 1,
+                criada: true
+            }
+        );
+        let v = b.versao_escrita("contracheque", 1).unwrap();
+        assert_eq!(v.estado, EstadoEscrito::Rascunho);
+        assert_eq!(v.autor, AutorEscrito::Usuario);
+        assert_eq!(v.fonte, FONTE);
+        assert_eq!(v.checksum.len(), 64);
+        assert_eq!(v.motivo, "m");
+        assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+        let outra = importar(&b, "navegador.registrar('v2')");
+        assert_eq!(outra.numero, 2);
+    }
+
+    #[test]
+    fn mesma_checksum_da_mais_nova_devolve_a_mesma_versao() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        importar(&b, FONTE);
+        let de_novo = importar(&b, FONTE);
+        assert_eq!(
+            de_novo,
+            Importacao {
+                numero: 1,
+                criada: false
+            }
+        );
+        assert_eq!(b.mostrar("contracheque").unwrap().versoes.len(), 1);
+        // a mudança do manifesto também é conteúdo
+        let mut m = manifesto("contracheque");
+        m.descricao = "outra".into();
+        let i = b
+            .importar_escrito(&m, FONTE, &AutorEscrito::Mcp, "muda a descrição")
+            .unwrap();
+        assert_eq!(
+            i,
+            Importacao {
+                numero: 2,
+                criada: true
+            }
+        );
+        // v1 -> v2 -> a v1 de novo: a mais nova é a v2, então o conteúdo da v1 vira a v3
+        let volta = importar(&b, FONTE);
+        assert_eq!(
+            volta,
+            Importacao {
+                numero: 3,
+                criada: true
+            }
+        );
+    }
+
+    #[test]
+    fn reimportar_algo_aposentado_cria_versao_nova() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let n = ativa(&b, FONTE);
+        b.desativar("contracheque", &conf_desativar("contracheque"))
+            .unwrap();
+        assert_eq!(
+            b.versao_escrita("contracheque", n).unwrap().estado,
+            EstadoEscrito::Aposentado
+        );
+        let i = importar(&b, FONTE);
+        assert_eq!(
+            i,
+            Importacao {
+                numero: 2,
+                criada: true
+            }
+        );
+    }
+
+    #[test]
+    fn importar_valida_manifesto_fonte_e_autor() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let mut ruim = manifesto("contracheque");
+        ruim.hosts.clear();
+        assert!(
+            b.importar_escrito(&ruim, FONTE, &AutorEscrito::Usuario, "")
+                .is_err()
+        );
+        let m = manifesto("contracheque");
+        for fonte in ["", "   \n"] {
+            assert!(
+                b.importar_escrito(&m, fonte, &AutorEscrito::Usuario, "")
+                    .is_err()
+            );
+        }
+        let grande = "x".repeat(LIMITE_DE_BYTES + 1);
+        assert!(
+            b.importar_escrito(&m, &grande, &AutorEscrito::Usuario, "")
+                .is_err()
+        );
+        assert!(
+            b.importar_escrito(&m, FONTE, &AutorEscrito::Ia(String::new()), "")
+                .is_err()
+        );
+        assert!(
+            b.importar_escrito(&m, FONTE, &AutorEscrito::Ia("a b".into()), "")
+                .is_err()
+        );
+        assert!(
+            b.importar_escrito(&m, FONTE, &AutorEscrito::Ia("claude-sonnet-5-5".into()), "")
+                .is_ok()
+        );
+        assert!(b.listar_escritos().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn o_autor_fica_registrado_como_texto() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let m = manifesto("contracheque");
+        b.importar_escrito(&m, "a()", &AutorEscrito::Mcp, "")
+            .unwrap();
+        b.importar_escrito(&m, "b()", &AutorEscrito::Ia("claude-sonnet-5-5".into()), "")
+            .unwrap();
+        assert_eq!(
+            b.versao_escrita("contracheque", 1).unwrap().autor,
+            AutorEscrito::Mcp
+        );
+        let v2 = b.versao_escrita("contracheque", 2).unwrap();
+        assert_eq!(v2.autor, AutorEscrito::Ia("claude-sonnet-5-5".into()));
+        assert_eq!(v2.autor.texto(), "ia:claude-sonnet-5-5");
+    }
+
+    #[test]
+    fn marcar_testado_so_de_rascunho() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        importar(&b, FONTE);
+        let falhou = ResultadoDoTeste {
+            passou: false,
+            resumo: "seletor sumiu".into(),
+        };
+        assert_eq!(
+            b.marcar_testado("contracheque", 1, &falhou).unwrap(),
+            EstadoEscrito::Rascunho
+        );
+        let v = b.versao_escrita("contracheque", 1).unwrap();
+        assert_eq!(v.estado, EstadoEscrito::Rascunho);
+        assert!(v.resultado_do_teste.unwrap().starts_with("falhou"));
+        assert_eq!(
+            b.marcar_testado("contracheque", 1, &passou()).unwrap(),
+            EstadoEscrito::Testado
+        );
+        // testado não volta a ser testado, e versão inexistente dá erro
+        assert!(b.marcar_testado("contracheque", 1, &passou()).is_err());
+        assert!(b.marcar_testado("contracheque", 9, &passou()).is_err());
+        assert!(b.marcar_testado("nao-existe", 1, &passou()).is_err());
+    }
+
+    #[test]
+    fn ativar_sem_testado_falha_em_rascunho_ativo_e_aposentado() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        importar(&b, FONTE);
+        let e = b
+            .ativar("contracheque", 1, &conf_ativar("contracheque", 1))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("testada"), "{e}");
+        assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+        b.marcar_testado("contracheque", 1, &passou()).unwrap();
+        b.ativar("contracheque", 1, &conf_ativar("contracheque", 1))
+            .unwrap();
+        // já ativa
+        assert!(
+            b.ativar("contracheque", 1, &conf_ativar("contracheque", 1))
+                .is_err()
+        );
+        b.desativar("contracheque", &conf_desativar("contracheque"))
+            .unwrap();
+        // aposentada não volta
+        assert!(
+            b.ativar("contracheque", 1, &conf_ativar("contracheque", 1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ativar_aposenta_a_anterior_e_so_uma_fica_ativa() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let v1 = ativa(&b, "a()");
+        let v2 = ativa(&b, "b()");
+        assert_eq!((v1, v2), (1, 2));
+        let d = b.mostrar("contracheque").unwrap();
+        assert_eq!(d.versoes[0].estado, EstadoEscrito::Aposentado);
+        assert_eq!(d.versoes[1].estado, EstadoEscrito::Ativo);
+        assert_eq!(
+            b.versao_ativa_escrita("contracheque")
+                .unwrap()
+                .unwrap()
+                .numero,
+            2
+        );
+        let l = b.listar_escritos().unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].ativa, Some(2));
+        assert_eq!(l[0].ultima, 2);
+        assert_eq!(l[0].estado_da_ultima, EstadoEscrito::Ativo);
+        assert_eq!(l[0].descricao, "Contracheque do mês");
+    }
+
+    #[test]
+    fn a_confirmacao_e_do_pedido_e_exige_terminal() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        importar(&b, FONTE);
+        b.marcar_testado("contracheque", 1, &passou()).unwrap();
+        // sem terminal nem se constrói
+        let e = Confirmacao::do_terminal(false, "contracheque@1", "contracheque@1")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("terminal interativo"), "{e}");
+        // digitação errada
+        assert!(Confirmacao::do_terminal(true, "sim", "contracheque@1").is_err());
+        // confirmação de outra versão ou de outro roteiro não vale
+        assert!(
+            b.ativar("contracheque", 1, &conf_ativar("contracheque", 2))
+                .is_err()
+        );
+        assert!(
+            b.ativar("contracheque", 1, &conf_ativar("outro", 1))
+                .is_err()
+        );
+        assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+        // desativar com a confirmação de ativar também não vale
+        ativa(&b, "c()");
+        assert!(
+            b.desativar("contracheque", &conf_ativar("contracheque", 2))
+                .is_err()
+        );
+    }
+
+    fn importar_como(b: &BancoDeRoteiros, autor: &AutorEscrito) -> u32 {
+        let n = b
+            .importar_escrito(&manifesto("contracheque"), FONTE, autor, "proposta")
+            .unwrap()
+            .numero;
+        b.marcar_testado("contracheque", n, &passou()).unwrap();
+        n
+    }
+
+    #[test]
+    fn autor_usuario_digita_so_nome_e_versao() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let n = importar_como(&b, &AutorEscrito::Usuario);
+        assert_eq!(
+            b.esperado_para_ativar("contracheque", n).unwrap(),
+            "contracheque@1"
+        );
+        b.ativar("contracheque", n, &conf_ativar("contracheque", n))
+            .unwrap();
+    }
+
+    #[test]
+    fn autor_mcp_ou_ia_exige_o_host_principal_na_digitacao() {
+        for autor in [AutorEscrito::Mcp, AutorEscrito::Ia("modelo-x".into())] {
+            let b = BancoDeRoteiros::em_memoria().unwrap();
+            let n = importar_como(&b, &autor);
+            let esperado = b.esperado_para_ativar("contracheque", n).unwrap();
+            assert_eq!(esperado, "contracheque@1 portal.exemplo.test");
+            // só `nome@versão` não vale para quem o MCP ou a IA propôs
+            let sem_host =
+                Confirmacao::do_terminal(true, "contracheque@1", "contracheque@1").unwrap();
+            let e = b
+                .ativar("contracheque", n, &sem_host)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("outro pedido"), "{e}");
+            assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+            // com o host digitado, ativa
+            let c = Confirmacao::do_terminal(true, &esperado, &esperado).unwrap();
+            b.ativar("contracheque", n, &c).unwrap();
+            assert_eq!(
+                b.versao_ativa_escrita("contracheque")
+                    .unwrap()
+                    .unwrap()
+                    .numero,
+                n
+            );
+        }
+    }
+
+    #[test]
+    fn o_host_do_esperado_e_o_primeiro_de_hosts() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let mut m = manifesto("contracheque");
+        m.hosts = vec!["auth.exemplo.test".into(), "portal.exemplo.test".into()];
+        m.url_inicial = "https://auth.exemplo.test/entrar".into();
+        b.importar_escrito(&m, FONTE, &AutorEscrito::Mcp, "")
+            .unwrap();
+        assert_eq!(
+            b.esperado_para_ativar("contracheque", 1).unwrap(),
+            "contracheque@1 auth.exemplo.test"
+        );
+        assert!(b.esperado_para_ativar("contracheque", 9).is_err());
+        assert_eq!(b.esperado_para_desativar("contracheque"), "contracheque");
+    }
+
+    #[test]
+    fn fonte_e_motivo_com_controle_ou_direcao_sao_recusados() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        for ruim in [
+            "a()\u{1b}[3A",
+            "a()\r\nb()",
+            "a() --\u{202e}",
+            "a()\u{2066}",
+            "a()\u{85}",
+            "a()\0",
+        ] {
+            let e = b
+                .importar_escrito(&manifesto("contracheque"), ruim, &AutorEscrito::Usuario, "")
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("controle"), "{ruim:?}: {e}");
+            assert!(
+                b.importar_escrito(
+                    &manifesto("contracheque"),
+                    FONTE,
+                    &AutorEscrito::Usuario,
+                    ruim
+                )
+                .is_err(),
+                "motivo {ruim:?}"
+            );
+        }
+        // quebra de linha e tabulação do fonte continuam valendo
+        assert!(
+            b.importar_escrito(
+                &manifesto("contracheque"),
+                "a()\n\tb()\n",
+                &AutorEscrito::Usuario,
+                ""
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn desativar_sem_ativa_ou_roteiro_inexistente_da_erro() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        assert!(
+            b.desativar("nao-existe", &conf_desativar("nao-existe"))
+                .is_err()
+        );
+        importar(&b, FONTE);
+        assert!(
+            b.desativar("contracheque", &conf_desativar("contracheque"))
+                .is_err()
+        );
+        let n = ativa(&b, "x()");
+        assert_eq!(
+            b.desativar("contracheque", &conf_desativar("contracheque"))
+                .unwrap(),
+            n
+        );
+        assert!(b.versao_ativa_escrita("contracheque").unwrap().is_none());
+    }
+
+    #[test]
+    fn editar_nunca_altera_a_versao_antiga() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        let n = ativa(&b, "antigo()");
+        let antes = b.versao_escrita("contracheque", n).unwrap();
+        // "editar" é importar o fonte novo: nasce rascunho v2, a ativa segue igual
+        let nova = importar(&b, "novo()");
+        assert_eq!(nova.numero, 2);
+        assert_eq!(b.versao_escrita("contracheque", n).unwrap(), antes);
+        assert_eq!(
+            b.versao_ativa_escrita("contracheque")
+                .unwrap()
+                .unwrap()
+                .fonte,
+            "antigo()"
+        );
+        // e o banco recusa por baixo dos panos: nem SQL direto edita ou apaga a versão
+        for sql in [
+            "UPDATE roteiro_escrito_versao SET fonte = 'x' WHERE numero = 1",
+            "UPDATE roteiro_escrito_versao SET manifesto = '{}' WHERE numero = 1",
+            "UPDATE roteiro_escrito_versao SET checksum = 'x' WHERE numero = 1",
+            "UPDATE roteiro_escrito_versao SET autor = 'mcp' WHERE numero = 1",
+            "DELETE FROM roteiro_escrito_versao WHERE numero = 1",
+            "UPDATE roteiro_escrito_evento SET detalhe = 'x'",
+            "DELETE FROM roteiro_escrito_evento",
+        ] {
+            assert!(b.conn.execute(sql, []).is_err(), "{sql}");
+        }
+        assert_eq!(b.versao_escrita("contracheque", n).unwrap(), antes);
+    }
+
+    #[test]
+    fn o_banco_recusa_transicao_invalida_e_duas_ativas() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        importar(&b, "a()");
+        importar(&b, "b()");
+        // rascunho direto para ativo, aposentado ou testado->rascunho
+        assert!(
+            b.conn
+                .execute(
+                    "UPDATE roteiro_escrito_versao SET estado = 'ativo' WHERE numero = 1",
+                    []
+                )
+                .is_err()
+        );
+        b.marcar_testado("contracheque", 1, &passou()).unwrap();
+        assert!(
+            b.conn
+                .execute(
+                    "UPDATE roteiro_escrito_versao SET estado = 'rascunho' WHERE numero = 1",
+                    []
+                )
+                .is_err()
+        );
+        // duas ativas ao mesmo tempo
+        b.conn
+            .execute(
+                "UPDATE roteiro_escrito_versao SET estado = 'ativo' WHERE numero = 1",
+                [],
+            )
+            .unwrap();
+        b.marcar_testado("contracheque", 2, &passou()).unwrap();
+        assert!(
+            b.conn
+                .execute(
+                    "UPDATE roteiro_escrito_versao SET estado = 'ativo' WHERE numero = 2",
+                    []
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn o_historico_conta_a_vida_da_versao() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        ativa(&b, "a()");
+        ativa(&b, "b()");
+        let d = b.mostrar("contracheque").unwrap();
+        let passos: Vec<(u32, Option<&str>, &str)> = d
+            .eventos
+            .iter()
+            .map(|e| (e.1, e.2.as_deref(), e.3.as_str()))
+            .collect();
+        assert_eq!(
+            passos,
+            vec![
+                (1, None, "rascunho"),
+                (1, Some("rascunho"), "testado"),
+                (1, Some("testado"), "ativo"),
+                (2, None, "rascunho"),
+                (2, Some("rascunho"), "testado"),
+                (1, Some("ativo"), "aposentado"),
+                (2, Some("testado"), "ativo"),
+            ]
+        );
+    }
+
+    #[test]
+    fn mostrar_e_versao_de_roteiro_inexistente_dao_erro() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        assert!(b.mostrar("nao-existe").is_err());
+        assert!(b.versao_escrita("nao-existe", 1).is_err());
+        assert!(b.versao_ativa_escrita("nao-existe").unwrap().is_none());
+        assert!(b.listar_escritos().unwrap().is_empty());
+    }
+
+    #[test]
+    fn roteiros_escritos_de_nomes_diferentes_nao_se_misturam() {
+        let b = BancoDeRoteiros::em_memoria().unwrap();
+        b.importar_escrito(&manifesto("um"), "a()", &AutorEscrito::Usuario, "")
+            .unwrap();
+        b.importar_escrito(&manifesto("dois"), "a()", &AutorEscrito::Usuario, "")
+            .unwrap();
+        assert_eq!(b.versao_escrita("um", 1).unwrap().roteiro, "um");
+        assert_eq!(b.versao_escrita("dois", 1).unwrap().roteiro, "dois");
+        let nomes: Vec<String> = b
+            .listar_escritos()
+            .unwrap()
+            .into_iter()
+            .map(|l| l.nome)
+            .collect();
+        assert_eq!(nomes, ["dois", "um"]);
+    }
+
+    #[test]
+    fn o_arquivo_persiste_e_migra_sem_perder_o_que_existe() {
+        let dir = tempfile::tempdir().unwrap();
+        let caminho = dir.path().join("roteiros.sqlite");
+        {
+            let b = BancoDeRoteiros::abrir(&caminho).unwrap();
+            b.criar_roteiro("gravado", "", "", None, &[], OrigemDaVersao::Manual)
+                .ok();
+            ativa(&b, "a()");
+        }
+        let b = BancoDeRoteiros::abrir(&caminho).unwrap();
+        assert_eq!(
+            b.versao_ativa_escrita("contracheque")
+                .unwrap()
+                .unwrap()
+                .numero,
+            1
+        );
     }
 }

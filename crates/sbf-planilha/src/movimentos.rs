@@ -36,6 +36,19 @@ fn colunas_de_registro(conn: &Connection) -> Resultado<HashSet<String>> {
 /// Lê `registro` entre as datas (inclusive). Inventários antigos sem alguma coluna
 /// opcional (`conta_provavel`, `descricao_original`…) devolvem o campo vazio.
 pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resultado<Vec<Registro>> {
+    registros_onde(
+        conn,
+        "valor_centavos <> 0 AND data >= ?1 AND data <= ?2",
+        &[&de.to_string(), &ate.to_string()],
+    )
+}
+
+/// Os registros com `external_ref` que cumprem `condicao` (SQL sobre `registro`, com `?1…`).
+fn registros_onde(
+    conn: &Connection,
+    condicao: &str,
+    parametros: &[&dyn rusqlite::ToSql],
+) -> Resultado<Vec<Registro>> {
     let colunas = colunas_de_registro(conn)?;
     let opcional = |nome: &str| {
         if colunas.contains(nome) {
@@ -45,18 +58,21 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
         }
     };
     let sql = format!(
-        "SELECT external_ref, tipo, data, valor_centavos, {conta}, {descricao}, {bruto}, {fornecedor}
+        "SELECT external_ref, tipo, data, valor_centavos, {conta}, {descricao}, {bruto}, {fornecedor},
+                {contraparte}, {contraparte_doc}
          FROM registro
-         WHERE external_ref IS NOT NULL AND valor_centavos <> 0 AND data >= ?1 AND data <= ?2
+         WHERE external_ref IS NOT NULL AND {condicao}
          ORDER BY data, external_ref",
         conta = opcional("conta_provavel"),
         descricao = opcional("descricao_original"),
         bruto = opcional("supplier_name_raw"),
         fornecedor = opcional("fornecedor_normalizado"),
+        contraparte = opcional("contraparte"),
+        contraparte_doc = opcional("contraparte_doc"),
     );
     let mut st = conn.prepare(&sql).map_err(erro)?;
     let linhas = st
-        .query_map(rusqlite::params![de.to_string(), ate.to_string()], |r| {
+        .query_map(parametros, |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -66,13 +82,25 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
                 r.get::<_, Option<String>>(5)?,
                 r.get::<_, Option<String>>(6)?,
                 r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
             ))
         })
         .map_err(erro)?;
     let mut saida = Vec::new();
     for l in linhas {
-        let (movimento, tipo, data, valor, conta, descricao, bruto, fornecedor) =
-            l.map_err(erro)?;
+        let (
+            movimento,
+            tipo,
+            data,
+            valor,
+            conta,
+            descricao,
+            bruto,
+            fornecedor,
+            contraparte,
+            contraparte_doc,
+        ) = l.map_err(erro)?;
         let Some(data) = Data::de_iso(&data) else {
             continue;
         };
@@ -87,6 +115,8 @@ pub(crate) fn registros_entre(conn: &Connection, de: Data, ate: Data) -> Resulta
                     .or_else(|| fornecedor.clone())
                     .unwrap_or_default(),
                 tipo,
+                contraparte: contraparte.filter(|c| !c.trim().is_empty()),
+                contraparte_doc: contraparte_doc.filter(|c| !c.trim().is_empty()),
             },
             fornecedor,
         });
@@ -109,6 +139,20 @@ pub fn movimentos_entre(
         .collect())
 }
 
+/// O movimento do extrato com este `external_ref` (`pluggy:txn_…`), de uma conexão já aberta.
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn movimento_pelo_id(
+    conn: &Connection,
+    externo: &str,
+) -> Resultado<Option<MovimentoDoExtrato>> {
+    Ok(registros_onde(conn, "external_ref = ?1", &[&externo])?
+        .into_iter()
+        .next()
+        .map(|r| r.movimento))
+}
+
 /// O extrato da Pluggy no `inventario.sqlite` do cofre. Abre uma conexão só de leitura a cada
 /// consulta, então não segura o arquivo nem exige `Send` da conexão.
 #[derive(Debug, Clone)]
@@ -129,6 +173,21 @@ impl MovimentosDaPluggy {
     #[must_use]
     pub fn do_cofre(cofre: &Path) -> MovimentosDaPluggy {
         MovimentosDaPluggy::novo(cofre.join("inventario.sqlite"))
+    }
+
+    /// O movimento com este `external_ref`, em leitura só de leitura.
+    ///
+    /// # Errors
+    /// O inventário não existe ou não abre, ou falha do SQLite.
+    pub fn do_registro(&self, externo: &str) -> Resultado<Option<MovimentoDoExtrato>> {
+        let conn = Connection::open_with_flags(
+            &self.inventario,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(erro)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(erro)?;
+        movimento_pelo_id(&conn, externo)
     }
 
     /// Lê os movimentos, devolvendo o erro (a fonte do trait o engole).
@@ -247,6 +306,65 @@ mod testes {
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].descricao, "FORNECEDOR");
         assert_eq!(m[0].conta_do_extrato, "");
+    }
+
+    #[test]
+    fn le_a_contraparte_e_o_documento_do_favorecido_quando_o_inventario_tem() {
+        let c = inventario_ficticio();
+        c.execute_batch(
+            "ALTER TABLE registro ADD COLUMN contraparte TEXT;
+             ALTER TABLE registro ADD COLUMN contraparte_doc TEXT;",
+        )
+        .expect("alter");
+        registro_completo(
+            &c,
+            "pluggy:txn_a",
+            "debito",
+            "2026-11-05",
+            -15_000,
+            Some("BANCO FICTICIO · 0001"),
+            "PIX ENVIADO",
+        );
+        registro_completo(
+            &c,
+            "pluggy:txn_b",
+            "debito",
+            "2026-11-06",
+            -1_000,
+            None,
+            "COMPRA",
+        );
+        c.execute(
+            "UPDATE registro SET contraparte = 'Fulana de Tal', contraparte_doc = '000.000.000-00'
+             WHERE external_ref = 'pluggy:txn_a'",
+            [],
+        )
+        .expect("update");
+        let m = movimentos_entre(&c, d(1), d(30)).expect("ler");
+        assert_eq!(m[0].contraparte.as_deref(), Some("Fulana de Tal"));
+        assert_eq!(m[0].contraparte_doc.as_deref(), Some("000.000.000-00"));
+        assert_eq!((&m[1].contraparte, &m[1].contraparte_doc), (&None, &None));
+    }
+
+    #[test]
+    fn acha_um_movimento_pelo_id_externo_em_qualquer_data() {
+        let c = inventario_ficticio();
+        registro_completo(
+            &c,
+            "pluggy:txn_a",
+            "debito",
+            "2026-03-05",
+            -15_000,
+            Some("BANCO FICTICIO · 0001"),
+            "PIX ENVIADO",
+        );
+        let m = movimento_pelo_id(&c, "pluggy:txn_a")
+            .expect("ler")
+            .expect("existe");
+        assert_eq!(m.movimento, "pluggy:txn_a");
+        assert_eq!(m.valor, Centavos(-15_000));
+        assert_eq!(m.descricao, "PIX ENVIADO");
+        assert!(movimento_pelo_id(&c, "pluggy:nada").expect("ler").is_none());
     }
 
     #[test]

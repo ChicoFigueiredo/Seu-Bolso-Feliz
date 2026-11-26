@@ -32,32 +32,8 @@ use sbf_triagem::sugestoes::gasto_do_mes_dezmilesimos;
 /// O nome da chave da OpenRouter no chaveiro (`ia:openrouter`).
 pub const PROVEDOR_DA_CHAVE: &str = "openrouter";
 
-/// O `claude` por um caminho absoluto de confiança: primeiro `~/.local/bin` (a instalação
-/// padrão), depois cada pasta absoluta do `PATH` do usuário, depois as pastas do sistema.
-pub fn resolver_claude() -> Option<PathBuf> {
-    let casa = std::env::var_os("HOME").map(PathBuf::from);
-    let path = std::env::var_os("PATH");
-    resolver_claude_em(casa.as_deref(), path.as_deref())
-}
-
-/// O miolo testável de [`resolver_claude`].
-pub fn resolver_claude_em(casa: Option<&Path>, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
-    let mut candidatos: Vec<PathBuf> = Vec::new();
-    if let Some(casa) = casa.filter(|c| c.is_absolute()) {
-        candidatos.push(casa.join(".local/bin/claude"));
-    }
-    if let Some(path) = path {
-        candidatos.extend(
-            std::env::split_paths(path)
-                .filter(|p| p.is_absolute())
-                .map(|p| p.join("claude")),
-        );
-    }
-    if let Some(sistema) = sbf_processo::localizar("claude") {
-        candidatos.push(sistema);
-    }
-    candidatos.into_iter().find(|c| sbf_processo::confiavel(c))
-}
+/// O `claude` por um caminho absoluto de confiança (a busca única fica em `sbf-ia`).
+pub use sbf_ia::resolver_claude;
 
 /// Um provedor que não está disponível: o teste de conexão e a rodada mostram o motivo.
 #[derive(Debug)]
@@ -228,6 +204,7 @@ pub fn montar(banco: &Path, insumos: &Insumos) -> Result<TriagemDoInventario, St
 #[cfg(test)]
 mod testes {
     use super::*;
+    use sbf_ia::resolver_claude_em;
     use std::os::unix::fs::PermissionsExt;
 
     fn executavel(pasta: &Path, nome: &str) -> PathBuf {

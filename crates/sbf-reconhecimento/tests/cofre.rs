@@ -17,13 +17,15 @@ use sbf_planejamento::{
 };
 use sbf_reconhecimento::{
     Andamento, ErroDoReconhecimento, EstadoDoTexto, Etapa, PROVAS_POSSIVEIS, Reconhecedor,
-    ReconhecedorDoCofre, Reconhecido, Resultado, Situacao, Sugestao, descontos,
+    ReconhecedorDoCofre, Reconhecido, Resultado, Situacao, Sugestao, automaticas, descontos,
 };
 use zeroize::Zeroizing;
 
 const CONTRACHEQUE: &str = include_str!("../../sbf-planilha/tests/contracheque-ficticio.txt");
 const CONTRACHEQUE_2026: &str =
     include_str!("../../sbf-planilha/tests/contracheque-2026-ficticio.txt");
+const CONTRACHEQUE_2026_11: &str =
+    include_str!("../../sbf-planilha/tests/contracheque-2026-11-ficticio.txt");
 const CPF: &str = "52998224725";
 
 struct Segredos;
@@ -93,6 +95,10 @@ impl Cenario {
 
     /// Um planejamento com o recorrente "Salário" de R$ 5.699,50 desde 09/2026.
     fn planejamento_com_salario(&self, valor: i64) -> String {
+        self.planejamento_com_salario_desde(valor, Competencia { ano: 2026, mes: 9 })
+    }
+
+    fn planejamento_com_salario_desde(&self, valor: i64, desde: Competencia) -> String {
         let banco = Banco::abrir(self.cofre.join("planejamento.sqlite")).expect("banco");
         let mut plan = PlanejamentoSqlite::novo(banco, Box::new(SemSaldos));
         let recibo = plan
@@ -107,7 +113,7 @@ impl Cenario {
                         prazo: Prazo::SemFim,
                         primeira_versao: Versao {
                             id: String::new(),
-                            desde: Competencia { ano: 2026, mes: 9 },
+                            desde,
                             valor: Some(Centavos(valor)),
                             certeza: Certeza::Estimado,
                             fonte: Fonte::Usuario,
@@ -447,7 +453,7 @@ fn pdf_sem_texto_grava_o_marcador_e_nao_vai_para_a_ia() {
 #[test]
 fn formato_sem_leitor_diz_o_motivo() {
     let c = cenario();
-    let f = c.solto("foto.jpg", b"nao e uma foto de verdade");
+    let f = c.solto("foto.heic", b"nao e uma foto de verdade");
 
     let r = ok(c.rodar(&c.reconhecedor(None), &f).0);
 
@@ -518,6 +524,31 @@ fn contracheque_gera_vincular_e_usar_rubricas_com_a_divergencia() {
             .composicao(&id, Competencia { ano: 2026, mes: 10 })
             .expect("c")
             .is_none()
+    );
+}
+
+#[test]
+fn contracheque_no_layout_de_novembro_de_2026_sai_como_contracheque() {
+    let c = cenario();
+    c.planejamento_com_salario(800_000);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026_11.as_bytes());
+    let falso = ia_de_boleto();
+
+    let (r, _) = c.rodar(&c.reconhecedor(Some(falso.clone())), &arquivo);
+    let r = ok(r);
+
+    match &r.reconhecido {
+        Reconhecido::Contracheque { contracheque, .. } => {
+            assert_eq!(contracheque.pagamento, Competencia { ano: 2026, mes: 11 });
+            assert_eq!(contracheque.liquido, Some(Centavos(800_000)));
+            assert!(contracheque.conferido);
+        }
+        outro => panic!("{outro:?}"),
+    }
+    assert_eq!(
+        falso.chamadas(),
+        0,
+        "a IA só entra quando o local não reconhece"
     );
 }
 
@@ -970,7 +1001,7 @@ fn com_par_de_conta_e_assinatura_o_credito_de_valor_diferente_tem_duas_provas_e_
     let mut plan = c.plan();
     plan.aplicar(
         Alteracao::MapearConta {
-            apelido: "CX-0001".into(),
+            codigo: "CX-0001".into(),
             conta_do_extrato: Some("BANCO FICTICIO · 0001".into()),
         },
         Autor::Usuario,
@@ -1175,4 +1206,393 @@ fn contracheque_de_2026_gera_o_registro_salario_uma_vez_so() {
         1
     );
     assert!(c.contar("SELECT COUNT(*) FROM sub_registro WHERE tipo = 'rubrica'") > 0);
+}
+
+// ---------------------------------------------------------------- imagens (OCR)
+
+/// Um print fictício de app em tela escura: "Comprovante de pagamento ... Valor pago
+/// R$ 1.234,56".
+const IMAGEM_ESCURA: &[u8] = include_bytes!("../../sbf-ocr/tests/fixtures/comprovante-escuro.png");
+
+fn tem_tesseract() -> bool {
+    let ok = sbf_ocr::Ocr::do_sistema().disponivel();
+    if !ok {
+        eprintln!("sem tesseract neste sistema: teste pulado");
+    }
+    ok
+}
+
+#[test]
+fn imagem_passa_pelo_ocr_e_grava_o_texto_com_o_metodo_ocr_tesseract() {
+    if !tem_tesseract() {
+        return;
+    }
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+
+    let (r, vistos) = c.rodar(&c.reconhecedor(None), &imagem);
+    let r = ok(r);
+
+    assert_eq!(r.texto, EstadoDoTexto::Extraido);
+    assert_eq!(situacao_de(&vistos, Etapa::ExtrairTexto), Situacao::Feita);
+    let (metodo, conteudo): (String, String) = c
+        .conexao()
+        .query_row("SELECT metodo, conteudo FROM texto", [], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
+        .expect("texto");
+    assert_eq!(metodo, "ocr-tesseract");
+    assert!(conteudo.contains("Valor pago"), "{conteudo}");
+    assert!(conteudo.contains("1.234,56"), "{conteudo}");
+}
+
+#[test]
+fn imagem_sem_tesseract_fica_sem_texto_e_nao_e_erro() {
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+    let r = c
+        .reconhecedor(None)
+        .com_ocr(sbf_ocr::Ocr::com_programa("/nao/existe/tesseract".into()));
+
+    let (resultado, vistos) = c.rodar(&r, &imagem);
+    let resultado = ok(resultado);
+
+    assert_eq!(
+        resultado.texto,
+        EstadoDoTexto::SemTexto("OCR indisponível".to_owned())
+    );
+    assert!(matches!(
+        situacao_de(&vistos, Etapa::ExtrairTexto),
+        Situacao::Pulada(_)
+    ));
+    // Nada gravado: com o tesseract instalado depois, o OCR roda.
+    assert_eq!(c.contar("SELECT COUNT(*) FROM texto"), 0);
+}
+
+#[test]
+fn imagem_com_texto_ja_no_inventario_reaproveita_sem_rodar_o_ocr() {
+    let c = cenario();
+    let imagem = c.solto("print.png", IMAGEM_ESCURA);
+    let hash = sbf_coleta::pastas::sha256_do_arquivo(&imagem).expect("hash");
+    let conn = c.conexao();
+    conn.execute(
+        "INSERT INTO achado (content_hash, file_size_bytes, camada) VALUES (?1, 10, 'A')",
+        [&hash],
+    )
+    .expect("achado");
+    conn.execute(
+        "INSERT INTO texto (content_hash, metodo, conteudo) VALUES (?1, 'ocr-tesseract', 'texto do worker')",
+        [&hash],
+    )
+    .expect("texto");
+    let r = c
+        .reconhecedor(None)
+        .com_ocr(sbf_ocr::Ocr::com_programa("/nao/existe/tesseract".into()));
+
+    let r = ok(c.rodar(&r, &imagem).0);
+
+    assert_eq!(r.texto, EstadoDoTexto::JaHavia);
+}
+
+#[test]
+fn imagem_corrompida_falha_no_ocr_sem_derrubar_o_reconhecimento() {
+    if !tem_tesseract() {
+        return;
+    }
+    let c = cenario();
+    let f = c.solto("foto.jpg", b"nao e uma foto de verdade");
+
+    let (r, vistos) = c.rodar(&c.reconhecedor(None), &f);
+
+    // Leitura que falha não é "sem texto": a Caixa de entrada a manda para Precisa revisar.
+    assert!(matches!(ok(r).texto, EstadoDoTexto::Falhou(_)));
+    assert!(matches!(
+        situacao_de(&vistos, Etapa::ExtrairTexto),
+        Situacao::Falhou(_)
+    ));
+    assert_eq!(c.contar("SELECT COUNT(*) FROM texto"), 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Vínculo automático do contracheque (sem janela, sem clique)
+// ---------------------------------------------------------------------------------------
+
+fn outubro() -> Competencia {
+    Competencia { ano: 2026, mes: 10 }
+}
+
+fn vincular_de(r: &Resultado) -> &Sugestao {
+    r.sugestoes
+        .iter()
+        .find(|s| matches!(s, Sugestao::Vincular { .. }))
+        .unwrap_or_else(|| panic!("sem vincular: {:?} {:?}", r.sugestoes, r.avisos))
+}
+
+fn documentos_de_outubro(c: &Cenario, id: &str) -> Vec<sbf_planejamento::DocumentoVinculado> {
+    c.plan()
+        .documentos(&sbf_reconhecimento::ocorrencia_do_mes(id, outubro()))
+        .expect("documentos")
+}
+
+#[test]
+fn contracheque_conferido_com_ocorrencia_do_mes_vincula_sozinho_com_autor_regra() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    let vincular = vincular_de(&r);
+    assert!(vincular.e_automatica(), "{vincular:?}");
+    // O reconhecimento só sugere: nada foi gravado ainda.
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+
+    assert_eq!(saida.novas(), 1, "{saida:?}");
+    assert!(saida.falhas.is_empty());
+    let docs = documentos_de_outubro(&c, &id);
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].sha256, r.sha256);
+    assert_eq!(
+        docs[0].autor,
+        Autor::Regra {
+            regra: "contracheque".to_owned()
+        }
+    );
+    // Só o vínculo é automático: as rubricas e os descontos esperam o clique.
+    assert!(
+        c.plan().composicao(&id, outubro()).expect("c").is_none(),
+        "usar as rubricas continua esperando o clique"
+    );
+}
+
+#[test]
+fn aplicar_duas_vezes_nao_duplica_e_a_segunda_leitura_mostra_o_vinculo_como_feito() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let rec = c.reconhecedor(None);
+    let r = ok(c.rodar(&rec, &arquivo).0);
+
+    let primeira = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("1");
+    let segunda = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("2");
+
+    assert_eq!(primeira.novas(), 1);
+    assert_eq!(segunda.novas(), 0, "{segunda:?}");
+    assert_eq!(documentos_de_outubro(&c, &id).len(), 1);
+    // Reconhecer de novo (o cartão da janela): o vínculo que a regra fez volta como
+    // automático, para aparecer como "Vinculado automaticamente".
+    let de_novo = ok(c.rodar(&rec, &arquivo).0);
+    assert!(vincular_de(&de_novo).e_automatica());
+    let terceira = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &de_novo).expect("3");
+    assert_eq!(terceira.novas(), 0);
+    assert_eq!(terceira.aplicadas.len(), 1);
+    assert_eq!(documentos_de_outubro(&c, &id).len(), 1);
+}
+
+#[test]
+fn contracheque_cuja_soma_nao_bate_so_sugere() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let adulterado = CONTRACHEQUE.replace("R$ 5.699,50", "R$ 5.000,00");
+    let arquivo = c.solto("contracheque.txt", adulterado.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(!vincular_de(&r).e_automatica());
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+    assert!(saida.aplicadas.is_empty());
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+}
+
+#[test]
+fn dois_recorrentes_de_salario_nao_sugerem_vinculo_nem_aplicam() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    {
+        // Um segundo recorrente de entrada com "salario" no nome.
+        let mut plan = c.plan();
+        let recorrente = plan.recorrente(&id).expect("r").expect("existe");
+        let mut novo = NovoRecorrente {
+            nome: "Salário extra".into(),
+            grupo: "Salário".into(),
+            subgrupo: None,
+            posicao: 1,
+            natureza: Natureza::Entrada,
+            prazo: Prazo::SemFim,
+            primeira_versao: recorrente.versoes[0].clone(),
+        };
+        novo.primeira_versao.id = String::new();
+        plan.aplicar(
+            Alteracao::CriarRecorrente {
+                recorrente: novo,
+                origem: None,
+            },
+            Autor::Usuario,
+        )
+        .expect("criar o segundo");
+    }
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(
+        r.sugestoes.iter().all(|s| !s.e_automatica()),
+        "{:?}",
+        r.sugestoes
+    );
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+    assert!(saida.aplicadas.is_empty());
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+}
+
+#[test]
+fn documento_ja_vinculado_pelo_usuario_nao_sugere_nem_aplica_nada() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let rec = c.reconhecedor(None);
+    let r = ok(c.rodar(&rec, &arquivo).0);
+    let mut plan = c.plan();
+    for a in vincular_de(&r).alteracoes(&r.sha256, &r.nome, 0, None) {
+        plan.aplicar(a, Autor::Usuario).expect("vincular");
+    }
+    drop(plan);
+
+    let de_novo = ok(c.rodar(&rec, &arquivo).0);
+    assert!(
+        de_novo
+            .sugestoes
+            .iter()
+            .all(|s| !matches!(s, Sugestao::Vincular { .. })),
+        "{:?}",
+        de_novo.sugestoes
+    );
+    // Mesmo com o resultado antigo na mão (janela aberta antes), nada é duplicado nem
+    // reatribuído à regra.
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+    assert!(saida.aplicadas.is_empty(), "{saida:?}");
+    let docs = documentos_de_outubro(&c, &id);
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].autor, Autor::Usuario);
+}
+
+#[test]
+fn vinculo_desfeito_pelo_usuario_nao_e_refeito() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let rec = c.reconhecedor(None);
+    let r = ok(c.rodar(&rec, &arquivo).0);
+    automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+    let doc = documentos_de_outubro(&c, &id).remove(0);
+    // O usuário desfaz ("Desfazer" do cartão).
+    c.plan()
+        .aplicar(
+            Alteracao::DesvincularDocumento { id: doc.id },
+            Autor::Usuario,
+        )
+        .expect("desvincular");
+
+    // A sugestão volta ao cartão, mas já não é automática.
+    let de_novo = ok(c.rodar(&rec, &arquivo).0);
+    assert!(!vincular_de(&de_novo).e_automatica());
+    // Nem com o resultado antigo (automático) a regra refaz.
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+    assert!(saida.aplicadas.is_empty(), "{saida:?}");
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+}
+
+#[test]
+fn contracheque_sem_a_ocorrencia_do_mes_so_sugere() {
+    let c = cenario();
+    // O Salário só começa em 11/2026: não há ocorrência de 10/2026 para ligar sozinho.
+    let id = c.planejamento_com_salario_desde(569_950, Competencia { ano: 2026, mes: 11 });
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    assert!(!vincular_de(&r).e_automatica());
+    assert_eq!(
+        automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r)
+            .expect("aplicar")
+            .novas(),
+        0
+    );
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+}
+
+#[test]
+fn sem_planejamento_nao_faz_nada_e_com_planejamento_quebrado_devolve_o_erro() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(569_950);
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+    let planejamento = c.cofre.join("planejamento.sqlite");
+
+    // Planejamento que não é um banco: o erro é genérico e o reconhecimento já valeu.
+    let guardado = std::fs::read(&planejamento).expect("ler");
+    std::fs::write(&planejamento, b"isto nao e um banco sqlite").expect("quebrar");
+    let erro = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect_err("quebrado");
+    assert!(!erro.contains("contracheque.txt"), "{erro}");
+
+    // Sem planejamento.sqlite: nada a fazer.
+    std::fs::remove_file(&planejamento).expect("remover");
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("sem banco");
+    assert!(saida.aplicadas.is_empty() && saida.falhas.is_empty());
+
+    std::fs::write(&planejamento, guardado).expect("restaurar");
+    assert!(documentos_de_outubro(&c, &id).is_empty());
+}
+
+#[test]
+fn as_tres_provas_e_o_vinculo_se_aplicam_juntos_sem_janela_e_uma_vez_so() {
+    let c = cenario();
+    let id = c.planejamento_com_salario(2_000_000);
+    c.plan()
+        .aplicar(
+            Alteracao::MapearConta {
+                codigo: "CX-0001".into(),
+                conta_do_extrato: Some("BANCO FICTICIO · 0001".into()),
+            },
+            Autor::Usuario,
+        )
+        .expect("par");
+    credito(
+        &c,
+        "pluggy:txn_exato",
+        "2026-10-09",
+        LIQUIDO_DE_2026,
+        "BANCO FICTICIO · 0001",
+        "CREDITO FICTICIO",
+    );
+    let arquivo = c.solto("contracheque.txt", CONTRACHEQUE_2026.as_bytes());
+    let r = ok(c.rodar(&c.reconhecedor(None), &arquivo).0);
+
+    let saida = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("aplicar");
+
+    // O vínculo do contracheque e a conciliação das três provas; as rubricas e os
+    // descontos (cliques) ficam de fora.
+    assert_eq!(saida.novas(), 2, "{saida:?}");
+    let autores: Vec<&str> = saida.aplicadas.iter().map(|a| a.autor.as_str()).collect();
+    assert_eq!(autores, ["contracheque", "tres-provas"]);
+    let ocorrencia = sbf_planejamento::IdOcorrencia {
+        recorrente: id.clone(),
+        competencia: outubro(),
+        parcela: None,
+    };
+    let conciliacoes = c
+        .plan()
+        .conciliacoes_da_ocorrencia(&ocorrencia)
+        .expect("conciliações");
+    assert_eq!(conciliacoes.len(), 1);
+    assert!(conciliacoes[0].conciliacao.confirmada);
+    assert!(c.plan().composicao(&id, outubro()).expect("c").is_none());
+
+    let de_novo = automaticas::aplicar_automaticas_do_resultado(&c.cofre, &r).expect("de novo");
+    assert_eq!(de_novo.novas(), 0, "{de_novo:?}");
+    assert_eq!(
+        c.plan()
+            .conciliacoes_da_ocorrencia(&ocorrencia)
+            .expect("conciliações")
+            .len(),
+        1
+    );
 }

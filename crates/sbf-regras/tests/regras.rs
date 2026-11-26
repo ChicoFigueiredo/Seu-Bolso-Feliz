@@ -117,7 +117,7 @@ fn ac_lua_01_tipo_novo_por_configuracao_reconhece_apos_reload() {
     }
     // Reload: abre de novo o arquivo e monta o motor das vigentes.
     let c = Catalogo::abrir(&caminho).unwrap();
-    assert_eq!(c.versao_do_esquema().unwrap(), 1);
+    assert_eq!(c.versao_do_esquema().unwrap(), 3);
     let motor = Motor::das_vigentes(&c, None).unwrap();
     let e = entrada("doc-1", COMPROVANTE);
     let l = motor.ler(&e);
@@ -243,7 +243,7 @@ fn ac_lua_02_regra_especifica_vence_a_geral_e_nao_mexe_em_tipo_antigo() {
     assert!(
         r.motivos
             .iter()
-            .any(|m| m.contains("mais específica: 2 condições contra 1")),
+            .any(|m| m.contains("mais específico: 2 condições contra 1")),
         "{:?}",
         r.motivos
     );
@@ -279,7 +279,7 @@ fn prioridade_maior_vence_com_motivo() {
     assert!(
         r.motivos
             .iter()
-            .any(|m| m == "prioridade 10 > 0 da regra b-especifica")
+            .any(|m| m == "prioridade 10 > 0 do padrão b-especifica")
     );
 }
 
@@ -697,6 +697,7 @@ fn resposta(campos: serde_json::Value) -> RespostaDoScript {
         revisar: false,
         motivos: vec![],
         evidencias: vec!["rubrica_irrf".into()],
+        exibir: vec![],
     }
 }
 
@@ -906,6 +907,89 @@ fn script_que_nao_corresponde_nao_se_aplica_e_texto_so_se_pedido() {
     assert_eq!(l.execucoes[0].resultado, ResultadoDaExecucao::NaoSeAplica);
 }
 
+fn resposta_com_exibir(linhas: &[&str]) -> RespostaDoScript {
+    RespostaDoScript {
+        exibir: linhas.iter().map(|l| (*l).to_owned()).collect(),
+        ..resposta(json!({}))
+    }
+}
+
+/// Uma regra de script (sem parâmetros) com o executor de mentira dado.
+fn motor_do_script(exec: &Arc<ExecutorFicticio>, leitor: bool) -> Motor {
+    let mut c = Catalogo::em_memoria().unwrap();
+    let mut n = nova("r", Definicao::simples("t", "comprovante pix"));
+    n.definicao.leitor = leitor.then(|| "contracheque".to_owned());
+    n.script = Some("f".into());
+    ativa(&mut c, n, Some(&**exec));
+    Motor::das_vigentes(&c, Some(exec.clone())).unwrap()
+}
+
+#[test]
+fn exibir_do_script_chega_ao_reconhecimento_sem_mexer_na_chave() {
+    let com = |linhas: &'static [&'static str]| {
+        Arc::new(ExecutorFicticio::novo().com_funcao("f", move |_| Ok(resposta_com_exibir(linhas))))
+    };
+    let e = entrada("doc-1", COMPROVANTE);
+    let l1 = motor_do_script(&com(&["IRRF conferido ✓", "segunda"]), false).ler(&e);
+    let l2 = motor_do_script(&com(&["outra coisa"]), false).ler(&e);
+    let l3 = motor_do_script(&com(&[]), false).ler(&e);
+    assert_eq!(reconhecido(&l1).exibir, ["IRRF conferido ✓", "segunda"]);
+    assert_eq!(reconhecido(&l2).exibir, ["outra coisa"]);
+    assert!(reconhecido(&l3).exibir.is_empty());
+    // O texto exibido não entra na chave de idempotência.
+    assert_eq!(reconhecido(&l1).chave, reconhecido(&l2).chave);
+    assert_eq!(reconhecido(&l1).chave, reconhecido(&l3).chave);
+}
+
+#[test]
+fn exibir_tambem_chega_quando_o_leitor_completa() {
+    let exec = Arc::new(
+        ExecutorFicticio::novo().com_funcao("f", |_| Ok(resposta_com_exibir(&["linha do script"]))),
+    );
+    let motor = motor_do_script(&exec, true);
+    let e = entrada("doc-1", COMPROVANTE);
+    let l = motor.ler(&e);
+    let antes = reconhecido(&l).clone();
+    assert!(antes.leitor.is_some() && antes.exibir.is_empty());
+    let pronto = motor.completar(antes.clone(), BTreeMap::new(), &e);
+    assert_eq!(pronto.exibir, ["linha do script"]);
+    assert_eq!(pronto.chave, antes.chave, "exibir não mexe na chave");
+}
+
+#[test]
+fn exibir_nao_vai_para_a_tabela_de_execucao_nem_para_a_proposta() {
+    let exec = Arc::new(
+        ExecutorFicticio::novo()
+            .com_funcao("f", |_| Ok(resposta_com_exibir(&["texto-do-documento"]))),
+    );
+    let mut c = Catalogo::em_memoria().unwrap();
+    let mut n = nova("r", def_comprovante());
+    n.script = Some("f".into());
+    ativa(&mut c, n, Some(&*exec));
+    let motor = Motor::das_vigentes(&c, Some(exec.clone())).unwrap();
+    let l = motor.ler(&entrada("doc-1", COMPROVANTE));
+    assert_eq!(reconhecido(&l).exibir, ["texto-do-documento"]);
+    c.registrar_execucao(&l).unwrap();
+    assert!(reconhecido(&l).propostas.len() == 1);
+    assert!(c.registrar_proposta(reconhecido(&l), "doc-1").unwrap());
+    let gravada = c.propostas(None).unwrap().remove(0);
+    assert!(
+        gravada.conteudo.exibir.is_empty(),
+        "a proposta gravada não guarda as linhas de exibir"
+    );
+    assert_eq!(gravada.conteudo.campos, reconhecido(&l).campos);
+}
+
+#[test]
+fn reconhecimento_antigo_sem_exibir_ainda_le() {
+    let exec = Arc::new(ExecutorFicticio::novo().com_funcao("f", |_| Ok(resposta(json!({})))));
+    let l = motor_do_script(&exec, false).ler(&entrada("doc-1", COMPROVANTE));
+    let mut json = serde_json::to_value(reconhecido(&l)).unwrap();
+    json.as_object_mut().unwrap().remove("exibir");
+    let lido: sbf_regras::Reconhecimento = serde_json::from_value(json).unwrap();
+    assert!(lido.exibir.is_empty());
+}
+
 #[test]
 fn parametros_vigentes_por_competencia() {
     let mut c = Catalogo::em_memoria().unwrap();
@@ -944,7 +1028,8 @@ fn fabrica_e_idempotente_e_o_contracheque_pede_o_leitor() {
     c.semear_fabrica().unwrap();
     c.semear_fabrica().unwrap();
     let regras = c.regras().unwrap();
-    assert_eq!(regras.len(), 2);
+    // Contracheque e pix-na-descricao, mais as 16 da biblioteca.
+    assert_eq!(regras.len(), 18);
     assert_eq!(
         c.versoes("contracheque").unwrap().len(),
         2,
@@ -999,6 +1084,46 @@ fn fabrica_e_idempotente_e_o_contracheque_pede_o_leitor() {
         motor.ler(&entrada("x", "Recibo qualquer")).decisao,
         Decisao::Nenhuma
     );
+}
+
+#[test]
+fn script_novo_de_fabrica_vira_versao_nova_em_rascunho_sem_mexer_na_ativa() {
+    // Um catálogo semeado por um sbf antigo: a v2 (IRRF) tem o script de antes do `exibir`,
+    // e o usuário já a ativou.
+    let antigo = ExecutorFicticio::novo().com(
+        "-- script antigo\nfunction transformar() end",
+        Ok(resposta(json!({}))),
+    );
+    let mut c = Catalogo::em_memoria().unwrap();
+    for (i, (mut nova, estado)) in sbf_regras::fabrica::regras_de_fabrica()
+        .into_iter()
+        .enumerate()
+    {
+        if nova.regra == "contracheque" && nova.script.is_some() {
+            nova.script = Some("-- script antigo\nfunction transformar() end".to_owned());
+        }
+        let v = c.salvar_rascunho(nova).unwrap();
+        if estado == Estado::Ativa || i == 1 {
+            c.ativar(&v.regra, v.versao, &Quem::Usuario, Some(&antigo))
+                .unwrap();
+        }
+    }
+    assert_eq!(c.versoes("contracheque").unwrap().len(), 2);
+    assert_eq!(c.versao("contracheque", 2).unwrap().estado, Estado::Ativa);
+
+    c.semear_fabrica().unwrap();
+    c.semear_fabrica().unwrap();
+
+    let versoes = c.versoes("contracheque").unwrap();
+    assert_eq!(versoes.len(), 3, "o script novo é a v3, uma vez só");
+    let v3 = c.versao("contracheque", 3).unwrap();
+    assert_eq!(v3.estado, Estado::Rascunho, "quem ativa a v3 é o usuário");
+    assert_eq!(v3.script.as_deref(), Some(sbf_regras::fabrica::SCRIPT_IRRF));
+    assert!(
+        sbf_regras::fabrica::SCRIPT_IRRF.contains("exibir"),
+        "o script de fábrica devolve exibir"
+    );
+    assert_eq!(c.versao("contracheque", 2).unwrap().estado, Estado::Ativa);
 }
 
 #[test]
@@ -1309,4 +1434,576 @@ fn erro_de_script_grava_so_a_categoria_nunca_o_texto_do_documento() {
         .collect();
     assert_eq!(motivos, vec![Some("execucao".to_owned())]);
     assert!(!motivos.iter().flatten().any(|m| m.contains(MARCADOR)));
+}
+
+// ---------------------------------------------------------------- favorecido de um Pix (D4, D13)
+
+const DOC_FICTICIO: &str = "000.000.000-00";
+
+fn registro_pix(id: &str, nome: Option<&str>, doc: Option<&str>) -> Entrada {
+    Entrada {
+        versao_do_esquema: 1,
+        id: id.to_owned(),
+        tipo: TipoDeEntrada::Registro,
+        origem: Origem {
+            canal: Canal::Pluggy,
+            id_externo: Some(id.to_owned()),
+        },
+        sha256: None,
+        mime: None,
+        nome: None,
+        texto: None,
+        dicas: Dicas {
+            conta: Some("Banco Exemplo 000000-1".to_owned()),
+            valor_centavos: Some(-15_000),
+            data: Some("2026-11-12".to_owned()),
+            descricao: Some("PIX ENVIADO".to_owned()),
+            contraparte: nome.map(str::to_owned),
+            contraparte_doc: doc.map(str::to_owned),
+        },
+        momento: Some("2026-11-12".to_owned()),
+    }
+}
+
+fn def_do_favorecido(condicao: Condicao) -> Definicao {
+    let mut d = Definicao::simples("pix-do-favorecido", "x");
+    d.aplica_a = vec![TipoDeEntrada::Registro];
+    d.detectar.todos = vec![condicao];
+    d
+}
+
+fn casa(def: &Definicao, e: &Entrada) -> bool {
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", def.clone()), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    matches!(motor.ler(e).decisao, Decisao::Reconhecido(_))
+}
+
+#[test]
+fn condicao_por_documento_ignora_a_pontuacao_dos_dois_lados() {
+    let formatada = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    let seca = def_do_favorecido(Condicao::ContraparteDoc(vec!["12345678909".into()]));
+    // A regra formatada casa o registro com e sem pontuação.
+    assert!(casa(
+        &formatada,
+        &registro_pix("pluggy:a", None, Some(DOC_FICTICIO))
+    ));
+    assert!(casa(
+        &formatada,
+        &registro_pix("pluggy:b", None, Some("00000000000"))
+    ));
+    // A regra só com dígitos casa o registro formatado.
+    assert!(casa(
+        &seca,
+        &registro_pix("pluggy:c", None, Some("123.456.789-09"))
+    ));
+    assert!(casa(
+        &seca,
+        &registro_pix("pluggy:d", None, Some("12345678909"))
+    ));
+    // Outro documento, ou nenhum, não casa.
+    assert!(!casa(
+        &seca,
+        &registro_pix("pluggy:e", None, Some("987.654.321-00"))
+    ));
+    assert!(!casa(
+        &seca,
+        &registro_pix("pluggy:f", Some("Fulana de Tal"), None)
+    ));
+}
+
+#[test]
+fn condicao_por_documento_casa_se_for_igual_a_algum_da_lista() {
+    let d = def_do_favorecido(Condicao::ContraparteDoc(vec![
+        "111.111.111-11".into(),
+        DOC_FICTICIO.into(),
+    ]));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:a", None, Some("00000000000"))
+    ));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:b", None, Some("11111111111"))
+    ));
+    assert!(!casa(
+        &d,
+        &registro_pix("pluggy:c", None, Some("22222222222"))
+    ));
+}
+
+#[test]
+fn condicao_por_nome_usa_regex_sobre_o_nome_normalizado() {
+    let d = def_do_favorecido(Condicao::Contraparte("^fulana de tal$".into()));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:a", Some("FULANA DE TAL"), None)
+    ));
+    assert!(casa(
+        &d,
+        &registro_pix("pluggy:b", Some("  Fulana  de Tal "), None)
+    ));
+    let acento = def_do_favorecido(Condicao::Contraparte("antonia".into()));
+    assert!(casa(
+        &acento,
+        &registro_pix("pluggy:c", Some("Antônia Exemplo"), None)
+    ));
+    assert!(!casa(
+        &d,
+        &registro_pix("pluggy:d", Some("Fulano de Tal"), None)
+    ));
+    assert!(!casa(&d, &registro_pix("pluggy:e", None, None)));
+}
+
+#[test]
+fn as_condicoes_novas_entram_na_especificidade_e_na_validacao() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.detectar
+        .todos
+        .push(Condicao::Contraparte("fulana".into()));
+    d.detectar
+        .nenhum
+        .push(Condicao::Descricao("ESTORNO".into()));
+    assert_eq!(d.especificidade(), 3);
+    assert!(d.validar().is_ok());
+    // Lista vazia, documento sem 11 ou 14 dígitos e regex quebrado são recusados.
+    for ruim in [
+        Condicao::ContraparteDoc(Vec::new()),
+        Condicao::ContraparteDoc(vec!["123".into()]),
+        Condicao::ContraparteDoc(vec!["abc.def.ghi-jk".into()]),
+        Condicao::Contraparte("(fulana".into()),
+    ] {
+        assert!(def_do_favorecido(ruim).validar().is_err());
+    }
+    // O formato em JSON.
+    let j = r#"{"tipo_documental":"x","aplica_a":["registro"],
+        "detectar":{"todos":[{"contraparte_doc":["000.000.000-00"]},{"contraparte":"fulana"}]}}"#;
+    let lida: Definicao = serde_json::from_str(j).unwrap();
+    assert!(lida.validar().is_ok());
+}
+
+#[test]
+fn dicas_antigas_sem_contraparte_ainda_se_leem() {
+    let j = r#"{"conta":null,"valor_centavos":-100,"data":"2026-11-12","descricao":"PIX"}"#;
+    let d: Dicas = serde_json::from_str(j).unwrap();
+    assert_eq!((d.contraparte, d.contraparte_doc), (None, None));
+}
+
+#[test]
+fn favorecido_e_documento_saem_da_contraparte_com_origem_de_dica() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.extrair.insert(
+        "favorecido".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::Contraparte,
+        },
+    );
+    d.extrair.insert(
+        "favorecido_doc".into(),
+        Extracao {
+            regex: "([0-9.\\-/]+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::ContraparteDoc,
+        },
+    );
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let l = motor.ler(&registro_pix(
+        "pluggy:a",
+        Some("Fulana de Tal"),
+        Some(DOC_FICTICIO),
+    ));
+    let r = reconhecido(&l);
+    assert_eq!(
+        r.campos["favorecido"].valor,
+        Valor::Texto("Fulana de Tal".into())
+    );
+    assert_eq!(
+        r.campos["favorecido"].de_onde,
+        DeOnde::Dica {
+            nome: "contraparte".into()
+        }
+    );
+    assert_eq!(
+        r.campos["favorecido_doc"].de_onde,
+        DeOnde::Dica {
+            nome: "contraparte_doc".into()
+        }
+    );
+}
+
+#[test]
+fn o_documento_do_favorecido_nunca_e_gravado_na_execucao_nem_na_proposta() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.extrair.insert(
+        "favorecido".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::Contraparte,
+        },
+    );
+    d.extrair.insert(
+        "favorecido_doc".into(),
+        Extracao {
+            regex: "(.+)".into(),
+            grupo: 1,
+            formato: Formato::Texto,
+            fonte: FonteDaExtracao::ContraparteDoc,
+        },
+    );
+    d.propor = vec![ModeloDeProposta::ConciliarOcorrencia {
+        janela_dias: 3,
+        compromisso: Some("Diarista".into()),
+    }];
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("regras.sqlite");
+    let mut c = Catalogo::abrir(&arquivo).unwrap();
+    ativa(&mut c, nova("r", d), None);
+    let motor = Motor::das_vigentes(&c, None).unwrap();
+    let e = registro_pix("pluggy:a", Some("Fulana de Tal"), Some(DOC_FICTICIO));
+    let l = motor.ler(&e);
+    c.registrar_execucao(&l).unwrap();
+    c.registrar_proposta(reconhecido(&l), &e.id).unwrap();
+
+    let p = &c.propostas(None).unwrap()[0];
+    assert!(p.conteudo.campos.contains_key("favorecido"));
+    assert!(
+        !p.conteudo.campos.contains_key("favorecido_doc"),
+        "o documento não fica na proposta"
+    );
+    drop(c);
+    let conn = rusqlite::Connection::open(&arquivo).unwrap();
+    for tabela in ["execucao", "proposta", "retorno"] {
+        let mut st = conn.prepare(&format!("SELECT * FROM {tabela}")).unwrap();
+        let n = st.column_count();
+        let mut linhas = st.query([]).unwrap();
+        while let Some(l) = linhas.next().unwrap() {
+            for i in 0..n {
+                if let Ok(t) = l.get::<_, String>(i) {
+                    assert!(!t.contains("000.000.000-00") && !t.contains("00000000000"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_proposta_de_um_registro_usa_valor_data_e_conta_da_origem() {
+    let mut d = def_do_favorecido(Condicao::ContraparteDoc(vec![DOC_FICTICIO.into()]));
+    d.propor = vec![ModeloDeProposta::ConciliarOcorrencia {
+        janela_dias: 3,
+        compromisso: Some("Diarista".into()),
+    }];
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let l = motor.ler(&registro_pix("pluggy:a", None, Some(DOC_FICTICIO)));
+    let r = reconhecido(&l);
+    assert_eq!(
+        r.propostas,
+        vec![Proposta::ConciliarOcorrencia {
+            valor_centavos: 15_000,
+            data: "2026-11-12".into(),
+            janela_dias: 3,
+            compromisso: Some("Diarista".into()),
+        }]
+    );
+    // Os campos continuam só os extraídos: a dica não vira campo.
+    assert!(r.campos.is_empty());
+}
+
+#[test]
+fn a_chave_de_idempotencia_nao_depende_do_documento_nem_do_nome() {
+    let d = def_do_favorecido(Condicao::Descricao("PIX".into()));
+    let motor = Motor::novo(
+        vec![VersaoDeRegra::avulsa(nova("r", d), 1, Estado::Ativa).unwrap()],
+        Vec::new(),
+        None,
+    );
+    let a = motor.ler(&registro_pix("pluggy:a", Some("A"), Some(DOC_FICTICIO)));
+    let b = motor.ler(&registro_pix("pluggy:a", None, None));
+    assert_eq!(reconhecido(&a).chave, reconhecido(&b).chave);
+}
+
+// ---------------------------------------------------------------- D15: o MCP decide
+
+#[test]
+fn d15_mcp_ativa_desativa_reverte_e_consolida_com_quem_mcp_no_historico() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(&mut c, nova("r", def_comprovante()), None);
+    let mut d2 = def_comprovante();
+    d2.prioridade = 7;
+    let v2 = c.salvar_rascunho(nova("r", d2)).unwrap();
+
+    // Ativa a versão 2 pelo MCP: a 1 sai de cena, tudo gravado com quem = mcp.
+    c.ativar("r", v2.versao, &Quem::Mcp, None).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Ativa);
+    let h = c.historico_de_estado("r", 2).unwrap();
+    let ativacao = h.last().unwrap();
+    assert_eq!((ativacao.1.as_str(), ativacao.2.as_str()), ("ativa", "mcp"));
+    assert!(
+        ativacao.3.contains("mcp"),
+        "o motivo diz quem decidiu: {h:?}"
+    );
+    let h1 = c.historico_de_estado("r", 1).unwrap();
+    assert_eq!(
+        h1.last().unwrap().2,
+        "mcp",
+        "a 1 saiu de cena por decisão do mcp"
+    );
+
+    // Reverte (volta à 1) e reverte de novo (volta à 2).
+    c.reverter("r", &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 1).unwrap().estado, Estado::Ativa);
+    c.reverter("r", &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Ativa);
+
+    // Desativa.
+    c.desativar("r", &Quem::Mcp).unwrap();
+    assert!(c.vigentes().unwrap().is_empty());
+    let h = c.historico_de_estado("r", 2).unwrap();
+    assert_eq!(h.last().unwrap().2, "mcp");
+
+    // Consolida: precisa das aceitas seguidas, e a decisão do MCP é gravada.
+    c.ativar("r", 2, &Quem::Mcp, None).unwrap();
+    let chaves = propostas(&mut c, 5);
+    for k in &chaves {
+        c.registrar_retorno(k, Retorno::Aceito, &Quem::Usuario, "ok")
+            .unwrap();
+    }
+    c.consolidar("r", 2, &Quem::Mcp).unwrap();
+    assert_eq!(c.versao("r", 2).unwrap().estado, Estado::Consolidada);
+    assert_eq!(
+        c.historico_de_estado("r", 2).unwrap().last().unwrap().2,
+        "mcp"
+    );
+}
+
+#[test]
+fn d15_mcp_nao_registra_retorno_do_usuario() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(&mut c, nova("r", def_comprovante()), None);
+    let chaves = propostas(&mut c, 1);
+    assert!(matches!(
+        c.registrar_retorno(&chaves[0], Retorno::Aceito, &Quem::Mcp, ""),
+        Err(ErroDasRegras::NaoPermitido(_))
+    ));
+}
+
+#[test]
+fn d12_vale_para_o_mcp_exemplo_falhando_bloqueia_a_ativacao() {
+    let mut c = Catalogo::em_memoria().unwrap();
+    let v = c.salvar_rascunho(nova("r", def_comprovante())).unwrap();
+    c.salvar_exemplo(
+        "r",
+        "nao",
+        &entrada("e", COMPROVANTE),
+        Esperado::NaoSeAplica,
+    )
+    .unwrap();
+    assert_eq!(
+        c.ativar("r", v.versao, &Quem::Mcp, None),
+        Err(ErroDasRegras::Exemplos(vec!["nao".into()]))
+    );
+    assert_eq!(c.versao("r", v.versao).unwrap().estado, Estado::Rascunho);
+}
+
+// ---------------------------------------------------------------- texto de OCR
+
+/// O que o tesseract devolve de um comprovante em tela escura: espaços sobrando, `RS` no
+/// lugar de `R$`, `O` no lugar de `0` e `l` no lugar de `1` dentro dos números.
+const COMPROVANTE_DE_OCR: &str = "Banco  Exemplo\nComprovante   PIX\n\
+Favorecido:  Fulano de Tal\nValor:  RS 1.234,5O\nData:  O6/lO/2O26\n";
+
+fn def_do_ocr(texto_de_ocr: bool) -> Definicao {
+    let mut d = def_comprovante();
+    d.extrair.remove("autenticacao");
+    d.texto_de_ocr = texto_de_ocr;
+    d
+}
+
+fn leitura_do_ocr(texto_de_ocr: bool) -> sbf_regras::Leitura {
+    let pasta = tempfile::tempdir().unwrap();
+    let mut c = Catalogo::abrir(&pasta.path().join("regras.sqlite")).unwrap();
+    ativa(
+        &mut c,
+        nova("comprovante-ocr", def_do_ocr(texto_de_ocr)),
+        None,
+    );
+    Motor::das_vigentes(&c, None)
+        .unwrap()
+        .ler(&entrada("img-1", COMPROVANTE_DE_OCR))
+}
+
+#[test]
+fn regra_sem_texto_de_ocr_nao_le_o_texto_ruidoso() {
+    let l = leitura_do_ocr(false);
+    // `Valor: RS 1.234,5O` não casa `R\$` e a data com `O` não é data: a regra reconhece
+    // (a detecção é por `contem`), mas sem os campos e com o obrigatório faltando.
+    let r = reconhecido(&l);
+    assert!(!r.campos.contains_key("valor_centavos"));
+    assert!(!r.campos.contains_key("data"));
+    assert!(r.revisar);
+}
+
+#[test]
+fn regra_com_texto_de_ocr_le_valor_e_data_do_texto_ruidoso() {
+    let l = leitura_do_ocr(true);
+    let r = reconhecido(&l);
+    assert_eq!(r.campos["valor_centavos"].valor, Valor::Centavos(123_450));
+    assert_eq!(r.campos["data"].valor, Valor::Data("2026-10-06".into()));
+    assert!(!r.revisar);
+}
+
+#[test]
+fn texto_de_ocr_falso_nao_muda_o_checksum_das_regras_que_ja_existem() {
+    let d = def_comprovante();
+    let json = serde_json::to_string(&d).unwrap();
+    assert!(!json.contains("texto_de_ocr"), "{json}");
+    let lido: Definicao = serde_json::from_str(&json).unwrap();
+    assert!(!lido.texto_de_ocr);
+    let com: Definicao = serde_json::from_str(
+        r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"x"}]},"texto_de_ocr":true}"#,
+    )
+    .unwrap();
+    assert!(com.texto_de_ocr);
+}
+
+#[test]
+fn normalizacao_de_ocr_junta_espacos_e_conserta_so_dentro_de_numeros() {
+    use sbf_regras::definicao::normalizar_ocr;
+    // Espaços juntos; quebras de linha ficam.
+    assert_eq!(normalizar_ocr("a   b \t c  \nd"), "a b c\nd");
+    // O -> 0 e l -> 1 só em tokens que são número.
+    assert_eq!(normalizar_ocr("R$ l.234,5O"), "R$ 1.234,50");
+    assert_eq!(normalizar_ocr("12/ll/2O26"), "12/11/2026");
+    assert_eq!(normalizar_ocr("10:3O"), "10:30");
+    // Palavras ficam como estão, mesmo com O e l, e também as que misturam letras e dígitos.
+    assert_eq!(
+        normalizar_ocr("Olá Lola Pol1 BOL2 ol"),
+        "Olá Lola Pol1 BOL2 ol"
+    );
+    // `l` ou `O` sem nenhum dígito de verdade não é número.
+    assert_eq!(normalizar_ocr("OO ll l O"), "OO ll l O");
+    // R$, RS e R§ (esta só antes de valor com vírgula e dois decimais).
+    assert_eq!(normalizar_ocr("RS 1.234,56"), "R$ 1.234,56");
+    assert_eq!(normalizar_ocr("R§ 12,OO"), "R$ 12,00");
+    assert_eq!(normalizar_ocr("R$1.234,56"), "R$1.234,56");
+    assert_eq!(normalizar_ocr("RS1.234,56"), "R$1.234,56");
+    // `RS` de Rio Grande do Sul não vira dinheiro.
+    assert_eq!(
+        normalizar_ocr("Porto Alegre RS 90000-000"),
+        "Porto Alegre RS 90000-000"
+    );
+}
+
+#[test]
+fn normalizacao_de_ocr_e_idempotente() {
+    use sbf_regras::definicao::normalizar_ocr;
+    let uma = normalizar_ocr(COMPROVANTE_DE_OCR);
+    assert_eq!(normalizar_ocr(&uma), uma);
+}
+
+#[test]
+fn o_campo_em_que_as_candidatas_discordam_sai_do_mesmo_criterio_do_motor() {
+    use sbf_regras::motor::campo_em_que_discordam;
+    let mut c = Catalogo::em_memoria().unwrap();
+    ativa(
+        &mut c,
+        nova("regra-a", Definicao::simples("tipo-a", "comprovante pix")),
+        None,
+    );
+    ativa(
+        &mut c,
+        nova("regra-b", Definicao::simples("tipo-b", "banco exemplo")),
+        None,
+    );
+    let motor = Motor::das_vigentes(&c, None).unwrap();
+    let l = motor.ler(&entrada("x", COMPROVANTE));
+    match &l.decisao {
+        Decisao::Ambiguo { candidatas, .. } => {
+            assert_eq!(campo_em_que_discordam(candidatas), Some("tipo_documental"));
+            // Uma candidata sozinha não discorda de ninguém.
+            assert_eq!(campo_em_que_discordam(&candidatas[..1]), None);
+        }
+        outra => panic!("{outra:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Mês por extenso sem ano (spec 15: o ano vem do `momento` da entrada)
+// ---------------------------------------------------------------------------------------
+
+const PRESTACAO: &str = "Prestação atual\nR$ 1.234,56\nVencimento em 25 de Novembro\n";
+
+fn def_prestacao() -> Definicao {
+    let mut d = Definicao::simples("prestacao-habitacao", "prestacao atual");
+    d.extrair.insert(
+        "competencia".into(),
+        extracao(r"Vencimento em (\d+ de [A-Za-zç]+)", Formato::Competencia),
+    );
+    d.extrair.insert(
+        "vencimento".into(),
+        extracao(r"Vencimento em (\d+ de [A-Za-zç]+)", Formato::Data),
+    );
+    d.obrigatorios = vec!["competencia".into()];
+    d
+}
+
+fn ler_prestacao(momento: Option<&str>) -> sbf_regras::Reconhecimento {
+    let v = VersaoDeRegra::avulsa(nova("prestacao", def_prestacao()), 1, Estado::Ativa).unwrap();
+    let mut e = entrada("p1", PRESTACAO);
+    e.momento = momento.map(str::to_owned);
+    match Motor::novo(vec![v], vec![], None).ler(&e).decisao {
+        Decisao::Reconhecido(r) => *r,
+        outra => panic!("{outra:?}"),
+    }
+}
+
+#[test]
+fn competencia_e_data_sem_ano_saem_do_momento_da_entrada() {
+    let r = ler_prestacao(Some("2026-11-20"));
+    assert_eq!(
+        r.campos["competencia"].valor,
+        Valor::Competencia("2026-11".into())
+    );
+    assert_eq!(
+        r.campos["vencimento"].valor,
+        Valor::Data("2026-11-25".into())
+    );
+    assert!(!r.revisar, "{:?}", r.motivos);
+    // Perto da virada do ano o mês mais próximo é o de dezembro do ano anterior.
+    let mut e = entrada("p2", "Prestação atual\nVencimento em 28 de Dezembro\n");
+    e.momento = Some("2026-01-05T09:00:00-03:00".into());
+    let v = VersaoDeRegra::avulsa(nova("prestacao", def_prestacao()), 1, Estado::Ativa).unwrap();
+    let Decisao::Reconhecido(r) = Motor::novo(vec![v], vec![], None).ler(&e).decisao else {
+        panic!()
+    };
+    assert_eq!(
+        r.campos["competencia"].valor,
+        Valor::Competencia("2025-12".into())
+    );
+}
+
+#[test]
+fn sem_momento_o_campo_fica_sem_valor_e_o_motivo_diz_por_que() {
+    let r = ler_prestacao(None);
+    assert!(!r.campos.contains_key("competencia"));
+    assert!(r.revisar, "campo obrigatório ausente vai para revisão");
+    let m = r.motivos.join(" | ");
+    assert!(m.contains("sem ano"), "{m}");
+    assert!(m.contains("`momento`"), "{m}");
 }

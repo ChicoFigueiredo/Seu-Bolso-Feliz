@@ -26,16 +26,19 @@ pub enum PainelDoDock {
     Previa,
     /// Os arquivos soltos na janela e o que o reconhecimento achou ([`crate::reconhecimento`]).
     Reconhecimento,
+    /// Rita, a assistente de padrões de reconhecimento ([`crate::rita_ui`]).
+    Rita,
 }
 
 impl PainelDoDock {
-    pub const TODOS: [PainelDoDock; 6] = [
+    pub const TODOS: [PainelDoDock; 7] = [
         PainelDoDock::Detalhe,
         PainelDoDock::Origens,
         PainelDoDock::Texto,
         PainelDoDock::Historico,
         PainelDoDock::Previa,
         PainelDoDock::Reconhecimento,
+        PainelDoDock::Rita,
     ];
 
     pub fn titulo(self) -> &'static str {
@@ -46,6 +49,7 @@ impl PainelDoDock {
             PainelDoDock::Historico => "Histórico de decisões",
             PainelDoDock::Previa => "Prévia",
             PainelDoDock::Reconhecimento => "Reconhecimento",
+            PainelDoDock::Rita => "Rita",
         }
     }
 
@@ -57,6 +61,7 @@ impl PainelDoDock {
             PainelDoDock::Historico => "history",
             PainelDoDock::Previa => "visibility",
             PainelDoDock::Reconhecimento => "upload_file",
+            PainelDoDock::Rita => "smart_toy",
         }
     }
 }
@@ -98,6 +103,8 @@ pub fn desenhar(
         PainelDoDock::Previa => vazio(ui, "Selecione um achado ou documento."),
         // Precisa do estado da janela: `Janela::dock_ui`.
         PainelDoDock::Reconhecimento => vazio(ui, "Solte um arquivo na janela para reconhecer."),
+        // Precisa do estado da janela: `Janela::dock_ui`.
+        PainelDoDock::Rita => vazio(ui, "Selecione um item para pedir a Rita."),
     }
 }
 

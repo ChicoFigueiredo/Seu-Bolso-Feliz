@@ -27,6 +27,7 @@ use sbf_roteiros::passo::Marca;
 use sbf_roteiros::servico::{Ambiente, executar_roteiro, gravar_novo};
 use zeroize::Zeroize as _;
 
+use crate::roteiros_escritos::Escritos;
 use crate::{componentes, tema};
 
 /// O provedor e o registro de `saida_ia` da IA dos roteiros.
@@ -125,6 +126,8 @@ pub struct Roteiros {
     /// Rótulos de senha de site, só na demonstração.
     rotulos_da_demonstracao: Vec<String>,
     senhas_da_demonstracao: SenhasDeSites,
+    /// Os roteiros escritos (Luau, spec 16).
+    escritos: Escritos,
 }
 
 impl std::fmt::Debug for Roteiros {
@@ -312,6 +315,7 @@ impl Roteiros {
         self.conserto = None;
         self.gravando = None;
         self.formulario = Formulario::default();
+        self.escritos.demonstracao();
         match cena {
             "roteiros-conserto" => {
                 self.aguardando.clear();
@@ -395,10 +399,12 @@ impl Roteiros {
         if let Ok(a) = b.aguardando() {
             self.aguardando = a;
         }
+        self.escritos.reler(b);
     }
 
     /// Junta o que as threads devolveram.
     fn andamento(&mut self) {
+        self.escritos.andamento();
         let mut feitos = Vec::new();
         for (i, e) in self.em_curso.iter().enumerate() {
             if let Ok(r) = e.resposta.try_recv() {
@@ -620,9 +626,12 @@ impl Roteiros {
                 ui.add_space(6.0);
             }
             self.sua_vez(ui);
+            self.escritos.sua_vez_ui(ui, self.banco.as_ref());
             self.formulario_ui(ui);
             self.gravacao_ui(ui);
             self.lista(ui);
+            self.escritos
+                .ui(ui, self.banco.as_ref(), self.amb.as_ref(), self.chaveiro.as_ref());
             self.historico_ui(ui);
         });
     }
@@ -1260,6 +1269,7 @@ impl Roteiros {
         if let Some(c) = &self.cancelar_a_gravacao {
             c.store(true, Ordering::SeqCst);
         }
+        self.escritos.cancelar_tudo();
     }
 }
 

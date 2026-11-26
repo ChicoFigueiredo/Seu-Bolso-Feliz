@@ -338,6 +338,8 @@ pub struct ContextoDaPagina<'a> {
     /// A caixa de entrada e a edição (fatia 3): Editar, Ratear, Excluir e a marca de pendente.
     pub caixa: Option<&'a dyn crate::caixa::FonteDaCaixa>,
     pub hoje: &'a str,
+    /// "Concilia" e "Reconhecido pela regra" do registro aberto (a janela as lê).
+    pub ligacoes: Option<&'a crate::ligacoes_do_registro::LigacoesDoRegistro>,
 }
 
 impl std::fmt::Debug for ContextoDaPagina<'_> {
@@ -346,6 +348,7 @@ impl std::fmt::Debug for ContextoDaPagina<'_> {
             .field("estacao", &self.estacao.is_some())
             .field("caixa", &self.caixa.is_some())
             .field("hoje", &self.hoje)
+            .field("ligacoes", &self.ligacoes.is_some())
             .finish()
     }
 }
@@ -518,6 +521,12 @@ pub fn desenhar(
             }
         });
 
+    // As ligações do registro com o planejamento e as regras.
+    if let Some(l) = contexto.ligacoes {
+        ui.add_space(6.0);
+        crate::ligacoes_do_registro::bloco(ui, l, pedidos);
+    }
+
     // Abas.
     ui.add_space(10.0);
     let abas = abas_de(alvo.tipo);
@@ -585,7 +594,7 @@ pub fn desenhar(
     }
     match &a.conteudo {
         ConteudoDaAba::Rastro => match leitor.rastro(alvo) {
-            Ok(r) => desenhar_rastro(ui, alvo, &item.rotulo, &r, pedidos),
+            Ok(r) => desenhar_rastro(ui, alvo, &item.rotulo, &r, contexto.ligacoes, pedidos),
             Err(e) => componentes::aviso(ui, "error", &e, p.perigo_sutil, p.borda, p.perigo),
         },
         ConteudoDaAba::Arquivo => {
@@ -723,6 +732,17 @@ pub fn tabela_em_pedacos(
     let p = tema::paleta(ui.ctx());
     let mut estado = vista.tabelas.remove(chave).unwrap_or_default();
     estado.teclado = teclado;
+    // A marcação (verde, âmbar) só nas tabelas principais das áreas, e só quando há catálogo
+    // de padrões ligado. Com o filtro de cor ligado a tabela é carregada por inteiro.
+    let marcacao = if teclado {
+        crate::marcacao::do_contexto(ui.ctx())
+    } else {
+        None
+    };
+    estado.filtro_de_cor = marcacao
+        .as_ref()
+        .and_then(|m| m.lock().ok().map(|g| g.filtro(chave)))
+        .unwrap_or_default();
     let mut minimo = 0;
     if estado.ordem_pendente.is_some() {
         if estado.ordenar_agora {
@@ -741,7 +761,27 @@ pub fn tabela_em_pedacos(
             ui.ctx().request_repaint();
         }
     }
+    if estado.filtro_de_cor != crate::marcacao::FiltroDeCor::Todas {
+        minimo = usize::MAX;
+    }
     let resultado = leitor.carregada(pedido, minimo).map(|c| {
+        estado.marcavel = marcacao.is_some()
+            && c.tabela.linhas.iter().take(16).any(|l| {
+                l.alvo.as_ref().is_some_and(|a| {
+                    matches!(
+                        a.tipo,
+                        sbf_inventario::Tipo::Achado | sbf_inventario::Tipo::Documento
+                    )
+                })
+            });
+        if estado.marcavel
+            && let Some(m) = &marcacao
+            && let Ok(mut g) = m.lock()
+            && crate::marcacao::faixa_do_filtro(ui, &mut g, chave)
+        {
+            estado.filtro_de_cor = g.filtro(chave);
+            ui.ctx().request_repaint();
+        }
         if minimo == usize::MAX {
             if let Some(o) = estado.ordem_pendente.take() {
                 estado.ordem = o;
@@ -929,6 +969,7 @@ pub fn desenhar_rastro(
     alvo: &Ref,
     rotulo: &str,
     rastro: &Rastro,
+    ligacoes: Option<&crate::ligacoes_do_registro::LigacoesDoRegistro>,
     pedidos: &mut Vec<Pedido>,
 ) {
     let p = tema::paleta(ui.ctx());
@@ -1002,6 +1043,10 @@ pub fn desenhar_rastro(
                     trilho(ui);
                 }
                 desenhar_elo(ui, e, pedidos);
+            }
+            if let Some(l) = ligacoes {
+                ui.add_space(6.0);
+                crate::ligacoes_do_registro::bloco(ui, l, pedidos);
             }
             if rastro
                 .abaixo

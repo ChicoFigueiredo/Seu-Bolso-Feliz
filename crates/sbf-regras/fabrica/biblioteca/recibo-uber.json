@@ -1,0 +1,95 @@
+{
+  "regra": "recibo-uber",
+  "nome": "Recibo · Uber",
+  "motivo": "regra de fábrica: recibo de corrida ou pedido da Uber em reais (data por extenso lida pelo script)",
+  "definicao": {
+    "versao_do_esquema": 1,
+    "tipo_documental": "recibo-uber",
+    "aplica_a": [
+      "documento"
+    ],
+    "prioridade": 10,
+    "detectar": {
+      "todos": [
+        {
+          "regex": "(?i)\\buber\\b"
+        },
+        {
+          "contem": "recibo"
+        },
+        {
+          "contem": "total"
+        }
+      ]
+    },
+    "extrair": {
+      "valor_centavos": {
+        "regex": "(?im)^[ \\t]*total\\b[^\\d\\n]{0,15}(\\d{1,3}(?:\\.\\d{3})+,\\d{2}|\\d+,\\d{2})",
+        "formato": "centavos"
+      },
+      "data": {
+        "regex": "(\\d{2}/\\d{2}/\\d{4})",
+        "formato": "data"
+      }
+    },
+    "obrigatorios": [
+      "valor_centavos",
+      "data"
+    ],
+    "script_le_texto": true,
+    "propor": []
+  },
+  "exemplos": [
+    {
+      "nome": "recibo com data por extenso",
+      "texto": "Uber\nRecibo\nObrigado por viajar, Fulano\nTotal R$ 23,40\n12 de novembro de 2026\nUberX · 5,2 km\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "recibo-uber",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 2340
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-11-12"
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "brl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "recibo com subtotal e data numérica",
+      "texto": "Uber\nRecibo da viagem\nSubtotal R$ 40,00\nTotal R$ 38,50\nData: 03/12/2026\n",
+      "esperado": {
+        "esperado": "reconhece",
+        "tipo_documental": "recibo-uber",
+        "campos": {
+          "valor_centavos": {
+            "tipo": "centavos",
+            "valor": 3850
+          },
+          "data": {
+            "tipo": "data",
+            "valor": "2026-12-03"
+          },
+          "moeda": {
+            "tipo": "texto",
+            "valor": "brl"
+          }
+        }
+      }
+    },
+    {
+      "nome": "recibo de outra empresa",
+      "texto": "Loja Exemplo\nRecibo\nTotal R$ 10,00\n",
+      "esperado": {
+        "esperado": "nao_se_aplica"
+      }
+    }
+  ]
+}

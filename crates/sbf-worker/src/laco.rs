@@ -8,12 +8,19 @@
 //! 3. **Nuvem**: se a coleta está ligada em Opções › Nuvens, no intervalo configurado;
 //! 4. **Mensageiros**: se ligados em Opções › Mensageiros, WhatsApp e Telegram (só as conversas
 //!    que o usuário incluiu), no intervalo de `mensageiros.json`;
-//! 5. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
+//! 5. **Gmail**: a cada `gmail_minutos` (padrão 30; `0` desliga), se o coletor foi ligado (o
+//!    `sbf` só liga quando as credenciais OAuth estão no ambiente): anexos para
+//!    `<cofre>/entrada/gmail/` e reconhecimento com as regras;
+//!    **Telegram**: as conversas seguidas (`telegram.json`), a cada `telegram_minutos` (15);
+//! 6. **Roteiros**: se há `roteiros.sqlite`, de 5 em 5 minutos executa os roteiros agendados
 //!    que já passaram do intervalo (spec 10, C1);
-//! 6. **Triagem**: um pequeno lote do agente, no horário configurado.
-//! 7. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
+//! 7. **Triagem**: um pequeno lote do agente, no horário configurado.
+//! 8. **Índice local** (spec 10): atualização incremental dos embeddings, de 30 em 30 minutos,
 //!    só se o modelo já foi baixado pela janela (o worker nunca baixa modelo);
-//! 8. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
+//! 9. **Pontos de atenção** (spec 10): a análise por regras, de 6 em 6 horas.
+//! 10. **Passada de padrões** (spec 15, D4): lê os documentos que já têm texto guardado com os
+//!     padrões de reconhecimento vigentes, só para marcar as listas (grava a execução, nunca
+//!     decisão, proposta nem Caixa de entrada). Lotes pequenos com pausa, com retomada.
 //!
 //! O que cada etapa **faz** de verdade vem por trait ([`ColetorDeNuvem`], [`Triador`]), para
 //! o laço ser testável sem rclone nem `claude`. O estado vai para `worker-estado.json` a cada
@@ -21,11 +28,13 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use rusqlite::Connection;
 use sbf_coleta::pastas::{self, Contadores, Opcoes, Varredor, Vigia};
+use sbf_inventario::caixa_de_entrada;
 
 use crate::config::{Config, hora_local};
 use crate::estado::{EstadoDoWorker, UltimaColeta, agora};
@@ -142,6 +151,56 @@ pub trait ColetorDeMensageiros {
     fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDeMensageiros, Falha>;
 }
 
+/// O que uma coleta do Gmail fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoGmail {
+    /// Mensagens lidas.
+    pub mensagens: usize,
+    /// Conteúdos novos no inventário.
+    pub novos: usize,
+}
+
+/// Uma coleta do Gmail (a real é `sbf_gmail::coletar`, montada no `sbf`).
+pub trait ColetorDeGmail {
+    /// Coleta as mensagens novas que casam com a consulta padrão.
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoGmail, Falha>;
+
+    /// Depois de [`Falha::Autorizacao`] o worker para de chamar [`Self::coletar`] e só
+    /// pergunta isto (barato, sem rede): `true` quando a pessoa entrou de novo e vale tentar.
+    /// O padrão é `true` (sem suspensão que dependa de login).
+    fn pode_tentar_de_novo(&mut self) -> bool {
+        true
+    }
+
+    /// Os ids das contas com a autorização vencida agora (lê só o chaveiro; sem rede). O worker
+    /// registra cada uma ao vencer, mostra a contagem na barra e segue com as outras contas.
+    fn contas_vencidas(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// O que uma coleta do Telegram fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoTelegram {
+    /// Conversas consultadas.
+    pub conversas: usize,
+    /// Arquivos novos no inventário.
+    pub novos: usize,
+}
+
+/// Uma coleta do Telegram (a real é `sbf_telegram::coleta`, montada no `sbf`).
+pub trait ColetorDeTelegram {
+    /// Coleta as conversas seguidas. Sem sessão guardada ou sem conversa seguida, é um `Ok`
+    /// vazio (não é falha: o usuário ainda não ligou).
+    ///
+    /// # Errors
+    /// A categoria da falha (a mensagem não sai do coletor).
+    fn coletar(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoTelegram, Falha>;
+}
+
 /// O que uma coleta de nuvem fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDaNuvem {
@@ -206,6 +265,50 @@ pub trait Triador {
     fn ciclo(&mut self, lote: usize, cancelar: &AtomicBool) -> Result<ResumoDaTriagem, Falha>;
 }
 
+/// Um arquivo novo de uma pasta vigiada, a reconhecer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArquivoNovo {
+    /// O sha256 do conteúdo (já indexado no inventário).
+    pub sha256: String,
+    pub caminho: PathBuf,
+    /// A fonte da pasta no `worker.json` (`celular` é o espelho do celular).
+    pub fonte: String,
+}
+
+/// O reconhecimento de um arquivo que chegou numa pasta vigiada (o real é o
+/// `ReconhecedorDoCofre` com o canal da pasta, montado no `sbf`): o resultado entra na Caixa
+/// de entrada. Quem chama: o vigia (arquivo que acabou de aparecer) e a reconciliação, **só
+/// para os achados novos que ela indexou e que ainda não têm linha na Caixa de entrada**
+/// (o que chegou com o vigia parado). Nunca o acervo antigo.
+pub trait ReconhecedorDePastas {
+    /// Reconhece um arquivo novo.
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn reconhecer(&mut self, arquivo: &ArquivoNovo, cancelar: &AtomicBool) -> Result<(), Falha>;
+
+    /// Logo depois de um [`ReconhecedorDePastas::reconhecer`] que deu certo: o que o
+    /// reconhecimento ligou sozinho no planejamento (alta confiança, sem janela e sem clique).
+    /// Uma escrita que falhou **não** derruba o reconhecimento (a linha da Caixa de entrada
+    /// já está gravada): vem em [`Vinculos::falha`]. O padrão é nada.
+    fn vinculos_do_ultimo(&mut self) -> Vinculos {
+        Vinculos::default()
+    }
+}
+
+/// O que um arquivo reconhecido ligou sozinho ao controle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Vinculos {
+    /// Ligações novas gravadas.
+    pub novos: usize,
+    /// A categoria da falha ao escrever no planejamento, se houve (nunca com dados).
+    pub falha: Option<Falha>,
+}
+
+/// Quantos achados novos a reconciliação reconhece por pasta e por volta (o resto fica para a
+/// próxima: o laço não pode ficar preso num lote grande).
+const LOTE_DE_PENDENTES: u32 = 50;
+
 /// O que uma atualização do índice local fez.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumoDoIndice {
@@ -238,10 +341,83 @@ pub trait Analista {
     fn analisar(&mut self) -> Result<ResumoDosPontos, Falha>;
 }
 
+/// O que uma volta de OCR fez. Só contagens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDoOcr {
+    /// Imagens com texto lido e gravado.
+    pub lidas: usize,
+    /// Imagens que o OCR leu e não tinham texto.
+    pub sem_texto: usize,
+    /// Imagens que não puderam ser lidas.
+    pub falhas: usize,
+    /// Sobraram imagens novas para a próxima volta.
+    pub pendentes: bool,
+    /// Não há tesseract neste sistema (não é falha: nada foi feito).
+    pub indisponivel: bool,
+    /// A causa mais comum das falhas da volta (uma palavra, sem caminho nem conteúdo).
+    pub causa: Option<&'static str>,
+}
+
+/// Lê o texto das imagens novas do inventário (o real é `sbf_ocr::ler_imagens_novas`,
+/// montado no `sbf`).
+pub trait LeitorDeImagens {
+    /// Lê um lote (poucas imagens por volta, para o vigia não ficar parado).
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn ler_novas(&mut self, cancelar: &AtomicBool) -> Result<ResumoDoOcr, Falha>;
+}
+
+/// O que um lote da passada de padrões fez. Só contagens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumoDaPassada {
+    /// Documentos lidos neste lote.
+    pub lidos: usize,
+    /// Leituras feitas até agora nas versões vigentes (o `N` de `padroes: N de M`).
+    pub feitos: u64,
+    /// Documentos com texto vezes versões vigentes (o `M`).
+    pub total: u64,
+}
+
+/// A passada de fundo dos padrões de reconhecimento sobre os documentos com texto guardado
+/// (a real é montada no `sbf`, sobre o `sbf-regras`). Nunca extrai texto, não usa OCR nem IA
+/// e só grava a execução: o ponto de parada fica no `regras.sqlite`, então um reinício do
+/// worker retoma de onde parou, e uma versão ativada ou alterada repete só ela.
+pub trait PassadaDePadroes {
+    /// Lê um lote pequeno. `lidos == 0` quer dizer que não há mais nada a ler agora.
+    ///
+    /// # Errors
+    /// A categoria da falha.
+    fn lote(&mut self, cancelar: &AtomicBool) -> Result<ResumoDaPassada, Falha>;
+}
+
+/// De quanto em quanto tempo a passada de padrões procura trabalho novo (texto novo, versão
+/// nova), em segundos, quando o último lote não achou nada.
+pub const INTERVALO_DOS_PADROES: u64 = 60;
+/// A pausa entre dois lotes da passada enquanto há o que ler, em segundos (lotes de até 200
+/// documentos ou 3 s, depois 1 s de pausa): o worker e a tela
+/// nunca ficam presos a ela.
+pub const PAUSA_DOS_PADROES: u64 = 1;
+/// Quanto a passada espera depois de uma falha (nunca gira em cima do mesmo erro).
+pub const RECUO_DOS_PADROES: u64 = 5 * 60;
+/// De quanto em quanto tempo, em segundos, o progresso vai para o log durante a passada.
+const LOG_DOS_PADROES: u64 = 60;
+
+/// De quanto em quanto tempo o OCR procura imagens novas, em segundos (se o lote anterior
+/// deixou imagens, a próxima volta já roda).
+pub const INTERVALO_DO_OCR: u64 = 60;
+/// Quanto o OCR espera quando o lote anterior não leu nada (só falhou) e ainda sobraram
+/// imagens: sem isto ele giraria a cada volta do laço em cima de um monte de imagens ruins.
+pub const INTERVALO_APOS_LOTE_SEM_LEITURA: u64 = 5 * 60;
 /// De quanto em quanto tempo o índice é atualizado, em segundos.
 pub const INTERVALO_DO_INDICE: u64 = 30 * 60;
 /// De quanto em quanto tempo os pontos de atenção são analisados, em segundos.
 pub const INTERVALO_DOS_PONTOS: u64 = 6 * 3600;
+
+/// De quanto em quanto tempo, em segundos, o estado é renovado mesmo com o laço preso num
+/// passo longo (a varredura inicial de uma pasta grande): bem abaixo de
+/// [`crate::estado::VALIDADE_S`].
+pub const BATIMENTO_DO_ESTADO: u64 = 10;
 
 /// O worker.
 pub struct Worker {
@@ -249,10 +425,15 @@ pub struct Worker {
     config: Config,
     nuvem: Option<Box<dyn ColetorDeNuvem>>,
     mensageiros: Option<Box<dyn ColetorDeMensageiros>>,
+    gmail: Option<Box<dyn ColetorDeGmail>>,
+    telegram: Option<Box<dyn ColetorDeTelegram>>,
     roteiros: Option<Box<dyn ColetorDeRoteiros>>,
     triador: Option<Box<dyn Triador>>,
     indexador: Option<Box<dyn Indexador>>,
     analista: Option<Box<dyn Analista>>,
+    leitor: Option<Box<dyn LeitorDeImagens>>,
+    passada: Option<Box<dyn PassadaDePadroes>>,
+    reconhecedor_de_pastas: Option<Box<dyn ReconhecedorDePastas>>,
     registro: Registro,
     /// O estado que vai para o arquivo.
     pub estado: EstadoDoWorker,
@@ -262,12 +443,29 @@ pub struct Worker {
     proxima_reconciliacao: u64,
     proxima_nuvem: u64,
     proxima_mensageiros: u64,
+    proxima_gmail: u64,
+    /// Todas as contas de e-mail venceram (`Autorizacao`): não coleta até `pode_tentar_de_novo`.
+    gmail_suspenso: bool,
+    /// As contas de e-mail com autorização vencida já registradas no log.
+    gmail_vencidas: std::collections::HashSet<String>,
+    proxima_telegram: u64,
     proxima_roteiros: u64,
     proxima_triagem: u64,
     proximo_indice: u64,
     proximos_pontos: u64,
+    proximo_ocr: u64,
+    proximos_padroes: u64,
+    /// Quando o progresso da passada foi ao log pela última vez.
+    padroes_logado_em: u64,
+    /// Houve lote com leitura desde o último registro no log.
+    padroes_sem_registrar: Option<ResumoDaPassada>,
     gravado_em: u64,
     sujo: bool,
+    /// Quando o arquivo de estado foi escrito pela última vez (o laço ou o batimento).
+    pulso: Arc<AtomicU64>,
+    /// De quanto em quanto tempo, em segundos, o batimento renova o estado se o laço está
+    /// preso num passo longo.
+    batimento_s: u64,
 }
 
 impl std::fmt::Debug for Worker {
@@ -318,10 +516,15 @@ impl Worker {
             config,
             nuvem,
             mensageiros: None,
+            gmail: None,
+            telegram: None,
             roteiros: None,
             triador,
             indexador: None,
             analista: None,
+            leitor: None,
+            passada: None,
+            reconhecedor_de_pastas: None,
             registro,
             estado,
             vigia,
@@ -331,12 +534,22 @@ impl Worker {
             proxima_reconciliacao: agora_,
             proxima_nuvem: agora_,
             proxima_mensageiros: agora_,
+            proxima_gmail: agora_,
+            gmail_suspenso: false,
+            gmail_vencidas: std::collections::HashSet::new(),
+            proxima_telegram: agora_,
             proxima_roteiros: agora_,
             proxima_triagem: agora_,
             proximo_indice: agora_,
             proximos_pontos: agora_,
+            proximo_ocr: agora_,
+            proximos_padroes: agora_,
+            padroes_logado_em: 0,
+            padroes_sem_registrar: None,
             gravado_em: 0,
             sujo: true,
+            pulso: Arc::new(AtomicU64::new(0)),
+            batimento_s: BATIMENTO_DO_ESTADO,
         };
         let _ = w.registro.registrar(&Evento::Iniciou {
             vigiadas: w.estado.vigiando,
@@ -348,6 +561,20 @@ impl Worker {
     #[must_use]
     pub fn com_mensageiros(mut self, coletor: Box<dyn ColetorDeMensageiros>) -> Self {
         self.mensageiros = Some(coletor);
+        self
+    }
+
+    /// Liga a coleta do Gmail (sem mudar a assinatura de [`Worker::novo`]).
+    #[must_use]
+    pub fn com_gmail(mut self, coletor: Box<dyn ColetorDeGmail>) -> Self {
+        self.gmail = Some(coletor);
+        self
+    }
+
+    /// Liga a coleta do Telegram (conversas seguidas), de `telegram_minutos` em `telegram_minutos`.
+    #[must_use]
+    pub fn com_telegram(mut self, coletor: Box<dyn ColetorDeTelegram>) -> Self {
+        self.telegram = Some(coletor);
         self
     }
 
@@ -365,6 +592,27 @@ impl Worker {
         self
     }
 
+    /// Liga o OCR das imagens novas (ADR-016 do desktop: só lê, nunca envia).
+    #[must_use]
+    pub fn com_ocr(mut self, leitor: Box<dyn LeitorDeImagens>) -> Self {
+        self.leitor = Some(leitor);
+        self
+    }
+
+    /// Liga a passada de fundo dos padrões de reconhecimento (spec 15, D4).
+    #[must_use]
+    pub fn com_passada_de_padroes(mut self, passada: Box<dyn PassadaDePadroes>) -> Self {
+        self.passada = Some(passada);
+        self
+    }
+
+    /// Liga o reconhecimento dos arquivos novos das pastas vigiadas (Caixa de entrada).
+    #[must_use]
+    pub fn com_reconhecimento_das_pastas(mut self, r: Box<dyn ReconhecedorDePastas>) -> Self {
+        self.reconhecedor_de_pastas = Some(r);
+        self
+    }
+
     /// Liga a análise dos pontos de atenção (spec 10).
     #[must_use]
     pub fn com_pontos(mut self, analista: Box<dyn Analista>) -> Self {
@@ -374,7 +622,11 @@ impl Worker {
 
     fn banco(&mut self) -> Resultado<&Connection> {
         if self.conn.is_none() {
-            self.conn = Some(banco::abrir(&self.dados.banco)?);
+            let conn = banco::abrir(&self.dados.banco)?;
+            // A Caixa de entrada existe desde aqui: só o que for achado depois passa pelo
+            // reconhecimento da reconciliação (o acervo antigo não).
+            caixa_de_entrada::garantir_tabela(&conn)?;
+            self.conn = Some(conn);
         }
         self.conn.as_ref().ok_or(crate::Erro::Configuracao)
     }
@@ -424,13 +676,24 @@ impl Worker {
             }
         }
         for (fonte, (raiz, arquivos)) in por_fonte {
+            let mut novos_arquivos: Vec<ArquivoNovo> = Vec::new();
             let resultado = (|| -> Resultado<Contadores> {
                 let varredura = self.varredura_do_vigia(&fonte, &raiz)?;
                 let cofre = self.dados.cofre.clone();
                 let conn = self.banco()?;
                 let mut c = Contadores::default();
                 for a in &arquivos {
-                    pastas::indexar_arquivo(conn, &cofre, &fonte, varredura, a, &mut c)?;
+                    let destino =
+                        pastas::indexar_arquivo(conn, &cofre, &fonte, varredura, a, &mut c)?;
+                    if destino == pastas::Destino::Novo
+                        && let Some(sha256) = caixa_de_entrada::sha_da_origem_local(conn, a)?
+                    {
+                        novos_arquivos.push(ArquivoNovo {
+                            sha256,
+                            caminho: a.clone(),
+                            fonte: fonte.clone(),
+                        });
+                    }
                 }
                 Ok(c)
             })();
@@ -442,10 +705,66 @@ impl Worker {
                         avisados: arquivos.len(),
                     });
                     self.coletou("pastas", c.novos, agora_);
+                    self.reconhecer_os_novos(&novos_arquivos, &AtomicBool::new(false));
                 }
                 Err(_) => self.falhou("vigia", Falha::Banco),
             }
         }
+    }
+
+    /// Os arquivos novos passam pelo reconhecimento (e entram na Caixa de entrada). Uma
+    /// falha de um arquivo não para os outros.
+    fn reconhecer_os_novos(&mut self, arquivos: &[ArquivoNovo], cancelar: &AtomicBool) {
+        let Some(mut r) = self.reconhecedor_de_pastas.take() else {
+            return;
+        };
+        let mut vinculados = 0usize;
+        for a in arquivos {
+            if cancelar.load(Ordering::Relaxed) {
+                break;
+            }
+            match r.reconhecer(a, cancelar) {
+                Ok(()) => {
+                    let v = r.vinculos_do_ultimo();
+                    vinculados += v.novos;
+                    if let Some(f) = v.falha {
+                        self.falhou("vinculo-automatico", f);
+                    }
+                }
+                Err(f) => self.falhou("reconhecimento", f),
+            }
+        }
+        if vinculados > 0 {
+            let _ = self.registro.registrar(&Evento::Vinculou { n: vinculados });
+        }
+        self.reconhecedor_de_pastas = Some(r);
+    }
+
+    /// Os achados novos que a reconciliação indexou e que ainda não têm linha na Caixa de
+    /// entrada (o vigia estava parado quando eles chegaram).
+    fn reconhecer_os_pendentes(&mut self, fonte: &str, cancelar: &AtomicBool) {
+        if self.reconhecedor_de_pastas.is_none() {
+            return;
+        }
+        let pendentes = match self.banco().and_then(|c| {
+            Ok(caixa_de_entrada::pendentes_de_reconhecer(
+                c,
+                fonte,
+                LOTE_DE_PENDENTES,
+            )?)
+        }) {
+            Ok(p) => p,
+            Err(_) => return self.falhou("reconhecimento", Falha::Banco),
+        };
+        let arquivos: Vec<ArquivoNovo> = pendentes
+            .into_iter()
+            .map(|p| ArquivoNovo {
+                sha256: p.sha256,
+                caminho: PathBuf::from(p.caminho),
+                fonte: fonte.to_owned(),
+            })
+            .collect();
+        self.reconhecer_os_novos(&arquivos, cancelar);
     }
 
     fn coletou(&mut self, origem: &str, novos: u64, agora_: u64) {
@@ -492,6 +811,7 @@ impl Worker {
                         erros: c.erros,
                     });
                     self.coletou("pastas", c.novos, agora_);
+                    self.reconhecer_os_pendentes(&p.fonte, cancelar);
                 }
                 Err(_) => self.falhou("reconciliacao", Falha::Banco),
             }
@@ -531,6 +851,21 @@ impl Worker {
             self.proxima_mensageiros = agora_ + minutos.max(1) * 60;
             self.passo_dos_mensageiros(cancelar, agora_);
         }
+        if self.config.gmail_minutos > 0
+            && self.gmail.is_some()
+            && agora_ >= self.proxima_gmail
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.passo_do_gmail(cancelar, agora_);
+        }
+        if self.config.telegram_minutos > 0
+            && self.telegram.is_some()
+            && agora_ >= self.proxima_telegram
+            && !cancelar.load(Ordering::Relaxed)
+        {
+            self.proxima_telegram = agora_ + self.config.telegram_minutos * 60;
+            self.passo_do_telegram(cancelar, agora_);
+        }
         if self.dados.pasta.join("roteiros.sqlite").exists()
             && agora_ >= self.proxima_roteiros
             && !cancelar.load(Ordering::Relaxed)
@@ -549,6 +884,13 @@ impl Worker {
             self.proxima_triagem = agora_ + self.config.triagem.intervalo_minutos.max(1) * 60;
             self.passo_da_triagem(cancelar, agora_);
         }
+        if agora_ >= self.proximo_ocr && !cancelar.load(Ordering::Relaxed) {
+            self.proximo_ocr = agora_ + INTERVALO_DO_OCR;
+            self.passo_do_ocr(cancelar, agora_);
+        }
+        if agora_ >= self.proximos_padroes && !cancelar.load(Ordering::Relaxed) {
+            self.passo_dos_padroes(cancelar, agora_);
+        }
         if agora_ >= self.proximo_indice && !cancelar.load(Ordering::Relaxed) {
             self.proximo_indice = agora_ + INTERVALO_DO_INDICE;
             self.passo_do_indice(cancelar);
@@ -559,6 +901,72 @@ impl Worker {
         }
         if self.sujo || agora_.saturating_sub(self.gravado_em) >= 10 {
             self.gravar_estado();
+        }
+    }
+
+    fn passo_do_ocr(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut l) = self.leitor.take() else {
+            return;
+        };
+        match l.ler_novas(cancelar) {
+            Ok(r) => {
+                if r.lidas + r.sem_texto + r.falhas > 0 {
+                    let _ = self.registro.registrar(&Evento::Ocr {
+                        lidas: r.lidas,
+                        sem_texto: r.sem_texto,
+                        falhas: r.falhas,
+                        causa: r.causa,
+                    });
+                }
+                if r.pendentes && !r.indisponivel {
+                    self.proximo_ocr = if r.lidas + r.sem_texto > 0 {
+                        // Sobrou imagem e o lote rendeu: a próxima volta já lê o seguinte.
+                        agora_
+                    } else {
+                        // O lote só falhou: não gira em cima das mesmas imagens ruins.
+                        agora_ + INTERVALO_APOS_LOTE_SEM_LEITURA
+                    };
+                }
+            }
+            Err(f) => self.falhou("ocr", f),
+        }
+        self.leitor = Some(l);
+    }
+
+    fn passo_dos_padroes(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut p) = self.passada.take() else {
+            self.proximos_padroes = agora_ + INTERVALO_DOS_PADROES;
+            return;
+        };
+        match p.lote(cancelar) {
+            Ok(r) if r.lidos > 0 => {
+                // Ainda há o que ler: o próximo lote vem depois de uma pausa, nunca já.
+                self.proximos_padroes = agora_ + PAUSA_DOS_PADROES;
+                self.padroes_sem_registrar = Some(r);
+                if agora_.saturating_sub(self.padroes_logado_em) >= LOG_DOS_PADROES {
+                    self.registrar_padroes(agora_);
+                }
+            }
+            Ok(_) => {
+                self.proximos_padroes = agora_ + INTERVALO_DOS_PADROES;
+                // Acabou o trabalho: o último progresso vai ao log.
+                self.registrar_padroes(agora_);
+            }
+            Err(f) => {
+                self.proximos_padroes = agora_ + RECUO_DOS_PADROES;
+                self.falhou("padroes", f);
+            }
+        }
+        self.passada = Some(p);
+    }
+
+    fn registrar_padroes(&mut self, agora_: u64) {
+        if let Some(r) = self.padroes_sem_registrar.take() {
+            let _ = self.registro.registrar(&Evento::Padroes {
+                feitos: r.feitos,
+                total: r.total,
+            });
+            self.padroes_logado_em = agora_;
         }
     }
 
@@ -631,6 +1039,82 @@ impl Worker {
         self.mensageiros = Some(m);
     }
 
+    /// Quanto esperar para olhar de novo se a pessoa entrou no Gmail (sem rede, só o chaveiro).
+    const ESPERA_DA_SUSPENSAO_S: u64 = 60;
+
+    fn passo_do_gmail(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut g) = self.gmail.take() else {
+            return;
+        };
+        if self.gmail_suspenso {
+            if !g.pode_tentar_de_novo() {
+                // Continua vencido: nada de rede, só olha de novo daqui a pouco.
+                self.proxima_gmail = agora_ + Self::ESPERA_DA_SUSPENSAO_S;
+                self.gmail = Some(g);
+                return;
+            }
+            self.gmail_suspenso = false;
+        }
+        self.proxima_gmail = agora_ + self.config.gmail_minutos * 60;
+        match g.coletar(cancelar) {
+            Ok(r) => {
+                let _ = self.registro.registrar(&Evento::Gmail {
+                    mensagens: r.mensagens,
+                    novos: r.novos,
+                });
+                self.coletou("gmail", r.novos as u64, agora_);
+            }
+            Err(f) => {
+                if f == Falha::Autorizacao {
+                    // Todas as contas venceram: não martela o Google, suspende até a pessoa
+                    // entrar de novo.
+                    self.gmail_suspenso = true;
+                    self.proxima_gmail = agora_ + Self::ESPERA_DA_SUSPENSAO_S;
+                }
+                self.falhou("gmail", f);
+            }
+        }
+        // Cada conta com a autorização vencida é registrada uma vez (quando vence); as outras
+        // contas seguem coletando normalmente.
+        let vencidas = g.contas_vencidas();
+        for id in vencidas
+            .iter()
+            .filter(|i| !self.gmail_vencidas.contains(*i))
+        {
+            let _ = self.registro.registrar(&Evento::FalhouConta {
+                passo: "gmail",
+                falha: Falha::Autorizacao,
+                conta: id,
+            });
+        }
+        let n = u32::try_from(vencidas.len()).unwrap_or(u32::MAX);
+        if n != self.estado.gmail_contas_vencidas {
+            self.estado.gmail_contas_vencidas = n;
+            self.sujo = true;
+        }
+        self.gmail_vencidas = vencidas.into_iter().collect();
+        self.gmail = Some(g);
+    }
+
+    fn passo_do_telegram(&mut self, cancelar: &AtomicBool, agora_: u64) {
+        let Some(mut t) = self.telegram.take() else {
+            return;
+        };
+        match t.coletar(cancelar) {
+            Ok(r) => {
+                if r.conversas > 0 {
+                    let _ = self.registro.registrar(&Evento::Telegram {
+                        conversas: r.conversas,
+                        novos: r.novos,
+                    });
+                }
+                self.coletou("telegram", r.novos as u64, agora_);
+            }
+            Err(f) => self.falhou("telegram", f),
+        }
+        self.telegram = Some(t);
+    }
+
     fn passo_dos_roteiros(&mut self, cancelar: &AtomicBool, agora_: u64) {
         let Some(mut r) = self.roteiros.take() else {
             return;
@@ -675,10 +1159,19 @@ impl Worker {
         self.triador = Some(t);
     }
 
+    /// Troca o intervalo do batimento do estado (o padrão é [`BATIMENTO_DO_ESTADO`]).
+    #[must_use]
+    pub fn com_batimento(mut self, segundos: u64) -> Self {
+        self.batimento_s = segundos.max(1);
+        self
+    }
+
     fn gravar_estado(&mut self) {
         match self.estado.gravar(&self.dados.estado()) {
             Ok(()) => {
                 self.gravado_em = self.estado.atualizado_em;
+                self.pulso
+                    .store(self.estado.atualizado_em, Ordering::Relaxed);
                 self.sujo = false;
             }
             Err(_) => {
@@ -692,10 +1185,23 @@ impl Worker {
     }
 
     /// Roda até `cancelar` virar `true`. Cada volta dura ~1 s (o vigia faz de sono).
+    ///
+    /// O estado (pid novo, `iniciado_em`, pastas vigiadas) é gravado já na largada, e uma thread
+    /// de batimento o renova enquanto o laço estiver preso num passo longo (a varredura inicial
+    /// de uma pasta grande leva minutos): sem isto a janela mostrava "parado" com o serviço ativo.
     pub fn rodar(&mut self, cancelar: &AtomicBool) {
-        while !cancelar.load(Ordering::Relaxed) {
-            self.passo(agora(), Duration::from_secs(1), cancelar);
-        }
+        self.gravar_estado();
+        let parar = AtomicBool::new(false);
+        let caminho = self.dados.estado();
+        let pulso = Arc::clone(&self.pulso);
+        let (pid, batimento_s) = (self.estado.pid, self.batimento_s);
+        std::thread::scope(|s| {
+            s.spawn(|| batimento(&caminho, pid, &pulso, batimento_s, &parar));
+            while !cancelar.load(Ordering::Relaxed) {
+                self.passo(agora(), Duration::from_secs(1), cancelar);
+            }
+            parar.store(true, Ordering::Relaxed);
+        });
         self.encerrar();
     }
 
@@ -719,6 +1225,30 @@ impl Worker {
             &self.dados.estado(),
             &serde_json::to_vec_pretty(&self.estado).unwrap_or_default(),
         );
+    }
+}
+
+/// Renova o `atualizado_em` do estado quando o laço não o escreve há `cada` segundos. Só mexe
+/// em arquivo do próprio processo (`pid`) e só quando o laço está parado, então não disputa
+/// com a escrita dele.
+fn batimento(caminho: &Path, pid: u32, pulso: &AtomicU64, cada: u64, parar: &AtomicBool) {
+    while !parar.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(100));
+        let agora_ = agora();
+        if agora_.saturating_sub(pulso.load(Ordering::Relaxed)) < cada {
+            continue;
+        }
+        if let Some(mut e) = EstadoDoWorker::ler(caminho)
+            && e.pid == pid
+            && !parar.load(Ordering::Relaxed)
+        {
+            e.atualizado_em = agora_;
+            if let Ok(b) = serde_json::to_vec_pretty(&e)
+                && crate::estado::escrever_atomico(caminho, &b).is_ok()
+            {
+                pulso.store(agora_, Ordering::Relaxed);
+            }
+        }
     }
 }
 

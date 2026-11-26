@@ -97,7 +97,8 @@ pub fn rodar(args: &[String]) -> ExitCode {
     };
     let chaveiro = sbf_chaveiro::Chaveiro::abrir_na_pasta_padrao().ok();
     let reconhecedor = match montar(cofre, chaveiro, o.com_ia) {
-        Ok(r) => r,
+        // `sbf reconhecer` reprocessa o arquivo e o põe na Caixa de entrada.
+        Ok(r) => r.com_caixa_de_entrada(sbf_inventario::caixa_de_entrada::Canal::Cli, true),
         Err(e) => {
             eprintln!("sbf: não deu para montar a IA: {e}");
             return ExitCode::from(1);
@@ -217,6 +218,8 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
         EstadoDoTexto::SemTexto(_) => "sem texto".to_owned(),
         EstadoDoTexto::Protegido(m) if o.detalhar => format!("protegido ({m})"),
         EstadoDoTexto::Protegido(_) => "protegido".to_owned(),
+        EstadoDoTexto::Falhou(m) if o.detalhar => format!("a leitura falhou ({m})"),
+        EstadoDoTexto::Falhou(_) => "a leitura falhou".to_owned(),
     };
     es(writeln!(saida, "texto: {texto}"))?;
     match &r.reconhecido {
@@ -257,7 +260,7 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
             let campos: Vec<&str> = r.campos.keys().map(String::as_str).collect();
             es(writeln!(
                 saida,
-                "reconhecido: regra {}@{} tipo={} campos={}{}",
+                "reconhecido: padrão {}@{} tipo={} campos={}{}",
                 r.regra,
                 r.versao,
                 r.tipo_documental,
@@ -273,7 +276,7 @@ fn imprimir(o: &Opcoes, r: &Resultado, saida: &mut dyn Write) -> Result<(), Stri
         Reconhecido::Ambiguo { candidatas, motivo } => {
             es(writeln!(
                 saida,
-                "reconhecido: ambiguo entre {} regras ({motivo})",
+                "reconhecido: ambiguo entre {} padrões ({motivo})",
                 candidatas.len()
             ))?;
         }
@@ -399,6 +402,9 @@ mod testes {
                 rotulo: "Vincular ao Salário · 10/2026".to_owned(),
                 tipo: TipoDeDocumento::Contracheque,
                 data: None,
+                regra: None,
+                chave: None,
+                automatica: false,
             }],
             avisos: vec!["aviso ficticio".to_owned()],
             entrada: None,

@@ -46,6 +46,33 @@ pub struct Nucleo {
     semelhantes: Semelhantes,
     plano: Option<crate::plano::Plano>,
     regras: Option<crate::regras::Regras>,
+    roteiros_escritos: Option<crate::roteiros_escritos::RoteirosEscritos>,
+    gmail: ColetaDoGmail,
+    telegram: Option<crate::telegram::Ponte>,
+    backups: crate::backup::Backups,
+}
+
+/// O que `gmail_coletar` recebe.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ParamsDeColetaDoGmail {
+    pub consulta: Option<String>,
+    pub desde: Option<String>,
+    pub limite: Option<usize>,
+}
+
+/// A coleta do Gmail que o `sbf` injeta (o MCP não conhece o cliente do Gmail nem o
+/// reconhecimento): recebe os parâmetros e devolve o resumo em JSON.
+pub type ColetorDoGmail = dyn Fn(&ParamsDeColetaDoGmail) -> Result<Value, String> + Send + Sync;
+
+#[derive(Clone, Default)]
+struct ColetaDoGmail(Option<Arc<ColetorDoGmail>>);
+
+impl std::fmt::Debug for ColetaDoGmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColetaDoGmail")
+            .field("ligada", &self.0.is_some())
+            .finish()
+    }
 }
 
 /// A busca por semelhança do índice local e o nível de confiança deste cliente MCP.
@@ -150,6 +177,8 @@ pub struct ParamsDeRegistros {
     pub texto: Option<String>,
     pub fornecedor: Option<String>,
     pub categoria: Option<String>,
+    /// O rótulo da conta, o código, o apelido ou o nome do banco (a conta do extrato).
+    pub conta: Option<String>,
     pub de: Option<String>,
     pub ate: Option<String>,
     pub estado: Option<String>,
@@ -227,13 +256,52 @@ impl Nucleo {
         abrir_leitura(banco)
             .and_then(|c| c.query_row("SELECT COUNT(*) FROM sqlite_master", [], |_| Ok(())))
             .map_err(|e| format!("não deu para abrir o inventário: {e}"))?;
+        let cofre = banco.parent().unwrap_or_else(|| Path::new("."));
+        let backups = crate::backup::Backups::novo(cofre);
+        backups.registrar(crate::backup::Qual::Inventario, banco.to_path_buf());
         Ok(Self {
             banco: banco.to_path_buf(),
             livro: livro.filter(|l| l.is_file()).map(Path::to_path_buf),
             semelhantes: Semelhantes(None),
             plano: None,
             regras: None,
+            roteiros_escritos: None,
+            gmail: ColetaDoGmail::default(),
+            telegram: None,
+            backups,
         })
+    }
+
+    /// Liga `gmail_coletar`. `coletor` roda a coleta do Gmail no cofre (anexos para
+    /// `entrada/gmail/` e reconhecimento com as regras).
+    #[must_use]
+    pub fn com_gmail(mut self, coletor: Arc<ColetorDoGmail>) -> Self {
+        self.gmail = ColetaDoGmail(Some(coletor));
+        self
+    }
+
+    /// Há coleta do Gmail ligada?
+    #[must_use]
+    pub fn tem_gmail(&self) -> bool {
+        self.gmail.0.is_some()
+    }
+
+    /// `gmail_coletar` (D15: aplica direto): coleta agora. Há backup do inventário e das
+    /// regras antes da primeira escrita da sessão; se falha, a coleta é recusada.
+    ///
+    /// # Errors
+    /// Gmail não ligado, backup que falhou ou a falha da coleta (sem conteúdo de e-mail).
+    pub fn gmail_coletar(&self, p: &ParamsDeColetaDoGmail) -> Resultado {
+        let coletor = self
+            .gmail
+            .0
+            .as_ref()
+            .ok_or_else(|| "a coleta do Gmail não está ligada".to_owned())?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Regras)?;
+        coletor(p)
     }
 
     /// Liga `buscar_semelhantes` ao índice local. `nivel` é o nível de confiança deste
@@ -257,8 +325,35 @@ impl Nucleo {
             banco: self.banco.clone(),
             nivel: self.nivel(),
             hoje: None,
+            backups: self.backups.clone(),
         });
         self
+    }
+
+    /// Diz onde está o `planejamento.sqlite` que a fábrica abre, para o backup da primeira
+    /// escrita da sessão e para `fazer_backup`. Sem isso o planejamento não é copiado.
+    #[must_use]
+    pub fn com_arquivo_do_planejamento(self, arquivo: &Path) -> Self {
+        self.backups
+            .registrar(crate::backup::Qual::Planejamento, arquivo.to_path_buf());
+        self
+    }
+
+    /// Troca o guarda de backups (os testes fixam o relógio). Chame antes de `com_planejamento`
+    /// e `com_regras`.
+    #[must_use]
+    pub fn com_backups(mut self, backups: crate::backup::Backups) -> Self {
+        backups.registrar(crate::backup::Qual::Inventario, self.banco.clone());
+        self.backups = backups;
+        self
+    }
+
+    /// `fazer_backup`: copia, agora, todos os bancos do cofre (API de backup do SQLite).
+    ///
+    /// # Errors
+    /// Qualquer banco que não deu para copiar.
+    pub fn fazer_backup(&self) -> Resultado {
+        self.backups.fazer_todos()
     }
 
     /// Liga as ferramentas de regras de reconhecimento sobre `caminho` (o `regras.sqlite`
@@ -271,13 +366,71 @@ impl Nucleo {
         caminho: PathBuf,
         executor: Arc<dyn sbf_regras::script::ExecutorDeScript>,
     ) -> Self {
-        self.regras = Some(crate::regras::Regras::novo(
-            caminho,
-            self.banco.clone(),
-            executor,
-            self.nivel(),
-        ));
+        self.backups
+            .registrar(crate::backup::Qual::Regras, caminho.clone());
+        self.regras = Some(
+            crate::regras::Regras::novo(caminho, self.banco.clone(), executor, self.nivel())
+                .com_backups(self.backups.clone()),
+        );
         self
+    }
+
+    /// Liga as ferramentas de roteiros escritos (só propor e consultar) sobre `caminho` (o
+    /// `roteiros.sqlite` da pasta de dados do app, fora do cofre). Chame depois de `com_busca`,
+    /// para herdar o nível do cliente. Se o arquivo já existe, ele entra no backup automático
+    /// (`<cofre>/backups/mcp/`) antes da primeira escrita da sessão.
+    #[must_use]
+    pub fn com_roteiros_escritos(mut self, caminho: PathBuf) -> Self {
+        self.backups
+            .registrar(crate::backup::Qual::Roteiros, caminho.clone());
+        self.roteiros_escritos = Some(
+            crate::roteiros_escritos::RoteirosEscritos::novo(
+                caminho,
+                self.banco.clone(),
+                self.nivel(),
+            )
+            .com_backups(self.backups.clone()),
+        );
+        self
+    }
+
+    /// Há roteiros escritos ligados?
+    #[must_use]
+    pub fn tem_roteiros_escritos(&self) -> bool {
+        self.roteiros_escritos.is_some()
+    }
+
+    /// As ferramentas de roteiros escritos.
+    ///
+    /// # Errors
+    /// Roteiros escritos não ligados.
+    pub fn roteiros_escritos(&self) -> Result<&crate::roteiros_escritos::RoteirosEscritos, String> {
+        self.roteiros_escritos
+            .as_ref()
+            .ok_or_else(|| "os roteiros escritos não estão ligados a este servidor".to_owned())
+    }
+
+    /// Liga as ferramentas do Telegram (a ponte é do `sbf`; o MCP não fala MTProto).
+    #[must_use]
+    pub fn com_telegram(mut self, ponte: Arc<dyn crate::telegram::PonteDoTelegram>) -> Self {
+        self.telegram = Some(crate::telegram::Ponte(ponte));
+        self
+    }
+
+    /// Há Telegram ligado?
+    #[must_use]
+    pub fn tem_telegram(&self) -> bool {
+        self.telegram.is_some()
+    }
+
+    /// A ponte do Telegram.
+    ///
+    /// # Errors
+    /// Telegram não ligado.
+    pub fn telegram(&self) -> Result<&crate::telegram::Ponte, String> {
+        self.telegram
+            .as_ref()
+            .ok_or_else(|| "o Telegram não está ligado a este servidor".to_owned())
     }
 
     /// Há regras de reconhecimento ligadas?
@@ -444,12 +597,23 @@ impl Nucleo {
 
     // ---------------------------------------------------------------- registros
 
+    /// O rótulo das contas (código e apelido dos pares confirmados). Sem planejamento ligado,
+    /// ou se ele não abre, ninguém tem rótulo e a conta aparece como veio.
+    fn rotulador(&self) -> sbf_planejamento::Rotulador {
+        self.plano
+            .as_ref()
+            .and_then(|p| (p.fabrica)().ok())
+            .and_then(|plan| plan.rotulador().ok())
+            .unwrap_or_default()
+    }
+
     /// Busca registros com filtros, mais novos primeiro.
     ///
     /// # Errors
     /// Falha do SQLite.
     pub fn buscar_registros(&self, p: &ParamsDeRegistros) -> Resultado {
         let c = self.leitura()?;
+        let rotulador = self.rotulador();
         let mut o = Onde::default();
         if let Some(t) = limpo(&p.texto) {
             let like = padrao_like(t);
@@ -469,6 +633,27 @@ impl Nucleo {
         }
         if p.sem_categoria == Some(true) {
             o.sem_valor("(categoria_provavel IS NULL OR categoria_provavel = '')");
+        }
+        if let Some(k) = limpo(&p.conta) {
+            // A conta do registro é a do extrato; o filtro aceita também o rótulo e o nome do
+            // banco, então as contas que o texto acha viram a lista do `IN`.
+            let mut st = c
+                .prepare(
+                    "SELECT DISTINCT conta_provavel FROM registro WHERE conta_provavel IS NOT NULL",
+                )
+                .map_err(erro)?;
+            let casam: Vec<String> = st
+                .query_map([], |l| l.get::<_, String>(0))
+                .map_err(erro)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(erro)?
+                .into_iter()
+                .filter(|conta| rotulador.casa(conta, k))
+                .collect();
+            o.e(
+                "conta_provavel IN (SELECT value FROM json_each(?))",
+                json!(casam).to_string(),
+            );
         }
         if let Some(de) = limpo(&p.de) {
             o.e("substr(data, 1, 10) >= ?", de.to_owned());
@@ -499,6 +684,7 @@ impl Nucleo {
             .map_err(erro)?;
         let itens = st
             .query_map(params_from_iter(o.valores.iter()), |l| {
+                let conta = l.get::<_, Option<String>>(7)?;
                 Ok(json!({
                     "id": l.get::<_, i64>(0)?,
                     "data": l.get::<_, String>(1)?,
@@ -507,7 +693,8 @@ impl Nucleo {
                     "descricao": curto(l.get(4)?, 120),
                     "fornecedor": l.get::<_, Option<String>>(5)?,
                     "categoria": l.get::<_, Option<String>>(6)?,
-                    "conta": l.get::<_, Option<String>>(7)?,
+                    "conta": conta,
+                    "conta_rotulo": rotulador.rotular_opcional(conta.as_deref()),
                     "estado": l.get::<_, String>(8)?,
                     "decidido_por": l.get::<_, Option<String>>(9)?,
                     "tem_documento": l.get::<_, bool>(10)?,
@@ -526,6 +713,7 @@ impl Nucleo {
     /// Registro inexistente ou falha do SQLite.
     pub fn ver_registro(&self, id: i64) -> Resultado {
         let c = self.leitura()?;
+        let rotulador = self.rotulador();
         let mut v: Value = c
             .query_row(
                 "SELECT tipo, substr(data, 1, 10), data_tipo, ciclo_id, valor_centavos,
@@ -568,6 +756,7 @@ impl Nucleo {
                    FROM sub_registro WHERE registro_id = ?1 ORDER BY id LIMIT 30",
             )
             .map_err(erro)?;
+        v["conta_rotulo"] = json!(rotulador.rotular_opcional(v["conta"].as_str()));
         v["sub_registros"] = Value::Array(
             st.query_map([id], |l| {
                 Ok(json!({
@@ -869,6 +1058,7 @@ impl Nucleo {
         let texto = limpo(&p.texto).map(str::to_lowercase);
         let categoria = limpo(&p.categoria).map(str::to_lowercase);
         let conta = limpo(&p.conta).map(str::to_lowercase);
+        let rotulador = self.rotulador();
         let busca = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
         let mut achadas: Vec<Value> = Vec::new();
         for linha in st.query_map([], |l| l.get::<_, String>(0)).map_err(erro)? {
@@ -908,6 +1098,7 @@ impl Nucleo {
             }
             if let Some(k) = &conta
                 && nome_conta.as_deref().map(str::to_lowercase).as_deref() != Some(k.as_str())
+                && !nome_conta.as_deref().is_some_and(|n| rotulador.casa(n, k))
             {
                 continue;
             }
@@ -918,6 +1109,7 @@ impl Nucleo {
                 "valor_centavos": v.get("valor"),
                 "descricao": curto(descricao, 120),
                 "categoria": nome_cat,
+                "conta_rotulo": rotulador.rotular_opcional(nome_conta.as_deref()),
                 "conta": nome_conta,
                 "confirmada": v.get("confirmada"),
             }));
@@ -1002,6 +1194,8 @@ impl Nucleo {
                 "no máximo {MAXIMO_DE_SUGESTOES} sugestões por chamada"
             ));
         }
+        self.backups
+            .antes_de_escrever(crate::backup::Qual::Inventario)?;
         let leitura = self.leitura()?;
         if !tem_triagem(&leitura) {
             return Err("o inventário ainda não tem a triagem (abra o app e migre)".to_owned());

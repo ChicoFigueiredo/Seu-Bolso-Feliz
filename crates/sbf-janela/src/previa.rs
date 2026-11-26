@@ -65,7 +65,7 @@ pub type GeradorDeCandidatas = Arc<dyn Fn(&str) -> Result<Vec<Candidata>, String
 
 /// O motivo de um PDF protegido sem regra de senha.
 pub const MOTIVO_SEM_REGRA: &str =
-    "Nenhuma regra de senha abre este PDF. Crie uma regra para o fornecedor e o tipo dele.";
+    "Nenhuma regra de senha abre este PDF. Crie um padrão para o fornecedor e o tipo dele.";
 
 /// Onde a prévia está sendo mostrada. A fila guarda um pedido por posto.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

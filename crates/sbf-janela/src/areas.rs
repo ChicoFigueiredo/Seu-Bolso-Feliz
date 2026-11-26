@@ -30,7 +30,7 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
         rotulo: "Caixa de entrada",
         icone: "inbox",
         fatia: 3,
-        motivo: "Os rascunhos do pipeline para corrigir, aprovar ou recusar (fatia 3)",
+        motivo: "A fila dos documentos recebidos e reconhecidos; abra um inventário para ligá-la",
     },
     AreaFutura {
         id: "controle",
@@ -48,17 +48,17 @@ pub const AREAS_FUTURAS: &[AreaFutura] = &[
     },
     AreaFutura {
         id: crate::regras_ui::ROTA,
-        rotulo: "Regras de reconhecimento",
+        rotulo: "Padrões de reconhecimento",
         icone: "rule",
         fatia: 3,
-        motivo: "O catálogo de regras ainda não está ligado a esta janela (spec 13).",
+        motivo: "O catálogo de padrões ainda não está ligado a esta janela (spec 13).",
     },
     AreaFutura {
         id: "conexoes",
         rotulo: "Conexões",
         icone: "hub",
         fatia: 4,
-        motivo: "Chega na fatia 4, com conexões, alertas e canais",
+        motivo: "O Telegram, a Pluggy e as pastas do worker só aparecem no inventário de verdade",
     },
     AreaFutura {
         id: "alertas",
@@ -244,8 +244,8 @@ pub fn descricao_da_area(area: Area) -> &'static str {
         Area::VisaoGeral => {
             "O inventário em números: resumo, etapas, fontes, os últimos 13 ciclos e avisos."
         }
-        Area::ATriar => "Achados que chegaram e ainda não passaram por nenhuma regra.",
-        Area::EmDuvida => "Achados que a regra ou você deixou em dúvida.",
+        Area::ATriar => "Achados que chegaram e ainda não passaram por nenhum padrão.",
+        Area::EmDuvida => "Achados que o padrão ou você deixou em dúvida.",
         Area::Documentos => "Achados confirmados como documento, com quem decidiu.",
         Area::Registros => {
             "Fatos financeiros que os documentos declaram. Ainda não são movimentações."

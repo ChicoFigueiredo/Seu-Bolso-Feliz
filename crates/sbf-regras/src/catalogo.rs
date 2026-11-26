@@ -22,8 +22,8 @@ use crate::definicao::{Definicao, parse_competencia};
 use crate::motor::Motor;
 use crate::script::ExecutorDeScript;
 use crate::{
-    Autor, Decisao, Entrada, ErroDasRegras, Estado, IdDaRegra, LIMIAR_DE_CONSOLIDACAO, Leitura,
-    Quem, Reconhecimento, ResultadoDaExecucao, Retorno, Valor, fabrica,
+    Autor, DeOnde, Decisao, Entrada, ErroDasRegras, Estado, IdDaRegra, LIMIAR_DE_CONSOLIDACAO,
+    Leitura, Quem, Reconhecimento, ResultadoDaExecucao, Retorno, Valor, fabrica,
 };
 
 type Resultado<T> = Result<T, ErroDasRegras>;
@@ -431,8 +431,57 @@ CREATE TABLE proposta (
 );
 ";
 
+/// A marcação das listas e a passada de fundo (spec 15, D3 e D4). Tudo com `IF NOT EXISTS`.
+///
+/// - `decisao_da_entrada`: a última decisão do conjunto de padrões sobre a entrada ser
+///   Ambíguo. A tabela `execucao` sozinha não distingue o âmbar: as candidatas de um empate
+///   e as de uma decisão clara têm o mesmo `resultado` (`reconhecido`), e o motivo é texto.
+/// - `passada_de_fundo`: o ponto de parada (rowid de `texto` no inventário) de cada versão,
+///   chaveado pelo checksum: versão nova ou alterada começa do zero, as outras seguem.
+/// - O índice por entrada serve à consulta em lote da janela.
+/// - Recupera o âmbar do que já estava gravado: um empate deixou o motivo
+///   `regras empatadas ... discordam em ...` (texto antigo) ou `padrões empatados ... discordam
+///   em ...` nas execuções das candidatas.
+const ESQUEMA_2: &str = "
+CREATE INDEX IF NOT EXISTS execucao_por_entrada ON execucao (entrada, regra);
+CREATE TABLE IF NOT EXISTS decisao_da_entrada (
+    entrada TEXT PRIMARY KEY,
+    ambiguo INTEGER NOT NULL,
+    em TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS passada_de_fundo (
+    regra TEXT NOT NULL,
+    versao INTEGER NOT NULL,
+    checksum TEXT NOT NULL,
+    ponto INTEGER NOT NULL DEFAULT 0,
+    feitos INTEGER NOT NULL DEFAULT 0,
+    atualizada_em TEXT NOT NULL,
+    PRIMARY KEY (regra, versao, checksum)
+);
+INSERT OR IGNORE INTO decisao_da_entrada (entrada, ambiguo, em)
+SELECT entrada, 1, MAX(em) FROM execucao
+ WHERE resultado = 'reconhecido'
+   AND (motivo LIKE 'regras empatadas%discordam em%' OR motivo LIKE 'padrões empatados%discordam em%')
+ GROUP BY entrada;
+";
+
+/// A identidade do documento: para cada padrão ativo ou consolidado que declara `identidade`,
+/// as entradas que o reconheceram com a identidade completa. A primeira gravada de um par
+/// `(regra, identidade)` é a original; as seguintes são repetidas pelo padrão. Só acrescenta
+/// uma tabela e um índice (nada do que existe muda).
+const ESQUEMA_3: &str = "
+CREATE TABLE IF NOT EXISTS identidade_da_entrada (
+    regra TEXT NOT NULL,
+    identidade TEXT NOT NULL,
+    entrada TEXT NOT NULL,
+    em TEXT NOT NULL,
+    PRIMARY KEY (regra, identidade, entrada)
+);
+CREATE INDEX IF NOT EXISTS identidade_por_regra ON identidade_da_entrada (regra, identidade);
+";
+
 /// As migrações, em ordem; `PRAGMA user_version` guarda quantas já rodaram.
-const MIGRACOES: &[&str] = &[ESQUEMA_1];
+const MIGRACOES: &[&str] = &[ESQUEMA_1, ESQUEMA_2, ESQUEMA_3];
 
 const COLUNAS_DA_VERSAO: &str = "regra, versao, definicao, script, checksum, autor, motivo, \
      criada_em, estado, aceitas_seguidas, ativada_em, consolidada_em, desativada_em";
@@ -553,17 +602,27 @@ fn quem_texto(q: &Quem) -> &'static str {
     match q {
         Quem::Usuario => "usuario",
         Quem::Ia => "ia",
+        Quem::Mcp => "mcp",
         Quem::Sistema => "sistema",
     }
 }
 
-fn exigir_usuario(quem: &Quem, acao: &str) -> Resultado<()> {
-    if *quem == Quem::Usuario {
+/// Quem decide o ciclo de vida: o usuário e, desde a D15, o MCP.
+fn exigir_decisor(quem: &Quem, acao: &str) -> Resultado<()> {
+    if matches!(quem, Quem::Usuario | Quem::Mcp) {
         Ok(())
     } else {
         Err(ErroDasRegras::NaoPermitido(format!(
-            "só o usuário pode {acao} uma regra"
+            "só o usuário (ou o MCP) pode {acao} uma regra"
         )))
+    }
+}
+
+/// "pelo usuário" ou "pelo mcp", para o motivo gravado no histórico.
+fn pelo(quem: &Quem) -> &'static str {
+    match quem {
+        Quem::Mcp => "pelo mcp",
+        _ => "pelo usuário",
     }
 }
 
@@ -574,7 +633,7 @@ fn exigir_usuario(quem: &Quem, acao: &str) -> Resultado<()> {
 /// O `regras.sqlite`.
 #[derive(Debug)]
 pub struct Catalogo {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 impl Catalogo {
@@ -702,6 +761,23 @@ impl Catalogo {
         let v = carregar_versao(&tx, &nova.regra, versao)?;
         tx.commit().map_err(banco)?;
         Ok(v)
+    }
+
+    /// Troca o rótulo de quem criou a versão na linha de criação do histórico de estado
+    /// (`assistente (qwen3-coder:30b)`). A coluna `autor` da versão é imutável e continua
+    /// `ia`; o rótulo mais fino fica no histórico, que a tela de versões já mostra.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn rotular_autoria(&mut self, regra: &str, versao: u32, rotulo: &str) -> Resultado<()> {
+        self.conn
+            .execute(
+                "UPDATE historico_de_estado SET quem = ?3
+                 WHERE regra = ?1 AND versao = ?2 AND de IS NULL AND para = 'rascunho'",
+                params![regra, versao, rotulo],
+            )
+            .map_err(banco)?;
+        Ok(())
     }
 
     /// Todas as versões de uma regra, da primeira à última.
@@ -835,7 +911,21 @@ impl Catalogo {
         executor: Option<&dyn ExecutorDeScript>,
     ) -> Resultado<RelatorioDosExemplos> {
         let v = self.versao(regra, versao)?;
-        let motor = Motor::novo(vec![v], self.parametros()?, None);
+        self.testar_versao(&v, executor)
+    }
+
+    /// Os exemplos da regra rodados sobre uma versão que pode nem estar gravada (o ensaio de
+    /// um rascunho avulso).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn testar_versao(
+        &self,
+        v: &VersaoDeRegra,
+        executor: Option<&dyn ExecutorDeScript>,
+    ) -> Resultado<RelatorioDosExemplos> {
+        let (regra, versao) = (v.regra.as_str(), v.versao);
+        let motor = Motor::novo(vec![v.clone()], self.parametros()?, None);
         let mut resultados = Vec::new();
         for ex in self.exemplos(regra)? {
             let leitura = motor.ler_com(&ex.entrada, executor);
@@ -853,7 +943,7 @@ impl Catalogo {
         })
     }
 
-    /// Ativa uma versão (rascunho ou desativada). Só [`Quem::Usuario`]. Bloqueia se algum
+    /// Ativa uma versão (rascunho ou desativada). Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15). Bloqueia se algum
     /// exemplo falha (D12) ou se há script e não há executor que o verifique. A versão
     /// vigente anterior vira desativada; tudo numa transação.
     ///
@@ -867,8 +957,9 @@ impl Catalogo {
         quem: &Quem,
         executor: Option<&dyn ExecutorDeScript>,
     ) -> Resultado<()> {
-        exigir_usuario(quem, "ativar")?;
-        self.ativar_como(regra, versao, quem, "ativada pelo usuário", executor)
+        exigir_decisor(quem, "ativar")?;
+        let motivo = format!("ativada {}", pelo(quem));
+        self.ativar_como(regra, versao, quem, &motivo, executor)
     }
 
     fn ativar_como(
@@ -914,12 +1005,12 @@ impl Catalogo {
         tx.commit().map_err(banco)
     }
 
-    /// Desativa a versão em vigor da regra. Só [`Quem::Usuario`].
+    /// Desativa a versão em vigor da regra. Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`], [`ErroDasRegras::NaoEncontrada`].
     pub fn desativar(&mut self, regra: &str, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "desativar")?;
+        exigir_decisor(quem, "desativar")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let v = versao_vigente(&tx, regra)?.ok_or_else(|| {
             ErroDasRegras::NaoEncontrada(format!("`{regra}` não tem versão em vigor"))
@@ -929,7 +1020,7 @@ impl Catalogo {
             &v,
             Estado::Desativada,
             quem_texto(quem),
-            "desativada pelo usuário",
+            &format!("desativada {}", pelo(quem)),
         )?;
         tx.commit().map_err(banco)
     }
@@ -937,12 +1028,12 @@ impl Catalogo {
     /// Rollback: reativa a versão que estava em vigor antes da atual (a mais recente que
     /// foi ativada e hoje está desativada) e desativa a atual. Preserva todas as versões
     /// e não roda os exemplos de novo (a versão já esteve em vigor). Reverter duas vezes
-    /// volta à versão de antes. Só [`Quem::Usuario`].
+    /// volta à versão de antes. Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`], [`ErroDasRegras::NaoEncontrada`].
     pub fn reverter(&mut self, regra: &str, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "reverter")?;
+        exigir_decisor(quem, "reverter")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let atual = versao_vigente(&tx, regra)?.ok_or_else(|| {
             ErroDasRegras::NaoEncontrada(format!("`{regra}` não tem versão em vigor"))
@@ -982,12 +1073,12 @@ impl Catalogo {
     }
 
     /// Consolida uma versão ativa que tem [`LIMIAR_DE_CONSOLIDACAO`] aceitas seguidas.
-    /// Só [`Quem::Usuario`].
+    /// Só [`Quem::Usuario`] ou [`Quem::Mcp`] (D15).
     ///
     /// # Errors
     /// [`ErroDasRegras::NaoPermitido`].
     pub fn consolidar(&mut self, regra: &str, versao: u32, quem: &Quem) -> Resultado<()> {
-        exigir_usuario(quem, "consolidar")?;
+        exigir_decisor(quem, "consolidar")?;
         let tx = self.conn.transaction().map_err(banco)?;
         let v = carregar_versao(&tx, regra, versao)?;
         if v.estado != Estado::Ativa {
@@ -1006,7 +1097,7 @@ impl Catalogo {
             &v,
             Estado::Consolidada,
             quem_texto(quem),
-            "consolidada pelo usuário",
+            &format!("consolidada {}", pelo(quem)),
         )?;
         tx.commit().map_err(banco)
     }
@@ -1039,6 +1130,21 @@ impl Catalogo {
     /// # Errors
     /// [`ErroDasRegras::Banco`].
     pub fn registrar_execucao(&mut self, leitura: &Leitura) -> Resultado<()> {
+        self.gravar_execucoes(leitura)?;
+        self.registrar_decisao(leitura)
+    }
+
+    /// Como [`Catalogo::registrar_execucao`], mas **só** a execução: não mexe na decisão da
+    /// entrada (o âmbar). É o que a passada de fundo do worker usa, lendo uma versão por vez:
+    /// uma leitura parcial não enxerga o empate com as outras versões (spec 15, D4).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn registrar_execucao_de_fundo(&mut self, leitura: &Leitura) -> Resultado<()> {
+        self.gravar_execucoes(leitura)
+    }
+
+    fn gravar_execucoes(&mut self, leitura: &Leitura) -> Resultado<()> {
         let mut chaves: BTreeMap<(String, u32), String> = BTreeMap::new();
         match &leitura.decisao {
             Decisao::Reconhecido(r) => {
@@ -1052,6 +1158,18 @@ impl Catalogo {
             Decisao::Nenhuma => {}
         }
         let tx = self.conn.transaction().map_err(banco)?;
+        // A identidade do documento: só de quem reconheceu com a identidade completa (o motor
+        // só a preenche para versão ativa ou consolidada). A primeira gravada é a original.
+        if let Decisao::Reconhecido(r) = &leitura.decisao
+            && let Some(identidade) = &r.identidade
+        {
+            tx.execute(
+                "INSERT OR IGNORE INTO identidade_da_entrada (regra, identidade, entrada, em)
+                     VALUES (?1, ?2, ?3, ?4)",
+                params![r.regra, identidade, leitura.entrada, agora()],
+            )
+            .map_err(banco)?;
+        }
         for e in &leitura.execucoes {
             if e.resultado == ResultadoDaExecucao::NaoSeAplica {
                 continue;
@@ -1091,6 +1209,57 @@ impl Catalogo {
         tx.commit().map_err(banco)
     }
 
+    /// A entrada em que o par `(regra, identidade)` foi visto **primeiro**, se alguma.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn entrada_da_identidade(
+        &self,
+        regra: &str,
+        identidade: &str,
+    ) -> Resultado<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT entrada FROM identidade_da_entrada WHERE regra = ?1 AND identidade = ?2
+                 ORDER BY rowid LIMIT 1",
+                params![regra, identidade],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(banco)
+    }
+
+    /// Marca o reconhecimento como repetido pelo padrão: se outra entrada, gravada antes, tem
+    /// a mesma `(regra, identidade)`, preenche `repetido_de` com o sha dela. Só lê; chame
+    /// **antes** de [`Catalogo::registrar_execucao`] ou depois, tanto faz (a original é a
+    /// primeira gravada, e reprocessá-la não a torna repetida).
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn marcar_repetido(&self, leitura: &mut Leitura) -> Resultado<()> {
+        let entrada = leitura.entrada.clone();
+        if let Decisao::Reconhecido(r) = &mut leitura.decisao
+            && let Some(identidade) = &r.identidade
+        {
+            r.repetido_de = self
+                .entrada_da_identidade(&r.regra, identidade)?
+                .filter(|primeira| *primeira != entrada);
+        }
+        Ok(())
+    }
+
+    /// Quantas identidades estão gravadas.
+    ///
+    /// # Errors
+    /// [`ErroDasRegras::Banco`].
+    pub fn total_de_identidades(&self) -> Resultado<u64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM identidade_da_entrada", [], |r| {
+                contagem(r, 0)
+            })
+            .map_err(banco)
+    }
+
     /// Quantas execuções estão gravadas.
     ///
     /// # Errors
@@ -1107,7 +1276,17 @@ impl Catalogo {
     /// # Errors
     /// [`ErroDasRegras::Banco`].
     pub fn registrar_proposta(&mut self, r: &Reconhecimento, entrada: &str) -> Resultado<bool> {
-        let conteudo = serde_json::to_string(r).map_err(banco)?;
+        // As linhas de `exibir` são só para a tela e podem ter texto do documento: não ficam
+        // gravadas.
+        // O CPF/CNPJ da contraparte nunca fica gravado, nem como campo extraído.
+        let mut sem_exibir = Reconhecimento {
+            exibir: Vec::new(),
+            ..r.clone()
+        };
+        sem_exibir.campos.retain(
+            |_, c| !matches!(&c.de_onde, DeOnde::Dica { nome } if nome == "contraparte_doc"),
+        );
+        let conteudo = serde_json::to_string(&sem_exibir).map_err(banco)?;
         let n = self
             .conn
             .execute(
@@ -1181,9 +1360,9 @@ impl Catalogo {
         quem: &Quem,
         motivo: &str,
     ) -> Resultado<()> {
-        if *quem == Quem::Ia {
+        if matches!(quem, Quem::Ia | Quem::Mcp) {
             return Err(ErroDasRegras::NaoPermitido(
-                "a IA não registra retorno do usuário".to_owned(),
+                "a IA e o MCP não registram retorno do usuário".to_owned(),
             ));
         }
         let tx = self.conn.transaction().map_err(banco)?;
@@ -1573,8 +1752,8 @@ impl Catalogo {
             }
         }
         for (regra, nome, entrada, esperado) in fabrica::exemplos_de_fabrica() {
-            if !self.exemplos(regra)?.iter().any(|e| e.nome == nome) {
-                self.salvar_exemplo(regra, nome, &entrada, esperado)?;
+            if !self.exemplos(&regra)?.iter().any(|e| e.nome == nome) {
+                self.salvar_exemplo(&regra, &nome, &entrada, esperado)?;
             }
         }
         Ok(())

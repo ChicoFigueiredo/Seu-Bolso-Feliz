@@ -161,7 +161,7 @@ impl Cenario {
         self.plan()
             .aplicar(
                 Alteracao::MapearConta {
-                    apelido: "CX-0001".into(),
+                    codigo: "CX-0001".into(),
                     conta_do_extrato: Some(CONTA.into()),
                 },
                 Autor::Usuario,
@@ -205,8 +205,15 @@ impl Cenario {
         let motor = Motor::das_vigentes(&c, None).expect("motor");
         for i in 0..5 {
             let id = format!("{:064x}", 1000 + i);
-            let e =
-                entrada_do_documento(&id, "x.txt", "text/plain", Some(texto), Canal::Pasta, None);
+            let e = entrada_do_documento(
+                &id,
+                "x.txt",
+                "text/plain",
+                Some(texto),
+                Canal::Pasta,
+                None,
+                None,
+            );
             let Decisao::Reconhecido(rec) = motor.ler(&e).decisao else {
                 panic!("a regra devia reconhecer");
             };
@@ -513,6 +520,7 @@ fn ac_lua_09_telegram_e_pasta_com_o_mesmo_sha_dao_a_mesma_chave() {
             Some(COMPROVANTE),
             canal,
             Some(id),
+            None,
         );
         match motor.ler(&e).decisao {
             Decisao::Reconhecido(rec) => *rec,
@@ -555,6 +563,8 @@ fn movimento_pix() -> sbf_planejamento::MovimentoDoExtrato {
         conta_do_extrato: CONTA.into(),
         descricao: "PIX ENVIADO Fulano de Tal".into(),
         tipo: "debito".into(),
+        contraparte: None,
+        contraparte_doc: None,
     }
 }
 
@@ -1010,4 +1020,503 @@ fn a_entrada_leva_o_mime_pela_assinatura_e_o_canal_do_cofre() {
     assert_eq!(e.origem.canal, Canal::Cofre);
     assert_eq!(e.mime.as_deref(), Some("text/plain"));
     assert_eq!(e.nome.as_deref(), Some("anotacao.txt"));
+}
+
+const CONTA_DE_AGUA: &str =
+    "Conta de Agua Exemplo\nContrato 998877-6\nVencimento em 25 de Novembro\nValor R$ 89,90\n";
+
+fn regra_da_conta_de_agua() -> NovaVersao {
+    let mut d = Definicao::simples("conta-agua-exemplo", "conta de agua exemplo");
+    d.extrair.insert(
+        "competencia".into(),
+        extracao(
+            r"Vencimento em (\d{1,2} de [A-Za-zç]+)",
+            Formato::Competencia,
+        ),
+    );
+    d.obrigatorios.push("competencia".into());
+    nova("conta-agua-exemplo", d)
+}
+
+/// Spec 15: a competência sem ano ("Vencimento em 25 de Novembro") sai do `momento` do
+/// documento, que o reconhecimento tira do inventário (a menor data de origem).
+#[test]
+fn competencia_sem_ano_usa_o_momento_do_inventario() {
+    let c = cenario();
+    c.instalar(regra_da_conta_de_agua());
+    let r = c.com_regras();
+    let arrastado = c.solto("conta-agua.txt", CONTA_DE_AGUA);
+
+    // A primeira leitura registra o achado e a origem; a data do arquivo passa a ser a do
+    // inventário (a de 18/11, mais antiga que a do arquivo recém-escrito).
+    let primeira = c.rodar(&r, &arrastado);
+    c.conexao()
+        .execute(
+            "UPDATE origem SET local_mtime = '2026-11-18T12:00:00.000Z' WHERE content_hash = ?1",
+            [&primeira.sha256],
+        )
+        .expect("data da origem");
+
+    let segunda = c.rodar(&r, &arrastado);
+    let entrada = segunda.entrada.as_ref().expect("entrada");
+    assert_eq!(
+        entrada.momento.as_deref(),
+        Some("2026-11-18T12:00:00.000Z"),
+        "o momento é a menor data de origem"
+    );
+    let Reconhecido::PelaRegra { reconhecimento } = &segunda.reconhecido else {
+        panic!("a regra devia reconhecer: {:?}", segunda.reconhecido);
+    };
+    assert_eq!(
+        reconhecimento.campos["competencia"].valor,
+        Valor::Competencia("2026-11".into())
+    );
+}
+
+// ---------------------------------------------------------------- vincular_ocorrencia
+
+const INVOICE_DA_NUVEM: &str = "Nuvem Exemplo Inc\nInvoice\nInvoice number  NE-0001\n\
+Date of issue  November 20, 2026\n$4.00 USD due November 20, 2026\n";
+const RECEIPT_DA_NUVEM: &str = "Nuvem Exemplo Inc\nReceipt\nReceipt number  NE-0001-R\n\
+Date paid  November 20, 2026\n$4.00 USD paid\n";
+
+/// Uma regra em inglês que só liga o documento à ocorrência do mês (sem valor, sem extrato).
+fn regra_da_nuvem(
+    id: &str,
+    titulo: &str,
+    regex_da_data: &str,
+    tipo: sbf_regras::TipoDoDocumento,
+    janela_dias: u32,
+) -> NovaVersao {
+    let mut d = Definicao::simples(id, titulo);
+    d.detectar
+        .todos
+        .push(Condicao::Contem("nuvem exemplo".into()));
+    d.extrair
+        .insert("data".into(), extracao(regex_da_data, Formato::Data));
+    d.obrigatorios = vec!["data".into()];
+    d.propor = vec![ModeloDeProposta::VincularOcorrencia {
+        compromisso: "Nuvem Exemplo".into(),
+        tipo_documento: tipo,
+        janela_dias,
+    }];
+    nova(id, d)
+}
+
+fn regra_da_invoice() -> NovaVersao {
+    regra_da_nuvem(
+        "invoice-nuvem-exemplo",
+        "invoice",
+        r"Date of issue\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Fatura,
+        20,
+    )
+}
+
+fn regra_do_receipt() -> NovaVersao {
+    regra_da_nuvem(
+        "receipt-nuvem-exemplo",
+        "receipt",
+        r"Date paid\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Comprovante,
+        20,
+    )
+}
+
+fn ocorrencia_de(id: String, ano: i32, mes: u8) -> AlvoDoDocumento {
+    AlvoDoDocumento::Ocorrencia {
+        id: sbf_planejamento::IdOcorrencia {
+            recorrente: id,
+            competencia: comp(ano, mes),
+            parcela: None,
+        },
+    }
+}
+
+fn so_vincular(r: &Resultado) -> &Sugestao {
+    r.sugestoes
+        .iter()
+        .find(|s| matches!(s, Sugestao::Vincular { regra: Some(_), .. }))
+        .unwrap_or_else(|| panic!("nenhum vincular de regra: {:?} {:?}", r.sugestoes, r.avisos))
+}
+
+#[test]
+fn vincular_ocorrencia_liga_a_invoice_e_o_receipt_em_ingles_a_mesma_ocorrencia() {
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice());
+    c.instalar(regra_do_receipt());
+    let alvo = ocorrencia_de(id, 2026, 11);
+
+    let invoice = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+    let s = so_vincular(&invoice);
+    let Sugestao::Vincular {
+        alvo: a,
+        rotulo,
+        tipo,
+        data,
+        ..
+    } = s
+    else {
+        panic!("{s:?}");
+    };
+    assert_eq!(a, &alvo);
+    assert_eq!(rotulo, "Vincular a Nuvem Exemplo PRO · 11/2026");
+    assert_eq!(*tipo, sbf_planejamento::TipoDeDocumento::Fatura);
+    assert_eq!(*data, sbf_planejamento::Data::nova(2026, 11, 20));
+    assert!(!s.e_automatica());
+    assert!(
+        s.da_regra().is_some(),
+        "o retorno do usuário vai para a regra"
+    );
+
+    let mut plan = c.plan();
+    confirmar(&mut plan, &invoice, s);
+    let receipt = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    let s = so_vincular(&receipt);
+    assert!(matches!(
+        s,
+        Sugestao::Vincular {
+            tipo: sbf_planejamento::TipoDeDocumento::Comprovante,
+            ..
+        }
+    ));
+    confirmar(&mut plan, &receipt, s);
+
+    let documentos = plan.documentos(&alvo).unwrap();
+    assert_eq!(
+        documentos.len(),
+        2,
+        "os dois documentos na mesma ocorrência"
+    );
+    assert!(documentos.iter().any(|d| d.sha256 == invoice.sha256));
+    assert!(documentos.iter().any(|d| d.sha256 == receipt.sha256));
+}
+
+#[test]
+fn vincular_ocorrencia_aceita_a_ocorrencia_ja_conciliada() {
+    let c = cenario();
+    let id = c.criar(
+        "Nuvem Exemplo PRO",
+        Natureza::Saida,
+        2_200,
+        20,
+        Some("CX-0001"),
+    );
+    c.mapear_conta();
+    c.movimento(
+        "pluggy:txn_1",
+        "debito",
+        "2026-11-20",
+        -2_200,
+        "NUVEM EXEMPLO",
+    );
+    let alvo = ocorrencia_de(id, 2026, 11);
+    let AlvoDoDocumento::Ocorrencia { id: ocorrencia } = alvo.clone() else {
+        unreachable!()
+    };
+    c.plan()
+        .aplicar(
+            Alteracao::Conciliar {
+                conciliacao: sbf_planejamento::Conciliacao {
+                    ocorrencia,
+                    movimento: "pluggy:txn_1".into(),
+                    valor: Centavos(2_200),
+                    data: sbf_planejamento::Data::nova(2026, 11, 20).unwrap(),
+                    confirmada: true,
+                },
+            },
+            Autor::Usuario,
+        )
+        .unwrap();
+    c.instalar(regra_do_receipt());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+
+    let Sugestao::Vincular { alvo: a, .. } = so_vincular(&r) else {
+        unreachable!()
+    };
+    assert_eq!(a, &alvo, "recibo em ocorrência já paga é válido");
+}
+
+#[test]
+fn vincular_ocorrencia_sem_ocorrencia_na_janela_nao_sugere_nada() {
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 5, None);
+    // A ocorrência de novembro vence dia 5; o documento é de 20/11 e a janela é de 5 dias.
+    c.instalar(regra_da_nuvem(
+        "invoice-nuvem-exemplo",
+        "invoice",
+        r"Date of issue\s+([A-Za-z]+ \d{1,2}, \d{4})",
+        sbf_regras::TipoDoDocumento::Fatura,
+        5,
+    ));
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+    assert!(
+        r.avisos.iter().any(|a| a.contains("ocorrência")),
+        "o motivo aparece: {:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn vincular_ocorrencia_de_outro_compromisso_nao_sugere_nada() {
+    let c = cenario();
+    c.criar("Energia", Natureza::Saida, 18_750, 20, None);
+    c.instalar(regra_da_invoice());
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+}
+
+#[test]
+fn vincular_ocorrencia_com_empate_de_distancia_nao_adivinha() {
+    let c = cenario();
+    // 18 e 22 de novembro: as duas a 2 dias do documento (20/11).
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 18, None);
+    c.criar("Nuvem Exemplo Team", Natureza::Saida, 4_400, 22, None);
+    c.instalar(regra_da_invoice());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    assert!(r.sugestoes.is_empty(), "{:?}", r.sugestoes);
+    assert!(
+        r.avisos.iter().any(|a| a.contains("empate")),
+        "o motivo diz que empatou: {:?}",
+        r.avisos
+    );
+}
+
+#[test]
+fn vincular_ocorrencia_escolhe_a_mais_proxima() {
+    let c = cenario();
+    let perto = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 18, None);
+    c.criar("Nuvem Exemplo Team", Natureza::Saida, 4_400, 28, None);
+    c.instalar(regra_da_invoice());
+
+    let r = c.rodar(&c.com_regras(), &c.solto("invoice.txt", INVOICE_DA_NUVEM));
+
+    let Sugestao::Vincular { alvo, .. } = so_vincular(&r) else {
+        unreachable!()
+    };
+    assert_eq!(alvo, &ocorrencia_de(perto, 2026, 11));
+}
+
+#[test]
+fn vincular_ocorrencia_nao_repete_o_documento_ja_vinculado() {
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_do_receipt());
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    let mut plan = c.plan();
+    confirmar(&mut plan, &r, so_vincular(&r));
+    assert_eq!(
+        plan.documentos(&ocorrencia_de(id, 2026, 11)).unwrap().len(),
+        1
+    );
+
+    // O mesmo conteúdo de novo (outro caminho): já está ligado, não sugere de novo.
+    let de_novo = c.rodar(&c.com_regras(), &c.solto("copia.txt", RECEIPT_DA_NUVEM));
+
+    assert!(
+        de_novo.sugestoes.iter().all(|s| s.da_regra().is_none()),
+        "{:?}",
+        de_novo.sugestoes
+    );
+    assert!(
+        de_novo.avisos.iter().any(|a| a.contains("já está ligado")),
+        "{:?}",
+        de_novo.avisos
+    );
+}
+
+#[test]
+fn vincular_ocorrencia_de_padrao_ativo_so_propoe_e_de_consolidado_vincula_sozinho() {
+    use sbf_reconhecimento::automaticas::aplicar_automaticas_do_resultado;
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    let alvo = ocorrencia_de(id, 2026, 11);
+    c.instalar(regra_do_receipt());
+
+    // Padrão só ativo: sugere, não é automática, e aplicar não grava nada.
+    let ativo = c.rodar(&c.com_regras(), &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    assert!(!so_vincular(&ativo).e_automatica());
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &ativo).unwrap();
+    assert!(saida.aplicadas.is_empty());
+    assert!(c.plan().documentos(&alvo).unwrap().is_empty());
+
+    // Consolidado: automática, gravada com o autor "<regra>@<versão>".
+    c.consolidar("receipt-nuvem-exemplo", RECEIPT_DA_NUVEM);
+    let outro = format!("{RECEIPT_DA_NUVEM}\n");
+    let r = c.rodar(&c.com_regras(), &c.solto("receipt-2.txt", &outro));
+    let s = so_vincular(&r);
+    assert!(s.e_automatica());
+    assert_eq!(
+        s.autor_do_vinculo_automatico().as_deref(),
+        Some("receipt-nuvem-exemplo@1")
+    );
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &r).unwrap();
+    assert_eq!(saida.novas(), 1);
+    let docs = c.plan().documentos(&alvo).unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(
+        docs[0].autor,
+        Autor::Regra {
+            regra: "receipt-nuvem-exemplo@1".to_owned()
+        }
+    );
+    // Idempotente: de novo, nada novo.
+    assert_eq!(
+        aplicar_automaticas_do_resultado(&c.cofre, &r)
+            .unwrap()
+            .novas(),
+        0
+    );
+    assert_eq!(c.plan().documentos(&alvo).unwrap().len(), 1);
+
+    // O usuário desfaz: a regra não refaz, e a sugestão volta sem ser automática.
+    let doc = docs.into_iter().next().unwrap();
+    c.plan()
+        .aplicar(
+            Alteracao::DesvincularDocumento { id: doc.id },
+            Autor::Usuario,
+        )
+        .unwrap();
+    let depois = c.rodar(&c.com_regras(), &c.solto("receipt-2.txt", &outro));
+    assert!(!so_vincular(&depois).e_automatica());
+    let saida = aplicar_automaticas_do_resultado(&c.cofre, &r).unwrap();
+    assert!(saida.aplicadas.is_empty());
+    assert!(c.plan().documentos(&alvo).unwrap().is_empty());
+}
+
+// ------------------------------------------------------------ identidade do documento
+
+const INVOICE_POR_EMAIL: &str = "Nuvem Exemplo Inc\nInvoice\nInvoice number  NE-0001\n\
+Date of issue  November 20, 2026\n$4.00 USD due November 20, 2026\n";
+/// O mesmo documento encaminhado pelo Telegram: o texto muda um pouco, o número é o mesmo.
+const INVOICE_PELO_TELEGRAM: &str = "Nuvem Exemplo Inc (encaminhado)\nInvoice\n\
+Invoice number   ne-0001 \nDate of issue  November 20, 2026\n$4.00 USD\n";
+
+fn regra_da_invoice_com_identidade() -> NovaVersao {
+    let mut v = regra_da_invoice();
+    v.definicao.extrair.insert(
+        "numero_da_invoice".into(),
+        extracao(r"Invoice number\s+([A-Za-z0-9-]+)", Formato::Texto),
+    );
+    v.definicao.identidade = vec!["numero_da_invoice".into()];
+    v
+}
+
+#[test]
+fn a_mesma_invoice_por_dois_canais_e_possivel_duplicidade_e_nao_vincula_duas_vezes() {
+    use sbf_inventario::caixa_de_entrada::{Canal, Estado, Filtro};
+    let c = cenario();
+    let id = c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let r = c.com_regras().com_caixa_de_entrada(Canal::Cli, false);
+
+    let primeira = c.rodar(&r, &c.solto("email.txt", INVOICE_POR_EMAIL));
+    assert!(
+        primeira.sugestoes.iter().any(|s| s.da_regra().is_some()),
+        "a primeira sugere o vínculo"
+    );
+    let segunda = c.rodar(&r, &c.solto("telegram.txt", INVOICE_PELO_TELEGRAM));
+    assert_ne!(primeira.sha256, segunda.sha256, "bytes diferentes");
+
+    // Nenhum vínculo duplicado: sai um aviso que diz de quem é repetido.
+    assert!(
+        segunda.sugestoes.iter().all(|s| s.da_regra().is_none()),
+        "{:?}",
+        segunda.sugestoes
+    );
+    let curto: String = primeira.sha256.chars().take(8).collect();
+    assert!(
+        segunda
+            .avisos
+            .iter()
+            .any(|a| a.contains("mesmo documento que") && a.contains(&curto)),
+        "{:?}",
+        segunda.avisos
+    );
+    // A Caixa marca a segunda como Possível duplicidade; a primeira não.
+    let nome_da_primeira = "email.txt";
+    let fila = sbf_inventario::caixa_de_entrada::listar(&c.conexao(), &Filtro::caixa()).unwrap();
+    let estado_de = |sha: &str| {
+        fila.iter()
+            .find(|e| e.content_hash == sha)
+            .map(|e| e.estado)
+    };
+    assert_eq!(
+        estado_de(&segunda.sha256),
+        Some(Estado::PossivelDuplicidade)
+    );
+    assert_ne!(
+        estado_de(&primeira.sha256),
+        Some(Estado::PossivelDuplicidade),
+        "{nome_da_primeira}"
+    );
+    // E só um documento chega à ocorrência se o usuário confirmar a primeira.
+    let mut plan = c.plan();
+    confirmar(&mut plan, &primeira, so_vincular(&primeira));
+    assert_eq!(
+        plan.documentos(&ocorrencia_de(id, 2026, 11)).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn a_mesma_invoice_em_outro_padrao_nao_e_duplicidade() {
+    use sbf_inventario::caixa_de_entrada::{Canal, Estado, Filtro};
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let mut recibo = regra_do_receipt();
+    recibo.definicao.extrair.insert(
+        "numero_da_invoice".into(),
+        extracao(
+            r"Receipt number\s+([A-Za-z0-9-]+?)(?:-R)?\s",
+            Formato::Texto,
+        ),
+    );
+    recibo.definicao.identidade = vec!["numero_da_invoice".into()];
+    c.instalar(recibo);
+    let r = c.com_regras().com_caixa_de_entrada(Canal::Cli, false);
+    c.rodar(&r, &c.solto("invoice.txt", INVOICE_POR_EMAIL));
+    let recibo = c.rodar(&r, &c.solto("receipt.txt", RECEIPT_DA_NUVEM));
+    assert!(
+        recibo.sugestoes.iter().any(|s| s.da_regra().is_some()),
+        "{:?} {:?}",
+        recibo.sugestoes,
+        recibo.avisos
+    );
+    let fila = sbf_inventario::caixa_de_entrada::listar(&c.conexao(), &Filtro::caixa()).unwrap();
+    assert!(
+        fila.iter().all(|e| e.estado != Estado::PossivelDuplicidade),
+        "{fila:?}"
+    );
+}
+
+#[test]
+fn identidade_repetida_chega_ao_estado_da_caixa_sem_depender_do_sha() {
+    use sbf_reconhecimento::caixa_de_entrada::{estado_do_resultado, leitura_do_resultado};
+    let c = cenario();
+    c.criar("Nuvem Exemplo PRO", Natureza::Saida, 2_200, 20, None);
+    c.instalar(regra_da_invoice_com_identidade());
+    let r = c.com_regras();
+    let primeira = c.rodar(&r, &c.solto("email.txt", INVOICE_POR_EMAIL));
+    let segunda = c.rodar(&r, &c.solto("telegram.txt", INVOICE_PELO_TELEGRAM));
+    assert_ne!(
+        estado_do_resultado(&primeira, false),
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
+    assert_eq!(
+        estado_do_resultado(&segunda, false),
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
+    assert_eq!(
+        leitura_do_resultado(&segunda, false).estado,
+        sbf_inventario::caixa_de_entrada::Estado::PossivelDuplicidade
+    );
 }

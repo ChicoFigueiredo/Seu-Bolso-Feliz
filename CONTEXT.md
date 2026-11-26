@@ -53,6 +53,32 @@ A lista da tela Hoje com o que pede atenção no livro-caixa: compromissos venci
 movimentações sem categoria, não alocadas ou não confirmadas e documentos a revisar.
 _Avoid_: pendências (reservado ao inventário), a revisar
 
+## Contas
+
+**Conta do extrato**:
+A conta como o banco a identifica e a conexão a traz: instituição, tipo e número
+("BANCO · 000000-1"). É a identidade da conta e não muda por vontade do usuário. A
+poupança vinculada é outra conta do extrato, com o mesmo número da corrente.
+_Avoid_: produto, subconta
+
+**Código da conta**:
+O nome pelo qual a planilha conhece a conta: "CX-0001", "C6", "Nubank". Só passa a
+valer para uma conta do extrato quando o usuário confirma o par; um código sem par não
+aponta para dinheiro nenhum.
+_Avoid_: apelido (para o código), número da conta
+
+**Apelido da conta**:
+O nome curto, opcional, que o usuário dá a uma conta para lembrar para que ela serve:
+"Consignado", "Bolão do trabalho". Não identifica nada: duas contas podem ter o mesmo apelido.
+_Avoid_: código, nome do banco
+
+**Rótulo da conta**:
+O que a tela mostra no lugar da conta do extrato: o código, seguido do apelido quando
+houver ("CX-0002 · Consignado"). A poupança vinculada leva o rótulo da corrente de mesmo
+número com "Poupança" na frente ("Poupança CX-0002 · Consignado"). Conta do extrato sem
+par confirmado aparece como o banco a chama.
+_Avoid_: nome da conta, label
+
 ## Classificação
 
 Três eixos independentes. Uma movimentação pode ter os três ao mesmo tempo, e nenhum
@@ -96,6 +122,19 @@ _Avoid_: lançamento, transação, transaction, despesa
 Uma movimentação futura já conhecida — vence em uma data, com um valor previsto ou
 confirmado.
 _Avoid_: conta a pagar, obrigação, pendência
+
+**Modelo de compromisso**:
+O molde que vários compromissos compartilham: declara os parâmetros (a diária, o dia da
+semana) e o cálculo que transforma esses parâmetros no previsto de cada mês. Cada compromisso
+que usa o modelo preenche os próprios valores, com vigência. Ex.: "Diarista por dia da semana".
+_Avoid_: template, tipo de compromisso (tipo é natureza ou grupo)
+
+**Cálculo** (de um compromisso):
+O script que, a partir dos parâmetros do modelo e dos valores do compromisso, dá o previsto
+de um mês (a diária vezes as sextas-feiras do mês). Um ajuste digitado num mês ("6 diárias")
+vale só para aquele mês e fica no rastro. Diferente do padrão de reconhecimento: o cálculo
+diz quanto deve ser; a regra reconhece o que aconteceu.
+_Avoid_: fórmula, regra de cálculo, script de compromisso
 
 **Recorrente**:
 Algo que se repete em intervalo previsível: assinatura, conta de consumo, parcelamento,
@@ -213,13 +252,34 @@ imagem ou o texto, pequeno num canto ou grande na página do item. Nunca muda o 
 _Avoid_: preview, thumbnail, visualizador
 
 **Caixa de entrada**:
-A fila única de documentos recebidos e ainda não resolvidos, independente de origem.
+A fila única de documentos recebidos e ainda não resolvidos, independente de origem. Lista os
+que o reconhecimento **reconheceu** (Pronto, Precisa revisar, Possível duplicidade); é onde se
+decidem as sugestões de ligação ao planejamento; a de alta confiança já vem feita (**Vínculo
+automático**, com Desfazer). O que ele não reconheceu vai para A triar.
 _Avoid_: inbox de ingestão, fila de jobs, ingestion queue
+
+**Canal** (da Caixa de entrada):
+Por onde o documento chegou **da primeira vez** (Telegram, Gmail, Celular, Pasta, Arrastado,
+linha de comando). Um só por documento, na lista "Chegou por". Não é a **Origem**: Origem é
+cada lugar onde o conteúdo foi achado, e um documento tem várias.
+_Avoid_: origem (para este sentido), fonte, source
+
+**Sem padrão de reconhecimento**:
+O documento novo que nenhum padrão de reconhecimento nem leitor casou (estados Não reconhecido e Protegido por
+senha). Fica na seção de mesmo nome de A triar, onde se cria o padrão a partir do cartão e se
+reconhece de novo; se passar a casar, sai de A triar e entra na Caixa de entrada.
+_Avoid_: não classificado, órfão, unmatched
 
 **Estados do documento** (os únicos que o usuário vê): Pronto, Precisa revisar,
 Possível duplicidade, Protegido por senha, Não reconhecido, Processando. Os estados
 internos do pipeline não aparecem na interface.
 _Avoid_: ingestion job, draft batch, reconciliation status, parsed, posted
+
+**Possível duplicidade**:
+O estado do documento que já chegou antes, ou por mais de um lugar com os mesmos bytes, ou com
+bytes diferentes e o mesmo texto (o recibo que chega por e-mail e pelo Telegram); o mais
+antigo segue como está e o mais novo é o marcado.
+_Avoid_: duplicata, cópia
 
 **Origem**:
 Cada lugar onde um mesmo conteúdo foi encontrado — um caminho no disco, um anexo do
@@ -260,24 +320,60 @@ _Avoid_: reconciliation, match, dedup
 
 ## Reconhecimento
 
-**Regra de reconhecimento**:
+**Padrão de reconhecimento**:
 Instrução versionada que diz como reconhecer um tipo de documento ou registro, quais
 campos tirar dele e o que propor. Muda sem recompilar o sbf e só vale depois que o
 usuário ativa a versão. Uma versão nova recomeça como **ativa** (só propõe); depois de 5
 propostas aceitas seguidas, sem correção, o sbf sugere torná-la **consolidada**, e só o
-usuário aprova. Uma regra consolidada concilia sozinha, mas apenas com as três provas
-exatas e sempre com Desfazer; uma rejeição, um Desfazer ou uma versão nova a devolve a
-ativa. Nasce de três jeitos: escrita no editor, rascunho montado a partir de uma correção
-na caixa de entrada, ou proposta pela IA — e nenhum desses a ativa.
-_Avoid_: padrão, plugin, template, parser, alerta (alerta avisa; regra de reconhecimento
-reconhece)
+usuário aprova. Um padrão consolidado concilia sozinho, mas apenas com as três provas
+exatas, e vincula sozinho o documento à ocorrência que ele propõe; sempre com Desfazer. Uma
+rejeição, um Desfazer ou uma versão nova o devolve ao estado ativo. Nasce de três jeitos: escrito no editor, rascunho montado a partir de uma correção
+na caixa de entrada, ou proposto pela IA ou pelo assistente — e nenhum desses o ativa.
+_Avoid_: regra de reconhecimento (nome antigo, até 2026-11-20), plugin, template, parser,
+alerta (alerta avisa; padrão de reconhecimento reconhece)
+
+**Vínculo automático**:
+O documento vai para o controle sem janela aberta e sem clique, quando a confiança é alta.
+Roda assim que o reconhecimento termina, qualquer que seja a rota por onde o documento chegou
+(Telegram, Gmail, pasta, celular), no worker; a janela aplica o mesmo no cartão que ainda
+não foi tocado. Só estas ligações são automáticas, sempre gravadas com autor "regra" e com
+Desfazer: (1) o **vínculo do contracheque**, quando o demonstrativo foi lido, a soma das
+rubricas bate com o líquido, há um só recorrente de salário e a ocorrência do mês do
+pagamento existe; (2) o **vínculo de um padrão consolidado** (proposta "vincular
+ocorrência"); (3) a **conciliação das três provas** (do salário, ou de um padrão
+consolidado). Nada mais é automático: usar as rubricas, criar compromissos de desconto em
+folha, dar baixa, e a conciliação com menos de três provas continuam esperando o clique, e
+um padrão só ativo só propõe. O que o usuário desfaz (documento desvinculado, par
+desconciliado) a regra nunca refaz. Aplicar duas vezes não duplica nada.
+_Avoid_: ligação silenciosa, auto-aprovação
 
 **Script**:
-Trecho curto em Lua anexado a uma regra de reconhecimento para calcular ou transformar
+Trecho curto em Lua anexado a um padrão de reconhecimento para calcular ou transformar
 campos — conferir o IRRF de um contracheque, montar a competência de uma rubrica. Só lê o
 que recebe e devolve uma proposta; nunca grava, paga, concilia nem acessa arquivo, rede ou
 banco.
 _Avoid_: plugin, extensão, roteiro (roteiro é o caminho de um site), macro
+
+**Rita**:
+O assistente de IA da janela, num painel ao lado do item selecionado. Lê só o que está na
+tela, responde sobre isso e, por enquanto, só mexe em padrões de reconhecimento: cria o
+rascunho, faz o pré-teste e explica por que um padrão venceu. Quem ativa é o usuário. Pode
+rodar numa IA local ou em qualquer provedor escolhido no Chaveiro. Diferente da triagem por
+IA, que roda em lote e só sugere classificação.
+_Avoid_: agente, chat, copiloto, bot
+
+**Pré-teste**:
+O ensaio de um padrão de reconhecimento antes de ativá-lo: roda sobre o documento em mãos,
+sobre os exemplos e sobre os documentos do cofre com o mesmo tipo de arquivo, só com o texto
+já guardado. Mostra quantos casariam, com quais padrões empataria e os campos tirados. Não
+grava nada.
+_Avoid_: dry-run, ensaio
+
+**Casou** (marca do documento):
+Um documento casou com um padrão quando o padrão o reconheceu em algum momento, mesmo que
+depois tenha sido desativado. Na lista: verde claro se algum padrão casou, âmbar se mais de
+um casou e discordam (Ambíguo), sem cor se nenhum casou.
+_Avoid_: match, bateu
 
 ## Inventário
 
@@ -365,11 +461,60 @@ conexão, só que sem agenda.
 _Avoid_: integração, provider, adapter, serviço, vigia, fonte (como nome de um item;
 "fonte em massa" continua valendo como descrição)
 
+**Conta de e-mail**:
+Uma Conexão do tipo E-mail: uma caixa (hoje Gmail; Outlook em breve) autorizada só para
+leitura. Cada conta tem id estável, apelido, o e-mail da conta (depois do login), os
+**rótulos** que a pessoa segue e o próprio checkpoint por rótulo; pode haver várias. A
+configuração (sem segredo) fica em `email.json`; o refresh token e as credenciais do
+aplicativo ficam no Chaveiro (`email/<id>/...` e `email/<tipo>/app/...`). Autorização
+vencida (`invalid_grant`) é um estado da conta, não uma falha de coleta: a coleta para até
+a pessoa entrar de novo.
+_Avoid_: caixa postal, inbox, carteira (para os segredos)
+
 **Roteiro**:
-O caminho gravado que uma conexão de site percorre para consultar e baixar documentos.
-Nasce da primeira coleta, guiada por IA, e se repete sem IA até o site mudar. Um roteiro
-só consulta e baixa: nunca paga, transfere, contrata ou altera cadastro.
+O caminho que uma conexão de site percorre para consultar e baixar documentos. Um roteiro
+só consulta e baixa: nunca paga, transfere, contrata ou altera cadastro. Tem dois tipos, e
+os dois passam pela mesma lista de bloqueio e pelo mesmo chaveiro:
+
+- **Roteiro gravado**: os passos em JSON que a IA grava na primeira coleta. Repete-se sem IA
+  até o site mudar.
+- **Roteiro escrito**: um programa em Luau, escrito à mão ao lado de um manifesto, que só
+  chama **verbos** (abrir, esperar, clicar, ler texto, baixar). Nasce em rascunho e só vale
+  depois de ativado, como uma regra de reconhecimento: a ativação e a desativação só
+  ocorrem na janela do app ou num terminal interativo, com confirmação digitada. O MCP e a IA
+  só propõem rascunho; nunca ativam, desativam, testam nem executam.
+
+Luau é só a linguagem do roteiro escrito. Não é o **Script** de uma regra de reconhecimento,
+que calcula campos de um documento e nunca toca um site.
 _Avoid_: script, macro, robô, automação
+
+**Verbo**:
+Uma das operações que um roteiro escrito pode chamar no navegador, como abrir uma página,
+clicar ou preencher a senha pelo rótulo do chaveiro. É a única porta do roteiro para o site:
+não há JavaScript solto, arquivo nem rede. Os verbos que digitam segredo recebem o rótulo do
+chaveiro, nunca o valor.
+_Avoid_: comando, função, API, passo (passo é a unidade do roteiro gravado)
+
+**Classe de ação**:
+O que um roteiro declara no manifesto sobre o tipo de coisa que faz no site: **consulta**
+(o padrão: só lê e baixa) ou **atualizar conexão** (também aperta "Atualizar" ou "Sincronizar"
+nas conexões de um agregador, como o Meu Pluggy). Nenhuma classe libera pagar, transferir,
+contratar ou alterar cadastro.
+
+A classe `consulta` barra clicar em elemento cujo texto é exatamente "Atualizar" ou
+"Sincronizar", para que a exceção da outra classe seja de fato uma exceção; a classe
+`atualizar_conexao` libera só esses dois textos exatos, e os demais campos do elemento
+(destino, rótulo, nome) continuam conferidos ("Atualizar e pagar" segue barrado).
+"Reconectar" e "atualizar conexão" não fazem parte do conjunto: reautorizar no banco é do
+usuário.
+_Avoid_: permissão, nível, modo, perfil
+
+**MFA por e-mail**:
+O segundo fator em que o site manda um código ao e-mail do usuário. Só um roteiro cujo
+manifesto diz que **não movimenta dinheiro** pode usá-lo: o sistema busca o código na caixa
+conectada (remetente fixo, janela curta, formato conhecido) e o digita sozinho. O código que
+muda por minuto num aplicativo (TOTP) continua sempre com o usuário.
+_Avoid_: 2FA, OTP, token, código de verificação
 
 **Coleta**:
 Uma passagem de uma conexão trazendo o que há de novo na fonte. É sempre de fora para

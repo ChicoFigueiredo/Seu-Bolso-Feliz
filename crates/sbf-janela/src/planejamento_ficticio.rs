@@ -47,6 +47,8 @@ pub struct PlanejamentoFicticio {
     extrato: Vec<MovimentoDoExtrato>,
     /// Apelido do planejamento -> conta do extrato, os pares confirmados.
     mapa_contas: Vec<(String, String)>,
+    /// Código da conta -> apelido.
+    apelidos_das_contas: Vec<(String, String)>,
     assinaturas: Vec<(String, Assinatura)>,
     /// Recorrentes cujo valor "disponível" antecede o crédito (feriado bancário), em dias.
     antecipa_dias: Vec<(String, i64)>,
@@ -115,6 +117,7 @@ impl PlanejamentoFicticio {
             saldos: Vec::new(),
             extrato: Vec::new(),
             mapa_contas: Vec::new(),
+            apelidos_das_contas: Vec::new(),
             assinaturas: Vec::new(),
             antecipa_dias: vec![("rec_salario".into(), 2)],
             contador: 0,
@@ -896,6 +899,8 @@ impl PlanejamentoFicticio {
                 Excecao::Dispensar { .. } => dispensada = true,
                 Excecao::ValorSoDesteMes { valor } => previsto = Some(*valor),
                 Excecao::PagoInformado { valor, .. } => pago_informado = Some(*valor),
+                // O conjunto fictício não tem modelos: não há cálculo a ajustar.
+                Excecao::QuantidadeSoDesteMes { .. } => {}
             }
         }
         let confirmadas: Vec<Centavos> = self
@@ -960,6 +965,7 @@ impl PlanejamentoFicticio {
             versao: v.id.clone(),
             prazo_desconhecido: matches!(r.prazo, Prazo::Desconhecido),
             sugestao_de_conciliacao: sugestao,
+            calculo: None,
         })
     }
 
@@ -1473,6 +1479,13 @@ impl Planejamento for PlanejamentoFicticio {
             .cloned())
     }
 
+    fn documento_desvinculado(&self, alvo: &AlvoDoDocumento, sha256: &str) -> Resultado<bool> {
+        Ok(self
+            .documentos
+            .iter()
+            .any(|d| d.desvinculado && &d.alvo == alvo && d.sha256 == sha256))
+    }
+
     fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {
         Ok(self
             .desfeitas
@@ -1520,6 +1533,15 @@ impl Planejamento for PlanejamentoFicticio {
     ) -> Resultado<Vec<sbf_planejamento::ConciliacaoComMovimento>> {
         Ok(self.conciliacoes_da_ocorrencia_impl(ocorrencia))
     }
+
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<Conciliacao>> {
+        Ok(self
+            .conciliacoes
+            .iter()
+            .filter(|c| c.movimento == movimento)
+            .cloned()
+            .collect())
+    }
 }
 
 fn alvo_da(a: &Alteracao) -> Option<String> {
@@ -1531,6 +1553,7 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::Excluir { recorrente, .. }
         | Alteracao::Restaurar { recorrente, .. }
         | Alteracao::Arquivar { recorrente, .. }
+        | Alteracao::Renomear { recorrente, .. }
         | Alteracao::Mover { recorrente, .. } => Some(recorrente.clone()),
         Alteracao::Excecao { ocorrencia, .. } => Some(ocorrencia.recorrente.clone()),
         Alteracao::Conciliar { conciliacao } => Some(conciliacao.ocorrencia.recorrente.clone()),
@@ -1541,8 +1564,13 @@ fn alvo_da(a: &Alteracao) -> Option<String> {
         | Alteracao::DefinirComposicao { .. }
         | Alteracao::VincularDocumento { .. }
         | Alteracao::DesvincularDocumento { .. }
-        | Alteracao::MapearConta { .. } => None,
-        Alteracao::DefinirAssinatura { recorrente, .. } => Some(recorrente.clone()),
+        | Alteracao::MapearConta { .. }
+        | Alteracao::DefinirApelidoDaConta { .. }
+        | Alteracao::CriarModelo { .. }
+        | Alteracao::NovaVersaoDoCalculo { .. } => None,
+        Alteracao::DefinirAssinatura { recorrente, .. }
+        | Alteracao::AplicarModelo { recorrente, .. }
+        | Alteracao::DefinirParametro { recorrente, .. } => Some(recorrente.clone()),
     }
 }
 
@@ -1788,6 +1816,11 @@ impl PlanejamentoFicticio {
                     .iter()
                     .position(|r| r.id == rec)
                     .ok_or_else(|| ErroDoPlanejamento::NaoEncontrado(rec.clone()))?;
+                if matches!(excecao, Excecao::QuantidadeSoDesteMes { .. }) {
+                    return Err(ErroDoPlanejamento::Invalida(
+                        "o conjunto fictício não tem modelos de compromisso".into(),
+                    ));
+                }
                 self.substituir_excecao(ocorrencia.clone(), excecao.clone(), autor.clone());
                 self.recorrentes[i].versao_do_registro += 1;
                 let texto = match excecao {
@@ -1795,6 +1828,7 @@ impl PlanejamentoFicticio {
                     Excecao::Dispensar { .. } => "Dispensou",
                     Excecao::ValorSoDesteMes { .. } => "Mudou o valor só deste mês de",
                     Excecao::PagoInformado { .. } => "Informou pagamento de",
+                    Excecao::QuantidadeSoDesteMes { .. } => "Ajustou a quantidade de",
                 };
                 Ok(self.registrar(
                     autor,
@@ -1892,6 +1926,17 @@ impl PlanejamentoFicticio {
                 };
                 Ok(self.registrar(autor, &recorrente, t.into(), &alt))
             }
+            Alteracao::Renomear {
+                recorrente,
+                nome,
+                versao_base,
+            } => {
+                let i = self.conferir_base(&recorrente, versao_base)?;
+                let r = &mut self.recorrentes[i];
+                r.nome = nome.trim().to_owned();
+                r.versao_do_registro += 1;
+                Ok(self.registrar(autor, &recorrente, "Renomeou.".into(), &alt))
+            }
             Alteracao::Mover {
                 recorrente,
                 grupo,
@@ -1981,9 +2026,12 @@ impl PlanejamentoFicticio {
                 Ok(self.registrar(autor, &recorrente, "Desvinculou um documento.".into(), &alt))
             }
             Alteracao::MapearConta {
-                apelido,
+                codigo,
                 conta_do_extrato,
-            } => self.mapear_conta(apelido, conta_do_extrato, autor, &alt),
+            } => self.mapear_conta(codigo, conta_do_extrato, autor, &alt),
+            Alteracao::DefinirApelidoDaConta { codigo, apelido } => {
+                self.definir_apelido_da_conta(codigo, apelido, autor, &alt)
+            }
             Alteracao::Desconciliar {
                 ocorrencia,
                 movimento,
@@ -2011,6 +2059,12 @@ impl PlanejamentoFicticio {
                 assinatura,
                 versao_base,
             } => self.definir_assinatura(recorrente, assinatura, versao_base, autor, &alt),
+            Alteracao::CriarModelo { .. }
+            | Alteracao::NovaVersaoDoCalculo { .. }
+            | Alteracao::AplicarModelo { .. }
+            | Alteracao::DefinirParametro { .. } => Err(ErroDoPlanejamento::Invalida(
+                "o conjunto fictício não tem modelos de compromisso".into(),
+            )),
         }
     }
 
@@ -2479,7 +2533,7 @@ mod testes {
         // Sem composição do mês, a sugestão que já existe continua sugestão.
         s.aplicar(
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(CONTA_DO_SALARIO.into()),
             },
             Autor::Usuario,

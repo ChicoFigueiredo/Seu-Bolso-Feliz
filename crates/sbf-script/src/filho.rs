@@ -14,7 +14,8 @@ use std::thread;
 use std::time::Duration;
 
 use sbf_regras::script::{
-    ErroDoScript, ExecutorDeScript, Limites, PedidoDeScript, RespostaDoScript,
+    ErroDoScript, ExecutorDeScript, Limites, PedidoDeCalculo, PedidoDeScript, RespostaDoScript,
+    ResultadoDeCalculo,
 };
 use tempfile::TempDir;
 
@@ -26,6 +27,8 @@ use crate::protocolo::{Mensagem, Resposta};
 const MARGEM: Duration = Duration::from_millis(1000);
 /// Folga a mais na primeira conversa com um filho recém-subido.
 const MARGEM_DE_SUBIDA: Duration = Duration::from_millis(2000);
+/// O prazo de um lote de cálculo: o de cada mês vezes os meses, no máximo isto.
+const PRAZO_MAXIMO_DO_LOTE_MS: u64 = 30_000;
 /// Teto de uma linha de resposta lida do filho.
 const LINHA_MAXIMA: usize = 16 * 1024 * 1024;
 
@@ -75,7 +78,9 @@ impl ExecutorFilho {
         match self.pedir(&Mensagem::Endurecimento(None), &limites, 100)? {
             Resposta::Endurecimento(r) => Ok(r),
             Resposta::Erro(e) => Err(e),
-            Resposta::Ok(_) => Err(ErroDoScript::Processo("resposta fora do protocolo".into())),
+            Resposta::Ok(_) | Resposta::Calculos(_) => {
+                Err(ErroDoScript::Processo("resposta fora do protocolo".into()))
+            }
         }
     }
 
@@ -239,6 +244,39 @@ impl ExecutorDeScript for ExecutorFilho {
     fn verificar(&self, fonte: &str) -> Result<(), ErroDoScript> {
         let limites = Limites::default();
         match self.pedir(&Mensagem::Verificar(fonte.to_owned()), &limites, 100)? {
+            Resposta::Ok(None) => Ok(()),
+            Resposta::Erro(e) => Err(e),
+            _ => Err(ErroDoScript::Processo("resposta fora do protocolo".into())),
+        }
+    }
+
+    fn calcular(&self, pedido: &PedidoDeCalculo) -> Result<Vec<ResultadoDeCalculo>, ErroDoScript> {
+        let meses = u64::try_from(pedido.itens.len()).unwrap_or(u64::MAX).max(1);
+        // O prazo do pai cobre o lote inteiro; o teto da resposta cresce com os meses.
+        let prazo_ms = pedido
+            .limites
+            .tempo_ms
+            .saturating_mul(meses)
+            .min(PRAZO_MAXIMO_DO_LOTE_MS);
+        let limites = Limites {
+            saida_bytes: pedido
+                .limites
+                .saida_bytes
+                .saturating_mul(usize::try_from(meses).unwrap_or(usize::MAX))
+                .min(LINHA_MAXIMA),
+            ..pedido.limites
+        };
+        let m = Mensagem::Calcular(Box::new(pedido.clone()));
+        match self.pedir(&m, &limites, prazo_ms)? {
+            Resposta::Calculos(r) if r.len() == pedido.itens.len() => Ok(r),
+            Resposta::Erro(e) => Err(e),
+            _ => Err(ErroDoScript::Processo("resposta fora do protocolo".into())),
+        }
+    }
+
+    fn verificar_calculo(&self, fonte: &str) -> Result<(), ErroDoScript> {
+        let limites = Limites::default();
+        match self.pedir(&Mensagem::VerificarCalculo(fonte.to_owned()), &limites, 100)? {
             Resposta::Ok(None) => Ok(()),
             Resposta::Erro(e) => Err(e),
             _ => Err(ErroDoScript::Processo("resposta fora do protocolo".into())),

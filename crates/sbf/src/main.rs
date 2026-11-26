@@ -8,31 +8,46 @@
 //!   do log de decisões e imprime o resumo;
 //! - `sbf mcp --inventario <pasta-do-cofre>`: o servidor MCP local por stdio (ver `mcp.rs`);
 //! - `sbf worker rodar|instalar|desinstalar|estado`: o worker local sem janela (`worker.rs`);
+//! - `sbf telegram entrar|conversas|seguir|deixar|coletar`: o Telegram da conta do usuário
+//!   (`telegram.rs`);
 //! - `sbf servidor`: a API do livro-caixa na VPS (fatia 2; ver `servidor.rs`);
 //! - `sbf coletor-vps`: as coletas da VPS, Gmail e Pluggy (ADR-014; ver `coletor.rs`);
+//! - `sbf gmail coletar --inventario <cofre>`: anexos de e-mail para o cofre, com as regras
+//!   de reconhecimento (ver `gmail.rs`);
 //! - `sbf canais`: o bot do Telegram e os alertas, na VPS (ADR-014, ADR-017; ver `canais.rs`);
 //! - `sbf reconhecer --inventario <cofre> --arquivo <caminho>`: o reconhecimento de um arquivo
 //!   solto, sem janela (ver `reconhecer.rs`);
 //! - `sbf regras --inventario <cofre> <subcomando>`: as regras de reconhecimento (`regras.rs`);
+//! - `sbf roteiros escrito <subcomando>`: o ciclo de vida do roteiro escrito em Luau (`roteiros.rs`);
+//! - `sbf rita --documento <sha|caminho> "pedido"`: Rita pelo terminal, para calibrar (`rita.rs`);
 //! - `sbf script --servir`: o processo filho dos scripts Luau, interno (`script.rs`);
 //! - `sbf --versao`.
 
 mod caixa;
+mod caixa_de_entrada;
 mod canais;
 mod captura;
 mod coletor;
+mod contas;
+mod email;
 mod entrada;
 mod estacao;
+mod gmail;
 mod inventario;
 mod mcp;
+mod ocr;
+mod padroes;
 mod planejamento;
 mod rag;
 mod reconhecer;
 mod regras;
+mod rita;
 mod roteiros;
 mod script;
 mod servidor;
+mod telegram;
 mod triagem;
+mod versao;
 mod worker;
 
 use std::path::PathBuf;
@@ -384,7 +399,7 @@ fn app_de_demonstracao() -> Result<App, String> {
         sbf_script::ExecutorNoProcesso::novo(),
     ))) {
         Ok(f) => janela.regras.ligar(f),
-        Err(e) => eprintln!("sbf: as regras fictícias não abriram ({e})"),
+        Err(e) => eprintln!("sbf: os padrões fictícios não abriram ({e})"),
     }
     // O reconhecedor fictício vem depois das regras: o Pix e o caso ambíguo leem o catálogo.
     sbf_janela::reconhecimento_ficticio::ligar_na_demonstracao(&mut janela);
@@ -490,7 +505,7 @@ fn preparar_cena_da_caixa(
     }
 }
 
-const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
+const AJUDA: &str = "uso: sbf | sbf --demonstracao | sbf --inventario <pasta-do-cofre> | sbf reprojetar --inventario <pasta-do-cofre> | sbf mcp --inventario <pasta-do-cofre> | sbf planejamento importar|ocultos|conciliar|contas --inventario <pasta-do-cofre> | sbf reconhecer --inventario <pasta-do-cofre> --arquivo <caminho> | sbf regras --inventario <pasta-do-cofre> <subcomando> (veja `sbf regras --ajuda`) | sbf roteiros escrito [--dados <pasta>] importar|listar|mostrar|testar|ativar|desativar (veja `sbf roteiros --ajuda`) | sbf rita --documento <sha|caminho> \"pedido\" (veja `sbf rita --ajuda`) | sbf servidor [--endereco 127.0.0.1:PORTA] | sbf worker rodar|instalar|desinstalar|estado | sbf gmail coletar --inventario <pasta-do-cofre> [--consulta \"<query>\"] [--desde AAAA-MM-DD] [--limite N] | sbf telegram entrar|sair|conversas|seguir|deixar|coletar|estado | sbf coletor-vps [gmail|pluggy|comparar] | sbf canais [vincular-telegram|alertas|nivel|desvincular] | sbf estacao importar-credencial [--servidor <url>] | sbf --versao";
 
 /// Gancho de pânico (achado A16 da revisão de segurança): mostra uma mensagem genérica e só
 /// o local (arquivo e linha). **Nunca o payload**, que pode carregar trecho de PDF ou outro
@@ -520,10 +535,12 @@ fn main() -> ExitCode {
         let payload = String::from("payload-que-nao-pode-aparecer");
         std::panic::panic_any(payload);
     }
+    let carimbo = versao::Carimbo::do_build();
+    sbf_janela::definir_carimbo_de_versao(carimbo.linha(), carimbo.aviso());
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--versao") | Some("--version") => {
-            println!("sbf {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", versao::Carimbo::do_build().linha());
             ExitCode::SUCCESS
         }
         Some("--demonstracao") => match app_de_demonstracao() {
@@ -542,11 +559,15 @@ fn main() -> ExitCode {
         Some("servidor") => servidor::rodar(&args[1..]),
         Some("coletor-vps") => coletor::rodar(&args[1..]),
         Some("worker") => worker::rodar(&args[1..]),
+        Some("gmail") | Some("email") => email::rodar(&args[1..]),
+        Some("telegram") => telegram::rodar(&args[1..]),
         Some("canais") => canais::rodar(&args[1..]),
         Some("mcp") => mcp::rodar(&args[1..]),
         Some("planejamento") => planejamento::rodar(&args[1..]),
         Some("reconhecer") => reconhecer::rodar(&args[1..]),
         Some("regras") => regras::rodar(&args[1..]),
+        Some("roteiros") => roteiros::rodar(&args[1..]),
+        Some("rita") => rita::rodar(&args[1..]),
         Some("script") => script::rodar(&args[1..]),
         Some("estacao") => estacao::importar_credencial_cli(&args[1..]),
         Some("reprojetar") => {

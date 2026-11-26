@@ -287,3 +287,94 @@ pub fn planilha_de_casos(caminho: &Path) {
     }
     wb.save(caminho).expect("salvar");
 }
+
+/// Uma linha de uma aba mensal do histórico fictício. O vencimento cai no mês da aba.
+#[derive(Clone)]
+pub struct LinhaDoMes {
+    pub grupo: &'static str,
+    pub descricao: &'static str,
+    pub dia: u8,
+    pub meio: &'static str,
+    pub previsto: Option<f64>,
+    pub pago: Option<f64>,
+}
+
+pub fn linha(
+    grupo: &'static str,
+    descricao: &'static str,
+    dia: u8,
+    previsto: f64,
+    pago: Option<f64>,
+) -> LinhaDoMes {
+    LinhaDoMes {
+        grupo,
+        descricao,
+        dia,
+        meio: "CX-0001",
+        previsto: Some(previsto),
+        pago,
+    }
+}
+
+/// Uma aba mensal fictícia: `nome` é `AAAA.MM`.
+#[derive(Clone)]
+pub struct AbaDoMes {
+    pub nome: &'static str,
+    pub linhas: Vec<LinhaDoMes>,
+    /// O salário bruto do painel (T3), quando a aba tem o painel.
+    pub salario: Option<f64>,
+    /// `false` = layout antigo, sem o nome do grupo na coluna B.
+    pub com_grupo: bool,
+}
+
+pub fn aba_do_mes(nome: &'static str, linhas: Vec<LinhaDoMes>) -> AbaDoMes {
+    AbaDoMes {
+        nome,
+        linhas,
+        salario: None,
+        com_grupo: true,
+    }
+}
+
+/// Gera um `.xlsx` com as abas dadas, na ordem, mais uma aba `Resumo` que o histórico ignora.
+pub fn planilha_historica(caminho: &Path, abas: &[AbaDoMes]) {
+    let mut wb = Workbook::new();
+    let data = Format::new().set_num_format("dd/mm/yyyy");
+    let resumo = wb.add_worksheet();
+    resumo.set_name("Resumo").expect("nome");
+    resumo.write_string(0, 0, "ignorar").expect("celula");
+    for a in abas {
+        let ws = wb.add_worksheet();
+        ws.set_name(a.nome).expect("nome");
+        if a.linhas.is_empty() && a.salario.is_none() {
+            // Layout que o leitor não entende: aba sem linha nenhuma.
+            ws.write_string(0, 0, "layout diferente").expect("celula");
+            continue;
+        }
+        let ano: u16 = a.nome[..4].parse().expect("ano");
+        let mes: u8 = a.nome[5..7].parse().expect("mes");
+        for (i, l) in a.linhas.iter().enumerate() {
+            let r = 6 + i as u32;
+            if a.com_grupo && !l.grupo.is_empty() {
+                ws.write_string(r, 1, l.grupo).expect("celula");
+            }
+            ws.write_string(r, 2, l.descricao).expect("celula");
+            let dt = ExcelDateTime::from_ymd(ano, mes, l.dia).expect("data");
+            ws.write_datetime_with_format(r, 6, &dt, &data)
+                .expect("celula");
+            ws.write_string(r, 7, l.meio).expect("celula");
+            if let Some(p) = l.previsto {
+                ws.write_number(r, 8, p).expect("celula");
+            }
+            if let Some(p) = l.pago {
+                ws.write_number(r, 9, p).expect("celula");
+            }
+        }
+        if let Some(s) = a.salario {
+            ws.write_string(2, 17, "Salário").expect("celula");
+            ws.write_number(2, 19, s).expect("celula");
+            ws.write_number(2, 20, s).expect("celula");
+        }
+    }
+    wb.save(caminho).expect("salvar");
+}

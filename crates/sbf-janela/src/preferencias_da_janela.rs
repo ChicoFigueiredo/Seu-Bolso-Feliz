@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::controle::ModoDoPeriodo;
 use crate::controle_ui::AbaDoDetalhe;
+use crate::padroes_visiveis::{AbaDosPadroes, FiltroDePadroes};
 
 /// O nome do arquivo, ao lado de `preferencias-das-ferramentas.json`.
 pub const NOME_DO_ARQUIVO: &str = "preferencias-da-janela.json";
@@ -58,6 +59,23 @@ impl Default for PreferenciasDoControle {
             aba_do_detalhe: AbaDoDetalhe::default(),
         }
     }
+}
+
+/// O que a área Conexões lembra: a última aba aberta.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PreferenciasDeConexoes {
+    /// A chave da aba (`telegram`, `email`, `pluggy`, `pastas`); vazio vale Telegram.
+    #[serde(default)]
+    pub aba: String,
+}
+
+/// O que a área Padrões lembra: os filtros e a vista (lista ou mapa), spec 15 (D5).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PreferenciasDosPadroes {
+    #[serde(default)]
+    pub filtro: FiltroDePadroes,
+    #[serde(default)]
+    pub aba: AbaDosPadroes,
 }
 
 /// Menor e maior tamanho (em pontos) que se aceita de um arquivo guardado.
@@ -170,6 +188,12 @@ pub struct PreferenciasDaJanela {
     /// A janela do sistema: maximizada, tamanho e posição.
     #[serde(default)]
     pub janela: EstadoDaJanela,
+    /// A área Conexões: a última aba.
+    #[serde(default)]
+    pub conexoes: PreferenciasDeConexoes,
+    /// A área Padrões: os filtros e a vista.
+    #[serde(default)]
+    pub padroes: PreferenciasDosPadroes,
 }
 
 /// Onde moram as preferências da janela: na pasta de dados do app, nunca dentro do cofre.
@@ -386,7 +410,30 @@ mod testes {
                 tamanho: Some([1400.0, 900.0]),
                 posicao: Some([120.0, 40.0]),
             },
+            conexoes: PreferenciasDeConexoes {
+                aba: "email".into(),
+            },
+            padroes: PreferenciasDosPadroes {
+                filtro: FiltroDePadroes {
+                    texto: "pix".into(),
+                    estado: Some(sbf_regras::Estado::Ativa),
+                    entrada: Some(sbf_regras::TipoDeEntrada::Registro),
+                    mime: Some("image/*".into()),
+                    casam: crate::padroes_visiveis::CasamComODocumento::JaCasaram,
+                },
+                aba: AbaDosPadroes::Mapa,
+            },
         }
+    }
+
+    #[test]
+    fn arquivo_antigo_sem_a_area_padroes_abre_com_o_padrao() {
+        let (_t, a) = caminho();
+        std::fs::create_dir_all(a.parent().expect("pasta")).expect("pasta");
+        std::fs::write(&a, r#"{"zoom": 1.5, "conexoes": {"aba": "email"}}"#).expect("escreve");
+        let p = PreferenciasDaJanela::carregar(&a);
+        assert_eq!(p.zoom, Some(1.5));
+        assert_eq!(p.padroes, PreferenciasDosPadroes::default());
     }
 
     #[test]

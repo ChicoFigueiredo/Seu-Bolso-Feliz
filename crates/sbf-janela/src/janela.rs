@@ -19,6 +19,7 @@ use crate::dock::{self, PainelDoDock};
 use crate::formato;
 use crate::icones;
 use crate::leitura::{Cache, Leitor};
+use crate::ligacoes_do_registro::{self, LigacoesDoRegistro, PedidoDeLigacao};
 use crate::navegacao::{Destino, Navegacao, Pedido};
 use crate::pagina::{self, Vista};
 use crate::painel::{self, EstadoDosRelatorios};
@@ -117,6 +118,10 @@ pub struct Janela {
     pub centro: Vista,
     flutuantes: HashMap<u64, Vista>,
     cache: Cache,
+    /// O rótulo das contas de agora; a `ConsultaRotulada` do app o lê.
+    pub rotulos: crate::rotulos::RotulosDasContas,
+    /// A geração do Controle em que `rotulos` foi lido.
+    rotulos_geracao: Option<u64>,
     pesquisa: String,
     pub periodo: Periodo,
     /// Filtro "Quem decidiu" (aba Início): `None` = todos.
@@ -168,8 +173,18 @@ pub struct Janela {
     pub triagem: crate::triagem::EstadoDaTriagem,
     /// Conexões › Roteiros (spec 10, C1).
     pub roteiros: crate::roteiros::Roteiros,
+    /// Conexões: Telegram, Pluggy e pastas do worker.
+    pub conexoes: crate::conexoes_ui::Conexoes,
     /// A área Regras de reconhecimento (spec 13, D12). Sem catálogo ligado, mostra o motivo.
     pub regras: crate::regras_ui::Regras,
+    /// Rita, a assistente de padrões (spec 15): painel do dock, destacável.
+    pub rita: crate::rita_ui::RitaUi,
+    /// O item que Rita recebe, guardado enquanto o foco e a área não mudam.
+    rita_item: Option<(Ref, String, Option<String>, crate::rita_ui::ItemDaTela)>,
+    /// A Caixa de entrada: os documentos que o reconhecimento viu chegar.
+    pub caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada,
+    /// A marcação verde/âmbar das listas de documentos (spec 15, D3).
+    pub marcacao: crate::marcacao::Compartilhada,
     /// Análise (spec 10): Perguntar (RAG local) e Pontos de atenção.
     pub perguntar: crate::analise::EstadoDePerguntar,
     pub pontos: crate::analise::EstadoDePontos,
@@ -189,7 +204,16 @@ pub struct Janela {
     pub estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela,
     /// A largura da lateral no último quadro (ou a guardada, antes de restaurar).
     pub largura_da_lateral: Option<f32>,
+    /// Os bancos do cofre que outros processos escrevem (MCP, worker): a janela relê o que
+    /// mostra quando um deles muda.
+    pub mudancas: crate::mudancas::Mudancas,
+    /// "Concilia" e "Reconhecido pela regra" da página de cada registro aberto, com a hora
+    /// da leitura (vale por alguns segundos e some quando um banco muda).
+    ligacoes_dos_registros: HashMap<Ref, (std::time::Instant, Option<LigacoesDoRegistro>)>,
 }
+
+/// Quanto tempo as ligações de um registro valem antes de serem lidas de novo.
+const VALIDADE_DAS_LIGACOES: std::time::Duration = std::time::Duration::from_secs(5);
 
 type PaginaPendente = Result<sbf_inventario::consulta::PaginaDeTabela, String>;
 
@@ -257,6 +281,8 @@ impl Janela {
             centro: Vista::default(),
             flutuantes: HashMap::new(),
             cache: Cache::default(),
+            rotulos: crate::rotulos::RotulosDasContas::default(),
+            rotulos_geracao: None,
             pesquisa: String::new(),
             periodo: Periodo::default(),
             quem_decidiu: None,
@@ -292,7 +318,12 @@ impl Janela {
             erro_do_dialogo: None,
             triagem: crate::triagem::EstadoDaTriagem::default(),
             roteiros: crate::roteiros::Roteiros::default(),
+            conexoes: crate::conexoes_ui::Conexoes::default(),
             regras: crate::regras_ui::Regras::default(),
+            rita: crate::rita_ui::RitaUi::default(),
+            rita_item: None,
+            caixa_de_entrada: crate::caixa_de_entrada::EstadoDaCaixaDeEntrada::default(),
+            marcacao: crate::marcacao::Compartilhada::default(),
             perguntar: crate::analise::EstadoDePerguntar::default(),
             pontos: crate::analise::EstadoDePontos::default(),
             planejamento: None,
@@ -304,6 +335,29 @@ impl Janela {
             casca_guardada: None,
             estado_da_janela: crate::preferencias_da_janela::EstadoDaJanela::default(),
             largura_da_lateral: None,
+            mudancas: crate::mudancas::Mudancas::default(),
+            ligacoes_dos_registros: HashMap::new(),
+        }
+    }
+
+    /// Vigia os bancos do cofre (`planejamento`, `regras` e `inventario`): quando outro
+    /// processo escreve num deles, a janela relê o que mostra.
+    pub fn vigiar_cofre(&mut self, cofre: &std::path::Path) {
+        self.mudancas
+            .vigiar(crate::mudancas::Mudancas::bancos_do_cofre(cofre));
+    }
+
+    /// Relê o que depende dos bancos que mudaram por fora, preservando seleção, abas e
+    /// rolagem (o egui guarda a rolagem pelo id; aqui só se esquece o que foi lido).
+    fn reler_o_que_mudou(&mut self, ctx: &Context) {
+        use crate::mudancas::Banco;
+        for banco in self.mudancas.mudaram(ctx) {
+            self.ligacoes_dos_registros.clear();
+            match banco {
+                Banco::Planejamento => self.controle.recarregar(),
+                Banco::Regras => self.regras.recarregar_de_fora(),
+                Banco::Inventario => self.cache.limpar(),
+            }
         }
     }
 
@@ -318,6 +372,10 @@ impl Janela {
             casca: self.casca_guardada.clone(),
             largura_da_lateral: self.largura_da_lateral,
             janela: self.estado_da_janela,
+            conexoes: crate::preferencias_da_janela::PreferenciasDeConexoes {
+                aba: self.conexoes.aba_guardada().to_owned(),
+            },
+            padroes: self.regras.preferencias(),
         }
     }
 
@@ -347,6 +405,8 @@ impl Janela {
         self.casca_guardada = lidas.casca.clone();
         self.largura_da_lateral = lidas.largura_valida();
         self.estado_da_janela = lidas.janela;
+        self.conexoes.definir_aba(&lidas.conexoes.aba);
+        self.regras.aplicar_preferencias(&lidas.padroes);
         lidas
     }
 
@@ -357,7 +417,27 @@ impl Janela {
         self.ligacoes.planejamento = true;
         let hoje = self.hoje_como_data();
         self.controle = crate::controle_ui::EstadoDoControle::novo(hoje);
+        self.rotulos_geracao = None;
+        self.atualizar_rotulos();
         self.navegacao = Navegacao::nova(Destino::AreaFutura("controle"));
+    }
+
+    /// Relê o rótulo das contas quando o planejamento mudou (a geração do Controle subiu: uma
+    /// escrita da janela ou do disco). O que a janela já leu com os nomes de antes é esquecido.
+    fn atualizar_rotulos(&mut self) {
+        let geracao = self.controle.geracao();
+        if self.rotulos_geracao == Some(geracao) {
+            return;
+        }
+        let Some(pl) = self.planejamento.as_ref() else {
+            return;
+        };
+        if let Ok(rotulador) = pl.0.rotulador() {
+            self.rotulos.definir(rotulador.clone());
+            self.controle.rotulador = rotulador;
+            self.cache.limpar();
+        }
+        self.rotulos_geracao = Some(geracao);
     }
 
     /// `hoje` (texto `AAAA-MM-DD`) como data; se o texto não serve, o relógio.
@@ -551,6 +631,10 @@ impl Janela {
                 .as_deref()
                 .map(crate::rubricas::ref_do_documento);
         }
+        // Uma linha da Caixa de entrada escolhida: o dock mostra o arquivo dela.
+        if let Some(r) = self.foco_da_caixa_de_entrada() {
+            return Some(r);
+        }
         self.centro
             .selecao
             .foco
@@ -672,6 +756,8 @@ impl Janela {
             estados: self.estado_do_achado.iter().cloned().collect(),
             fontes: self.fonte.iter().cloned().collect(),
             tipos: self.tipo_do_documento.iter().cloned().collect(),
+            // O rótulo das contas expande a pesquisa na `ConsultaRotulada`, não aqui.
+            contas_do_texto: Vec::new(),
         }
     }
 
@@ -817,6 +903,7 @@ impl Janela {
             self.cache.limpar();
         }
         self.sondar_triagem(ui.ctx());
+        self.sincronizar_marcacao(ui.ctx());
         match vista {
             Some(v) => self.desenhar_destino_em(ui, consulta, destino, v),
             None => {
@@ -825,6 +912,15 @@ impl Janela {
                 self.centro = centro;
             }
         }
+    }
+
+    /// Liga a marcação ao catálogo de padrões (o mesmo da área Regras) e a publica no
+    /// contexto, para as tabelas a acharem. Barato: roda a cada quadro.
+    fn sincronizar_marcacao(&mut self, ctx: &egui::Context) {
+        if let Ok(mut m) = self.marcacao.lock() {
+            m.definir_fonte(self.regras.fonte());
+        }
+        crate::marcacao::publicar(ctx, &self.marcacao);
     }
 
     fn desenhar_destino_em(
@@ -836,6 +932,10 @@ impl Janela {
     ) {
         let p = tema::paleta(ui.ctx());
         let filtro = self.filtro();
+        let ligacoes = match destino {
+            Destino::Item(r) => self.ligacoes_do_registro(consulta, r),
+            _ => None,
+        };
         let banco = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let descricao_do_filtro_atual = descricao_do_filtro(&filtro, &self.ciclo_atual());
         let hoje = self.hoje.clone();
@@ -850,6 +950,7 @@ impl Janela {
             estacao,
             caixa,
             hoje: &hoje,
+            ligacoes: ligacoes.as_ref(),
         };
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         let pedidos = &mut self.pedidos;
@@ -1019,6 +1120,9 @@ impl Janela {
                     &mut self.periodo,
                     &mut self.focar_pesquisa,
                 );
+                if *area == Area::ATriar {
+                    crate::caixa_de_entrada_ui::secao_sem_padrao(ui, &mut self.caixa_de_entrada);
+                }
                 if *area == Area::Lotes {
                     faixa_do_lote(ui, &mut leitor, self.lote_atual.as_ref(), caixa, pedidos);
                 }
@@ -1093,6 +1197,11 @@ impl Janela {
                     }
                 }
             }
+            // A Caixa de entrada do reconhecimento local; os rascunhos do servidor (spec 08)
+            // só aparecem quando ela não está ligada.
+            Destino::AreaFutura("caixa") if self.caixa_de_entrada.ligada() => {
+                crate::caixa_de_entrada_ui::area(ui, &mut self.caixa_de_entrada);
+            }
             Destino::AreaFutura("caixa") if caixa.is_some() => {
                 if let Some(c) = caixa {
                     crate::caixa_ui::area(
@@ -1119,7 +1228,12 @@ impl Janela {
                 }
             }
             Destino::AreaFutura("roteiros") => self.roteiros.area(ui),
-            Destino::AreaFutura(crate::regras_ui::ROTA) => self.regras.area(ui),
+            Destino::AreaFutura("conexoes") => self.conexoes.area(ui),
+            Destino::AreaFutura(crate::regras_ui::ROTA) => {
+                let documento = self.documento_de_referencia_dos_padroes();
+                self.regras.definir_documento(documento);
+                self.regras.area(ui);
+            }
             Destino::AreaFutura("perguntar") => {
                 crate::analise::perguntar(ui, &mut self.perguntar, pedidos);
             }
@@ -1174,6 +1288,10 @@ impl Janela {
             self.reconhecimento_ui(ui);
             return;
         }
+        if painel == PainelDoDock::Rita {
+            self.rita_do_dock_ui(ui, consulta);
+            return;
+        }
         let foco = self.foco();
         let mut leitor = Leitor::novo(consulta, &mut self.cache);
         if painel == PainelDoDock::Previa {
@@ -1224,12 +1342,151 @@ impl Janela {
         );
     }
 
+    /// O item que Rita recebe: o documento (ou registro) em foco, com o texto guardado, a área
+    /// e os itens selecionados como lista. Guardado até o foco ou a área mudarem (nada de
+    /// consulta ao banco a cada quadro).
+    fn item_da_rita(&mut self, consulta: &dyn Consulta) -> Option<crate::rita_ui::ItemDaTela> {
+        let cofre = self.rita.cofre()?;
+        let foco = self.foco()?;
+        let area = areas::rotulo_do_destino(self.navegacao.atual());
+        // O filtro ativo da área (período, estado, tipo, conexão, pesquisa): vai a Rita em
+        // palavras. A lista visível em si não é lida (só a seleção vira títulos): ver a spec 15, D8.
+        let filtro = filtro_para_rita(&self.filtro(), &self.ciclo_atual());
+        if let Some((r, a, f, item)) = &self.rita_item
+            && *r == foco
+            && *a == area
+            && *f == filtro
+        {
+            return Some(item.clone());
+        }
+        let titulos: Vec<sbf_rita::TituloDaLista> = self
+            .centro
+            .selecao
+            .itens
+            .iter()
+            .filter(|r| **r != foco)
+            .take(30)
+            .map(|r| sbf_rita::TituloDaLista {
+                id: r.chave.clone(),
+                titulo: Leitor::novo(consulta, &mut self.cache).rotulo(r),
+            })
+            .collect();
+        let mut leitor = Leitor::novo(consulta, &mut self.cache);
+        let rotulo = leitor.rotulo(&foco);
+        let entrada = match foco.tipo {
+            Tipo::Achado | Tipo::Documento => {
+                let texto = leitor.texto(&foco).ok().and_then(|t| (*t).clone());
+                let (nome, mime) =
+                    sbf_rita::cofre::nome_e_mime(&cofre, &foco.chave).unwrap_or_default();
+                let mut e = sbf_rita::entrada_de_documento(
+                    &foco.chave,
+                    nome.as_deref().or(Some(rotulo.as_str())),
+                    mime.as_deref(),
+                    texto.as_deref(),
+                );
+                e.momento = sbf_rita::cofre::momento_do_documento(&cofre, &foco.chave);
+                e
+            }
+            Tipo::Registro => sbf_rita::entrada_de_registro(&foco.chave, &rotulo),
+            _ => return None,
+        };
+        let item = crate::rita_ui::ItemDaTela {
+            chave: foco.to_string(),
+            rotulo,
+            tela: sbf_rita::DadosDaTela {
+                cofre,
+                item: entrada,
+                area: area.clone(),
+                filtro: filtro.clone(),
+                titulos,
+            },
+        };
+        self.rita_item = Some((foco, area, filtro, item.clone()));
+        Some(item)
+    }
+
+    /// O painel Rita no dock.
+    fn rita_do_dock_ui(&mut self, ui: &mut Ui, consulta: &dyn Consulta) {
+        if self.rita.flutuante {
+            ui.add_space(6.0);
+            ui.label("Rita está numa janela flutuante.");
+            if ui.button("Trazer de volta para o painel").clicked() {
+                self.rita.flutuante = false;
+            }
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let acoes = self.rita.desenhar(ui, item.as_ref());
+        self.processar_acoes_da_rita(ui.ctx(), acoes);
+    }
+
+    /// Rita destacada numa janela flutuante (acompanha a seleção igual ao painel).
+    pub fn rita_flutuante_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
+        if !self.rita.flutuante {
+            return;
+        }
+        let item = self.item_da_rita(consulta);
+        let mut acoes = Vec::new();
+        let mut aberta = true;
+        let p = tema::paleta(ctx);
+        egui::Window::new(RichText::new("Rita").strong())
+            .id(Id::new("rita-flutuante"))
+            .open(&mut aberta)
+            .default_size([440.0, 580.0])
+            .resizable(true)
+            .collapsible(true)
+            .frame(egui::Frame::window(&ctx.global_style()).fill(p.superficie_1))
+            .show(ctx, |ui| {
+                acoes = self.rita.desenhar(ui, item.as_ref());
+            });
+        if !aberta {
+            self.rita.flutuante = false;
+        }
+        self.processar_acoes_da_rita(ctx, acoes);
+    }
+
+    /// O que o painel Rita pediu: ativar (como usuário, pelo caminho da área Padrões) ou abrir
+    /// a regra no editor. Depois de uma gravação de Rita, a lista de padrões se relê.
+    fn processar_acoes_da_rita(&mut self, ctx: &Context, acoes: Vec<crate::rita_ui::AcaoDeRita>) {
+        use crate::rita_ui::AcaoDeRita;
+        if self.rita.tomar_gravou() {
+            self.regras.recarregar_de_fora();
+        }
+        for a in acoes {
+            match a {
+                AcaoDeRita::Ativar { regra, versao } => {
+                    let r = match self.regras.fonte() {
+                        Some(f) => f.ativar(&regra, versao),
+                        None => Err("O catálogo de padrões não está ligado.".to_owned()),
+                    };
+                    if r.is_ok() {
+                        self.regras.recarregar_de_fora();
+                    }
+                    self.rita.ativacao_feita(&regra, versao, r);
+                }
+                AcaoDeRita::AbrirNoEditor { regra } => {
+                    self.ligacao(
+                        ctx,
+                        PedidoDeLigacao::Regra {
+                            regra,
+                            flutuante: false,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     /// Os painéis flutuantes (Ctrl+clique), como janelas egui dentro da janela.
     pub fn flutuantes_ui(&mut self, ctx: &Context, consulta: &dyn Consulta) {
         let p = tema::paleta(ctx);
         let lista: Vec<_> = self.navegacao.flutuantes().to_vec();
         let hoje = self.hoje.clone();
         for f in lista {
+            let ligacoes = match &f.destino {
+                Destino::Item(r) => self.ligacoes_do_registro(consulta, r),
+                _ => None,
+            };
             let contexto_da_pagina = pagina::ContextoDaPagina {
                 estacao: self.estacao.as_ref().map(|e| e.0.as_ref()),
                 caixa: self
@@ -1237,6 +1494,7 @@ impl Janela {
                     .as_ref()
                     .map(|c| &*c.0 as &dyn crate::caixa::FonteDaCaixa),
                 hoje: &hoje,
+                ligacoes: ligacoes.as_ref(),
             };
             let mut leitor = Leitor::novo(consulta, &mut self.cache);
             let titulo = match &f.destino {
@@ -1578,6 +1836,8 @@ impl Janela {
         consulta: &dyn Consulta,
         comandos: &mut dyn Comandos,
     ) {
+        self.reler_o_que_mudou(ctx);
+        self.atualizar_rotulos();
         // Clicar num lote (na área Lotes ou numa aba) faz dele o lote atual.
         if let Some(r) = &self.centro.selecao.foco
             && r.tipo == Tipo::Lote
@@ -1650,7 +1910,11 @@ impl Janela {
                     });
                 }
                 Pedido::Caixa(p) => self.caixa_pedido(p),
-                Pedido::Controle(p) => self.controle_pedido(p),
+                Pedido::Controle(p) => {
+                    self.controle_pedido(p);
+                    self.atualizar_rotulos();
+                }
+                Pedido::Ligacao(p) => self.ligacao(ctx, p),
                 Pedido::Alterar(pedido) => self.alterar(pedido),
                 Pedido::RefazerAlteracao(id) => self.refazer(&id),
                 Pedido::DescartarAlteracao(id) => self.descartar(&id),
@@ -1685,6 +1949,111 @@ impl Janela {
                 | Pedido::Avancar => {}
             }
         }
+    }
+
+    /// Um clique numa ligação do registro.
+    fn ligacao(&mut self, ctx: &Context, pedido: PedidoDeLigacao) {
+        match pedido {
+            PedidoDeLigacao::Registro {
+                movimento,
+                flutuante,
+            } => {
+                let Some(banco) = self.ferramentas.as_ref().map(|f| f.banco.clone()) else {
+                    self.controle.mensagem = Some((
+                        "Sem inventário ligado: não há registro para abrir.".to_owned(),
+                        true,
+                    ));
+                    return;
+                };
+                match ligacoes_do_registro::registro_do_movimento(&banco, &movimento) {
+                    Ok(Some(registro)) => {
+                        crate::navegacao::pedir_abrir(
+                            ctx,
+                            &mut self.pedidos,
+                            Destino::Item(registro),
+                            flutuante,
+                        );
+                        ctx.request_repaint();
+                    }
+                    Ok(None) => {
+                        self.controle.mensagem = Some((
+                            "Este movimento não está mais no inventário.".to_owned(),
+                            true,
+                        ));
+                    }
+                    Err(e) => {
+                        self.controle.mensagem =
+                            Some((format!("Não deu para achar o registro: {e}"), true));
+                    }
+                }
+            }
+            PedidoDeLigacao::Ocorrencia {
+                ocorrencia,
+                flutuante,
+            } => {
+                if let Err(e) = self.controle.navegador.ir_para(ocorrencia.competencia) {
+                    self.controle.mensagem = Some((e, true));
+                }
+                self.controle.selecionada = Some(ocorrencia);
+                crate::navegacao::pedir_abrir(
+                    ctx,
+                    &mut self.pedidos,
+                    ligacoes_do_registro::destino_do_controle(),
+                    flutuante,
+                );
+                ctx.request_repaint();
+            }
+            PedidoDeLigacao::Regra { regra, flutuante } => {
+                self.regras.abrir(&regra);
+                crate::navegacao::pedir_abrir(
+                    ctx,
+                    &mut self.pedidos,
+                    ligacoes_do_registro::destino_das_regras(),
+                    flutuante,
+                );
+                ctx.request_repaint();
+            }
+        }
+    }
+
+    /// As ligações da página de um registro (só no inventário real, com planejamento ou
+    /// regras ligados). Guardadas por [`VALIDADE_DAS_LIGACOES`]; um banco que muda por fora
+    /// as descarta.
+    fn ligacoes_do_registro(
+        &mut self,
+        consulta: &dyn Consulta,
+        alvo: &Ref,
+    ) -> Option<LigacoesDoRegistro> {
+        if !ligacoes_do_registro::se_aplica(alvo) {
+            return None;
+        }
+        if let Some((quando, l)) = self.ligacoes_dos_registros.get(alvo)
+            && quando.elapsed() < VALIDADE_DAS_LIGACOES
+        {
+            return l.clone();
+        }
+        let banco = self.ferramentas.as_ref().map(|f| f.banco.clone())?;
+        let externo = Leitor::novo(consulta, &mut self.cache)
+            .item(alvo)
+            .ok()
+            .and_then(|i| {
+                i.as_ref()
+                    .as_ref()
+                    .and_then(ligacoes_do_registro::id_externo_do_item)
+            });
+        let lidas = externo.and_then(|externo| {
+            let movimento = ligacoes_do_registro::movimento_do_registro(&banco, &externo)
+                .ok()
+                .flatten()?;
+            Some(ligacoes_do_registro::montar(
+                self.planejamento.as_ref().map(|p| p.0.as_ref()),
+                self.regras.fonte(),
+                &movimento,
+            ))
+        });
+        self.ligacoes_dos_registros
+            .insert(alvo.clone(), (std::time::Instant::now(), lidas.clone()));
+        lidas
     }
 
     /// Na casca, os pedidos de navegação vão para a fila dela.
@@ -1759,7 +2128,7 @@ impl Janela {
             A::Retomar => servico.retomar().map(|()| "Rodada retomada.".to_owned()),
             A::ApagarRegra(id) => servico
                 .apagar_regra_do_agente(id)
-                .map(|()| "Regra apagada. Ela só volta com 3 confirmações novas suas.".to_owned()),
+                .map(|()| "Padrão apagado. Ela só volta com 3 confirmações novas suas.".to_owned()),
             A::Aceitar(ids) => servico.aceitar(&ids, comandos).map(|r| {
                 self.decisoes_da_sessao.extend(&r.decisoes);
                 let mut texto = format!(
@@ -1836,7 +2205,7 @@ impl Janela {
     pub(crate) fn controle_pedido(&mut self, pedido: crate::controle_ui::PedidoDoControle) {
         use crate::controle::AcaoDoControle as A;
         use crate::controle_ui::{AbaLateral, PedidoDoControle as P, mensagem_de_erro};
-        use sbf_planejamento::{Alteracao, Autor, Conciliacao};
+        use sbf_planejamento::{Alteracao, Autor};
         // A prévia de documento não escreve no planejamento.
         match &pedido {
             P::PreviaDoDocumento(sha) => {
@@ -1865,6 +2234,9 @@ impl Janela {
         }
         let hoje = self.hoje_como_data();
         let ligador = self.ligador_de_salario();
+        // As regras de reconhecimento e o extrato: o favorecido de um Pix concilia por elas.
+        let regras = self.regras.fonte().cloned();
+        let inventario = self.ferramentas.as_ref().map(|f| f.banco.clone());
         let Some(pl) = self.planejamento.as_mut() else {
             self.erro("O planejamento ainda não está ligado a esta janela.".to_owned());
             return;
@@ -1912,6 +2284,14 @@ impl Janela {
                         ..
                     }) => "Par de conta confirmado.",
                     Some(Alteracao::MapearConta { .. }) => "Par de conta desligado.",
+                    Some(Alteracao::DefinirApelidoDaConta {
+                        apelido: Some(_), ..
+                    }) => "Apelido da conta salvo.",
+                    Some(Alteracao::DefinirApelidoDaConta { .. }) => "Apelido da conta tirado.",
+                    Some(Alteracao::Excecao {
+                        excecao: sbf_planejamento::Excecao::QuantidadeSoDesteMes { .. },
+                        ..
+                    }) => "Quantidade ajustada só neste mês.",
                     _ => "Feito.",
                 };
                 let mut r = Ok(());
@@ -1935,11 +2315,27 @@ impl Janela {
             P::Acao(A::BuscarNoExtrato) => {
                 let periodo = controle.navegador.periodo();
                 controle.recarregar();
-                controle.mensagem = Some(match plan.buscar_conciliacoes(&periodo, hoje) {
-                    Ok(0) => ("Nenhuma sugestão nova.".to_owned(), false),
-                    Ok(1) => ("1 sugestão nova.".to_owned(), false),
-                    Ok(n) => (format!("{n} sugestões novas."), false),
-                    Err(e) => (mensagem_de_erro(&e), true),
+                // Primeiro as assinaturas; depois o favorecido de um Pix, nas ocorrências que
+                // ainda não têm sugestão.
+                let padrao = plan.buscar_conciliacoes(&periodo, hoje);
+                let pelas_regras = match &padrao {
+                    Ok(_) => buscar_pelas_regras(
+                        plan,
+                        regras.as_ref(),
+                        inventario.as_deref(),
+                        &periodo,
+                        hoje,
+                    ),
+                    Err(_) => Ok(0),
+                };
+                controle.mensagem = Some(match (padrao, pelas_regras) {
+                    (Err(e), _) => (mensagem_de_erro(&e), true),
+                    (Ok(_), Err(e)) => (format!("Não deu para buscar pelos padrões: {e}"), true),
+                    (Ok(n), Ok(m)) => match n + m {
+                        0 => ("Nenhuma sugestão nova.".to_owned(), false),
+                        1 => ("1 sugestão nova.".to_owned(), false),
+                        total => (format!("{total} sugestões novas."), false),
+                    },
                 });
             }
             P::ConciliarManual {
@@ -1965,6 +2361,7 @@ impl Janela {
                 ocorrencia,
                 movimento,
             } => {
+                let desfeito = movimento.clone();
                 let r = plan.aplicar(
                     Alteracao::Desconciliar {
                         ocorrencia,
@@ -1972,6 +2369,13 @@ impl Janela {
                     },
                     Autor::Usuario,
                 );
+                // Uma conciliação que uma regra consolidada fez sozinha: o Desfazer é o
+                // retorno que a rebaixa a ativa (D4).
+                if r.is_ok()
+                    && let Some(mut catalogo) = regras.as_ref().and_then(|f| f.catalogo.lock().ok())
+                {
+                    sbf_reconhecimento::favorecido::desfeito(&mut catalogo, &desfeito);
+                }
                 terminar(
                     controle,
                     r,
@@ -2011,28 +2415,54 @@ impl Janela {
                 let Some(o) = controle.linha_selecionada().cloned() else {
                     return;
                 };
-                match plan.sugestao_de_conciliacao(&o.id) {
-                    Ok(Some(c)) => {
-                        let confirmada = Conciliacao {
-                            confirmada: true,
-                            ..c
-                        };
-                        let r = plan.aplicar(
-                            Alteracao::Conciliar {
-                                conciliacao: confirmada.clone(),
-                            },
-                            Autor::Usuario,
-                        );
-                        if terminar(controle, r, "Conciliação confirmada.") {
-                            ligar_o_salario(plan, ligador.as_deref(), controle, &confirmada);
-                        }
-                    }
-                    Ok(None) => {
+                // Todas as sugestões pendentes da ocorrência: uma por débito (o favorecido de
+                // um Pix pode somar vários). Cada proposta de regra recebe `Aceito`.
+                let mut catalogo = regras.as_ref().and_then(|f| f.catalogo.lock().ok());
+                let r =
+                    sbf_reconhecimento::favorecido::confirmar(plan, catalogo.as_deref_mut(), &o.id);
+                drop(catalogo);
+                controle.recarregar();
+                match r {
+                    Ok(feitas) if feitas.is_empty() => {
                         controle.mensagem =
                             Some(("Não há sugestão de conciliação nesta linha.".into(), true));
                     }
-                    Err(e) => controle.mensagem = Some((mensagem_de_erro(&e), true)),
+                    Ok(feitas) => {
+                        controle.mensagem = Some((
+                            if feitas.len() == 1 {
+                                "Conciliação confirmada.".to_owned()
+                            } else {
+                                format!(
+                                    "{} conciliações confirmadas, uma por débito.",
+                                    feitas.len()
+                                )
+                            },
+                            false,
+                        ));
+                        for confirmada in &feitas {
+                            ligar_o_salario(plan, ligador.as_deref(), controle, confirmada);
+                        }
+                    }
+                    Err(e) => controle.mensagem = Some((e, true)),
                 }
+            }
+            P::IgnorarSugestao { ocorrencia } => {
+                let mut catalogo = regras.as_ref().and_then(|f| f.catalogo.lock().ok());
+                let r = sbf_reconhecimento::favorecido::ignorar(
+                    plan,
+                    catalogo.as_deref_mut(),
+                    &ocorrencia,
+                );
+                drop(catalogo);
+                controle.recarregar();
+                controle.mensagem = Some(match r {
+                    Ok(0) => (
+                        "Não há sugestão de conciliação nesta linha.".to_owned(),
+                        true,
+                    ),
+                    Ok(_) => ("Sugestão ignorada. A regra não a repete.".to_owned(), false),
+                    Err(e) => (e, true),
+                });
             }
             P::Acao(a @ (A::Subir | A::Descer)) => {
                 let Some(o) = controle.linha_selecionada().cloned() else {
@@ -2943,7 +3373,7 @@ pub fn confirmar_dialogo(d: &Dialogo) -> Result<Pedido, String> {
                     estrategia: estrategia.to_owned(),
                 },
                 alvos: vec![Ref::nova(Tipo::Fornecedor, fornecedor)],
-                motivo: Some("regra criada à mão (Ferramentas › Regras de senha)".to_owned()),
+                motivo: Some("padrão criado à mão (Ferramentas › Regras de senha)".to_owned()),
             }))
         }
         Dialogo::NovoLote { nome } => {
@@ -3073,7 +3503,7 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
             partes.push("decidido por você".to_owned())
         }
         Some(sbf_inventario::consulta::Quem::Automatico(r)) if r.is_empty() => {
-            partes.push("decidido pelas regras".to_owned());
+            partes.push("decidido pelos padrões".to_owned());
         }
         Some(q) => partes.push(format!("decidido por {}", q.rotulo())),
         None => {}
@@ -3086,6 +3516,13 @@ pub fn descricao_do_filtro(f: &Filtro, ciclo_atual: &str) -> String {
     } else {
         format!("Filtro: {}", partes.join(" · "))
     }
+}
+
+/// O filtro ativo em palavras para Rita (sem o convite de "Sem filtros"): `None` sem filtro.
+pub fn filtro_para_rita(f: &Filtro, ciclo_atual: &str) -> Option<String> {
+    descricao_do_filtro(f, ciclo_atual)
+        .strip_prefix("Filtro: ")
+        .map(str::to_owned)
 }
 
 fn cabecalho_da_area(
@@ -3168,6 +3605,32 @@ fn faixa_do_lote(
 
 /// Depois de uma conciliação confirmada de uma ocorrência com contracheque vinculado, liga o
 /// registro do salário ao crédito no inventário. Falha vira aviso discreto; a conciliação fica.
+/// A busca pelo favorecido do Pix (regras de reconhecimento sobre o extrato). Sem catálogo ou
+/// sem inventário ligados, não há o que buscar.
+fn buscar_pelas_regras(
+    plan: &mut dyn sbf_planejamento::Planejamento,
+    regras: Option<&crate::regras::FonteDasRegras>,
+    inventario: Option<&std::path::Path>,
+    periodo: &sbf_planejamento::Periodo,
+    hoje: sbf_planejamento::Data,
+) -> Result<usize, String> {
+    let (Some(fonte), Some(inventario)) = (regras, inventario) else {
+        return Ok(0);
+    };
+    let mut catalogo = fonte
+        .catalogo
+        .lock()
+        .map_err(|_| "o catálogo de padrões está ocupado".to_owned())?;
+    sbf_reconhecimento::favorecido::buscar(
+        plan,
+        &mut catalogo,
+        fonte.executor.clone(),
+        &sbf_planilha::movimentos::MovimentosDaPluggy::novo(inventario),
+        periodo,
+        hoje,
+    )
+}
+
 fn ligar_o_salario(
     plan: &dyn sbf_planejamento::Planejamento,
     ligador: Option<&dyn crate::reconhecimento::LigadorDeSalario>,
@@ -3187,6 +3650,79 @@ fn ligar_o_salario(
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn clicar_numa_ocorrencia_do_registro_seleciona_e_abre_o_controle_mensal() {
+        use sbf_planejamento::{Competencia, IdOcorrencia};
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        let id = IdOcorrencia {
+            recorrente: "rec_salario".into(),
+            competencia: Competencia::nova(2026, 11).expect("competência"),
+            parcela: None,
+        };
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Ocorrencia {
+                ocorrencia: id.clone(),
+                flutuante: true,
+            },
+        );
+        assert_eq!(j.controle.selecionada, Some(id));
+        assert_eq!(
+            j.controle.navegador.ancora(),
+            Competencia::nova(2026, 11).expect("competência")
+        );
+        assert_eq!(
+            j.pedidos,
+            vec![Pedido::AbrirFlutuante(Destino::AreaFutura("controle"))]
+        );
+    }
+
+    #[test]
+    fn clicar_numa_regra_do_registro_abre_a_area_de_regras() {
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Regra {
+                regra: "pix-da-diarista".into(),
+                flutuante: false,
+            },
+        );
+        assert_eq!(
+            j.pedidos,
+            vec![Pedido::Abrir(Destino::AreaFutura(crate::regras_ui::ROTA))]
+        );
+    }
+
+    #[test]
+    fn abrir_o_registro_sem_inventario_avisa_em_vez_de_falhar() {
+        let ctx = Context::default();
+        let mut j = Janela::nova();
+        j.ligacao(
+            &ctx,
+            PedidoDeLigacao::Registro {
+                movimento: "pluggy:txn_a".into(),
+                flutuante: false,
+            },
+        );
+        assert!(j.pedidos.is_empty());
+        assert!(matches!(&j.controle.mensagem, Some((_, true))));
+    }
+
+    #[test]
+    fn rita_recebe_o_filtro_ativo_em_palavras_e_nada_sem_filtro() {
+        assert_eq!(filtro_para_rita(&Filtro::default(), "2026-10"), None);
+        let f = Filtro {
+            texto: Some("pix".to_owned()),
+            ..Filtro::default()
+        };
+        assert_eq!(
+            filtro_para_rita(&f, "2026-10").as_deref(),
+            Some("\u{201c}pix\u{201d}")
+        );
+    }
 
     #[test]
     fn filtro_em_palavras() {

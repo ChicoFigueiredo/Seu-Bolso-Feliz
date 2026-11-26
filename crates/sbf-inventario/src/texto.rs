@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 /// Uma linha de `texto`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextoGravado {
-    /// `pdftotext`, `pdf-sem-texto`, `texto-simples`, `ocr-por`...
+    /// `pdftotext`, `pdf-sem-texto`, `texto-simples`, `ocr-tesseract`, `ocr-sem-texto`...
     pub metodo: String,
     /// Já cortado como o Bun corta; vazio quando não há texto.
     pub conteudo: String,
@@ -18,6 +18,10 @@ pub struct TextoGravado {
 
 /// `texto.metodo` de um arquivo de texto simples lido direto.
 pub const METODO_TEXTO_SIMPLES: &str = "texto-simples";
+/// `texto.metodo` de uma imagem lida pelo `tesseract` (`sbf-ocr`).
+pub const METODO_OCR_TESSERACT: &str = "ocr-tesseract";
+/// `texto.metodo` de uma imagem que o `tesseract` leu e não achou texto (conteúdo vazio).
+pub const METODO_OCR_SEM_TEXTO: &str = "ocr-sem-texto";
 
 /// O achado já tem linha em `texto`?
 ///
@@ -56,8 +60,8 @@ pub fn ler_texto(
         .optional()
 }
 
-/// Grava o texto do achado e, quando há, o `canonical_fingerprint` dele (só se o texto entrou:
-/// a primeira extração vale). Não abre transação: roda
+/// Grava o texto do achado, a impressão do texto (`impressao_do_texto`) e, quando há, o
+/// `canonical_fingerprint` dele (só se o texto entrou: a primeira extração vale). Não abre transação: roda
 /// dentro da de quem chama (a rodada de PDF protegido) ou use [`registrar_texto`].
 ///
 /// # Errors
@@ -73,6 +77,11 @@ pub fn gravar_texto(
         "INSERT OR IGNORE INTO texto (content_hash, metodo, conteudo) VALUES (?1, ?2, ?3)",
         params![content_hash, metodo, conteudo],
     )?;
+    if inseriu == 1 {
+        // A impressão do texto (documento repetido com bytes diferentes) sai junto, na
+        // mesma transação de quem grava.
+        crate::impressao_do_texto::calcular(conexao, content_hash)?;
+    }
     // A impressão é do texto que ficou: se já havia outro, ela não muda.
     if let (Some(impressao), 1) = (impressao, inseriu) {
         conexao.execute(
@@ -100,4 +109,25 @@ pub fn registrar_texto(
         rusqlite::Transaction::new_unchecked(conexao, rusqlite::TransactionBehavior::Immediate)?;
     gravar_texto(&tx, content_hash, metodo, conteudo, impressao)?;
     tx.commit()
+}
+
+/// O momento de um achado, para as regras completarem datas sem ano (spec 15): a **menor**
+/// `origem.local_mtime` (a data do arquivo, ou a da mensagem no Telegram) entre as origens do
+/// achado; sem nenhuma, o `achado.primeiro_visto_em`; sem achado, `None`. ISO 8601 (`…Z`).
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn momento_do_achado(conexao: &Connection, sha256: &str) -> rusqlite::Result<Option<String>> {
+    conexao
+        .query_row(
+            "SELECT COALESCE(
+                 (SELECT min(o.local_mtime) FROM origem o
+                   WHERE o.content_hash = a.content_hash AND o.local_mtime <> ''),
+                 a.primeiro_visto_em)
+               FROM achado a WHERE a.content_hash = ?1",
+            [sha256],
+            |l| l.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
 }

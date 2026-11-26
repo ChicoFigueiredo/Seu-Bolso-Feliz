@@ -9,18 +9,30 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::ferramentas::{
-    Nucleo, ParamsDeAchados, ParamsDeDecisoes, ParamsDeFornecedores, ParamsDeRegistros,
-    ParamsDeSugestoesAbertas, ParamsDoLivro, SugestaoProposta,
+    Nucleo, ParamsDeAchados, ParamsDeColetaDoGmail, ParamsDeDecisoes, ParamsDeFornecedores,
+    ParamsDeRegistros, ParamsDeSugestoesAbertas, ParamsDoLivro, SugestaoProposta,
 };
 use crate::plano::{
-    ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO, PedidoDeAlteracao,
-    PedidoDeCancelamento, PedidoDeCompromisso, PedidoDeConciliacao, PedidoDeExcecao,
+    ComChave, EntradaDeAlteracao as Alt, FERRAMENTAS as FERRAMENTAS_DO_PLANO,
+    FERRAMENTAS_DE_ESCRITA as ESCRITA_DO_PLANO, PedidoDeAjustarQuantidade, PedidoDeAlteracao,
+    PedidoDeAplicacao, PedidoDeAplicarModelo, PedidoDeAplicarProposta, PedidoDeCancelamento,
+    PedidoDeCompromisso, PedidoDeConciliacao, PedidoDeConciliar, PedidoDeCriarModelo,
+    PedidoDeDefinirParametro, PedidoDeDesconciliar, PedidoDeDesfazer, PedidoDeExcecao,
     PedidoDeExclusao, PedidoDeLista, PedidoDePausa, PedidoDePeriodo, PedidoDeProjecao,
-    PedidoDePropostas, PedidoDeRetomada, PedidoDeSimulacao, PedidoNovoCompromisso,
+    PedidoDePropostas, PedidoDeRecusaDeProposta, PedidoDeRetomada, PedidoDeSimulacao,
+    PedidoNovoCompromisso,
 };
 use crate::regras::{
-    FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, PedidoDeProposta, PedidoDeRegra,
-    PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste, Regras,
+    FERRAMENTAS as FERRAMENTAS_DAS_REGRAS, FERRAMENTAS_DE_ESCRITA as ESCRITA_DAS_REGRAS,
+    PedidoDeProposta, PedidoDeRegra, PedidoDeSimulacao as PedidoDeSimulacaoDeRegra, PedidoDeTeste,
+    PedidoDeVersao, Regras,
+};
+use crate::roteiros_escritos::{
+    FERRAMENTAS as FERRAMENTAS_DOS_ROTEIROS_ESCRITOS, PedidoDeRoteiroEscrito,
+    PedidoDeVerRoteiroEscrito, RoteirosEscritos,
+};
+use crate::telegram::{
+    FERRAMENTAS as FERRAMENTAS_DO_TELEGRAM, PedidoDeColeta, PedidoDeConversas, PedidoDeSeguir,
 };
 
 macro_rules! esquema {
@@ -40,6 +52,8 @@ esquema!(PedidoDeRegistros, ParamsDeRegistros {
     fornecedor: Option<String>,
     /// Categoria exata (sem diferenciar maiúsculas).
     categoria: Option<String>,
+    /// A conta: o rótulo (CX-0001 · Apelido), o código, o apelido ou o nome do banco.
+    conta: Option<String>,
     /// Data inicial, AAAA-MM-DD, inclusive.
     de: Option<String>,
     /// Data final, AAAA-MM-DD, inclusive.
@@ -67,6 +81,15 @@ esquema!(PedidoDeAchados, ParamsDeAchados {
     deslocamento: Option<i64>,
 });
 
+esquema!(PedidoDeColetaDoGmail, ParamsDeColetaDoGmail {
+    /// Consulta do Gmail (a mesma da caixa de busca). Padrão: has:attachment newer_than:30d -category:promotions.
+    consulta: Option<String>,
+    /// AAAA-MM-DD: coleta desde esta data e ignora o checkpoint.
+    desde: Option<String>,
+    /// Quantas mensagens, no máximo, nesta coleta (padrão 200).
+    limite: Option<usize>,
+});
+
 esquema!(PedidoDeFornecedores, ParamsDeFornecedores {
     /// Trecho do nome.
     texto: Option<String>,
@@ -90,7 +113,7 @@ esquema!(PedidoDoLivro, ParamsDoLivro {
     texto: Option<String>,
     /// Nome da categoria.
     categoria: Option<String>,
-    /// Nome da conta.
+    /// Nome da conta ou o rótulo dela (código, apelido).
     conta: Option<String>,
     /// Data inicial, AAAA-MM-DD, inclusive.
     de: Option<String>,
@@ -175,12 +198,25 @@ impl Servidor {
     pub fn novo(nucleo: Nucleo) -> Self {
         let mut tool_router = Self::tool_router();
         if !nucleo.tem_planejamento() {
-            for nome in FERRAMENTAS_DO_PLANO {
+            for nome in FERRAMENTAS_DO_PLANO.iter().chain(&ESCRITA_DO_PLANO) {
                 tool_router.remove_route(nome);
             }
         }
+        if !nucleo.tem_gmail() {
+            tool_router.remove_route("gmail_coletar");
+        }
         if !nucleo.tem_regras() {
-            for nome in FERRAMENTAS_DAS_REGRAS {
+            for nome in FERRAMENTAS_DAS_REGRAS.iter().chain(&ESCRITA_DAS_REGRAS) {
+                tool_router.remove_route(nome);
+            }
+        }
+        if !nucleo.tem_roteiros_escritos() {
+            for nome in &FERRAMENTAS_DOS_ROTEIROS_ESCRITOS {
+                tool_router.remove_route(nome);
+            }
+        }
+        if !nucleo.tem_telegram() {
+            for nome in &FERRAMENTAS_DO_TELEGRAM {
                 tool_router.remove_route(nome);
             }
         }
@@ -223,7 +259,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Paginado."
+        description = "Busca registros (fatos financeiros extraidos de documentos) com filtros, do mais novo ao mais antigo. Valores em centavos (negativo = saiu). Cada registro traz conta (a do extrato) e conta_rotulo (codigo e apelido que o usuario deu, como CX-0001 · Reserva); o filtro conta aceita um ou outro. Paginado."
     )]
     fn buscar_registros(
         &self,
@@ -296,7 +332,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA."
+        description = "PROPOE sugestoes (nao decide nada). Cada item: alvo_tipo, alvo_id, campo, valor, confianca 0-1, justificativa ate 140 caracteres. Recusa alvo inexistente, ja decidido pelo usuario ou promovido, e campo ou valor invalido, dizendo o motivo de cada um. O usuario confirma em Inventario > Triagem por IA (decidir achado e registro continua so do usuario)."
     )]
     fn sugerir(&self, Parameters(p): Parameters<PedidoDeSugestoes>) -> Result<String, String> {
         let lista: Vec<SugestaoProposta> = p
@@ -391,7 +427,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Lista as propostas feitas pelo MCP e o estado de cada uma (pendente, confirmada, recusada, expirada). Só leitura; confirmar e recusar acontecem na janela do SBF."
+        description = "Lista as propostas feitas pelo MCP e o estado de cada uma (pendente, confirmada, recusada, expirada). Só leitura. Para decidir use aplicar_proposta ou recusar_proposta (ou a janela do SBF)."
     )]
     fn listar_propostas(
         &self,
@@ -401,7 +437,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE um compromisso novo. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF; a resposta traz a simulação (meses afetados, antes e depois)."
+        description = "PROPÕE um compromisso novo (não aplica). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta); a resposta traz a simulação (meses afetados, antes e depois). Há backup automático antes da primeira escrita da sessão."
     )]
     fn propor_compromisso(
         &self,
@@ -411,7 +447,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE alterar um compromisso (valor, certeza, conta, centro...), só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE alterar um compromisso (valor, certeza, conta, centro...), só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_alteracao(
         &self,
@@ -421,7 +457,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE pausar um compromisso por um período (ate é exclusivo; sem ate, até retomar). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE pausar um compromisso por um período (ate é exclusivo; sem ate, até retomar). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_pausa(
         &self,
@@ -431,7 +467,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE retomar um compromisso pausado a partir de um mês. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE retomar um compromisso pausado a partir de um mês. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_retomada(
         &self,
@@ -441,7 +477,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE marcar um compromisso como cancelado a partir de um mês (só no app; não cancela nada no fornecedor). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE marcar um compromisso como cancelado a partir de um mês (só no app; não cancela nada no fornecedor). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_cancelamento(
         &self,
@@ -451,7 +487,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Lista as regras de reconhecimento do cofre: id, nome, tipo de documento, versão em vigor, estado, execuções e taxa de acerto, e as que estão prontas para consolidar (quem consolida é o usuário). Só leitura."
+        description = "Lista as regras de reconhecimento do cofre: id, nome, tipo de documento, versão em vigor, estado, execuções e taxa de acerto, e as que estão prontas para consolidar (consolidar_regra aplica). Só leitura."
     )]
     fn listar_regras(&self) -> Result<String, String> {
         self.regras("listar_regras", |r| r.listar())
@@ -465,7 +501,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "Roda os exemplos de uma versão de regra e diz, para cada um, se passou e o que divergiu. Só leitura: não ativa nem muda nada."
+        description = "Roda os exemplos de uma versão de regra e diz, para cada um, se passou e o que divergiu. Só leitura: não ativa nem muda nada. Rode antes de ativar_regra: exemplo falhando bloqueia a ativação."
     )]
     fn testar_regra(&self, Parameters(p): Parameters<PedidoDeTeste>) -> Result<String, String> {
         self.regras("testar_regra", |r| r.testar(&p))
@@ -482,14 +518,41 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE uma versão nova de regra: salva um RASCUNHO com autor IA. PROPOR NÃO ATIVA: a versão em vigor continua a mesma, e ativar é só na janela do SBF (área Regras de reconhecimento), pelo usuário. Confere o script antes de salvar. Não consolida nem reverte."
+        description = "PROPÕE uma versão nova de regra: salva um RASCUNHO com autor IA. PROPOR NÃO ATIVA: a versão em vigor continua a mesma; para ativar use ativar_regra (ou a janela do SBF). Confere o script antes de salvar. Há backup automático antes da primeira escrita da sessão."
     )]
     fn propor_regra(&self, Parameters(p): Parameters<PedidoDeProposta>) -> Result<String, String> {
         self.regras("propor_regra", |r| r.propor(&p))
     }
 
     #[tool(
-        description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE um roteiro ESCRITO (Luau, para o navegador): valida o manifesto (hosts, rótulos do chaveiro, MFA, movimenta_dinheiro, classe) e salva um RASCUNHO com autor mcp. PROPOR NÃO ATIVA E NÃO EXECUTA: ao contrário das regras, o MCP NUNCA ativa, desativa, testa nem executa roteiro escrito; quem ativa é o usuário, só no terminal (`sbf roteiros escrito ativar`, com confirmação digitada) ou na janela. Manifesto inválido é recusado com o motivo; o mesmo conteúdo não duplica a versão. Fonte e manifesto até 64 KiB. Nunca ponha senha, CPF ou código: só rótulos do chaveiro. Há backup automático antes da primeira escrita da sessão."
+    )]
+    fn propor_roteiro_escrito(
+        &self,
+        Parameters(p): Parameters<PedidoDeRoteiroEscrito>,
+    ) -> Result<String, String> {
+        self.roteiros_escritos("propor_roteiro_escrito", |r| r.propor(&p))
+    }
+
+    #[tool(
+        description = "Lista os roteiros escritos (Luau): nome, descrição, versão ativa, última versão e o estado da última (rascunho, testado, ativo ou aposentado). Só leitura."
+    )]
+    fn listar_roteiros_escritos(&self) -> Result<String, String> {
+        self.roteiros_escritos("listar_roteiros_escritos", |r| r.listar())
+    }
+
+    #[tool(
+        description = "Mostra um roteiro escrito: o manifesto, o fonte Luau, o estado, o autor, o resultado do teste e o histórico de estados. Sem versão, a mais nova (o campo ativa diz qual está em vigor). Só leitura; nunca devolve segredo (o manifesto guarda só rótulos do chaveiro)."
+    )]
+    fn ver_roteiro_escrito(
+        &self,
+        Parameters(p): Parameters<PedidoDeVerRoteiroEscrito>,
+    ) -> Result<String, String> {
+        self.roteiros_escritos("ver_roteiro_escrito", |r| r.ver(&p))
+    }
+
+    #[tool(
+        description = "PROPÕE excluir (logicamente) um compromisso, com motivo; o histórico fica. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_exclusao_logica(
         &self,
@@ -503,7 +566,7 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE ligar uma ocorrência a um movimento real (como sugestão de conciliação). Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE ligar uma ocorrência a um movimento real (como sugestão de conciliação). Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_conciliacao(
         &self,
@@ -513,13 +576,258 @@ impl Servidor {
     }
 
     #[tool(
-        description = "PROPÕE uma exceção em uma ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Exige chave de idempotência. Nada muda até o usuário confirmar na janela do SBF."
+        description = "PROPÕE uma exceção em uma ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Exige chave de idempotência. Nada muda até alguém confirmar (a janela do SBF ou aplicar_proposta). Há backup automático antes da primeira escrita."
     )]
     fn propor_excecao(
         &self,
         Parameters(p): Parameters<ComChave<PedidoDeExcecao>>,
     ) -> Result<String, String> {
         self.propor("propor_excecao", &p.chave, Alt::Excecao(p.pedido))
+    }
+
+    // ------------------------------------------------------------ D15: o MCP aplica direto
+
+    #[tool(
+        description = "APLICA AGORA (sem confirmação na janela) uma mudança num compromisso: renomear (nome), valor só neste mês (so_este_mes, apenas o valor) ou daqui em diante (daqui_em_diante), certeza, conta, centro, fornecedor, categoria, nota. Vai para o histórico com autor mcp. Para voltar atrás: desfazer. Backup automático do planejamento antes da primeira escrita da sessão."
+    )]
+    fn aplicar_alteracao(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicacao>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_alteracao", |l| l.aplicar_alteracao(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA um compromisso novo (recusa o mesmo nome no mesmo grupo). Vai para o histórico com autor mcp; a resposta traz a simulação. Para voltar atrás: desfazer. Backup automático do planejamento antes da primeira escrita da sessão."
+    )]
+    fn criar_compromisso(
+        &self,
+        Parameters(p): Parameters<PedidoNovoCompromisso>,
+    ) -> Result<String, String> {
+        self.plano("criar_compromisso", |l| {
+            l.aplicar("criar_compromisso", &Alt::Compromisso(p))
+        })
+    }
+
+    #[tool(
+        description = "APLICA AGORA a pausa de um compromisso por um período (ate é exclusivo; sem ate, até retomar). Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn pausar(&self, Parameters(p): Parameters<PedidoDePausa>) -> Result<String, String> {
+        self.plano("pausar", |l| l.aplicar("pausar", &Alt::Pausa(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a retomada de um compromisso pausado a partir de um mês. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn retomar(&self, Parameters(p): Parameters<PedidoDeRetomada>) -> Result<String, String> {
+        self.plano("retomar", |l| l.aplicar("retomar", &Alt::Retomada(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA o cancelamento de um compromisso a partir de um mês (só no app; não cancela nada no fornecedor). Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn cancelar(&self, Parameters(p): Parameters<PedidoDeCancelamento>) -> Result<String, String> {
+        self.plano("cancelar", |l| l.aplicar("cancelar", &Alt::Cancelamento(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA uma exceção numa ocorrência: adiar, dispensar (com motivo), pago_informado ou valor_so_deste_mes. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn excecao(&self, Parameters(p): Parameters<PedidoDeExcecao>) -> Result<String, String> {
+        self.plano("excecao", |l| l.aplicar("excecao", &Alt::Excecao(p)))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a exclusão lógica de um compromisso, com motivo; o histórico fica e dá para restaurar. Autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn excluir_logicamente(
+        &self,
+        Parameters(p): Parameters<PedidoDeExclusao>,
+    ) -> Result<String, String> {
+        self.plano("excluir_logicamente", |l| {
+            l.aplicar("excluir_logicamente", &Alt::ExclusaoLogica(p))
+        })
+    }
+
+    #[tool(
+        description = "APLICA AGORA a conciliação CONFIRMADA de uma ocorrência com um ou VÁRIOS movimentos (de 1 a 20; tudo ou nada). Autor mcp no histórico. Para voltar atrás: desfazer (um por movimento, o último primeiro) ou desconciliar. Backup automático antes da primeira escrita."
+    )]
+    fn conciliar(&self, Parameters(p): Parameters<PedidoDeConciliar>) -> Result<String, String> {
+        self.plano("conciliar", |l| l.conciliar(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA o desfazer de uma conciliação (um movimento da ocorrência): exclusão lógica, com histórico e autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn desconciliar(
+        &self,
+        Parameters(p): Parameters<PedidoDeDesconciliar>,
+    ) -> Result<String, String> {
+        self.plano("desconciliar", |l| l.desconciliar(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA uma proposta pendente (veja listar_propostas), revalidando a versão de base, com autor mcp no histórico. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn aplicar_proposta(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicarProposta>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_proposta", |l| l.aplicar_proposta(&p))
+    }
+
+    #[tool(
+        description = "RECUSA uma proposta pendente, com motivo. Não aplica nada. Backup automático antes da primeira escrita."
+    )]
+    fn recusar_proposta(
+        &self,
+        Parameters(p): Parameters<PedidoDeRecusaDeProposta>,
+    ) -> Result<String, String> {
+        self.plano("recusar_proposta", |l| l.recusar_proposta(&p))
+    }
+
+    #[tool(
+        description = "Lista os modelos de compromisso (o molde que vários compromissos compartilham: parâmetros + o Cálculo em Luau), com a versão e o checksum do Cálculo, o script e quais compromissos usam cada um, com os valores e vigências. De fábrica: \"Diarista por dia da semana\" (parâmetros diaria em centavos e dia_da_semana; previsto = diária × quantas vezes aquele dia cai no mês). Só leitura."
+    )]
+    fn listar_modelos(&self) -> Result<String, String> {
+        self.plano("listar_modelos", |l| l.listar_modelos())
+    }
+
+    #[tool(
+        description = "APLICA AGORA um modelo de compromisso novo: parâmetros declarados (centavos, dia_da_semana, inteiro, texto) e o Cálculo em Luau (função calcular(entrada, ajuda) que devolve {valor_centavos, quantidade?, explicacao}). O script é conferido antes. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn criar_modelo(
+        &self,
+        Parameters(p): Parameters<PedidoDeCriarModelo>,
+    ) -> Result<String, String> {
+        self.plano("criar_modelo", |l| l.criar_modelo(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a ligação de um compromisso a um modelo (id ou nome do modelo), com os valores dos parâmetros e a vigência de cada um (desde AAAA-MM). O previsto de cada mês passa a ser o resultado do Cálculo. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn aplicar_modelo(
+        &self,
+        Parameters(p): Parameters<PedidoDeAplicarModelo>,
+    ) -> Result<String, String> {
+        self.plano("aplicar_modelo", |l| l.aplicar_modelo(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA um valor de parâmetro com vigência (desde AAAA-MM) num compromisso que já usa um modelo (ex.: diaria 21000 desde 2026-05). Os meses anteriores não mudam. Histórico com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn definir_parametro(
+        &self,
+        Parameters(p): Parameters<PedidoDeDefinirParametro>,
+    ) -> Result<String, String> {
+        self.plano("definir_parametro", |l| l.definir_parametro(&p))
+    }
+
+    #[tool(
+        description = "APLICA AGORA a quantidade (ex.: 6 diárias) de UM mês só, num compromisso com modelo: o Cálculo usa esta quantidade naquele mês e o resto segue o cálculo. Aparece no Rastro com autor mcp. Para voltar atrás: desfazer. Backup automático antes da primeira escrita."
+    )]
+    fn ajustar_quantidade(
+        &self,
+        Parameters(p): Parameters<PedidoDeAjustarQuantidade>,
+    ) -> Result<String, String> {
+        self.plano("ajustar_quantidade", |l| l.ajustar_quantidade(&p))
+    }
+
+    #[tool(
+        description = "DESFAZ uma alteração que o MCP aplicou: a última ainda não desfeita, ou a de alteracao_id (só as do mcp). O Desfazer vai para o histórico com autor mcp. Não desfaz o que o usuário fez. Backup automático antes da primeira escrita."
+    )]
+    fn desfazer(&self, Parameters(p): Parameters<PedidoDeDesfazer>) -> Result<String, String> {
+        self.plano("desfazer", |l| l.desfazer(&p))
+    }
+
+    #[tool(
+        description = "ATIVA AGORA uma versão de regra de reconhecimento (autor mcp em historico_de_estado). Os exemplos rodam antes: exemplo falhando BLOQUEIA a ativação (vale para o MCP também). A versão em vigor anterior vira desativada. Para voltar atrás: reverter_regra. Backup automático do regras.sqlite antes da primeira escrita da sessão."
+    )]
+    fn ativar_regra(&self, Parameters(p): Parameters<PedidoDeVersao>) -> Result<String, String> {
+        self.regras("ativar_regra", |r| r.ativar(&p))
+    }
+
+    #[tool(
+        description = "DESATIVA AGORA a versão em vigor de uma regra (autor mcp no histórico). Para voltar atrás: ativar_regra com a versão. Backup automático antes da primeira escrita."
+    )]
+    fn desativar_regra(&self, Parameters(p): Parameters<PedidoDeRegra>) -> Result<String, String> {
+        self.regras("desativar_regra", |r| r.desativar(&p))
+    }
+
+    #[tool(
+        description = "REVERTE AGORA uma regra à versão que estava em vigor antes (rollback; reverter de novo volta à de agora). Autor mcp no histórico. Backup automático antes da primeira escrita."
+    )]
+    fn reverter_regra(&self, Parameters(p): Parameters<PedidoDeRegra>) -> Result<String, String> {
+        self.regras("reverter_regra", |r| r.reverter(&p))
+    }
+
+    #[tool(
+        description = "CONSOLIDA AGORA uma versão ativa que já tem as aceitas seguidas necessárias (veja listar_regras); a consolidada concilia sozinha só com as três provas, com Desfazer na janela. Autor mcp no histórico. Backup automático antes da primeira escrita."
+    )]
+    fn consolidar_regra(
+        &self,
+        Parameters(p): Parameters<PedidoDeVersao>,
+    ) -> Result<String, String> {
+        self.regras("consolidar_regra", |r| r.consolidar(&p))
+    }
+
+    #[tool(
+        description = "COLETA AGORA o Gmail do usuario: baixa os anexos (PDF, imagem, XML) para <cofre>/entrada/gmail/, registra no inventario com origem gmail:<mensagem>:<parte>, deduplica por sha256 e passa cada documento novo pelas regras de reconhecimento; e-mail sem anexo vira entrada Mensagem. Aplica direto (D15), sem confirmacao; nada vai para o planejamento (as regras so propoem). Checkpoint automatico: coletar de novo so traz o que e novo. Devolve so contagens. Backup automatico do inventario e das regras antes da primeira escrita da sessao."
+    )]
+    fn gmail_coletar(
+        &self,
+        Parameters(p): Parameters<PedidoDeColetaDoGmail>,
+    ) -> Result<String, String> {
+        responder("gmail_coletar", self.nucleo.gmail_coletar(&p.into()))
+    }
+
+    #[tool(
+        description = "Lista as conversas (grupos, canais e privadas) da conta do Telegram do usuário, com id, nome, tipo e se já é seguida. atualizar=true pergunta ao Telegram agora; sem isso vale a última lista guardada. Só leitura: nada é enviado, apagado nem marcado como lido."
+    )]
+    fn telegram_conversas(
+        &self,
+        Parameters(p): Parameters<PedidoDeConversas>,
+    ) -> Result<String, String> {
+        responder(
+            "telegram_conversas",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::conversas(t, &p)),
+        )
+    }
+
+    #[tool(
+        description = "APLICA AGORA: passa a seguir (ou, com deixar=true, deixa de seguir) uma conversa do Telegram, pelo id ou pelo nome. Só as conversas seguidas são coletadas. Para voltar atrás: telegram_seguir com deixar=true."
+    )]
+    fn telegram_seguir(&self, Parameters(p): Parameters<PedidoDeSeguir>) -> Result<String, String> {
+        responder(
+            "telegram_seguir",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::seguir(t, &p)),
+        )
+    }
+
+    #[tool(
+        description = "COLETA AGORA as mídias novas (fotos, documentos e PDFs) das conversas seguidas do Telegram: baixa para <cofre>/entrada/telegram/<conversa>/, registra no inventário como achado com origem telegram:<conversa>:<mensagem> (o mesmo arquivo em outra mensagem é só uma origem a mais) e roda o Reconhecimento em cada arquivo novo. conversa limita a uma; desde (AAAA-MM-DD) vale só na primeira coleta de cada conversa. Só leitura no Telegram."
+    )]
+    fn telegram_coletar(
+        &self,
+        Parameters(p): Parameters<PedidoDeColeta>,
+    ) -> Result<String, String> {
+        responder(
+            "telegram_coletar",
+            self.nucleo
+                .telegram()
+                .and_then(|t| crate::telegram::coletar(t, &p)),
+        )
+    }
+
+    #[tool(
+        description = "Faz AGORA o backup de todos os bancos do cofre (inventário, planejamento, regras...) em <cofre>/backups/mcp/, com a API de backup do SQLite (consistente com o WAL); guarda os 20 mais recentes por banco. Os bancos que o MCP escreve já são copiados sozinhos antes da primeira escrita de cada sessão."
+    )]
+    fn fazer_backup(&self) -> Result<String, String> {
+        responder("fazer_backup", self.nucleo.fazer_backup())
     }
 }
 
@@ -540,6 +848,14 @@ impl Servidor {
         responder(nome, self.nucleo.regras().and_then(f))
     }
 
+    fn roteiros_escritos(
+        &self,
+        nome: &str,
+        f: impl FnOnce(&RoteirosEscritos) -> Result<Value, String>,
+    ) -> Result<String, String> {
+        responder(nome, self.nucleo.roteiros_escritos().and_then(f))
+    }
+
     fn propor(&self, nome: &str, chave: &str, e: Alt) -> Result<String, String> {
         responder(
             nome,
@@ -552,7 +868,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro e livro-caixa do usuario, somente leitura, mais a ferramenta sugerir, que apenas PROPOE classificacoes: o usuario confirma depois no app (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; leia fornecedores e decisoes_recentes para seguir o criterio do usuario antes de sugerir."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar e telegram_coletar/telegram_seguir tambem aplicam direto: coletam o Gmail e o Telegram para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). ROTEIROS ESCRITOS (Luau, navegador com credenciais) sao diferentes das regras: o mcp so PROPOE (propor_roteiro_escrito cria um RASCUNHO com autor mcp) e consulta (listar_roteiros_escritos, ver_roteiro_escrito); NAO existe ferramenta que ative, desative, teste ou execute roteiro escrito, e ativar e so do usuario, no terminal (sbf roteiros escrito ativar) ou na janela. Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 

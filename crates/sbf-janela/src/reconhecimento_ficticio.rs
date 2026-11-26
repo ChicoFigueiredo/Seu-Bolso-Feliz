@@ -82,6 +82,9 @@ pub fn reconhecedor_do_contracheque() -> ReconhecedorFicticio {
                     rotulo: format!("Vincular ao Salário · {mes}"),
                     tipo: TipoDeDocumento::Contracheque,
                     data: None,
+                    regra: None,
+                    chave: None,
+                    automatica: false,
                 },
                 Sugestao::UsarRubricas {
                     rotulo: uso.rotulo(&uso.eventuais_iniciais()),
@@ -158,6 +161,7 @@ fn resultado_pelo_motor(fonte: &FonteDasRegras, nome: &str, texto: &str) -> Opti
         Some(texto),
         Canal::Arrastado,
         None,
+        None,
     );
     let leitura = motor.ler(&entrada);
     catalogo.registrar_execucao(&leitura).ok()?;
@@ -214,6 +218,8 @@ fn sugestoes_do_pix(rec: &sbf_regras::Reconhecimento) -> Vec<Sugestao> {
             conta_do_extrato: "Conta Corrente Exemplo".to_owned(),
             descricao: "PIX ENVIADO FULANO DE TAL".to_owned(),
             tipo: "debito".to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         },
         alvo: Some(ocorrencia_do_mes(
             "rec_energia",
@@ -279,5 +285,97 @@ pub fn reconhecedor_de_demonstracao(fonte: Option<&FonteDasRegras>) -> Reconhece
 /// (`janela.regras.ligar`) antes, para a demonstração ter o Pix e o caso ambíguo.
 pub fn ligar_na_demonstracao(janela: &mut Janela) {
     let fonte = janela.regras.fonte().cloned();
-    janela.ligar_reconhecedor(Arc::new(reconhecedor_de_demonstracao(fonte.as_ref())));
+    let reconhecedor = Arc::new(reconhecedor_de_demonstracao(fonte.as_ref()));
+    janela.ligar_caixa_de_entrada(Arc::new(caixa_de_entrada_de_demonstracao(&*reconhecedor)));
+    janela.ligar_reconhecedor(reconhecedor);
+}
+
+/// O resultado fictício de um nome de arquivo (o que o reconhecedor da demonstração devolve).
+fn resultado_de(r: &dyn Reconhecedor, nome: &str) -> Option<Resultado> {
+    r.reconhecer(Path::new(nome), &mut |_| {}, &AtomicBool::new(false))
+        .ok()
+}
+
+/// O que a demonstração diz que não tem padrão: uma foto de recibo, lida por OCR.
+pub const NOME_DO_RECIBO_SEM_PADRAO: &str = "foto-recibo-oficina.jpg";
+
+/// A Caixa de entrada fictícia da demonstração: o contracheque (Telegram), o comprovante de
+/// Pix (Gmail), o caso ambíguo (pasta) e uma foto sem padrão (celular).
+pub fn caixa_de_entrada_de_demonstracao(
+    r: &dyn Reconhecedor,
+) -> crate::caixa_de_entrada::CaixaDeEntradaFicticia {
+    use crate::caixa_de_entrada::{CaixaDeEntradaFicticia, entrada_ficticia};
+    use sbf_inventario::caixa_de_entrada::{Canal as CanalDaCaixa, Estado};
+    let mut caixa = CaixaDeEntradaFicticia::nova();
+    let linhas = [
+        (
+            NOME_DO_CONTRACHEQUE,
+            "2026-11-20T12:10:00.000Z",
+            CanalDaCaixa::Telegram,
+            Estado::Pronto,
+        ),
+        (
+            NOME_DO_PIX,
+            "2026-11-20T09:42:00.000Z",
+            CanalDaCaixa::Gmail,
+            Estado::Pronto,
+        ),
+        (
+            NOME_DO_AMBIGUO,
+            "2026-11-19T21:03:00.000Z",
+            CanalDaCaixa::Pasta,
+            Estado::PrecisaRevisar,
+        ),
+    ];
+    for (nome, chegou, canal, estado) in linhas {
+        // Sem o catálogo de regras o Pix e o ambíguo caem no contracheque: não entram.
+        let res = resultado_de(r, nome)
+            .filter(|res| res.sha256 == crate::demonstracao::hash_do_nome(nome));
+        if let Some(res) = res {
+            let (tipo, resumo) = sbf_reconhecimento::caixa_de_entrada::tipo_e_resumo(&res);
+            let e = entrada_ficticia(
+                &res.sha256,
+                nome,
+                chegou,
+                canal,
+                tipo.as_deref(),
+                &resumo.unwrap_or_default(),
+                estado,
+            );
+            caixa = caixa.com(e, res);
+        }
+    }
+    let sha = crate::demonstracao::hash_do_nome(NOME_DO_RECIBO_SEM_PADRAO);
+    let entrada = entrada_do_documento(
+        &sha,
+        NOME_DO_RECIBO_SEM_PADRAO,
+        "image/jpeg",
+        Some("RECIBO OFICINA EXEMPLO servico 12/11/2026 R$ 320,00"),
+        Canal::Arrastado,
+        None,
+        None,
+    );
+    let res = Resultado {
+        sha256: sha.clone(),
+        nome: NOME_DO_RECIBO_SEM_PADRAO.to_owned(),
+        ja_existia: false,
+        texto: sbf_reconhecimento::EstadoDoTexto::Extraido,
+        reconhecido: Reconhecido::Nada {
+            motivo: "nenhum leitor local reconheceu o documento".to_owned(),
+        },
+        sugestoes: Vec::new(),
+        avisos: Vec::new(),
+        entrada: Some(entrada),
+        leitura: None,
+    };
+    let e = entrada_ficticia(
+        &sha,
+        NOME_DO_RECIBO_SEM_PADRAO,
+        "2026-11-20T10:30:00.000Z",
+        CanalDaCaixa::Celular,
+        None,
+        "nenhum leitor local reconheceu o documento",
+        Estado::NaoReconhecido,
+    );
+    caixa.com(e, res)
 }

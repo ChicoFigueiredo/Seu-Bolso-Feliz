@@ -72,6 +72,11 @@ pub enum PedidoDoControle {
         ocorrencia: IdOcorrencia,
         movimento: String,
     },
+    /// Ignora as sugestões pendentes da ocorrência (uma regra de reconhecimento recebe
+    /// `Rejeitado`): exclusão lógica, a regra não as repete.
+    IgnorarSugestao {
+        ocorrencia: IdOcorrencia,
+    },
     /// Define (ou tira) a assinatura de um recorrente, lendo a versão na hora.
     DefinirAssinatura {
         recorrente: String,
@@ -264,6 +269,11 @@ pub struct EstadoDoControle {
     pub oferta_de_assinatura: Option<OfertaDeAssinatura>,
     /// A tela "Contas do planejamento".
     pub contas: crate::contas_ui::EstadoDasContas,
+    /// O rótulo das contas do extrato (a janela o relê quando o planejamento muda).
+    pub rotulador: sbf_planejamento::Rotulador,
+    /// O que o usuário digita em "Quantidade só deste mês" (do Modelo de compromisso), por
+    /// ocorrência: trocar de linha começa de novo.
+    quantidade_em_edicao: Option<(IdOcorrencia, String)>,
     selecao_da_previa: Option<IdOcorrencia>,
     motivos_de_recusa: std::collections::HashMap<String, String>,
     recusando: Option<String>,
@@ -312,6 +322,8 @@ impl EstadoDoControle {
             conciliar_aberto: None,
             oferta_de_assinatura: None,
             contas: crate::contas_ui::EstadoDasContas::default(),
+            rotulador: sbf_planejamento::Rotulador::default(),
+            quantidade_em_edicao: None,
             selecao_da_previa: None,
             motivos_de_recusa: std::collections::HashMap::new(),
             recusando: None,
@@ -2258,7 +2270,10 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
     let aba = estado.aba_do_detalhe.efetiva(tem_rubricas);
     ui.separator();
     let contracheques = contracheques_de(dados);
-    let vm_movimentos = movimentos_do_detalhe(&sel, dados);
+    let mut vm_movimentos = movimentos_do_detalhe(&sel, dados);
+    if let Some(vm) = vm_movimentos.as_mut() {
+        vm.rotulador = estado.rotulador.clone();
+    }
     let faixa = movimentos::faixa_do_contracheque(
         dados.composicao.as_ref(),
         &contracheques,
@@ -2272,6 +2287,16 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
         .filter(|o| o.recorrente == sel.id.recorrente);
     let mut mais = false;
     let mut efeitos: Vec<EfeitoDoDetalhe> = Vec::new();
+    let linha_do_modelo = controle::linha_do_modelo(&sel);
+    let mut quantidade_texto = match &estado.quantidade_em_edicao {
+        Some((id, t)) if id == &sel.id => t.clone(),
+        _ => linha_do_modelo
+            .as_ref()
+            .and_then(|m| m.quantidade)
+            .map_or_else(String::new, |q| q.to_string()),
+    };
+    let excecao_da_quantidade =
+        controle::excecao_de_quantidade(&dados.excecoes, &sel.id).map(|e| e.id.clone());
     // O painel do dock já rola na vertical; aqui só as tabelas largas rolam de lado.
     ScrollArea::horizontal()
         .id_salt("controle-detalhe")
@@ -2282,6 +2307,18 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
                 if let Some(vm) = &vm_movimentos {
                     dispensou_oferta =
                         movimentos::secao(ui, vm, &sel.id, &mut conciliar_aberto, oferta, pedidos);
+                    ui.add_space(8.0);
+                }
+                if let Some(m) = &linha_do_modelo {
+                    secao_do_modelo(
+                        ui,
+                        &p,
+                        m,
+                        &sel.id,
+                        excecao_da_quantidade.as_deref(),
+                        &mut quantidade_texto,
+                        pedidos,
+                    );
                     ui.add_space(8.0);
                 }
                 aba_resumo(ui, &sel, dados.recorrente.as_ref());
@@ -2318,6 +2355,9 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
             AbaDoDetalhe::Historico => aba_historico(ui, &dados.historico),
         });
     estado.conciliar_aberto = conciliar_aberto.then(|| sel.id.clone());
+    estado.quantidade_em_edicao = linha_do_modelo
+        .is_some()
+        .then(|| (sel.id.clone(), quantidade_texto));
     if dispensou_oferta {
         estado.oferta_de_assinatura = None;
     }
@@ -2348,6 +2388,57 @@ fn detalhe_ui(ui: &mut Ui, estado: &mut EstadoDoControle, hoje: Data, pedidos: &
                 )));
             }
         }
+    }
+}
+
+/// "Modelo de compromisso": a linha do cálculo (modelo, parâmetros, quantidade, total), o
+/// aviso quando o cálculo falhou e o campo para ajustar a quantidade só deste mês.
+fn secao_do_modelo(
+    ui: &mut Ui,
+    p: &Paleta,
+    m: &controle::LinhaDoModelo,
+    id: &IdOcorrencia,
+    excecao_viva: Option<&str>,
+    quantidade: &mut String,
+    pedidos: &mut Vec<Pedido>,
+) {
+    secao_do_detalhe(ui, p, "Modelo de compromisso");
+    ui.label(&m.texto);
+    if let Some(a) = &m.aviso {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(icones::icone_cor("warning", 16.0, p.aviso));
+            ui.label(RichText::new(a).color(p.aviso));
+        });
+    }
+    if m.ajustada {
+        texto_pequeno(
+            ui,
+            "A quantidade deste mês foi digitada; os outros meses seguem o cálculo.",
+        );
+    }
+    let pedido = controle::alteracao_de_quantidade(id, quantidade);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Quantidade só deste mês").color(p.tinta_suave));
+        ui.add(egui::TextEdit::singleline(quantidade).desired_width(56.0));
+        if ui
+            .add_enabled(pedido.is_ok(), egui::Button::new("Ajustar"))
+            .clicked()
+            && let Ok(alt) = &pedido
+        {
+            pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
+                alt.clone(),
+            ])));
+        }
+        if let Some(exc) = excecao_viva
+            && ui.button("Voltar ao cálculo").clicked()
+        {
+            pedidos.push(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
+                Alteracao::DesfazerExcecao { id: exc.to_owned() },
+            ])));
+        }
+    });
+    if let (Err(e), false) = (&pedido, quantidade.trim().is_empty()) {
+        texto_pequeno(ui, e);
     }
 }
 
@@ -2832,6 +2923,7 @@ fn aba_excecoes(ui: &mut Ui, v: &[sbf_planejamento::ExcecaoGravada]) {
             Excecao::Dispensar { .. } => "Dispensada",
             Excecao::ValorSoDesteMes { .. } => "Valor só deste mês",
             Excecao::PagoInformado { .. } => "Pago informado",
+            Excecao::QuantidadeSoDesteMes { .. } => "Quantidade só deste mês",
         };
         componentes::cartao(ui, |ui| {
             ui.label(
@@ -2842,6 +2934,9 @@ fn aba_excecoes(ui: &mut Ui, v: &[sbf_planejamento::ExcecaoGravada]) {
                 ))
                 .strong(),
             );
+            if let Excecao::QuantidadeSoDesteMes { quantidade } = &e.excecao {
+                texto_pequeno(ui, format!("Quantidade digitada: {quantidade}"));
+            }
             texto_pequeno(
                 ui,
                 format!(
@@ -3368,7 +3463,7 @@ fn formulario_ui(ui: &mut Ui, d: &mut DialogoDoControle) {
                     ui.label("Conta");
                     ui.add_enabled(
                         daqui,
-                        egui::TextEdit::singleline(conta).hint_text("apelido, como CX-0001"),
+                        egui::TextEdit::singleline(conta).hint_text("código, como CX-0001"),
                     );
                     ui.end_row();
                     ui.label("Centro");
@@ -4143,7 +4238,7 @@ mod testes {
     fn mapear_salario(j: &mut crate::janela::Janela) {
         j.controle_pedido(PedidoDoControle::AplicarVarias(vec![
             Alteracao::MapearConta {
-                apelido: "CX-0001".into(),
+                codigo: "CX-0001".into(),
                 conta_do_extrato: Some(crate::planejamento_ficticio::CONTA_DO_SALARIO.into()),
             },
         ]));
@@ -4155,7 +4250,7 @@ mod testes {
         let j = janela_ligada();
         let pl = j.planejamento.as_ref().unwrap().0.as_ref();
         let d = crate::contas_ui::carregar(pl).expect("contas");
-        let cx = d.contas.iter().find(|c| c.apelido == "CX-0001").unwrap();
+        let cx = d.contas.iter().find(|c| c.codigo == "CX-0001").unwrap();
         assert!(cx.conta_do_extrato.is_none());
         let s = d.sugestao_de("CX-0001").expect("sugestão");
         assert_eq!(
@@ -4186,7 +4281,7 @@ mod testes {
         assert_eq!(
             d.contas
                 .iter()
-                .find(|c| c.apelido == "CX-0001")
+                .find(|c| c.codigo == "CX-0001")
                 .unwrap()
                 .conta_do_extrato
                 .as_deref(),
@@ -4250,6 +4345,27 @@ mod testes {
                 .as_deref()
                 .is_some_and(|d| d.contains("SALARIO"))
         );
+    }
+
+    #[test]
+    fn ignorar_a_sugestao_tira_o_selo_e_nao_concilia_nada() {
+        let mut j = janela_ligada();
+        let (sel, _) = vm_do_salario(&mut j);
+        assert!(sel.sugestao_de_conciliacao);
+        j.controle_pedido(PedidoDoControle::IgnorarSugestao {
+            ocorrencia: sel.id.clone(),
+        });
+        let (sel, vm) = vm_do_salario(&mut j);
+        assert!(!sel.sugestao_de_conciliacao);
+        assert_eq!(sel.conciliado, None);
+        assert!(vm.sugestao.is_none() && vm.confirmadas.is_empty());
+        assert_eq!(
+            j.controle.mensagem,
+            Some(("Sugestão ignorada. A regra não a repete.".to_owned(), false))
+        );
+        // Sem sugestão pendente, avisa em vez de calar.
+        j.controle_pedido(PedidoDoControle::IgnorarSugestao { ocorrencia: sel.id });
+        assert!(j.controle.mensagem.as_ref().is_some_and(|(_, erro)| *erro));
     }
 
     #[test]

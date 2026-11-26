@@ -12,12 +12,14 @@
 //! regra; é o desempate da precedência depois da `prioridade`.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Campo, Canal, DeOnde, Entrada, ErroDasRegras, Proposta, TipoDeEntrada, VERSAO_DO_ESQUEMA, Valor,
+    Campo, Canal, DeOnde, Entrada, ErroDasRegras, Proposta, TipoDeEntrada, TipoDoDocumento,
+    VERSAO_DO_ESQUEMA, Valor,
 };
 
 /// Teto de tamanho de um regex compilado (evita regex patológico vindo de uma regra).
@@ -29,6 +31,10 @@ fn esquema_padrao() -> u32 {
 
 fn aplica_padrao() -> Vec<TipoDeEntrada> {
     vec![TipoDeEntrada::Documento]
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn grupo_padrao() -> usize {
@@ -61,8 +67,21 @@ pub struct Definicao {
     /// O script recebe o texto do documento (padrão: não).
     #[serde(default)]
     pub script_le_texto: bool,
+    /// O texto do documento vem de OCR (imagem): antes de detectar e extrair, o motor o
+    /// passa por [`normalizar_ocr`] (espaços juntos, `O`/`l` consertados dentro de números,
+    /// `RS`/`R§` lidos como `R$`). Falso por padrão, e **não entra no JSON quando é falso**,
+    /// para não mudar o checksum das versões que já existem.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub texto_de_ocr: bool,
     #[serde(default)]
     pub propor: Vec<ModeloDeProposta>,
+    /// Os nomes dos campos de `extrair` que, juntos, identificam o documento
+    /// (`numero_do_recibo`, `linha_digitavel`, `autenticacao`). O mesmo documento que chega
+    /// por dois canais, com o texto um pouco diferente, tem a mesma identidade: a segunda
+    /// entrada é **repetida pelo padrão** (Possível duplicidade). Vazio por padrão, e **não
+    /// entra no JSON quando é vazio**, para não mudar o checksum das versões que já existem.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identidade: Vec<String>,
 }
 
 impl Definicao {
@@ -83,7 +102,9 @@ impl Definicao {
             leitor: None,
             parametros: Vec::new(),
             script_le_texto: false,
+            texto_de_ocr: false,
             propor: Vec::new(),
+            identidade: Vec::new(),
         }
     }
 
@@ -133,6 +154,22 @@ impl Definicao {
         {
             if !nome_valido(nome) {
                 return Err(erro(format!("nome inválido `{nome}` (use [a-z0-9_]+)")));
+            }
+        }
+        for nome in &self.identidade {
+            if !self.extrair.contains_key(nome) {
+                return Err(erro(format!(
+                    "identidade: `{nome}` não é um campo de `extrair`"
+                )));
+            }
+        }
+        for proposta in &self.propor {
+            if let ModeloDeProposta::VincularOcorrencia { compromisso, .. } = proposta
+                && normalizar(compromisso).is_empty()
+            {
+                return Err(erro(
+                    "propor `vincular_ocorrencia`: `compromisso` vazio".to_owned(),
+                ));
             }
         }
         let todos = compilar_condicoes(&self.detectar.todos)?;
@@ -197,7 +234,48 @@ fn compilar_condicoes(condicoes: &[Condicao]) -> Result<Vec<CondicaoCompilada>, 
                 Condicao::Canal(c) => CondicaoCompilada::Canal(c.clone()),
                 Condicao::Descricao(p) => CondicaoCompilada::Descricao(regex(p)?),
                 Condicao::Nome(p) => CondicaoCompilada::Nome(regex(p)?),
+                Condicao::ContraparteDoc(docs) => {
+                    CondicaoCompilada::ContraparteDoc(documentos_validos(docs)?)
+                }
+                Condicao::Contraparte(p) => CondicaoCompilada::Contraparte(
+                    RegexBuilder::new(p)
+                        .case_insensitive(true)
+                        .size_limit(LIMITE_DO_REGEX)
+                        .dfa_size_limit(LIMITE_DO_REGEX)
+                        .build()
+                        .map_err(|m| {
+                            ErroDasRegras::Definicao(format!("regex inválido em `{p}`: {m}"))
+                        })?,
+                ),
             })
+        })
+        .collect()
+}
+
+/// Os dígitos de um documento (CPF/CNPJ), sem a pontuação.
+pub fn so_os_digitos(documento: &str) -> String {
+    documento.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// Confere a lista de `contraparte_doc`: ao menos um, cada um com 11 (CPF) ou 14 (CNPJ)
+/// dígitos. Devolve só os dígitos.
+fn documentos_validos(docs: &[String]) -> Result<Vec<String>, ErroDasRegras> {
+    if docs.is_empty() {
+        return Err(ErroDasRegras::Definicao(
+            "contraparte_doc precisa de ao menos um documento".to_owned(),
+        ));
+    }
+    docs.iter()
+        .map(|d| {
+            let digitos = so_os_digitos(d);
+            if matches!(digitos.len(), 11 | 14) {
+                Ok(digitos)
+            } else {
+                // Sem repetir o documento na mensagem: é dado pessoal.
+                Err(ErroDasRegras::Definicao(
+                    "contraparte_doc: cada documento tem 11 (CPF) ou 14 (CNPJ) dígitos".to_owned(),
+                ))
+            }
         })
         .collect()
 }
@@ -232,6 +310,12 @@ pub enum Condicao {
     Descricao(String),
     /// Regex sobre o nome do arquivo.
     Nome(String),
+    /// O CPF/CNPJ da contraparte do registro (`dicas.contraparte_doc`) é igual a algum destes.
+    /// Só os dígitos contam: `000.000.000-00` e `00000000000` são o mesmo documento.
+    ContraparteDoc(Vec<String>),
+    /// Regex sobre o nome da contraparte (`dicas.contraparte`) **normalizado** (minúsculas,
+    /// sem acento, espaços juntos), sem diferenciar maiúsculas do padrão.
+    Contraparte(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +341,11 @@ pub enum FonteDaExtracao {
     Texto,
     /// `dicas.descricao`.
     Descricao,
+    /// `dicas.contraparte`: o nome do favorecido do registro.
+    Contraparte,
+    /// `dicas.contraparte_doc`: o CPF/CNPJ do favorecido. Só vale para o motor; o documento
+    /// nunca é gravado na execução nem na proposta.
+    ContraparteDoc,
 }
 
 /// Como extrair um campo.
@@ -285,6 +374,14 @@ pub enum ModeloDeProposta {
         compromisso: Option<String>,
     },
     PagarFatura,
+    /// Anexa o documento à ocorrência do mês do compromisso (o campo `data`, ou `vencimento`);
+    /// não pede valor. Os dois campos são obrigatórios na definição.
+    VincularOcorrencia {
+        /// Um trecho do nome do compromisso, comparado sem acento nem maiúsculas.
+        compromisso: String,
+        tipo_documento: TipoDoDocumento,
+        janela_dias: u32,
+    },
 }
 
 impl ModeloDeProposta {
@@ -325,6 +422,21 @@ impl ModeloDeProposta {
                 janela_dias: *janela_dias,
                 compromisso: compromisso.clone(),
             }),
+            Self::VincularOcorrencia {
+                compromisso,
+                tipo_documento,
+                janela_dias,
+            } => Ok(Proposta::VincularOcorrencia {
+                data: data("data")
+                    .or_else(|_| data("vencimento"))
+                    .map_err(|_| {
+                        "proposta vincular_ocorrencia não gerada: falta o campo `data` (ou `vencimento`)"
+                            .to_owned()
+                    })?,
+                janela_dias: *janela_dias,
+                compromisso: compromisso.trim().to_owned(),
+                tipo_documento: *tipo_documento,
+            }),
             Self::PagarFatura => Ok(Proposta::PagarFatura {
                 valor_centavos: centavos("valor_centavos")
                     .map_err(|m| format!("proposta pagar_fatura não gerada: {m}"))?,
@@ -348,6 +460,9 @@ enum CondicaoCompilada {
     Canal(Vec<Canal>),
     Descricao(Regex),
     Nome(Regex),
+    /// Só dígitos.
+    ContraparteDoc(Vec<String>),
+    Contraparte(Regex),
 }
 
 impl CondicaoCompilada {
@@ -369,6 +484,18 @@ impl CondicaoCompilada {
                 .as_deref()
                 .is_some_and(|d| r.is_match(d)),
             Self::Nome(r) => entrada.nome.as_deref().is_some_and(|n| r.is_match(n)),
+            Self::ContraparteDoc(docs) => entrada
+                .dicas
+                .contraparte_doc
+                .as_deref()
+                .map(so_os_digitos)
+                .is_some_and(|d| !d.is_empty() && docs.contains(&d)),
+            Self::Contraparte(r) => entrada
+                .dicas
+                .contraparte
+                .as_deref()
+                .map(normalizar)
+                .is_some_and(|n| r.is_match(&n)),
         }
     }
 }
@@ -406,9 +533,18 @@ impl Compilada {
         let mut campos = BTreeMap::new();
         let mut motivos = Vec::new();
         for e in &self.extracoes {
-            let (texto, descricao) = match e.fonte {
-                FonteDaExtracao::Texto => (entrada.texto.as_deref(), false),
-                FonteDaExtracao::Descricao => (entrada.dicas.descricao.as_deref(), true),
+            let (texto, dica) = match e.fonte {
+                FonteDaExtracao::Texto => (entrada.texto.as_deref(), None),
+                FonteDaExtracao::Descricao => {
+                    (entrada.dicas.descricao.as_deref(), Some("descricao"))
+                }
+                FonteDaExtracao::Contraparte => {
+                    (entrada.dicas.contraparte.as_deref(), Some("contraparte"))
+                }
+                FonteDaExtracao::ContraparteDoc => (
+                    entrada.dicas.contraparte_doc.as_deref(),
+                    Some("contraparte_doc"),
+                ),
             };
             let Some(texto) = texto else { continue };
             let Some(caps) = e.regex.captures(texto) else {
@@ -423,20 +559,20 @@ impl Compilada {
                 continue;
             }
             let recorte = &texto[inicio..fim];
-            match e.formato.aplicar(recorte) {
+            match e.formato.aplicar_em(recorte, entrada.momento.as_deref()) {
                 Some(valor) => {
-                    let de_onde = if descricao {
-                        DeOnde::Dica {
-                            nome: "descricao".to_owned(),
-                        }
-                    } else {
-                        DeOnde::Trecho { inicio, fim }
+                    let de_onde = match dica {
+                        Some(nome) => DeOnde::Dica {
+                            nome: nome.to_owned(),
+                        },
+                        None => DeOnde::Trecho { inicio, fim },
                     };
                     campos.insert(e.nome.clone(), Campo { valor, de_onde });
                 }
-                None => motivos.push(format!(
-                    "campo `{}` achado mas fora do formato {:?}",
-                    e.nome, e.formato
+                None => motivos.push(e.formato.motivo_da_falha(
+                    &e.nome,
+                    recorte,
+                    entrada.momento.as_deref(),
                 )),
             }
         }
@@ -445,8 +581,16 @@ impl Compilada {
 }
 
 impl Formato {
-    /// Converte o trecho bruto; `None` se não tem o formato.
+    /// Converte o trecho bruto; `None` se não tem o formato. Sem o `momento` do item (veja
+    /// [`Formato::aplicar_em`]), um mês sem ano não vira data nem competência.
     pub fn aplicar(self, bruto: &str) -> Option<Valor> {
+        self.aplicar_em(bruto, None)
+    }
+
+    /// Como [`Formato::aplicar`], completando o ano que falta (`25 de Novembro`, `Novembro`)
+    /// pelo `momento` do item (ISO 8601; só a data conta): vale o ano que deixa o mês, ou a
+    /// data, mais perto do momento.
+    pub fn aplicar_em(self, bruto: &str, momento: Option<&str>) -> Option<Valor> {
         match self {
             Self::Texto => {
                 let t = bruto.trim();
@@ -457,10 +601,39 @@ impl Formato {
                 (!t.is_empty()).then(|| Valor::Texto(t.to_lowercase()))
             }
             Self::Centavos => parse_centavos(bruto).map(Valor::Centavos),
-            Self::Data => parse_data(bruto).map(Valor::Data),
-            Self::Competencia => parse_competencia(bruto).map(Valor::Competencia),
+            Self::Data => parse_data(bruto)
+                .or_else(|| data_por_extenso(bruto, momento))
+                .map(Valor::Data),
+            Self::Competencia => parse_competencia(bruto)
+                .or_else(|| competencia_por_extenso(bruto, momento))
+                .map(Valor::Competencia),
             Self::Inteiro => parse_inteiro(bruto).map(Valor::Inteiro),
         }
+    }
+
+    /// Por que o trecho achado pelo regex não virou valor (para o motivo da leitura e para o
+    /// diagnóstico de Rita). O trecho é cortado.
+    pub fn motivo_da_falha(self, campo: &str, bruto: &str, momento: Option<&str>) -> String {
+        let trecho: String = bruto.trim().chars().take(40).collect();
+        if matches!(self, Self::Data | Self::Competencia)
+            && let Some(m) = so_o_mes(bruto)
+            && m.ano.is_none()
+        {
+            let porque = if momento.and_then(data_do_momento).is_none() {
+                "e o item não tem `momento` (data da mensagem ou do arquivo) para completar o ano"
+            } else {
+                "e o `momento` do item não ajuda"
+            };
+            return format!(
+                "campo `{campo}`: «{trecho}» está sem ano {porque}; capture um trecho com o ano (ex.: `10/2026`)"
+            );
+        }
+        if self == Self::Data && so_o_mes(bruto).is_some_and(|m| m.dia.is_none()) {
+            return format!(
+                "campo `{campo}`: «{trecho}» não tem o dia; o formato `data` pede dia, mês e ano"
+            );
+        }
+        format!("campo `{campo}` achado mas fora do formato {self:?} (trecho «{trecho}»)")
     }
 }
 
@@ -489,6 +662,51 @@ pub fn normalizar(texto: &str) -> String {
         }
     }
     saida.trim_end().to_owned()
+}
+
+/// O texto de um OCR com o ruído mais comum desfeito, para a regra que pede
+/// `"texto_de_ocr": true`:
+///
+/// - espaços e tabs seguidos viram um espaço, e o fim de cada linha é aparado (as quebras
+///   de linha ficam, porque os regexes das regras as usam);
+/// - `RS` e `R§` viram `R$` quando vêm antes de um valor com vírgula e dois decimais
+///   (`RS 1.234,56`; o `RS` de Rio Grande do Sul, antes de um CEP, fica);
+/// - dentro de um **número** (um token só de dígitos, `.`, `,`, `/`, `:`, `-`, `O` e `l`,
+///   com ao menos um dígito de verdade), `O` vira `0` e `l` vira `1`. Palavra, ou token com
+///   outras letras (`Pol1`, `BOL2`), não é tocada.
+///
+/// Idempotente. Só `O` e `l` são trocados; o resto do texto passa como veio.
+pub fn normalizar_ocr(texto: &str) -> String {
+    static ESPACOS: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[ \t\u{00A0}]+"));
+    static FIM_DE_LINHA: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"(?m) +(\r?\n|$)"));
+    static MOEDA: LazyLock<Regex> =
+        LazyLock::new(|| regex_fixo(r"\bR[S§](\s*)([0-9Ol.]+,[0-9Ol]{2})\b"));
+    static TOKEN: LazyLock<Regex> = LazyLock::new(|| regex_fixo(r"[\p{L}\p{N}.,/:\-]+"));
+    let juntos = ESPACOS.replace_all(texto, " ");
+    let aparado = FIM_DE_LINHA.replace_all(&juntos, "$1");
+    let moeda = MOEDA.replace_all(&aparado, "R$$${1}${2}");
+    TOKEN
+        .replace_all(&moeda, |c: &regex::Captures<'_>| {
+            let t = &c[0];
+            let so_de_numero = t.chars().all(|ch| {
+                ch.is_ascii_digit() || matches!(ch, 'O' | 'l' | '.' | ',' | '/' | ':' | '-')
+            });
+            if so_de_numero && t.chars().any(|ch| ch.is_ascii_digit()) {
+                t.replace('O', "0").replace('l', "1")
+            } else {
+                t.to_owned()
+            }
+        })
+        .into_owned()
+}
+
+fn regex_fixo(padrao: &str) -> Regex {
+    // Os padrões são constantes deste arquivo e compilam (os testes de `normalizar_ocr`
+    // exercitam os quatro). Se um dia não compilar, o regex que não casa nada deixa o
+    // texto como veio.
+    RegexBuilder::new(padrao)
+        .build()
+        .unwrap_or_else(|_| Regex::new(r"[^\s\S]").unwrap_or_else(|_| unreachable!()))
 }
 
 /// Dinheiro em centavos. Padrão brasileiro primeiro:
@@ -585,7 +803,7 @@ pub fn parse_data(bruto: &str) -> Option<String> {
     {
         let (m, d) = resto.split_once('-')?;
         (d, m, a)
-    } else {
+    } else if s.contains('/') || s.matches('-').count() == 2 {
         let sep = if s.contains('/') { '/' } else { '-' };
         let mut it = s.split(sep);
         let (d, m, a) = (it.next()?, it.next()?, it.next()?);
@@ -593,6 +811,9 @@ pub fn parse_data(bruto: &str) -> Option<String> {
             return None;
         }
         (d, m, a)
+    } else {
+        // `25 de novembro de 2026`, `November 20, 2026`: só com o ano; sem ano, `aplicar_em`.
+        return data_por_extenso(s, None);
     };
     let dia = so_digitos(d, 2)?;
     let mes = so_digitos(m, 2)?;
@@ -619,6 +840,147 @@ pub fn parse_competencia(bruto: &str) -> Option<String> {
     (1..=12)
         .contains(&mes)
         .then(|| format!("{ano:04}-{mes:02}"))
+}
+
+const MESES: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "marco",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+
+const MESES_EM_INGLES: [&str; 12] = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
+/// O número do mês (1 a 12) de `janeiro`, `Março`, `mar`, `November`, `Sept`... (sem
+/// diferenciar maiúsculas nem acentos). A abreviação é a de três letras (mais `sept`). Os
+/// dois idiomas valem juntos: nenhum trio de letras é um mês num idioma e outro no outro.
+fn mes_por_nome(palavra: &str) -> Option<u32> {
+    let p = normalizar(palavra);
+    let abreviacao = p.len() == 3 || p == "sept";
+    let acha = |meses: &[&str; 12]| {
+        meses
+            .iter()
+            .position(|m| *m == p || (abreviacao && m.starts_with(&p[..3.min(p.len())])))
+    };
+    acha(&MESES)
+        .or_else(|| acha(&MESES_EM_INGLES))
+        .and_then(|i| u32::try_from(i + 1).ok())
+}
+
+/// Um mês escrito por extenso, com o dia e o ano quando o trecho os traz.
+struct MesPorExtenso {
+    dia: Option<u32>,
+    mes: u32,
+    ano: Option<i32>,
+}
+
+/// Lê `25 de Novembro`, `25 de novembro de 2026`, `Novembro`, `novembro de 2026`, `nov/2026`
+/// e `25 nov`; em inglês, `November 20, 2026`, `Nov 20 2026`, `20 November 2026`, `Nov 20` e
+/// `Sept 2026`. Qualquer outra coisa (palavra a mais, número solto) é `None`.
+fn so_o_mes(bruto: &str) -> Option<MesPorExtenso> {
+    let normal = normalizar(bruto);
+    let partes: Vec<&str> = normal.split(' ').filter(|p| *p != "de").collect();
+    let numero = |p: &str, tamanho: std::ops::RangeInclusive<usize>| {
+        tamanho.contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit())
+    };
+    let (dia, resto) = match partes.first() {
+        Some(p) if numero(p, 1..=2) => (Some(p.parse::<u32>().ok()?), &partes[1..]),
+        _ => (None, &partes[..]),
+    };
+    let (nome, dia, ano) = match (dia, resto) {
+        (_, [m]) => (*m, dia, None),
+        (_, [m, a]) if numero(a, 4..=4) => (*m, dia, Some(a.parse::<i32>().ok()?)),
+        // O inglês põe o dia depois do mês: `Nov 20`, `November 20, 2026`.
+        (None, [m, d]) if numero(d, 1..=2) => (*m, Some(d.parse::<u32>().ok()?), None),
+        (None, [m, d, a]) if numero(d, 1..=2) && numero(a, 4..=4) => (
+            *m,
+            Some(d.parse::<u32>().ok()?),
+            Some(a.parse::<i32>().ok()?),
+        ),
+        _ => return None,
+    };
+    Some(MesPorExtenso {
+        dia,
+        mes: mes_por_nome(nome)?,
+        ano,
+    })
+}
+
+/// Os dias desde 1970-01-01 (calendário gregoriano; para comparar datas).
+fn dias_civis(ano: i32, mes: u32, dia: u32) -> i64 {
+    let a = i64::from(ano) - i64::from(mes <= 2);
+    let era = a.div_euclid(400);
+    let ano_da_era = a - era * 400;
+    let m = i64::from(mes);
+    let d_do_ano = (153 * ((m + 9) % 12) + 2) / 5 + i64::from(dia) - 1;
+    let d_da_era = ano_da_era * 365 + ano_da_era / 4 - ano_da_era / 100 + d_do_ano;
+    era * 146_097 + d_da_era - 719_468
+}
+
+/// `(ano, mês, dia)` do começo de um `momento` ISO 8601 (`2026-11-20`, `2026-11-20T10:00:00Z`).
+fn data_do_momento(momento: &str) -> Option<(i32, u32, u32)> {
+    let d = parse_data(momento.trim().get(..10)?)?;
+    let mut it = d.split('-');
+    Some((
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    ))
+}
+
+/// `AAAA-MM-DD` de `25 de Novembro` (e `25 de Novembro de 2026`). Sem ano, o do `momento`
+/// que deixa a data mais perto dele; sem `momento` e sem ano, `None`.
+fn data_por_extenso(bruto: &str, momento: Option<&str>) -> Option<String> {
+    let m = so_o_mes(bruto)?;
+    let dia = m.dia?;
+    let valida = |ano: i32| {
+        (dia >= 1 && dia <= dias_no_mes(ano, m.mes))
+            .then(|| format!("{ano:04}-{:02}-{dia:02}", m.mes))
+    };
+    if let Some(a) = m.ano {
+        return valida(a);
+    }
+    let (ay, am, ad) = data_do_momento(momento?)?;
+    let alvo = dias_civis(ay, am, ad);
+    (ay - 1..=ay + 1)
+        .filter(|a| dia <= dias_no_mes(*a, m.mes))
+        .min_by_key(|a| (dias_civis(*a, m.mes, dia) - alvo).abs())
+        .and_then(valida)
+}
+
+/// `AAAA-MM` de `Novembro`, `25 de Novembro`, `novembro de 2026`. Sem ano, o do `momento` que
+/// deixa o mês mais perto dele; sem `momento` e sem ano, `None`.
+fn competencia_por_extenso(bruto: &str, momento: Option<&str>) -> Option<String> {
+    let m = so_o_mes(bruto)?;
+    if let Some(a) = m.ano {
+        return Some(format!("{a:04}-{:02}", m.mes));
+    }
+    let (ay, am, _) = data_do_momento(momento?)?;
+    let alvo = i64::from(ay) * 12 + i64::from(am) - 1;
+    let ano = (ay - 1..=ay + 1)
+        .min_by_key(|a| (i64::from(*a) * 12 + i64::from(m.mes) - 1 - alvo).abs())?;
+    Some(format!("{ano:04}-{:02}", m.mes))
 }
 
 /// Inteiro com sinal; pontos são milhar (`1.234` = 1234).
@@ -682,6 +1044,193 @@ mod testes {
     }
 
     #[test]
+    fn data_e_competencia_por_extenso_com_ano() {
+        let f = |fmt: Formato, t: &str| {
+            fmt.aplicar_em(t, None).map(|v| match v {
+                Valor::Data(d) | Valor::Competencia(d) => d,
+                outro => outro.to_string(),
+            })
+        };
+        assert_eq!(
+            f(Formato::Data, "25 de Novembro de 2026").as_deref(),
+            Some("2026-11-25")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "novembro de 2026").as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "Março/2027").as_deref(),
+            Some("2027-03")
+        );
+        assert_eq!(
+            f(Formato::Competencia, "nov/2026").as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(f(Formato::Data, "31 de abril de 2026"), None);
+        assert_eq!(
+            f(Formato::Data, "novembro de 2026"),
+            None,
+            "data pede o dia"
+        );
+    }
+
+    #[test]
+    fn datas_em_ingles_com_ano() {
+        for (texto, esperado) in [
+            ("November 20, 2026", "2026-11-20"),
+            ("November 20 2026", "2026-11-20"),
+            ("Nov 20, 2026", "2026-11-20"),
+            ("20 November 2026", "2026-11-20"),
+            ("20 Nov 2026", "2026-11-20"),
+            ("NOVEMBER 5, 2026", "2026-11-05"),
+            ("Sept 3, 2026", "2026-09-03"),
+            ("September 3, 2026", "2026-09-03"),
+            ("Dec 31, 2026", "2026-12-31"),
+            ("January 1, 2027", "2027-01-01"),
+            ("Feb 29, 2028", "2028-02-29"),
+            ("Aug 9 2026", "2026-08-09"),
+            ("Oct 9 2026", "2026-10-09"),
+            ("May 9 2026", "2026-05-09"),
+            ("Apr 9 2026", "2026-04-09"),
+        ] {
+            assert_eq!(parse_data(texto).as_deref(), Some(esperado), "{texto}");
+            assert_eq!(
+                Formato::Data.aplicar(texto),
+                Some(Valor::Data(esperado.to_owned())),
+                "{texto}"
+            );
+        }
+        assert_eq!(parse_data("Feb 29, 2027"), None);
+        assert_eq!(parse_data("Nov 31, 2026"), None);
+        assert_eq!(parse_data("Novem 20, 2026"), None);
+        assert_eq!(parse_data("November 2026"), None, "data pede o dia");
+    }
+
+    #[test]
+    fn competencia_em_ingles() {
+        let c = |t: &str| Formato::Competencia.aplicar(t);
+        let comp = |s: &str| Some(Valor::Competencia(s.to_owned()));
+        assert_eq!(c("November 20, 2026"), comp("2026-11"));
+        assert_eq!(c("20 November 2026"), comp("2026-11"));
+        assert_eq!(c("November 2026"), comp("2026-11"));
+        assert_eq!(c("Sept 2026"), comp("2026-09"));
+        assert_eq!(c("Dec 2026"), comp("2026-12"));
+        assert_eq!(c("November 20"), None, "sem ano e sem momento");
+        assert_eq!(
+            Formato::Competencia.aplicar_em("November 20", Some("2026-11-21")),
+            comp("2026-11")
+        );
+    }
+
+    #[test]
+    fn data_em_ingles_sem_ano_usa_o_momento() {
+        let f = |t: &str, m: Option<&str>| Formato::Data.aplicar_em(t, m);
+        let d = |s: &str| Some(Valor::Data(s.to_owned()));
+        assert_eq!(f("November 20", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("Nov 20", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("20 Nov", Some("2026-11-21")), d("2026-11-20"));
+        assert_eq!(f("Dec 28", Some("2027-01-05")), d("2026-12-28"));
+        assert_eq!(f("Jan 3", Some("2026-12-30T10:00:00Z")), d("2027-01-03"));
+        assert_eq!(f("Nov 20", None), None);
+    }
+
+    #[test]
+    fn meses_dos_dois_idiomas_convivem() {
+        // O mesmo número de mês nos dois idiomas.
+        for (pt, en, mes) in [
+            ("jan", "jan", "01"),
+            ("fev", "feb", "02"),
+            ("mar", "mar", "03"),
+            ("abr", "apr", "04"),
+            ("mai", "may", "05"),
+            ("jun", "jun", "06"),
+            ("jul", "jul", "07"),
+            ("ago", "aug", "08"),
+            ("set", "sep", "09"),
+            ("out", "oct", "10"),
+            ("nov", "nov", "11"),
+            ("dez", "dec", "12"),
+        ] {
+            let esperado = Some(Valor::Competencia(format!("2026-{mes}")));
+            assert_eq!(
+                Formato::Competencia.aplicar(&format!("{pt}/2026")),
+                esperado,
+                "{pt}"
+            );
+            assert_eq!(
+                Formato::Competencia.aplicar(&format!("{en} 2026")),
+                esperado,
+                "{en}"
+            );
+        }
+        assert_eq!(
+            Formato::Data.aplicar("25 de Novembro de 2026"),
+            Some(Valor::Data("2026-11-25".to_owned()))
+        );
+        assert_eq!(
+            Formato::Data.aplicar("25 de dezembro de 2026"),
+            Some(Valor::Data("2026-12-25".to_owned()))
+        );
+        assert_eq!(
+            Formato::Competencia.aplicar("March 2026"),
+            Some(Valor::Competencia("2026-03".to_owned()))
+        );
+    }
+
+    #[test]
+    fn mes_sem_ano_usa_o_mes_mais_proximo_do_momento() {
+        let f = |fmt: Formato, t: &str, m: Option<&str>| {
+            fmt.aplicar_em(t, m).map(|v| match v {
+                Valor::Data(d) | Valor::Competencia(d) => d,
+                outro => outro.to_string(),
+            })
+        };
+        let c = Formato::Competencia;
+        assert_eq!(
+            f(c, "Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(c, "Dezembro", Some("2026-01-05")).as_deref(),
+            Some("2025-12")
+        );
+        assert_eq!(
+            f(c, "janeiro", Some("2026-12-30T10:00:00-03:00")).as_deref(),
+            Some("2027-01")
+        );
+        assert_eq!(
+            f(c, "25 de Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11")
+        );
+        assert_eq!(
+            f(Formato::Data, "25 de Novembro", Some("2026-11-20")).as_deref(),
+            Some("2026-11-25")
+        );
+        assert_eq!(
+            f(Formato::Data, "28 de dezembro", Some("2026-01-05")).as_deref(),
+            Some("2025-12-28")
+        );
+        // 29 de fevereiro: só o ano bissexto serve.
+        assert_eq!(
+            f(Formato::Data, "29 de fevereiro", Some("2027-03-01")).as_deref(),
+            Some("2028-02-29")
+        );
+        assert_eq!(f(c, "Novembro", None), None, "sem momento não há ano");
+        assert_eq!(f(c, "Novembro", Some("lixo")), None);
+    }
+
+    #[test]
+    fn o_motivo_da_falha_diz_por_que_o_mes_sem_ano_nao_saiu() {
+        let m = Formato::Competencia.motivo_da_falha("competencia", "25 de Novembro", None);
+        assert!(m.contains("sem ano"), "{m}");
+        assert!(m.contains("momento"), "{m}");
+        let m = Formato::Centavos.motivo_da_falha("valor", "abc", None);
+        assert!(m.contains("valor"), "{m}");
+        assert!(m.contains("achado mas fora do formato"), "{m}");
+    }
+
+    #[test]
     fn normalizar_tira_acento_e_colapsa() {
         assert_eq!(
             normalizar("  DEMONSTRATIVO,  de   Pagamento\n"),
@@ -732,6 +1281,79 @@ mod testes {
         d.detectar.algum.push(Condicao::Contem("d".into()));
         d.detectar.algum.push(Condicao::Contem("e".into()));
         assert_eq!(d.especificidade(), 4);
+    }
+
+    #[test]
+    fn identidade_precisa_ser_campo_de_extrair_e_vazia_nao_entra_no_json() {
+        let sem = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]}}"#;
+        let d: Definicao = serde_json::from_str(sem).unwrap();
+        assert!(d.identidade.is_empty());
+        assert!(
+            !serde_json::to_string(&d).unwrap().contains("identidade"),
+            "lista vazia não muda o JSON (nem o checksum) das versões antigas"
+        );
+        let com = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]},
+            "extrair":{"numero_do_recibo":{"regex":"Recibo (\\d+)","formato":"texto"}},
+            "identidade":["numero_do_recibo"]}"#;
+        let mut d: Definicao = serde_json::from_str(com).unwrap();
+        d.validar().unwrap();
+        assert!(
+            serde_json::to_string(&d)
+                .unwrap()
+                .contains("\"identidade\"")
+        );
+        d.identidade = vec!["numero_que_nao_existe".into()];
+        let erro = d.validar().unwrap_err().to_string();
+        assert!(erro.contains("numero_que_nao_existe"), "{erro}");
+    }
+
+    #[test]
+    fn vincular_ocorrencia_no_json_e_na_geracao() {
+        let j = r#"{"tipo_documental":"x","detectar":{"todos":[{"contem":"abc"}]},
+            "propor":[{"vincular_ocorrencia":{"compromisso":"servico exemplo","tipo_documento":"comprovante","janela_dias":20}}]}"#;
+        let d: Definicao = serde_json::from_str(j).unwrap();
+        assert!(d.validar().is_ok());
+        let campo = |v: Valor| Campo {
+            valor: v,
+            de_onde: DeOnde::Dica { nome: "x".into() },
+        };
+        let mut campos = BTreeMap::new();
+        assert!(d.propor[0].gerar(&campos).is_err(), "sem data");
+        campos.insert(
+            "vencimento".to_owned(),
+            campo(Valor::Data("2026-11-20".into())),
+        );
+        let esperado = Proposta::VincularOcorrencia {
+            data: "2026-11-20".into(),
+            janela_dias: 20,
+            compromisso: "servico exemplo".into(),
+            tipo_documento: TipoDoDocumento::Comprovante,
+        };
+        assert_eq!(
+            d.propor[0].gerar(&campos).unwrap(),
+            esperado,
+            "cai no vencimento"
+        );
+        campos.insert("data".to_owned(), campo(Valor::Data("2026-11-19".into())));
+        assert!(matches!(
+            d.propor[0].gerar(&campos),
+            Ok(Proposta::VincularOcorrencia { data, .. }) if data == "2026-11-19"
+        ));
+        // Sem compromisso ou com um tipo que não existe, a definição não vale.
+        for ruim in [
+            r#"{"vincular_ocorrencia":{"compromisso":"  ","tipo_documento":"outro","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"tipo_documento":"outro","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"compromisso":"a","janela_dias":3}}"#,
+            r#"{"vincular_ocorrencia":{"compromisso":"a","tipo_documento":"recibo","janela_dias":3}}"#,
+        ] {
+            let j = format!(
+                r#"{{"tipo_documental":"x","detectar":{{"todos":[{{"contem":"abc"}}]}},"propor":[{ruim}]}}"#
+            );
+            let ok = serde_json::from_str::<Definicao>(&j)
+                .ok()
+                .is_some_and(|d| d.validar().is_ok());
+            assert!(!ok, "{ruim}");
+        }
     }
 
     #[test]

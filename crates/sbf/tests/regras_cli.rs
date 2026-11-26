@@ -269,7 +269,7 @@ fn prova_sem_recompilar_regra_nova_e_depois_a_v2_com_o_luau_alterado() {
     ]);
     let antes = a.ok(&["simular", REGRA, "1", txt.to_str().unwrap()]);
     assert!(antes.contains("1 mudaria"), "{antes}");
-    assert!(antes.contains("antes:  nenhuma regra"), "{antes}");
+    assert!(antes.contains("antes:  nenhum padrão"), "{antes}");
     assert!(antes.contains("favorecido=Fulano de Tal"), "{antes}");
     assert!(antes.contains("valor_centavos=123456c"), "{antes}");
 

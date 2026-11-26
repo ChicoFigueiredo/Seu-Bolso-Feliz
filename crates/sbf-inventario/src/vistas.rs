@@ -39,6 +39,8 @@ pub struct Dialeto {
     pub contraparte: bool,
     pub data_compra: bool,
     pub fatura_ref: bool,
+    pub contraparte_doc: bool,
+    pub tipo_original: bool,
 }
 
 impl Dialeto {
@@ -47,6 +49,8 @@ impl Dialeto {
         contraparte: true,
         data_compra: true,
         fatura_ref: true,
+        contraparte_doc: true,
+        tipo_original: true,
     };
 
     pub fn detectar(conn: &Connection) -> ResultadoDeConsulta<Dialeto> {
@@ -59,6 +63,8 @@ impl Dialeto {
             contraparte: tem("contraparte"),
             data_compra: tem("data_compra"),
             fatura_ref: tem("fatura_ref"),
+            contraparte_doc: tem("contraparte_doc"),
+            tipo_original: tem("tipo_original"),
         })
     }
 
@@ -79,6 +85,12 @@ impl Dialeto {
     }
     pub fn fatura_ref(&self, alias: &str) -> String {
         Self::coluna(self.fatura_ref, alias, "fatura_ref")
+    }
+    pub fn contraparte_doc(&self, alias: &str) -> String {
+        Self::coluna(self.contraparte_doc, alias, "contraparte_doc")
+    }
+    pub fn tipo_original(&self, alias: &str) -> String {
+        Self::coluna(self.tipo_original, alias, "tipo_original")
     }
 }
 
@@ -320,13 +332,24 @@ pub fn selecao_do_filtro(ctx: &Contexto<'_>, filtro: &Filtro, alvo: Alvo) -> Sel
     if let Some(t) = texto_do_filtro(filtro) {
         let padrao = Value::Text(format!("%{t}%"));
         s = match alvo {
-            Alvo::Registro => s.onde(
-                format!(
-                    "r.descricao_original LIKE ? OR r.supplier_name_raw LIKE ? OR r.fornecedor_normalizado LIKE ? OR {} LIKE ? OR r.categoria_provavel LIKE ? OR r.conta_provavel LIKE ?",
-                    ctx.dialeto.contraparte("r.")
-                ),
-                vec![padrao; 6],
-            ),
+            Alvo::Registro => {
+                // As contas cujo rótulo casa com o texto entram como mais uma alternativa.
+                let contas = &filtro.contas_do_texto;
+                let por_rotulo = if contas.is_empty() {
+                    String::new()
+                } else {
+                    format!(" OR r.conta_provavel IN ({})", marcas(contas.len()))
+                };
+                let mut valores = vec![padrao; 6];
+                valores.extend(contas.iter().map(|c| texto(c.as_str())));
+                s.onde(
+                    format!(
+                        "r.descricao_original LIKE ? OR r.supplier_name_raw LIKE ? OR r.fornecedor_normalizado LIKE ? OR {} LIKE ? OR r.categoria_provavel LIKE ? OR r.conta_provavel LIKE ?{por_rotulo}",
+                        ctx.dialeto.contraparte("r.")
+                    ),
+                    valores,
+                )
+            }
             Alvo::Achado => s.onde(
                 "a.supplier_name_raw LIKE ? OR a.notas LIKE ? OR a.document_type LIKE ? OR EXISTS (SELECT 1 FROM origem o WHERE o.content_hash = a.content_hash AND (o.filename LIKE ? OR o.local_filepath LIKE ? OR o.gmail_subject LIKE ? OR o.gmail_from LIKE ?))",
                 vec![padrao; 7],
@@ -546,6 +569,22 @@ pub(crate) fn celula_estado_registro(estado: &str, decidido_por: &Option<String>
 /// Os 8 primeiros caracteres do hash, para nomear um achado sem nome de arquivo.
 pub fn hash_curto(hash: &str) -> &str {
     hash.get(..8).unwrap_or(hash)
+}
+
+/// O documento (CPF ou CNPJ) da contraparte sem o que identifica: só os 3 primeiros e os 2
+/// últimos dígitos, o resto vira `*`. Pontuação some. Dado pessoal: a página nunca mostra o
+/// documento inteiro.
+pub fn mascarar_documento(doc: &str) -> String {
+    let digitos: Vec<char> = doc.chars().filter(char::is_ascii_digit).collect();
+    let n = digitos.len();
+    if n < 6 {
+        return "*".repeat(n);
+    }
+    digitos
+        .iter()
+        .enumerate()
+        .map(|(i, c)| if i < 3 || i >= n - 2 { *c } else { '*' })
+        .collect()
 }
 
 /// O nome de um registro: a descrição original, ou `Registro N`.

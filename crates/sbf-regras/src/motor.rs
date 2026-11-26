@@ -29,7 +29,7 @@ use std::time::Instant;
 use serde_json::{Value as Json, json};
 
 use crate::catalogo::{Catalogo, Parametro, VersaoDeRegra, parametro_vigente, sha256_hex};
-use crate::definicao::{Compilada, normalizar};
+use crate::definicao::{Compilada, normalizar, normalizar_ocr};
 use crate::script::{ExecutorDeScript, Limites, PedidoDeScript, RespostaDoScript};
 use crate::{
     Campo, DeOnde, Decisao, Entrada, ErroDasRegras, Execucao, Leitura, Reconhecimento,
@@ -159,14 +159,29 @@ impl Motor {
     /// Lê uma entrada com um executor emprestado (o catálogo usa em `testar`).
     pub fn ler_com(&self, entrada: &Entrada, executor: Option<&dyn ExecutorDeScript>) -> Leitura {
         let normalizado = normalizar(entrada.texto.as_deref().unwrap_or(""));
+        // A versão que pede `texto_de_ocr` lê o texto já limpo do ruído do OCR (uma vez só
+        // por entrada, e só se alguma versão pede).
+        let do_ocr = self
+            .versoes
+            .iter()
+            .any(|v| v.versao.definicao.texto_de_ocr)
+            .then(|| {
+                let e = com_texto_de_ocr(entrada);
+                let n = normalizar(e.texto.as_deref().unwrap_or(""));
+                (e, n)
+            });
         let mut execucoes = Vec::new();
         let mut candidatas = Vec::new();
         for vc in &self.versoes {
             if !vc.versao.definicao.aplica_a.contains(&entrada.tipo) {
                 continue;
             }
+            let (entrada, normalizado) = match &do_ocr {
+                Some((e, n)) if vc.versao.definicao.texto_de_ocr => (e, n.as_str()),
+                _ => (entrada, normalizado.as_str()),
+            };
             let t0 = Instant::now();
-            let avaliada = self.avaliar(vc, entrada, &normalizado, executor);
+            let avaliada = self.avaliar(vc, entrada, normalizado, executor);
             let duracao_us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX);
             let (resultado, motivo) = match avaliada {
                 Ok(None) => (ResultadoDaExecucao::NaoSeAplica, None),
@@ -219,8 +234,15 @@ impl Motor {
             reconhecimento.revisar = true;
             reconhecimento
                 .motivos
-                .push("a versão da regra não está neste motor".to_owned());
+                .push("a versão do padrão não está neste motor".to_owned());
             return reconhecimento;
+        };
+        let do_ocr;
+        let entrada = if vc.versao.definicao.texto_de_ocr {
+            do_ocr = com_texto_de_ocr(entrada);
+            &do_ocr
+        } else {
+            entrada
         };
         reconhecimento.campos.extend(campos_do_leitor);
         reconhecimento.leitor = None;
@@ -230,7 +252,7 @@ impl Motor {
             Ok(None) => {
                 let mut r = copia;
                 r.motivos
-                    .push("o script disse que a regra não corresponde".to_owned());
+                    .push("o script disse que o padrão não corresponde".to_owned());
                 r.revisar = true;
                 r
             }
@@ -270,7 +292,10 @@ impl Motor {
             revisar: false,
             motivos,
             evidencias: Vec::new(),
+            exibir: Vec::new(),
             propostas: Vec::new(),
+            identidade: None,
+            repetido_de: None,
             chave: chave_de_idempotencia(&entrada.id, &v.regra, v.versao, &v.checksum, &[]),
         };
         if rec.leitor.is_some() {
@@ -334,11 +359,16 @@ impl Motor {
                     .push(format!("campo obrigatório ausente: `{nome}`"));
             }
         }
+        let para_propor = campos_para_propor(&rec.campos, entrada);
         for modelo in &v.definicao.propor {
-            match modelo.gerar(&rec.campos) {
+            match modelo.gerar(&para_propor) {
                 Ok(p) => rec.propostas.push(p),
                 Err(m) => rec.motivos.push(m),
             }
+        }
+        // Só quem de fato reconhece identifica: rascunho e desativada não.
+        if matches!(v.estado, crate::Estado::Ativa | crate::Estado::Consolidada) {
+            rec.identidade = identidade_dos_campos(&v.definicao.identidade, &rec.campos);
         }
         rec.chave = chave_de_idempotencia(
             &entrada.id,
@@ -349,6 +379,75 @@ impl Motor {
         );
         Ok(Some(rec))
     }
+}
+
+/// A identidade do documento: os valores dos campos de `nomes`, em minúsculas e sem espaços
+/// nas pontas, juntos por `|`. `None` se a lista é vazia ou se falta (ou está vazio) algum
+/// campo. Não olha o estado da versão: quem grava só grava a de versão ativa ou consolidada
+/// (ver [`Motor::ler`]); o pré-teste usa isto sobre um rascunho para contar repetidos.
+pub fn identidade_dos_campos(nomes: &[String], campos: &BTreeMap<String, Campo>) -> Option<String> {
+    if nomes.is_empty() {
+        return None;
+    }
+    let partes: Option<Vec<String>> = nomes
+        .iter()
+        .map(|n| {
+            let v = campos.get(n)?.valor.to_string().trim().to_lowercase();
+            (!v.is_empty()).then_some(v)
+        })
+        .collect();
+    partes.map(|p| p.join("|"))
+}
+
+/// A entrada com o texto passado por [`normalizar_ocr`]. As posições dos campos extraídos
+/// (`DeOnde::Trecho`) valem para este texto limpo, não para o que o tesseract devolveu.
+fn com_texto_de_ocr(entrada: &Entrada) -> Entrada {
+    let mut e = entrada.clone();
+    e.texto = e.texto.as_deref().map(normalizar_ocr);
+    e
+}
+
+/// Os campos com que as propostas são geradas: os extraídos e, para o que falta, o que a
+/// origem já sabia (`valor_centavos` em módulo, `data` e `conta`). Um registro do banco traz
+/// valor, data e conta nas dicas; a regra por favorecido não precisa extraí-los. Não muda os
+/// campos do reconhecimento.
+fn campos_para_propor(
+    campos: &BTreeMap<String, Campo>,
+    entrada: &Entrada,
+) -> BTreeMap<String, Campo> {
+    let mut saida = campos.clone();
+    let da_dica = |nome: &str, valor: Valor| Campo {
+        valor,
+        de_onde: DeOnde::Dica {
+            nome: nome.to_owned(),
+        },
+    };
+    if let Some(c) = entrada.dicas.valor_centavos
+        && !saida.contains_key("valor_centavos")
+    {
+        saida.insert(
+            "valor_centavos".to_owned(),
+            da_dica("valor_centavos", Valor::Centavos(c.abs())),
+        );
+    }
+    if let Some(d) = entrada
+        .dicas
+        .data
+        .as_deref()
+        .and_then(crate::definicao::parse_data)
+        && !saida.contains_key("data")
+    {
+        saida.insert("data".to_owned(), da_dica("data", Valor::Data(d)));
+    }
+    if let Some(c) = entrada.dicas.conta.as_deref()
+        && !saida.contains_key("conta")
+    {
+        saida.insert(
+            "conta".to_owned(),
+            da_dica("conta", Valor::Texto(c.to_owned())),
+        );
+    }
+    saida
 }
 
 /// A competência `AAAA-MM`: o campo `competencia`, senão o mês de `data`, de `dicas.data`
@@ -455,6 +554,8 @@ fn aplicar_resposta(rec: &mut Reconhecimento, resposta: RespostaDoScript) -> Res
     rec.revisar |= resposta.revisar;
     rec.motivos.extend(resposta.motivos);
     rec.evidencias.extend(resposta.evidencias);
+    // Só para a tela: a chave de idempotência (calculada depois) não olha para isto.
+    rec.exibir = resposta.exibir;
     Ok(())
 }
 
@@ -523,9 +624,9 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
         let mut vencedora = candidatas.remove(0).rec;
         if let Some((p1, e1, regra1, _)) = &segunda {
             let porque = if p0 > *p1 {
-                format!("prioridade {p0} > {p1} da regra {regra1}")
+                format!("prioridade {p0} > {p1} do padrão {regra1}")
             } else {
-                format!("mais específica: {e0} condições contra {e1} (regra {regra1})")
+                format!("mais específico: {e0} condições contra {e1} (padrão {regra1})")
             };
             vencedora.motivos.push(porque);
         }
@@ -534,7 +635,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
                 execucoes,
                 &c.rec.regra,
                 c.rec.versao,
-                format!("não prevaleceu: venceu a regra {}", vencedora.regra),
+                format!("não prevaleceu: venceu o padrão {}", vencedora.regra),
             );
         }
         return Decisao::Reconhecido(Box::new(vencedora));
@@ -546,7 +647,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
             .map(|c| format!("{}@{}", c.rec.regra, c.rec.versao))
             .collect();
         let motivo = format!(
-            "regras empatadas em prioridade {p0} e especificidade {e0} discordam em {discordancia}: {}",
+            "padrões empatados em prioridade {p0} e especificidade {e0} discordam em {discordancia}: {}",
             nomes.join(", ")
         );
         for c in &candidatas {
@@ -564,7 +665,7 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
     let mut vencedora = primeira.rec;
     vencedora.motivos.push(format!(
         "empate de prioridade {p0} e especificidade {e0} com resultados concordantes; \
-         escolhida a de menor id ({})",
+         escolhido o de menor id ({})",
         vencedora.regra
     ));
     for c in resto {
@@ -572,28 +673,44 @@ fn decidir(mut candidatas: Vec<Candidata>, execucoes: &mut [Execucao]) -> Decisa
             execucoes,
             &c.rec.regra,
             c.rec.versao,
-            format!("empate concordante: venceu a regra {}", vencedora.regra),
+            format!("empate concordante: venceu o padrão {}", vencedora.regra),
         );
     }
     Decisao::Reconhecido(Box::new(vencedora))
 }
 
-/// Em que as candidatas discordam (tipo ou campo crítico com valores diferentes nas duas),
-/// ou `None` se concordam.
-fn discordam(candidatas: &[Candidata]) -> Option<String> {
+/// Em que as candidatas discordam (tipo ou campo crítico com valor diferente nas duas),
+/// ou `None` se concordam. É o que decide a [`Decisao::Ambiguo`]; a janela usa o mesmo
+/// critério para dizer em que campo as candidatas de um ambíguo divergem.
+///
+/// Devolve `"tipo_documental"` ou o nome de um de [`CAMPOS_CRITICOS`].
+pub fn campo_em_que_discordam<'a>(
+    candidatas: impl IntoIterator<Item = &'a Reconhecimento>,
+) -> Option<&'static str> {
+    let candidatas: Vec<&Reconhecimento> = candidatas.into_iter().collect();
     for (i, a) in candidatas.iter().enumerate() {
         for b in &candidatas[i + 1..] {
-            if a.rec.tipo_documental != b.rec.tipo_documental {
-                return Some("tipo_documental".to_owned());
+            if a.tipo_documental != b.tipo_documental {
+                return Some("tipo_documental");
             }
             for nome in CAMPOS_CRITICOS {
-                if let (Some(x), Some(y)) = (a.rec.campos.get(nome), b.rec.campos.get(nome))
+                if let (Some(x), Some(y)) = (a.campos.get(nome), b.campos.get(nome))
                     && x.valor != y.valor
                 {
-                    return Some(format!("`{nome}`"));
+                    return Some(nome);
                 }
             }
         }
     }
     None
+}
+
+fn discordam(candidatas: &[Candidata]) -> Option<String> {
+    campo_em_que_discordam(candidatas.iter().map(|c| &c.rec)).map(|nome| {
+        if nome == "tipo_documental" {
+            nome.to_owned()
+        } else {
+            format!("`{nome}`")
+        }
+    })
 }

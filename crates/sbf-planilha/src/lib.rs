@@ -12,6 +12,7 @@
 
 pub mod conciliacao;
 pub mod contracheque;
+pub mod historico;
 pub mod importacao;
 pub mod leitura;
 pub mod mapa;

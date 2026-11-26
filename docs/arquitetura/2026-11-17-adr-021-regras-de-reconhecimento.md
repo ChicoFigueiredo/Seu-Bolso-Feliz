@@ -42,6 +42,12 @@ O CEO decidiu (grill de 2026-11-17):
 
 ## Consequências
 
+- **(2026-11-18, D15) O MCP tem controle total.** Ele ativa, desativa, reverte e consolida
+  regras (`Quem::Mcp`, gravado em `historico_de_estado`) e aplica direto no planejamento, com
+  autor `mcp` no Rastro e Desfazer. Isso substitui a parte da D14 que proibia o MCP de ativar.
+  A D12 vale para todos (exemplo falhando bloqueia, inclusive o MCP). Antes da primeira
+  escrita de cada banco por sessão há backup pela API de backup do SQLite; se falha, a escrita
+  é recusada.
 - **Nenhuma escrita financeira sai de uma regra.** O tipo da proposta não tem variante para
   lançar, pagar ou criar movimentação; quem aplica é o Rust, pelas APIs do inventário e do
   planejamento, depois do clique (ou das três provas, na consolidada).

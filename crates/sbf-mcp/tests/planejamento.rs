@@ -98,6 +98,7 @@ fn ocorrencia(r: &Recorrente, c: Competencia) -> Ocorrencia {
         centro: None,
         fornecedor: None,
         versao: v.id.clone(),
+        calculo: None,
         prazo_desconhecido: false,
         sugestao_de_conciliacao: false,
     }
@@ -335,22 +336,21 @@ fn lista_de_ferramentas_so_tem_planejamento_quando_ligado() {
 }
 
 #[test]
-fn ac30_nenhuma_ferramenta_expoe_aplicar_confirmar_recusar_ou_sql() {
+fn d15_ferramentas_que_aplicam_existem_mas_sql_e_pagamento_nunca() {
+    // AC-30 original: nenhuma ferramenta de SQL livre ou pagamento. Desde a D15 o MCP também
+    // aplica (aplicar_*, desfazer...), e isso é anunciado.
     let c = cenario();
     let nomes = Servidor::novo(c.nucleo.clone()).nomes_das_ferramentas();
+    for n in sbf_mcp::plano::FERRAMENTAS_DE_ESCRITA {
+        assert!(nomes.iter().any(|x| x == n), "falta {n}");
+    }
     for n in &nomes {
-        for proibido in [
-            "aplicar",
-            "confirmar",
-            "recusar",
-            "sql",
-            "executar",
-            "excluir_",
-            "pagar",
-        ] {
+        for proibido in ["sql", "executar", "pagar"] {
             assert!(!n.contains(proibido), "ferramenta proibida: {n}");
         }
     }
+    // As propor_* continuam não aplicando: o nome diz e o teste abaixo prova.
+    assert!(nomes.iter().any(|n| n == "propor_pausa"));
 }
 
 #[test]

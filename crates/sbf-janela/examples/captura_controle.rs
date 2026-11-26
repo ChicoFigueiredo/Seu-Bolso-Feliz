@@ -215,7 +215,7 @@ impl App {
             (3, "conciliar") => {
                 janela.pedir(Pedido::Controle(PedidoDoControle::AplicarVarias(vec![
                     sbf_planejamento::Alteracao::MapearConta {
-                        apelido: "CX-0001".into(),
+                        codigo: "CX-0001".into(),
                         conta_do_extrato: Some(
                             sbf_janela::planejamento_ficticio::CONTA_DO_SALARIO.into(),
                         ),

@@ -111,6 +111,7 @@ pub fn id_do_painel(p: PainelDoDock) -> &'static str {
         PainelDoDock::Historico => "historico",
         PainelDoDock::Previa => "previa",
         PainelDoDock::Reconhecimento => "reconhecimento",
+        PainelDoDock::Rita => "rita",
     }
 }
 
@@ -156,6 +157,11 @@ impl AppSbf {
     ) -> Self {
         let mut janela = janela;
         janela.na_casca = true;
+        // A leitura mostra o rótulo das contas; o planejamento da janela o mantém em dia.
+        let consulta: Box<dyn Consulta> = Box::new(crate::rotulos::ConsultaRotulada::nova(
+            consulta,
+            janela.rotulos.clone(),
+        ));
         let paineis_visiveis = PainelDoDock::TODOS
             .into_iter()
             .map(|p| {
@@ -673,6 +679,7 @@ impl AppCasca for AppSbf {
             let mut j = self.janela.borrow_mut();
             j.contagens(self.consulta.as_ref())
         };
+        let caixa_de_entrada = self.janela.borrow_mut().contagens_da_caixa_de_entrada();
         let futura = |id: &str| {
             areas::area_futura(id).map(|a| {
                 ItemNavegacao::novo(a.id, a.rotulo, a.icone)
@@ -749,18 +756,28 @@ impl AppCasca for AppSbf {
             GrupoNavegacao::novo("Dinheiro", dinheiro).selo("fatia 2"),
             GrupoNavegacao::novo("Documentos", {
                 // As Regras de reconhecimento (spec 13) já funcionam: sem selo de fatia.
-                let mut v = futuras(&["caixa"]);
+                // A Caixa de entrada funciona quando está ligada ao reconhecimento: sem
+                // etiqueta de fatia e com o contador dos não resolvidos.
+                let mut v = match caixa_de_entrada {
+                    Some(c) => vec![
+                        ItemNavegacao::novo("caixa", "Caixa de entrada", "inbox")
+                            .contagem(c.reconhecidos.max(0) as u64),
+                    ],
+                    None => futuras(&["caixa"]),
+                };
                 v.push(ItemNavegacao::novo(
                     crate::regras_ui::ROTA,
-                    "Regras de reconhecimento",
+                    "Padrões de reconhecimento",
                     "rule",
                 ));
                 v
             }),
             GrupoNavegacao::novo("Inventário", inventario).selo("fatia 1"),
             GrupoNavegacao::novo("Fontes", {
-                // Roteiros (spec 10, C1) já funcionam: o item não leva o selo de fatia.
-                let mut v = futuras(&["conexoes", "alertas"]);
+                // Conexões (Telegram, Pluggy, pastas) e Roteiros (spec 10, C1) já funcionam: os
+                // itens não levam o selo de fatia.
+                let mut v = vec![ItemNavegacao::novo("conexoes", "Conexões", "hub")];
+                v.extend(futuras(&["alertas"]));
                 v.push(ItemNavegacao::novo("roteiros", "Roteiros", "route"));
                 v
             }),
@@ -898,6 +915,7 @@ impl AppCasca for AppSbf {
                 janela.dialogos_ui(&ctx, consulta.as_ref());
                 janela.ferramentas_ui(&ctx);
                 janela.previas_ui(&ctx, consulta.as_ref());
+                janela.rita_flutuante_ui(&ctx, consulta.as_ref());
             }
             Local::Flutuante(id) => {
                 let vista = vistas_flutuantes.entry(id).or_default();
@@ -929,6 +947,7 @@ impl AppCasca for AppSbf {
                         | PainelDoDock::Texto
                         | PainelDoDock::Historico
                         | PainelDoDock::Reconhecimento
+                        | PainelDoDock::Rita
                 ) {
                     d = d.escondido();
                 }
@@ -1140,6 +1159,8 @@ impl AppCasca for AppSbf {
             }
             "opcoes" => {
                 componentes::titulo(ui, "Opções", 18.0);
+                carimbo_de_versao_ui(ui);
+                ui.add_space(12.0);
                 bancada_casca::vista::opcoes_de_aparencia(ui, &self.textos);
                 ui.add_space(12.0);
                 opcoes_da_previa(ui, &mut self.janela.get_mut().previas);
@@ -1164,6 +1185,7 @@ impl AppCasca for AppSbf {
             _ => {
                 componentes::titulo(ui, "Seu Bolso Feliz", 18.0);
                 linha(ui, "Versão", env!("CARGO_PKG_VERSION").to_owned());
+                carimbo_de_versao_ui(ui);
                 ui.label(RichText::new("Fatia 2: o inventário e o livro-caixa (só leitura, mais mudar a categoria) no desktop. Fontes Manrope e Instrument Serif (OFL) e Material Symbols Rounded (Apache-2.0).").color(p.tinta_suave));
             }
         }
@@ -1273,6 +1295,34 @@ impl AppCasca for AppSbf {
         if id == "sincronizacao" {
             bancada_casca::abrir(ctx, Destino::Area(Area::Sincronizacao).rota());
         }
+    }
+}
+
+/// O carimbo do binário: a linha de versão e o aviso de build com alterações.
+#[derive(Debug, Clone)]
+struct CarimboDeVersao {
+    linha: String,
+    aviso: Option<String>,
+}
+
+static CARIMBO_DE_VERSAO: std::sync::OnceLock<CarimboDeVersao> = std::sync::OnceLock::new();
+
+/// Registra o carimbo de versão do binário (commit do SBF e da bancada, data) para Opções e
+/// Sobre mostrarem. O `build.rs` do binário `sbf` é quem sabe; a janela só exibe. Só a
+/// primeira chamada vale.
+pub fn definir_carimbo_de_versao(linha: String, aviso: Option<String>) {
+    let _ = CARIMBO_DE_VERSAO.set(CarimboDeVersao { linha, aviso });
+}
+
+/// A linha de versão e, em destaque, o aviso se o build tinha alterações não commitadas.
+fn carimbo_de_versao_ui(ui: &mut Ui) {
+    let Some(c) = CARIMBO_DE_VERSAO.get() else {
+        return;
+    };
+    let p = tema::paleta(ui.ctx());
+    ui.label(RichText::new(&c.linha).color(p.tinta_suave));
+    if let Some(a) = &c.aviso {
+        ui.label(RichText::new(format!("Atenção: {a}")).color(p.aviso));
     }
 }
 

@@ -6,6 +6,7 @@
 
 mod comum;
 
+use bancada_navegador::site_falso::{Configuracao, PDF_FICTICIO, SiteFalso};
 use comum::{CPF, SENHA, Senhas, inventario};
 use sbf_roteiros::Navegador as _;
 use sbf_roteiros::banco::{BancoDeRoteiros, OrigemDaVersao};
@@ -13,10 +14,13 @@ use sbf_roteiros::cdp::Cdp;
 use sbf_roteiros::chrome::{Chrome, OpcoesDoChrome};
 use sbf_roteiros::executor::{Contexto, Decisao, Fim, Opcoes, Pausa, executar};
 use sbf_roteiros::inventario::NoInventario;
+use sbf_roteiros::navegador::TipoDeCampo;
 use sbf_roteiros::passo::Passo;
-use sbf_roteiros::site_falso::{Configuracao, PDF_FICTICIO, SiteFalso};
-use std::sync::Mutex;
+use std::io::{Read as _, Write as _};
+use std::net::TcpListener;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 fn ligado() -> bool {
@@ -28,7 +32,7 @@ fn ligado() -> bool {
 }
 
 fn abrir(pasta: &std::path::Path) -> Chrome {
-    Chrome::abrir(&OpcoesDoChrome {
+    sbf_roteiros::chrome::abrir(&OpcoesDoChrome {
         programa: None,
         perfil: pasta.join("perfil"),
         sem_janela: std::env::var("SBF_CHROME_VISIVEL").ok().as_deref() != Some("1"),
@@ -206,7 +210,12 @@ fn a_pagina_simplificada_do_chrome_nao_tem_valor_de_campo() {
     chrome.navegar(&site.url("/login")).unwrap();
     chrome.preencher("#cpf", CPF).unwrap();
     chrome
-        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
         .unwrap();
     // o valor existe na página (o site vai aceitar), mas a página simplificada não o mostra
     let valor_no_dom = Cdp::conectar(chrome.alvo_da_pagina())
@@ -242,7 +251,12 @@ fn ro_02_no_navegador_clique_e_envio_perigosos_sao_barrados() {
     chrome.navegar(&site.url("/login")).unwrap();
     chrome.preencher("#cpf", CPF).unwrap();
     chrome
-        .preencher_segredo("#senha", &sbf_chaveiro::Segredo::novo(SENHA))
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
         .unwrap();
     chrome.clicar("#entrar").unwrap();
     assert!(chrome.visivel("#pagar").unwrap(), "chegou ao painel");
@@ -673,4 +687,364 @@ fn ro_02_no_navegador_a_excecao_do_comprovante_vale_e_o_resto_continua_barrado()
         "o resto do campo vale"
     );
     chrome.fechar();
+}
+
+#[test]
+fn texto_no_chrome_le_o_que_se_ve_e_nunca_o_valor_de_campo() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/comprovante")).unwrap();
+    assert_eq!(chrome.texto("#ok").unwrap(), "Comprovante de pagamento");
+    assert!(chrome.texto("#nao-existe").is_err());
+
+    chrome.navegar(&site.url("/login")).unwrap();
+    chrome.preencher("#cpf", CPF).unwrap();
+    chrome
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|_| true,
+        )
+        .unwrap();
+    // O valor existe no campo, mas `texto` recusa o campo e a página inteira não o repete.
+    assert!(chrome.texto("#senha").is_err());
+    assert!(chrome.texto("#cpf").is_err());
+    let corpo = chrome.texto("body").unwrap();
+    assert!(
+        !corpo.contains(SENHA) && !corpo.contains(CPF),
+        "o texto visível da página não traz valor de campo"
+    );
+    chrome.fechar();
+}
+
+// ---------------------------------------------------------------------------------------------
+// TOCTOU da digitação do segredo e forja do binding (revisão de segurança).
+// ---------------------------------------------------------------------------------------------
+
+/// Um portal mínimo em 127.0.0.1 (sem o site falso da bancada): `/entrar` e `/fora` têm um campo
+/// de senha; `/entrar` só redireciona (por script, para `localhost`, outro host) depois que
+/// `liberar` acende, que é quando o chaveiro lento do teste começa a ler a senha.
+fn portal_com_redirecionamento(liberar: Arc<AtomicBool>) -> u16 {
+    let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
+    let porta = ouvinte.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for fluxo in ouvinte.incoming() {
+            let Ok(mut fluxo) = fluxo else { continue };
+            let liberar = Arc::clone(&liberar);
+            std::thread::spawn(move || {
+                let mut pedido = [0_u8; 2048];
+                let n = fluxo.read(&mut pedido).unwrap_or(0);
+                let texto = String::from_utf8_lossy(&pedido[..n]).into_owned();
+                let caminho = texto
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split(' ').nth(1))
+                    .unwrap_or("/")
+                    .to_owned();
+                let campos =
+                    "<form id=f><input id=cpf type=text><input id=senha type=password></form>";
+                let (tipo, corpo) = match caminho.as_str() {
+                    "/entrar" => (
+                        "text/html",
+                        format!(
+                            "<!doctype html><title>Entrar</title>{campos}<script>fetch('/gatilho').then(function(){{location.href='http://localhost:{porta}/fora'}})</script>"
+                        ),
+                    ),
+                    "/fora" | "/outra" => (
+                        "text/html",
+                        format!("<!doctype html><title>Fora</title>{campos}"),
+                    ),
+                    "/gatilho" => {
+                        // Segura a resposta até o chaveiro começar a ler a senha.
+                        for _ in 0..400 {
+                            if liberar.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        ("text/plain", "ok".to_owned())
+                    }
+                    _ => ("text/plain", "?".to_owned()),
+                };
+                let _ = write!(
+                    fluxo,
+                    "HTTP/1.1 200 OK\r\nContent-Type: {tipo}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
+                    corpo.len()
+                );
+            });
+        }
+    });
+    porta
+}
+
+/// O chaveiro lento: ao ler a senha, avisa o portal (que dispara o redirecionamento) e leva
+/// um tempo, como o chaveiro de verdade, antes de entregar.
+struct ChaveiroLento {
+    liberar: Arc<AtomicBool>,
+}
+
+impl sbf_roteiros::executor::FonteDeSenhas for ChaveiroLento {
+    fn senha_de_site(&self, rotulo: &str) -> Result<sbf_chaveiro::Segredo, String> {
+        if rotulo != "senha:portal-exemplo" {
+            return Err("sem essa senha".into());
+        }
+        self.liberar.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(1200));
+        Ok(sbf_chaveiro::Segredo::novo(SENHA))
+    }
+    fn cpf(&self) -> Result<sbf_chaveiro::Segredo, String> {
+        Ok(sbf_chaveiro::Segredo::novo(CPF))
+    }
+}
+
+#[test]
+fn toctou_redirecionamento_entre_a_checagem_e_a_digitacao_nao_recebe_a_senha_no_chrome() {
+    if !ligado() {
+        return;
+    }
+    use sbf_roteiros::banco::AutorEscrito;
+    use sbf_roteiros::codigo_email::RelogioReal;
+    use sbf_roteiros::escrito::OpcoesEscrito;
+    use sbf_roteiros::manifesto::Manifesto;
+    use sbf_roteiros::servico::{Ambiente, Servicos, executar_escrito_em};
+
+    let d = tempfile::tempdir().unwrap();
+    let liberar = Arc::new(AtomicBool::new(false));
+    let porta = portal_com_redirecionamento(Arc::clone(&liberar));
+    let (cofre, _conn) = inventario(d.path());
+    let mut amb = Ambiente::novo(&d.path().join("dados"), &cofre);
+    amb.opcoes = opcoes();
+    amb.sem_janela = true;
+    let banco = amb.banco().unwrap();
+    let m = Manifesto::de_json(
+        r##"{"nome":"toctou","url_inicial":"https://portal.exemplo.test/entrar",
+        "hosts":["portal.exemplo.test"],"rotulo_senha":"senha:portal-exemplo",
+        "mfa":{"tipo":"nenhum"},"movimenta_dinheiro":false}"##,
+    )
+    .unwrap();
+    let fonte = r##"
+        navegador.abrir("https://portal.exemplo.test/entrar")
+        navegador.esperar("#senha", 5)
+        pcall(function() navegador.preencher_senha("#senha", "senha:portal-exemplo") end)
+        navegador.registrar("seguiu")
+    "##;
+    let numero = banco
+        .importar_escrito(&m, fonte, &AutorEscrito::Usuario, "teste")
+        .unwrap()
+        .numero;
+    let versao = banco.versao_escrita("toctou", numero).unwrap();
+    let execucao = banco
+        .iniciar_execucao_escrita("toctou", numero, "teste")
+        .unwrap();
+    let mut chrome = abrir(d.path());
+    let opcoes_de_teste = OpcoesEscrito {
+        mapa_de_hosts: vec![(
+            "portal.exemplo.test".into(),
+            format!("http://127.0.0.1:{porta}"),
+        )],
+        aceitar_http_loopback: true,
+    };
+    let nao = AtomicBool::new(false);
+    let pausa = comum::PausaFalsa::default();
+    let rel = executar_escrito_em(
+        &amb,
+        &mut chrome,
+        &versao,
+        execucao,
+        &Servicos {
+            senhas: &ChaveiroLento { liberar },
+            caixa: None,
+            relogio: &RelogioReal,
+            pausa: Some(&pausa),
+            opcoes: &opcoes_de_teste,
+        },
+        &nao,
+    )
+    .unwrap();
+    eprintln!("TOCTOU com Chrome real: {:?}", rel.fim);
+    // O roteiro termina com erro claro (host fora da lista), sem eco de segredo...
+    match &rel.fim {
+        Fim::Falhou { motivo, .. } => {
+            assert!(motivo.contains("hosts do manifesto"), "{motivo}");
+            assert!(!motivo.contains(SENHA));
+        }
+        outro => panic!("esperava Falhou, veio {outro:?}"),
+    }
+    assert!(
+        rel.registros.is_empty(),
+        "o pcall não salva: {:?}",
+        rel.registros
+    );
+    let eventos = format!("{:?}", banco.eventos_escritos(execucao).unwrap());
+    assert!(!eventos.contains(SENHA), "{eventos}");
+    // ...e a senha NÃO foi digitada na página de fora.
+    let mut cdp = Cdp::conectar(chrome.alvo_da_pagina()).unwrap();
+    assert_eq!(
+        cdp.avaliar("location.host.startsWith('localhost')")
+            .unwrap(),
+        true,
+        "o redirecionamento por timer aconteceu"
+    );
+    assert_eq!(
+        cdp.avaliar("document.querySelector('#senha').value")
+            .unwrap(),
+        "",
+        "a senha não pode ter sido digitada no host de fora"
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn toctou_navegacao_na_mesma_origem_depois_da_conferencia_tambem_aborta_a_digitacao() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let liberar = Arc::new(AtomicBool::new(true));
+    let porta = portal_com_redirecionamento(liberar);
+    let base = format!("http://127.0.0.1:{porta}");
+    let mut chrome = abrir(d.path());
+    // Sem navegação nova: digita.
+    chrome.navegar(&format!("{base}/fora")).unwrap();
+    chrome.pagina().unwrap();
+    chrome
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|u| u.starts_with("http://127.0.0.1"),
+        )
+        .unwrap();
+    // Confere o campo certo: CPF num campo de senha e senha num campo de texto são recusados.
+    assert!(
+        chrome
+            .preencher_segredo(
+                "#cpf",
+                &sbf_chaveiro::Segredo::novo(SENHA),
+                TipoDeCampo::Senha,
+                &|_| true
+            )
+            .is_err()
+    );
+    assert!(
+        chrome
+            .preencher_segredo(
+                "#senha",
+                &sbf_chaveiro::Segredo::novo(CPF),
+                TipoDeCampo::Texto,
+                &|_| true
+            )
+            .is_err()
+    );
+    // Leu a página (a "conferência"), e então outra navegação, ainda no mesmo host, chega
+    // por timer: o predicado de host passaria, mas a página não é mais a conferida.
+    chrome.navegar(&format!("{base}/fora")).unwrap();
+    chrome.pagina().unwrap();
+    let mut cdp = Cdp::conectar(chrome.alvo_da_pagina()).unwrap();
+    cdp.avaliar("setTimeout(function(){location.href='/outra'},50);true")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(700));
+    let e = chrome
+        .preencher_segredo(
+            "#senha",
+            &sbf_chaveiro::Segredo::novo(SENHA),
+            TipoDeCampo::Senha,
+            &|u| u.starts_with("http://127.0.0.1"),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("a página mudou"), "{e}");
+    assert!(!e.contains(SENHA));
+    assert_eq!(
+        cdp.avaliar("document.querySelector('#senha').value")
+            .unwrap(),
+        ""
+    );
+    chrome.fechar();
+}
+
+#[test]
+fn b6_a_pagina_nao_forja_campo_e_termo_enormes_ou_com_controle() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let site = SiteFalso::iniciar(Configuracao::default()).unwrap();
+    let mut chrome = abrir(d.path());
+    chrome.navegar(&site.url("/login")).unwrap();
+    let mut cdp = Cdp::conectar(chrome.alvo_da_pagina()).unwrap();
+    // A página chama o binding por conta própria, com campo/termo forjados.
+    cdp.avaliar(
+        "window.sbfBloqueio(JSON.stringify({campo:'linha\\nfalsa\\u001b[31m'+'a'.repeat(500),termo:'pagar\\u202e'+'b'.repeat(500)}));true",
+    )
+    .unwrap();
+    // E um payload gigante, que nem deve ser lido.
+    cdp.avaliar("window.sbfBloqueio(JSON.stringify({campo:'x'.repeat(100000),termo:'y'}));true")
+        .unwrap();
+    let b = chrome.bloqueios().unwrap();
+    assert_eq!(b.len(), 1, "o payload gigante é ignorado: {b:?}");
+    assert_eq!(b[0].campo.chars().count(), 200, "{:?}", b[0]);
+    assert!(b[0].campo.starts_with("linhafalsa[31m"), "{:?}", b[0]);
+    assert!(b[0].termo.starts_with("pagar") && b[0].termo.chars().count() <= 200);
+    for t in [&b[0].campo, &b[0].termo] {
+        assert!(
+            !t.chars().any(|c| c.is_control() || c == '\u{202e}'),
+            "{t:?}"
+        );
+    }
+    chrome.fechar();
+}
+
+/// O lançador do SBF, mas ligando o `--no-sandbox` (como `SBF_CHROME_SEM_SANDBOX`).
+struct SemSandbox;
+
+impl bancada_navegador::chrome::Lancador for SemSandbox {
+    fn localizar_chrome(&self) -> Option<std::path::PathBuf> {
+        sbf_roteiros::chrome::localizar_chrome()
+    }
+    fn lancar(
+        &self,
+        programa: &std::path::Path,
+        args: &[String],
+    ) -> Result<std::process::Child, String> {
+        sbf_roteiros::chrome::LancadorDoSbf.lancar(programa, args)
+    }
+    fn sem_sandbox(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn b8_abrir_sem_sandbox_registra_aviso_e_o_normal_nao() {
+    if !ligado() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let normal = abrir(d.path());
+    if std::env::var_os("SBF_CHROME_SEM_SANDBOX").is_none() {
+        assert!(normal.avisos().is_empty(), "{:?}", normal.avisos());
+    }
+    normal.fechar();
+    let politica: std::sync::Arc<dyn bancada_navegador::Politica + Send + Sync> =
+        std::sync::Arc::new(sbf_roteiros::bloqueio::ListaDeBloqueio);
+    let sem = Chrome::abrir(
+        &OpcoesDoChrome {
+            programa: None,
+            perfil: d.path().join("perfil"),
+            sem_janela: true,
+        },
+        &SemSandbox,
+        politica,
+    )
+    .unwrap();
+    assert_eq!(
+        sem.avisos(),
+        [bancada_navegador::chrome::AVISO_SEM_SANDBOX.to_owned()]
+    );
+    sem.fechar();
 }

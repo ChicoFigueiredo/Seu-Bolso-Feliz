@@ -13,6 +13,7 @@ sbf-coleta = { path = "../sbf-coleta" }
 sbf-inventario = { workspace = true }
 sbf-regras = { workspace = true }
 sbf-pdf = { path = "../sbf-pdf" }
+sbf-ocr = { path = "../sbf-ocr" }
 sbf-triagem = { path = "../sbf-triagem" }
 sbf-ia = { path = "../sbf-ia" }
 rusqlite = { workspace = true }

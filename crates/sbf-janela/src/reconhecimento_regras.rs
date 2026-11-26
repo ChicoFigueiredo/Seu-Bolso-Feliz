@@ -64,10 +64,10 @@ pub fn descrever_de_onde(de: &DeOnde, texto: Option<&str>) -> String {
         DeOnde::Leitor { leitor } => format!("leitor {leitor}"),
         DeOnde::Script { a_partir_de } => {
             if a_partir_de.is_empty() {
-                "script da regra".to_owned()
+                "script do padrão".to_owned()
             } else {
                 format!(
-                    "script da regra, a partir de {}",
+                    "script do padrão, a partir de {}",
                     a_partir_de
                         .iter()
                         .map(|n| rotulo_do_campo(n))
@@ -324,7 +324,7 @@ impl Criacao {
     pub fn correcao(&self) -> Result<Correcao, String> {
         let nome = self.nome.trim();
         if nome.is_empty() {
-            return Err("dê um nome à regra".to_owned());
+            return Err("dê um nome ao padrão".to_owned());
         }
         let tipo = self.tipo_documental.trim();
         if tipo.is_empty() {
@@ -348,7 +348,7 @@ impl Criacao {
             campos.insert(n.to_owned(), v);
         }
         if campos.is_empty() {
-            return Err("preencha pelo menos um campo que a regra deve ler".to_owned());
+            return Err("preencha pelo menos um campo que o padrão deve ler".to_owned());
         }
         Ok(Correcao {
             regra: None,
@@ -364,6 +364,37 @@ impl Criacao {
 // ---------------------------------------------------------------------------------------
 
 impl Janela {
+    /// O documento contra o qual a área Padrões confere "casam com o documento" (spec 15, D5):
+    /// o cartão da linha escolhida da Caixa de entrada ou, sem ele, o cartão mais recente do
+    /// Reconhecimento que guarda a entrada lida pelo motor.
+    pub(crate) fn documento_de_referencia_dos_padroes(
+        &self,
+    ) -> Option<crate::regras_ui::DocumentoDeReferencia> {
+        let da_caixa = self
+            .caixa_de_entrada
+            .selecionada
+            .is_some()
+            .then_some(self.reconhecimento.da_caixa)
+            .flatten();
+        let indices = da_caixa
+            .into_iter()
+            .chain((0..self.reconhecimento.cartoes.len()).rev());
+        for i in indices {
+            let Some(c) = self.reconhecimento.cartoes.get(i) else {
+                continue;
+            };
+            if let Some(r) = c.resultado()
+                && let Some(entrada) = &r.entrada
+            {
+                return Some(crate::regras_ui::DocumentoDeReferencia {
+                    rotulo: c.nome.clone(),
+                    entrada: entrada.clone(),
+                });
+            }
+        }
+        None
+    }
+
     fn fonte_das_regras(&self) -> Option<FonteDasRegras> {
         self.regras.fonte().cloned()
     }
@@ -371,7 +402,7 @@ impl Janela {
     /// Abre "Testar com este documento" para o cartão `cartao`.
     pub fn abrir_teste(&mut self, cartao: usize) {
         let Some(fonte) = self.fonte_das_regras() else {
-            self.mensagem_das_regras(true, "O catálogo de regras não está ligado a esta janela.");
+            self.mensagem_das_regras(true, "O catálogo de padrões não está ligado a esta janela.");
             return;
         };
         let Some(c) = self.reconhecimento.cartoes.get(cartao) else {
@@ -441,7 +472,7 @@ impl Janela {
                     (
                         false,
                         format!(
-                            "Exemplo «{}» guardado na regra {}.",
+                            "Exemplo «{}» guardado no padrão {}.",
                             t.nome_do_exemplo.trim(),
                             o.nome
                         ),
@@ -460,7 +491,7 @@ impl Janela {
     /// o que o usuário corrigiu no cartão.
     pub fn abrir_criacao(&mut self, cartao: usize) {
         if self.regras.fonte().is_none() {
-            self.mensagem_das_regras(true, "O catálogo de regras não está ligado a esta janela.");
+            self.mensagem_das_regras(true, "O catálogo de padrões não está ligado a esta janela.");
             return;
         }
         let Some(c) = self.reconhecimento.cartoes.get(cartao) else {
@@ -654,7 +685,7 @@ mod testes {
                 },
                 None
             ),
-            "script da regra, a partir de Valor, Data"
+            "script do padrão, a partir de Valor, Data"
         );
     }
 }
@@ -676,6 +707,7 @@ mod testes_do_painel {
 
     use super::*;
     use crate::planejamento_ficticio::{HOJE_DA_DEMONSTRACAO, PlanejamentoFicticio};
+    use crate::reconhecimento::SituacaoDoCartao;
     use crate::reconhecimento_ficticio::{NOME_DO_AMBIGUO, NOME_DO_PIX, ligar_na_demonstracao};
     use crate::tema;
 
@@ -762,7 +794,7 @@ mod testes_do_painel {
             reconhecimento: rec,
         } = &r.reconhecido
         else {
-            panic!("devia vir pela regra: {:?}", r.reconhecido);
+            panic!("devia vir pelo padrão: {:?}", r.reconhecido);
         };
         assert_eq!(rec.regra, PIX);
         assert_eq!(rec.tipo_documental, "comprovante-pix");
@@ -910,6 +942,7 @@ mod testes_do_painel {
             "application/pdf",
             Some(texto),
             Canal::Arrastado,
+            None,
             None,
         );
         let (rec, leitura) = {
@@ -1322,6 +1355,135 @@ mod testes_do_painel {
         quadro(&ctx, &mut j);
     }
 
+    // ---- `exibir` e a linha da regra no cartão ----
+
+    /// Todo o texto que o quadro pintou.
+    fn textos_pintados(ctx: &egui::Context, j: &mut Janela) -> Vec<String> {
+        textos_numa_tela_de(ctx, j, 1400.0)
+    }
+
+    /// Como [`textos_pintados`], numa tela mais alta (o que passa do fim da tela não é pintado).
+    fn textos_numa_tela_de(ctx: &egui::Context, j: &mut Janela, altura: f32) -> Vec<String> {
+        fn colher(forma: &egui::Shape, fora: &mut Vec<String>) {
+            match forma {
+                egui::Shape::Text(t) => fora.push(t.galley.text().to_owned()),
+                egui::Shape::Vec(v) => v.iter().for_each(|f| colher(f, fora)),
+                _ => {}
+            }
+        }
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1000.0, altura),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut saida = ctx.run_ui(entrada, |ui| {
+            j.reconhecimento_ui(ui);
+        });
+        saida.textures_delta.clear();
+        let mut textos = Vec::new();
+        for c in &saida.shapes {
+            colher(&c.shape, &mut textos);
+        }
+        textos
+    }
+
+    fn contem(textos: &[String], trecho: &str) -> bool {
+        textos.iter().any(|t| t.contains(trecho))
+    }
+
+    fn ctx_pronto() -> egui::Context {
+        let ctx = egui::Context::default();
+        tema::instalar_fontes(&ctx);
+        tema::aplicar(&ctx, "claro");
+        ctx
+    }
+
+    fn leitura_da_regra(mut rec: sbf_regras::Reconhecimento) -> sbf_regras::Leitura {
+        rec.leitor = None;
+        sbf_regras::Leitura {
+            entrada: "doc-ficticio".to_owned(),
+            decisao: Decisao::Reconhecido(Box::new(rec)),
+            execucoes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn o_rotulo_da_regra_traz_nome_e_versao() {
+        assert_eq!(
+            crate::reconhecimento_regras_ui::rotulo_da_regra("Contracheque", 3),
+            "Padrão Contracheque · versão 3"
+        );
+    }
+
+    #[test]
+    fn o_cartao_do_contracheque_desenha_a_regra_e_as_linhas_de_exibir() {
+        let ctx = ctx_pronto();
+        let (mut j, _) = janela();
+        let _p = soltar(&mut j, NOME_DO_PIX);
+        // Qualquer reconhecimento serve de molde para a regra que "leu" o contracheque.
+        let mut rec = match &j.reconhecimento.cartoes[0]
+            .resultado()
+            .expect("r")
+            .reconhecido
+        {
+            Reconhecido::PelaRegra { reconhecimento } => (**reconhecimento).clone(),
+            outro => panic!("esperava PelaRegra, veio {outro:?}"),
+        };
+        rec.regra = "contracheque".to_owned();
+        rec.versao = 3;
+        rec.exibir = vec![
+            "IRRF conferido ✓ · tabela irrf-teste".to_owned(),
+            "⚠ IRRF diverge da tabela irrf-teste".to_owned(),
+        ];
+        let _c = soltar(&mut j, "contracheque.pdf");
+        {
+            let c = &mut j.reconhecimento.cartoes[1];
+            c.nomes_das_regras
+                .insert("contracheque".to_owned(), "Contracheque".to_owned());
+            let SituacaoDoCartao::Pronto(r) = &mut c.situacao else {
+                panic!("o contracheque deveria estar pronto");
+            };
+            assert!(matches!(r.reconhecido, Reconhecido::Contracheque { .. }));
+            r.leitura = Some(leitura_da_regra(rec));
+        }
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(
+            contem(&textos, "Padrão Contracheque · versão 3"),
+            "{textos:?}"
+        );
+        assert!(contem(&textos, "IRRF conferido ✓ · tabela irrf-teste"));
+        assert!(contem(&textos, "⚠ IRRF diverge da tabela irrf-teste"));
+
+        // Sem a regra na leitura, o cartão do contracheque segue como sempre.
+        let SituacaoDoCartao::Pronto(r) = &mut j.reconhecimento.cartoes[1].situacao else {
+            panic!("pronto");
+        };
+        r.leitura = None;
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(!contem(&textos, "Padrão Contracheque"));
+        assert!(!contem(&textos, "IRRF conferido"));
+    }
+
+    #[test]
+    fn o_cartao_pela_regra_desenha_as_linhas_de_exibir() {
+        let ctx = ctx_pronto();
+        let (mut j, _) = janela();
+        let _p = soltar(&mut j, NOME_DO_PIX);
+        let SituacaoDoCartao::Pronto(r) = &mut j.reconhecimento.cartoes[0].situacao else {
+            panic!("pronto");
+        };
+        let Reconhecido::PelaRegra { reconhecimento } = &mut r.reconhecido else {
+            panic!("esperava PelaRegra");
+        };
+        reconhecimento.exibir = vec!["linha curta do script".to_owned()];
+        let textos = textos_pintados(&ctx, &mut j);
+        assert!(contem(&textos, "linha curta do script"), "{textos:?}");
+        assert!(contem(&textos, "Reconhecido pelo padrão"));
+        assert!(contem(&textos, "· versão"));
+    }
+
     #[test]
     fn a_tela_da_nova_regra_cria_o_rascunho() {
         let (mut j, f) = janela();
@@ -1354,5 +1516,95 @@ mod testes_do_painel {
         assert_eq!(v[0].estado, Estado::Rascunho);
         assert_eq!(v[0].definicao.tipo_documental, "boleto");
         assert_eq!(v[0].definicao.detectar.todos.len(), 1);
+    }
+
+    // ---- "Por que este padrão?" (spec 15, D6) ----
+
+    #[test]
+    fn por_que_este_padrao_mostra_o_vencedor_e_o_ambiguo_numa_secao_recolhivel() {
+        let ctx = ctx_pronto();
+        // Sem a animação de abrir, o corpo da seção aparece inteiro no primeiro quadro.
+        ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        let (mut j, _) = janela();
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let _b = soltar(&mut j, NOME_DO_AMBIGUO);
+        // Recolhida: só o título.
+        let textos = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        assert!(contem(&textos, "Por que este padrão?"), "{textos:?}");
+        assert!(!contem(&textos, "Venceu:"), "{textos:?}");
+        j.reconhecimento.cartoes[0].por_que_aberto = true;
+        j.reconhecimento.cartoes[1].por_que_aberto = true;
+        let _ = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        let textos = textos_numa_tela_de(&ctx, &mut j, 3200.0);
+        assert!(
+            contem(&textos, "Entrada: documento (application/pdf)"),
+            "{textos:?}"
+        );
+        assert!(
+            contem(
+                &textos,
+                "Venceu: Comprovante Pix · Banco Exemplo · versão 2."
+            ),
+            "{textos:?}"
+        );
+        assert!(
+            contem(&textos, "foi o único padrão que casou"),
+            "{textos:?}"
+        );
+        // O ambíguo: os dois padrões, o campo em que discordam e o que cada um lê.
+        assert!(
+            contem(&textos, "Ambíguo: 2 padrões empataram"),
+            "{textos:?}"
+        );
+        assert!(
+            contem(&textos, "discordam em o tipo documental"),
+            "{textos:?}"
+        );
+        assert!(contem(&textos, "lê comprovante-pix"), "{textos:?}");
+        assert!(contem(&textos, "lê pix-agendado"), "{textos:?}");
+        assert!(
+            contem(&textos, "prioridade 0 · especificidade 2"),
+            "{textos:?}"
+        );
+    }
+
+    #[test]
+    fn os_pesos_do_cartao_vem_do_catalogo() {
+        let (mut j, _) = janela();
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let c = &j.reconhecimento.cartoes[0];
+        let peso = c.pesos_das_regras.get(&(PIX.to_owned(), 2)).expect("peso");
+        assert_eq!((peso.prioridade, peso.especificidade), (0, 2));
+    }
+
+    #[test]
+    fn o_documento_de_referencia_e_o_do_cartao_mais_recente_com_a_entrada() {
+        let (mut j, _) = janela();
+        assert!(j.documento_de_referencia_dos_padroes().is_none());
+        let _a = soltar(&mut j, NOME_DO_PIX);
+        let _b = soltar(&mut j, NOME_DO_AMBIGUO);
+        let d = j.documento_de_referencia_dos_padroes().expect("documento");
+        assert_eq!(d.rotulo, NOME_DO_AMBIGUO);
+        assert!(d.entrada.texto.is_some());
+        // O filtro "casam agora" da área Padrões confere contra ele.
+        j.regras.definir_documento(Some(d));
+        j.regras
+            .definir_filtro(crate::padroes_visiveis::FiltroDePadroes {
+                casam: crate::padroes_visiveis::CasamComODocumento::Agora,
+                ..Default::default()
+            });
+        let ids: Vec<String> = j
+            .regras
+            .padroes_filtrados()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "comprovante-pix-banco-exemplo",
+                "pix-agendado-banco-exemplo"
+            ]
+        );
     }
 }

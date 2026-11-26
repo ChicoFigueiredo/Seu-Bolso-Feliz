@@ -1,0 +1,49 @@
+                                               CA/SR
+                     Mês / Ano de Pagamento                                                Código de Lotação
+                                               MZ SN UNIDADE FICTICIA DE
+                     NOVEMBRO / 2026                                                       012 3456 7
+                                               TESTES
+
+DEMONSTRATIVO DE PAGAMENTO
+Nome                                                                  Data Admissão        Matrícula
+FULANO DE TAL                                                         01/02/2003           12345-6
+Unidade de Lotação                                                                         Sigla
+GN UNIDADE FICTICIA                                                                        GEFIC
+                                                           Ref.
+Cargo                                                                 Ag./Un.    Op./Prod. Conta de Deposito
+                                                           Salarial
+TECNICO FICTICIO                                                      1234       5678      123456789 0
+                                                           101
+Função de Confiança/Cargo em Comissão Função Gratificada              Dep. PAI   SF-NSS    SF-CEF
+                                                                                                       Dep. IR
+GERENTE FICTICIO I                                                    00         00        00
+
+ Tp/Rub          Discriminação da Rubrica              Competência               Prazo             Valor
+  2002     SALARIO PADRAO                                   11/2026                                     5.000,00
+           COMPL TEMP VARIAVEL AJUSTE
+  2005                                                      11/2026                                     3.000,00
+           MERCADO
+  2068     ADIANT GRATIFICACAO NATAL                        11/2026                                     4.000,00
+  21041    AJUDA DE CUSTO TRABALHO REMOTO                   11/2026                                       100,00
+  3068     REP ADIANT GRATIFICACAO NATAL                    11/2026                                     1.000,00
+  4313     INSS CONTRIBUICAO                                11/2026                                       800,00
+  4325     IMPOSTO DE RENDA                                 11/2026                                     1.500,00
+  4460     SAUDE CAIXA - MENSALIDADE                        11/2026                                       300,00
+  4460     SAUDE CAIXA - MENSALIDADE                        11/2026                                       100,00
+ 43355     EMPRESTIMO E-CONSIGNADO                          11/2026                                       200,00
+  43355     EMPRESTIMO E-CONSIGNADO                             11/2026                                     200,00
+Salário Bruto                    Valor Desconto            Salário Liquido             Excesso de Débito
+                    R$ 12.100,00              R$ 4.100,00                R$ 8.000,00               R$ 0,00
+Liquido creditado em 23/11/2026
+                                                               Liquido creditado em
+                                                R$ 8.000,00
+                                Marg. Consignável de     Marg. Consignável 40%
+Marg. Consignável 5% Cartões                                                        Dep. FGTS Mês Anterior
+                                35% Empréstimos          Limite
+                    R$ 250,00                                                                    R$ 400,00
+                                                 R$ 0,00                R$ 300,00
+                                                               Base Cálculo Imposto
+Salário Contrib. INSS               Sal. Contr. Prev. Privada             Valor Remuneração Base
+                                                               Renda
+                        R$ 5.000,00               R$ 6.000,00                                           R$ 8.000,00
+                                                                              R$ 7.000,00

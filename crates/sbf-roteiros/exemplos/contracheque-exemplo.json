@@ -1,0 +1,16 @@
+{
+  "nome": "contracheque-exemplo",
+  "descricao": "Entra no portal de contracheque fictício, confirma o código recebido por e-mail e baixa o PDF do mês. Exemplo para o site falso; veja contracheque-modelo-portal-real.md para adaptar a um portal real.",
+  "url_inicial": "https://portal.exemplo.test/entrar",
+  "hosts": ["portal.exemplo.test"],
+  "rotulo_senha": "senha:portal-exemplo",
+  "rotulo_cpf": null,
+  "mfa": {
+    "tipo": "email",
+    "remetente": "nao-responda@portal.exemplo.test",
+    "formato": "\\d{6}"
+  },
+  "movimenta_dinheiro": false,
+  "classe": "consulta",
+  "agenda_horas": 168
+}

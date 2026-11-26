@@ -27,14 +27,18 @@ use std::fmt;
 mod banco;
 pub mod conciliacao;
 mod escrita;
+mod modelo;
 mod projecao;
 mod resumo;
+mod rotulo;
 mod servico;
 
 pub use banco::Banco;
+pub use modelo::FABRICA_NOME_DO_MODELO;
 pub use projecao::{
     projetar, projetar_competencias, projetar_competencias_desde, projetar_desde, versao_vigente,
 };
+pub use rotulo::Rotulador;
 pub use servico::PlanejamentoSqlite;
 
 use serde::{Deserialize, Serialize};
@@ -359,6 +363,12 @@ pub enum Excecao {
         valor: Centavos,
         data: Option<Data>,
     },
+    /// O usuário digitou a quantidade (as diárias) só deste mês: o Cálculo do Modelo de
+    /// compromisso usa esta quantidade no lugar da que ele mesmo conta. Só vale em
+    /// compromisso ligado a um modelo.
+    QuantidadeSoDesteMes {
+        quantidade: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -383,19 +393,24 @@ pub struct Conciliacao {
     pub confirmada: bool,
 }
 
-/// Uma conta do planejamento (o apelido da planilha, como `CX-0001`) e a conta do extrato a
-/// que ela corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO · 000000-1`).
+/// Uma conta do planejamento: o **código da conta** (o nome que a planilha usa, como
+/// `CX-0001`), o **apelido** opcional que o usuário lhe deu ("Reserva") e a conta do extrato a
+/// que o código corresponde (o `conta_provavel` do inventário, como `BANCO EXEMPLO ·
+/// 000000-1`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContaDoPlanejamento {
-    pub apelido: String,
+    pub codigo: String,
+    /// O nome curto, opcional, que aparece depois do código no rótulo. Não identifica nada.
+    #[serde(default)]
+    pub apelido: Option<String>,
     /// `None` enquanto o usuário não confirmou um par.
     pub conta_do_extrato: Option<String>,
 }
 
-/// Um par apelido ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
+/// Um par código ↔ conta do extrato proposto pelo histórico, para o usuário confirmar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParDeConta {
-    pub apelido: String,
+    pub codigo: String,
     pub conta_do_extrato: String,
     /// Quantas conciliações (confirmadas ou sugeridas) e assinaturas apontam para o par.
     pub evidencias: u32,
@@ -405,7 +420,7 @@ pub struct ParDeConta {
 
 /// Como achar no extrato o movimento de um recorrente de valor variável (o salário): o texto
 /// que a descrição do banco traz e a janela em dias em volta do vencimento. A conta vem da
-/// versão (o apelido) e do par confirmado.
+/// versão (o código) e do par confirmado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assinatura {
     /// Comparado sem acento e sem caixa, como "contém" ("SALARIO CAIXA").
@@ -425,6 +440,13 @@ pub struct MovimentoDoExtrato {
     pub descricao: String,
     /// O `tipo` do inventário (`credito`, `pagamento_fatura`, `transferencia_interna`…).
     pub tipo: String,
+    /// O nome do favorecido (ou de quem pagou) que o banco informa à parte da descrição.
+    /// Na CAIXA a descrição é só "PIX ENVIADO": o favorecido só aparece aqui.
+    #[serde(default)]
+    pub contraparte: Option<String>,
+    /// O CPF/CNPJ da contraparte, às vezes formatado. Dado pessoal: nunca vai a log.
+    #[serde(default)]
+    pub contraparte_doc: Option<String>,
 }
 
 /// Uma conciliação gravada da ocorrência, com o movimento do extrato quando ele ainda aparece
@@ -513,6 +535,8 @@ pub struct Ocorrencia {
     pub fornecedor: Option<String>,
     /// O id da versão que explica o valor.
     pub versao: String,
+    /// O Cálculo do Modelo de compromisso que deu o `previsto`, se o compromisso usa um.
+    pub calculo: Option<CalculoDaOcorrencia>,
     pub prazo_desconhecido: bool,
     /// Há sugestão de conciliação à espera de confirmação.
     pub sugestao_de_conciliacao: bool,
@@ -523,6 +547,21 @@ pub struct Ocorrencia {
 // ---------------------------------------------------------------------------------------
 
 /// O último saldo conhecido de uma conta, com a data da coleta.
+/// De onde veio o previsto de uma ocorrência de compromisso com modelo (Cálculo).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalculoDaOcorrencia {
+    /// O nome do Modelo de compromisso.
+    pub modelo: String,
+    /// O que o script diz ("diária R$ 210,00 × 5 sextas"); vazio quando o cálculo falhou.
+    pub explicacao: String,
+    /// A quantidade usada (as sextas do mês, ou a que o usuário ajustou).
+    pub quantidade: Option<i64>,
+    /// A quantidade foi digitada para este mês ([`Excecao::QuantidadeSoDesteMes`]).
+    pub ajustada: bool,
+    /// Por que o cálculo não valeu (⚠): o previsto cai no último valor conhecido.
+    pub aviso: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Saldo {
     pub conta: String,
@@ -689,6 +728,76 @@ pub struct DocumentoVinculado {
 }
 
 // ---------------------------------------------------------------------------------------
+// Modelo de compromisso e Cálculo
+// ---------------------------------------------------------------------------------------
+
+/// O tipo de um parâmetro de Modelo de compromisso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeParametro {
+    /// Dinheiro, em centavos inteiros (≥ 0).
+    Centavos,
+    /// De 1 (segunda) a 7 (domingo).
+    DiaDaSemana,
+    Inteiro,
+    Texto,
+}
+
+/// Um parâmetro que o modelo declara.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParametroDeModelo {
+    /// Minúsculas, sem acento, `_` e dígitos: é a chave em `entrada.parametros`.
+    pub nome: String,
+    pub tipo: TipoDeParametro,
+}
+
+/// O valor de um parâmetro: centavos, dia da semana e inteiro são [`Inteiro`](Self::Inteiro).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ValorDoParametro {
+    Inteiro(i64),
+    Texto(String),
+}
+
+/// O valor de um parâmetro num compromisso, a partir de uma competência (inclusive).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValorDeParametro {
+    pub parametro: String,
+    pub desde: Competencia,
+    pub valor: ValorDoParametro,
+}
+
+/// Um Modelo de compromisso, com a versão mais recente do Cálculo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Modelo {
+    pub id: String,
+    pub nome: String,
+    pub parametros: Vec<ParametroDeModelo>,
+    /// A versão mais recente do Cálculo (1, 2...).
+    pub versao_do_calculo: u32,
+    /// O sha256 do script dessa versão.
+    pub checksum: String,
+    /// O script Luau dessa versão.
+    pub calculo: String,
+    /// Veio de fábrica (semeado ao abrir o banco).
+    pub de_fabrica: bool,
+}
+
+/// A ligação de um compromisso a um modelo, com os valores que ele preencheu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LigacaoDeModelo {
+    pub recorrente: String,
+    pub modelo_id: String,
+    pub modelo: String,
+    /// A versão do Cálculo a que a ligação está presa.
+    pub versao_do_calculo: u32,
+    pub checksum: String,
+    pub parametros: Vec<ParametroDeModelo>,
+    /// Os valores vigentes, do mais antigo ao mais novo, por parâmetro.
+    pub valores: Vec<ValorDeParametro>,
+}
+
+// ---------------------------------------------------------------------------------------
 // Escrita
 // ---------------------------------------------------------------------------------------
 
@@ -718,17 +827,62 @@ pub enum Escopo {
 }
 
 /// Um remendo de versão: `None` mantém o campo; `Some(None)` limpa.
+///
+/// No JSON (propostas, inversos do Desfazer) o `Some(None)` vira `{"limpar": true}`: com o
+/// serde padrão ele viraria `null` e voltaria como `None`, e "limpar a nota" se perderia.
+/// `null` continua lendo como "não muda", como no que já foi gravado.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MudancaDeVersao {
+    #[serde(with = "limpavel")]
     pub valor: Option<Option<Centavos>>,
     pub certeza: Option<Certeza>,
     pub fonte: Option<Fonte>,
     pub frequencia: Option<Frequencia>,
+    #[serde(with = "limpavel")]
     pub conta: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub centro: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub fornecedor: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub categoria: Option<Option<String>>,
+    #[serde(with = "limpavel")]
     pub nota: Option<Option<String>>,
+}
+
+/// `Option<Option<T>>` que sobrevive ao JSON: `null` = não muda, `{"limpar": true}` = limpa.
+mod limpavel {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Forma<T> {
+        Limpar { limpar: bool },
+        Valor(T),
+    }
+
+    #[allow(clippy::option_option)]
+    pub fn serialize<S: Serializer, T: Serialize>(
+        v: &Option<Option<T>>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match v {
+            None => s.serialize_none(),
+            Some(None) => Forma::<&T>::Limpar { limpar: true }.serialize(s),
+            Some(Some(x)) => Forma::Valor(x).serialize(s),
+        }
+    }
+
+    #[allow(clippy::option_option)]
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        d: D,
+    ) -> Result<Option<Option<T>>, D::Error> {
+        Ok(match Option::<Forma<T>>::deserialize(d)? {
+            None => None,
+            Some(Forma::Limpar { limpar }) => limpar.then_some(None),
+            Some(Forma::Valor(x)) => Some(Some(x)),
+        })
+    }
 }
 
 /// Uma linha de origem importada: a mesma origem nunca gera duas regras.
@@ -810,6 +964,12 @@ pub enum Alteracao {
         arquivado: bool,
         versao_base: i64,
     },
+    /// Muda o nome do compromisso (o histórico guarda o nome de antes; dá para desfazer).
+    Renomear {
+        recorrente: String,
+        nome: String,
+        versao_base: i64,
+    },
     /// Muda o grupo e/ou a posição (prioridade).
     Mover {
         recorrente: String,
@@ -843,15 +1003,50 @@ pub enum Alteracao {
         ocorrencia: IdOcorrencia,
         movimento: String,
     },
-    /// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato.
+    /// Confirma (ou desfaz, com `None`) o par código ↔ conta do extrato.
     MapearConta {
-        apelido: String,
+        // O JSON gravado antes do rename (histórico, propostas) dizia `apelido`.
+        #[serde(alias = "apelido")]
+        codigo: String,
         conta_do_extrato: Option<String>,
+    },
+    /// Dá (ou tira, com `None`) o apelido de um código de conta. Vale também para um código
+    /// que ainda não tem par; o histórico guarda o apelido de antes, e dá para desfazer.
+    DefinirApelidoDaConta {
+        codigo: String,
+        apelido: Option<String>,
     },
     /// Define (ou tira, com `None`) a assinatura de um recorrente.
     DefinirAssinatura {
         recorrente: String,
         assinatura: Option<Assinatura>,
+        versao_base: i64,
+    },
+    /// Cria um Modelo de compromisso: os parâmetros e a versão 1 do Cálculo (script Luau com
+    /// `calcular(entrada, ajuda)`).
+    CriarModelo {
+        nome: String,
+        parametros: Vec<ParametroDeModelo>,
+        calculo: String,
+    },
+    /// Uma versão nova do Cálculo do modelo `modelo` (id). As anteriores não mudam; os
+    /// compromissos continuam presos à versão que usavam até serem ligados de novo.
+    NovaVersaoDoCalculo {
+        modelo: String,
+        calculo: String,
+    },
+    /// Liga o compromisso ao modelo `modelo` (id), na versão mais recente do Cálculo, e
+    /// grava os `valores` dos parâmetros com vigência.
+    AplicarModelo {
+        recorrente: String,
+        modelo: String,
+        valores: Vec<ValorDeParametro>,
+        versao_base: i64,
+    },
+    /// Um valor de parâmetro com vigência (o de mesmo parâmetro e `desde` é substituído).
+    DefinirParametro {
+        recorrente: String,
+        valor: ValorDeParametro,
         versao_base: i64,
     },
 }
@@ -967,20 +1162,55 @@ pub trait Planejamento {
     /// O efeito de uma alteração, sem gravar nada.
     fn simular(&self, alteracao: &Alteracao, hoje: Data) -> Resultado<Simulacao>;
 
-    /// Aplica e grava no histórico. A janela e a importação usam; o MCP nunca.
+    /// Aplica e grava no histórico. A janela, a importação e (D15) o MCP usam.
     fn aplicar(&mut self, alteracao: Alteracao, autor: Autor) -> Resultado<Recibo>;
+
+    /// Desfaz uma alteração do histórico (`alteracao_id`): aplica o inverso que ela guardou,
+    /// com novo registro no histórico (autor `autor`), e marca a original como desfeita.
+    /// Recusa a que já foi desfeita, a que é um Desfazer e a que não tem inverso. O padrão
+    /// recusa tudo (quem não guarda o inverso não sabe desfazer).
+    fn desfazer(&mut self, alteracao_id: &str, autor: Autor) -> Resultado<Recibo> {
+        let _ = (alteracao_id, autor);
+        Err(ErroDoPlanejamento::Invalida(
+            "este planejamento não sabe desfazer alterações".to_owned(),
+        ))
+    }
+
+    /// A alteração mais recente de `autor` que ainda dá para desfazer: não foi desfeita, não
+    /// é ela mesma um Desfazer e tem inverso. O padrão é nenhuma.
+    fn ultima_desfazivel(&self, autor: &Autor) -> Resultado<Option<EntradaDoHistorico>> {
+        let _ = autor;
+        Ok(None)
+    }
 
     /// Guarda uma proposta pendente. A mesma `chave` devolve a mesma proposta.
     fn propor(&mut self, alteracao: Alteracao, origem: &str, chave: &str) -> Resultado<Proposta>;
 
     fn propostas(&self, so_pendentes: bool) -> Resultado<Vec<Proposta>>;
 
-    /// Só a janela chama: revalida a versão de base e aplica com autor `Usuario`.
+    /// A janela chama: revalida a versão de base e aplica com autor `Usuario`.
     fn confirmar_proposta(&mut self, id: &str) -> Resultado<Recibo>;
+
+    /// Como [`Planejamento::confirmar_proposta`], mas com o autor dado no histórico (D15: o MCP
+    /// aplica as propostas que ele mesmo fez, com autor `Mcp`). O padrão recusa.
+    fn confirmar_proposta_como(&mut self, id: &str, autor: Autor) -> Resultado<Recibo> {
+        let _ = (id, autor);
+        Err(ErroDoPlanejamento::Invalida(
+            "este planejamento não confirma proposta em nome de outro autor".to_owned(),
+        ))
+    }
 
     fn recusar_proposta(&mut self, id: &str, motivo: &str) -> Resultado<()>;
 
     fn historico(&self, alvo: Option<&str>, limite: u32) -> Resultado<Vec<EntradaDoHistorico>>;
+
+    /// Uma linha do histórico pelo id (o `alteracao_id` do recibo).
+    fn entrada_do_historico(&self, id: &str) -> Resultado<Option<EntradaDoHistorico>> {
+        Ok(self
+            .historico(None, 100_000)?
+            .into_iter()
+            .find(|e| e.id == id))
+    }
 
     /// O recorrente que já nasceu desta origem, se houver.
     fn origem_importada(&self, origem: &OrigemImportada) -> Resultado<Option<String>>;
@@ -1010,6 +1240,13 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
+    /// O usuário já desvinculou este documento (pelo sha256) deste alvo alguma vez: uma regra
+    /// não refaz o vínculo sozinha, como não refaz a conciliação desfeita. O padrão é `false`.
+    fn documento_desvinculado(&self, alvo: &AlvoDoDocumento, sha256: &str) -> Resultado<bool> {
+        let _ = (alvo, sha256);
+        Ok(false)
+    }
+
     /// As exceções de um recorrente, inclusive as desfeitas (para idempotência e para a aba
     /// "Exceções"). O padrão é nenhuma, para implementações que não as guardam.
     fn excecoes_do_recorrente(&self, recorrente: &str) -> Resultado<Vec<ExcecaoGravada>> {
@@ -1017,18 +1254,24 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
-    /// Os apelidos de conta em uso (nas versões) e o par confirmado de cada um.
+    /// Os códigos de conta em uso (nas versões, ou já com par ou apelido), cada um com o
+    /// apelido e o par confirmado.
     fn contas(&self) -> Resultado<Vec<ContaDoPlanejamento>> {
         Ok(Vec::new())
     }
 
-    /// Os pares apelido ↔ conta do extrato que o histórico sugere, para apelidos ainda sem par
+    /// O rótulo das contas do extrato (ver [`Rotulador`]), do que o planejamento sabe agora.
+    fn rotulador(&self) -> Resultado<Rotulador> {
+        Ok(Rotulador::novo(&self.contas()?, &self.contas_do_extrato()?))
+    }
+
+    /// Os pares código ↔ conta do extrato que o histórico sugere, para códigos ainda sem par
     /// confirmado. Não grava nada.
     fn pares_de_conta_sugeridos(&self) -> Resultado<Vec<ParDeConta>> {
         Ok(Vec::new())
     }
 
-    /// As contas que aparecem no extrato (para escolher o par de um apelido), em ordem.
+    /// As contas que aparecem no extrato (para escolher o par de um código), em ordem.
     fn contas_do_extrato(&self) -> Resultado<Vec<String>> {
         Ok(Vec::new())
     }
@@ -1059,6 +1302,14 @@ pub trait Planejamento {
         Ok(Vec::new())
     }
 
+    /// As ocorrências a que este movimento do extrato está ligado (conciliações confirmadas e
+    /// sugestões, sem as desfeitas): é como a página do registro diz "Concilia". O padrão é
+    /// nenhuma.
+    fn conciliacoes_do_movimento(&self, movimento: &str) -> Resultado<Vec<Conciliacao>> {
+        let _ = movimento;
+        Ok(Vec::new())
+    }
+
     /// A conciliação deste par ocorrência e movimento já foi desfeita antes (exclusão lógica):
     /// uma regra não a refaz sozinha. O padrão é `false`.
     fn conciliacao_desfeita(&self, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<bool> {
@@ -1074,6 +1325,22 @@ pub trait Planejamento {
         competencia: Competencia,
     ) -> Resultado<Vec<BaixaPeloContracheque>> {
         let _ = competencia;
+        Ok(Vec::new())
+    }
+
+    /// Os Modelos de compromisso (sem os desfeitos), com a versão mais recente do Cálculo.
+    fn modelos(&self) -> Resultado<Vec<Modelo>> {
+        Ok(Vec::new())
+    }
+
+    /// A ligação do compromisso a um modelo e os valores que ele preencheu, se houver.
+    fn ligacao_de_modelo(&self, recorrente: &str) -> Resultado<Option<LigacaoDeModelo>> {
+        let _ = recorrente;
+        Ok(None)
+    }
+
+    /// Todas as ligações vigentes (para listar quem usa cada modelo).
+    fn ligacoes_de_modelo(&self) -> Resultado<Vec<LigacaoDeModelo>> {
         Ok(Vec::new())
     }
 

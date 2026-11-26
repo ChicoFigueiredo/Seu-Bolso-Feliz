@@ -42,6 +42,8 @@ impl Extrato {
             conta_do_extrato: conta.to_owned(),
             descricao: descricao.to_owned(),
             tipo: if valor > 0 { "credito" } else { "debito" }.to_owned(),
+            contraparte: None,
+            contraparte_doc: None,
         });
     }
 }
@@ -110,10 +112,10 @@ fn base(s: &PlanejamentoSqlite, id: &str) -> i64 {
         .versao_do_registro
 }
 
-fn mapear(s: &mut PlanejamentoSqlite, apelido: &str, conta: Option<&str>) {
+fn mapear(s: &mut PlanejamentoSqlite, codigo: &str, conta: Option<&str>) {
     s.aplicar(
         Alteracao::MapearConta {
-            apelido: apelido.into(),
+            codigo: codigo.into(),
             conta_do_extrato: conta.map(str::to_owned),
         },
         Autor::Usuario,
@@ -177,7 +179,7 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
         s.contas()
             .expect("contas")
             .iter()
-            .map(|c| (c.apelido.as_str(), c.conta_do_extrato.as_deref()))
+            .map(|c| (c.codigo.as_str(), c.conta_do_extrato.as_deref()))
             .collect::<Vec<_>>(),
         [("CX-0001", None), ("Nubank", None)]
     );
@@ -203,10 +205,10 @@ fn mapear_conta_grava_confirma_desfaz_e_deixa_historico() {
 #[test]
 fn mapear_conta_valida_os_campos() {
     let mut s = servico(&Extrato::default());
-    for (apelido, conta) in [("  ", Some("B")), ("CX", Some(" "))] {
+    for (codigo, conta) in [("  ", Some("B")), ("CX", Some(" "))] {
         let erro = s.aplicar(
             Alteracao::MapearConta {
-                apelido: apelido.into(),
+                codigo: codigo.into(),
                 conta_do_extrato: conta.map(str::to_owned),
             },
             Autor::Usuario,
@@ -216,7 +218,7 @@ fn mapear_conta_valida_os_campos() {
 }
 
 #[test]
-fn contas_incluem_o_par_mesmo_sem_versao_usando_o_apelido() {
+fn contas_incluem_o_par_mesmo_sem_versao_usando_o_codigo() {
     let mut s = servico(&Extrato::default());
     mapear(&mut s, "Antiga", Some("BANCO · 9"));
     let contas = s.contas().expect("contas");
@@ -634,21 +636,21 @@ fn pares_sugeridos_vem_do_historico_com_evidencia_e_motivo() {
     conciliar(&mut s, &net, "pluggy:txn_3", 5_000, 9, false);
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 2);
-    assert_eq!(pares[0].apelido, "CX-0001");
+    assert_eq!(pares[0].codigo, "CX-0001");
     assert_eq!(pares[0].conta_do_extrato, "BANCO · 1");
     assert_eq!(pares[0].evidencias, 2);
     assert_eq!(
         pares[0].motivo,
         "1 conciliação confirmada e 1 conciliação sugerida"
     );
-    assert_eq!(pares[1].apelido, "Nubank");
+    assert_eq!(pares[1].codigo, "Nubank");
     assert_eq!(pares[1].conta_do_extrato, "BANCO · 2");
 
-    // Com o par confirmado, o apelido sai da lista.
+    // Com o par confirmado, o código sai da lista.
     mapear(&mut s, "CX-0001", Some("BANCO · 1"));
     let pares = s.pares_de_conta_sugeridos().expect("pares");
     assert_eq!(pares.len(), 1);
-    assert_eq!(pares[0].apelido, "Nubank");
+    assert_eq!(pares[0].codigo, "Nubank");
 }
 
 #[test]
@@ -689,6 +691,61 @@ fn sem_extrato_nada_e_sugerido() {
     assert_eq!(s.buscar_conciliacoes(&novembro(), HOJE).expect("buscar"), 0);
     assert!(s.pares_de_conta_sugeridos().expect("pares").is_empty());
     assert!(s.contas_do_extrato().expect("contas").is_empty());
+}
+
+#[test]
+fn conciliacoes_do_movimento_dizem_a_que_ocorrencia_ele_esta_ligado() {
+    let extrato = Extrato::default();
+    extrato.por("pluggy:txn_s", 20, 822_600, "BANCO · 1", "SALARIO EMPRESA");
+    let mut s = servico(&extrato);
+    let id = criar(
+        &mut s,
+        "Salário",
+        Natureza::Entrada,
+        20,
+        Some(845_000),
+        Some("CX-0001"),
+    );
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:txn_s")
+            .expect("vazio")
+            .is_empty()
+    );
+    s.aplicar(
+        Alteracao::Conciliar {
+            conciliacao: Conciliacao {
+                ocorrencia: ocorrencia(&id),
+                movimento: "pluggy:txn_s".into(),
+                valor: Centavos(822_600),
+                data: dia(20),
+                confirmada: true,
+            },
+        },
+        Autor::Usuario,
+    )
+    .expect("confirmar");
+    let v = s.conciliacoes_do_movimento("pluggy:txn_s").expect("lista");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].ocorrencia, ocorrencia(&id));
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:outro")
+            .expect("vazio")
+            .is_empty()
+    );
+    // Desfeita, deixa de ligar.
+    s.aplicar(
+        Alteracao::Desconciliar {
+            ocorrencia: ocorrencia(&id),
+            movimento: "pluggy:txn_s".into(),
+        },
+        Autor::Usuario,
+    )
+    .expect("desfazer");
+    assert!(
+        s.conciliacoes_do_movimento("pluggy:txn_s")
+            .expect("vazio")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -738,4 +795,195 @@ fn conciliacoes_da_ocorrencia_trazem_o_movimento_e_a_conta() {
         .expect("conciliações");
     assert!(!v[0].mesma_conta);
     assert!(v[0].movimento.is_some());
+}
+
+// ---------------------------------------------------------------------------------------
+// Apelido da conta e rótulo
+// ---------------------------------------------------------------------------------------
+
+fn apelidar(
+    s: &mut PlanejamentoSqlite,
+    codigo: &str,
+    apelido: Option<&str>,
+) -> Result<sbf_planejamento::Recibo, ErroDoPlanejamento> {
+    s.aplicar(
+        Alteracao::DefinirApelidoDaConta {
+            codigo: codigo.into(),
+            apelido: apelido.map(str::to_owned),
+        },
+        Autor::Usuario,
+    )
+}
+
+fn apelido_de(s: &PlanejamentoSqlite, codigo: &str) -> Option<String> {
+    s.contas()
+        .expect("contas")
+        .into_iter()
+        .find(|c| c.codigo == codigo)
+        .and_then(|c| c.apelido)
+}
+
+#[test]
+fn apelido_grava_aparece_em_contas_troca_e_tira_com_historico() {
+    let mut s = servico(&Extrato::default());
+    criar(
+        &mut s,
+        "Aluguel",
+        Natureza::Saida,
+        5,
+        Some(100_000),
+        Some("CX-0001"),
+    );
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    apelidar(&mut s, "CX-0001", Some("  Reserva ")).expect("dar");
+    assert_eq!(apelido_de(&s, "CX-0001"), Some("Reserva".into()));
+    apelidar(&mut s, "CX-0001", Some("Casa")).expect("trocar");
+    assert_eq!(apelido_de(&s, "CX-0001"), Some("Casa".into()));
+    // Texto em branco e `None` tiram o apelido; a linha continua, só o campo esvazia.
+    apelidar(&mut s, "CX-0001", Some("   ")).expect("tirar");
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    apelidar(&mut s, "CX-0001", Some("Volta")).expect("dar");
+    apelidar(&mut s, "CX-0001", None).expect("tirar");
+    assert_eq!(apelido_de(&s, "CX-0001"), None);
+    let h = s.historico(Some("CX-0001"), 10).expect("historico");
+    assert_eq!(h.len(), 5);
+    assert!(h.iter().all(|e| e.autor == Autor::Usuario));
+}
+
+#[test]
+fn apelido_vale_para_codigo_sem_par_e_sem_versao_e_nao_mexe_no_par() {
+    let mut s = servico(&Extrato::default());
+    apelidar(&mut s, "Antiga", Some("Poupança velha")).expect("dar");
+    let contas = s.contas().expect("contas");
+    assert_eq!(contas.len(), 1);
+    assert_eq!(contas[0].codigo, "Antiga");
+    assert_eq!(contas[0].apelido.as_deref(), Some("Poupança velha"));
+    assert_eq!(contas[0].conta_do_extrato, None);
+    // Ligar e desligar o par não apaga o apelido, nem o contrário.
+    mapear(&mut s, "Antiga", Some("BANCO · 9"));
+    assert_eq!(apelido_de(&s, "Antiga"), Some("Poupança velha".into()));
+    mapear(&mut s, "Antiga", None);
+    assert_eq!(apelido_de(&s, "Antiga"), Some("Poupança velha".into()));
+    apelidar(&mut s, "Antiga", None).expect("tirar");
+    mapear(&mut s, "Antiga", Some("BANCO · 9"));
+    assert_eq!(
+        s.contas().expect("contas")[0].conta_do_extrato.as_deref(),
+        Some("BANCO · 9")
+    );
+}
+
+#[test]
+fn apelido_valida_codigo_e_tamanho() {
+    let mut s = servico(&Extrato::default());
+    assert!(matches!(
+        apelidar(&mut s, "  ", Some("x")),
+        Err(ErroDoPlanejamento::Invalida(_))
+    ));
+    let longo = "x".repeat(61);
+    assert!(matches!(
+        apelidar(&mut s, "CX", Some(&longo)),
+        Err(ErroDoPlanejamento::Invalida(_))
+    ));
+    assert!(s.contas().expect("contas").is_empty());
+}
+
+#[test]
+fn apelido_e_par_se_desfazem_e_a_linha_nunca_e_apagada() {
+    let mut s = servico(&Extrato::default());
+    let r1 = apelidar(&mut s, "CX-9", Some("Um")).expect("dar");
+    let r2 = apelidar(&mut s, "CX-9", Some("Dois")).expect("trocar");
+    s.desfazer(&r2.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    assert_eq!(apelido_de(&s, "CX-9"), Some("Um".into()));
+    s.desfazer(&r1.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    assert_eq!(apelido_de(&s, "CX-9"), None);
+    // Desfazer o mesmo duas vezes é recusado, como as outras alterações.
+    assert!(s.desfazer(&r1.alteracao_id, Autor::Usuario).is_err());
+
+    let ligar = s
+        .aplicar(
+            Alteracao::MapearConta {
+                codigo: "CX-9".into(),
+                conta_do_extrato: Some("BANCO · 1".into()),
+            },
+            Autor::Usuario,
+        )
+        .expect("ligar");
+    s.desfazer(&ligar.alteracao_id, Autor::Usuario)
+        .expect("desfazer");
+    // Sem par, sem apelido e sem versão que o use, o código sai da lista; a linha fica.
+    assert!(s.contas().expect("contas").is_empty());
+    let linhas: i64 = s
+        .banco
+        .conexao()
+        .query_row("SELECT count(*) FROM contas_do_planejamento", [], |l| {
+            l.get(0)
+        })
+        .expect("contar");
+    assert_eq!(linhas, 1);
+
+    // Nada se apaga de fato: o gatilho do esquema recusa o DELETE.
+    assert!(
+        s.banco
+            .conexao()
+            .execute("DELETE FROM contas_do_planejamento", [])
+            .is_err()
+    );
+}
+
+#[test]
+fn rotulador_junta_pares_apelidos_e_poupanca_vinculada() {
+    let extrato = Extrato::default();
+    extrato.por("a", 8, 100, "BANCO EXEMPLO · 000000-1", "X");
+    extrato.por("b", 8, 100, "BANCO EXEMPLO Poupança · 000000-1", "X");
+    extrato.por("c", 8, 100, "BANCO EXEMPLO · 000000-2", "X");
+    let mut s = servico(&extrato);
+    mapear(&mut s, "CX-0001", Some("BANCO EXEMPLO · 000000-1"));
+    apelidar(&mut s, "CX-0001", Some("Reserva")).expect("dar");
+    let r = s.rotulador().expect("rotulador");
+    assert_eq!(r.rotular("BANCO EXEMPLO · 000000-1"), "CX-0001 · Reserva");
+    assert_eq!(
+        r.rotular("BANCO EXEMPLO Poupança · 000000-1"),
+        "Poupança CX-0001 · Reserva"
+    );
+    assert_eq!(
+        r.rotular("BANCO EXEMPLO · 000000-2"),
+        "BANCO EXEMPLO · 000000-2"
+    );
+    // Todas as contas continuam na lista do extrato: o rótulo só troca o nome.
+    assert_eq!(s.contas_do_extrato().expect("contas").len(), 3);
+}
+
+#[test]
+fn a_poupanca_vinculada_nao_vale_como_par_na_conciliacao() {
+    // A derivação é só de exibição: o movimento da poupança não casa com o par da corrente.
+    let extrato = Extrato::default();
+    extrato.por(
+        "pluggy:txn_p",
+        8,
+        -10_000,
+        "BANCO EXEMPLO Poupança · 000000-1",
+        "ENERGIA",
+    );
+    let mut s = servico(&extrato);
+    let luz = criar(
+        &mut s,
+        "Luz",
+        Natureza::Saida,
+        8,
+        Some(10_000),
+        Some("CX-0001"),
+    );
+    mapear(&mut s, "CX-0001", Some("BANCO EXEMPLO · 000000-1"));
+    let o = IdOcorrencia {
+        recorrente: luz,
+        competencia: comp(2026, 11),
+        parcela: None,
+    };
+    let candidatos = s.candidatos_de_conciliacao(&o).expect("candidatos");
+    assert!(
+        candidatos.iter().all(|c| !c.mesma_conta),
+        "a conta da poupança não é a do par"
+    );
 }

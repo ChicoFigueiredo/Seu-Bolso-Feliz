@@ -118,6 +118,9 @@ pub enum Pedido {
     Triagem(crate::triagem::AcaoDaTriagem),
     /// Controle mensal (spec 11): Ações, aplicar com prévia e propostas do Claude.
     Controle(crate::controle_ui::PedidoDoControle),
+    /// Um clique numa ligação do registro (abrir o registro do movimento, a ocorrência que
+    /// ele concilia, a regra que o reconhece).
+    Ligacao(crate::ligacoes_do_registro::PedidoDeLigacao),
 }
 
 impl Pedido {

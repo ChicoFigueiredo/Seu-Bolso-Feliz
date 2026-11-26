@@ -22,22 +22,25 @@ sbf-planejamento = { path = "../sbf-planejamento" }
 sbf-planilha = { path = "../sbf-planilha" }
 sbf-reconhecimento = { path = "../sbf-reconhecimento" }
 sbf-regras = { workspace = true }
+sbf-rita = { path = "../sbf-rita" }
 sbf-pontos = { path = "../sbf-pontos" }
 sbf-ia = { path = "../sbf-ia" }
 sbf-worker = { path = "../sbf-worker" }
 sbf-mensageiros = { path = "../sbf-mensageiros" }
+sbf-telegram = { path = "../sbf-telegram" }
+sbf-gmail = { path = "../sbf-gmail" }
 sbf-roteiros = { path = "../sbf-roteiros" }
 # QR do pareamento do WhatsApp (MIT OR Apache-2.0); só desenhamos a matriz.
 qrcode = { version = "0.14", default-features = false }
 # Só para o acervo fictício da demonstração (o anexo do e-mail liga ao achado pelo sha256).
 sha2 = "0.11"
 zeroize = { workspace = true }
+rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
 bancada-segredos = { workspace = true, features = ["testes"] }
-rusqlite = { workspace = true }
 tempfile = { workspace = true }
 sbf-estacao = { path = "../sbf-estacao" }
 sbf-livro = { path = "../sbf-livro" }

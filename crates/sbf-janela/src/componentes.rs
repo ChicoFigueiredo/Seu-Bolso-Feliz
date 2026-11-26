@@ -19,13 +19,9 @@ pub fn ctrl(ui: &Ui) -> bool {
     ui.input(|i| i.modifiers.command)
 }
 
-/// Um texto clicável que abre um destino. Ctrl+clique abre no painel flutuante.
-pub fn link_para(
-    ui: &mut Ui,
-    texto: &str,
-    destino: Destino,
-    pedidos: &mut Vec<Pedido>,
-) -> Response {
+/// Um texto clicável. Devolve a resposta e, quando houve clique, `Some(flutuante)`: Ctrl ou o
+/// botão do meio pedem o painel flutuante.
+pub fn link_cru(ui: &mut Ui, texto: &str) -> (Response, Option<bool>) {
     let p = tema::paleta(ui.ctx());
     let resposta = ui.add(
         egui::Label::new(RichText::new(texto).color(p.destaque_tinta))
@@ -41,11 +37,26 @@ pub fn link_para(
             Stroke::new(1.0, p.destaque_tinta),
         );
     }
-    if resposta.clicked() {
-        let flutuante = ctrl(ui);
-        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, flutuante);
+    let clique = if resposta.clicked() {
+        Some(ctrl(ui))
     } else if resposta.middle_clicked() {
-        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, true);
+        Some(true)
+    } else {
+        None
+    };
+    (resposta, clique)
+}
+
+/// Um texto clicável que abre um destino. Ctrl+clique abre no painel flutuante.
+pub fn link_para(
+    ui: &mut Ui,
+    texto: &str,
+    destino: Destino,
+    pedidos: &mut Vec<Pedido>,
+) -> Response {
+    let (resposta, clique) = link_cru(ui, texto);
+    if let Some(flutuante) = clique {
+        crate::navegacao::pedir_abrir(ui.ctx(), pedidos, destino, flutuante);
     }
     resposta
 }
@@ -65,8 +76,18 @@ pub fn link_item(ui: &mut Ui, alvo: &Ref, texto: &str, pedidos: &mut Vec<Pedido>
         }
         return r;
     }
+    // Conta com rótulo: o link mostra o rótulo e a dica guarda a conta do extrato (`BANCO · num`;
+    // a conta do livro-caixa tem outro tipo de chave e fica como está).
+    let conta_do_extrato = if alvo.tipo == sbf_inventario::Tipo::Conta
+        && texto != alvo.chave
+        && alvo.chave.contains(" · ")
+    {
+        format!("Conta do extrato: {}\n", alvo.chave)
+    } else {
+        String::new()
+    };
     r.on_hover_text(format!(
-        "{} · clique abre, Ctrl+clique abre ao lado",
+        "{conta_do_extrato}{} · clique abre, Ctrl+clique abre ao lado",
         alvo.tipo.singular()
     ))
 }
@@ -127,9 +148,15 @@ pub fn cores_do_estado(ui: &Ui, rotulo: &str) -> (Color32, Color32, &'static str
     } else if r.starts_with("sem valor")
         || r.starts_with("não alocada")
         || r.starts_with("precisa revisar")
+        || r.starts_with("possível duplicidade")
+        || r.starts_with("protegido por senha")
         || r == "fechada"
     {
         (p.aviso_sutil, p.aviso, "warning")
+    } else if r.starts_with("não reconhecido") {
+        (p.perigo_sutil, p.perigo, "help")
+    } else if r.starts_with("processando") {
+        (p.info_sutil, p.info, "schedule")
     } else if r == "pausada" || r == "revogada" {
         (p.superficie_3, p.tinta_suave, "pause")
     } else {
@@ -182,7 +209,7 @@ pub fn estado_compacto(ui: &mut Ui, rotulo: &str, quem: Option<&sbf_inventario::
         .response;
     let quem_icone = match quem {
         Some(sbf_inventario::consulta::Quem::Usuario) => Some(("person", "você")),
-        Some(sbf_inventario::consulta::Quem::Automatico(_)) => Some(("smart_toy", "regras")),
+        Some(sbf_inventario::consulta::Quem::Automatico(_)) => Some(("smart_toy", "padrões")),
         None => None,
     };
     let r2 = quem_icone.map(|(i, _)| ui.label(icones::icone_cor(i, 14.0, p.tinta_suave)));

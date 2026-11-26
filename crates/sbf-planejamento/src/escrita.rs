@@ -4,13 +4,17 @@
 //! linhas, e `desfeita` é uma marca.
 
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
-use crate::banco::{self, carregar_um, json, novo_id};
+mod modelos;
+
+use crate::banco::{self, carregar_um, de_json, json, novo_id};
 use crate::projecao::{projetar_competencias, versao_vigente};
 use crate::{
-    Alteracao, AlvoDoDocumento, Assinatura, Autor, Competencia, Composicao, Conciliacao, Data,
-    ErroDoPlanejamento, Escopo, Excecao, Exclusao, Frequencia, IdOcorrencia, MudancaDeVersao,
-    NovoRecorrente, OrigemImportada, Prazo, Recibo, Recorrente, Resultado, TipoDeDocumento, Versao,
+    Alteracao, AlvoDoDocumento, Assinatura, Autor, Cancelamento, Competencia, Composicao,
+    Conciliacao, Data, ErroDoPlanejamento, Escopo, Excecao, Exclusao, Frequencia, IdOcorrencia,
+    MudancaDeVersao, NovoRecorrente, OrigemImportada, Prazo, Recibo, Recorrente, Resultado,
+    TipoDeDocumento, Versao,
 };
 
 /// O que uma variante fez, para o histórico e o recibo.
@@ -21,6 +25,50 @@ struct Feito {
     versao_nova: i64,
     /// `false` quando nada mudou (a mesma origem importada duas vezes).
     grava_historico: bool,
+    /// O que desfaz esta alteração (D15), guardado junto da linha do histórico.
+    inversa: Option<Inversa>,
+}
+
+/// O inverso de uma alteração, em JSON na tabela `inversas`. Quase sempre é outra
+/// [`Alteracao`]; pausa e cancelamento não têm alteração própria que os desfaça, então
+/// ganham um inverso interno.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "tipo", rename_all = "snake_case")]
+pub(crate) enum Inversa {
+    Alteracao {
+        alteracao: Box<Alteracao>,
+    },
+    /// Fixa o fim de uma pausa (`ate = desde` a esvazia; o valor de antes a reabre).
+    AjustarPausa {
+        recorrente: String,
+        pausa: String,
+        ate: Option<Competencia>,
+    },
+    /// Volta o cancelamento ao de antes, ou a nenhum.
+    Cancelamento {
+        recorrente: String,
+        anterior: Option<Cancelamento>,
+    },
+    /// Desfaz a criação de um modelo (marca `desfeito`).
+    ModeloCriado {
+        modelo: String,
+    },
+    /// Desfaz uma versão nova do Cálculo (marca `desfeita`).
+    CalculoCriado {
+        calculo: String,
+    },
+    /// Volta a ligação a modelo e os valores de parâmetro de um compromisso ao que eram.
+    Modelo {
+        recorrente: String,
+        ligacao: modelos::RestauroDaLigacao,
+        valores: Vec<modelos::ValorAnterior>,
+    },
+}
+
+fn inversa_de(alteracao: Alteracao) -> Option<Inversa> {
+    Some(Inversa::Alteracao {
+        alteracao: Box::new(alteracao),
+    })
 }
 
 fn invalida<T>(motivo: &str) -> Resultado<T> {
@@ -83,6 +131,11 @@ pub(crate) fn aplicar_na(
             arquivado,
             versao_base,
         } => arquivar(c, recorrente, *arquivado, *versao_base)?,
+        Alteracao::Renomear {
+            recorrente,
+            nome,
+            versao_base,
+        } => renomear(c, recorrente, nome, *versao_base)?,
         Alteracao::Mover {
             recorrente,
             grupo,
@@ -103,9 +156,12 @@ pub(crate) fn aplicar_na(
         } => vincular_documento(c, alvo, sha256, *tipo_documento, nome, *data, autor, agora)?,
         Alteracao::DesvincularDocumento { id } => desvincular_documento(c, id)?,
         Alteracao::MapearConta {
-            apelido,
+            codigo,
             conta_do_extrato,
-        } => mapear_conta(c, apelido, conta_do_extrato.as_deref(), autor, agora)?,
+        } => mapear_conta(c, codigo, conta_do_extrato.as_deref(), autor, agora)?,
+        Alteracao::DefinirApelidoDaConta { codigo, apelido } => {
+            definir_apelido_da_conta(c, codigo, apelido.as_deref(), autor, agora)?
+        }
         Alteracao::DefinirAssinatura {
             recorrente,
             assinatura,
@@ -122,8 +178,38 @@ pub(crate) fn aplicar_na(
             ocorrencia,
             movimento,
         } => desconciliar(c, ocorrencia, movimento)?,
+        Alteracao::CriarModelo {
+            nome,
+            parametros,
+            calculo,
+        } => modelos::criar_modelo(c, nome, parametros, calculo, autor, agora)?,
+        Alteracao::NovaVersaoDoCalculo { modelo, calculo } => {
+            modelos::nova_versao(c, modelo, calculo, autor, agora)?
+        }
+        Alteracao::AplicarModelo {
+            recorrente,
+            modelo,
+            valores,
+            versao_base,
+        } => modelos::aplicar_modelo(c, recorrente, modelo, valores, *versao_base, autor, agora)?,
+        Alteracao::DefinirParametro {
+            recorrente,
+            valor,
+            versao_base,
+        } => modelos::definir_parametro(c, recorrente, valor, *versao_base, autor, agora)?,
     };
 
+    fechar(c, feito, &json(alteracao)?, autor, agora)
+}
+
+/// Grava a linha do histórico (com o inverso, se houver) e devolve o recibo.
+fn fechar(
+    c: &Connection,
+    feito: Feito,
+    alteracao_json: &str,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Recibo> {
     let alteracao_id = if feito.grava_historico {
         let id = novo_id(c, "hist")?;
         c.execute(
@@ -136,9 +222,15 @@ pub(crate) fn aplicar_na(
                 feito.alvo,
                 feito.recorrente,
                 feito.resumo,
-                json(alteracao)?
+                alteracao_json
             ],
         )?;
+        if let Some(inversa) = &feito.inversa {
+            c.execute(
+                "INSERT INTO inversas (historico_id, inversa) VALUES (?1, ?2)",
+                params![id, json(inversa)?],
+            )?;
+        }
         id
     } else {
         String::new()
@@ -149,6 +241,168 @@ pub(crate) fn aplicar_na(
         versao_nova: feito.versao_nova,
         quando: agora.to_owned(),
     })
+}
+
+// ---------------------------------------------------------------------------------------
+// Desfazer (D15)
+// ---------------------------------------------------------------------------------------
+
+/// Põe a versão do registro de hoje nas alterações que a exigem: o inverso foi guardado
+/// quando o registro estava em outra versão.
+fn com_base_atual(c: &Connection, alteracao: Alteracao) -> Resultado<Alteracao> {
+    let atual = |id: &str| carregar(c, id).map(|r| r.versao_do_registro);
+    Ok(match alteracao {
+        Alteracao::Editar {
+            recorrente,
+            escopo,
+            mudanca,
+            ..
+        } => Alteracao::Editar {
+            versao_base: atual(&recorrente)?,
+            recorrente,
+            escopo,
+            mudanca,
+        },
+        Alteracao::Excluir {
+            recorrente, motivo, ..
+        } => Alteracao::Excluir {
+            versao_base: atual(&recorrente)?,
+            recorrente,
+            motivo,
+        },
+        Alteracao::Restaurar { recorrente, .. } => Alteracao::Restaurar {
+            versao_base: atual(&recorrente)?,
+            recorrente,
+        },
+        Alteracao::Renomear {
+            recorrente, nome, ..
+        } => Alteracao::Renomear {
+            versao_base: atual(&recorrente)?,
+            recorrente,
+            nome,
+        },
+        outra => outra,
+    })
+}
+
+/// Desfaz a alteração `id` do histórico: aplica o inverso guardado, grava a linha do Desfazer
+/// e liga as duas. Dentro da transação de quem chama.
+pub(crate) fn desfazer_na(
+    c: &Connection,
+    id: &str,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Recibo> {
+    let existe_no_historico =
+        banco::existe(c, "SELECT 1 FROM historico WHERE id = ?1", params![id])?;
+    if !existe_no_historico {
+        return Err(ErroDoPlanejamento::NaoEncontrado(format!("alteração {id}")));
+    }
+    if banco::existe(
+        c,
+        "SELECT 1 FROM desfeitos WHERE original_id = ?1",
+        params![id],
+    )? {
+        return invalida("essa alteração já foi desfeita");
+    }
+    if banco::existe(
+        c,
+        "SELECT 1 FROM desfeitos WHERE desfazedor_id = ?1",
+        params![id],
+    )? {
+        return invalida("isso já é um Desfazer: refaça a alteração, se quiser");
+    }
+    let inversa: Option<String> = c
+        .query_row(
+            "SELECT inversa FROM inversas WHERE historico_id = ?1",
+            params![id],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let Some(inversa) = inversa else {
+        return invalida("essa alteração não tem como ser desfeita automaticamente");
+    };
+    let inversa: Inversa = de_json(&inversa)?;
+    let recibo = match &inversa {
+        Inversa::Alteracao { alteracao } => {
+            let alteracao = com_base_atual(c, (**alteracao).clone())?;
+            aplicar_na(c, &alteracao, autor, agora)?
+        }
+        Inversa::AjustarPausa {
+            recorrente,
+            pausa,
+            ate,
+        } => {
+            let rec = carregar(c, recorrente)?;
+            c.execute(
+                "UPDATE pausas SET ate = ?2 WHERE id = ?1 AND recorrente_id = ?3",
+                params![pausa, ate.map(|a| a.to_string()), recorrente],
+            )?;
+            let versao_nova = subir_versao(c, recorrente)?;
+            let feito = Feito {
+                alvo: rec.id.clone(),
+                recorrente: Some(rec.id),
+                resumo: "Desfez uma pausa ou retomada.".into(),
+                versao_nova,
+                grava_historico: true,
+                inversa: None,
+            };
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::Cancelamento {
+            recorrente,
+            anterior,
+        } => {
+            carregar(c, recorrente)?;
+            match anterior {
+                Some(a) => {
+                    c.execute(
+                        "UPDATE cancelamentos SET desde = ?2, motivo = ?3, comprovado = ?4,
+                                desfeito = 0 WHERE recorrente_id = ?1",
+                        params![recorrente, a.desde.to_string(), a.motivo, a.comprovado],
+                    )?;
+                }
+                None => {
+                    c.execute(
+                        "UPDATE cancelamentos SET desfeito = 1 WHERE recorrente_id = ?1",
+                        params![recorrente],
+                    )?;
+                }
+            }
+            let versao_nova = subir_versao(c, recorrente)?;
+            let feito = Feito {
+                alvo: recorrente.clone(),
+                recorrente: Some(recorrente.clone()),
+                resumo: "Desfez um cancelamento.".into(),
+                versao_nova,
+                grava_historico: true,
+                inversa: None,
+            };
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::ModeloCriado { modelo } => {
+            let feito = modelos::desfazer_modelo_criado(c, modelo)?;
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::CalculoCriado { calculo } => {
+            let feito = modelos::desfazer_calculo_criado(c, calculo)?;
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+        Inversa::Modelo {
+            recorrente,
+            ligacao,
+            valores,
+        } => {
+            carregar(c, recorrente)?;
+            let feito = modelos::desfazer_ligacao(c, recorrente, ligacao, valores)?;
+            fechar(c, feito, &json(&inversa)?, autor, agora)?
+        }
+    };
+    c.execute(
+        "INSERT INTO desfeitos (original_id, desfazedor_id, quando) VALUES (?1, ?2, ?3)",
+        params![id, recibo.alteracao_id, agora],
+    )?;
+    Ok(recibo)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -293,6 +547,7 @@ fn criar_recorrente(
                 resumo: String::new(),
                 versao_nova: rec.versao_do_registro,
                 grava_historico: false,
+                inversa: None,
             });
         }
     }
@@ -332,10 +587,15 @@ fn criar_recorrente(
     }
     Ok(Feito {
         alvo: id.clone(),
-        recorrente: Some(id),
+        recorrente: Some(id.clone()),
         resumo: "Criou o recorrente.".into(),
         versao_nova: 1,
         grava_historico: true,
+        inversa: inversa_de(Alteracao::Excluir {
+            recorrente: id,
+            motivo: "criação desfeita".into(),
+            versao_base: 0,
+        }),
     })
 }
 
@@ -402,21 +662,24 @@ fn editar(
     if campos.is_empty() {
         return invalida("nenhuma mudança");
     }
-    let resumo = match escopo {
+    let (resumo, inversa) = match escopo {
         Escopo::SoEsteMes(competencia) => {
             let so_valor = campos == ["valor"];
             let Some(Some(valor)) = mudanca.valor.filter(|_| so_valor) else {
                 return invalida("só o valor muda só neste mês, e ele precisa ter valor");
             };
             let ocorrencia = id_da_ocorrencia(c, id, competencia)?;
-            registrar_excecao(
+            let exc = registrar_excecao(
                 c,
                 &ocorrencia,
                 &Excecao::ValorSoDesteMes { valor },
                 autor,
                 agora,
             )?;
-            format!("Mudou o valor só de {competencia}.")
+            (
+                format!("Mudou o valor só de {competencia}."),
+                inversa_de(Alteracao::DesfazerExcecao { id: exc }),
+            )
         }
         Escopo::DaquiEmDiante(competencia) => {
             if let Some(f) = &mudanca.frequencia {
@@ -426,6 +689,7 @@ fn editar(
                 .or_else(|| rec.versoes.first())
                 .ok_or_else(|| ErroDoPlanejamento::Banco("recorrente sem versão".into()))?;
             let mesma_data = base_da_versao.desde == competencia;
+            let restauracao = restaurar_campos(mudanca, base_da_versao);
             let mut nova = base_da_versao.clone();
             aplicar_mudanca(&mut nova, mudanca);
             nova.desde = competencia;
@@ -433,9 +697,17 @@ fn editar(
                 nova.id = novo_id(c, "ver")?;
             }
             gravar_versao(c, id, &nova, !mesma_data)?;
-            format!(
-                "Nova versão a partir de {competencia} ({}).",
-                campos.join(", ")
+            (
+                format!(
+                    "Nova versão a partir de {competencia} ({}).",
+                    campos.join(", ")
+                ),
+                inversa_de(Alteracao::Editar {
+                    recorrente: id.to_owned(),
+                    escopo: Escopo::DaquiEmDiante(competencia),
+                    mudanca: restauracao,
+                    versao_base: 0,
+                }),
             )
         }
     };
@@ -446,7 +718,23 @@ fn editar(
         resumo,
         versao_nova,
         grava_historico: true,
+        inversa,
     })
+}
+
+/// A mudança que devolve os campos de `m` aos valores de `v` (o que valia antes).
+fn restaurar_campos(m: &MudancaDeVersao, v: &Versao) -> MudancaDeVersao {
+    MudancaDeVersao {
+        valor: m.valor.map(|_| v.valor),
+        certeza: m.certeza.map(|_| v.certeza),
+        fonte: m.fonte.map(|_| v.fonte),
+        frequencia: m.frequencia.map(|_| v.frequencia),
+        conta: m.conta.as_ref().map(|_| v.conta.clone()),
+        centro: m.centro.as_ref().map(|_| v.centro.clone()),
+        fornecedor: m.fornecedor.as_ref().map(|_| v.fornecedor.clone()),
+        categoria: m.categoria.as_ref().map(|_| v.categoria.clone()),
+        nota: m.nota.as_ref().map(|_| v.nota.clone()),
+    }
 }
 
 /// O id (com a parcela) da ocorrência do recorrente naquela competência.
@@ -476,6 +764,7 @@ fn tipo_da_excecao(e: &Excecao) -> &'static str {
         Excecao::Dispensar { .. } => "dispensar",
         Excecao::ValorSoDesteMes { .. } => "valor_so_deste_mes",
         Excecao::PagoInformado { .. } => "pago_informado",
+        Excecao::QuantidadeSoDesteMes { .. } => "quantidade_so_deste_mes",
     }
 }
 
@@ -534,10 +823,11 @@ fn pausar(
     )? {
         return invalida("já há uma pausa aberta; retome antes");
     }
+    let pausa_id = novo_id(c, "pau")?;
     c.execute(
         "INSERT INTO pausas (id, recorrente_id, desde, ate, motivo) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
-            novo_id(c, "pau")?,
+            pausa_id,
             id,
             desde.to_string(),
             ate.map(|a| a.to_string()),
@@ -551,23 +841,33 @@ fn pausar(
         resumo: format!("Pausou a partir de {desde}."),
         versao_nova,
         grava_historico: true,
+        // Uma pausa que acaba onde começa não suprime mês nenhum.
+        inversa: Some(Inversa::AjustarPausa {
+            recorrente: id.to_owned(),
+            pausa: pausa_id,
+            ate: Some(desde),
+        }),
     })
 }
 
 fn retomar(c: &Connection, id: &str, desde: Competencia, base: i64) -> Resultado<Feito> {
     carregar_com_base(c, id, base)?;
-    let pausa: Option<String> = c
+    let pausa: Option<(String, Option<String>)> = c
         .query_row(
-            "SELECT id FROM pausas
+            "SELECT id, ate FROM pausas
              WHERE recorrente_id = ?1 AND desde < ?2 AND (ate IS NULL OR ate > ?2)
              ORDER BY desde DESC LIMIT 1",
             params![id, desde.to_string()],
-            |l| l.get(0),
+            |l| Ok((l.get(0)?, l.get(1)?)),
         )
         .optional()?;
-    let Some(pausa) = pausa else {
+    let Some((pausa, ate_antes)) = pausa else {
         return invalida("não há pausa para retomar nesta competência");
     };
+    let ate_antes = ate_antes
+        .as_deref()
+        .map(banco::ler_competencia)
+        .transpose()?;
     c.execute(
         "UPDATE pausas SET ate = ?2 WHERE id = ?1",
         params![pausa, desde.to_string()],
@@ -579,6 +879,11 @@ fn retomar(c: &Connection, id: &str, desde: Competencia, base: i64) -> Resultado
         resumo: format!("Retomou em {desde}."),
         versao_nova,
         grava_historico: true,
+        inversa: Some(Inversa::AjustarPausa {
+            recorrente: id.to_owned(),
+            pausa,
+            ate: ate_antes,
+        }),
     })
 }
 
@@ -592,11 +897,13 @@ fn cancelar(
 ) -> Resultado<Feito> {
     carregar_com_base(c, id, base)?;
     nao_vazio(motivo, "o motivo")?;
+    let anterior = carregar(c, id)?.cancelamento;
     c.execute(
         "INSERT INTO cancelamentos (recorrente_id, desde, motivo, comprovado)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (recorrente_id) DO UPDATE
-         SET desde = excluded.desde, motivo = excluded.motivo, comprovado = excluded.comprovado",
+         SET desde = excluded.desde, motivo = excluded.motivo, comprovado = excluded.comprovado,
+             desfeito = 0",
         params![id, desde.to_string(), motivo, comprovado],
     )?;
     let versao_nova = subir_versao(c, id)?;
@@ -609,6 +916,10 @@ fn cancelar(
         ),
         versao_nova,
         grava_historico: true,
+        inversa: Some(Inversa::Cancelamento {
+            recorrente: id.to_owned(),
+            anterior,
+        }),
     })
 }
 
@@ -632,7 +943,13 @@ fn excecao_avulsa(
     if let Excecao::Dispensar { motivo } = excecao {
         nao_vazio(motivo, "o motivo")?;
     }
-    registrar_excecao(c, ocorrencia, excecao, autor, agora)?;
+    if let Excecao::QuantidadeSoDesteMes { quantidade } = excecao {
+        if !(0..=1000).contains(quantidade) {
+            return invalida("a quantidade vai de 0 a 1000");
+        }
+        modelos::exige_modelo(c, &rec.id)?;
+    }
+    let exc = registrar_excecao(c, ocorrencia, excecao, autor, agora)?;
     let resumo = match excecao {
         Excecao::Adiar { nova_data: Some(d) } => format!("Adiou {ocorrencia} para {d}."),
         Excecao::Adiar { nova_data: None } => format!("Adiou {ocorrencia} sem nova data."),
@@ -641,6 +958,9 @@ fn excecao_avulsa(
             format!("Mudou o valor só de {}.", ocorrencia.competencia)
         }
         Excecao::PagoInformado { .. } => format!("Informou pago em {ocorrencia}."),
+        Excecao::QuantidadeSoDesteMes { .. } => {
+            format!("Ajustou a quantidade só de {}.", ocorrencia.competencia)
+        }
     };
     Ok(Feito {
         alvo: ocorrencia.to_string(),
@@ -648,6 +968,7 @@ fn excecao_avulsa(
         resumo,
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: inversa_de(Alteracao::DesfazerExcecao { id: exc }),
     })
 }
 
@@ -673,6 +994,7 @@ fn desfazer_excecao(c: &Connection, id: &str) -> Resultado<Feito> {
         resumo: format!("Desfez uma exceção de {ocorrencia}."),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -712,6 +1034,10 @@ fn conciliar(c: &Connection, x: &Conciliacao, autor: &Autor) -> Resultado<Feito>
         },
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: inversa_de(Alteracao::Desconciliar {
+            ocorrencia: x.ocorrencia.clone(),
+            movimento: x.movimento.clone(),
+        }),
     })
 }
 
@@ -719,6 +1045,14 @@ fn conciliar(c: &Connection, x: &Conciliacao, autor: &Autor) -> Resultado<Feito>
 /// `desfeita`, para o histórico e para uma regra não refazer sozinha o que o usuário desfez.
 fn desconciliar(c: &Connection, ocorrencia: &IdOcorrencia, movimento: &str) -> Resultado<Feito> {
     let rec = recorrente_da_ocorrencia(c, ocorrencia)?;
+    let antes: Option<(i64, String, bool)> = c
+        .query_row(
+            "SELECT valor, data, confirmada FROM conciliacoes
+             WHERE ocorrencia = ?1 AND movimento = ?2 AND desfeita = 0",
+            params![ocorrencia.to_string(), movimento],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+        )
+        .optional()?;
     let tocadas = c.execute(
         "UPDATE conciliacoes SET desfeita = 1, sem_automatico = 1
          WHERE ocorrencia = ?1 AND movimento = ?2 AND desfeita = 0",
@@ -735,6 +1069,18 @@ fn desconciliar(c: &Connection, ocorrencia: &IdOcorrencia, movimento: &str) -> R
         resumo: format!("Desfez a conciliação de {ocorrencia}."),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: match antes {
+            Some((valor, data, confirmada)) => inversa_de(Alteracao::Conciliar {
+                conciliacao: Conciliacao {
+                    ocorrencia: ocorrencia.clone(),
+                    movimento: movimento.to_owned(),
+                    valor: crate::Centavos(valor),
+                    data: banco::ler_data(&data)?,
+                    confirmada,
+                },
+            }),
+            None => None,
+        },
     })
 }
 
@@ -764,6 +1110,10 @@ fn excluir(
         resumo: "Excluiu (exclusão lógica).".into(),
         versao_nova,
         grava_historico: true,
+        inversa: inversa_de(Alteracao::Restaurar {
+            recorrente: id.to_owned(),
+            versao_base: 0,
+        }),
     })
 }
 
@@ -784,6 +1134,11 @@ fn restaurar(c: &Connection, id: &str, base: i64) -> Resultado<Feito> {
         resumo: "Restaurou o recorrente.".into(),
         versao_nova,
         grava_historico: true,
+        inversa: inversa_de(Alteracao::Excluir {
+            recorrente: id.to_owned(),
+            motivo: "restauração desfeita".into(),
+            versao_base: 0,
+        }),
     })
 }
 
@@ -804,6 +1159,30 @@ fn arquivar(c: &Connection, id: &str, arquivado: bool, base: i64) -> Resultado<F
         },
         versao_nova,
         grava_historico: true,
+        inversa: None,
+    })
+}
+
+fn renomear(c: &Connection, id: &str, nome: &str, base: i64) -> Resultado<Feito> {
+    let rec = carregar_com_base(c, id, base)?;
+    let nome = nome.trim();
+    nao_vazio(nome, "o nome")?;
+    c.execute(
+        "UPDATE recorrentes SET nome = ?2 WHERE id = ?1",
+        params![id, nome],
+    )?;
+    let versao_nova = subir_versao(c, id)?;
+    Ok(Feito {
+        alvo: id.to_owned(),
+        recorrente: Some(id.to_owned()),
+        resumo: "Renomeou o compromisso.".into(),
+        versao_nova,
+        grava_historico: true,
+        inversa: inversa_de(Alteracao::Renomear {
+            recorrente: id.to_owned(),
+            nome: rec.nome,
+            versao_base: 0,
+        }),
     })
 }
 
@@ -822,6 +1201,7 @@ fn mover(c: &Connection, id: &str, grupo: &str, posicao: i64, base: i64) -> Resu
         resumo: "Mudou o grupo ou a prioridade.".into(),
         versao_nova,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -838,6 +1218,7 @@ fn criar_grupo(c: &Connection, nome: &str, posicao: i64) -> Resultado<Feito> {
         resumo: "Criou ou reordenou um grupo.".into(),
         versao_nova: 0,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -902,6 +1283,7 @@ fn definir_composicao(
         ),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -937,6 +1319,7 @@ fn vincular_documento(
             resumo: String::new(),
             versao_nova: rec.versao_do_registro,
             grava_historico: false,
+            inversa: None,
         });
     }
     nao_vazio(nome, "o nome do documento")?;
@@ -963,6 +1346,7 @@ fn vincular_documento(
         resumo: "Vinculou um documento.".into(),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -984,6 +1368,7 @@ fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
             resumo: String::new(),
             versao_nova: rec.versao_do_registro,
             grava_historico: false,
+            inversa: None,
         });
     }
     c.execute(
@@ -996,6 +1381,7 @@ fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
         resumo: "Desvinculou um documento.".into(),
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: None,
     })
 }
 
@@ -1003,42 +1389,104 @@ fn desvincular_documento(c: &Connection, id: &str) -> Resultado<Feito> {
 // Contas do extrato e assinaturas
 // ---------------------------------------------------------------------------------------
 
+/// O maior apelido de conta, em caracteres.
+const MAXIMO_DO_APELIDO: usize = 60;
+
 /// A maior janela de uma assinatura, em dias.
 const JANELA_MAXIMA_DA_ASSINATURA: u8 = 60;
 
-/// Confirma (ou desfaz, com `None`) o par apelido ↔ conta do extrato. Nada é apagado: desfazer
+/// Confirma (ou desfaz, com `None`) o par código ↔ conta do extrato. Nada é apagado: desfazer
 /// deixa a linha sem conta.
 fn mapear_conta(
     c: &Connection,
-    apelido: &str,
+    codigo: &str,
     conta_do_extrato: Option<&str>,
     autor: &Autor,
     agora: &str,
 ) -> Resultado<Feito> {
-    let apelido = apelido.trim();
-    nao_vazio(apelido, "o apelido da conta")?;
+    let codigo = codigo.trim();
+    nao_vazio(codigo, "o código da conta")?;
     let conta = conta_do_extrato.map(str::trim);
     if let Some(conta) = conta {
         nao_vazio(conta, "a conta do extrato")?;
     }
+    let antes: Option<Option<String>> = c
+        .query_row(
+            "SELECT conta_do_extrato FROM contas_do_planejamento WHERE apelido = ?1",
+            params![codigo],
+            |l| l.get(0),
+        )
+        .optional()?;
     c.execute(
         "INSERT INTO contas_do_planejamento (apelido, conta_do_extrato, quando, autor)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (apelido) DO UPDATE
          SET conta_do_extrato = excluded.conta_do_extrato, quando = excluded.quando,
              autor = excluded.autor",
-        params![apelido, conta, agora, json(autor)?],
+        params![codigo, conta, agora, json(autor)?],
     )?;
     Ok(Feito {
-        alvo: apelido.to_owned(),
+        alvo: codigo.to_owned(),
         recorrente: None,
         resumo: if conta.is_some() {
-            format!("Confirmou a conta do extrato de {apelido}.")
+            format!("Confirmou a conta do extrato de {codigo}.")
         } else {
-            format!("Desfez o par de conta de {apelido}.")
+            format!("Desfez o par de conta de {codigo}.")
         },
         versao_nova: 0,
         grava_historico: true,
+        // Desfazer volta ao par de antes (ou a nenhum): a linha nunca é apagada.
+        inversa: inversa_de(Alteracao::MapearConta {
+            codigo: codigo.to_owned(),
+            conta_do_extrato: antes.flatten(),
+        }),
+    })
+}
+
+/// Dá (ou tira, com `None`) o apelido de um código de conta. Nada é apagado: tirar deixa o
+/// campo vazio, e o apelido de antes fica no histórico (e no inverso, para o Desfazer).
+fn definir_apelido_da_conta(
+    c: &Connection,
+    codigo: &str,
+    apelido: Option<&str>,
+    autor: &Autor,
+    agora: &str,
+) -> Resultado<Feito> {
+    let codigo = codigo.trim();
+    nao_vazio(codigo, "o código da conta")?;
+    let apelido = apelido.map(str::trim).filter(|a| !a.is_empty());
+    if apelido.is_some_and(|a| a.chars().count() > MAXIMO_DO_APELIDO) {
+        return invalida("o apelido da conta é longo demais");
+    }
+    let antes: Option<Option<String>> = c
+        .query_row(
+            "SELECT apelido_da_conta FROM contas_do_planejamento WHERE apelido = ?1",
+            params![codigo],
+            |l| l.get(0),
+        )
+        .optional()?;
+    c.execute(
+        "INSERT INTO contas_do_planejamento (apelido, apelido_da_conta, quando, autor)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (apelido) DO UPDATE
+         SET apelido_da_conta = excluded.apelido_da_conta, quando = excluded.quando,
+             autor = excluded.autor",
+        params![codigo, apelido, agora, json(autor)?],
+    )?;
+    Ok(Feito {
+        alvo: codigo.to_owned(),
+        recorrente: None,
+        resumo: if apelido.is_some() {
+            format!("Deu um apelido à conta {codigo}.")
+        } else {
+            format!("Tirou o apelido da conta {codigo}.")
+        },
+        versao_nova: 0,
+        grava_historico: true,
+        inversa: inversa_de(Alteracao::DefinirApelidoDaConta {
+            codigo: codigo.to_owned(),
+            apelido: antes.flatten(),
+        }),
     })
 }
 
@@ -1083,5 +1531,6 @@ fn definir_assinatura(
         },
         versao_nova: rec.versao_do_registro,
         grava_historico: true,
+        inversa: None,
     })
 }

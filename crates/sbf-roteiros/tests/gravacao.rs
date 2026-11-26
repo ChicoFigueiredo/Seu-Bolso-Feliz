@@ -313,22 +313,23 @@ fn ro_04_grava_com_ia_executa_sem_ia_e_conserta_so_apos_aprovacao() {
         .find(|e| e.seletor == "#baixar")
         .unwrap()
         .seletor = "#baixar-v2".into();
-    let rodar =
-        |nav: &mut sbf_roteiros::falso::NavegadorFalso, r: &sbf_roteiros::Roteiro, pasta: &str| {
-            let e = banco.iniciar_execucao(id, vid, "janela").unwrap();
-            let mut destino = NoInventario::novo(&conn, &cofre, "meu banco", e);
-            let mut c = Contexto {
-                navegador: nav,
-                senhas: &Senhas,
-                pausa: &pausa,
-                destino: &mut destino,
-                banco: &banco,
-                pasta: d.path().join(pasta),
-                opcoes: opcoes(),
-                cancelar: &nao,
-            };
-            executar_com_conserto(&mut c, id, e, r, None).unwrap().fim
+    let rodar = |nav: &mut bancada_navegador::falso::NavegadorFalso,
+                 r: &sbf_roteiros::Roteiro,
+                 pasta: &str| {
+        let e = banco.iniciar_execucao(id, vid, "janela").unwrap();
+        let mut destino = NoInventario::novo(&conn, &cofre, "meu banco", e);
+        let mut c = Contexto {
+            navegador: nav,
+            senhas: &Senhas,
+            pausa: &pausa,
+            destino: &mut destino,
+            banco: &banco,
+            pasta: d.path().join(pasta),
+            opcoes: opcoes(),
+            cancelar: &nao,
         };
+        executar_com_conserto(&mut c, id, e, r, None).unwrap().fim
+    };
     assert!(matches!(
         rodar(&mut nav2, &banco.versao_ativa(id).unwrap().2, "e3"),
         Fim::Falhou { .. }
@@ -417,7 +418,7 @@ fn guia_de<'a>(ia: &'a Falso) -> Guia<'a> {
 }
 
 fn gravar(
-    nav: &mut sbf_roteiros::falso::NavegadorFalso,
+    nav: &mut bancada_navegador::falso::NavegadorFalso,
     guia: &Guia<'_>,
     pasta: &std::path::Path,
 ) -> sbf_roteiros::erro::Resultado<sbf_roteiros::gravacao::Gravado> {
@@ -466,7 +467,7 @@ fn ro_01_a_ia_nao_leva_a_senha_em_campo_que_nao_e_de_senha() {
             nome: "busca".into(),
             ..Default::default()
         });
-    let mut e = sbf_roteiros::falso::Elemento::com_texto("");
+    let mut e = bancada_navegador::falso::Elemento::com_texto("");
     e.candidato.eh_campo = true;
     e.candidato.tipo = "text".into();
     nav.elementos.insert("#busca".into(), e);
@@ -643,7 +644,7 @@ fn ro_01_numero_longo_no_seletor_nao_vai_a_ia_e_a_resposta_volta_ao_seletor_de_v
     let mut nav = site(false);
     let p = nav.paginas.get_mut("login").unwrap();
     p.elementos.push(clicavel("#conta-12345678901", "Baixar"));
-    let mut e = sbf_roteiros::falso::Elemento::com_texto("Baixar");
+    let mut e = bancada_navegador::falso::Elemento::com_texto("Baixar");
     e.candidato.tipo = "button".into();
     nav.elementos.insert("#conta-12345678901".into(), e);
     let ia = Falso::com_roteiro(vec![

@@ -242,10 +242,23 @@ fn chave_e_iso_do_mtime_batem_com_o_typescript() {
 }
 
 #[test]
+fn vigia_nao_conta_raiz_que_nao_existe_e_volta_sem_esperar_os_avisos() {
+    let c = cenario();
+    let fantasma = c.raiz.join("nao-existe");
+    let vigia = Vigia::iniciar(&[c.raiz.clone(), fantasma]).expect("vigia");
+    assert_eq!(vigia.vigiadas, vec![c.raiz.clone()]);
+    assert!(vigia.aguardar_pronto(Duration::from_secs(10)));
+}
+
+#[test]
 fn vigia_avisa_e_indexa_um_arquivo_novo_com_as_mesmas_regras() {
     let c = cenario();
     let vigia = Vigia::iniciar(std::slice::from_ref(&c.raiz)).expect("vigia");
     assert_eq!(vigia.vigiadas.len(), 1);
+    assert!(
+        vigia.aguardar_pronto(Duration::from_secs(10)),
+        "avisos instalados"
+    );
     let varredura = abrir_varredura_do_vigia(&c.conn, "disco:teste", &c.raiz).expect("varredura");
     // Reaproveita a mesma varredura aberta.
     assert_eq!(
