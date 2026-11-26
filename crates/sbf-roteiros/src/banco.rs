@@ -68,7 +68,9 @@ const SQL_ESCRITO: &str = "
 CREATE TABLE IF NOT EXISTS roteiro_escrito (
   id        INTEGER PRIMARY KEY,
   nome      TEXT NOT NULL UNIQUE,
-  criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  criado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  suspenso_unix   INTEGER,
+  suspenso_motivo TEXT
 );
 CREATE TABLE IF NOT EXISTS roteiro_escrito_versao (
   id          INTEGER PRIMARY KEY,
@@ -156,6 +158,9 @@ pub enum EstadoDaExecucao {
     Falhou,
     Bloqueada,
     Cancelada,
+    /// O portal não aceitou a entrada (`navegador.entrada_recusada`): a agenda do roteiro
+    /// foi suspensa até o usuário retomar.
+    EntradaRecusada,
 }
 
 impl EstadoDaExecucao {
@@ -168,6 +173,7 @@ impl EstadoDaExecucao {
             Self::Falhou => "falhou",
             Self::Bloqueada => "bloqueada",
             Self::Cancelada => "cancelada",
+            Self::EntradaRecusada => "entrada_recusada",
         }
     }
     pub(crate) fn de(t: &str) -> Self {
@@ -177,6 +183,7 @@ impl EstadoDaExecucao {
             "falhou" => Self::Falhou,
             "bloqueada" => Self::Bloqueada,
             "cancelada" => Self::Cancelada,
+            "entrada_recusada" => Self::EntradaRecusada,
             _ => Self::Rodando,
         }
     }
@@ -190,6 +197,7 @@ impl EstadoDaExecucao {
             Self::Falhou => "Falhou",
             Self::Bloqueada => "Bloqueada",
             Self::Cancelada => "Cancelada",
+            Self::EntradaRecusada => "Entrada recusada",
         }
     }
 }
@@ -265,7 +273,8 @@ impl BancoDeRoteiros {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
-        conn.execute_batch(crate::execucao_escrita::SQL)?;
+        crate::execucao_escrita::preparar(&conn)?;
+        crate::proposta_baixa::preparar(&conn)?;
         Ok(Self { conn })
     }
 
@@ -278,7 +287,8 @@ impl BancoDeRoteiros {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SQL)?;
         conn.execute_batch(SQL_ESCRITO)?;
-        conn.execute_batch(crate::execucao_escrita::SQL)?;
+        crate::execucao_escrita::preparar(&conn)?;
+        crate::proposta_baixa::preparar(&conn)?;
         Ok(Self { conn })
     }
 
@@ -1687,6 +1697,8 @@ mod testes_escrito {
             movimenta_dinheiro: false,
             classe: Classe::Consulta,
             agenda_horas: Some(168),
+            agenda: Vec::new(),
+            parametros: Vec::new(),
         }
     }
 

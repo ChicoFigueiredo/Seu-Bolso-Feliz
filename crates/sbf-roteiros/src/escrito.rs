@@ -46,7 +46,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// um instante antes de o clique terminar de voltar).
 const FOLGA_DO_PEDIDO: Duration = Duration::from_secs(10);
 /// O fuso do usuário: UTC−3 fixo (São Paulo não tem horário de verão desde 2019).
-const FUSO_EM_SEGUNDOS: i64 = -3 * 3600;
+pub(crate) const FUSO_EM_SEGUNDOS: i64 = -3 * 3600;
 /// O que o roteiro vê quando a caixa de e-mail não tem autorização (sem dado nenhum).
 const MENSAGEM_SEM_AUTORIZACAO_DO_GMAIL: &str =
     "Autorização do Gmail ausente: entre de novo em Conexões › E-mail";
@@ -162,6 +162,7 @@ pub struct SbfVerbos<'a> {
     chamadas: u32,
     baixados: u32,
     novos: u32,
+    descartados: u32,
     pausas: u32,
     registros: Vec<String>,
     ultimo_bloqueio: Option<Bloqueio>,
@@ -262,6 +263,7 @@ impl<'a> SbfVerbos<'a> {
             chamadas: 0,
             baixados: 0,
             novos: 0,
+            descartados: 0,
             pausas: 0,
             registros: Vec::new(),
             ultimo_bloqueio: None,
@@ -289,6 +291,13 @@ impl<'a> SbfVerbos<'a> {
     #[must_use]
     pub fn novos(&self) -> u32 {
         self.novos
+    }
+
+    /// Quantos arquivos baixados foram descartados por já estarem no inventário (a baixa por
+    /// conteúdo): não contam em [`Self::novos`].
+    #[must_use]
+    pub fn descartados(&self) -> u32 {
+        self.descartados
     }
 
     /// Quantas pausas houve.
@@ -893,10 +902,15 @@ impl Verbos for SbfVerbos<'_> {
         // O arquivo já está no inventário (ou já estava): a cópia temporária não fica.
         let _ = std::fs::remove_file(&caminho);
         self.baixados += 1;
-        if recebido == Recebido::Novo {
-            self.novos += 1;
+        match recebido {
+            Recebido::Novo => self.novos += 1,
+            Recebido::Descartado => self.descartados += 1,
+            Recebido::Repetido => {}
         }
-        self.anotar("download", &nome_final);
+        match recebido.nota() {
+            Some(nota) => self.anotar("descartado", &format!("{nome_final}: {nota}")),
+            None => self.anotar("download", &nome_final),
+        }
         Ok(nome_final)
     }
 
@@ -952,10 +966,9 @@ impl Relogio for RelogioCancelavel<'_> {
 // Datas (UTC−3), sem `Utc::now().date` puro
 // ------------------------------------------------------------------------------------------
 
-/// Dias desde 1970-01-01 para (ano, mês, dia) do calendário gregoriano (a contraprova de
-/// [`data_dos_dias`], nos testes).
-#[cfg(test)]
-fn dias_da_data(a: i64, m: i64, d: i64) -> i64 {
+/// Dias desde 1970-01-01 para (ano, mês, dia) do calendário gregoriano (também a contraprova de
+/// [`data_dos_dias`], nos testes, e a base dos instantes da agenda).
+pub(crate) fn dias_da_data(a: i64, m: i64, d: i64) -> i64 {
     let a = if m <= 2 { a - 1 } else { a };
     let era = a.div_euclid(400);
     let ano_da_era = a.rem_euclid(400);
@@ -965,7 +978,7 @@ fn dias_da_data(a: i64, m: i64, d: i64) -> i64 {
 }
 
 /// (ano, mês, dia) a partir de dias desde 1970-01-01.
-fn data_dos_dias(dias: i64) -> (i64, i64, i64) {
+pub(crate) fn data_dos_dias(dias: i64) -> (i64, i64, i64) {
     let z = dias + 719_468;
     let era = z.div_euclid(146_097);
     let dia_da_era = z.rem_euclid(146_097);
@@ -979,7 +992,7 @@ fn data_dos_dias(dias: i64) -> (i64, i64, i64) {
     (a, m, d)
 }
 
-fn dias_do_mes(a: i64, m: i64) -> i64 {
+pub(crate) fn dias_do_mes(a: i64, m: i64) -> i64 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,

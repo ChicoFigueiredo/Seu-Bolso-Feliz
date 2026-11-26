@@ -132,8 +132,26 @@ impl Pausa for PausaNoBanco<'_> {
 pub enum Recebido {
     /// Achado novo no inventário.
     Novo,
-    /// O mesmo conteúdo (sha256) já estava lá.
+    /// O conteúdo (sha256) já estava lá e, mesmo assim, entrou: uma nova chegada do achado
+    /// que existia (execução da **Baixa forçada**) ou a mesma chegada vista de novo.
     Repetido,
+    /// Baixa por conteúdo: o sha256 do arquivo, ou o texto extraído dele, já existia no
+    /// inventário. O arquivo foi apagado e nada foi criado.
+    Descartado,
+}
+
+/// A nota que o histórico guarda de um arquivo descartado.
+pub const NOTA_JA_ESTAVA_NO_INVENTARIO: &str = "já estava no inventário";
+
+impl Recebido {
+    /// A nota para o histórico: só o descarte tem uma.
+    #[must_use]
+    pub const fn nota(self) -> Option<&'static str> {
+        match self {
+            Self::Descartado => Some(NOTA_JA_ESTAVA_NO_INVENTARIO),
+            Self::Novo | Self::Repetido => None,
+        }
+    }
 }
 
 /// Para onde vai o que foi baixado (o inventário, ADR-014).

@@ -10,6 +10,8 @@
 //!   listar | mostrar <nome> [--versao <n>]
 //!   testar <nome> <versao> --cenario <cenario>   (roda no site falso; sai 0 passou, 1 falhou)
 //!   ativar <nome> <versao> | desativar <nome>   (só em terminal interativo, com confirmação)
+//!   executar <nome> --inventario <cofre> [--de M] [--ate M] [--forcar]   (roda a versão ativa)
+//!   retomar <nome>   (só em terminal interativo: volta a agenda suspensa por entrada recusada)
 //! ```
 //!
 //! O catálogo é o `roteiros.sqlite` da pasta de dados do app, fora do cofre. Ver [`AJUDA`].
@@ -35,12 +37,16 @@ use std::sync::atomic::AtomicBool;
 use sbf_chaveiro::{Chaveiro, Segredo};
 use sbf_ia::{NivelDeConfianca, Registro};
 use sbf_roteiros::banco::{AutorEscrito, BancoDeRoteiros, Confirmacao, EstadoEscrito};
+use sbf_roteiros::executor::Fim;
 use sbf_roteiros::executor::FonteDeSenhas;
 use sbf_roteiros::gravacao::Guia;
 use sbf_roteiros::manifesto::{
     Classe, Manifesto, Mfa, escapar_fonte_para_terminal, escapar_para_terminal,
 };
-use sbf_roteiros::servico::{Ambiente, executar_devidos, executar_escritos_devidos};
+use sbf_roteiros::parametros::{EspecDeMes, ValorBruto};
+use sbf_roteiros::servico::{
+    Ambiente, PedidoDeExecucao, executar_devidos, executar_escrito_com, executar_escritos_devidos,
+};
 use sbf_roteiros::teste_escrito::{Cenario, testar_escrito};
 use sbf_worker::laco::{ColetorDeRoteiros, Dados, ResumoDeRoteiros};
 use sbf_worker::registro::Falha;
@@ -259,13 +265,26 @@ uso: sbf roteiros escrito [--dados <pasta-de-dados>] <subcomando>
   mostrar <nome> [--versao <n>]          manifesto, fonte, versões e histórico de estados
   testar <nome> <versao> --cenario <c>   roda a versão no site falso local (Chrome sem janela,
                                          senhas fictícias); passou => `testado`. Sai 0 se passou,
-                                         1 se falhou. Cenários: contracheque, conexoes
+                                         1 se falhou. Cenários: contracheque, conexoes, soucaixa
   ativar <nome> <versao>                 só num terminal interativo, com confirmação digitada;
                                          só de uma versão testada; aposenta a ativa anterior.
                                          Mostra autor, hosts, rótulos do chaveiro, MFA e o fonte
                                          Luau; se foi proposta pelo MCP ou pela IA, a digitação
                                          é `<nome>@<versao> <host>`
   desativar <nome>                       idem (aposenta a versão ativa)
+  executar <nome> --inventario <pasta-do-cofre> [--de <mês>] [--ate <mês>] [--forcar]
+                                         roda AGORA a versão ativa, no Chrome do perfil dedicado e
+                                         com o chaveiro real. `--de` e `--ate` entregam os
+                                         parâmetros de mês que o manifesto declara (`AAAA-MM` ou
+                                         relativo ao mês corrente: `0` este mês, `-1` o anterior);
+                                         sem eles valem os padrões do manifesto. `--forcar` é a
+                                         Baixa forçada (baixa de novo o que o inventário já tem):
+                                         só num terminal interativo. Se o roteiro pedir MFA ou
+                                         CAPTCHA, resolva no navegador; funciona mesmo com a
+                                         agenda suspensa e, se der certo, NÃO a retoma
+  retomar <nome>                         só num terminal interativo: volta a agenda do roteiro
+                                         que parou em `entrada_recusada` (o portal recusou a
+                                         entrada). O MCP e a IA nunca retomam
   entrar --url <https://...>             login à mão, SEM controle: abre o Chrome do perfil dedicado
                                          sem a porta de automação (sites como o Google recusam
                                          navegador controlado). Entre com Google, e-mail, o que
@@ -384,7 +403,7 @@ fn mfa_texto(m: &Mfa) -> String {
 
 fn resumo_do_manifesto(m: &Manifesto) -> Vec<String> {
     let hosts: Vec<String> = m.hosts.iter().map(|h| e(h)).collect();
-    vec![
+    let mut linhas = vec![
         format!("  hosts: {}", hosts.join(", ")),
         format!("  url inicial: {}", e(&m.url_inicial)),
         format!("  mfa: {}", mfa_texto(&m.mfa)),
@@ -401,8 +420,12 @@ fn resumo_do_manifesto(m: &Manifesto) -> Vec<String> {
         ),
         format!(
             "  agenda: {}",
-            m.agenda_horas
-                .map_or_else(|| "sem agenda".to_owned(), |h| format!("a cada {h} h"))
+            if m.agenda.is_empty() {
+                m.agenda_horas
+                    .map_or_else(|| "sem agenda".to_owned(), |h| format!("a cada {h} h"))
+            } else {
+                "por horário (fuso UTC−3), roda uma vez ao voltar se perdeu o horário".to_owned()
+            }
         ),
         format!(
             "  chaveiro: senha {}, CPF {}",
@@ -413,7 +436,61 @@ fn resumo_do_manifesto(m: &Manifesto) -> Vec<String> {
                 .as_deref()
                 .map_or_else(|| "não usa".to_owned(), e)
         ),
-    ]
+    ];
+    linhas.extend(linhas_da_agenda(m));
+    linhas
+}
+
+/// Cada entrada da agenda e cada parâmetro declarado, uma linha por item.
+fn linhas_da_agenda(m: &Manifesto) -> Vec<String> {
+    let mut l = Vec::new();
+    for (i, entrada) in m.agenda.iter().enumerate() {
+        let horarios: Vec<String> = entrada.horarios.iter().map(|h| e(h)).collect();
+        let dias = entrada.dias_do_mes.as_ref().map_or_else(
+            || "todo dia".to_owned(),
+            |d| {
+                let d: Vec<String> = d.iter().map(ToString::to_string).collect();
+                format!("nos dias {}", d.join(", "))
+            },
+        );
+        let parametros: Vec<String> = entrada
+            .parametros
+            .iter()
+            .map(|(n, v)| format!("{}={}", e(n), valor_bruto_texto(v)))
+            .collect();
+        l.push(format!(
+            "    entrada {}: {} {dias}{}",
+            i + 1,
+            horarios.join(", "),
+            if parametros.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", parametros.join(", "))
+            }
+        ));
+    }
+    for p in &m.parametros {
+        l.push(format!(
+            "    parâmetro {}: {}{}",
+            e(&p.nome),
+            match p.tipo {
+                sbf_roteiros::parametros::TipoDeParametro::Mes => "mês",
+                sbf_roteiros::parametros::TipoDeParametro::Booleano => "sim ou não",
+            },
+            p.padrao.as_ref().map_or(String::new(), |v| format!(
+                ", padrão {}",
+                valor_bruto_texto(v)
+            ))
+        ));
+    }
+    l
+}
+
+fn valor_bruto_texto(v: &ValorBruto) -> String {
+    match v {
+        ValorBruto::Texto(t) => e(t),
+        ValorBruto::Booleano(b) => b.to_string(),
+    }
 }
 
 /// Quantas linhas do fonte o `ativar` imprime inteiras; acima disso manda ler com `mostrar`.
@@ -551,10 +628,15 @@ fn listar(a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
             || "nenhuma versão em vigor".to_owned(),
             |v| format!("v{v} em vigor"),
         );
+        let suspensa = if banco.agenda_suspensa_escrita(&l.nome)?.is_some() {
+            " [agenda SUSPENSA: veja `mostrar`; retome com `retomar`]"
+        } else {
+            ""
+        };
         w(
             a.saida,
             &format!(
-                "{}: {em_vigor}; mais nova v{} ({})",
+                "{}: {em_vigor}; mais nova v{} ({}){suspensa}",
                 e(&l.nome),
                 l.ultima,
                 l.estado_da_ultima.texto()
@@ -607,6 +689,16 @@ fn mostrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
         .iter()
         .find(|v| v.numero == escolhida)
         .ok_or_else(|| op(format!("`{}` não tem a versão {escolhida}", e(nome))))?;
+    if let Some(sp) = banco.agenda_suspensa_escrita(nome)? {
+        w(
+            a.saida,
+            &format!(
+                "AGENDA SUSPENSA (entrada recusada pelo portal): {}. Para voltar: sbf roteiros escrito retomar {}",
+                e(&sp.motivo),
+                e(nome)
+            ),
+        );
+    }
     w(a.saida, &format!("Manifesto da v{}:", v.numero));
     if !v.manifesto.descricao.is_empty() {
         w(a.saida, &format!("  {}", e(&v.manifesto.descricao)));
@@ -983,6 +1075,160 @@ fn entrar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
     Ok(())
 }
 
+/// O que o `executar` entende da linha de comando.
+#[derive(Debug, PartialEq, Eq)]
+struct ExecucaoPedida {
+    nome: String,
+    cofre: PathBuf,
+    pedido: PedidoDeExecucao,
+}
+
+/// Monta o pedido de `executar <nome> --inventario <cofre> [--de M] [--ate M] [--forcar]`.
+/// Só confere a forma (mês legível, `--forcar` só com terminal); o manifesto confere o resto
+/// (nome declarado, de ≤ ate, 60 meses) na hora de resolver.
+fn montar_execucao(resto: &[String], terminal: bool) -> Result<ExecucaoPedida, FalhaDoCli> {
+    let mut sem_flag: Vec<String> = Vec::new();
+    let mut forcar = false;
+    for a in resto {
+        if a == "--forcar" {
+            if forcar {
+                return Err(uso("--forcar repetido"));
+            }
+            forcar = true;
+        } else {
+            sem_flag.push(a.clone());
+        }
+    }
+    let (soltos, valores) = opcoes(&sem_flag, &["--de", "--ate", "--inventario"])?;
+    let [nome] = soltos.as_slice() else {
+        return Err(uso(
+            "uso: executar <nome> --inventario <pasta-do-cofre> [--de <mês>] [--ate <mês>] [--forcar]",
+        ));
+    };
+    let cofre = valores.get("--inventario").ok_or_else(|| {
+        uso("executar pede --inventario <pasta-do-cofre> (onde caem os downloads)")
+    })?;
+    let mut pedido = PedidoDeExecucao {
+        forcar,
+        ..PedidoDeExecucao::default()
+    };
+    for opcao in ["--de", "--ate"] {
+        if let Some(v) = valores.get(opcao) {
+            if EspecDeMes::ler(v).is_none() {
+                return Err(uso(format!(
+                    "{opcao} pede um mês: AAAA-MM (como 2026-11) ou relativo ao corrente (0, -1, -12)"
+                )));
+            }
+            pedido.entregues.insert(
+                opcao.trim_start_matches("--").to_owned(),
+                ValorBruto::Texto(v.clone()),
+            );
+        }
+    }
+    if forcar && !terminal {
+        return Err(op(
+            "--forcar só num terminal interativo; o MCP e a IA só propõem. Nada foi executado.",
+        ));
+    }
+    Ok(ExecucaoPedida {
+        nome: nome.clone(),
+        cofre: PathBuf::from(cofre),
+        pedido,
+    })
+}
+
+/// `executar`: roda a versão ativa agora, no Chrome e com o chaveiro de verdade.
+fn executar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
+    let pedida = montar_execucao(resto, a.terminal)?;
+    let chaveiro = Chaveiro::abrir_na_pasta_padrao().ok();
+    let senhas: &dyn FonteDeSenhas = match &chaveiro {
+        Some(c) => c,
+        None => &SemChaveiro,
+    };
+    let mut amb = Ambiente::novo(a.dados, &pedida.cofre);
+    amb.programa_do_chrome.clone_from(&a.chrome);
+    w(
+        a.saida,
+        &format!(
+            "Executando `{}`{} (Chrome do perfil dedicado, chaveiro real)...",
+            e(&pedida.nome),
+            if pedida.pedido.forcar {
+                " com Baixa forçada"
+            } else {
+                ""
+            }
+        ),
+    );
+    let cancelar = AtomicBool::new(false);
+    let rel = executar_escrito_com(
+        &amb,
+        &pedida.nome,
+        "terminal",
+        senhas,
+        &cancelar,
+        &pedida.pedido,
+    )?;
+    w(
+        a.saida,
+        &format!(
+            "{} baixado(s), {} novo(s), {} descartado(s) por já estarem no inventário.",
+            rel.baixados, rel.novos, rel.descartados
+        ),
+    );
+    if let Some(motivo) = &rel.entrada_recusada {
+        w(
+            a.saida,
+            &format!(
+                "O portal recusou a entrada: {}. A agenda de `{}` foi suspensa; depois de resolver, rode: sbf roteiros escrito retomar {}",
+                e(motivo),
+                e(&pedida.nome),
+                e(&pedida.nome)
+            ),
+        );
+        return Err(op("entrada recusada"));
+    }
+    match rel.fim {
+        Fim::Concluida => {
+            w(a.saida, "Concluída.");
+            Ok(())
+        }
+        Fim::Falhou { motivo, .. } => Err(op(format!("o roteiro falhou: {motivo}"))),
+        Fim::Bloqueada { bloqueio, .. } => {
+            Err(op(format!("barrado pela lista de bloqueio: {bloqueio}")))
+        }
+        Fim::Cancelada => Err(op("cancelada")),
+        Fim::PausaExpirou { .. } => Err(op("você não voltou da pausa a tempo")),
+    }
+}
+
+/// `retomar`: volta a agenda suspensa por entrada recusada. Só com terminal interativo (sem
+/// confirmação digitada: é voltar ao que o usuário já tinha ativado).
+fn retomar(a: &mut AmbienteDoCli, resto: &[String]) -> Result<(), FalhaDoCli> {
+    let [nome] = resto else {
+        return Err(uso("uso: retomar <nome>"));
+    };
+    if !a.terminal {
+        return Err(recusa_sem_terminal("retomar"));
+    }
+    let banco = abrir_banco(a)?;
+    // Erro claro se o roteiro não existe (em vez de "não estava suspensa").
+    banco.mostrar(nome)?;
+    let Some(s) = banco.agenda_suspensa_escrita(nome)? else {
+        w(
+            a.saida,
+            &format!("`{}`: a agenda não estava suspensa.", e(nome)),
+        );
+        return Ok(());
+    };
+    w(
+        a.saida,
+        &format!("`{}` estava suspensa: {}", e(nome), e(&s.motivo)),
+    );
+    banco.retomar_agenda_escrita(nome)?;
+    w(a.saida, &format!("{}: agenda retomada.", e(nome)));
+    Ok(())
+}
+
 fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
     let Some((sub, resto)) = args.split_first() else {
         return Err(uso("falta o subcomando"));
@@ -995,6 +1241,8 @@ fn despachar(args: &[String], a: &mut AmbienteDoCli) -> Result<(), FalhaDoCli> {
         "testar" => testar(a, resto),
         "ativar" => ativar(a, resto),
         "desativar" => desativar(a, resto),
+        "executar" => executar(a, resto),
+        "retomar" => retomar(a, resto),
         "observar" => observar(a, resto),
         "entrar" => entrar(a, resto),
         outro => Err(uso(format!("subcomando desconhecido: {outro}"))),
@@ -1730,6 +1978,170 @@ mod testes_escrito {
         // e o cofre nem foi criado
         assert!(!c.dados().join("cofre-do-teste-nao-usado").exists());
         assert_eq!(codigo(Ok(())), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn executar_monta_o_pedido_com_meses_e_forcar() {
+        let p = montar_execucao(
+            &args(&[
+                "contracheque-exemplo",
+                "--inventario",
+                "/cofre",
+                "--de",
+                "-1",
+                "--ate",
+                "2026-11",
+                "--forcar",
+            ]),
+            true,
+        )
+        .unwrap();
+        assert_eq!(p.nome, "contracheque-exemplo");
+        assert_eq!(p.cofre, PathBuf::from("/cofre"));
+        assert!(p.pedido.forcar);
+        assert_eq!(
+            p.pedido.entregues.get("de"),
+            Some(&ValorBruto::Texto("-1".into()))
+        );
+        assert_eq!(
+            p.pedido.entregues.get("ate"),
+            Some(&ValorBruto::Texto("2026-11".into()))
+        );
+        assert_eq!((p.pedido.entrada, p.pedido.previsto_unix), (None, None));
+        // sem opções: pedido vazio (valem os padrões do manifesto)
+        let p = montar_execucao(&args(&["x", "--inventario", "/c"]), false).unwrap();
+        assert_eq!(p.pedido, PedidoDeExecucao::default());
+        // a ordem das opções não importa
+        let p = montar_execucao(
+            &args(&["--forcar", "--inventario", "/c", "x", "--ate", "0"]),
+            true,
+        )
+        .unwrap();
+        assert!(p.pedido.forcar);
+        assert_eq!(p.nome, "x");
+    }
+
+    #[test]
+    fn executar_recusa_uso_errado_e_forcar_sem_terminal() {
+        for ruim in [
+            vec![],
+            vec!["x"],                                               // sem --inventario
+            vec!["--inventario", "/c"],                              // sem nome
+            vec!["a", "b", "--inventario", "/c"],                    // dois nomes
+            vec!["x", "--inventario", "/c", "--de"],                 // sem valor
+            vec!["x", "--inventario", "/c", "--de", "ontem"],        // mês ilegível
+            vec!["x", "--inventario", "/c", "--ate", "2026-13"],     // mês fora do calendário
+            vec!["x", "--inventario", "/c", "--de", "1"],            // relativo tem de ser <= 0
+            vec!["x", "--inventario", "/c", "--forcar", "--forcar"], // repetido
+            vec!["x", "--inventario", "/c", "--de", "0", "--de", "0"],
+            vec!["x", "--inventario", "/c", "--senha", "abc"], // opção desconhecida
+        ] {
+            let r = montar_execucao(&args(&ruim), true);
+            assert!(matches!(r, Err(FalhaDoCli::Uso(_))), "{ruim:?}: {r:?}");
+        }
+        // forçar sem terminal é recusa de operação (o MCP e a IA só propõem)
+        let r = montar_execucao(&args(&["x", "--inventario", "/c", "--forcar"]), false);
+        assert!(
+            matches!(r, Err(FalhaDoCli::Operacao(ref m)) if m.contains("terminal")),
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn executar_pelo_despachante_recusa_uso_errado_sem_abrir_nada() {
+        let c = Cenario::novo();
+        let (r, saida) = c.rodar(true, "", &["executar", "x"]);
+        assert!(matches!(r, Err(FalhaDoCli::Uso(_))));
+        assert!(saida.is_empty(), "{saida}");
+        // nem o banco foi criado
+        assert!(!c.dados().join("roteiros.sqlite").exists());
+        let (r, _) = c.rodar(
+            false,
+            "",
+            &["executar", "x", "--inventario", "/c", "--forcar"],
+        );
+        assert!(matches!(r, Err(FalhaDoCli::Operacao(_))));
+        assert!(!c.dados().join("roteiros.sqlite").exists());
+    }
+
+    #[test]
+    fn retomar_sem_terminal_recusa_e_nao_altera() {
+        let c = Cenario::novo();
+        c.importar().0.unwrap();
+        c.banco()
+            .suspender_agenda_escrita("contracheque-exemplo", "o portal pediu a senha nova", 1)
+            .unwrap();
+        let (r, _) = c.rodar(false, "", &["retomar", "contracheque-exemplo"]);
+        assert!(
+            matches!(r, Err(FalhaDoCli::Operacao(ref m)) if m.contains("terminal")),
+            "{r:?}"
+        );
+        assert!(
+            c.banco()
+                .agenda_suspensa_escrita("contracheque-exemplo")
+                .unwrap()
+                .is_some()
+        );
+        // uso errado
+        for ruim in [vec!["retomar"], vec!["retomar", "a", "b"]] {
+            let (r, _) = c.rodar(true, "", &ruim);
+            assert!(matches!(r, Err(FalhaDoCli::Uso(_))), "{ruim:?}");
+        }
+    }
+
+    #[test]
+    fn retomar_com_terminal_volta_a_agenda_e_listar_mostrar_avisam_antes() {
+        let c = Cenario::novo();
+        c.importar().0.unwrap();
+        c.banco()
+            .suspender_agenda_escrita("contracheque-exemplo", "o portal pediu a senha nova", 1)
+            .unwrap();
+        let (_, saida) = c.rodar(false, "", &["listar"]);
+        assert!(saida.contains("SUSPENSA"), "{saida}");
+        let (_, saida) = c.rodar(false, "", &["mostrar", "contracheque-exemplo"]);
+        assert!(saida.contains("AGENDA SUSPENSA"), "{saida}");
+        assert!(saida.contains("o portal pediu a senha nova"), "{saida}");
+        assert!(saida.contains("retomar contracheque-exemplo"), "{saida}");
+
+        let (r, saida) = c.rodar(true, "", &["retomar", "contracheque-exemplo"]);
+        assert_eq!(r, Ok(()));
+        assert!(saida.contains("agenda retomada"), "{saida}");
+        assert!(
+            c.banco()
+                .agenda_suspensa_escrita("contracheque-exemplo")
+                .unwrap()
+                .is_none()
+        );
+        // de novo: nada a retomar, sem erro
+        let (r, saida) = c.rodar(true, "", &["retomar", "contracheque-exemplo"]);
+        assert_eq!(r, Ok(()));
+        assert!(saida.contains("não estava suspensa"), "{saida}");
+        // roteiro inexistente: erro de operação
+        let (r, _) = c.rodar(true, "", &["retomar", "nao-existe"]);
+        assert!(matches!(r, Err(FalhaDoCli::Operacao(_))), "{r:?}");
+    }
+
+    #[test]
+    fn mostrar_descreve_a_agenda_e_os_parametros_do_manifesto() {
+        let c = Cenario::novo();
+        let com_agenda = MANIFESTO.replace(
+            r#""agenda_horas": 168"#,
+            r#""agenda": [{"horarios": ["04:00", "20:00"], "dias_do_mes": [20, 30], "parametros": {"de": "-1"}}],
+               "parametros": [{"nome": "de", "tipo": "mes", "padrao": "0"}]"#,
+        );
+        std::fs::write(c.pasta.path().join("manifesto.json"), com_agenda).unwrap();
+        c.importar().0.unwrap();
+        let (_, saida) = c.rodar(false, "", &["mostrar", "contracheque-exemplo"]);
+        assert!(saida.contains("agenda: por horário"), "{saida}");
+        assert!(
+            saida.contains("entrada 1: 04:00, 20:00 nos dias 20, 30 (de=-1)"),
+            "{saida}"
+        );
+        assert!(saida.contains("parâmetro de: mês, padrão 0"), "{saida}");
     }
 
     #[test]

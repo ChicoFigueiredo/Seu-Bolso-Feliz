@@ -18,11 +18,37 @@
 //!   "agenda_horas": 168
 //! }
 //! ```
+//!
+//! A **agenda** (`agenda`, a lista de [`EntradaDeAgenda`]) e os **parâmetros do roteiro**
+//! (`parametros`, a lista de [`ParametroDeclarado`]) são opcionais; `agenda_horas` continua
+//! aceito, mas não junto com `agenda`. Ver a spec 18.
+//!
+//! ```json
+//! {
+//!   "agenda": [
+//!     { "horarios": ["04:00", "12:00", "20:00"], "dias_do_mes": [20, 21, 30, 1],
+//!       "parametros": { "de": "-1", "ate": "0" } }
+//!   ],
+//!   "parametros": [
+//!     { "nome": "de", "tipo": "mes", "padrao": "0" },
+//!     { "nome": "ate", "tipo": "mes", "padrao": "0" },
+//!     { "nome": "forcar", "tipo": "booleano", "padrao": false }
+//!   ]
+//! }
+//! ```
 
 use crate::erro::{ErroDeRoteiro, Resultado};
+use crate::parametros::{
+    ParametroDeclarado, ValorBruto, conferir_intervalo_estatico, validar_declaracao,
+    validar_entregues,
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+
+/// Quantas entradas a agenda do manifesto tem, no máximo.
+pub const MAXIMO_DE_ENTRADAS_DA_AGENDA: usize = 16;
 
 /// O maior manifesto ou fonte aceito: 64 KiB.
 pub const LIMITE_DE_BYTES: usize = 64 * 1024;
@@ -116,6 +142,41 @@ pub enum Classe {
     AtualizarConexao,
 }
 
+/// Uma entrada da **agenda** do roteiro: em que horários (e dias do mês) ele roda e com que
+/// parâmetros. Horários e dias no fuso do usuário (UTC−3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntradaDeAgenda {
+    /// De 1 a 24 horários `"HH:MM"` válidos, sem repetir.
+    pub horarios: Vec<String>,
+    /// Dias do mês (1 a 31). Sem ele, todo dia. O dia 31 num mês sem 31 não dispara nesse mês.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dias_do_mes: Option<Vec<u8>>,
+    /// Valores dos parâmetros declarados que esta entrada entrega ao roteiro.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parametros: BTreeMap<String, ValorBruto>,
+}
+
+impl EntradaDeAgenda {
+    /// Os horários como (hora, minuto), na ordem do manifesto. Só chamar depois de validar.
+    pub(crate) fn horarios_em_minutos(&self) -> Vec<u32> {
+        self.horarios
+            .iter()
+            .filter_map(|h| horario_em_minutos(h))
+            .collect()
+    }
+}
+
+/// `"HH:MM"` (duas casas cada, 00:00 a 23:59) como minutos desde a meia-noite.
+fn horario_em_minutos(h: &str) -> Option<u32> {
+    let b = h.as_bytes();
+    if b.len() != 5 || b[2] != b':' || !b[..2].iter().chain(&b[3..]).all(u8::is_ascii_digit) {
+        return None;
+    }
+    let (hh, mm): (u32, u32) = (h[..2].parse().ok()?, h[3..].parse().ok()?);
+    (hh < 24 && mm < 60).then_some(hh * 60 + mm)
+}
+
 /// O manifesto de um roteiro escrito.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,10 +198,29 @@ pub struct Manifesto {
     pub classe: Classe,
     #[serde(default)]
     pub agenda_horas: Option<u32>,
+    /// A agenda por horário (substitui `agenda_horas`; os dois juntos são inválidos).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agenda: Vec<EntradaDeAgenda>,
+    /// Os parâmetros que o roteiro aceita (mês e sim/não, nunca segredo).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parametros: Vec<ParametroDeclarado>,
 }
 
 fn invalido(m: impl Into<String>) -> ErroDeRoteiro {
     ErroDeRoteiro::Invalido(format!("manifesto: {}", m.into()))
+}
+
+/// O texto de um erro `Invalido`, sem o prefixo do tipo.
+fn motivo_de(e: &ErroDeRoteiro) -> String {
+    match e {
+        ErroDeRoteiro::Invalido(m) => m.clone(),
+        outro => outro.to_string(),
+    }
+}
+
+/// Um erro do módulo de parâmetros, com o prefixo do manifesto.
+fn de_parametros(e: ErroDeRoteiro) -> ErroDeRoteiro {
+    invalido(motivo_de(&e))
 }
 
 impl Manifesto {
@@ -217,6 +297,58 @@ impl Manifesto {
             && h < 1
         {
             return Err(invalido("`agenda_horas` tem de ser pelo menos 1"));
+        }
+        self.validar_parametros_e_agenda()
+    }
+
+    fn validar_parametros_e_agenda(&self) -> Resultado<()> {
+        validar_declaracao(&self.parametros).map_err(de_parametros)?;
+        if !self.agenda.is_empty() && self.agenda_horas.is_some() {
+            return Err(invalido(
+                "`agenda` e `agenda_horas` não valem juntas: use só `agenda`",
+            ));
+        }
+        if self.agenda.len() > MAXIMO_DE_ENTRADAS_DA_AGENDA {
+            return Err(invalido(format!(
+                "`agenda` passa de {MAXIMO_DE_ENTRADAS_DA_AGENDA} entradas"
+            )));
+        }
+        for (i, e) in self.agenda.iter().enumerate() {
+            let onde = format!("`agenda[{i}]`");
+            if e.horarios.is_empty() || e.horarios.len() > 24 {
+                return Err(invalido(format!("{onde}: `horarios` tem de ter de 1 a 24")));
+            }
+            let mut vistos = Vec::new();
+            for h in &e.horarios {
+                let Some(m) = horario_em_minutos(h) else {
+                    return Err(invalido(format!(
+                        "{onde}: cada horário tem de ser \"HH:MM\" (00:00 a 23:59)"
+                    )));
+                };
+                if vistos.contains(&m) {
+                    return Err(invalido(format!("{onde}: há horário repetido")));
+                }
+                vistos.push(m);
+            }
+            if let Some(dias) = &e.dias_do_mes {
+                if dias.is_empty() {
+                    return Err(invalido(format!(
+                        "{onde}: `dias_do_mes` vazio (sem ele, roda todo dia)"
+                    )));
+                }
+                if dias.iter().any(|d| !(1..=31).contains(d)) {
+                    return Err(invalido(format!("{onde}: `dias_do_mes` vai de 1 a 31")));
+                }
+                let mut ordenados = dias.clone();
+                ordenados.sort_unstable();
+                ordenados.dedup();
+                if ordenados.len() != dias.len() {
+                    return Err(invalido(format!("{onde}: há dia do mês repetido")));
+                }
+            }
+            validar_entregues(&self.parametros, &e.parametros, &onde).map_err(de_parametros)?;
+            conferir_intervalo_estatico(&self.parametros, &e.parametros)
+                .map_err(|er| invalido(format!("{onde}: {}", motivo_de(&er))))?;
         }
         Ok(())
     }
@@ -435,6 +567,8 @@ mod testes {
             movimenta_dinheiro: false,
             classe: Classe::Consulta,
             agenda_horas: Some(168),
+            agenda: Vec::new(),
+            parametros: Vec::new(),
         }
     }
 

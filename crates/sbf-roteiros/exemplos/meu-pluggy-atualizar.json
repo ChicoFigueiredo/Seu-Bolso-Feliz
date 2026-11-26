@@ -8,5 +8,7 @@
   "mfa": { "tipo": "manual" },
   "movimenta_dinheiro": false,
   "classe": "atualizar_conexao",
-  "agenda_horas": 24
+  "agenda": [
+    { "horarios": ["04:00", "12:00", "20:00"] }
+  ]
 }

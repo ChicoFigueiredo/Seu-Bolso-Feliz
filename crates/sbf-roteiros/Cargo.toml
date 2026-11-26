@@ -22,6 +22,10 @@ bancada-navegador = { workspace = true }
 # da coleta do Gmail; nenhum fluxo de OAuth novo.
 sbf-gmail = { path = "../sbf-gmail" }
 sbf-coletor = { path = "../sbf-coletor" }
+# O texto de um PDF baixado (sem senha) e a impressão do texto: a mesma que o inventário usa para
+# achar o documento repetido com bytes diferentes (a baixa por conteúdo, spec 18).
+sbf-inventario = { workspace = true }
+sbf-pdf = { path = "../sbf-pdf" }
 # O formato do código (ancorado) vem do manifesto.
 regex = { workspace = true }
 rusqlite = { workspace = true }

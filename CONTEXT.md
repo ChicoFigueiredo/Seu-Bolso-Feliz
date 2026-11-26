@@ -303,6 +303,9 @@ O documento do empregador que, para um mês de pagamento, lista as rubricas e o 
 líquido. Declara um registro do tipo salário — o líquido — cujas rubricas são
 sub-registros; o crédito do banco é outro registro do mesmo fato. A data de crédito impressa
 nele não prova quando o dinheiro entrou: quem prova é o banco.
+Num mesmo mês há o contracheque **antecipado** (o do dia 20) e o **final** (o do dia 30). No
+portal do empregador o final ocupa o mesmo lugar do antecipado; para o sistema são dois
+documentos de conteúdo diferente da mesma competência, e o segundo não é duplicata do primeiro.
 _Avoid_: holerite, demonstrativo, folha
 
 **Rubrica**:
@@ -515,6 +518,30 @@ manifesto diz que **não movimenta dinheiro** pode usá-lo: o sistema busca o c�
 conectada (remetente fixo, janela curta, formato conhecido) e o digita sozinho. O código que
 muda por minuto num aplicativo (TOTP) continua sempre com o usuário.
 _Avoid_: 2FA, OTP, token, código de verificação
+
+**Agenda**:
+Quando um roteiro escrito roda sozinho. É uma lista de entradas; cada uma diz os **horários**
+do dia e, se quiser, os **dias do mês**, sempre no fuso do usuário, e pode trazer os seus
+**parâmetros**. Se o app estava desligado num horário, o roteiro roda **uma vez** ao voltar, não
+uma por horário perdido. O antigo "a cada N horas" é só um caso simples da agenda.
+_Avoid_: cron, frequência, intervalo
+
+**Parâmetros do roteiro**:
+Os valores que cada execução entrega ao roteiro: o **período** (de/até, em meses, absolutos
+como 2026-01 ou relativos ao mês corrente como -1) e o **forçar**. Quem entrega é a agenda,
+a janela (Executar agora) ou o terminal. Nunca levam segredo: só mês e sim/não.
+_Avoid_: argumentos, variáveis, configuração
+
+**Baixa forçada**:
+Baixar de novo um período mesmo que o conteúdo seja idêntico ao já inventariado. Sem ela, o
+conteúdo idêntico é descartado, comparado pelo arquivo e pelo texto extraído. É uma execução
+do roteiro: o usuário a confirma na janela ou pede no terminal; o MCP só a propõe.
+_Avoid_: reprocessamento, redownload
+
+**Suspensão da agenda**:
+A agenda de um roteiro parada porque o site recusou a entrada. Existe para não errar a senha
+de novo, de hora em hora, até o site bloquear a conta. Só o usuário a retoma.
+_Avoid_: pausa (pausa é a espera por você dentro de uma execução), bloqueio
 
 **Coleta**:
 Uma passagem de uma conexão trazendo o que há de novo na fonte. É sempre de fora para

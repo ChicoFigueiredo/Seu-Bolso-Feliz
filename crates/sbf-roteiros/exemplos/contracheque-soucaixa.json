@@ -1,0 +1,27 @@
+{
+  "nome": "contracheque-soucaixa",
+  "descricao": "Entra no SouCaixa (CPF, código de validação por e-mail e senha), abre o contracheque de cada mês pedido pelo calendário e baixa o PDF. Só consulta e baixa: nada de pedidos, adiantamentos nem auxílios.",
+  "url_inicial": "https://soucaixa.caixa.gov.br/",
+  "hosts": ["soucaixa.caixa.gov.br", "login.caixa.gov.br"],
+  "rotulo_senha": "soucaixa",
+  "rotulo_cpf": null,
+  "mfa": {
+    "tipo": "email",
+    "remetente": "logincaixa@caixa.gov.br",
+    "formato": "\\d{6}"
+  },
+  "movimenta_dinheiro": false,
+  "classe": "consulta",
+  "parametros": [
+    { "nome": "de", "tipo": "mes", "padrao": "0" },
+    { "nome": "ate", "tipo": "mes", "padrao": "0" },
+    { "nome": "forcar", "tipo": "booleano", "padrao": false }
+  ],
+  "agenda": [
+    {
+      "horarios": ["04:00", "12:00", "20:00"],
+      "dias_do_mes": [20, 21, 30, 1],
+      "parametros": { "de": "-1", "ate": "0" }
+    }
+  ]
+}

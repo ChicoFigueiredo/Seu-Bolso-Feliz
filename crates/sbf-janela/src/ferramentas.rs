@@ -22,6 +22,7 @@ use sbf_inventario::banco::Inventario;
 use sbf_inventario::consulta::Tabela;
 use sbf_inventario::leitor::LeitorSqlite;
 use sbf_pdf::{OpcoesDaRodada, PropostaDeRegra, RelatorioDaRodada, Situacao as SituacaoDoPdf};
+use zeroize::Zeroize as _;
 
 use crate::componentes;
 use crate::navegacao::Pedido;
@@ -118,6 +119,9 @@ pub struct Ferramentas {
     pub mensageiros: crate::mensageiros::Mensageiros,
     /// Opções › Chaveiro › Senhas de sites (roteiros).
     pub senhas_de_sites: crate::roteiros::SenhasDeSites,
+    /// O CPF que está sendo digitado (zerado ao guardar) e o aviso do último guardar.
+    cpf_digitado: String,
+    aviso_do_cpf: Option<String>,
     /// "Tentar estratégias padrão" na rodada de PDF (desligada por padrão).
     pub tentar_estrategias_padrao: bool,
     /// Instante da última cópia feita nesta sessão.
@@ -188,6 +192,8 @@ impl Ferramentas {
             nuvens: crate::nuvens::Nuvens::nova(cofre_para_nuvens),
             mensageiros: crate::mensageiros::Mensageiros::nova(cofre_para_mensageiros),
             senhas_de_sites: crate::roteiros::SenhasDeSites::default(),
+            cpf_digitado: String::new(),
+            aviso_do_cpf: None,
             tentar_estrategias_padrao: false,
             ultima_copia: None,
             tarefa: None,
@@ -765,6 +771,25 @@ impl Ferramentas {
             "CPF guardado: {}",
             if chaveiro.tem_cpf() { "sim" } else { "não" }
         ));
+        ui.label("CPF (11 dígitos; com ou sem pontos)");
+        ui.add(egui::TextEdit::singleline(&mut self.cpf_digitado).password(true));
+        if ui
+            .add_enabled(
+                !self.cpf_digitado.trim().is_empty(),
+                egui::Button::new("Guardar CPF"),
+            )
+            .clicked()
+        {
+            let r = chaveiro.guardar_cpf_digitado(self.cpf_digitado.trim());
+            self.cpf_digitado.zeroize();
+            self.aviso_do_cpf = Some(match r {
+                Ok(()) => "CPF guardado.".to_owned(),
+                Err(e) => format!("Não deu para guardar: {e}"),
+            });
+        }
+        if let Some(a) = &self.aviso_do_cpf {
+            ui.label(a);
+        }
         let rotulos = chaveiro.rotulos_de_senha();
         ui.label(format!(
             "Senhas próprias ({}): {}",

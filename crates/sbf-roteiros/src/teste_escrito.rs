@@ -8,7 +8,7 @@
 //! dedicado do Chrome (o do teste nasce e morre numa pasta temporária), o cofre e o inventário
 //! reais (o PDF fictício cai num cofre temporário) e qualquer rede além de `127.0.0.1`.
 //!
-//! Cenários: [`Cenario::Contracheque`] e [`Cenario::Conexoes`].
+//! Cenários: [`Cenario::Contracheque`], [`Cenario::Conexoes`] e [`Cenario::SouCaixa`].
 //!
 //! **Contracheque** sobe o
 //! [`PortalDeContracheque`](bancada_navegador::site_falso::PortalDeContracheque) com CPF e senha
@@ -24,6 +24,13 @@
 //! atualizada exatamente uma vez; o painel não registrou nenhum acesso proibido (excluir); e
 //! nada que pareça segredo ou URL com token chegou ao resumo. Se o roteiro pede a vez do
 //! usuário (sessão expirada), o teste **falha** com o motivo da pausa: no teste não há usuário.
+//!
+//! **SouCaixa** sobe o [`PortalDeSouCaixa`] (CPF, validação por e-mail, código, senha, calendário
+//! de meses e download do PDF) e mapeia os DOIS hosts do manifesto (`soucaixa.caixa.gov.br` e
+//! `login.caixa.gov.br`) para a mesma origem local. O teste passa se, juntas: a execução
+//! concluiu; o login e o código foram aceitos; o contracheque do mês corrente foi baixado e o
+//! PDF entrou no inventário com origem `roteiro:`; o portal não registrou nenhum acesso
+//! proibido; e nem a senha, nem o CPF, nem o código aparecem no resumo nem nos registros.
 
 use crate::banco::{EstadoDaExecucao, EstadoEscrito, ResultadoDoTeste, VersaoEscrita};
 use crate::chrome::{self, OpcoesDoChrome};
@@ -36,6 +43,10 @@ use crate::navegador::Navegador;
 use crate::servico::{Ambiente, RelatorioEscrito, Servicos, executar_escrito_em};
 use bancada_navegador::site_falso::{Config, MfaDoPortal, PortalDeContracheque};
 use bancada_navegador::site_falso_conexoes::{Config as ConfigDeConexoes, PortalDeConexoes};
+use bancada_navegador::site_falso_soucaixa::{
+    self, Config as ConfigDoSouCaixa, HOST_DO_LOGIN, HOST_DO_SITE, PortalDeSouCaixa,
+    REMETENTE_DO_CODIGO,
+};
 use bancada_navegador::url::host_de;
 use regex::Regex;
 use rusqlite::Connection;
@@ -66,11 +77,14 @@ pub enum Cenario {
     /// Painel de conexões do Meu Pluggy: abre cada conexão, clica em "Atualizar" e espera o
     /// widget (iframe) terminar; o vizinho "Excluir" nunca pode ser tocado.
     Conexoes,
+    /// Portal do SouCaixa: CPF, escolha do e-mail, código, senha, calendário de meses e download
+    /// do PDF do mês; os distratores (pedidos, auxílios, alterar dados) nunca podem ser tocados.
+    SouCaixa,
 }
 
 impl Cenario {
     /// Todos os cenários, na ordem em que o CLI os lista.
-    pub const TODOS: &'static [Self] = &[Self::Contracheque, Self::Conexoes];
+    pub const TODOS: &'static [Self] = &[Self::Contracheque, Self::Conexoes, Self::SouCaixa];
 
     /// O nome do cenário na linha de comando (`--cenario contracheque`).
     #[must_use]
@@ -78,6 +92,7 @@ impl Cenario {
         match self {
             Self::Contracheque => "contracheque",
             Self::Conexoes => "conexoes",
+            Self::SouCaixa => "soucaixa",
         }
     }
 
@@ -90,6 +105,9 @@ impl Cenario {
             }
             Self::Conexoes => {
                 "painel de conexões fictício: abre cada conexão, clica em Atualizar e espera o widget terminar"
+            }
+            Self::SouCaixa => {
+                "SouCaixa fictício: CPF, código por e-mail e senha, mês no calendário, download do PDF"
             }
         }
     }
@@ -108,6 +126,7 @@ impl Cenario {
         match self {
             Self::Contracheque => self.conferir_contracheque(m),
             Self::Conexoes => self.conferir_conexoes(m),
+            Self::SouCaixa => self.conferir_soucaixa(m),
         }
     }
 
@@ -150,7 +169,54 @@ impl Cenario {
             ));
         }
         Ok(AlvoDoTeste {
+            hosts_logicos: vec![host.clone()],
             host_logico: host,
+            remetente: remetente.clone(),
+            rotulo_senha: m.rotulo_senha.clone().unwrap_or_default(),
+        })
+    }
+
+    fn conferir_soucaixa(self, m: &Manifesto) -> Resultado<AlvoDoTeste> {
+        let nao = |motivo: &str| self.nao(motivo);
+        let Mfa::Email { remetente, formato } = &m.mfa else {
+            return Err(nao("o manifesto tem de declarar MFA por e-mail"));
+        };
+        if remetente != REMETENTE_DO_CODIGO {
+            return Err(nao(&format!(
+                "o remetente do código tem de ser {REMETENTE_DO_CODIGO}"
+            )));
+        }
+        if m.movimenta_dinheiro {
+            return Err(nao("o roteiro movimenta dinheiro"));
+        }
+        if m.classe != Classe::Consulta {
+            return Err(nao("a classe tem de ser `consulta`"));
+        }
+        if m.rotulo_senha.is_none() {
+            return Err(nao("o manifesto não declara `rotulo_senha`"));
+        }
+        let Some(host) = host_de(&m.url_inicial) else {
+            return Err(nao("`url_inicial` não tem host"));
+        };
+        for esperado in [HOST_DO_SITE, HOST_DO_LOGIN] {
+            if !m.hosts.iter().any(|h| h == esperado) {
+                return Err(nao(&format!("`hosts` não traz {esperado}")));
+            }
+        }
+        if !m.hosts.contains(&host) {
+            return Err(nao("o host de `url_inicial` não está em `hosts`"));
+        }
+        let casa = Regex::new(&format!("^(?:{formato})$"))
+            .map(|r| r.is_match("123456"))
+            .unwrap_or(false);
+        if !casa {
+            return Err(nao(
+                "o formato do código do manifesto não casa com o de 6 dígitos do portal falso",
+            ));
+        }
+        Ok(AlvoDoTeste {
+            host_logico: host,
+            hosts_logicos: vec![HOST_DO_SITE.to_owned(), HOST_DO_LOGIN.to_owned()],
             remetente: remetente.clone(),
             rotulo_senha: m.rotulo_senha.clone().unwrap_or_default(),
         })
@@ -181,6 +247,7 @@ impl Cenario {
             return Err(nao("o host de `url_inicial` não está em `hosts`"));
         }
         Ok(AlvoDoTeste {
+            hosts_logicos: vec![host.clone()],
             host_logico: host,
             remetente: String::new(),
             rotulo_senha: String::new(),
@@ -193,6 +260,8 @@ impl Cenario {
 struct AlvoDoTeste {
     /// O host que o roteiro abre (mapeado para o portal local).
     host_logico: String,
+    /// Todos os hosts lógicos que o portal local imita (o SouCaixa tem dois: site e login).
+    hosts_logicos: Vec<String>,
     /// De quem vem o e-mail com o código.
     remetente: String,
     /// O rótulo que a senha fictícia atende.
@@ -249,6 +318,35 @@ impl CaixaDeEmail for CaixaDoPortal<'_> {
             corpo: Zeroizing::new(format!(
                 "Seu código de verificação\nO seu código de acesso é {codigo}. Não o compartilhe."
             )),
+        }])
+    }
+}
+
+/// A "caixa de e-mail" do cenário `soucaixa`: o e-mail do portal (remetente fixo, "Código de
+/// ativação: NNNNNN") recebido quando o portal gerou o código.
+struct CaixaDoSouCaixa<'a> {
+    portal: &'a PortalDeSouCaixa,
+    remetente: String,
+}
+
+impl CaixaDeEmail for CaixaDoSouCaixa<'_> {
+    fn mensagens_recentes(
+        &self,
+        remetente: &str,
+        desde: SystemTime,
+    ) -> Result<Vec<MensagemCurta>, ErroDeCodigo> {
+        if remetente != self.remetente {
+            return Ok(Vec::new());
+        }
+        let Some((corpo, quando)) = self.portal.email_do_codigo() else {
+            return Ok(Vec::new());
+        };
+        if quando < desde {
+            return Ok(Vec::new());
+        }
+        Ok(vec![MensagemCurta {
+            recebida_em: quando,
+            corpo: Zeroizing::new(corpo),
         }])
     }
 }
@@ -416,7 +514,48 @@ pub fn testar_em(
             )?;
             testar_conexoes(amb, &versao, &alvo, &portal, navegador)
         }
+        Cenario::SouCaixa => {
+            let (_, mes_atual, mes_anterior) = meses_do_teste();
+            let portal = PortalDeSouCaixa::iniciar(
+                ConfigDoSouCaixa::nova(CPF_FICTICIO, SENHA_FICTICIA, &mes_atual)
+                    .com_meses_publicados(&[mes_anterior.as_str(), mes_atual.as_str()]),
+            )?;
+            testar_soucaixa(amb, &versao, &alvo, &portal, navegador)
+        }
     }
+}
+
+/// O cenário `soucaixa` contra um `portal` que o chamador já subiu (para os testes olharem os
+/// contadores do portal depois). Mesmo caminho de [`testar_em`]: grava o resultado com
+/// `marcar_testado`. O portal tem de aceitar o CPF e a senha fictícios do teste
+/// ([`CPF_FICTICIO`], [`SENHA_FICTICIA`]) e ter o mês corrente do teste como mês corrente.
+///
+/// # Errors
+/// Os de [`testar_em`].
+pub fn testar_soucaixa_em(
+    amb: &Ambiente,
+    nome: &str,
+    numero: u32,
+    portal: &PortalDeSouCaixa,
+    navegador: &mut dyn Navegador,
+) -> Resultado<ResultadoDoTeste> {
+    let (versao, alvo) = conferir_antes(amb, nome, numero, Cenario::SouCaixa)?;
+    testar_soucaixa(amb, &versao, &alvo, portal, navegador)
+}
+
+/// O CPF, a senha e o mês corrente que um portal do SouCaixa de teste tem de aceitar para o
+/// cenário `soucaixa`: o chamador de [`testar_soucaixa_em`] monta a [`ConfigDoSouCaixa`] com isto.
+#[must_use]
+pub fn config_do_soucaixa_de_teste(meses_publicados: &[&str]) -> ConfigDoSouCaixa {
+    let (_, mes_atual, _) = meses_do_teste();
+    ConfigDoSouCaixa::nova(CPF_FICTICIO, SENHA_FICTICIA, &mes_atual)
+        .com_meses_publicados(meses_publicados)
+}
+
+/// O mês corrente do teste (`AAAA-MM`, UTC−3), o que o roteiro vê como "hoje".
+#[must_use]
+pub fn mes_corrente_do_teste() -> String {
+    meses_do_teste().1
 }
 
 /// O cenário `conexoes` contra um `portal` que o chamador já subiu (para os testes olharem os
@@ -522,6 +661,54 @@ fn testar_contracheque(
         &amb.inventario,
         &codigos_a_esconder(&portal),
     );
+    banco.marcar_testado(&versao.roteiro, versao.numero, &resultado)?;
+    Ok(resultado)
+}
+
+fn testar_soucaixa(
+    amb: &Ambiente,
+    versao: &VersaoEscrita,
+    alvo: &AlvoDoTeste,
+    portal: &PortalDeSouCaixa,
+    navegador: &mut dyn Navegador,
+) -> Resultado<ResultadoDoTeste> {
+    let banco = amb.banco()?;
+    let (_, mes_atual, _) = meses_do_teste();
+    let senhas = SenhasDoTeste {
+        rotulo: alvo.rotulo_senha.clone(),
+    };
+    let caixa = CaixaDoSouCaixa {
+        portal,
+        remetente: alvo.remetente.clone(),
+    };
+    // Os dois hosts do manifesto (site e login) são a mesma origem local.
+    let opcoes = OpcoesEscrito {
+        mapa_de_hosts: alvo
+            .hosts_logicos
+            .iter()
+            .map(|h| (h.clone(), portal.url_base()))
+            .collect(),
+        aceitar_http_loopback: true,
+    };
+    let relatorio = rodar_com_vigia(
+        amb,
+        versao,
+        navegador,
+        &Servicos {
+            senhas: &senhas,
+            caixa: Some(&caixa),
+            relogio: &RelogioReal,
+            pausa: Some(&SemUsuario),
+            opcoes: &opcoes,
+        },
+    )?;
+    let mut esconder = vec![
+        SENHA_FICTICIA.to_owned(),
+        CPF_FICTICIO.to_owned(),
+        CPF_FICTICIO.chars().filter(char::is_ascii_digit).collect(),
+    ];
+    esconder.extend(portal.codigo_gerado());
+    let resultado = avaliar_soucaixa(&relatorio, portal, &mes_atual, &amb.inventario, &esconder);
     banco.marcar_testado(&versao.roteiro, versao.numero, &resultado)?;
     Ok(resultado)
 }
@@ -699,6 +886,116 @@ fn avaliar(
     if !passou && let Some(ultimo) = rel.registros.last() {
         resumo.push_str(&format!(" (último registro do roteiro: {ultimo})"));
     }
+    for valor in esconder.iter().filter(|v| !v.is_empty()) {
+        resumo = resumo.replace(valor.as_str(), "***");
+    }
+    ResultadoDoTeste { passou, resumo }
+}
+
+/// Existe alguma origem de roteiro (`roteiro:...`) no inventário?
+fn origem_de_roteiro_existe(inventario: &Path) -> bool {
+    let Ok(conn) = Connection::open(inventario) else {
+        return false;
+    };
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM origem WHERE origin_type = 'roteiro' AND origin_key LIKE 'roteiro:%')",
+        [],
+        |l| l.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+/// Confere os critérios do cenário `soucaixa` e monta o resumo (sem segredo).
+fn avaliar_soucaixa(
+    rel: &RelatorioEscrito,
+    portal: &PortalDeSouCaixa,
+    mes: &str,
+    inventario: &Path,
+    esconder: &[String],
+) -> ResultadoDoTeste {
+    let mut falhas: Vec<String> = Vec::new();
+    let mut fatos: Vec<String> = Vec::new();
+
+    if rel.fim == Fim::Concluida {
+        fatos.push("a execução concluiu".to_owned());
+    } else {
+        falhas.push(format!("a execução terminou {}", fim_em_texto(&rel.fim)));
+    }
+    if let Some(motivo) = &rel.entrada_recusada {
+        falhas.push(format!("o portal recusou a entrada ({motivo})"));
+    }
+
+    if portal.logins() >= 1 && portal.logins_recusados() == 0 {
+        fatos.push("o login foi aceito".to_owned());
+    } else if portal.logins() == 0 {
+        falhas.push("o portal não registrou nenhum login aceito".to_owned());
+    } else {
+        falhas.push(format!(
+            "o portal recusou {} login(s)",
+            portal.logins_recusados()
+        ));
+    }
+    if portal.codigos_recusados() == 0 && portal.logins() >= 1 {
+        fatos.push("o código foi aceito".to_owned());
+    } else if portal.codigos_recusados() > 0 {
+        falhas.push(format!(
+            "o portal recusou {} código(s)",
+            portal.codigos_recusados()
+        ));
+    }
+
+    if portal.baixou(mes) {
+        fatos.push(format!("contracheque de {mes} baixado"));
+        let esperado = sha256_hex(&site_falso_soucaixa::pdf_do_contracheque(mes, None));
+        if rel.baixados >= 1 && achado_existe(inventario, &esperado) {
+            fatos.push("o arquivo no inventário é o PDF fictício esperado".to_owned());
+        } else {
+            falhas.push(
+                "o arquivo baixado não está no inventário ou não é o PDF fictício esperado"
+                    .to_owned(),
+            );
+        }
+        if !origem_de_roteiro_existe(inventario) {
+            falhas.push("o inventário não registrou a origem `roteiro:` do arquivo".to_owned());
+        }
+    } else {
+        falhas.push(format!(
+            "o contracheque do mês corrente ({mes}) não foi baixado"
+        ));
+    }
+
+    let proibidos = portal.acessos_proibidos();
+    if proibidos.is_empty() {
+        fatos.push("nenhum acesso proibido".to_owned());
+    } else {
+        falhas.push(format!(
+            "o portal registrou acesso proibido: {}",
+            proibidos.join(", ")
+        ));
+    }
+
+    // Nenhum segredo (nem o código do e-mail) pode ter chegado ao histórico do roteiro.
+    let historico = rel.registros.join("\n");
+    if esconder
+        .iter()
+        .filter(|v| !v.is_empty())
+        .any(|v| historico.contains(v.as_str()))
+    {
+        falhas.push("um segredo apareceu nos registros do roteiro".to_owned());
+    } else {
+        fatos.push("nenhum segredo nos registros".to_owned());
+    }
+
+    let passou = falhas.is_empty();
+    let mut resumo = if passou {
+        format!("passou no cenário soucaixa: {}", fatos.join("; "))
+    } else {
+        format!("falhou no cenário soucaixa: {}", falhas.join("; "))
+    };
+    if !passou && let Some(ultimo) = rel.registros.last() {
+        resumo.push_str(&format!(" (último registro do roteiro: {ultimo})"));
+    }
+    let mut resumo = sem_consulta_de_url(&resumo);
     for valor in esconder.iter().filter(|v| !v.is_empty()) {
         resumo = resumo.replace(valor.as_str(), "***");
     }
@@ -890,7 +1187,9 @@ mod testes {
             },
             baixados: 0,
             novos: 0,
+            descartados: 0,
             registros: vec![format!("viu {CPF_FICTICIO}")],
+            entrada_recusada: None,
         };
         let r = avaliar(
             &rel,
@@ -986,7 +1285,9 @@ mod testes {
             fim,
             baixados: 0,
             novos: 0,
+            descartados: 0,
             registros: registros.iter().map(|r| (*r).to_owned()).collect(),
+            entrada_recusada: None,
         }
     }
 
@@ -1088,5 +1389,127 @@ mod testes {
         let pausa = PausaAnotada::default();
         assert_eq!(pausa.aguardar(1, "faça login"), Decisao::Expirou);
         assert_eq!(pausa.motivos(), vec!["faça login".to_owned()]);
+    }
+
+    // ------------------------------------------------------------------ cenário soucaixa
+
+    fn manifesto_soucaixa(mfa: &str, classe: &str, movimenta: bool, hosts: &str) -> Manifesto {
+        Manifesto::de_json(&format!(
+            r#"{{"nome":"contracheque-soucaixa","url_inicial":"https://soucaixa.caixa.gov.br/",
+            "hosts":{hosts},"rotulo_senha":"soucaixa","rotulo_cpf":null,"mfa":{mfa},
+            "movimenta_dinheiro":{movimenta},"classe":"{classe}"}}"#
+        ))
+        .unwrap()
+    }
+
+    const EMAIL_CAIXA: &str =
+        r#"{"tipo":"email","remetente":"logincaixa@caixa.gov.br","formato":"\\d{6}"}"#;
+    const DOIS_HOSTS: &str = r#"["soucaixa.caixa.gov.br","login.caixa.gov.br"]"#;
+
+    #[test]
+    fn o_cenario_soucaixa_aceita_o_manifesto_com_os_dois_hosts() {
+        assert_eq!(Cenario::de_texto("soucaixa"), Some(Cenario::SouCaixa));
+        assert!(Cenario::SouCaixa.descricao().contains("SouCaixa"));
+        let alvo = Cenario::SouCaixa
+            .conferir(&manifesto_soucaixa(
+                EMAIL_CAIXA,
+                "consulta",
+                false,
+                DOIS_HOSTS,
+            ))
+            .unwrap();
+        assert_eq!(alvo.hosts_logicos.len(), 2);
+        assert_eq!(alvo.remetente, "logincaixa@caixa.gov.br");
+        assert_eq!(alvo.rotulo_senha, "soucaixa");
+    }
+
+    #[test]
+    fn o_cenario_soucaixa_recusa_o_que_nao_e_dele_com_motivo_claro() {
+        let outro_remetente =
+            r#"{"tipo":"email","remetente":"outro@exemplo.test","formato":"\\d{6}"}"#;
+        let casos = [
+            (
+                manifesto_soucaixa(r#"{"tipo":"manual"}"#, "consulta", false, DOIS_HOSTS),
+                "MFA por e-mail",
+            ),
+            (
+                manifesto_soucaixa(outro_remetente, "consulta", false, DOIS_HOSTS),
+                "remetente",
+            ),
+            (
+                manifesto_soucaixa(EMAIL_CAIXA, "atualizar_conexao", false, DOIS_HOSTS),
+                "consulta",
+            ),
+            (
+                manifesto_soucaixa(
+                    EMAIL_CAIXA,
+                    "consulta",
+                    false,
+                    r#"["soucaixa.caixa.gov.br"]"#,
+                ),
+                "login.caixa.gov.br",
+            ),
+        ];
+        for (m, trecho) in casos {
+            let e = Cenario::SouCaixa.conferir(&m).unwrap_err().to_string();
+            assert!(e.contains("este roteiro não é do cenário soucaixa"), "{e}");
+            assert!(e.contains(trecho), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_caixa_do_soucaixa_so_responde_ao_remetente_e_so_depois_do_codigo() {
+        let (_, mes, _) = meses_do_teste();
+        let portal =
+            PortalDeSouCaixa::iniciar(ConfigDoSouCaixa::nova(CPF_FICTICIO, SENHA_FICTICIA, &mes))
+                .unwrap();
+        let caixa = CaixaDoSouCaixa {
+            portal: &portal,
+            remetente: REMETENTE_DO_CODIGO.to_owned(),
+        };
+        let antes = SystemTime::now() - Duration::from_secs(60);
+        assert!(
+            caixa
+                .mensagens_recentes(REMETENTE_DO_CODIGO, antes)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn soucaixa_falha_sem_login_sem_download_e_nunca_mostra_segredo() {
+        let (_, mes, _) = meses_do_teste();
+        let portal =
+            PortalDeSouCaixa::iniciar(ConfigDoSouCaixa::nova(CPF_FICTICIO, SENHA_FICTICIA, &mes))
+                .unwrap();
+        let rel = RelatorioEscrito {
+            fim: Fim::Falhou {
+                passo: 0,
+                motivo: format!("erro com {SENHA_FICTICIA}"),
+            },
+            baixados: 0,
+            novos: 0,
+            descartados: 0,
+            registros: vec![format!("viu {CPF_FICTICIO}")],
+            entrada_recusada: Some("o SouCaixa não aceitou a entrada".to_owned()),
+        };
+        let esconder = vec![SENHA_FICTICIA.to_owned(), CPF_FICTICIO.to_owned()];
+        let r = avaliar_soucaixa(&rel, &portal, &mes, Path::new("/nao/existe"), &esconder);
+        assert!(!r.passou);
+        assert!(
+            r.resumo.starts_with("falhou no cenário soucaixa"),
+            "{}",
+            r.resumo
+        );
+        assert!(r.resumo.contains("recusou a entrada"), "{}", r.resumo);
+        assert!(r.resumo.contains("nenhum login aceito"), "{}", r.resumo);
+        assert!(r.resumo.contains("não foi baixado"), "{}", r.resumo);
+        assert!(
+            r.resumo.contains("segredo apareceu nos registros"),
+            "{}",
+            r.resumo
+        );
+        assert!(!r.resumo.contains(SENHA_FICTICIA), "{}", r.resumo);
+        assert!(!r.resumo.contains(CPF_FICTICIO), "{}", r.resumo);
     }
 }

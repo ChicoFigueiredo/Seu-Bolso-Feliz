@@ -14,7 +14,39 @@ use std::path::{Path, PathBuf};
 const CRATES_PROIBIDOS: [&str; 3] = ["sbf-mcp", "sbf-worker", "sbf-ia"];
 
 /// Citar isto, em qualquer lugar do código, é ter o que só o usuário tem.
-const PROIBIDOS: [&str; 4] = ["Confirmacao", "da_janela", "do_terminal", "marcar_testado"];
+///
+/// `retomar_agenda`: só o usuário (terminal interativo, depois a janela) retoma a agenda
+/// suspensa por `navegador.entrada_recusada`; o MCP, o worker e a IA nunca.
+///
+/// `pedido_da_proposta_de_baixa` e `decidir_proposta_de_baixa`: só o usuário, na janela, aceita
+/// ou recusa uma proposta de Baixa forçada (e a janela é quem executa o roteiro). O MCP só
+/// **propõe** (`propor_baixa_forcada`); nem o worker decide proposta.
+const PROIBIDOS: [&str; 7] = [
+    "Confirmacao",
+    "da_janela",
+    "do_terminal",
+    "marcar_testado",
+    "retomar_agenda",
+    "pedido_da_proposta_de_baixa",
+    "decidir_proposta_de_baixa",
+];
+
+/// O que **executa** roteiro escrito, ou mexe no que a execução decide. O worker executa a
+/// agenda (é o trabalho dele), então esta lista vale só para o MCP e a IA: eles nunca executam,
+/// nunca forçam a baixa (`forcar`, `PedidoDeExecucao`, `.forcando(`) e nunca suspendem a
+/// agenda.
+const SO_DO_EXECUTOR: [&str; 7] = [
+    "executar_escrito",
+    "executar_escritos",
+    "PedidoDeExecucao",
+    "resolver_pedido",
+    "abrir_chrome",
+    ".forcando(",
+    "suspender_agenda_escrita",
+];
+
+/// Quais crates têm a lista [`SO_DO_EXECUTOR`] além de [`PROIBIDOS`].
+const SEM_EXECUTAR: [&str; 2] = ["sbf-mcp", "sbf-ia"];
 
 /// Chamar isto num arquivo que toca em roteiros escritos é ativar ou desativar.
 const ACOES: [&str; 2] = [".ativar(", ".desativar("];
@@ -62,13 +94,22 @@ fn sem_comentarios(fonte: &str) -> String {
     saida
 }
 
-/// O que há de proibido neste arquivo (já sem comentários), um item por achado.
-fn achados(codigo: &str) -> Vec<String> {
+/// O que há de proibido neste arquivo (já sem comentários), um item por achado. `executa`:
+/// o crate também não pode executar roteiro escrito (MCP e IA).
+fn achados(codigo: &str, executa: bool) -> Vec<String> {
     let mut v: Vec<String> = PROIBIDOS
         .iter()
         .filter(|p| codigo.contains(**p))
         .map(|p| format!("cita `{p}`"))
         .collect();
+    if executa {
+        v.extend(
+            SO_DO_EXECUTOR
+                .iter()
+                .filter(|p| codigo.contains(**p))
+                .map(|p| format!("cita `{p}` (executar ou forçar é do executor, não deste crate)")),
+        );
+    }
     // `.ativar(` também existe nas regras de reconhecimento: só conta onde o arquivo toca em
     // roteiros escritos (o banco ou o crate dos roteiros).
     if codigo.contains("BancoDeRoteiros") || codigo.contains("sbf_roteiros") {
@@ -98,19 +139,43 @@ fn arquivos_rs(pasta: &Path, saida: &mut Vec<PathBuf>) {
 
 #[test]
 fn o_detector_acha_o_proibido_e_ignora_comentarios() {
-    assert!(achados("let c = Confirmacao::da_janela(a, b);").len() >= 2);
-    assert!(!achados("let b = BancoDeRoteiros::abrir(p); b.marcar_testado(x);").is_empty());
-    assert!(!achados("use sbf_roteiros::x; b.ativar(n, 1, &c);").is_empty());
-    assert!(!achados("use sbf_roteiros::x; b.desativar(n, &c);").is_empty());
+    assert!(achados("let c = Confirmacao::da_janela(a, b);", false).len() >= 2);
+    assert!(
+        !achados(
+            "let b = BancoDeRoteiros::abrir(p); b.marcar_testado(x);",
+            false
+        )
+        .is_empty()
+    );
+    assert!(!achados("use sbf_roteiros::x; b.ativar(n, 1, &c);", false).is_empty());
+    assert!(!achados("use sbf_roteiros::x; b.desativar(n, &c);", false).is_empty());
+    assert!(!achados("b.retomar_agenda_escrita(n);", false).is_empty());
     // as regras de reconhecimento também têm `.ativar(`: só conta junto dos roteiros
-    assert!(achados("c.ativar(&regra, 1, &Quem::Mcp)").is_empty());
+    assert!(achados("c.ativar(&regra, 1, &Quem::Mcp)", false).is_empty());
     let comentado = sem_comentarios(
         "// Confirmacao e marcar_testado\n/// da_janela\n//! do_terminal\n/* Confirmacao\n .ativar( */\nfn ok() {}\n",
     );
-    assert!(achados(&comentado).is_empty(), "{comentado}");
+    assert!(achados(&comentado, true).is_empty(), "{comentado}");
     // `//` dentro de string não esconde o que vem depois
     let esperto = sem_comentarios("let u = \"https://x\"; Confirmacao::da_janela(a, b);\n");
-    assert!(!achados(&esperto).is_empty());
+    assert!(!achados(&esperto, false).is_empty());
+    // a baixa forçada: só o usuário decide a proposta; MCP e IA também não executam nem forçam
+    assert!(!achados("b.decidir_proposta_de_baixa(1, true, 0);", false).is_empty());
+    assert!(!achados("b.pedido_da_proposta_de_baixa(1, 0);", false).is_empty());
+    for executa in [
+        "executar_escrito(&amb, n, g, &s, &c);",
+        "executar_escritos_devidos(&amb, 0);",
+        "let p = PedidoDeExecucao::default();",
+        "NoInventario::novo(a, b, c, d).forcando(true);",
+        "amb.abrir_chrome();",
+        "b.suspender_agenda_escrita(n, m, 0);",
+    ] {
+        assert!(!achados(executa, true).is_empty(), "{executa}");
+        // o worker executa a agenda: a lista do executor não vale para ele
+        assert!(achados(executa, false).is_empty(), "{executa}");
+    }
+    // propor é permitido
+    assert!(achados("b.propor_baixa_forcada(n, de, ate, \"mcp\", 0);", true).is_empty());
 }
 
 #[test]
@@ -127,7 +192,8 @@ fn mcp_worker_e_ia_nao_ativam_nem_testam_roteiro_escrito() {
         for a in arquivos {
             let fonte = std::fs::read_to_string(&a).unwrap_or_default();
             lidos += 1;
-            for achado in achados(&sem_comentarios(&fonte)) {
+            let sem_executar = SEM_EXECUTAR.contains(&c);
+            for achado in achados(&sem_comentarios(&fonte), sem_executar) {
                 problemas.push(format!("{}: {achado}", a.display()));
             }
         }

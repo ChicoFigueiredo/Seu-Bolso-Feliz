@@ -155,6 +155,26 @@ pub fn completar_pendentes(conn: &Connection) -> rusqlite::Result<usize> {
     }
 }
 
+/// Algum achado já tem esta impressão do texto? (A baixa por conteúdo dos roteiros: o arquivo
+/// baixado de novo, com bytes diferentes e o mesmo texto, é o mesmo documento.) `impressao`
+/// vem de [`impressao_de`]. Banco que não passou pela migração 5: `false`. Quem gravou `texto`
+/// por fora e deixou a linha pendente não conta até [`completar_pendentes`].
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn existe_impressao(conn: &Connection, impressao: &str) -> rusqlite::Result<bool> {
+    if !existe_a_tabela(conn) {
+        return Ok(false);
+    }
+    conn.query_row(
+        "SELECT 1 FROM impressao_do_texto WHERE impressao = ?1 LIMIT 1",
+        [impressao],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|l| l.is_some())
+}
+
 /// O achado mais antigo que tem o mesmo texto de outro.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Original {
@@ -224,6 +244,20 @@ mod testes {
         );
         assert_ne!(normalizar("Pagamento"), normalizar("pagamento"));
         assert_ne!(normalizar("ação"), normalizar("acao"));
+    }
+
+    #[test]
+    fn existe_impressao_acha_so_a_gravada_e_aceita_banco_sem_a_migracao() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(!existe_impressao(&conn, "abc").unwrap());
+        conn.execute_batch(
+            "CREATE TABLE impressao_do_texto (content_hash TEXT PRIMARY KEY, impressao TEXT,
+               pendente INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO impressao_do_texto VALUES ('h', 'abc', 0);",
+        )
+        .unwrap();
+        assert!(existe_impressao(&conn, "abc").unwrap());
+        assert!(!existe_impressao(&conn, "outra").unwrap());
     }
 
     #[test]

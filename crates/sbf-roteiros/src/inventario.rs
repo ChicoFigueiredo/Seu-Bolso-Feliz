@@ -3,11 +3,24 @@
 //! sha256 e origem `roteiro:<nome>/<execução>/<arquivo>`. Os roteiros gravam direto no cofre
 //! (ADR-014). Idempotente: o mesmo conteúdo não vira um segundo achado, nem uma segunda
 //! origem da mesma fonte.
+//!
+//! **Baixa por conteúdo** (spec 18): o contracheque do dia 30 substitui o do dia 20 no mesmo
+//! lugar do portal, então "já baixei" se decide pelo conteúdo. Um arquivo é DESCARTADO (apagado,
+//! sem achado nem origem, [`Recebido::Descartado`]) se o sha256 dele, ou a impressão do texto
+//! extraído, já existe no inventário. O texto vem do que o inventário já sabe extrair (PDF sem
+//! senha pelo `pdftotext`, e `txt`/`xml` lidos direto) e a impressão é a de
+//! `sbf_inventario::impressao_do_texto` (a mesma que acha o documento repetido com bytes
+//! diferentes na Caixa de entrada). PDF protegido por senha, imagem e planilha só valem pelo
+//! sha256: o fluxo de senha continua o da rodada do chaveiro. A **Baixa forçada**
+//! ([`NoInventario::forcando`]) não descarta: baixa de novo e registra a chegada.
 
 use crate::erro::{ErroDeRoteiro, Resultado};
 use crate::executor::{Destino, Recebido};
 use rusqlite::{Connection, OptionalExtension as _, params};
 use sbf_coleta::pastas::{LIMITE_COPIA_BYTES, caminho_no_acervo};
+use sbf_inventario::{impressao_do_texto, texto as texto_do_inventario};
+use sbf_pdf::texto::{LIMITE_DO_TEXTO, cortar_como_o_js, impressao_canonica};
+use sbf_pdf::{Desfecho, Ferramentas, PdfProtegido};
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
 use std::path::Path;
@@ -38,6 +51,58 @@ pub struct NoInventario<'a> {
     vistos: u64,
     novos: u64,
     repetidos: u64,
+    forcando: bool,
+    descartados: u64,
+}
+
+/// O texto de um arquivo baixado, como o inventário o guardaria (`texto`).
+struct TextoDoArquivo {
+    metodo: &'static str,
+    /// Já cortado como o Bun corta (20 KB).
+    conteudo: String,
+    /// O `canonical_fingerprint` do texto inteiro.
+    fingerprint: String,
+    /// A impressão do texto; `None` se o texto é curto demais (menos de 200 caracteres).
+    impressao: Option<String>,
+}
+
+/// O maior arquivo `txt`/`xml` lido para extrair o texto (o mesmo teto do reconhecimento).
+const LIMITE_DO_TEXTO_SIMPLES: u64 = 2 * 1024 * 1024;
+
+/// O texto do arquivo baixado, sem escrever nada em disco. `None`: formato sem leitor, PDF
+/// protegido por senha, ilegível ou sem texto (só vale o sha256).
+fn texto_do_arquivo(arquivo: &Path, ext: &str) -> Option<TextoDoArquivo> {
+    let (metodo, inteiro) = match ext {
+        "pdf" => {
+            let pdf = PdfProtegido::ler(arquivo).ok()?;
+            if pdf.precisa_de_senha() {
+                return None;
+            }
+            match pdf.abrir_sem_senha(&Ferramentas::default()) {
+                Desfecho::Aberto(t) => (sbf_inventario::protegidos::METODO_PDFTOTEXT, t.texto),
+                _ => return None,
+            }
+        }
+        "txt" | "xml" => {
+            let mut bytes = Vec::new();
+            std::fs::File::open(arquivo)
+                .and_then(|f| f.take(LIMITE_DO_TEXTO_SIMPLES).read_to_end(&mut bytes))
+                .ok()?;
+            let t = String::from_utf8_lossy(&bytes).into_owned();
+            if t.trim().is_empty() {
+                return None;
+            }
+            (texto_do_inventario::METODO_TEXTO_SIMPLES, t)
+        }
+        _ => return None,
+    };
+    let conteudo = cortar_como_o_js(&inteiro, LIMITE_DO_TEXTO);
+    Some(TextoDoArquivo {
+        metodo,
+        impressao: impressao_do_texto::impressao_de(&conteudo),
+        fingerprint: impressao_canonica(&inteiro),
+        conteudo,
+    })
 }
 
 impl<'a> NoInventario<'a> {
@@ -53,7 +118,25 @@ impl<'a> NoInventario<'a> {
             vistos: 0,
             novos: 0,
             repetidos: 0,
+            forcando: false,
+            descartados: 0,
         }
+    }
+
+    /// **Baixa forçada**: não descarta o conteúdo que o inventário já tem. O mesmo arquivo vira
+    /// uma nova chegada (outra origem do achado que existia, [`Recebido::Repetido`]); o mesmo
+    /// texto com bytes diferentes entra como achado novo. Quem confirma é o usuário (janela ou
+    /// terminal); o padrão é não forçar.
+    #[must_use]
+    pub const fn forcando(mut self, forcando: bool) -> Self {
+        self.forcando = forcando;
+        self
+    }
+
+    /// Quantos arquivos esta execução descartou por já estarem no inventário.
+    #[must_use]
+    pub const fn descartados(&self) -> u64 {
+        self.descartados
     }
 
     fn fonte(&self) -> String {
@@ -150,12 +233,25 @@ impl Destino for NoInventario<'_> {
         let tamanho = std::fs::metadata(arquivo)?.len();
         let hash = sha256_do_arquivo(arquivo)?;
         let fonte = self.fonte();
+        let texto = texto_do_arquivo(arquivo, &ext);
+        if !self.forcando && texto.as_ref().is_some_and(|t| t.impressao.is_some()) {
+            // Quem gravou `texto` por fora (os scripts Bun) deixou a impressão pendente.
+            let _ = impressao_do_texto::completar_pendentes(self.conn);
+        }
         // Conferir e gravar numa transação só, com a trava de escrita já tomada: a janela e o
         // worker podem receber o mesmo conteúdo ao mesmo tempo e só um deles o cria.
         let tx = rusqlite::Transaction::new_unchecked(
             self.conn,
             rusqlite::TransactionBehavior::Immediate,
         )?;
+        if !self.forcando && Self::ja_esta_no_inventario(&tx, &hash, texto.as_ref())? {
+            drop(tx);
+            // Baixa por conteúdo: o arquivo baixado não fica na pasta da execução.
+            let _ = std::fs::remove_file(arquivo);
+            self.descartados += 1;
+            self.repetidos += 1;
+            return Ok(Recebido::Descartado);
+        }
         let ja_chave: Option<i64> = tx
             .query_row(
                 "SELECT 1 FROM origem WHERE origin_key = ?1",
@@ -163,15 +259,9 @@ impl Destino for NoInventario<'_> {
                 |l| l.get(0),
             )
             .optional()?;
-        // O mesmo conteúdo já veio deste roteiro: não vira outra origem.
-        let ja_conteudo: Option<i64> = tx
-            .query_row(
-                "SELECT 1 FROM origem WHERE content_hash = ?1 AND fonte_id = ?2 LIMIT 1",
-                params![hash, fonte],
-                |l| l.get(0),
-            )
-            .optional()?;
-        if ja_chave.is_some() || ja_conteudo.is_some() {
+        // A mesma chegada (execução e nome) não vira outra origem. Sem forçar, o mesmo conteúdo
+        // já foi descartado acima; forçando, ele vira uma nova chegada.
+        if ja_chave.is_some() {
             drop(tx);
             self.repetidos += 1;
             return Ok(Recebido::Repetido);
@@ -211,6 +301,17 @@ impl Destino for NoInventario<'_> {
                     (!ext.is_empty()).then_some(&ext),
                 ],
             )?;
+            if let Some(t) = &texto {
+                // O texto e a impressão ficam guardados: é com eles que a próxima baixa, de
+                // bytes diferentes e o mesmo texto, descobre que já tem o documento.
+                texto_do_inventario::gravar_texto(
+                    &tx,
+                    &hash,
+                    t.metodo,
+                    &t.conteudo,
+                    Some(&t.fingerprint),
+                )?;
+            }
         }
         tx.execute(
             "INSERT INTO origem (content_hash, fonte_id, varredura_id, origin_type,
@@ -238,6 +339,30 @@ impl Destino for NoInventario<'_> {
         } else {
             Recebido::Repetido
         })
+    }
+}
+
+impl NoInventario<'_> {
+    /// O sha256 já é um achado, ou a impressão do texto já é de algum achado?
+    fn ja_esta_no_inventario(
+        tx: &Connection,
+        hash: &str,
+        texto: Option<&TextoDoArquivo>,
+    ) -> Resultado<bool> {
+        let por_arquivo: Option<i64> = tx
+            .query_row(
+                "SELECT 1 FROM achado WHERE content_hash = ?1",
+                [hash],
+                |l| l.get(0),
+            )
+            .optional()?;
+        if por_arquivo.is_some() {
+            return Ok(true);
+        }
+        match texto.and_then(|t| t.impressao.as_deref()) {
+            Some(impressao) => Ok(impressao_do_texto::existe_impressao(tx, impressao)?),
+            None => Ok(false),
+        }
     }
 }
 

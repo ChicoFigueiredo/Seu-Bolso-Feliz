@@ -134,8 +134,22 @@ pub const FRASES: &[&str] = &[
     "editar cadastro",
     "alterar dados",
     "atualizar dados",
+    // Com o possessivo no meio ("Quero alterar meus dados", tela de MFA do Login Caixa).
+    "alterar meus dados",
+    "atualizar meus dados",
+    "editar meus dados",
+    "editar dados",
+    "alterar meu cadastro",
+    "atualizar meu cadastro",
     "alterar senha",
     "trocar senha",
+    "alterar minha senha",
+    "trocar minha senha",
+    "recuperar senha",
+    "redefinir senha",
+    "alterar meu email",
+    "alterar meu e mail",
+    "alterar meu telefone",
     "alterar email",
     "alterar e mail",
     "alterar telefone",
@@ -482,6 +496,35 @@ mod testes {
             "destino",
             "/pagamento/comprovante-de-pagamento/confirmar"
         ));
+    }
+
+    #[test]
+    fn alterar_dados_com_possessivo_e_recuperar_senha_sao_barrados() {
+        // Os botões e links reais da tela de login (Keycloak): nenhum roteiro clica neles.
+        for texto in [
+            "Quero alterar meus dados",
+            "Atualizar meus dados",
+            "Editar meus dados",
+            "Alterar meu cadastro",
+            "Alterar minha senha",
+            "Trocar minha senha",
+            "Recuperar Senha",
+            "Redefinir senha",
+            "Alterar meu e-mail",
+            "Alterar meu telefone",
+        ] {
+            assert!(bloqueia("texto", texto), "deveria bloquear: {texto}");
+        }
+        // O que o roteiro de verdade clica continua livre.
+        for texto in [
+            "Próximo",
+            "Receber código",
+            "Enviar",
+            "Entrar",
+            "Baixar PDF",
+        ] {
+            assert!(!bloqueia("texto", texto), "não deveria bloquear: {texto}");
+        }
     }
 
     #[test]

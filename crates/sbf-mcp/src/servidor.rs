@@ -28,7 +28,7 @@ use crate::regras::{
     PedidoDeVersao, Regras,
 };
 use crate::roteiros_escritos::{
-    FERRAMENTAS as FERRAMENTAS_DOS_ROTEIROS_ESCRITOS, PedidoDeRoteiroEscrito,
+    FERRAMENTAS as FERRAMENTAS_DOS_ROTEIROS_ESCRITOS, PedidoDeBaixaForcada, PedidoDeRoteiroEscrito,
     PedidoDeVerRoteiroEscrito, RoteirosEscritos,
 };
 use crate::telegram::{
@@ -535,6 +535,16 @@ impl Servidor {
     }
 
     #[tool(
+        description = "PROPÕE baixar de novo um período de um roteiro escrito, mesmo que o conteúdo já esteja no inventário (a Baixa forçada). Só grava uma PROPOSTA pendente (nome do roteiro, `de` e `ate` opcionais: AAAA-MM ou relativo ao mês corrente, como 0 e -1); ela aparece na janela do SBF como \"Baixar de novo: <roteiro> <período>\" e SÓ O USUÁRIO a aceita, na janela, que então executa o roteiro. O MCP NUNCA executa roteiro, nem força a baixa, nem retoma a agenda suspensa. O roteiro tem de declarar os parâmetros `de`/`ate` para aceitar período. A mesma proposta pendente não duplica; vale 7 dias. Há backup automático antes da primeira escrita da sessão."
+    )]
+    fn propor_baixa_forcada(
+        &self,
+        Parameters(p): Parameters<PedidoDeBaixaForcada>,
+    ) -> Result<String, String> {
+        self.roteiros_escritos("propor_baixa_forcada", |r| r.propor_baixa(&p))
+    }
+
+    #[tool(
         description = "Lista os roteiros escritos (Luau): nome, descrição, versão ativa, última versão e o estado da última (rascunho, testado, ativo ou aposentado). Só leitura."
     )]
     fn listar_roteiros_escritos(&self) -> Result<String, String> {
@@ -868,7 +878,7 @@ impl Servidor {
     router = self.tool_router,
     name = "sbf",
     version = "0.1.0",
-    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar e telegram_coletar/telegram_seguir tambem aplicam direto: coletam o Gmail e o Telegram para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). ROTEIROS ESCRITOS (Luau, navegador com credenciais) sao diferentes das regras: o mcp so PROPOE (propor_roteiro_escrito cria um RASCUNHO com autor mcp) e consulta (listar_roteiros_escritos, ver_roteiro_escrito); NAO existe ferramenta que ative, desative, teste ou execute roteiro escrito, e ativar e so do usuario, no terminal (sbf roteiros escrito ativar) ou na janela. Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
+    instructions = "Inventario financeiro, livro-caixa e controle mensal do usuario. DESDE A D15 (2026-11-18) este servidor tem CONTROLE TOTAL: as ferramentas aplicar_*, criar_compromisso, pausar, retomar, cancelar, excecao, excluir_logicamente, conciliar, desconciliar, recusar_proposta, criar_modelo, aplicar_modelo, definir_parametro, ajustar_quantidade e as de regra (ativar_regra, desativar_regra, reverter_regra, consolidar_regra) APLICAM na hora, sem confirmacao na janela, com autor mcp no historico e no Rastro (gmail_coletar e telegram_coletar/telegram_seguir tambem aplicam direto: coletam o Gmail e o Telegram para o cofre); desfazer volta atras a ultima alteracao do mcp (reverter_regra para regras). As ferramentas propor_* continuam so propondo. Exemplo de regra falhando bloqueia a ativacao (vale para o mcp tambem). ROTEIROS ESCRITOS (Luau, navegador com credenciais) sao diferentes das regras: o mcp so PROPOE (propor_roteiro_escrito cria um RASCUNHO com autor mcp) e consulta (listar_roteiros_escritos, ver_roteiro_escrito); NAO existe ferramenta que ative, desative, teste ou execute roteiro escrito, e ativar e so do usuario, no terminal (sbf roteiros escrito ativar) ou na janela. Tambem so PROPOE a baixa forcada (propor_baixa_forcada: baixar de novo um periodo ja inventariado); o usuario aceita na janela, que executa. O mcp nunca executa, nunca forca a baixa e nunca retoma a agenda suspensa de um roteiro. Antes da primeira escrita de cada banco na sessao ha backup automatico em <cofre>/backups/mcp/ (e fazer_backup sob demanda); se o backup falha, a escrita e recusada. A triagem do inventario continua so do usuario: sugerir apenas PROPOE classificacoes (Inventario > Triagem por IA). Valores em centavos. Comece por inventario_resumo; simule antes de aplicar (simular_mudanca, simular_regra, testar_regra); leia fornecedores e decisoes_recentes para seguir o criterio do usuario."
 )]
 impl rmcp::ServerHandler for Servidor {}
 
